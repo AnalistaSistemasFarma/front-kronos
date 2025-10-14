@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -18,7 +18,7 @@ import {
 } from '@mantine/core';
 import { IconAlertCircle, IconChevronRight } from '@tabler/icons-react';
 
-export default function CreateTicketPage() {
+function CreateTicketForm() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -199,5 +199,13 @@ export default function CreateTicketPage() {
         </form>
       </Paper>
     </div>
+  );
+}
+
+export default function CreateTicketPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <CreateTicketForm />
+    </Suspense>
   );
 }

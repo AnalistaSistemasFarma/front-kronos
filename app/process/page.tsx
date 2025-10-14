@@ -102,9 +102,7 @@ export default function ProcessPage() {
             <Title order={3} className='text-gray-500 mb-2'>
               No processes available
             </Title>
-            <Text className='text-gray-400'>
-              You don't have any processes assigned at this time.
-            </Text>
+            <Text className='text-gray-400'>No tienes procesos asignados en este momento.</Text>
           </div>
         </Card>
       ) : (

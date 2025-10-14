@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { Paper, Title, TextInput, Button, Stack, Divider } from '@mantine/core';
+import { Paper, Title, TextInput, Button, Stack } from '@mantine/core';
 import { IconEye, IconEyeOff } from '@tabler/icons-react';
 import Image from 'next/image';
 
