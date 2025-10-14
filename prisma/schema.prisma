@@ -1,0 +1,244 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// MODELOS DE NEXTAUTH
+// ============================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user             User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedCases    Case[] @relation("TechnicalAccount")
+
+  @@unique([provider, providerAccountId])
+  @@map("account")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+model User {
+  id            String         @id @default(cuid())
+  name          String?
+  email         String         @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  accounts      Account[]
+  sessions      Session[]
+  companyUsers  CompanyUser[]
+
+  @@map("user")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_token")
+}
+
+// ============================================
+// MODELOS DE EMPRESA Y PROCESOS
+// ============================================
+
+model Company {
+  id_company   Int           @id @default(autoincrement())
+  company      String
+  company_logo String?
+  companyUsers CompanyUser[]
+
+  @@map("company")
+}
+
+model CompanyUser {
+  id_company_user Int                     @id @default(autoincrement())
+  id_company      Int
+  id_user         String
+  company         Company                 @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
+  user            User                    @relation(fields: [id_user], references: [id], onDelete: Cascade)
+  subprocesses    SubprocessUserCompany[]
+
+  @@map("company_user")
+}
+
+model Process {
+  id_process   Int          @id @default(autoincrement())
+  process      String
+  process_url  String?
+  subprocesses Subprocess[]
+
+  @@map("process")
+}
+
+model Subprocess {
+  id_subprocess           Int                     @id @default(autoincrement())
+  subprocess              String
+  subprocess_url          String?
+  id_process              Int
+  process                 Process                 @relation(fields: [id_process], references: [id_process], onDelete: Cascade)
+  subprocessUserCompanies SubprocessUserCompany[]
+
+  @@map("subprocess")
+}
+
+model SubprocessUserCompany {
+  id_subprocess_user_company Int         @id @default(autoincrement())
+  id_subprocess              Int
+  id_company_user            Int
+  subprocess                 Subprocess  @relation(fields: [id_subprocess], references: [id_subprocess], onDelete: Cascade)
+  companyUser                CompanyUser @relation(fields: [id_company_user], references: [id_company_user], onDelete: Cascade)
+
+  @@map("subprocess_user_company")
+}
+
+// ============================================
+// MODELOS DEL SISTEMA HELP DESK
+// ============================================
+
+model StatusCase {
+  id_status_case Int    @id @default(autoincrement())
+  status         String @unique
+  cases          Case[]
+
+  @@map("status_case")
+}
+
+model Active {
+  id_active Int     @id @default(autoincrement())
+  name      String  @unique
+  cases     Case[]
+  categoryCase CategoryCase[] @relation("CategoryCaseActive")
+
+  @@map("active")
+}
+
+model Department {
+  id_department Int    @id @default(autoincrement())
+  department    String @unique
+  cases         Case[]
+
+  @@map("department")
+}
+
+model Category {
+  id_category  Int            @id @default(autoincrement())
+  category     String         @unique
+  categoryCase CategoryCase[]
+
+  @@map("category")
+}
+
+model Subcategory {
+  id_subcategory Int            @id @default(autoincrement())
+  subcategory    String         @unique
+  categoryCase   CategoryCase[]
+
+  @@map("subcategory")
+}
+
+model Activity {
+  id_activity  Int            @id @default(autoincrement())
+  activity     String         @unique
+  categoryCase CategoryCase[] @relation("CategoryCaseActivity")
+
+  @@map("activity")
+}
+
+model Case {
+  id_case         Int            @id @default(autoincrement())
+  description     String         @db.Text
+  id_status_case  Int
+  subject_case    String
+  creation_date   DateTime       @default(now())
+  resolution      String?        @db.Text
+  end_date        DateTime?
+  id_technical    String
+  requester       String
+  id_active       Int
+  place           String?
+  id_department   Int
+  case_type       String
+  priority        String
+  
+  // Relaciones
+  statusCase      StatusCase     @relation(fields: [id_status_case], references: [id_status_case])
+  active          Active         @relation(fields: [id_active], references: [id_active])
+  department      Department     @relation(fields: [id_department], references: [id_department])
+  technicalAccount Account       @relation("TechnicalAccount", fields: [id_technical], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  
+  // Tablas relacionadas
+  notes           Note[]
+  logs            LogCaseHelpDesk[]
+  categoryCase    CategoryCase[]
+
+  @@map("case")
+}
+
+model CategoryCase {
+  id_category_case Int          @id @default(autoincrement())
+  id_case          Int
+  id_category      Int
+  id_subcategory   Int
+  id_activity      Int
+  
+  // Relaciones
+  case             Case         @relation(fields: [id_case], references: [id_case], onDelete: Cascade)
+  category         Category     @relation(fields: [id_category], references: [id_category], onDelete: NoAction, onUpdate: NoAction)
+  subcategory      Subcategory  @relation(fields: [id_subcategory], references: [id_subcategory], onDelete: NoAction, onUpdate: NoAction)
+  activity         Activity     @relation("CategoryCaseActivity", fields: [id_activity], references: [id_activity], onDelete: NoAction, onUpdate: NoAction, map: "fk_category_case_activity")
+  active           Active       @relation("CategoryCaseActive", fields: [id_activity], references: [id_active], onDelete: NoAction, onUpdate: NoAction, map: "fk_category_case_active")
+
+  @@map("category_case")
+}
+
+model Note {
+  id_note Int      @id @default(autoincrement())
+  id_case Int
+  note    String   @db.Text
+  
+  case    Case     @relation(fields: [id_case], references: [id_case], onDelete: Cascade)
+
+  @@map("notes")
+}
+
+model LogCaseHelpDesk {
+  id_log  Int      @id @default(autoincrement())
+  id_case Int
+  log     String   @db.Text
+  
+  case    Case     @relation(fields: [id_case], references: [id_case], onDelete: Cascade)
+
+  @@map("logs_case_help_desk")
+}
