@@ -170,7 +170,7 @@ model Subcategory {
 
 model Activity {
   id_activity  Int            @id @default(autoincrement())
-  activity     String         @unique
+  activity     String
   categoryCase CategoryCase[] @relation("CategoryCaseActivity")
 
   @@map("activity")
