@@ -116,10 +116,10 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { subject, description, priority, department, place, subprocess_id } = body;
+    const { requestType, priority, technician, associatedAsset, category, site, subcategory, department, activity, description, subprocess_id } = body;
 
     // Validate required fields
-    if (!subject || !description || !priority || !department) {
+    if (!requestType || !priority || !technician || !associatedAsset || !category || !site || !subcategory || !department || !activity || !description) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
@@ -137,6 +137,50 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      // Find or create category
+      let categoryRecord = await prisma.category.findFirst({
+        where: { category: category }
+      });
+
+      if (!categoryRecord) {
+        categoryRecord = await prisma.category.create({
+          data: { category }
+        });
+      }
+
+      // For now, use existing records or create simple ones
+      // Find or create subcategory
+      let subcategoryRecord = await prisma.subcategory.findFirst({
+        where: {
+          subcategory: subcategory
+        }
+      });
+
+      if (!subcategoryRecord) {
+        subcategoryRecord = await prisma.subcategory.create({
+          data: {
+            subcategory,
+            id_category: categoryRecord.id_category
+          }
+        });
+      }
+
+      // Find or create activity
+      let activityRecord = await prisma.activity.findFirst({
+        where: {
+          activity: activity
+        }
+      });
+
+      if (!activityRecord) {
+        activityRecord = await prisma.activity.create({
+          data: {
+            activity,
+            id_subcategory: subcategoryRecord.id_subcategory
+          }
+        });
+      }
+
       // Find status "Open"
       const statusRecord = await prisma.statusCase.findFirst({
         where: { status: 'Open' }
@@ -151,20 +195,30 @@ export async function POST(request: NextRequest) {
         data: {
           description,
           id_status_case: statusRecord.id_status_case,
-          subject_case: subject,
+          subject_case: `${requestType} - ${associatedAsset}`,
           creation_date: new Date(),
-          id_technical: session.user?.email || '',
+          id_technical: technician,
           requester: session.user?.name || '',
           id_active: 1, // Default active, adjust as needed
-          place: place || '',
+          place: site,
           id_department: departmentRecord.id_department,
-          case_type: 'Help Desk',
+          case_type: requestType,
           priority,
         },
         include: {
           statusCase: true,
           department: true,
           active: true,
+        }
+      });
+
+      // Create category_case record
+      await prisma.categoryCase.create({
+        data: {
+          id_case: newCase.id_case,
+          id_category: categoryRecord.id_category,
+          id_subcategory: subcategoryRecord.id_subcategory,
+          id_activity: activityRecord.id_activity,
         }
       });
 
@@ -175,7 +229,7 @@ export async function POST(request: NextRequest) {
         priority: newCase.priority,
         status: newCase.statusCase.status,
         created_at: newCase.creation_date.toISOString(),
-        assigned_user: session.user?.name || 'Unassigned',
+        assigned_user: technician,
         subprocess_id: subprocess_id || 1,
         description: newCase.description,
         department: newCase.department.department,

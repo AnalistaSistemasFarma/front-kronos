@@ -155,6 +155,7 @@ model Department {
 model Category {
   id_category  Int            @id @default(autoincrement())
   category     String         @unique
+  subcategories Subcategory[]
   categoryCase CategoryCase[]
 
   @@map("category")
@@ -163,15 +164,20 @@ model Category {
 model Subcategory {
   id_subcategory Int            @id @default(autoincrement())
   subcategory    String         @unique
+  id_category    Int
+  category       Category       @relation(fields: [id_category], references: [id_category])
+  activities     Activity[]
   categoryCase   CategoryCase[]
 
   @@map("subcategory")
 }
 
 model Activity {
-  id_activity  Int            @id @default(autoincrement())
-  activity     String
-  categoryCase CategoryCase[] @relation("CategoryCaseActivity")
+  id_activity    Int            @id @default(autoincrement())
+  activity       String
+  id_subcategory Int
+  subcategory    Subcategory    @relation(fields: [id_subcategory], references: [id_subcategory])
+  categoryCase   CategoryCase[] @relation("CategoryCaseActivity")
 
   @@map("activity")
 }
