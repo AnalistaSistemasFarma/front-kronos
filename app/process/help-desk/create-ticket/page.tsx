@@ -50,11 +50,16 @@ function TicketsBoard() {
   });
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
-    subject: '',
-    description: '',
+    requestType: '',
     priority: '',
+    technician: '',
+    associatedAsset: '',
+    category: '',
+    site: '',
+    subcategory: '',
     department: '',
-    place: '',
+    activity: '',
+    description: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
 
@@ -108,11 +113,16 @@ function TicketsBoard() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          subject: formData.subject,
-          description: formData.description,
+          requestType: formData.requestType,
           priority: formData.priority,
+          technician: formData.technician,
+          associatedAsset: formData.associatedAsset,
+          category: formData.category,
+          site: formData.site,
+          subcategory: formData.subcategory,
           department: formData.department,
-          place: formData.place,
+          activity: formData.activity,
+          description: formData.description,
           subprocess_id: subprocessId ? parseInt(subprocessId) : 1,
         }),
       });
@@ -129,11 +139,16 @@ function TicketsBoard() {
 
       // Reset form and close modal
       setFormData({
-        subject: '',
-        description: '',
+        requestType: '',
         priority: '',
+        technician: '',
+        associatedAsset: '',
+        category: '',
+        site: '',
+        subcategory: '',
         department: '',
-        place: '',
+        activity: '',
+        description: '',
       });
       setModalOpened(false);
     } catch (err) {
@@ -331,18 +346,16 @@ function TicketsBoard() {
         size="lg"
       >
         <Stack>
-          <TextInput
-            label="Asunto"
-            placeholder="Ingrese el asunto del ticket"
-            value={formData.subject}
-            onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
-          />
-          <Textarea
-            label="Descripción"
-            placeholder="Describa el problema o solicitud"
-            value={formData.description}
-            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-            minRows={4}
+          <Select
+            label="Tipo Solicitud"
+            placeholder="Seleccione el tipo de solicitud"
+            data={[
+              { value: 'Incidente', label: 'Incidente' },
+              { value: 'Solicitud', label: 'Solicitud' },
+              { value: 'Problema', label: 'Problema' },
+            ]}
+            value={formData.requestType}
+            onChange={(value) => setFormData({ ...formData, requestType: value || '' })}
           />
           <Select
             label="Prioridad"
@@ -357,16 +370,53 @@ function TicketsBoard() {
             onChange={(value) => setFormData({ ...formData, priority: value || '' })}
           />
           <TextInput
+            label="Técnico"
+            placeholder="Ingrese el técnico asignado"
+            value={formData.technician}
+            onChange={(e) => setFormData({ ...formData, technician: e.target.value })}
+          />
+          <TextInput
+            label="Activo Asociado"
+            placeholder="Ingrese el activo asociado"
+            value={formData.associatedAsset}
+            onChange={(e) => setFormData({ ...formData, associatedAsset: e.target.value })}
+          />
+          <TextInput
+            label="Categoría"
+            placeholder="Ingrese la categoría"
+            value={formData.category}
+            onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+          />
+          <TextInput
+            label="Sitio"
+            placeholder="Ingrese el sitio"
+            value={formData.site}
+            onChange={(e) => setFormData({ ...formData, site: e.target.value })}
+          />
+          <TextInput
+            label="Subcategoría"
+            placeholder="Ingrese la subcategoría"
+            value={formData.subcategory}
+            onChange={(e) => setFormData({ ...formData, subcategory: e.target.value })}
+          />
+          <TextInput
             label="Departamento"
             placeholder="Ingrese el departamento"
             value={formData.department}
             onChange={(e) => setFormData({ ...formData, department: e.target.value })}
           />
           <TextInput
-            label="Lugar"
-            placeholder="Ingrese el lugar"
-            value={formData.place}
-            onChange={(e) => setFormData({ ...formData, place: e.target.value })}
+            label="Actividad"
+            placeholder="Ingrese la actividad"
+            value={formData.activity}
+            onChange={(e) => setFormData({ ...formData, activity: e.target.value })}
+          />
+          <Textarea
+            label="Descripción"
+            placeholder="Describa el problema o solicitud"
+            value={formData.description}
+            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            minRows={4}
           />
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setModalOpened(false)}>

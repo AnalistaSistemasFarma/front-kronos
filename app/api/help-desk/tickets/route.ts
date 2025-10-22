@@ -157,42 +157,11 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { subject, description, priority, department, place, subprocess_id } = body;
+    const { requestType, priority, technician, associatedAsset, category, site, subcategory, department, activity, description, subprocess_id } = body;
 
     // Validate required fields
-    if (!subject || !description || !priority || !department) {
-      return NextResponse.json(
-        {
-          error:
-            'Missing required fields: subject, description, priority, and department are required',
-        },
-        { status: 400 }
-      );
-    }
-
-    // Validate priority values
-    const validPriorities = ['Low', 'Medium', 'High', 'Critical'];
-    if (!validPriorities.includes(priority)) {
-      return NextResponse.json(
-        {
-          error: `Invalid priority. Must be one of: ${validPriorities.join(', ')}`,
-        },
-        { status: 400 }
-      );
-    }
-
-    // Validate subject and description length
-    if (subject.length > 255) {
-      return NextResponse.json(
-        { error: 'Subject must be 255 characters or less' },
-        { status: 400 }
-      );
-    }
-    if (description.length > 8000) {
-      return NextResponse.json(
-        { error: 'Description must be 8000 characters or less' },
-        { status: 400 }
-      );
+    if (!requestType || !priority || !technician || !associatedAsset || !category || !site || !subcategory || !department || !activity || !description) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
     const prisma = new PrismaClient();
@@ -213,6 +182,50 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         console.error('Error handling department:', error);
         return NextResponse.json({ error: 'Failed to process department' }, { status: 500 });
+      }
+
+      // Find or create category
+      let categoryRecord = await prisma.category.findFirst({
+        where: { category: category }
+      });
+
+      if (!categoryRecord) {
+        categoryRecord = await prisma.category.create({
+          data: { category }
+        });
+      }
+
+      // For now, use existing records or create simple ones
+      // Find or create subcategory
+      let subcategoryRecord = await prisma.subcategory.findFirst({
+        where: {
+          subcategory: subcategory
+        }
+      });
+
+      if (!subcategoryRecord) {
+        subcategoryRecord = await prisma.subcategory.create({
+          data: {
+            subcategory,
+            id_category: categoryRecord.id_category
+          }
+        });
+      }
+
+      // Find or create activity
+      let activityRecord = await prisma.activity.findFirst({
+        where: {
+          activity: activity
+        }
+      });
+
+      if (!activityRecord) {
+        activityRecord = await prisma.activity.create({
+          data: {
+            activity,
+            id_subcategory: subcategoryRecord.id_subcategory
+          }
+        });
       }
 
       // Find status "Open"
@@ -257,37 +270,36 @@ export async function POST(request: NextRequest) {
       }
 
       // Create the case
-      let newCase;
-      try {
-        newCase = await prisma.case.create({
-          data: {
-            description,
-            id_status_case: statusRecord.id_status_case,
-            subject_case: subject,
-            creation_date: new Date(),
-            id_technical: technicalAccount.id,
-            requester: session.user?.name || '',
-            id_active: 1, // Default active, adjust as needed
-            place: place || '',
-            id_department: departmentRecord.id_department,
-            case_type: 'Help Desk',
-            priority,
-          },
-          include: {
-            statusCase: true,
-            department: true,
-            active: true,
-            technicalAccount: {
-              include: {
-                user: true,
-              },
-            },
-          },
-        });
-      } catch (error) {
-        console.error('Error creating case:', error);
-        return NextResponse.json({ error: 'Failed to create ticket' }, { status: 500 });
-      }
+      const newCase = await prisma.case.create({
+        data: {
+          description,
+          id_status_case: statusRecord.id_status_case,
+          subject_case: `${requestType} - ${associatedAsset}`,
+          creation_date: new Date(),
+          id_technical: technician,
+          requester: session.user?.name || '',
+          id_active: 1, // Default active, adjust as needed
+          place: site,
+          id_department: departmentRecord.id_department,
+          case_type: requestType,
+          priority,
+        },
+        include: {
+          statusCase: true,
+          department: true,
+          active: true,
+        }
+      });
+
+      // Create category_case record
+      await prisma.categoryCase.create({
+        data: {
+          id_case: newCase.id_case,
+          id_category: categoryRecord.id_category,
+          id_subcategory: subcategoryRecord.id_subcategory,
+          id_activity: activityRecord.id_activity,
+        }
+      });
 
       // Transform to match the expected response format
       const newTicket = {
@@ -296,7 +308,7 @@ export async function POST(request: NextRequest) {
         priority: newCase.priority,
         status: newCase.statusCase.status,
         created_at: newCase.creation_date.toISOString(),
-        assigned_user: newCase.technicalAccount?.user?.name || 'Unassigned',
+        assigned_user: technician,
         subprocess_id: subprocess_id || 1,
         description: newCase.description,
         department: newCase.department.department,
