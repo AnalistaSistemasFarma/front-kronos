@@ -84,9 +84,9 @@ export default function ProcessPage() {
     <div className='max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8'>
       <div className='mb-8'>
         <Title order={1} className='text-3xl font-bold text-gray-900 mb-2'>
-          Process
+          Procesos
         </Title>
-        <Text className='text-gray-600'>List of processes available for your user</Text>
+        <Text className='text-gray-600'>List de procesos disponibles para tu usuario</Text>
       </div>
 
       {error && (
@@ -117,20 +117,20 @@ export default function ProcessPage() {
                   {process.process_url && (
                     <Text size='sm' className='text-blue-600 hover:text-blue-800'>
                       <a href={process.process_url} target='_blank' rel='noopener noreferrer'>
-                        View documentation
+                        Ver documentación
                       </a>
                     </Text>
                   )}
                 </div>
                 <Badge color='blue' variant='light'>
-                  {process.subprocesses.length} subprocesses
+                  {process.subprocesses.length} subprocesos
                 </Badge>
               </div>
 
               {process.subprocesses.length > 0 && (
                 <div>
                   <Text size='sm' className='font-medium text-gray-700 mb-2'>
-                    Subprocesses:
+                    Subprocesos:
                   </Text>
                   <Stack gap='xs'>
                     {process.subprocesses.map((subprocess) => (
@@ -138,9 +138,29 @@ export default function ProcessPage() {
                         key={subprocess.id_subprocess}
                         className='flex items-center p-2 bg-gray-50 rounded text-sm text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors'
                         onClick={() => {
-                          router.push(
-                            `/process/help-desk/create-ticket?subprocess_id=${subprocess.id_subprocess}`
-                          );
+                          if (subprocess.subprocess_url) {
+                            try {
+                              if (subprocess.subprocess_url.startsWith('/')) {
+                                router.push(subprocess.subprocess_url);
+                              } else {
+                                router.push(subprocess.subprocess_url);
+                              }
+                            } catch (error) {
+                              console.error(
+                                'Invalid subprocess URL:',
+                                subprocess.subprocess_url,
+                                'Error:',
+                                error
+                              );
+                              alert(
+                                'La URL del subproceso no es válida. Por favor, contacta al administrador.'
+                              );
+                            }
+                          } else {
+                            router.push(
+                              `/process/help-desk/create-ticket?subprocess_id=${subprocess.id_subprocess}`
+                            );
+                          }
                         }}
                       >
                         <IconFolder size={16} className='mr-2 text-gray-500' />

@@ -8,6 +8,7 @@ import { prisma } from '../../../../lib/prisma';
 export const authOptions = {
   adapter: PrismaAdapter(prisma),
   debug: process.env.NODE_ENV === 'development',
+  baseUrl: process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : undefined,
   providers: [
     CredentialsProvider({
       name: 'credentials',

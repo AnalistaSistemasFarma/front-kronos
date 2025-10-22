@@ -53,9 +53,13 @@ model User {
   emailVerified DateTime?
   image         String?
   password      String?
+  role          String         @default("user")
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
   accounts      Account[]
   sessions      Session[]
   companyUsers  CompanyUser[]
+  auditLogs     UserAuditLog[]
 
   @@map("user")
 }
@@ -237,8 +241,21 @@ model LogCaseHelpDesk {
   id_log  Int      @id @default(autoincrement())
   id_case Int
   log     String   @db.Text
-  
+
   case    Case     @relation(fields: [id_case], references: [id_case], onDelete: Cascade)
 
   @@map("logs_case_help_desk")
+}
+
+model UserAuditLog {
+  id_audit_log Int      @id @default(autoincrement())
+  user_id      String
+  action       String   // 'CREATE', 'UPDATE', 'DELETE', 'DEACTIVATE', 'ACTIVATE'
+  performed_by String   // ID del usuario que realizó la acción
+  details      String?  @db.Text
+  created_at   DateTime @default(now())
+
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("user_audit_log")
 }

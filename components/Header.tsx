@@ -19,11 +19,11 @@ export default function Header() {
           <div className='flex items-center'>
             <Link href='/dashboard' aria-label='Go to dashboard'>
               <Image
-                src='/grupo-pisa-logo.svg'
-                alt='Grupo Pisa Logo'
+                src='/logo.svg'
+                alt='Logo'
                 width={120}
                 height={48}
-                className={`h-12 w-auto ${isDashboard ? 'shadow-lg' : ''}`}
+                className={`h-12 w-auto ${isDashboard ? '' : ''}`}
               />
             </Link>
           </div>

@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '../../auth/[...nextauth]/route';
+import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '../../../generated/prisma';
+import { authOptions } from '../../auth/[...nextauth]/route';
 
 // Mock data for tickets
 const mockTickets = [
@@ -67,41 +67,82 @@ export async function GET(request: NextRequest) {
     const dateFrom = searchParams.get('date_from');
     const dateTo = searchParams.get('date_to');
 
-    let filteredTickets = mockTickets;
+    const prisma = new PrismaClient();
 
-    // Filter by subprocess_id if provided
-    if (subprocessId) {
-      filteredTickets = filteredTickets.filter(ticket => ticket.subprocess_id === parseInt(subprocessId));
+    try {
+      // Build where clause for filtering
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const where = {} as Record<string, any>;
+
+      if (priority) {
+        where.priority = priority;
+      }
+
+      if (status) {
+        where.statusCase = {
+          status: status,
+        };
+      }
+
+      if (assignedUser) {
+        where.technicalAccount = {
+          user: {
+            name: {
+              contains: assignedUser,
+              mode: 'insensitive',
+            },
+          },
+        };
+      }
+
+      if (dateFrom || dateTo) {
+        where.creation_date = {};
+        if (dateFrom) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (where.creation_date as any).gte = new Date(dateFrom);
+        }
+        if (dateTo) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (where.creation_date as any).lte = new Date(dateTo);
+        }
+      }
+
+      // Fetch cases with relations
+      const cases = await prisma.case.findMany({
+        where,
+        include: {
+          statusCase: true,
+          department: true,
+          active: true,
+          technicalAccount: {
+            include: {
+              user: true,
+            },
+          },
+        },
+        orderBy: {
+          creation_date: 'desc',
+        },
+      });
+
+      // Transform to Ticket interface
+      const tickets = cases.map((caseItem) => ({
+        id_case: caseItem.id_case,
+        subject: caseItem.subject_case,
+        priority: caseItem.priority,
+        status: caseItem.statusCase.status,
+        created_at: caseItem.creation_date.toISOString(),
+        assigned_user: caseItem.technicalAccount?.user?.name || 'Unassigned',
+        subprocess_id: subprocessId ? parseInt(subprocessId) : 1, // Default since not in schema
+        description: caseItem.description,
+        department: caseItem.department.department,
+        place: caseItem.place || '',
+      }));
+
+      return NextResponse.json(tickets);
+    } finally {
+      await prisma.$disconnect();
     }
-
-    // Apply filters
-    if (priority) {
-      filteredTickets = filteredTickets.filter(ticket => ticket.priority === priority);
-    }
-
-    if (status) {
-      filteredTickets = filteredTickets.filter(ticket => ticket.status === status);
-    }
-
-    if (assignedUser) {
-      filteredTickets = filteredTickets.filter(ticket =>
-        ticket.assigned_user.toLowerCase().includes(assignedUser.toLowerCase())
-      );
-    }
-
-    if (dateFrom) {
-      filteredTickets = filteredTickets.filter(ticket =>
-        new Date(ticket.created_at) >= new Date(dateFrom)
-      );
-    }
-
-    if (dateTo) {
-      filteredTickets = filteredTickets.filter(ticket =>
-        new Date(ticket.created_at) <= new Date(dateTo)
-      );
-    }
-
-    return NextResponse.json(filteredTickets);
   } catch (error) {
     console.error('Error fetching tickets:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -120,53 +161,133 @@ export async function POST(request: NextRequest) {
 
     // Validate required fields
     if (!subject || !description || !priority || !department) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      return NextResponse.json(
+        {
+          error:
+            'Missing required fields: subject, description, priority, and department are required',
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validate priority values
+    const validPriorities = ['Low', 'Medium', 'High', 'Critical'];
+    if (!validPriorities.includes(priority)) {
+      return NextResponse.json(
+        {
+          error: `Invalid priority. Must be one of: ${validPriorities.join(', ')}`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validate subject and description length
+    if (subject.length > 255) {
+      return NextResponse.json(
+        { error: 'Subject must be 255 characters or less' },
+        { status: 400 }
+      );
+    }
+    if (description.length > 8000) {
+      return NextResponse.json(
+        { error: 'Description must be 8000 characters or less' },
+        { status: 400 }
+      );
     }
 
     const prisma = new PrismaClient();
 
     try {
       // Find or create department
-      let departmentRecord = await prisma.department.findFirst({
-        where: { department: department }
-      });
-
-      if (!departmentRecord) {
-        departmentRecord = await prisma.department.create({
-          data: { department }
+      let departmentRecord;
+      try {
+        departmentRecord = await prisma.department.findFirst({
+          where: { department: department },
         });
+
+        if (!departmentRecord) {
+          departmentRecord = await prisma.department.create({
+            data: { department },
+          });
+        }
+      } catch (error) {
+        console.error('Error handling department:', error);
+        return NextResponse.json({ error: 'Failed to process department' }, { status: 500 });
       }
 
       // Find status "Open"
-      const statusRecord = await prisma.statusCase.findFirst({
-        where: { status: 'Open' }
-      });
+      let statusRecord;
+      try {
+        statusRecord = await prisma.statusCase.findFirst({
+          where: { status: 'Open' },
+        });
 
-      if (!statusRecord) {
-        return NextResponse.json({ error: 'Status "Open" not found' }, { status: 500 });
+        if (!statusRecord) {
+          return NextResponse.json(
+            { error: 'Status "Open" not found in database' },
+            { status: 500 }
+          );
+        }
+      } catch (error) {
+        console.error('Error finding status:', error);
+        return NextResponse.json({ error: 'Failed to find ticket status' }, { status: 500 });
+      }
+
+      // Find technical account by user email
+      let technicalAccount;
+      try {
+        const userEmail = session.user?.email;
+        if (!userEmail) {
+          return NextResponse.json({ error: 'User email not found in session' }, { status: 400 });
+        }
+
+        technicalAccount = await prisma.account.findFirst({
+          where: { user: { email: userEmail } },
+        });
+
+        if (!technicalAccount) {
+          return NextResponse.json(
+            { error: 'Technical account not found for current user' },
+            { status: 500 }
+          );
+        }
+      } catch (error) {
+        console.error('Error finding technical account:', error);
+        return NextResponse.json({ error: 'Failed to find technical account' }, { status: 500 });
       }
 
       // Create the case
-      const newCase = await prisma.case.create({
-        data: {
-          description,
-          id_status_case: statusRecord.id_status_case,
-          subject_case: subject,
-          creation_date: new Date(),
-          id_technical: session.user?.email || '',
-          requester: session.user?.name || '',
-          id_active: 1, // Default active, adjust as needed
-          place: place || '',
-          id_department: departmentRecord.id_department,
-          case_type: 'Help Desk',
-          priority,
-        },
-        include: {
-          statusCase: true,
-          department: true,
-          active: true,
-        }
-      });
+      let newCase;
+      try {
+        newCase = await prisma.case.create({
+          data: {
+            description,
+            id_status_case: statusRecord.id_status_case,
+            subject_case: subject,
+            creation_date: new Date(),
+            id_technical: technicalAccount.id,
+            requester: session.user?.name || '',
+            id_active: 1, // Default active, adjust as needed
+            place: place || '',
+            id_department: departmentRecord.id_department,
+            case_type: 'Help Desk',
+            priority,
+          },
+          include: {
+            statusCase: true,
+            department: true,
+            active: true,
+            technicalAccount: {
+              include: {
+                user: true,
+              },
+            },
+          },
+        });
+      } catch (error) {
+        console.error('Error creating case:', error);
+        return NextResponse.json({ error: 'Failed to create ticket' }, { status: 500 });
+      }
 
       // Transform to match the expected response format
       const newTicket = {
@@ -175,7 +296,7 @@ export async function POST(request: NextRequest) {
         priority: newCase.priority,
         status: newCase.statusCase.status,
         created_at: newCase.creation_date.toISOString(),
-        assigned_user: session.user?.name || 'Unassigned',
+        assigned_user: newCase.technicalAccount?.user?.name || 'Unassigned',
         subprocess_id: subprocess_id || 1,
         description: newCase.description,
         department: newCase.department.department,

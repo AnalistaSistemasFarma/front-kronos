@@ -47,16 +47,9 @@ export default function Login() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'blue',
       }}
     >
-      <Image
-        src='/grupo-pisa-logo.svg'
-        alt='Grupo Pisa Logo'
-        width={200}
-        height={100}
-        style={{ marginBottom: '2rem' }}
-      />
+      <Image src='/logo.svg' alt='Logo' width={320} height={48} className='mb-4' />
       <Paper shadow='md' p='xl' radius='md' withBorder style={{ maxWidth: 400, width: '100%' }}>
         <Title order={2} ta='center' mb='lg'>
           Bienvenido al Portal de servicios
