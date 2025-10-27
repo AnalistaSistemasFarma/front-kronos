@@ -32,7 +32,7 @@ export async function GET() {
           include: {
             company: {
               include: {
-                sapEndpoints: true,
+                sap_endpoints: true,
               },
             },
           },
@@ -43,7 +43,7 @@ export async function GET() {
     const companies = companyAccess.map((access) => ({
       id: access.companyUser.company.id_company,
       name: access.companyUser.company.company,
-      sapEndpoint: access.companyUser.company.sapEndpoints[0] || null,
+      sapEndpoint: access.companyUser.company.sap_endpoints[0] || null,
     }));
 
     return NextResponse.json({ companies });
