@@ -1,0 +1,43 @@
+name: Deploy to Production (Self-Hosted)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted # Runner instalado en tu servidor
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        continue-on-error: true
+
+      - name: Stop PM2 apps
+        run: pm2 stop all
+        continue-on-error: true
+
+      - name: Copy files to production
+        run: |
+          xcopy /E /I /Y * "C:\Users\administrador.DFARUNIADM\projects\front-kronos"
+        shell: cmd
+
+      - name: Install production dependencies
+        run: |
+          cd C:\Users\administrador.DFARUNIADM\projects\front-kronos
+          npm install --production
+
+      - name: Restart PM2 apps
+        run: |
+          cd C:\Users\administrador.DFARUNIADM\projects\front-kronos
+          pm2 restart all
+          pm2 save
+
+   
