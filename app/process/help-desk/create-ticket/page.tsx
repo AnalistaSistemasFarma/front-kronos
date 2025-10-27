@@ -24,11 +24,11 @@ import { IconAlertCircle, IconChevronRight, IconSearch } from '@tabler/icons-rea
 
 interface Ticket {
   id_case: number;
-  subject: string;
+  subject_case: string;
   priority: string;
   status: string;
-  created_at: string;
-  assigned_user: string;
+  creation_date: string;
+  nombreTecnico: string;
   subprocess_id: number;
 }
 
@@ -50,13 +50,27 @@ function TicketsBoard() {
   });
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
-    subject: '',
-    description: '',
+    requestType: '',
     priority: '',
+    technician: '',
+    category: '',
+    site: '',
+    asunto: '',
+    subcategory: '',
     department: '',
-    place: '',
+    activity: '',
+    description: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
+
+  // Options for selects
+  const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
+  const [subcategories, setSubcategories] = useState<{ value: string; label: string }[]>([]);
+  const [activities, setActivities] = useState<{ value: string; label: string }[]>([]);
+  const [technicals, setTechnicals] = useState<{ value: string; label: string }[]>([]);
+  const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [idUser, setIdUser] = useState("");
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -65,11 +79,114 @@ function TicketsBoard() {
       return;
     }
     fetchTickets();
+    fetchOptions();
+    fetchSubprocessUsers();
   }, [session, status, router, filters]);
+
+  useEffect(() => {
+    const globalStore = localStorage.getItem("global-store");
+    if (globalStore) {
+      try {
+        const parsedStore = JSON.parse(globalStore);
+        const idUserValue = parsedStore?.state?.idUser || "";
+        setIdUser(idUserValue);
+      } catch (error) {
+        console.error("Error parsing global-store from localStorage:", error);
+        setIdUser("");
+      }
+    } else {
+      setIdUser("");
+    }
+  }, []);
+
+  const fetchOptions = async () => {
+    try {
+      setLoadingOptions(true);
+      const [categoriesRes, departmentsRes] = await Promise.all([
+        fetch('/api/help-desk/categories'),
+        fetch('/api/help-desk/departments'),
+      ]);
+
+      if (categoriesRes.ok) {
+        const categoriesData: { id_category: number; category: string }[] = await categoriesRes.json();
+        setCategories(categoriesData.map((cat) => ({ value: cat.id_category.toString(), label: cat.category })));
+      }
+
+      if (departmentsRes.ok) {
+        const departmentsData: { id_department: number; department: string }[] = await departmentsRes.json();
+        setDepartments(departmentsData.map((dep) => ({ value: dep.id_department.toString(), label: dep.department })));
+      }
+    } catch (error) {
+      console.error('Error fetching options:', error);
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
+
+  const fetchSubcategories = async (categoryId: string) => {
+    console.log('Frontend - fetchSubcategories called with categoryId:', categoryId);
+    try {
+      const response = await fetch(`/api/help-desk/subcategories?category_id=${categoryId}`);
+      console.log('Frontend - fetchSubcategories response status:', response.status);
+      if (response.ok) {
+        const data: { id_subcategory: number; subcategory: string }[] = await response.json();
+        console.log('Frontend - fetchSubcategories received data:', data);
+        setSubcategories(data.map((sub) => ({ value: sub.id_subcategory.toString(), label: sub.subcategory })));
+        console.log('Frontend - subcategories state updated:', data.map((sub) => ({ value: sub.id_subcategory.toString(), label: sub.subcategory })));
+      } else {
+        console.error('Frontend - fetchSubcategories failed with status:', response.status);
+      }
+    } catch (error) {
+      console.error('Error fetching subcategories:', error);
+    }
+  };
+
+  const fetchSubprocessUsers = async () => {
+    console.log('Frontend - fetchSubprocessUsers called');
+    try {
+      const response = await fetch('/api/help-desk/technical');
+      console.log('Frontend - fetchSubprocessUsers response status:', response.status);
+
+      if (response.ok) {
+        const data: {
+          id_subprocess_user_company: number;
+          subprocess: string;
+          id_company_user: number;
+          name: string;
+        }[] = await response.json();
+
+        console.log('Frontend - fetchSubprocessUsers received data:', data);
+
+        setTechnicals(
+          data.map((item) => ({
+            value: item.id_subprocess_user_company.toString(),
+            label: item.name,
+          }))
+        );
+      } else {
+        console.error('Frontend - fetchSubprocessUsers failed with status:', response.status);
+      }
+    } catch (error) {
+      console.error('Error fetching subprocess users:', error);
+    }
+  };
+
+  const fetchActivities = async (subcategoryId: string) => {
+    try {
+      const response = await fetch(`/api/help-desk/activities?subcategory_id=${subcategoryId}`);
+      if (response.ok) {
+        const data: { id_activity: number; activity: string }[] = await response.json();
+        setActivities(data.map((act) => ({ value: act.id_activity.toString(), label: act.activity })));
+      }
+    } catch (error) {
+      console.error('Error fetching activities:', error);
+    }
+  };
 
   const fetchTickets = async () => {
     try {
       setLoading(true);
+
       const params = new URLSearchParams();
       if (subprocessId) params.append('subprocess_id', subprocessId);
       if (filters.priority) params.append('priority', filters.priority);
@@ -78,15 +195,16 @@ function TicketsBoard() {
       if (filters.date_from) params.append('date_from', filters.date_from);
       if (filters.date_to) params.append('date_to', filters.date_to);
 
+      // ✅ usar los parámetros en la URL
       const response = await fetch(`/api/help-desk/tickets?${params.toString()}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch tickets');
-      }
-      const data: Ticket[] = await response.json();
+
+      if (!response.ok) throw new Error('Failed to fetch tickets');
+
+      const data = await response.json();
       setTickets(data);
     } catch (err) {
-      setError('Unable to load tickets. Please try again.');
       console.error('Error fetching tickets:', err);
+      setError('Unable to load tickets. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -99,21 +217,54 @@ function TicketsBoard() {
     }));
   };
 
+  const handleFormChange = (field: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+
+    // Handle dependent selects
+    if (field === 'category' && value) {
+      fetchSubcategories(value);
+      // Reset dependent fields
+      setFormData((prev) => ({
+        ...prev,
+        subcategory: '',
+        activity: '',
+      }));
+      setSubcategories([]);
+      setActivities([]);
+    } else if (field === 'subcategory' && value) {
+      fetchActivities(value);
+      // Reset dependent field
+      setFormData((prev) => ({
+        ...prev,
+        activity: '',
+      }));
+      setActivities([]);
+    }
+  };
+
   const handleCreateTicket = async () => {
     try {
       setCreateLoading(true);
-      const response = await fetch('/api/help-desk/tickets', {
+      const response = await fetch('/api/help-desk/create_ticket', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          subject: formData.subject,
-          description: formData.description,
+          requestType: formData.requestType,
           priority: formData.priority,
+          technician: formData.technician,
+          category: formData.category,
+          site: formData.site,
+          requester: idUser,
+          asunto: formData.asunto,
+          subcategory: formData.subcategory,
           department: formData.department,
-          place: formData.place,
-          subprocess_id: subprocessId ? parseInt(subprocessId) : 1,
+          activity: formData.activity,
+          description: formData.description,
         }),
       });
 
@@ -129,12 +280,19 @@ function TicketsBoard() {
 
       // Reset form and close modal
       setFormData({
-        subject: '',
-        description: '',
+        requestType: '',
         priority: '',
+        technician: '',
+        category: '',
+        site: '',
+        asunto: '',
+        subcategory: '',
         department: '',
-        place: '',
+        activity: '',
+        description: '',
       });
+
+      fetchTickets();
       setModalOpened(false);
     } catch (err) {
       console.error('Error creating ticket:', err);
@@ -176,7 +334,7 @@ function TicketsBoard() {
   );
 
   const getPriorityColor = (priority: string) => {
-    switch (priority.toLowerCase()) {
+    switch (priority?.toLowerCase()) {
       case 'critical': return 'red';
       case 'high': return 'orange';
       case 'medium': return 'yellow';
@@ -186,7 +344,7 @@ function TicketsBoard() {
   };
 
   const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
+    switch (status?.toLowerCase()) {
       case 'open': return 'blue';
       case 'in progress': return 'yellow';
       case 'closed': return 'green';
@@ -294,7 +452,7 @@ function TicketsBoard() {
                 tickets.map((ticket) => (
                   <Table.Tr key={ticket.id_case}>
                     <Table.Td>{ticket.id_case}</Table.Td>
-                    <Table.Td className='font-medium'>{ticket.subject}</Table.Td>
+                    <Table.Td className='font-medium'>{ticket.subject_case}</Table.Td>
                     <Table.Td>
                       <Badge color={getPriorityColor(ticket.priority)} variant='light'>
                         {ticket.priority}
@@ -306,15 +464,13 @@ function TicketsBoard() {
                       </Badge>
                     </Table.Td>
                     <Table.Td>
-                      {new Date(ticket.created_at).toLocaleDateString('es-ES', {
+                      {new Date(ticket.creation_date).toLocaleDateString('es-ES', {
                         year: 'numeric',
                         month: 'short',
                         day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
                       })}
                     </Table.Td>
-                    <Table.Td>{ticket.assigned_user}</Table.Td>
+                    <Table.Td>{ticket.nombreTecnico}</Table.Td>
                   </Table.Tr>
                 ))
               )}
@@ -331,18 +487,15 @@ function TicketsBoard() {
         size="lg"
       >
         <Stack>
-          <TextInput
-            label="Asunto"
-            placeholder="Ingrese el asunto del ticket"
-            value={formData.subject}
-            onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
-          />
-          <Textarea
-            label="Descripción"
-            placeholder="Describa el problema o solicitud"
-            value={formData.description}
-            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-            minRows={4}
+          <Select
+            label="Tipo Solicitud"
+            placeholder="Seleccione el tipo de solicitud"
+            data={[
+              { value: 'Incidente', label: 'Incidente' },
+              { value: 'Solicitud', label: 'Solicitud' },
+            ]}
+            value={formData.requestType}
+            onChange={(value) => setFormData({ ...formData, requestType: value || '' })}
           />
           <Select
             label="Prioridad"
@@ -357,16 +510,62 @@ function TicketsBoard() {
             onChange={(value) => setFormData({ ...formData, priority: value || '' })}
           />
           <TextInput
-            label="Departamento"
-            placeholder="Ingrese el departamento"
-            value={formData.department}
-            onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+            label="Asunto"
+            placeholder="Ingrese el asunto"
+            value={formData.asunto}
+            onChange={(e) => setFormData({ ...formData, asunto: e.target.value })}
+          />
+          <Select
+            label="Técnico"
+            placeholder="Seleccione el técnico asignado"
+            data={technicals}
+            value={formData.technician}
+            onChange={(value) => handleFormChange('technician', value || '')}
+          />
+          <Select
+            label="Categoría"
+            placeholder="Seleccione la categoría"
+            data={categories}
+            value={formData.category}
+            onChange={(value) => handleFormChange('category', value || '')}
+            disabled={loadingOptions}
           />
           <TextInput
-            label="Lugar"
-            placeholder="Ingrese el lugar"
-            value={formData.place}
-            onChange={(e) => setFormData({ ...formData, place: e.target.value })}
+            label="Sitio"
+            placeholder="Ingrese el sitio"
+            value={formData.site}
+            onChange={(e) => setFormData({ ...formData, site: e.target.value })}
+          />
+          <Select
+            label="Subcategoría"
+            placeholder="Seleccione la subcategoría"
+            data={subcategories}
+            value={formData.subcategory}
+            onChange={(value) => handleFormChange('subcategory', value || '')}
+            disabled={!formData.category || loadingOptions}
+          />
+          <Select
+            label="Departamento"
+            placeholder="Seleccione el departamento"
+            data={departments}
+            value={formData.department}
+            onChange={(value) => handleFormChange('department', value || '')}
+            disabled={loadingOptions}
+          />
+          <Select
+            label="Actividad"
+            placeholder="Seleccione la actividad"
+            data={activities}
+            value={formData.activity}
+            onChange={(value) => handleFormChange('activity', value || '')}
+            disabled={!formData.subcategory || loadingOptions}
+          />
+          <Textarea
+            label="Descripción"
+            placeholder="Describa el problema o solicitud"
+            value={formData.description}
+            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            minRows={4}
           />
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setModalOpened(false)}>
