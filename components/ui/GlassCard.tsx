@@ -9,7 +9,7 @@ interface GlassCardProps {
   hoverable?: boolean;
   interactive?: boolean;
   onClick?: () => void;
-  padding?: 'sm' | 'md' | 'lg';
+  padding?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
 const GlassCard: React.FC<GlassCardProps> = ({
@@ -24,6 +24,7 @@ const GlassCard: React.FC<GlassCardProps> = ({
     sm: '16px',
     md: '20px',
     lg: '24px',
+    xl: '32px',
   };
 
   return (
