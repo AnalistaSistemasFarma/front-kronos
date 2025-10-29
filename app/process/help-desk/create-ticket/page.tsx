@@ -335,19 +335,18 @@ function TicketsBoard() {
 
   const getPriorityColor = (priority: string) => {
     switch (priority?.toLowerCase()) {
-      case 'critical': return 'red';
-      case 'high': return 'orange';
-      case 'medium': return 'yellow';
-      case 'low': return 'green';
+      case 'alta': return 'orange';
+      case 'media': return 'yellow';
+      case 'baja': return 'green';
       default: return 'gray';
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
-      case 'open': return 'blue';
-      case 'in progress': return 'yellow';
-      case 'closed': return 'green';
+      case 'abierto': return 'green';
+      case 'in progress': return 'blue';
+      case 'closed': return 'red';
       default: return 'gray';
     }
   };
@@ -384,26 +383,13 @@ function TicketsBoard() {
             label='Priority'
             placeholder='All priorities'
             data={[
-              { value: '', label: 'All' },
-              { value: 'Low', label: 'Low' },
-              { value: 'Medium', label: 'Medium' },
-              { value: 'High', label: 'High' },
-              { value: 'Critical', label: 'Critical' },
+              { value: '', label: '' },
+              { value: 'Baja', label: 'Baja' },
+              { value: 'Media', label: 'Media' },
+              { value: 'Alta', label: 'Alta' },
             ]}
             value={filters.priority}
             onChange={(value) => handleFilterChange('priority', value || '')}
-          />
-          <Select
-            label='Status'
-            placeholder='All statuses'
-            data={[
-              { value: '', label: 'All' },
-              { value: 'Open', label: 'Open' },
-              { value: 'In Progress', label: 'In Progress' },
-              { value: 'Closed', label: 'Closed' },
-            ]}
-            value={filters.status}
-            onChange={(value) => handleFilterChange('status', value || '')}
           />
           <TextInput
             label='Assigned User'
@@ -450,9 +436,17 @@ function TicketsBoard() {
                 </Table.Tr>
               ) : (
                 tickets.map((ticket) => (
-                  <Table.Tr key={ticket.id_case}>
+                  <Table.Tr 
+                    key={ticket.id_case}
+                    className="cursor-pointer hover:bg-gray-50 transition-colors"
+                    onClick={() => {
+                      sessionStorage.setItem("selectedTicket", JSON.stringify(ticket));
+
+                      router.push(`/process/help-desk/view-ticket?id=${ticket.id_case}`);
+                    }}
+                  >
                     <Table.Td>{ticket.id_case}</Table.Td>
-                    <Table.Td className='font-medium'>{ticket.subject_case}</Table.Td>
+                    <Table.Td className='font-Media'>{ticket.subject_case}</Table.Td>
                     <Table.Td>
                       <Badge color={getPriorityColor(ticket.priority)} variant='light'>
                         {ticket.priority}
@@ -464,11 +458,7 @@ function TicketsBoard() {
                       </Badge>
                     </Table.Td>
                     <Table.Td>
-                      {new Date(ticket.creation_date).toLocaleDateString('es-ES', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                      })}
+                      {ticket.creation_date.split('T')[0]}
                     </Table.Td>
                     <Table.Td>{ticket.nombreTecnico}</Table.Td>
                   </Table.Tr>
@@ -501,10 +491,9 @@ function TicketsBoard() {
             label="Prioridad"
             placeholder="Seleccione la prioridad"
             data={[
-              { value: 'Low', label: 'Baja' },
-              { value: 'Medium', label: 'Media' },
-              { value: 'High', label: 'Alta' },
-              { value: 'Critical', label: 'Crítica' },
+              { value: 'Baja', label: 'Baja' },
+              { value: 'Media', label: 'Media' },
+              { value: 'Alta', label: 'Alta' },
             ]}
             value={formData.priority}
             onChange={(value) => setFormData({ ...formData, priority: value || '' })}
@@ -530,11 +519,16 @@ function TicketsBoard() {
             onChange={(value) => handleFormChange('category', value || '')}
             disabled={loadingOptions}
           />
-          <TextInput
+          <Select
             label="Sitio"
-            placeholder="Ingrese el sitio"
+            placeholder="Seleccione el sitio"
+            data={[
+              { value: 'Administrativa', label: 'Administrativa' },
+              { value: 'Planta', label: 'Planta' },
+              { value: 'Celta', label: 'Celta' },
+            ]}
             value={formData.site}
-            onChange={(e) => setFormData({ ...formData, site: e.target.value })}
+            onChange={(value) => setFormData({ ...formData, site: value || '' })}
           />
           <Select
             label="Subcategoría"
