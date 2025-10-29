@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: 'GSS Front',
+      name: 'GSS-Front',
       exec_mode: 'cluster',
       instances: '1', // Or a number of instances
       script: 'node_modules/next/dist/bin/next',
