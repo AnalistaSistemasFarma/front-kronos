@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   Title,
@@ -18,33 +18,71 @@ import {
   Checkbox,
 } from '@mantine/core';
 import {
-  IconArrowLeft,
   IconCalendar,
   IconUser,
   IconBuilding,
   IconNote,
-  IconSend,
 } from '@tabler/icons-react';
 
-export default function ViewTicketPage() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const id = searchParams.get('id');
-  const [ticket, setTicket] = useState<any>(null);
-  const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
-  const [subcategories, setSubcategories] = useState<{ value: string; label: string }[]>([]);
-  const [activities, setActivities] = useState<{ value: string; label: string }[]>([]);
-  const [technicals, setTechnicals] = useState<{ value: string; label: string }[]>([]);
-  const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
-  const [loadingOptions, setLoadingOptions] = useState(false);
-  const [notes, setNotes] = useState<string[]>([]);
-  const [newNote, setNewNote] = useState('');
-  const [showResolution, setShowResolution] = useState(false);
-  const [resolutionData, setResolutionData] = useState({
-    estado: '',
-    correo: '',
-    resolucion: '',
-  });
+interface Ticket {
+  id_case: number;
+  case_type: string;
+  subject_case: string;
+  priority: string;
+  category: string;
+  subcategory: string;
+  activity: string;
+  department: string;
+  place?: string;
+  description: string;
+  status: string;
+  id_department?: string;
+  id_category?: string;
+  id_subcategory?: string;
+  id_activity?: string;
+  id_technical?: string;
+  creation_date: string;
+  nombreTecnico: string;
+  subprocess_id: number;
+}
+
+interface Option {
+  value: string;
+  label: string;
+}
+
+interface Subcategory {
+  id_subcategory: number;
+  subcategory: string;
+  id_category: number | null;
+}
+
+interface Activity {
+  id_activity: number;
+  activity: string;
+  id_subcategory: number | null;
+}  
+
+
+function ViewTicketPage() {
+    const searchParams = useSearchParams();
+    const router = useRouter();
+    const id = searchParams.get('id');
+    const [ticket, setTicket] = useState<Ticket | null>(null);
+    const [categories, setCategories] = useState<Option[]>([]);
+    const [subcategories, setSubcategories] = useState<Option[]>([]);
+    const [activities, setActivities] = useState<Option[]>([]);
+    const [technicals, setTechnicals] = useState<Option[]>([]);
+    const [departments, setDepartments] = useState<Option[]>([]);
+    const [loadingOptions, setLoadingOptions] = useState(false);
+    const [notes, setNotes] = useState<string[]>([]);
+    const [newNote, setNewNote] = useState('');
+    const [showResolution, setShowResolution] = useState(false);
+    const [resolutionData, setResolutionData] = useState({
+        estado: '',
+        correo: '',
+        resolucion: '',
+    });
 
   useEffect(() => {
     const storedTicket = sessionStorage.getItem('selectedTicket');
@@ -110,19 +148,21 @@ export default function ViewTicketPage() {
   };
 
   const fetchSubcategories = async (categoryId: string) => {
-    try {
-        const response = await fetch(`/api/help-desk/subcategories?category_id=${categoryId}`);
-        if (response.ok) {
-        const data = await response.json();
-        setSubcategories(data.map((sub: any) => ({
-            value: sub.id_subcategory.toString(),
-            label: sub.subcategory,
-        })));
-        }
-    } catch (error) {
-        console.error('Error fetching subcategories:', error);
+  try {
+    const response = await fetch(`/api/help-desk/subcategories?category_id=${categoryId}`);
+    if (response.ok) {
+      const data: Subcategory[] = await response.json();
+      setSubcategories(
+        data.map((sub) => ({
+          value: sub.id_subcategory.toString(),
+          label: sub.subcategory,
+        }))
+      );
     }
-  };
+  } catch (error) {
+    console.error('Error fetching subcategories:', error);
+  }
+};
 
   const fetchSubprocessUsers = async () => {
     console.log('Frontend - fetchSubprocessUsers called');
@@ -155,19 +195,21 @@ export default function ViewTicketPage() {
   };
 
   const fetchActivities = async (subcategoryId: string) => {
-    try {
-        const response = await fetch(`/api/help-desk/activities?subcategory_id=${subcategoryId}`);
-        if (response.ok) {
-        const data = await response.json();
-        setActivities(data.map((act: any) => ({
-            value: act.id_activity.toString(),
-            label: act.activity,
-        })));
-        }
-    } catch (error) {
-        console.error('Error fetching activities:', error);
+  try {
+    const response = await fetch(`/api/help-desk/activities?subcategory_id=${subcategoryId}`);
+    if (response.ok) {
+      const data: Activity[] = await response.json();
+      setActivities(
+        data.map((act) => ({
+          value: act.id_activity.toString(),
+          label: act.activity,
+        }))
+      );
     }
-  };
+  } catch (error) {
+    console.error('Error fetching activities:', error);
+  }
+};
 
   const handleAddNote = () => {
     if (!newNote.trim()) return;
@@ -216,7 +258,7 @@ export default function ViewTicketPage() {
                         label="Tipo de Solicitud"
                         data={['Incidente', 'Solicitud']}
                         value={ticket.case_type}
-                        onChange={(val) => setTicket({ ...ticket, case_type: val })}
+                        onChange={(val) => setTicket({ ...ticket, case_type: val ?? '' })}
                         mt="xs"
                     />
                     </div>
@@ -226,7 +268,7 @@ export default function ViewTicketPage() {
                             label="Prioridad"
                             data={['Baja', 'Media', 'Alta']}
                             value={ticket.priority}
-                            onChange={(val) => setTicket({ ...ticket, priority: val })}
+                            onChange={(val) => setTicket({ ...ticket, priority: val ?? '' })}
                             className="min-w-[150px]"
                         />
                         <Select
@@ -236,7 +278,7 @@ export default function ViewTicketPage() {
                             onChange={(val) =>
                                 setTicket({
                                 ...ticket,
-                                id_category: val,
+                                id_category: val ?? '',
                                 id_subcategory: '',
                                 id_activity: '',
                                 })
@@ -250,7 +292,7 @@ export default function ViewTicketPage() {
                             onChange={(val) =>
                                 setTicket({
                                 ...ticket,
-                                id_subcategory: val,
+                                id_subcategory: val ?? '',
                                 id_activity: '',
                                 })
                             }
@@ -260,7 +302,7 @@ export default function ViewTicketPage() {
                             label="Actividad"
                             data={activities}
                             value={ticket.id_activity?.toString() || ''}
-                            onChange={(val) => setTicket({ ...ticket, id_activity: val })}
+                            onChange={(val) => setTicket({ ...ticket, id_activity: val ?? '' })}
                             className="min-w-[150px]"
                         />
                     </Group>
@@ -284,7 +326,7 @@ export default function ViewTicketPage() {
                             data={departments}
                             placeholder="Departamento"
                             value={ticket.id_department?.toString() || ''}
-                            onChange={(val) => setTicket({ ...ticket, id_department: val })}
+                            onChange={(val) => setTicket({ ...ticket, id_department: val ?? '' })}
                             className="flex-1"
                         />
                     </div>
@@ -295,7 +337,7 @@ export default function ViewTicketPage() {
                             data={technicals}
                             placeholder="Nombre del técnico"
                             value={ticket.id_technical?.toString() || ''}
-                            onChange={(val) => setTicket({ ...ticket, id_technical: val })}
+                            onChange={(val) => setTicket({ ...ticket, id_technical: val ?? '' })}
                             className="flex-1"
                         />
                     </div>
@@ -310,7 +352,7 @@ export default function ViewTicketPage() {
                             ]}
                             placeholder="Sitio"
                             value={ticket.place || ''}
-                            onChange={(val) => setTicket({ ...ticket, place: val })}
+                            onChange={(val) => setTicket({ ...ticket, place: val ?? '' })}
                             className="flex-1"
                         />
                     </div>
@@ -433,5 +475,13 @@ export default function ViewTicketPage() {
             </Button>
         </div>
     </div>
+  );
+}
+
+export default function TicketsViewBoardPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <ViewTicketPage />
+    </Suspense>
   );
 }

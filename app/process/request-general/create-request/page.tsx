@@ -245,7 +245,7 @@ function RequestBoard() {
                 </Table.Tr>
               ) : (
                 tickets.map((ticket) => (
-                  <Table.Tr>
+                  <Table.Tr key={ticket.id}>
                     <Table.Td>{ticket.id}</Table.Td>
                     <Table.Td>{ticket.company}</Table.Td>
                     <Table.Td>
