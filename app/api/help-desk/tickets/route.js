@@ -6,7 +6,6 @@ export async function GET(req) {
   try {
     const pool = await sql.connect(sqlConfig);
 
-    // 🧩 Leer parámetros desde la URL
     const { searchParams } = new URL(req.url);
     const priority = searchParams.get("priority");
     const status = searchParams.get("status");
@@ -18,9 +17,9 @@ export async function GET(req) {
       SELECT 
         c.case_type, c.creation_date, c.description, c.end_date, 
         c.id_case, c.id_department, c.id_technical, c.place, 
-        c.priority, c.requester, c.subject_case, 
-        cg.category, sg.subcategory, a.activity, sc.status, 
-        u.name AS nombreTecnico, d.department
+        c.priority, c.requester, c.subject_case, cg.id_category,
+        cg.category, sg.id_subcategory ,sg.subcategory, a.id_activity,
+		    a.activity, sc.status, u.name AS nombreTecnico, d.department
       FROM [case] c
       LEFT JOIN category_case cc ON cc.id_case = c.id_case
       INNER JOIN category cg ON cg.id_category = cc.id_category
@@ -33,7 +32,6 @@ export async function GET(req) {
       WHERE 1=1
     `;
 
-    // 🧩 Agregar filtros dinámicamente
     if (priority) query += ` AND c.priority = @priority`;
     if (status) query += ` AND sc.status = @status`;
     if (assigned_user) query += ` AND u.name LIKE '%' + @assigned_user + '%'`;
