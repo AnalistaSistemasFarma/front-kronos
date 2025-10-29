@@ -2,7 +2,19 @@
 
 import React, { useState } from 'react';
 import { Title, Text, Group, Badge, Stack, ActionIcon } from '@mantine/core';
-import { IconChevronDown, IconChevronUp, IconClock, IconBuilding } from '@tabler/icons-react';
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconClock,
+  IconBuilding,
+  IconArrowRight,
+  IconFileText,
+  IconSettings,
+  IconTicket,
+  IconShoppingCart,
+  IconUsers,
+  IconChartBar,
+} from '@tabler/icons-react';
 import GlassCard from '../ui/GlassCard';
 import StatusBadge from '../ui/StatusBadge';
 import GradientButton from '../ui/GradientButton';
@@ -79,6 +91,31 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
     return '📊';
   };
 
+  const getSubprocessIcon = (subprocessName: string) => {
+    const name = subprocessName.toLowerCase();
+
+    if (name.includes('ticket') || name.includes('help') || name.includes('soporte')) {
+      return <IconTicket size={18} />;
+    }
+    if (name.includes('compra') || name.includes('purchase') || name.includes('pedido')) {
+      return <IconShoppingCart size={18} />;
+    }
+    if (name.includes('usuario') || name.includes('user') || name.includes('persona')) {
+      return <IconUsers size={18} />;
+    }
+    if (name.includes('reporte') || name.includes('report') || name.includes('estadística')) {
+      return <IconChartBar size={18} />;
+    }
+    if (name.includes('config') || name.includes('setting') || name.includes('ajuste')) {
+      return <IconSettings size={18} />;
+    }
+    if (name.includes('documento') || name.includes('document') || name.includes('archivo')) {
+      return <IconFileText size={18} />;
+    }
+
+    return <IconFileText size={18} />;
+  };
+
   const formatRelativeTime = (dateString?: string) => {
     if (!dateString) return 'Nunca';
 
@@ -103,7 +140,7 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
       hoverable
       interactive
       onClick={() => onProcessClick(process.id_process)}
-      padding='lg'
+      padding='xl'
     >
       {/* Header */}
       <div className='process-card-header'>
@@ -125,16 +162,6 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
 
       {/* Quick Actions */}
       <Group gap='xs' className='process-actions'>
-        <GradientButton
-          size='xs'
-          variant='outline'
-          onClick={(e) => {
-            e?.stopPropagation();
-            // Handle view details
-          }}
-        >
-          Ver detalles
-        </GradientButton>
         {process.process_url && (
           <GradientButton
             size='xs'
@@ -153,8 +180,8 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
       {process.subprocesses.length > 0 && (
         <div className='process-subprocesses'>
           <div className='subprocesses-header'>
-            <Text size='xs' fw={500} c='dimmed'>
-              Subprocesos{process.subprocesses.length > 0 && ` (${process.subprocesses.length})`}:
+            <Text size='sm' fw={600} c='dimmed'>
+              Subprocesos{process.subprocesses.length > 0 && ` (${process.subprocesses.length})`}
             </Text>
             {process.subprocesses.length > 3 && (
               <ActionIcon
@@ -166,34 +193,43 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
                 }}
                 c='blue'
               >
-                {isExpanded ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
+                {isExpanded ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}
               </ActionIcon>
             )}
           </div>
 
-          <div className='subprocesses-list'>
+          <div className='subprocesses-grid'>
             {visibleSubprocesses.map((subprocess) => (
-              <Badge
+              <div
                 key={subprocess.id_subprocess}
-                className='subprocess-tag'
+                className='subprocess-card'
                 onClick={(e: React.MouseEvent) => {
                   e.stopPropagation();
                   onSubprocessClick(subprocess);
                 }}
               >
-                {subprocess.subprocess}
-              </Badge>
+                <div className='subprocess-icon'>{getSubprocessIcon(subprocess.subprocess)}</div>
+                <Text size='sm' fw={500} className='subprocess-name'>
+                  {subprocess.subprocess}
+                </Text>
+                <IconArrowRight size={14} className='subprocess-arrow' />
+              </div>
             ))}
             {!isExpanded && process.subprocesses.length > 3 && (
-              <Badge
-                className='subprocess-tag subprocess-tag--more'
+              <div
+                className='subprocess-card subprocess-card--more'
                 onClick={(e: React.MouseEvent) => {
                   e.stopPropagation();
                   setIsExpanded(true);
                 }}
               >
-                +{process.subprocesses.length - 3} más
-              </Badge>
+                <div className='subprocess-icon'>
+                  <IconChevronDown size={16} />
+                </div>
+                <Text size='sm' fw={500} className='subprocess-name'>
+                  +{process.subprocesses.length - 3} más
+                </Text>
+              </div>
             )}
           </div>
         </div>
@@ -224,7 +260,7 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
           height: 100%;
           display: flex;
           flex-direction: column;
-          gap: 24px;
+          gap: 32px;
         }
 
         .process-card.list-view-card {
@@ -307,7 +343,11 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
 
         .list-view-card .process-subprocesses {
           flex: 0 0 auto;
-          max-width: 400px;
+          max-width: 500px;
+        }
+
+        .list-view-card .subprocesses-grid {
+          grid-template-columns: 1fr;
         }
 
         .subprocesses-header {
@@ -316,32 +356,81 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
           justify-content: space-between;
         }
 
-        .subprocesses-list {
+        .subprocesses-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+
+        .subprocess-card {
           display: flex;
-          flex-wrap: wrap;
-          gap: 10px;
-        }
-
-        .subprocess-tag {
-          cursor: pointer;
-          transition: all 0.2s ease;
-          background: rgba(102, 126, 234, 0.1);
-          color: #667eea;
-          border: 1px solid rgba(102, 126, 234, 0.2);
-          padding: 6px 12px;
-          border-radius: 6px;
-          font-size: 11px;
-          font-weight: 500;
-        }
-
-        .subprocess-tag:hover {
-          background: rgba(102, 126, 234, 0.2);
-          transform: translateY(-1px);
-        }
-
-        .subprocess-tag--more {
+          align-items: center;
+          gap: 12px;
+          padding: 14px 16px;
           background: rgba(102, 126, 234, 0.05);
-          border: 1px dashed rgba(102, 126, 234, 0.3);
+          border: 1px solid rgba(102, 126, 234, 0.1);
+          border-radius: 10px;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .subprocess-card:hover {
+          background: rgba(102, 126, 234, 0.1);
+          border-color: rgba(102, 126, 234, 0.3);
+          transform: translateY(-2px);
+          box-shadow: 0 6px 16px rgba(102, 126, 234, 0.15);
+        }
+
+        .subprocess-card:active {
+          transform: translateY(-1px);
+          box-shadow: 0 3px 8px rgba(102, 126, 234, 0.2);
+        }
+
+        .subprocess-card--more {
+          background: rgba(102, 126, 234, 0.02);
+          border: 1px dashed rgba(102, 126, 234, 0.2);
+          justify-content: center;
+        }
+
+        .subprocess-card--more:hover {
+          background: rgba(102, 126, 234, 0.05);
+          border-color: rgba(102, 126, 234, 0.3);
+        }
+
+        .subprocess-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 36px;
+          height: 36px;
+          background: rgba(102, 126, 234, 0.1);
+          border-radius: 8px;
+          color: #667eea;
+          flex-shrink: 0;
+        }
+
+        .subprocess-card--more .subprocess-icon {
+          background: rgba(102, 126, 234, 0.05);
+        }
+
+        .subprocess-name {
+          flex: 1;
+          color: #333;
+          font-size: 14px;
+          line-height: 1.4;
+        }
+
+        .subprocess-arrow {
+          color: #667eea;
+          opacity: 0.7;
+          transition: all 0.2s ease;
+        }
+
+        .subprocess-card:hover .subprocess-arrow {
+          opacity: 1;
+          transform: translateX(2px);
         }
 
         .process-metadata {
@@ -407,6 +496,19 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
 
           .list-view-card .process-subprocesses {
             max-width: none;
+          }
+
+          .subprocess-card {
+            padding: 12px 14px;
+          }
+
+          .subprocess-icon {
+            width: 32px;
+            height: 32px;
+          }
+
+          .subprocess-name {
+            font-size: 13px;
           }
 
           .list-view-card .process-metadata {

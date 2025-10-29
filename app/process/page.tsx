@@ -165,7 +165,7 @@ export default function ProcessPage() {
       { value: 'administrative', label: 'Administrativos', count: categoryCounts.administrative },
       { value: 'technical', label: 'Técnicos', count: categoryCounts.technical },
       { value: 'financial', label: 'Financieros', count: categoryCounts.financial },
-    ];
+    ].filter((category) => category.count > 0); // Only show categories with processes
   }, [enhancedProcesses]);
 
   const handleProcessClick = (processId: number) => {
@@ -324,7 +324,7 @@ export default function ProcessPage() {
                 ))}
               </div>
             ) : (
-              <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 4 }} spacing='lg'>
+              <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 3 }} spacing='lg'>
                 {filteredProcesses.map((process) => (
                   <ProcessCard
                     key={process.id_process}

@@ -19,8 +19,33 @@ import {
   Badge,
   Modal,
   Textarea,
+  Grid,
+  Card,
+  Text,
+  Divider,
+  LoadingOverlay,
+  ActionIcon,
+  Tooltip,
+  Collapse,
+  Box,
+  Flex,
 } from '@mantine/core';
-import { IconAlertCircle, IconChevronRight, IconSearch } from '@tabler/icons-react';
+import {
+  IconAlertCircle,
+  IconChevronRight,
+  IconSearch,
+  IconPlus,
+  IconFilter,
+  IconX,
+  IconCheck,
+  IconRefresh,
+  IconTicket,
+  IconCalendarEvent,
+  IconUser,
+  IconFlag,
+  IconClock,
+  IconBuilding,
+} from '@tabler/icons-react';
 
 interface Ticket {
   id_case: number;
@@ -70,7 +95,9 @@ function TicketsBoard() {
   const [technicals, setTechnicals] = useState<{ value: string; label: string }[]>([]);
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
-  const [idUser, setIdUser] = useState("");
+  const [idUser, setIdUser] = useState('');
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -84,18 +111,18 @@ function TicketsBoard() {
   }, [session, status, router, filters]);
 
   useEffect(() => {
-    const globalStore = localStorage.getItem("global-store");
+    const globalStore = localStorage.getItem('global-store');
     if (globalStore) {
       try {
         const parsedStore = JSON.parse(globalStore);
-        const idUserValue = parsedStore?.state?.idUser || "";
+        const idUserValue = parsedStore?.state?.idUser || '';
         setIdUser(idUserValue);
       } catch (error) {
-        console.error("Error parsing global-store from localStorage:", error);
-        setIdUser("");
+        console.error('Error parsing global-store from localStorage:', error);
+        setIdUser('');
       }
     } else {
-      setIdUser("");
+      setIdUser('');
     }
   }, []);
 
@@ -108,13 +135,22 @@ function TicketsBoard() {
       ]);
 
       if (categoriesRes.ok) {
-        const categoriesData: { id_category: number; category: string }[] = await categoriesRes.json();
-        setCategories(categoriesData.map((cat) => ({ value: cat.id_category.toString(), label: cat.category })));
+        const categoriesData: { id_category: number; category: string }[] =
+          await categoriesRes.json();
+        setCategories(
+          categoriesData.map((cat) => ({ value: cat.id_category.toString(), label: cat.category }))
+        );
       }
 
       if (departmentsRes.ok) {
-        const departmentsData: { id_department: number; department: string }[] = await departmentsRes.json();
-        setDepartments(departmentsData.map((dep) => ({ value: dep.id_department.toString(), label: dep.department })));
+        const departmentsData: { id_department: number; department: string }[] =
+          await departmentsRes.json();
+        setDepartments(
+          departmentsData.map((dep) => ({
+            value: dep.id_department.toString(),
+            label: dep.department,
+          }))
+        );
       }
     } catch (error) {
       console.error('Error fetching options:', error);
@@ -131,8 +167,13 @@ function TicketsBoard() {
       if (response.ok) {
         const data: { id_subcategory: number; subcategory: string }[] = await response.json();
         console.log('Frontend - fetchSubcategories received data:', data);
-        setSubcategories(data.map((sub) => ({ value: sub.id_subcategory.toString(), label: sub.subcategory })));
-        console.log('Frontend - subcategories state updated:', data.map((sub) => ({ value: sub.id_subcategory.toString(), label: sub.subcategory })));
+        setSubcategories(
+          data.map((sub) => ({ value: sub.id_subcategory.toString(), label: sub.subcategory }))
+        );
+        console.log(
+          'Frontend - subcategories state updated:',
+          data.map((sub) => ({ value: sub.id_subcategory.toString(), label: sub.subcategory }))
+        );
       } else {
         console.error('Frontend - fetchSubcategories failed with status:', response.status);
       }
@@ -176,7 +217,9 @@ function TicketsBoard() {
       const response = await fetch(`/api/help-desk/activities?subcategory_id=${subcategoryId}`);
       if (response.ok) {
         const data: { id_activity: number; activity: string }[] = await response.json();
-        setActivities(data.map((act) => ({ value: act.id_activity.toString(), label: act.activity })));
+        setActivities(
+          data.map((act) => ({ value: act.id_activity.toString(), label: act.activity }))
+        );
       }
     } catch (error) {
       console.error('Error fetching activities:', error);
@@ -198,13 +241,13 @@ function TicketsBoard() {
       // ✅ usar los parámetros en la URL
       const response = await fetch(`/api/help-desk/tickets?${params.toString()}`);
 
-      if (!response.ok) throw new Error('Failed to fetch tickets');
+      if (!response.ok) throw new Error('Error al cargar los casos');
 
       const data = await response.json();
       setTickets(data);
     } catch (err) {
       console.error('Error fetching tickets:', err);
-      setError('Unable to load tickets. Please try again.');
+      setError('No se pudieron cargar los casos. Por favor intente nuevamente.');
     } finally {
       setLoading(false);
     }
@@ -270,7 +313,7 @@ function TicketsBoard() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create ticket');
+        throw new Error(errorData.error || 'Error al crear el caso');
       }
 
       const newTicket = await response.json();
@@ -296,17 +339,16 @@ function TicketsBoard() {
       setModalOpened(false);
     } catch (err) {
       console.error('Error creating ticket:', err);
-      setError('Failed to create ticket. Please try again.');
+      setError('Error al crear el caso. Por favor intente nuevamente.');
     } finally {
       setCreateLoading(false);
     }
   };
 
-
   if (status === 'loading' || loading) {
     return (
       <div className='min-h-screen flex items-center justify-center'>
-        <div>Loading...</div>
+        <div>Cargando...</div>
       </div>
     );
   }
@@ -316,9 +358,9 @@ function TicketsBoard() {
   }
 
   const breadcrumbItems = [
-    { title: 'Process', href: '/process' },
-    { title: 'Help Desk', href: '#' },
-    { title: 'Tickets Board', href: '#' },
+    { title: 'Procesos', href: '/process' },
+    { title: 'Mesa de Ayuda', href: '#' },
+    { title: 'Panel de Casos', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (
       <Link key={index} href={item.href} passHref>
@@ -335,249 +377,640 @@ function TicketsBoard() {
 
   const getPriorityColor = (priority: string) => {
     switch (priority?.toLowerCase()) {
-      case 'alta': return 'orange';
-      case 'media': return 'yellow';
-      case 'baja': return 'green';
-      default: return 'gray';
+      case 'alta':
+        return 'red';
+      case 'media':
+        return 'yellow';
+      case 'baja':
+        return 'green';
+      default:
+        return 'gray';
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
-      case 'abierto': return 'green';
-      case 'in progress': return 'blue';
-      case 'closed': return 'red';
-      default: return 'gray';
+      case 'abierto':
+        return 'green';
+      case 'en progreso':
+        return 'blue';
+      case 'cerrado':
+        return 'gray';
+      case 'resuelto':
+        return 'teal';
+      default:
+        return 'gray';
     }
   };
 
+  const getPriorityIcon = (priority: string) => {
+    switch (priority?.toLowerCase()) {
+      case 'alta':
+        return <IconFlag size={14} color='red' />;
+      case 'media':
+        return <IconFlag size={14} color='yellow' />;
+      case 'baja':
+        return <IconFlag size={14} color='green' />;
+      default:
+        return <IconFlag size={14} />;
+    }
+  };
+
+  const validateForm = () => {
+    const errors: Record<string, string> = {};
+
+    if (!formData.requestType) {
+      errors.requestType = 'El tipo de solicitud es obligatorio';
+    }
+    if (!formData.priority) {
+      errors.priority = 'La prioridad es obligatoria';
+    }
+    if (!formData.asunto.trim()) {
+      errors.asunto = 'El asunto es obligatorio';
+    }
+    if (!formData.category) {
+      errors.category = 'La categoría es obligatoria';
+    }
+    if (!formData.subcategory) {
+      errors.subcategory = 'La subcategoría es obligatoria';
+    }
+    if (!formData.department) {
+      errors.department = 'El departamento es obligatorio';
+    }
+    if (!formData.activity) {
+      errors.activity = 'La actividad es obligatoria';
+    }
+    if (!formData.site) {
+      errors.site = 'El sitio es obligatorio';
+    }
+    if (!formData.description.trim()) {
+      errors.description = 'La descripción es obligatoria';
+    } else if (formData.description.trim().length < 10) {
+      errors.description = 'La descripción debe tener al menos 10 caracteres';
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleCreateTicketWithValidation = async () => {
+    if (!validateForm()) {
+      return;
+    }
+    await handleCreateTicket();
+  };
+
   return (
-    <div className='max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8'>
-      <div className='mb-8'>
-        <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
-          {breadcrumbItems}
-        </Breadcrumbs>
-        <Title order={1} className='text-3xl font-bold text-gray-900 mb-2'>
-          Mesa de Ayuda
-        </Title>
-        <p className='text-gray-600'>
-          Vista y Administración de Tickets
-        </p>
-        <br />
-        <Button onClick={() => setModalOpened(true)}>
-          Crear Ticket
-        </Button>
-      </div>
+    <div className='min-h-screen bg-gray-50'>
+      <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
+        {/* Header Section */}
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+          <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
+            {breadcrumbItems}
+          </Breadcrumbs>
 
-      {error && (
-        <Alert icon={<IconAlertCircle size={16} />} title='Error' color='red' mb='md'>
-          {error}
-        </Alert>
-      )}
+          <Flex justify='space-between' align='center' mb='4'>
+            <div>
+              <Title
+                order={1}
+                className='text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3'
+              >
+                <IconTicket size={32} className='text-blue-600' />
+                Mesa de Ayuda
+              </Title>
+              <Text size='lg' color='gray.6'>
+                Gestión y seguimiento de casos de soporte técnico
+              </Text>
+            </div>
 
-      {/* Filters */}
-      <Paper shadow='sm' p='md' radius='md' withBorder mb='md'>
-        <Title order={4} mb='md'>Filters</Title>
-        <Group grow>
-          <Select
-            label='Priority'
-            placeholder='All priorities'
-            data={[
-              { value: '', label: '' },
-              { value: 'Baja', label: 'Baja' },
-              { value: 'Media', label: 'Media' },
-              { value: 'Alta', label: 'Alta' },
-            ]}
-            value={filters.priority}
-            onChange={(value) => handleFilterChange('priority', value || '')}
-          />
-          <TextInput
-            label='Assigned User'
-            placeholder='Search by user'
-            leftSection={<IconSearch size={16} />}
-            value={filters.assigned_user}
-            onChange={(e) => handleFilterChange('assigned_user', e.target.value)}
-          />
-          <TextInput
-            label='Date From'
-            type='date'
-            value={filters.date_from}
-            onChange={(e) => handleFilterChange('date_from', e.target.value)}
-          />
-          <TextInput
-            label='Date To'
-            type='date'
-            value={filters.date_to}
-            onChange={(e) => handleFilterChange('date_to', e.target.value)}
-          />
-        </Group>
-      </Paper>
-
-      {/* Tickets Table */}
-      <Paper shadow='sm' radius='md' withBorder>
-        <div className='overflow-x-auto'>
-          <Table stickyHeader>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>ID</Table.Th>
-                <Table.Th>Asunto</Table.Th>
-                <Table.Th>Prioridad</Table.Th>
-                <Table.Th>Estado</Table.Th>
-                <Table.Th>Fecha de Creación</Table.Th>
-                <Table.Th>Usuario Asignado</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {tickets.length === 0 ? (
-                <Table.Tr>
-                  <Table.Td colSpan={6} className='text-center py-8 text-gray-500'>
-                    No tickets found
-                  </Table.Td>
-                </Table.Tr>
-              ) : (
-                tickets.map((ticket) => (
-                  <Table.Tr 
-                    key={ticket.id_case}
-                    className="cursor-pointer hover:bg-gray-50 transition-colors"
-                    onClick={() => {
-                      sessionStorage.setItem("selectedTicket", JSON.stringify(ticket));
-
-                      router.push(`/process/help-desk/view-ticket?id=${ticket.id_case}`);
-                    }}
-                  >
-                    <Table.Td>{ticket.id_case}</Table.Td>
-                    <Table.Td className='font-Media'>{ticket.subject_case}</Table.Td>
-                    <Table.Td>
-                      <Badge color={getPriorityColor(ticket.priority)} variant='light'>
-                        {ticket.priority}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge color={getStatusColor(ticket.status)} variant='light'>
-                        {ticket.status}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {ticket.creation_date.split('T')[0]}
-                    </Table.Td>
-                    <Table.Td>{ticket.nombreTecnico}</Table.Td>
-                  </Table.Tr>
-                ))
-              )}
-            </Table.Tbody>
-          </Table>
-        </div>
-      </Paper>
-
-      {/* Modal for creating ticket */}
-      <Modal
-        opened={modalOpened}
-        onClose={() => setModalOpened(false)}
-        title="Crear Nuevo Ticket"
-        size="lg"
-      >
-        <Stack>
-          <Select
-            label="Tipo Solicitud"
-            placeholder="Seleccione el tipo de solicitud"
-            data={[
-              { value: 'Incidente', label: 'Incidente' },
-              { value: 'Solicitud', label: 'Solicitud' },
-            ]}
-            value={formData.requestType}
-            onChange={(value) => setFormData({ ...formData, requestType: value || '' })}
-          />
-          <Select
-            label="Prioridad"
-            placeholder="Seleccione la prioridad"
-            data={[
-              { value: 'Baja', label: 'Baja' },
-              { value: 'Media', label: 'Media' },
-              { value: 'Alta', label: 'Alta' },
-            ]}
-            value={formData.priority}
-            onChange={(value) => setFormData({ ...formData, priority: value || '' })}
-          />
-          <TextInput
-            label="Asunto"
-            placeholder="Ingrese el asunto"
-            value={formData.asunto}
-            onChange={(e) => setFormData({ ...formData, asunto: e.target.value })}
-          />
-          <Select
-            label="Técnico"
-            placeholder="Seleccione el técnico asignado"
-            data={technicals}
-            value={formData.technician}
-            onChange={(value) => handleFormChange('technician', value || '')}
-          />
-          <Select
-            label="Categoría"
-            placeholder="Seleccione la categoría"
-            data={categories}
-            value={formData.category}
-            onChange={(value) => handleFormChange('category', value || '')}
-            disabled={loadingOptions}
-          />
-          <Select
-            label="Sitio"
-            placeholder="Seleccione el sitio"
-            data={[
-              { value: 'Administrativa', label: 'Administrativa' },
-              { value: 'Planta', label: 'Planta' },
-              { value: 'Celta', label: 'Celta' },
-            ]}
-            value={formData.site}
-            onChange={(value) => setFormData({ ...formData, site: value || '' })}
-          />
-          <Select
-            label="Subcategoría"
-            placeholder="Seleccione la subcategoría"
-            data={subcategories}
-            value={formData.subcategory}
-            onChange={(value) => handleFormChange('subcategory', value || '')}
-            disabled={!formData.category || loadingOptions}
-          />
-          <Select
-            label="Departamento"
-            placeholder="Seleccione el departamento"
-            data={departments}
-            value={formData.department}
-            onChange={(value) => handleFormChange('department', value || '')}
-            disabled={loadingOptions}
-          />
-          <Select
-            label="Actividad"
-            placeholder="Seleccione la actividad"
-            data={activities}
-            value={formData.activity}
-            onChange={(value) => handleFormChange('activity', value || '')}
-            disabled={!formData.subcategory || loadingOptions}
-          />
-          <Textarea
-            label="Descripción"
-            placeholder="Describa el problema o solicitud"
-            value={formData.description}
-            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-            minRows={4}
-          />
-          <Group justify="flex-end">
-            <Button variant="default" onClick={() => setModalOpened(false)}>
-              Cancelar
+            <Button
+              onClick={() => setModalOpened(true)}
+              size='lg'
+              leftSection={<IconPlus size={18} />}
+              className='bg-blue-600 hover:bg-blue-700'
+            >
+              Crear Nuevo Caso
             </Button>
-            <Button onClick={handleCreateTicket} loading={createLoading}>
-              Crear Ticket
-            </Button>
+          </Flex>
+
+          {/* Stats Cards */}
+          <Grid>
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
+                <Group>
+                  <IconTicket size={24} className='text-blue-600' />
+                  <div>
+                    <Text size='xs' color='blue.6'>
+                      Total de Casos
+                    </Text>
+                    <Text size='lg' fw={600}>
+                      {tickets.length}
+                    </Text>
+                  </div>
+                </Group>
+              </Card>
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
+                <Group>
+                  <IconCheck size={24} className='text-green-600' />
+                  <div>
+                    <Text size='xs' color='green.6'>
+                      Resueltos
+                    </Text>
+                    <Text size='lg' fw={600}>
+                      {
+                        tickets.filter(
+                          (t) =>
+                            t.status?.toLowerCase() === 'resuelto' ||
+                            t.status?.toLowerCase() === 'cerrado'
+                        ).length
+                      }
+                    </Text>
+                  </div>
+                </Group>
+              </Card>
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card p='md' radius='md' withBorder className='bg-yellow-50 border-yellow-200'>
+                <Group>
+                  <IconClock size={24} className='text-yellow-600' />
+                  <div>
+                    <Text size='xs' color='yellow.6'>
+                      En Progreso
+                    </Text>
+                    <Text size='lg' fw={600}>
+                      {tickets.filter((t) => t.status?.toLowerCase() === 'en progreso').length}
+                    </Text>
+                  </div>
+                </Group>
+              </Card>
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card p='md' radius='md' withBorder className='bg-red-50 border-red-200'>
+                <Group>
+                  <IconFlag size={24} className='text-red-600' />
+                  <div>
+                    <Text size='xs' color='red.6'>
+                      Alta Prioridad
+                    </Text>
+                    <Text size='lg' fw={600}>
+                      {tickets.filter((t) => t.priority?.toLowerCase() === 'alta').length}
+                    </Text>
+                  </div>
+                </Group>
+              </Card>
+            </Grid.Col>
+          </Grid>
+        </Card>
+
+        {error && (
+          <Alert
+            icon={<IconAlertCircle size={20} />}
+            title='Error'
+            color='red'
+            mb='md'
+            className='border-red-200 bg-red-50'
+          >
+            {error}
+          </Alert>
+        )}
+
+        {/* Filters Section */}
+        <Card shadow='sm' p='lg' radius='md' withBorder mb='6' className='bg-white'>
+          <Group justify='space-between' mb='md'>
+            <Title order={3} className='flex items-center gap-2'>
+              <IconFilter size={20} />
+              Filtros de Búsqueda
+            </Title>
+            <ActionIcon
+              variant='subtle'
+              onClick={() => setFiltersExpanded(!filtersExpanded)}
+              aria-label={filtersExpanded ? 'Ocultar filtros' : 'Mostrar filtros'}
+            >
+              {filtersExpanded ? <IconX size={16} /> : <IconFilter size={16} />}
+            </ActionIcon>
           </Group>
-        </Stack>
-      </Modal>
+
+          <Collapse in={filtersExpanded}>
+            <Box mt='md'>
+              <Grid>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Prioridad'
+                    placeholder='Todas las prioridades'
+                    clearable
+                    data={[
+                      { value: 'Baja', label: 'Baja' },
+                      { value: 'Media', label: 'Media' },
+                      { value: 'Alta', label: 'Alta' },
+                    ]}
+                    value={filters.priority}
+                    onChange={(value) => handleFilterChange('priority', value || '')}
+                    leftSection={<IconFlag size={16} />}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <TextInput
+                    label='Usuario Asignado'
+                    placeholder='Buscar por usuario'
+                    leftSection={<IconSearch size={16} />}
+                    value={filters.assigned_user}
+                    onChange={(e) => handleFilterChange('assigned_user', e.target.value)}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <TextInput
+                    label='Fecha Desde'
+                    type='date'
+                    value={filters.date_from}
+                    onChange={(e) => handleFilterChange('date_from', e.target.value)}
+                    leftSection={<IconCalendarEvent size={16} />}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <TextInput
+                    label='Fecha Hasta'
+                    type='date'
+                    value={filters.date_to}
+                    onChange={(e) => handleFilterChange('date_to', e.target.value)}
+                    leftSection={<IconCalendarEvent size={16} />}
+                  />
+                </Grid.Col>
+              </Grid>
+
+              <Group justify='flex-end' mt='md'>
+                <Button
+                  variant='outline'
+                  onClick={() =>
+                    setFilters({
+                      priority: '',
+                      status: '',
+                      assigned_user: '',
+                      date_from: '',
+                      date_to: '',
+                    })
+                  }
+                  leftSection={<IconX size={16} />}
+                >
+                  Limpiar Filtros
+                </Button>
+                <Button onClick={fetchTickets} leftSection={<IconRefresh size={16} />}>
+                  Aplicar Filtros
+                </Button>
+              </Group>
+            </Box>
+          </Collapse>
+        </Card>
+
+        {/* Tickets Table */}
+        <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden'>
+          <LoadingOverlay visible={loading} />
+
+          <Title order={3} mb='md' className='flex items-center gap-2'>
+            <IconTicket size={20} />
+            Lista de Casos
+          </Title>
+
+          <div className='overflow-x-auto'>
+            <Table striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>ID</Table.Th>
+                  <Table.Th>Asunto</Table.Th>
+                  <Table.Th>Prioridad</Table.Th>
+                  <Table.Th>Estado</Table.Th>
+                  <Table.Th>Fecha de Creación</Table.Th>
+                  <Table.Th>Técnico Asignado</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {tickets.length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
+                      <div className='flex flex-col items-center gap-3'>
+                        <IconTicket size={48} className='text-gray-300' />
+                        <Text size='lg' fw={500}>
+                          No se encontraron casos
+                        </Text>
+                        <Text size='sm' color='gray.500'>
+                          Intenta ajustar los filtros o crea un nuevo caso
+                        </Text>
+                      </div>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : (
+                  tickets.map((ticket) => (
+                    <Table.Tr
+                      key={ticket.id_case}
+                      className='cursor-pointer hover:bg-gray-50 transition-colors'
+                      onClick={() => {
+                        sessionStorage.setItem('selectedTicket', JSON.stringify(ticket));
+                        router.push(`/process/help-desk/view-ticket?id=${ticket.id_case}`);
+                      }}
+                    >
+                      <Table.Td>
+                        <Badge variant='light' color='blue' size='sm'>
+                          #{ticket.id_case}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text fw={500} className='max-w-xs truncate'>
+                          {ticket.subject_case}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap={4}>
+                          {getPriorityIcon(ticket.priority)}
+                          <Badge
+                            color={getPriorityColor(ticket.priority)}
+                            variant='light'
+                            size='sm'
+                          >
+                            {ticket.priority}
+                          </Badge>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge color={getStatusColor(ticket.status)} variant='light' size='sm'>
+                          {ticket.status}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size='sm'>
+                          {new Date(ticket.creation_date).toLocaleDateString('es-ES', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                          })}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap={4}>
+                          <IconUser size={14} className='text-gray-400' />
+                          <Text size='sm'>{ticket.nombreTecnico || 'Sin asignar'}</Text>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))
+                )}
+              </Table.Tbody>
+            </Table>
+          </div>
+        </Card>
+
+        {/* Modal for creating ticket */}
+        <Modal
+          opened={modalOpened}
+          onClose={() => {
+            setModalOpened(false);
+            setFormErrors({});
+          }}
+          title={
+            <Group>
+              <IconPlus size={20} />
+              <Text size='lg' fw={600}>
+                Crear Nuevo Caso
+              </Text>
+            </Group>
+          }
+          size='xl'
+          radius='md'
+          overlayProps={{ blur: 4 }}
+        >
+          <LoadingOverlay visible={createLoading} />
+
+          <Stack>
+            <Grid>
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Tipo de Solicitud'
+                  placeholder='Seleccione el tipo de solicitud'
+                  data={[
+                    { value: 'Incidente', label: 'Incidente' },
+                    { value: 'Solicitud', label: 'Solicitud' },
+                  ]}
+                  value={formData.requestType}
+                  onChange={(value) => {
+                    setFormData({ ...formData, requestType: value || '' });
+                    if (formErrors.requestType) {
+                      setFormErrors({ ...formErrors, requestType: '' });
+                    }
+                  }}
+                  error={formErrors.requestType}
+                  required
+                  leftSection={<IconTicket size={16} />}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Prioridad'
+                  placeholder='Seleccione la prioridad'
+                  data={[
+                    { value: 'Baja', label: 'Baja' },
+                    { value: 'Media', label: 'Media' },
+                    { value: 'Alta', label: 'Alta' },
+                  ]}
+                  value={formData.priority}
+                  onChange={(value) => {
+                    setFormData({ ...formData, priority: value || '' });
+                    if (formErrors.priority) {
+                      setFormErrors({ ...formErrors, priority: '' });
+                    }
+                  }}
+                  error={formErrors.priority}
+                  required
+                  leftSection={<IconFlag size={16} />}
+                />
+              </Grid.Col>
+            </Grid>
+
+            <TextInput
+              label='Asunto'
+              placeholder='Ingrese un asunto claro y conciso'
+              value={formData.asunto}
+              onChange={(e) => {
+                setFormData({ ...formData, asunto: e.target.value });
+                if (formErrors.asunto) {
+                  setFormErrors({ ...formErrors, asunto: '' });
+                }
+              }}
+              error={formErrors.asunto}
+              required
+              maxLength={100}
+              description='Máximo 100 caracteres'
+            />
+
+            <Grid>
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Categoría'
+                  placeholder='Seleccione la categoría'
+                  data={categories}
+                  value={formData.category}
+                  onChange={(value) => {
+                    handleFormChange('category', value || '');
+                    if (formErrors.category) {
+                      setFormErrors({ ...formErrors, category: '' });
+                    }
+                  }}
+                  error={formErrors.category}
+                  required
+                  disabled={loadingOptions}
+                  leftSection={<IconFilter size={16} />}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Subcategoría'
+                  placeholder='Seleccione la subcategoría'
+                  data={subcategories}
+                  value={formData.subcategory}
+                  onChange={(value) => {
+                    handleFormChange('subcategory', value || '');
+                    if (formErrors.subcategory) {
+                      setFormErrors({ ...formErrors, subcategory: '' });
+                    }
+                  }}
+                  error={formErrors.subcategory}
+                  required
+                  disabled={!formData.category || loadingOptions}
+                  leftSection={<IconFilter size={16} />}
+                />
+              </Grid.Col>
+            </Grid>
+
+            <Grid>
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Departamento'
+                  placeholder='Seleccione el departamento'
+                  data={departments}
+                  value={formData.department}
+                  onChange={(value) => {
+                    handleFormChange('department', value || '');
+                    if (formErrors.department) {
+                      setFormErrors({ ...formErrors, department: '' });
+                    }
+                  }}
+                  error={formErrors.department}
+                  required
+                  disabled={loadingOptions}
+                  leftSection={<IconBuilding size={16} />}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Sitio'
+                  placeholder='Seleccione el sitio'
+                  data={[
+                    { value: 'Administrativa', label: 'Administrativa' },
+                    { value: 'Planta', label: 'Planta' },
+                    { value: 'Celta', label: 'Celta' },
+                  ]}
+                  value={formData.site}
+                  onChange={(value) => {
+                    setFormData({ ...formData, site: value || '' });
+                    if (formErrors.site) {
+                      setFormErrors({ ...formErrors, site: '' });
+                    }
+                  }}
+                  error={formErrors.site}
+                  required
+                  leftSection={<IconBuilding size={16} />}
+                />
+              </Grid.Col>
+            </Grid>
+
+            <Grid>
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Actividad'
+                  placeholder='Seleccione la actividad'
+                  data={activities}
+                  value={formData.activity}
+                  onChange={(value) => {
+                    handleFormChange('activity', value || '');
+                    if (formErrors.activity) {
+                      setFormErrors({ ...formErrors, activity: '' });
+                    }
+                  }}
+                  error={formErrors.activity}
+                  required
+                  disabled={!formData.subcategory || loadingOptions}
+                  leftSection={<IconFilter size={16} />}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Técnico Asignado'
+                  placeholder='Seleccione el técnico (opcional)'
+                  data={technicals}
+                  value={formData.technician}
+                  onChange={(value) => handleFormChange('technician', value || '')}
+                  disabled={loadingOptions}
+                  leftSection={<IconUser size={16} />}
+                  clearable
+                  description='Puede dejarse sin asignar'
+                />
+              </Grid.Col>
+            </Grid>
+
+            <Textarea
+              label='Descripción Detallada'
+              placeholder='Describa detalladamente el problema o solicitud. Incluya toda la información relevante para una mejor atención.'
+              value={formData.description}
+              onChange={(e) => {
+                setFormData({ ...formData, description: e.target.value });
+                if (formErrors.description) {
+                  setFormErrors({ ...formErrors, description: '' });
+                }
+              }}
+              error={formErrors.description}
+              required
+              minRows={5}
+              maxLength={1000}
+              description='Mínimo 10 caracteres, máximo 1000 caracteres'
+              autosize
+            />
+
+            <Divider />
+
+            <Group justify='flex-end' gap='md'>
+              <Button
+                variant='outline'
+                onClick={() => {
+                  setModalOpened(false);
+                  setFormErrors({});
+                }}
+                size='md'
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleCreateTicketWithValidation}
+                loading={createLoading}
+                size='md'
+                leftSection={<IconPlus size={16} />}
+                className='bg-blue-600 hover:bg-blue-700'
+              >
+                Crear Caso
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+      </div>
     </div>
   );
 }
 
 export default function TicketsBoardPage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense fallback={<div>Cargando...</div>}>
       <TicketsBoard />
     </Suspense>
   );

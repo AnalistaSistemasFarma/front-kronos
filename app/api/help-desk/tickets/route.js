@@ -1,17 +1,17 @@
-import sql from "mssql";
-import sqlConfig from "../../../../dbconfig";
-import { NextResponse } from "next/server";
+import sql from 'mssql';
+import sqlConfig from '../../../../dbconfig';
+import { NextResponse } from 'next/server';
 
 export async function GET(req) {
   try {
     const pool = await sql.connect(sqlConfig);
 
     const { searchParams } = new URL(req.url);
-    const priority = searchParams.get("priority");
-    const status = searchParams.get("status");
-    const assigned_user = searchParams.get("assigned_user");
-    const date_from = searchParams.get("date_from");
-    const date_to = searchParams.get("date_to");
+    const priority = searchParams.get('priority');
+    const status = searchParams.get('status');
+    const assigned_user = searchParams.get('assigned_user');
+    const date_from = searchParams.get('date_from');
+    const date_to = searchParams.get('date_to');
 
     let query = `
       SELECT 
@@ -35,25 +35,28 @@ export async function GET(req) {
     if (priority) query += ` AND c.priority = @priority`;
     if (status) query += ` AND sc.status = @status`;
     if (assigned_user) query += ` AND u.name LIKE '%' + @assigned_user + '%'`;
-    if (date_from && date_to)
-      query += ` AND c.creation_date BETWEEN @date_from AND @date_to`;
+    if (date_from && date_to) query += ` AND c.creation_date BETWEEN @date_from AND @date_to`;
 
     const request = pool.request();
-    if (priority) request.input("priority", sql.NVarChar, priority);
-    if (status) request.input("status", sql.NVarChar, status);
-    if (assigned_user) request.input("assigned_user", sql.NVarChar, assigned_user);
+    if (priority) request.input('priority', sql.NVarChar, priority);
+    if (status) request.input('status', sql.NVarChar, status);
+    if (assigned_user) request.input('assigned_user', sql.NVarChar, assigned_user);
     if (date_from && date_to) {
-      request.input("date_from", sql.Date, date_from);
-      request.input("date_to", sql.Date, date_to);
+      request.input('date_from', sql.Date, date_from);
+      request.input('date_to', sql.Date, date_to);
     }
 
     const result = await request.query(query);
 
     return NextResponse.json(result.recordset, { status: 200 });
   } catch (err) {
-    console.error("Error en el procesamiento de la solicitud:", err);
+    console.error('Error en el procesamiento de la solicitud:', err);
     return NextResponse.json(
-      { error: "Error procesando la solicitud", details: err.message },
+      {
+        error: 'Error al procesar la solicitud de casos',
+        details: 'No se pudieron obtener los casos. Por favor intente nuevamente.',
+        technical: err.message,
+      },
       { status: 500 }
     );
   }
