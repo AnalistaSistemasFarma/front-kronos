@@ -19,7 +19,8 @@ export async function GET(req) {
         c.id_case, c.id_department, c.id_technical, c.place, 
         c.priority, c.requester, c.subject_case, cg.id_category,
         cg.category, sg.id_subcategory ,sg.subcategory, a.id_activity,
-		    a.activity, sc.status, u.name AS nombreTecnico, d.department
+        a.activity, sc.status, u.name AS nombreTecnico, d.department,
+        sc.id_status_case
       FROM [case] c
       LEFT JOIN category_case cc ON cc.id_case = c.id_case
       INNER JOIN category cg ON cg.id_category = cc.id_category
