@@ -738,11 +738,7 @@ function TicketsBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Text size='sm'>
-                          {new Date(ticket.creation_date).toLocaleDateString('es-ES', {
-                            day: '2-digit',
-                            month: '2-digit',
-                            year: 'numeric',
-                          })}
+                          {new Date(ticket.creation_date).toISOString().split('T')[0]}
                         </Text>
                       </Table.Td>
                       <Table.Td>

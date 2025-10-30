@@ -61,6 +61,7 @@ interface Ticket {
   creation_date: string;
   nombreTecnico: string;
   subprocess_id: number;
+  id_status_case: number;
 }
 
 interface Option {
@@ -102,11 +103,17 @@ function ViewTicketPage() {
     resolucion: '',
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [isEditing, setIsEditing] = useState(false);
+  const [originalTicket, setOriginalTicket] = useState<Ticket | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     const storedTicket = sessionStorage.getItem('selectedTicket');
     if (storedTicket) {
-      setTicket(JSON.parse(storedTicket));
+      const ticketData = JSON.parse(storedTicket);
+      setTicket(ticketData);
+      setOriginalTicket(ticketData);
       setLoading(false);
     } else if (id) {
       fetch(`/api/help-desk/tickets?id=${id}`)
@@ -116,6 +123,7 @@ function ViewTicketPage() {
         })
         .then((data) => {
           setTicket(data);
+          setOriginalTicket(data);
           setLoading(false);
         })
         .catch((err) => {
@@ -134,24 +142,15 @@ function ViewTicketPage() {
     }
   }, [ticket]);
 
-  // Cuando cambia la categoría
+  // Cargar subcategorías y actividades iniciales cuando se carga el ticket
   useEffect(() => {
-    if (ticket?.category) {
-      fetchSubcategories(ticket.category);
-    }
-  }, [ticket?.category]);
-
-  useEffect(() => {
-    if (ticket?.id_category) {
+    if (ticket?.id_category && !isEditing) {
       fetchSubcategories(ticket.id_category);
     }
-  }, [ticket?.id_category]);
-
-  useEffect(() => {
-    if (ticket?.id_subcategory) {
+    if (ticket?.id_subcategory && !isEditing) {
       fetchActivities(ticket.id_subcategory);
     }
-  }, [ticket?.id_subcategory]);
+  }, [ticket?.id_category, ticket?.id_subcategory, isEditing]);
 
   const fetchOptions = async () => {
     try {
@@ -250,15 +249,151 @@ function ViewTicketPage() {
     }
   };
 
+  const handleFormChange = (field: string, value: string) => {
+    setTicket((prev) => {
+      if (!prev) return prev;
+      const updatedTicket = { ...prev, [field]: value };
+
+      // Handle dependent selects
+      if (field === 'id_category' && value) {
+        fetchSubcategories(value);
+        // Reset dependent fields
+        updatedTicket.id_subcategory = '';
+        updatedTicket.id_activity = '';
+        setSubcategories([]);
+        setActivities([]);
+      } else if (field === 'id_subcategory' && value) {
+        fetchActivities(value);
+        // Reset dependent field
+        updatedTicket.id_activity = '';
+        setActivities([]);
+      }
+
+      return updatedTicket;
+    });
+
+    // Clear form errors for the field being changed
+    if (formErrors[field]) {
+      setFormErrors((prev) => {
+        const newErrors = { ...prev };
+        delete newErrors[field];
+        return newErrors;
+      });
+    }
+  };
+
   const handleAddNote = () => {
     if (!newNote.trim()) return;
     setNotes((prev) => [...prev, newNote.trim()]);
     setNewNote('');
   };
 
-  const handleUpdateCase = () => {
-    // Actualizacion Caso
-    console.log('Actualizar caso con:', resolutionData);
+  const handleStartEditing = () => {
+    setIsEditing(true);
+    setUpdateMessage(null);
+  };
+
+  const handleCancelEditing = () => {
+    if (originalTicket) {
+      setTicket(originalTicket);
+    }
+    setIsEditing(false);
+    setFormErrors({});
+    setUpdateMessage(null);
+  };
+
+  const validateFields = (): boolean => {
+    const errors: Record<string, string> = {};
+    
+    if (!ticket?.case_type) {
+      errors.case_type = 'El tipo de caso es requerido';
+    }
+    if (!ticket?.priority) {
+      errors.priority = 'La prioridad es requerida';
+    }
+    if (!ticket?.id_category) {
+      errors.id_category = 'La categoría es requerida';
+    }
+    if (!ticket?.id_subcategory) {
+      errors.id_subcategory = 'La subcategoría es requerida';
+    }
+    if (!ticket?.id_activity) {
+      errors.id_activity = 'La actividad es requerida';
+    }
+    if (!ticket?.id_department) {
+      errors.id_department = 'El departamento es requerido';
+    }
+
+    if (resolutionData.estado) {
+      if (!resolutionData.resolucion || resolutionData.resolucion.trim() === '') {
+        errors.resolucion = 'La descripción de la resolución es requerida cuando se cambia el estado';
+      }
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleUpdateCase = async () => {
+    if (!validateFields()) {
+      return;
+    }
+
+    setIsUpdating(true);
+    setUpdateMessage(null);
+
+    try {
+      const updateData = {
+        id_case: ticket?.id_case,
+        status: resolutionData.estado || ticket?.id_status_case,
+        priority: ticket?.priority,
+        case_type: ticket?.case_type,
+        id_category: ticket?.id_category,
+        id_subcategory: ticket?.id_subcategory,
+        id_activity: ticket?.id_activity,
+        id_department: ticket?.id_department,
+        id_technical: ticket?.id_technical,
+        resolucion: resolutionData.resolucion,
+      };
+
+      const response = await fetch('/api/help-desk/update_ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updateData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Error al actualizar el caso');
+      }
+
+      const result = await response.json();
+      setUpdateMessage({ type: 'success', text: 'Caso actualizado exitosamente' });
+      
+      // Actualizar el estado local del ticket si se cambió el estado
+      if (resolutionData.estado) {
+        setTicket(prev => prev ? { ...prev, status: resolutionData.estado } : null);
+      }
+      
+      setOriginalTicket(ticket);
+      setIsEditing(false);
+      
+      // Limpiar datos de resolución después de actualizar
+      if (resolutionData.estado) {
+        setResolutionData({ ...resolutionData, estado: '', resolucion: '' });
+        setShowResolution(false);
+      }
+    } catch (error) {
+      console.error('Error updating case:', error);
+      setUpdateMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Error al actualizar el caso'
+      });
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   const getPriorityColor = (priority: string) => {
@@ -430,6 +565,8 @@ function ViewTicketPage() {
                     value={ticket.case_type}
                     onChange={(val) => setTicket({ ...ticket, case_type: val ?? '' })}
                     leftSection={<IconTicket size={16} />}
+                    disabled={!isEditing}
+                    error={formErrors.case_type}
                   />
                 </div>
 
@@ -456,16 +593,10 @@ function ViewTicketPage() {
                         label='Categoría'
                         data={categories}
                         value={ticket.id_category?.toString() || ''}
-                        onChange={(val) =>
-                          setTicket({
-                            ...ticket,
-                            id_category: val ?? '',
-                            id_subcategory: '',
-                            id_activity: '',
-                          })
-                        }
+                        onChange={(val) => handleFormChange('id_category', val ?? '')}
                         leftSection={<IconFilter size={16} />}
-                        disabled={loadingOptions}
+                        disabled={!isEditing || loadingOptions}
+                        error={formErrors.id_category}
                       />
                     </Grid.Col>
                     <Grid.Col span={{ base: 12, md: 6 }}>
@@ -473,15 +604,10 @@ function ViewTicketPage() {
                         label='Subcategoría'
                         data={subcategories}
                         value={ticket.id_subcategory?.toString() || ''}
-                        onChange={(val) =>
-                          setTicket({
-                            ...ticket,
-                            id_subcategory: val ?? '',
-                            id_activity: '',
-                          })
-                        }
+                        onChange={(val) => handleFormChange('id_subcategory', val ?? '')}
                         leftSection={<IconFilter size={16} />}
-                        disabled={!ticket.id_category || loadingOptions}
+                        disabled={!isEditing || !ticket.id_category || loadingOptions}
+                        error={formErrors.id_subcategory}
                       />
                     </Grid.Col>
                     <Grid.Col span={{ base: 12, md: 6 }}>
@@ -489,9 +615,10 @@ function ViewTicketPage() {
                         label='Actividad'
                         data={activities}
                         value={ticket.id_activity?.toString() || ''}
-                        onChange={(val) => setTicket({ ...ticket, id_activity: val ?? '' })}
+                        onChange={(val) => handleFormChange('id_activity', val ?? '')}
                         leftSection={<IconFilter size={16} />}
-                        disabled={!ticket.id_subcategory || loadingOptions}
+                        disabled={!isEditing || !ticket.id_subcategory || loadingOptions}
+                        error={formErrors.id_activity}
                       />
                     </Grid.Col>
                     <Grid.Col span={{ base: 12, md: 6 }}>
@@ -501,6 +628,8 @@ function ViewTicketPage() {
                         value={ticket.priority}
                         onChange={(val) => setTicket({ ...ticket, priority: val ?? '' })}
                         leftSection={<IconFlag size={16} />}
+                        disabled={!isEditing}
+                        error={formErrors.priority}
                       />
                     </Grid.Col>
                   </Grid>
@@ -524,11 +653,7 @@ function ViewTicketPage() {
                       Fecha de Creación
                     </Text>
                     <Text fw={500}>
-                      {new Date(ticket.creation_date).toLocaleDateString('es-ES', {
-                        day: '2-digit',
-                        month: '2-digit',
-                        year: 'numeric',
-                      })}
+                      {new Date(ticket.creation_date).toISOString().split('T')[0]}
                     </Text>
                   </div>
 
@@ -541,7 +666,8 @@ function ViewTicketPage() {
                       value={ticket.id_department?.toString() || ''}
                       onChange={(val) => setTicket({ ...ticket, id_department: val ?? '' })}
                       leftSection={<IconBuilding size={16} />}
-                      disabled={loadingOptions}
+                      disabled={!isEditing || loadingOptions}
+                      error={formErrors.id_department}
                     />
                   </div>
 
@@ -558,6 +684,7 @@ function ViewTicketPage() {
                       value={ticket.place || ''}
                       onChange={(val) => setTicket({ ...ticket, place: val ?? '' })}
                       leftSection={<IconBuilding size={16} />}
+                      disabled={!isEditing}
                     />
                   </div>
 
@@ -570,7 +697,7 @@ function ViewTicketPage() {
                       value={ticket.id_technical?.toString() || ''}
                       onChange={(val) => setTicket({ ...ticket, id_technical: val ?? '' })}
                       leftSection={<IconUser size={16} />}
-                      disabled={loadingOptions}
+                      disabled={!isEditing || loadingOptions}
                       clearable
                       placeholder='Sin asignar'
                     />
@@ -637,12 +764,16 @@ function ViewTicketPage() {
                     <Select
                       label='Estado del caso'
                       placeholder='Selecciona estado'
-                      data={['Resuelto', 'Cancelado']}
+                      data={[
+                        { value: '2', label: 'Resuelto' },
+                        { value: '3', label: 'Cancelado' },
+                      ]}
                       value={resolutionData.estado}
                       onChange={(val) =>
                         setResolutionData({ ...resolutionData, estado: val || '' })
                       }
                       error={formErrors.estado}
+                      disabled={!isEditing}
                     />
                     <TextInput
                       label='Correo electrónico de contacto'
@@ -655,6 +786,7 @@ function ViewTicketPage() {
                         })
                       }
                       error={formErrors.correo}
+                      disabled={!isEditing}
                     />
                     <Textarea
                       label='Descripción de la resolución'
@@ -668,16 +800,20 @@ function ViewTicketPage() {
                       }
                       minRows={3}
                       error={formErrors.resolucion}
+                      disabled={!isEditing}
                     />
 
-                    <Button
-                      fullWidth
-                      color='blue'
-                      onClick={handleUpdateCase}
-                      leftSection={<IconCheck size={16} />}
-                    >
-                      Actualizar Caso
-                    </Button>
+                    {isEditing && (
+                      <Button
+                        fullWidth
+                        color='blue'
+                        onClick={handleUpdateCase}
+                        leftSection={<IconCheck size={16} />}
+                        loading={isUpdating}
+                      >
+                        Actualizar Caso
+                      </Button>
+                    )}
                   </Stack>
                 )}
               </Card>
@@ -687,7 +823,49 @@ function ViewTicketPage() {
 
         {/* Actions */}
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
-          <Group justify='flex-end'>
+          {/* Mensaje de actualización */}
+          {updateMessage && (
+            <Alert
+              color={updateMessage.type === 'success' ? 'green' : 'red'}
+              mb='md'
+              icon={updateMessage.type === 'success' ? <IconCheck size={16} /> : <IconAlertCircle size={16} />}
+            >
+              {updateMessage.text}
+            </Alert>
+          )}
+
+          <Group justify='space-between'>
+            <Group>
+              {!isEditing ? (
+                <Button
+                  color='blue'
+                  onClick={handleStartEditing}
+                  leftSection={<IconTicket size={16} />}
+                >
+                  Editar Caso
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    color='green'
+                    onClick={handleUpdateCase}
+                    leftSection={<IconCheck size={16} />}
+                    loading={isUpdating}
+                  >
+                    Guardar Cambios
+                  </Button>
+                  <Button
+                    variant='outline'
+                    color='gray'
+                    onClick={handleCancelEditing}
+                    leftSection={<IconX size={16} />}
+                  >
+                    Cancelar
+                  </Button>
+                </>
+              )}
+            </Group>
+
             <Button
               variant='outline'
               onClick={() => router.push('/process/help-desk/create-ticket')}
