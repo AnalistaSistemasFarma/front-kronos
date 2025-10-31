@@ -20,13 +20,8 @@ export async function POST(req) {
 
     if (
       !requestType ||
-      !priority ||
       !category ||
-      !subcategory ||
-      !site ||
       !asunto ||
-      !department ||
-      !activity ||
       !description
     ) {
       return new Response(
