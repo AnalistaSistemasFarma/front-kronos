@@ -8,6 +8,7 @@ import { Paper, Title, TextInput, Button, Stack, Group, Text, Divider } from '@m
 import { IconEye, IconEyeOff, IconLock, IconAt, IconArrowRight } from '@tabler/icons-react';
 import Image from 'next/image';
 import Link from 'next/link';
+import TextLogo from '../../components/TextLogo';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -199,9 +200,10 @@ export default function Login() {
           .form-container {
             margin: 0 16px;
           }
-          .logo {
+          .text-logo.logo {
             width: 250px !important;
             height: auto !important;
+            font-size: 22px !important;
           }
           .shape-1,
           .shape-2 {
@@ -220,21 +222,15 @@ export default function Login() {
             margin: 0 8px;
             padding: 24px !important;
           }
-          .logo {
+          .text-logo.logo {
             width: 200px !important;
             height: auto !important;
+            font-size: 18px !important;
           }
         }
       `}</style>
 
-      <Image
-        src='/logo.svg'
-        alt='Logo'
-        width={320}
-        height={48}
-        className='mb-6 logo'
-        style={{ filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.2))' }}
-      />
+      <TextLogo size='large' className='mb-6 logo' withShadow={true} withHover={true} />
 
       <Paper
         shadow='xl'
