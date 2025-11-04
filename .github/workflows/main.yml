@@ -18,7 +18,7 @@ jobs:
 
       - name: Build
         run: npm run build
-        continue-on-error: true
+        continue-on-error: false
 
       - name: Stop PM2 apps
         run: pm2 stop all

@@ -3,8 +3,8 @@
 import { useSession, signOut } from 'next-auth/react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import Image from 'next/image';
 import { Menu, Avatar, Loader } from '@mantine/core';
+import TextLogo from './TextLogo';
 
 export default function Header() {
   const { data: session, status } = useSession();
@@ -18,13 +18,7 @@ export default function Header() {
           {/* Left: Logo */}
           <div className='flex items-center'>
             <Link href='/dashboard' aria-label='Go to dashboard'>
-              <Image
-                src='/logo.svg'
-                alt='Logo'
-                width={120}
-                height={48}
-                className={`h-12 w-auto ${isDashboard ? '' : ''}`}
-              />
+              <TextLogo size='small' className={`h-12 w-auto ${isDashboard ? '' : ''}`} />
             </Link>
           </div>
 

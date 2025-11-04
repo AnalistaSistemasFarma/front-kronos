@@ -7,6 +7,7 @@ import { Select, Button, Paper, Title, Stack, Loader, Alert } from '@mantine/cor
 import { IconAlertCircle } from '@tabler/icons-react';
 import { useUserContext } from '../../lib/user-context';
 import Image from 'next/image';
+import TextLogo from '../../components/TextLogo';
 
 interface Company {
   id: number;
@@ -90,13 +91,7 @@ export default function SelectCompany() {
         backgroundColor: 'blue',
       }}
     >
-      <Image
-        src='/grupo-pisa-logo.svg'
-        alt='Grupo Pisa Logo'
-        width={200}
-        height={100}
-        style={{ marginBottom: '2rem' }}
-      />
+      <TextLogo size='medium' style={{ marginBottom: '2rem' }} />
       <Paper shadow='md' p='xl' radius='md' withBorder style={{ maxWidth: 400, width: '100%' }}>
         <Title order={2} ta='center' mb='lg'>
           Seleccionar Empresa

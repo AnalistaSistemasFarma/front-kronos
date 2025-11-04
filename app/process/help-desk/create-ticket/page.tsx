@@ -30,6 +30,8 @@ import {
   Box,
   Flex,
 } from '@mantine/core';
+import { ReportsChart } from '../../../../components/help-desk/ReportsChart';
+import { useHelpDeskAccess } from '../../../../components/help-desk/hooks/useHelpDeskAccess';
 import {
   IconAlertCircle,
   IconChevronRight,
@@ -62,6 +64,7 @@ function TicketsBoard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const subprocessId = searchParams.get('subprocess_id');
+  const { hasAccess: hasHelpDeskAccess } = useHelpDeskAccess();
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -563,6 +566,9 @@ function TicketsBoard() {
             </Grid.Col>
           </Grid>
         </Card>
+
+        {/* Reports Section - Only show for users with help-desk access */}
+        {hasHelpDeskAccess && <ReportsChart className='mb-6' />}
 
         {error && (
           <Alert
