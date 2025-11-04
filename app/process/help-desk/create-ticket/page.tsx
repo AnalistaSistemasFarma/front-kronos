@@ -693,7 +693,7 @@ function TicketsBoard() {
                         <Text size='lg' fw={500}>
                           No se encontraron casos
                         </Text>
-                        <Text size='sm' color='gray.500'>
+                        <Text size='sm'>
                           Intenta ajustar los filtros o crea un nuevo caso
                         </Text>
                       </div>
