@@ -568,6 +568,10 @@ function RequestBoard() {
                     <Table.Tr
                       key={ticket.id}
                       className='cursor-pointer hover:bg-gray-50 transition-colors'
+                      onClick={() => {
+                        sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
+                        router.push(`/process/request-general/view-request?id=${ticket.id}`);
+                      }}
                     >
                       <Table.Td>
                         <Badge variant='light' color='blue' size='sm'>
@@ -645,7 +649,7 @@ function RequestBoard() {
             <Grid>
               <Grid.Col span={{ base: 12, md: 6 }}>
                 <Select
-                  label='Empresa'
+                  label='Empresa Solicitante'
                   placeholder='Seleccione la empresa'
                   data={companies}
                   value={formData.company}

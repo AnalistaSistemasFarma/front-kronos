@@ -134,7 +134,6 @@ function ViewTicketPage() {
     }
   }, [id]);
 
-  // Cuando se carga el ticket por primera vez
   useEffect(() => {
     if (ticket) {
       fetchOptions();
@@ -142,7 +141,6 @@ function ViewTicketPage() {
     }
   }, [ticket]);
 
-  // Cargar subcategorías y actividades iniciales cuando se carga el ticket
   useEffect(() => {
     if (ticket?.id_category && !isEditing) {
       fetchSubcategories(ticket.id_category);
@@ -272,7 +270,6 @@ function ViewTicketPage() {
       return updatedTicket;
     });
 
-    // Clear form errors for the field being changed
     if (formErrors[field]) {
       setFormErrors((prev) => {
         const newErrors = { ...prev };
@@ -372,7 +369,6 @@ function ViewTicketPage() {
       const result = await response.json();
       setUpdateMessage({ type: 'success', text: 'Caso actualizado exitosamente' });
       
-      // Actualizar el estado local del ticket si se cambió el estado
       if (resolutionData.estado) {
         setTicket(prev => prev ? { ...prev, status: resolutionData.estado } : null);
       }
@@ -380,7 +376,6 @@ function ViewTicketPage() {
       setOriginalTicket(ticket);
       setIsEditing(false);
       
-      // Limpiar datos de resolución después de actualizar
       if (resolutionData.estado) {
         setResolutionData({ ...resolutionData, estado: '', resolucion: '' });
         setShowResolution(false);
