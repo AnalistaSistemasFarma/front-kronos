@@ -64,6 +64,7 @@ interface Ticket {
   id_status_case: number;
   resolution?: string;
   end_date?: string;
+  company?: string;
 }
 
 interface Note {
@@ -617,7 +618,7 @@ function ViewTicketPage() {
             <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white h-full'>
               <Title order={3} mb='md' className='flex items-center gap-2'>
                 <IconNote size={20} />
-                Detalles del Caso
+                Detalles del Caso - {ticket.company}
               </Title>
 
               <Stack>

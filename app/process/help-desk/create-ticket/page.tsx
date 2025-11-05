@@ -57,6 +57,7 @@ interface Ticket {
   creation_date: string;
   nombreTecnico: string;
   subprocess_id: number;
+  company: string;
 }
 
 function TicketsBoard() {
@@ -683,6 +684,7 @@ function TicketsBoard() {
                 <Table.Tr>
                   <Table.Th>ID</Table.Th>
                   <Table.Th>Asunto</Table.Th>
+                  <Table.Th>Empresa</Table.Th>
                   <Table.Th>Prioridad</Table.Th>
                   <Table.Th>Estado</Table.Th>
                   <Table.Th>Fecha de Creación</Table.Th>
@@ -722,6 +724,11 @@ function TicketsBoard() {
                       <Table.Td>
                         <Text fw={500} className='max-w-xs truncate'>
                           {ticket.subject_case}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size='sm'>
+                          {ticket.company}
                         </Text>
                       </Table.Td>
                       <Table.Td>

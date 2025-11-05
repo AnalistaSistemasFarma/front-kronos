@@ -20,7 +20,7 @@ export async function GET(req) {
         c.priority, c.requester, c.subject_case, cg.id_category,
         cg.category, sg.id_subcategory ,sg.subcategory, a.id_activity,
         a.activity, sc.status, u.name AS nombreTecnico, d.department,
-        sc.id_status_case, c.resolution
+        sc.id_status_case, c.resolution, co.company
       FROM [case] c
       LEFT JOIN category_case cc ON cc.id_case = c.id_case
       INNER JOIN category cg ON cg.id_category = cc.id_category
@@ -31,6 +31,7 @@ export async function GET(req) {
       INNER JOIN subprocess_user_company suc ON suc.id_subprocess_user_company = c.id_technical
       LEFT JOIN company_user cu ON cu.id_company_user = suc.id_company_user
       LEFT JOIN [user] u ON u.id = cu.id_user
+	    LEFT JOIN company co ON co.id_company = c.company
       WHERE 1=1
     `;
 
