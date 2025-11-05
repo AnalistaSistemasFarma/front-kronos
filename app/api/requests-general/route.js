@@ -25,7 +25,6 @@ export async function GET(req) {
       console.log('API requests-general: Agregando filtro por idRequester:', idUser);
     } else {
       console.log('API requests-general: No se proporcionó idUser, devolviendo error');
-      // Si no hay idUser, devolver error en lugar de todos los tickets
       return NextResponse.json(
         { error: "Se requiere el parámetro idUser para filtrar tickets" },
         { status: 400 }
@@ -33,7 +32,6 @@ export async function GET(req) {
     }
 
     const request = pool.request();
-    // Usar siempre NVarchar como se especificó en el feedback
     request.input('idUser', sql.NVarChar, idUser);
     console.log('API requests-general: Usando sql.NVarChar para idUser');
 

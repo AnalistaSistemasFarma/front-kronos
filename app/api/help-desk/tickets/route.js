@@ -36,13 +36,16 @@ export async function GET(req) {
     `;
 
     if (priority) query += ` AND c.priority = @priority`;
-    if (status) query += ` AND sc.status = @status`;
+    if (status && status !== '0') query += ` AND sc.id_status_case = @status`;
+    else if (!status) query += ` AND sc.id_status_case = 1`; // Por defecto mostrar solo tickets abiertos (id_status_case = 1)
     if (assigned_user) query += ` AND u.name LIKE '%' + @assigned_user + '%'`;
     if (date_from && date_to) query += ` AND c.creation_date BETWEEN @date_from AND @date_to`;
 
+    query += ` ORDER BY c.id_case DESC`;
+
     const request = pool.request();
     if (priority) request.input('priority', sql.NVarChar, priority);
-    if (status) request.input('status', sql.NVarChar, status);
+    if (status) request.input('status', sql.Int, status);
     if (assigned_user) request.input('assigned_user', sql.NVarChar, assigned_user);
     if (date_from && date_to) {
       request.input('date_from', sql.Date, date_from);

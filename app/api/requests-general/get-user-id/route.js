@@ -4,7 +4,6 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 
-// Función de logging de auditoría
 const logAuditEvent = (event, userId, userName, ipAddress, success, details) => {
   const timestamp = new Date().toISOString();
   const logEntry = {
@@ -19,8 +18,6 @@ const logAuditEvent = (event, userId, userName, ipAddress, success, details) => 
   
   console.log(`[AUDIT] ${JSON.stringify(logEntry)}`);
   
-  // Aquí se podría agregar logging a archivo o base de datos
-  // Por ahora usamos console.log para desarrollo
 };
 
 export async function GET(req) {
@@ -31,7 +28,6 @@ export async function GET(req) {
                   'unknown';
   
   try {
-    // 1. Validar sesión del usuario
     session = await getServerSession(authOptions);
     
     if (!session?.user?.email) {
@@ -46,7 +42,6 @@ export async function GET(req) {
       );
     }
 
-    // 2. Obtener parámetros de la solicitud
     const { searchParams } = new URL(req.url);
     const userName = searchParams.get('userName');
 
@@ -62,7 +57,6 @@ export async function GET(req) {
       );
     }
 
-    // 3. Conectar a la base de datos y ejecutar consulta segura
     const pool = await sql.connect(sqlConfig);
     
     const query = `
@@ -77,7 +71,6 @@ export async function GET(req) {
     const result = await request.query(query);
     const duration = Date.now() - startTime;
 
-    // 4. Verificar si se encontró el usuario
     if (result.recordset.length === 0) {
       logAuditEvent('USER_NOT_FOUND', session.user.email, userName, ipAddress, false, `Query executed in ${duration}ms`);
       return NextResponse.json(
@@ -90,7 +83,6 @@ export async function GET(req) {
       );
     }
 
-    // 5. Retornar resultado exitoso
     const userId = result.recordset[0].id;
     logAuditEvent('USER_FOUND', session.user.email, userName, ipAddress, true, `Query executed in ${duration}ms`);
     
@@ -128,7 +120,6 @@ export async function GET(req) {
       { status: 500 }
     );
   } finally {
-    // Asegurarse de cerrar la conexión a la base de datos
     try {
       if (sql && sql.pool) {
         await sql.close();

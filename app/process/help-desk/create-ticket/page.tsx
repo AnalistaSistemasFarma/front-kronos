@@ -72,7 +72,7 @@ function TicketsBoard() {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState({
     priority: '',
-    status: '',
+    status: '1', // Por defecto mostrar solo tickets con estado "Abierto"
     assigned_user: '',
     date_from: '',
     date_to: '',
@@ -92,7 +92,6 @@ function TicketsBoard() {
   });
   const [createLoading, setCreateLoading] = useState(false);
 
-  // Options for selects
   const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
   const [subcategories, setSubcategories] = useState<{ value: string; label: string }[]>([]);
   const [activities, setActivities] = useState<{ value: string; label: string }[]>([]);
@@ -269,10 +268,8 @@ function TicketsBoard() {
       [field]: value,
     }));
 
-    // Handle dependent selects
     if (field === 'category' && value) {
       fetchSubcategories(value);
-      // Reset dependent fields
       setFormData((prev) => ({
         ...prev,
         subcategory: '',
@@ -282,7 +279,6 @@ function TicketsBoard() {
       setActivities([]);
     } else if (field === 'subcategory' && value) {
       fetchActivities(value);
-      // Reset dependent field
       setFormData((prev) => ({
         ...prev,
         activity: '',
@@ -321,10 +317,8 @@ function TicketsBoard() {
 
       const newTicket = await response.json();
 
-      // Add the new ticket to the list
       setTickets((prev) => [newTicket, ...prev]);
 
-      // Reset form and close modal
       setFormData({
         requestType: '',
         priority: '',
@@ -395,12 +389,10 @@ function TicketsBoard() {
     switch (status?.toLowerCase()) {
       case 'abierto':
         return 'green';
-      case 'en progreso':
-        return 'blue';
-      case 'cerrado':
+      case 'cancelado':
         return 'gray';
       case 'resuelto':
-        return 'teal';
+        return 'blue';
       default:
         return 'gray';
     }
@@ -617,12 +609,19 @@ function TicketsBoard() {
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Usuario Asignado'
-                    placeholder='Buscar por usuario'
-                    leftSection={<IconSearch size={16} />}
-                    value={filters.assigned_user}
-                    onChange={(e) => handleFilterChange('assigned_user', e.target.value)}
+                  <Select
+                    label='Estado'
+                    placeholder='Todas los estados'
+                    clearable
+                    data={[
+                      { value: '0', label: 'Todos' },
+                      { value: '1', label: 'Abierto' },
+                      { value: '2', label: 'Resuelto' },
+                      { value: '3', label: 'Cancelado' },
+                    ]}
+                    value={filters.status}
+                    onChange={(value) => handleFilterChange('status', value || '')}
+                    leftSection={<IconFlag size={16} />}
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
