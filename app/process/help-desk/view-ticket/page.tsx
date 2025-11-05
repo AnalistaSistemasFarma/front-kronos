@@ -117,7 +117,6 @@ function ViewTicketPage() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Función para determinar si el ticket está resuelto
   const isTicketResolved = () => {
     return ticket?.id_status_case === 2 || ticket?.status?.toLowerCase() === 'resuelto';
   };
@@ -299,7 +298,6 @@ function ViewTicketPage() {
 
       if (response.ok) {
         setNewNote('');
-        // Recargar las notas para obtener la lista actualizada
         await fetchNotes();
       } else {
         const errorData = await response.json();
@@ -315,17 +313,14 @@ function ViewTicketPage() {
       if (!prev) return prev;
       const updatedTicket = { ...prev, [field]: value };
 
-      // Handle dependent selects
       if (field === 'id_category' && value) {
         fetchSubcategories(value);
-        // Reset dependent fields
         updatedTicket.id_subcategory = '';
         updatedTicket.id_activity = '';
         setSubcategories([]);
         setActivities([]);
       } else if (field === 'id_subcategory' && value) {
         fetchActivities(value);
-        // Reset dependent field
         updatedTicket.id_activity = '';
         setActivities([]);
       }

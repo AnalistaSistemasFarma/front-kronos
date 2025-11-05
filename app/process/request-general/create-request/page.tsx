@@ -85,11 +85,9 @@ function RequestBoard() {
   });
   const [createLoading, setCreateLoading] = useState(false);
 
-  // Options for selects
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
   const [idUser, setIdUser] = useState('');
 
-  // New state for filters and enhanced functionality
   const [filters, setFilters] = useState({
     status: '',
     company: '',
@@ -105,11 +103,9 @@ function RequestBoard() {
       router.push('/login');
       return;
     }
-    // Solo llamar a fetchCompanies aquí, fetchTickets se manejará en otro efecto
     fetchCompanies();
   }, [session, status, router]);
 
-  // Efecto separado para manejar la obtención de userId y luego fetchTickets
   useEffect(() => {
     if (status === 'loading') return;
     if (!session) {
@@ -117,25 +113,19 @@ function RequestBoard() {
       return;
     }
     
-    // Solo proceder si el userId no se ha inicializado aún
     if (!userIdInitialized) {
       if (userName && !userId) {
-        console.log('Iniciando obtención de userId para userName:', userName);
         getUserIdByName(userName).then(id => {
           if (id) {
             setUserId(id);
             setUserIdInitialized(true);
-            console.log('ID de usuario obtenido y establecido:', id);
-            // Llamar a fetchTickets inmediatamente después de establecer el userId
             fetchTicketsWithUserId(id);
           } else {
-            console.error('No se pudo obtener el ID para el usuario:', userName);
-            setUserIdInitialized(true); // Marcar como inicializado incluso si falla
+            setUserIdInitialized(true);
             setError('No se pudo obtener el ID del usuario. Por favor, recargue la página.');
           }
         });
       } else if (!userName) {
-        console.log('No hay userName disponible');
         setUserIdInitialized(true);
       }
     }
@@ -171,10 +161,8 @@ function RequestBoard() {
 
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
-      console.log('fetchTicketsWithUserId: Enviando userId:', userIdToUse);
 
       const url = `/api/requests-general?${params.toString()}`;
-      console.log('fetchTicketsWithUserId: URL completa:', url);
 
       const response = await fetch(url);
 
@@ -265,7 +253,6 @@ function RequestBoard() {
       [field]: value,
     }));
 
-    // Clear form errors when user starts typing
     if (formErrors[field]) {
       setFormErrors((prev) => ({
         ...prev,
@@ -334,10 +321,8 @@ function RequestBoard() {
 
       const newTicket = await response.json();
 
-      // Add the new ticket to the list
       setTickets((prev) => [newTicket, ...prev]);
 
-      // Reset form and close modal
       setFormData({
         company: '',
         usuario: '',
