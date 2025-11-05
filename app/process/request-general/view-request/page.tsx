@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   Title,
@@ -75,6 +76,10 @@ function ViewRequestPage() {
   const [originalRequest, setOriginalRequest] = useState<Request | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const { data: session, status } = useSession();
+  const userName = session?.user?.name || '';
+  const [userId, setUserId] = useState<number | null>(null);
+  const [loadingUserId, setLoadingUserId] = useState(false);
 
   useEffect(() => {
     const storedRequest = sessionStorage.getItem('selectedRequest');
@@ -107,6 +112,59 @@ function ViewRequestPage() {
       fetchCompanies();
     }
   }, [request]);
+
+  const getUserIdByName = async (userName: string): Promise<number | null> => {
+    if (!session || status !== 'authenticated') {
+      console.error('No hay sesión activa para realizar esta operación');
+      return null;
+    }
+
+    if (!userName || userName.trim() === '') {
+      console.error('El nombre de usuario es requerido');
+      return null;
+    }
+
+    try {
+      setLoadingUserId(true);
+      
+      const params = new URLSearchParams({
+        userName: userName.trim()
+      });
+
+      const response = await fetch(`/api/requests-general/get-user-id?${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error al obtener ID de usuario:', errorData.error);
+        return null;
+      }
+
+      const data = await response.json();
+      return data.success ? data.userId : null;
+
+    } catch (error) {
+      console.error('Error en la llamada al endpoint:', error);
+      return null;
+    } finally {
+      setLoadingUserId(false);
+    }
+  };
+
+  useEffect(() => {
+    if (status === 'authenticated' && userName && !userId) {
+      getUserIdByName(userName).then(id => {
+        if (id) {
+          setUserId(id);
+          console.log('ID de usuario obtenido:', id);
+        }
+      });
+    }
+  }, [status, userName, userId]);
 
   const fetchCompanies = async () => {
     try {
@@ -324,7 +382,7 @@ function ViewRequestPage() {
                 <IconFileDescription size={32} className='text-blue-6' />
                 Solicitud #{request.id}
               </Title>
-              <Text size='lg' color='gray.6'>
+              <Text size='lg'>
                 {request.category}
               </Text>
             </div>

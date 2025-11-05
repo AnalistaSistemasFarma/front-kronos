@@ -7,7 +7,7 @@ export async function POST(req) {
     const {
       id,
       status,
-      usuario,
+      user,
       id_company,
       category,
       descripcion,
@@ -33,7 +33,7 @@ export async function POST(req) {
         UPDATE [requests_general]
         SET 
           [status] = @status,
-          [user] = @usuario,
+          [user] = @user,
           id_company = @id_company,
           category = @category,
           [description] = @descripcion
@@ -43,7 +43,7 @@ export async function POST(req) {
       const request = new sql.Request(transaction);
       request.input('id', sql.Int, id);
       request.input('status', sql.NVarChar(50), status || 'Pendiente');
-      request.input('usuario', sql.NVarChar(255), usuario);
+      request.input('user', sql.NVarChar(255), user);
       request.input('id_company', sql.Int, id_company);
       request.input('category', sql.NVarChar(255), category);
       request.input('descripcion', sql.NVarChar(1000), descripcion);

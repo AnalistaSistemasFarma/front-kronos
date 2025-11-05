@@ -241,7 +241,6 @@ function TicketsBoard() {
       if (filters.date_from) params.append('date_from', filters.date_from);
       if (filters.date_to) params.append('date_to', filters.date_to);
 
-      // ✅ usar los parámetros en la URL
       const response = await fetch(`/api/help-desk/tickets?${params.toString()}`);
 
       if (!response.ok) throw new Error('Error al cargar los casos');

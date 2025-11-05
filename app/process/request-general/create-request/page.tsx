@@ -65,6 +65,10 @@ interface Ticket {
 function RequestBoard() {
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
+  const [userId, setUserId] = useState<number | null>(null);
+  const [loadingUserId, setLoadingUserId] = useState(false);
+  const [userIdInitialized, setUserIdInitialized] = useState(false);
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const subprocessId = searchParams.get('subprocess_id');
@@ -101,9 +105,41 @@ function RequestBoard() {
       router.push('/login');
       return;
     }
-    fetchTickets();
+    // Solo llamar a fetchCompanies aquí, fetchTickets se manejará en otro efecto
     fetchCompanies();
   }, [session, status, router]);
+
+  // Efecto separado para manejar la obtención de userId y luego fetchTickets
+  useEffect(() => {
+    if (status === 'loading') return;
+    if (!session) {
+      router.push('/login');
+      return;
+    }
+    
+    // Solo proceder si el userId no se ha inicializado aún
+    if (!userIdInitialized) {
+      if (userName && !userId) {
+        console.log('Iniciando obtención de userId para userName:', userName);
+        getUserIdByName(userName).then(id => {
+          if (id) {
+            setUserId(id);
+            setUserIdInitialized(true);
+            console.log('ID de usuario obtenido y establecido:', id);
+            // Llamar a fetchTickets inmediatamente después de establecer el userId
+            fetchTicketsWithUserId(id);
+          } else {
+            console.error('No se pudo obtener el ID para el usuario:', userName);
+            setUserIdInitialized(true); // Marcar como inicializado incluso si falla
+            setError('No se pudo obtener el ID del usuario. Por favor, recargue la página.');
+          }
+        });
+      } else if (!userName) {
+        console.log('No hay userName disponible');
+        setUserIdInitialized(true);
+      }
+    }
+  }, [status, session, userName, userId, userIdInitialized, router]);
 
   useEffect(() => {
     const globalStore = localStorage.getItem('global-store');
@@ -122,14 +158,30 @@ function RequestBoard() {
   }, []);
 
   const fetchTickets = async () => {
+    if (!userId) {
+      console.log('fetchTickets: No se puede ejecutar sin userId');
+      return;
+    }
+    await fetchTicketsWithUserId(userId);
+  };
+
+  const fetchTicketsWithUserId = async (userIdToUse: number) => {
     try {
       setLoading(true);
 
-      const response = await fetch(`/api/requests-general`);
+      const params = new URLSearchParams();
+      params.append('idUser', userIdToUse.toString());
+      console.log('fetchTicketsWithUserId: Enviando userId:', userIdToUse);
+
+      const url = `/api/requests-general?${params.toString()}`;
+      console.log('fetchTicketsWithUserId: URL completa:', url);
+
+      const response = await fetch(url);
 
       if (!response.ok) throw new Error('Failed to fetch tickets');
 
       const data = await response.json();
+      console.log('fetchTicketsWithUserId: Tickets recibidos:', data.length, 'tickets');
       setTickets(data);
     } catch (err) {
       console.error('Error fetching tickets:', err);
@@ -138,6 +190,49 @@ function RequestBoard() {
       setLoading(false);
     }
   };
+
+  const getUserIdByName = async (userName: string): Promise<number | null> => {
+    if (!session || status !== 'authenticated') {
+      console.error('No hay sesión activa para realizar esta operación');
+      return null;
+    }
+
+    if (!userName || userName.trim() === '') {
+      console.error('El nombre de usuario es requerido');
+      return null;
+    }
+
+    try {
+      setLoadingUserId(true);
+      
+      const params = new URLSearchParams({
+        userName: userName.trim()
+      });
+
+      const response = await fetch(`/api/requests-general/get-user-id?${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error al obtener ID de usuario:', errorData.error);
+        return null;
+      }
+
+      const data = await response.json();
+      return data.success ? data.userId : null;
+
+    } catch (error) {
+      console.error('Error en la llamada al endpoint:', error);
+      return null;
+    } finally {
+      setLoadingUserId(false);
+    }
+  };
+
 
   const fetchCompanies = async () => {
     try {
@@ -186,30 +281,6 @@ function RequestBoard() {
     }));
   };
 
-  const fetchFilteredTickets = async () => {
-    try {
-      setLoading(true);
-
-      const params = new URLSearchParams();
-      if (filters.status) params.append('status', filters.status);
-      if (filters.company) params.append('company', filters.company);
-      if (filters.date_from) params.append('date_from', filters.date_from);
-      if (filters.date_to) params.append('date_to', filters.date_to);
-
-      const response = await fetch(`/api/requests-general?${params.toString()}`);
-
-      if (!response.ok) throw new Error('Failed to fetch tickets');
-
-      const data = await response.json();
-      setTickets(data);
-    } catch (err) {
-      console.error('Error fetching tickets:', err);
-      setError('Unable to load tickets. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const validateForm = () => {
     const errors: Record<string, string> = {};
 
@@ -252,7 +323,7 @@ function RequestBoard() {
           usuario: formData.usuario,
           descripcion: formData.descripcion,
           category: formData.category,
-          createdby: userName,
+          createdby: userId,
         }),
       });
 
@@ -360,7 +431,6 @@ function RequestBoard() {
             </Button>
           </Flex>
 
-          {/* Stats Cards */}
           <Grid>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
               <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
@@ -517,7 +587,7 @@ function RequestBoard() {
                 >
                   Limpiar Filtros
                 </Button>
-                <Button onClick={fetchFilteredTickets} leftSection={<IconRefresh size={16} />}>
+                <Button onClick={fetchTickets} leftSection={<IconRefresh size={16} />}>
                   Aplicar Filtros
                 </Button>
               </Group>
