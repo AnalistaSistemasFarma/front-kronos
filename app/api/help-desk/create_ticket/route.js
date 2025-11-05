@@ -16,6 +16,7 @@ export async function POST(req) {
       department,
       activity,
       description,
+      company,
     } = body;
 
     if (
@@ -51,6 +52,7 @@ export async function POST(req) {
           id_department,
           case_type,
           [priority],
+          company,
           id_status_case
         )
         OUTPUT INSERTED.id_case
@@ -64,6 +66,7 @@ export async function POST(req) {
           @department,
           @requestType,
           @priority,
+          @company,
           1
         );
       `;
@@ -78,6 +81,7 @@ export async function POST(req) {
       request.input('department', sql.Int, department);
       request.input('requestType', sql.NVarChar(50), requestType);
       request.input('priority', sql.NVarChar(1000), priority);
+      request.input('company', sql.Int, company);
 
       const caseResult = await request.query(insertCaseQuery);
       const newCaseId = caseResult.recordset[0].id_case;

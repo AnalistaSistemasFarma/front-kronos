@@ -10,6 +10,7 @@ export async function POST(req) {
       priority,
       case_type,
       id_category,
+      place,
       id_subcategory,
       id_activity,
       id_department,
@@ -49,6 +50,7 @@ export async function POST(req) {
           case_type = @case_type,
           id_department = @id_department,
           id_technical = @id_technical,
+          place = @place,
           resolution = @resolucion
         WHERE id_case = @id_case;
       `;
@@ -59,6 +61,7 @@ export async function POST(req) {
       updateCaseRequest.input('case_type', sql.NVarChar(50), case_type);
       updateCaseRequest.input('id_department', sql.Int, id_department);
       updateCaseRequest.input('id_technical', sql.Int, id_technical || null);
+      updateCaseRequest.input('place', sql.NVarChar(1000), place);
       updateCaseRequest.input('resolucion', sql.Text, resolucion || null);
       updateCaseRequest.input('id_case', sql.Int, id_case);
 

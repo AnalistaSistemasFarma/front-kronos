@@ -38,7 +38,7 @@ export async function POST(req) {
           [user],
           id_company,
           created_at,
-          requester,
+          id_requester,
           [status]
         )
         OUTPUT INSERTED.id
@@ -59,7 +59,7 @@ export async function POST(req) {
       request.input("category", sql.NVarChar(255), category);
       request.input("usuario", sql.NVarChar(255), usuario);
       request.input("company", sql.Int, company);
-      request.input("createdby", sql.NVarChar(255), createdby);
+      request.input("createdby", sql.NVarChar(1000), createdby);
 
       const caseResult = await request.query(insertCaseQuery);
       const newCaseId = caseResult.recordset[0].id_case;

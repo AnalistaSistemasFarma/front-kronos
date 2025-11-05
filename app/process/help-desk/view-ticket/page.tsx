@@ -62,6 +62,14 @@ interface Ticket {
   nombreTecnico: string;
   subprocess_id: number;
   id_status_case: number;
+  resolution?: string;
+  end_date?: string;
+  company?: string;
+}
+
+interface Note {
+  id_note: number;
+  note: string;
 }
 
 interface Option {
@@ -94,8 +102,9 @@ function ViewTicketPage() {
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notes, setNotes] = useState<string[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
   const [newNote, setNewNote] = useState('');
+  const [loadingNotes, setLoadingNotes] = useState(false);
   const [showResolution, setShowResolution] = useState(false);
   const [resolutionData, setResolutionData] = useState({
     estado: '',
@@ -107,6 +116,11 @@ function ViewTicketPage() {
   const [originalTicket, setOriginalTicket] = useState<Ticket | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Función para determinar si el ticket está resuelto
+  const isTicketResolved = () => {
+    return ticket?.id_status_case === 2 || ticket?.status?.toLowerCase() === 'resuelto';
+  };
 
   useEffect(() => {
     const storedTicket = sessionStorage.getItem('selectedTicket');
@@ -138,6 +152,7 @@ function ViewTicketPage() {
     if (ticket) {
       fetchOptions();
       fetchSubprocessUsers();
+      fetchNotes();
     }
   }, [ticket]);
 
@@ -247,6 +262,54 @@ function ViewTicketPage() {
     }
   };
 
+  const fetchNotes = async () => {
+    if (!ticket?.id_case) return;
+    
+    try {
+      setLoadingNotes(true);
+      const response = await fetch(`/api/help-desk/notes?id_case=${ticket.id_case}`);
+      
+      if (response.ok) {
+        const data: Note[] = await response.json();
+        setNotes(data);
+      } else {
+        console.error('Error al cargar notas');
+      }
+    } catch (error) {
+      console.error('Error fetching notes:', error);
+    } finally {
+      setLoadingNotes(false);
+    }
+  };
+
+  const handleAddNote = async () => {
+    if (!newNote.trim() || !ticket?.id_case) return;
+    
+    try {
+      const response = await fetch('/api/help-desk/notes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id_case: ticket.id_case,
+          note: newNote.trim(),
+        }),
+      });
+
+      if (response.ok) {
+        setNewNote('');
+        // Recargar las notas para obtener la lista actualizada
+        await fetchNotes();
+      } else {
+        const errorData = await response.json();
+        console.error('Error al agregar nota:', errorData.error);
+      }
+    } catch (error) {
+      console.error('Error adding note:', error);
+    }
+  };
+
   const handleFormChange = (field: string, value: string) => {
     setTicket((prev) => {
       if (!prev) return prev;
@@ -279,11 +342,6 @@ function ViewTicketPage() {
     }
   };
 
-  const handleAddNote = () => {
-    if (!newNote.trim()) return;
-    setNotes((prev) => [...prev, newNote.trim()]);
-    setNewNote('');
-  };
 
   const handleStartEditing = () => {
     setIsEditing(true);
@@ -346,6 +404,7 @@ function ViewTicketPage() {
         priority: ticket?.priority,
         case_type: ticket?.case_type,
         id_category: ticket?.id_category,
+        place: ticket?.place,
         id_subcategory: ticket?.id_subcategory,
         id_activity: ticket?.id_activity,
         id_department: ticket?.id_department,
@@ -539,6 +598,18 @@ function ViewTicketPage() {
               </Badge>
             </Group>
           </Flex>
+
+          {/* Alerta de caso resuelto */}
+          {isTicketResolved() && (
+            <Alert
+              icon={<IconCheck size={16} />}
+              title='Caso Resuelto'
+              color='teal'
+              mb='4'
+            >
+              Este caso ha sido marcado como resuelto y no se puede modificar. Si necesita realizar cambios, contacte al administrador del sistema.
+            </Alert>
+          )}
         </Card>
 
         {/* Main Content */}
@@ -547,7 +618,7 @@ function ViewTicketPage() {
             <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white h-full'>
               <Title order={3} mb='md' className='flex items-center gap-2'>
                 <IconNote size={20} />
-                Detalles del Caso
+                Detalles del Caso - {ticket.company}
               </Title>
 
               <Stack>
@@ -560,7 +631,7 @@ function ViewTicketPage() {
                     value={ticket.case_type}
                     onChange={(val) => setTicket({ ...ticket, case_type: val ?? '' })}
                     leftSection={<IconTicket size={16} />}
-                    disabled={!isEditing}
+                    disabled={!isEditing || isTicketResolved()}
                     error={formErrors.case_type}
                   />
                 </div>
@@ -590,7 +661,7 @@ function ViewTicketPage() {
                         value={ticket.id_category?.toString() || ''}
                         onChange={(val) => handleFormChange('id_category', val ?? '')}
                         leftSection={<IconFilter size={16} />}
-                        disabled={!isEditing || loadingOptions}
+                        disabled={!isEditing || loadingOptions || isTicketResolved()}
                         error={formErrors.id_category}
                       />
                     </Grid.Col>
@@ -601,7 +672,7 @@ function ViewTicketPage() {
                         value={ticket.id_subcategory?.toString() || ''}
                         onChange={(val) => handleFormChange('id_subcategory', val ?? '')}
                         leftSection={<IconFilter size={16} />}
-                        disabled={!isEditing || !ticket.id_category || loadingOptions}
+                        disabled={!isEditing || !ticket.id_category || loadingOptions || isTicketResolved()}
                         error={formErrors.id_subcategory}
                       />
                     </Grid.Col>
@@ -612,7 +683,7 @@ function ViewTicketPage() {
                         value={ticket.id_activity?.toString() || ''}
                         onChange={(val) => handleFormChange('id_activity', val ?? '')}
                         leftSection={<IconFilter size={16} />}
-                        disabled={!isEditing || !ticket.id_subcategory || loadingOptions}
+                        disabled={!isEditing || !ticket.id_subcategory || loadingOptions || isTicketResolved()}
                         error={formErrors.id_activity}
                       />
                     </Grid.Col>
@@ -623,7 +694,7 @@ function ViewTicketPage() {
                         value={ticket.priority}
                         onChange={(val) => setTicket({ ...ticket, priority: val ?? '' })}
                         leftSection={<IconFlag size={16} />}
-                        disabled={!isEditing}
+                        disabled={!isEditing || isTicketResolved()}
                         error={formErrors.priority}
                       />
                     </Grid.Col>
@@ -661,7 +732,7 @@ function ViewTicketPage() {
                       value={ticket.id_department?.toString() || ''}
                       onChange={(val) => setTicket({ ...ticket, id_department: val ?? '' })}
                       leftSection={<IconBuilding size={16} />}
-                      disabled={!isEditing || loadingOptions}
+                      disabled={!isEditing || loadingOptions || isTicketResolved()}
                       error={formErrors.id_department}
                     />
                   </div>
@@ -679,7 +750,7 @@ function ViewTicketPage() {
                       value={ticket.place || ''}
                       onChange={(val) => setTicket({ ...ticket, place: val ?? '' })}
                       leftSection={<IconBuilding size={16} />}
-                      disabled={!isEditing}
+                      disabled={!isEditing || isTicketResolved()}
                     />
                   </div>
 
@@ -692,7 +763,7 @@ function ViewTicketPage() {
                       value={ticket.id_technical?.toString() || ''}
                       onChange={(val) => setTicket({ ...ticket, id_technical: val ?? '' })}
                       leftSection={<IconUser size={16} />}
-                      disabled={!isEditing || loadingOptions}
+                      disabled={!isEditing || loadingOptions || isTicketResolved()}
                       clearable
                       placeholder='Sin asignar'
                     />
@@ -710,16 +781,16 @@ function ViewTicketPage() {
                 {notes.length > 0 ? (
                   <div className='max-h-40 overflow-y-auto border border-gray-200 rounded-md p-3 mb-3 bg-gray-50'>
                     <Stack gap='xs'>
-                      {notes.map((note, i) => (
-                        <Text key={i} size='sm' className='text-gray-700'>
-                          • {note}
+                      {notes.map((note) => (
+                        <Text key={note.id_note} size='sm' className='text-gray-700'>
+                          • {note.note}
                         </Text>
                       ))}
                     </Stack>
                   </div>
                 ) : (
                   <Text size='sm' color='dimmed' mb='xs'>
-                    No hay notas registradas.
+                    {loadingNotes ? 'Cargando notas...' : 'No hay notas registradas.'}
                   </Text>
                 )}
 
@@ -730,16 +801,22 @@ function ViewTicketPage() {
                     onChange={(e) => setNewNote(e.target.value)}
                     minRows={2}
                     className='flex-1'
+                    disabled={isTicketResolved()}
                   />
                   <ActionIcon
                     variant='filled'
                     color='blue'
                     onClick={handleAddNote}
-                    disabled={!newNote.trim()}
+                    disabled={!newNote.trim() || isTicketResolved()}
                   >
                     <IconCheck size={16} />
                   </ActionIcon>
                 </Group>
+                {isTicketResolved() && (
+                  <Text size='xs' color='dimmed' mt='xs'>
+                    No se pueden agregar notas a casos resueltos.
+                  </Text>
+                )}
               </Card>
 
               {/* Resolución */}
@@ -749,12 +826,34 @@ function ViewTicketPage() {
                     <IconCheck size={18} className='text-green-6' />
                     Resolución del Caso
                   </Title>
-                  <ActionIcon variant='subtle' onClick={() => setShowResolution(!showResolution)}>
-                    {showResolution ? <IconX size={16} /> : <IconCheck size={16} />}
-                  </ActionIcon>
+                  {!isTicketResolved() && (
+                    <ActionIcon variant='subtle' onClick={() => setShowResolution(!showResolution)}>
+                      {showResolution ? <IconX size={16} /> : <IconCheck size={16} />}
+                    </ActionIcon>
+                  )}
                 </Group>
 
-                {showResolution && (
+                {/* Mostrar información de resolución si el caso está resuelto */}
+                {isTicketResolved() && (
+                  <Card withBorder radius='md' p='md' bg='teal.0' mb='md'>
+                    <Stack gap='sm'>
+                      <Text fw={600}>
+                        Información de Resolución
+                      </Text>
+                      <Text size='sm' className='whitespace-pre-line text-gray-700'>
+                        {ticket.resolution}
+                      </Text>
+                      {ticket.end_date && (
+                        <Text size='xs'>
+                          Fecha de resolución: {new Date(ticket.end_date).toLocaleDateString()}
+                        </Text>
+                      )}
+                    </Stack>
+                  </Card>
+                )}
+
+                {/* Formulario de resolución para casos no resueltos */}
+                {!isTicketResolved() && showResolution && (
                   <Stack>
                     <Select
                       label='Estado del caso'
@@ -836,6 +935,7 @@ function ViewTicketPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
+                  disabled={isTicketResolved()}
                 >
                   Editar Caso
                 </Button>
@@ -858,6 +958,11 @@ function ViewTicketPage() {
                     Cancelar
                   </Button>
                 </>
+              )}
+              {isTicketResolved() && (
+                <Text size='sm' color='dimmed'>
+                  Los casos resueltos no se pueden modificar.
+                </Text>
               )}
             </Group>
 
