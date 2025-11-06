@@ -62,6 +62,13 @@ interface Option {
   label: string;
 }
 
+interface Note {
+  id_note: number;
+  note: string;
+  createdBy: string;
+  creation_date?: string;
+}
+
 function ViewRequestPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -71,6 +78,9 @@ function ViewRequestPage() {
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [newNote, setNewNote] = useState('');
+  const [loadingNotes, setLoadingNotes] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [originalRequest, setOriginalRequest] = useState<Request | null>(null);
@@ -110,6 +120,7 @@ function ViewRequestPage() {
   useEffect(() => {
     if (request) {
       fetchCompanies();
+      fetchNotes();
     }
   }, [request]);
 
@@ -182,6 +193,53 @@ function ViewRequestPage() {
       console.error('Error fetching companies:', error);
     } finally {
       setLoadingOptions(false);
+    }
+  };
+
+  const fetchNotes = async () => {
+    if (!request?.id) return;
+    try {
+      setLoadingNotes(true);
+      const response = await fetch(`/api/requests-general/notes?id_request=${request.id}`);
+      
+      if (response.ok) {
+        const data: Note[] = await response.json();
+        setNotes(data);
+      } else {
+        console.error('Error al cargar notas');
+      }
+    } catch (error) {
+      console.error('Error fetching notes:', error);
+    } finally {
+      setLoadingNotes(false);
+    }
+  };
+
+  const handleAddNote = async () => {
+    if (!newNote.trim() || !request?.id || !userId) return;
+    
+    try {
+      const response = await fetch('/api/requests-general/notes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id_request: request.id,
+          note: newNote.trim(),
+          created_by: userId,
+        }),
+      });
+
+      if (response.ok) {
+        setNewNote('');
+        await fetchNotes();
+      } else {
+        const errorData = await response.json();
+        console.error('Error al agregar nota:', errorData.error);
+      }
+    } catch (error) {
+      console.error('Error adding note:', error);
     }
   };
 
@@ -520,6 +578,75 @@ function ViewRequestPage() {
                     </Text>
                   </div>
                 </Stack>
+              </Card>
+              <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+                <Title order={4} mb='md' className='flex items-center gap-2'>
+                  <IconNote size={18} className='text-blue-6' />
+                  Notas de la Solicitud
+                </Title>
+
+                {notes.length > 0 ? (
+                  <div className='max-h-40 overflow-y-auto border border-gray-200 rounded-md p-3 mb-3 bg-gray-50'>
+                    <Stack gap='xs'>
+                      {notes.map((note) => (
+                        <div key={note.id_note} className='border-b border-gray-200 pb-2 last:border-b-0'>
+                          <Text size='sm' className='text-gray-700 mb-1'>
+                            {note.note}
+                          </Text>
+                          <div className='flex justify-between items-center'>
+                            <Text size='xs' color='gray.6'>
+                              Creado por: {note.createdBy}
+                            </Text>
+                            {note.creation_date && (
+                              <Text size='xs' color='gray.6'>
+                                {new Intl.DateTimeFormat('es-CO', {
+                                  day: 'numeric',
+                                  month: 'long',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  hour12: true
+                                }).format(
+                                  new Date(
+                                    new Date(note.creation_date).getTime() + (5 * 60 * 60 * 1000) // +5 horas
+                                  )
+                                )}
+                              </Text>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </Stack>
+                  </div>
+                ) : (
+                  <Text size='sm' color='dimmed' mb='xs'>
+                    {loadingNotes ? 'Cargando notas...' : 'No hay notas registradas.'}
+                  </Text>
+                )}
+
+                <Group align='flex-end'>
+                  <Textarea
+                    placeholder='Escribe una nota...'
+                    value={newNote}
+                    onChange={(e) => setNewNote(e.target.value)}
+                    minRows={2}
+                    className='flex-1'
+                    disabled={!userId || loadingUserId}
+                  />
+                  <ActionIcon
+                    variant='filled'
+                    color='blue'
+                    onClick={handleAddNote}
+                    disabled={!userId || loadingUserId || !newNote.trim()}
+                  >
+                    <IconCheck size={16} />
+                  </ActionIcon>
+                </Group>
+                {(!userId || loadingUserId) && (
+                  <Text size='xs' color='orange.6' mt='xs'>
+                    {loadingUserId ? 'Cargando información del usuario...' : 'No se pudo identificar al usuario actual'}
+                  </Text>
+                )}
               </Card>
             </Stack>
           </Grid.Col>
