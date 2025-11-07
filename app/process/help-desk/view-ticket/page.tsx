@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import {
   Title,
   Paper,
@@ -70,6 +71,8 @@ interface Ticket {
 interface Note {
   id_note: number;
   note: string;
+  createdBy: string;
+  creation_date?: string;
 }
 
 interface Option {
@@ -116,6 +119,10 @@ function ViewTicketPage() {
   const [originalTicket, setOriginalTicket] = useState<Ticket | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const { data: session, status } = useSession();
+  const userName = session?.user?.name || '';
+  const [userId, setUserId] = useState<number | null>(null);
+  const [loadingUserId, setLoadingUserId] = useState(false);
 
   const isTicketResolved = () => {
     return ticket?.id_status_case === 2 || ticket?.status?.toLowerCase() === 'resuelto';
@@ -163,6 +170,59 @@ function ViewTicketPage() {
       fetchActivities(ticket.id_subcategory);
     }
   }, [ticket?.id_category, ticket?.id_subcategory, isEditing]);
+
+  const getUserIdByName = async (userName: string): Promise<number | null> => {
+    if (!session || status !== 'authenticated') {
+      console.error('No hay sesión activa para realizar esta operación');
+      return null;
+    }
+
+    if (!userName || userName.trim() === '') {
+      console.error('El nombre de usuario es requerido');
+      return null;
+    }
+
+    try {
+      setLoadingUserId(true);
+      
+      const params = new URLSearchParams({
+        userName: userName.trim()
+      });
+
+      const response = await fetch(`/api/requests-general/get-user-id?${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error al obtener ID de usuario:', errorData.error);
+        return null;
+      }
+
+      const data = await response.json();
+      return data.success ? data.userId : null;
+
+    } catch (error) {
+      console.error('Error en la llamada al endpoint:', error);
+      return null;
+    } finally {
+      setLoadingUserId(false);
+    }
+  };
+
+  useEffect(() => {
+    if (status === 'authenticated' && userName && !userId) {
+      getUserIdByName(userName).then(id => {
+        if (id) {
+          setUserId(id);
+          console.log('ID de usuario obtenido:', id);
+        }
+      });
+    }
+  }, [status, userName, userId]);
 
   const fetchOptions = async () => {
     try {
@@ -282,7 +342,7 @@ function ViewTicketPage() {
   };
 
   const handleAddNote = async () => {
-    if (!newNote.trim() || !ticket?.id_case) return;
+    if (!newNote.trim() || !ticket?.id_case || !userId) return;
     
     try {
       const response = await fetch('/api/help-desk/notes', {
@@ -293,6 +353,7 @@ function ViewTicketPage() {
         body: JSON.stringify({
           id_case: ticket.id_case,
           note: newNote.trim(),
+          created_by: userId,
         }),
       });
 
@@ -777,9 +838,32 @@ function ViewTicketPage() {
                   <div className='max-h-40 overflow-y-auto border border-gray-200 rounded-md p-3 mb-3 bg-gray-50'>
                     <Stack gap='xs'>
                       {notes.map((note) => (
-                        <Text key={note.id_note} size='sm' className='text-gray-700'>
-                          • {note.note}
-                        </Text>
+                        <div key={note.id_note} className='border-b border-gray-200 pb-2 last:border-b-0'>
+                          <Text size='sm' className='text-gray-700 mb-1'>
+                            {note.note}
+                          </Text>
+                          <div className='flex justify-between items-center'>
+                            <Text size='xs' color='gray.6'>
+                              Creado por: {note.createdBy}
+                            </Text>
+                            {note.creation_date && (
+                              <Text size='xs' color='gray.6'>
+                                {new Intl.DateTimeFormat('es-CO', {
+                                  day: 'numeric',
+                                  month: 'long',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  hour12: true
+                                }).format(
+                                  new Date(
+                                    new Date(note.creation_date).getTime() + (5 * 60 * 60 * 1000) // +5 horas
+                                  )
+                                )}
+                              </Text>
+                            )}
+                          </div>
+                        </div>
                       ))}
                     </Stack>
                   </div>
@@ -796,13 +880,13 @@ function ViewTicketPage() {
                     onChange={(e) => setNewNote(e.target.value)}
                     minRows={2}
                     className='flex-1'
-                    disabled={isTicketResolved()}
+                    disabled={!userId || loadingUserId || isTicketResolved()}
                   />
                   <ActionIcon
                     variant='filled'
                     color='blue'
                     onClick={handleAddNote}
-                    disabled={!newNote.trim() || isTicketResolved()}
+                    disabled={!userId || loadingUserId || !newNote.trim() || isTicketResolved()}
                   >
                     <IconCheck size={16} />
                   </ActionIcon>
@@ -810,6 +894,11 @@ function ViewTicketPage() {
                 {isTicketResolved() && (
                   <Text size='xs' color='dimmed' mt='xs'>
                     No se pueden agregar notas a casos resueltos.
+                  </Text>
+                )}
+                {(!userId || loadingUserId) && !isTicketResolved() && (
+                  <Text size='xs' color='orange.6' mt='xs'>
+                    {loadingUserId ? 'Cargando información del usuario...' : 'No se pudo identificar al usuario actual'}
                   </Text>
                 )}
               </Card>
