@@ -18,8 +18,9 @@ export async function GET(req) {
     const pool = await sql.connect(sqlConfig);
 
     const query = `
-      SELECT n.id_note, n.note 
-      FROM notes n 
+      SELECT n.id_note, n.note, u.name as 'createdBy', n.creation_date
+      FROM notes n
+      INNER JOIN [user] u ON u.id = n.created_by
       WHERE n.id_case = @id_case
       ORDER BY n.id_note DESC
     `;
@@ -47,13 +48,23 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const body = await req.json();
-    const { id_case, note } = body;
+    const { id_case, note, created_by } = body;
 
     if (!id_case || !note || note.trim() === '') {
       return new Response(
         JSON.stringify({
           error: 'Campos obligatorios faltantes',
           details: 'El id_case y el contenido de la nota son requeridos',
+        }),
+        { status: 400 }
+      );
+    }
+
+    if (!created_by) {
+      return new Response(
+        JSON.stringify({
+          error: 'Campo obligatorio faltante',
+          details: 'El campo created_by es requerido',
         }),
         { status: 400 }
       );
@@ -66,14 +77,15 @@ export async function POST(req) {
       await transaction.begin();
 
       const insertNoteQuery = `
-        INSERT INTO notes (note, id_case)
+        INSERT INTO notes (note, id_case, created_by)
         OUTPUT INSERTED.id_note
-        VALUES (@note, @id_case);
+        VALUES (@note, @id_case, @created_by);
       `;
 
       const request = new sql.Request(transaction);
       request.input('note', sql.Text, note.trim());
       request.input('id_case', sql.Int, id_case);
+      request.input('created_by', sql.NVarChar, created_by);
 
       const result = await request.query(insertNoteQuery);
       const newNoteId = result.recordset[0].id_note;
