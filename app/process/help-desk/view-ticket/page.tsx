@@ -41,8 +41,7 @@ import {
   IconClock,
 } from '@tabler/icons-react';
 import Link from 'next/link';
-// @ts-ignore - El hook está en formato .jsx pero lo usamos en .tsx
-import { useSendMessage } from '../../../../components/email/hooks/useSendMessage';
+import { sendMessage } from '../../../../components/email/utils/sendMessage';
 
 interface Ticket {
   id_case: number;
@@ -469,12 +468,12 @@ function ViewTicketPage() {
     }
 
     try {
-      // Preparar los datos en el formato esperado por el hook useSendMessage
+      // Preparar los datos en el formato esperado por la función sendMessage
       const message = `Actualización del Caso #${ticket?.id_case} - ${ticket?.subject_case}`;
       const emails = resolutionData.correo;
       
       // Crear la tabla con los detalles del caso
-      const table: Record<string, any>[] = [
+      const table: Array<Record<string, string | number | undefined>> = [
         {
           'ID del Caso': ticket?.id_case,
           'Asunto': ticket?.subject_case,
@@ -494,8 +493,8 @@ function ViewTicketPage() {
 
       const outro = `Este es un mensaje automático del sistema de Mesa de Ayuda. El caso #${ticket?.id_case} ha sido actualizado. Si tiene alguna pregunta, por favor contacte al administrador del sistema.`;
 
-      // Usar el hook useSendMessage para enviar el correo
-      const result = await useSendMessage(
+      // Usar la función sendMessage para enviar el correo
+      const result = await sendMessage(
         message,
         emails,
         table,
