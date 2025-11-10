@@ -41,6 +41,8 @@ import {
   IconClock,
 } from '@tabler/icons-react';
 import Link from 'next/link';
+// @ts-ignore - El hook está en formato .jsx pero lo usamos en .tsx
+import { useSendMessage } from '../../../../components/email/hooks/useSendMessage';
 
 interface Ticket {
   id_case: number;
@@ -113,6 +115,7 @@ function ViewTicketPage() {
     estado: '',
     correo: '',
     resolucion: '',
+    notificarPorCorreo: false,
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [isEditing, setIsEditing] = useState(false);
@@ -441,8 +444,76 @@ function ViewTicketPage() {
       }
     }
 
+    // Validación para el campo de correo cuando el checkbox está marcado
+    if (resolutionData.notificarPorCorreo) {
+      if (!resolutionData.correo || resolutionData.correo.trim() === '') {
+        errors.correo = 'El correo electrónico es requerido cuando se selecciona notificar por correo';
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolutionData.correo)) {
+        errors.correo = 'Por favor ingrese un correo electrónico válido';
+      }
+    }
+
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
+  };
+
+  const sendEmailNotification = async (): Promise<boolean> => {
+    // Verificar que la variable de entorno API_EMAIL esté configurada
+    if (!process.env.API_EMAIL) {
+      console.error('Error: La variable de entorno API_EMAIL no está configurada');
+      setUpdateMessage({
+        type: 'error',
+        text: 'Error de configuración: No se puede enviar la notificación por correo. Contacte al administrador.'
+      });
+      return false;
+    }
+
+    try {
+      // Preparar los datos en el formato esperado por el hook useSendMessage
+      const message = `Actualización del Caso #${ticket?.id_case} - ${ticket?.subject_case}`;
+      const emails = resolutionData.correo;
+      
+      // Crear la tabla con los detalles del caso
+      const table: Record<string, any>[] = [
+        {
+          'ID del Caso': ticket?.id_case,
+          'Asunto': ticket?.subject_case,
+          'Articulo': ticket?.activity,
+          'Departamento': ticket?.department,
+          'Empresa': ticket?.company,
+          'Fecha de Creación': ticket?.creation_date ? new Date(ticket.creation_date).toISOString().split('T')[0] : 'N/A'
+        }
+      ];
+
+      // Si hay una resolución, añadirla como una fila adicional
+      if (resolutionData.resolucion) {
+        table.push({
+          'Resolución': resolutionData.resolucion
+        });
+      }
+
+      const outro = `Este es un mensaje automático del sistema de Mesa de Ayuda. El caso #${ticket?.id_case} ha sido actualizado. Si tiene alguna pregunta, por favor contacte al administrador del sistema.`;
+
+      // Usar el hook useSendMessage para enviar el correo
+      const result = await useSendMessage(
+        message,
+        emails,
+        table,
+        outro,
+        'https://farmalogica.com.co/imagenes/logos/logo20.png', // Logo por defecto
+        [] // Sin archivos adjuntos
+      );
+
+      console.log('Notificación por correo enviada exitosamente:', result);
+      return true;
+    } catch (error) {
+      console.error('Error al enviar la notificación por correo:', error);
+      setUpdateMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Error al enviar la notificación por correo'
+      });
+      return false;
+    }
   };
 
   const handleUpdateCase = async () => {
@@ -482,7 +553,22 @@ function ViewTicketPage() {
       }
 
       const result = await response.json();
-      setUpdateMessage({ type: 'success', text: 'Caso actualizado exitosamente' });
+      
+      // Enviar notificación por correo si el checkbox está marcado
+      let emailSent = true;
+      if (resolutionData.notificarPorCorreo) {
+        emailSent = await sendEmailNotification();
+      }
+      
+      // Mostrar mensaje de éxito considerando el estado de la notificación
+      if (emailSent) {
+        setUpdateMessage({
+          type: 'success',
+          text: resolutionData.notificarPorCorreo
+            ? 'Caso actualizado exitosamente y notificación por correo enviada'
+            : 'Caso actualizado exitosamente'
+        });
+      }
       
       if (resolutionData.estado) {
         setTicket(prev => prev ? { ...prev, status: resolutionData.estado } : null);
@@ -492,7 +578,7 @@ function ViewTicketPage() {
       setIsEditing(false);
       
       if (resolutionData.estado) {
-        setResolutionData({ ...resolutionData, estado: '', resolucion: '' });
+        setResolutionData({ ...resolutionData, estado: '', resolucion: '', notificarPorCorreo: false });
         setShowResolution(false);
       }
     } catch (error) {
@@ -953,19 +1039,35 @@ function ViewTicketPage() {
                       error={formErrors.estado}
                       disabled={!isEditing}
                     />
-                    <TextInput
-                      label='Correo electrónico de contacto'
-                      placeholder='correo@empresa.com'
-                      value={resolutionData.correo}
+                    <Checkbox
+                      label='¿Notificar por correo electrónico?'
+                      checked={resolutionData.notificarPorCorreo}
                       onChange={(e) =>
                         setResolutionData({
                           ...resolutionData,
-                          correo: e.currentTarget.value,
+                          notificarPorCorreo: e.currentTarget.checked,
+                          correo: e.currentTarget.checked ? resolutionData.correo : '',
                         })
                       }
-                      error={formErrors.correo}
                       disabled={!isEditing}
+                      mb='sm'
                     />
+                    {resolutionData.notificarPorCorreo && (
+                      <TextInput
+                        label='Correo electrónico de contacto'
+                        placeholder='correo@empresa.com'
+                        value={resolutionData.correo}
+                        onChange={(e) =>
+                          setResolutionData({
+                            ...resolutionData,
+                            correo: e.currentTarget.value,
+                          })
+                        }
+                        error={formErrors.correo}
+                        disabled={!isEditing}
+                        required
+                      />
+                    )}
                     <Textarea
                       label='Descripción de la resolución'
                       placeholder='Describe la resolución aplicada...'
@@ -980,18 +1082,6 @@ function ViewTicketPage() {
                       error={formErrors.resolucion}
                       disabled={!isEditing}
                     />
-
-                    {isEditing && (
-                      <Button
-                        fullWidth
-                        color='blue'
-                        onClick={handleUpdateCase}
-                        leftSection={<IconCheck size={16} />}
-                        loading={isUpdating}
-                      >
-                        Actualizar Caso
-                      </Button>
-                    )}
                   </Stack>
                 )}
               </Card>
