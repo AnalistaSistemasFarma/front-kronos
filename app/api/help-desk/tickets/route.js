@@ -28,7 +28,7 @@ export async function GET(req) {
       INNER JOIN activity a ON a.id_activity = cc.id_activity
       INNER JOIN status_case sc ON sc.id_status_case = c.id_status_case
       INNER JOIN department d ON d.id_department = c.id_department
-      INNER JOIN subprocess_user_company suc ON suc.id_subprocess_user_company = c.id_technical
+      LEFT JOIN subprocess_user_company suc ON suc.id_subprocess_user_company = c.id_technical
       LEFT JOIN company_user cu ON cu.id_company_user = suc.id_company_user
       LEFT JOIN [user] u ON u.id = cu.id_user
 	    LEFT JOIN company co ON co.id_company = c.company
