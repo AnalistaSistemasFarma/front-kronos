@@ -12,6 +12,7 @@ export async function GET(req) {
     const assigned_user = searchParams.get('assigned_user');
     const date_from = searchParams.get('date_from');
     const date_to = searchParams.get('date_to');
+    const technician = searchParams.get('technician');
 
     let query = `
       SELECT 
@@ -39,6 +40,7 @@ export async function GET(req) {
     if (status && status !== '0') query += ` AND sc.id_status_case = @status`;
     else if (!status) query += ` AND sc.id_status_case = 1`; // Por defecto mostrar solo tickets abiertos (id_status_case = 1)
     if (assigned_user) query += ` AND u.name LIKE '%' + @assigned_user + '%'`;
+    if (technician) query += ` AND c.id_technical = @technician`;
     if (date_from && date_to) query += ` AND c.creation_date BETWEEN @date_from AND @date_to`;
 
     query += ` ORDER BY c.id_case DESC`;
@@ -47,6 +49,7 @@ export async function GET(req) {
     if (priority) request.input('priority', sql.NVarChar, priority);
     if (status) request.input('status', sql.Int, status);
     if (assigned_user) request.input('assigned_user', sql.NVarChar, assigned_user);
+    if (technician) request.input('technician', sql.Int, technician);
     if (date_from && date_to) {
       request.input('date_from', sql.Date, date_from);
       request.input('date_to', sql.Date, date_to);
