@@ -76,6 +76,7 @@ function TicketsBoard() {
     assigned_user: '',
     date_from: '',
     date_to: '',
+    technician: '', // Nuevo filtro por técnico
   });
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
@@ -98,6 +99,8 @@ function TicketsBoard() {
   const [technicals, setTechnicals] = useState<{ value: string; label: string }[]>([]);
   const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
+  const [loadingTechnicals, setLoadingTechnicals] = useState(false);
+  const [technicalsError, setTechnicalsError] = useState<string | null>(null);
   const [idUser, setIdUser] = useState('');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -188,6 +191,9 @@ function TicketsBoard() {
   const fetchSubprocessUsers = async () => {
     console.log('Frontend - fetchSubprocessUsers called');
     try {
+      setLoadingTechnicals(true);
+      setTechnicalsError(null);
+      
       const response = await fetch('/api/help-desk/technical');
       console.log('Frontend - fetchSubprocessUsers response status:', response.status);
 
@@ -201,18 +207,33 @@ function TicketsBoard() {
 
         console.log('Frontend - fetchSubprocessUsers received data:', data);
 
-        setTechnicals(
-          data.map((item) => ({
-            value: item.id_subprocess_user_company.toString(),
-            label: item.name,
-          }))
-        );
+        // Validar que los datos sean válidos
+        if (Array.isArray(data) && data.length > 0) {
+          setTechnicals(
+            data.map((item) => ({
+              value: item.id_subprocess_user_company.toString(),
+              label: item.name,
+            }))
+          );
+        } else {
+          setTechnicals([]);
+          console.log('No se encontraron técnicos disponibles');
+        }
       } else {
-        console.error('Frontend - fetchSubprocessUsers failed with status:', response.status);
+        const errorText = await response.text();
+        console.error('Frontend - fetchSubprocessUsers failed with status:', response.status, errorText);
+        setTechnicalsError('No se pudieron cargar los técnicos. Intente nuevamente.');
       }
     } catch (error) {
       console.error('Error fetching subprocess users:', error);
+      setTechnicalsError('Error de conexión al cargar técnicos. Verifique su conexión e intente nuevamente.');
+    } finally {
+      setLoadingTechnicals(false);
     }
+  };
+
+  const handleRetryTechnicals = async () => {
+    await fetchSubprocessUsers();
   };
 
   const fetchActivities = async (subcategoryId: string) => {
@@ -240,6 +261,7 @@ function TicketsBoard() {
       if (filters.assigned_user) params.append('assigned_user', filters.assigned_user);
       if (filters.date_from) params.append('date_from', filters.date_from);
       if (filters.date_to) params.append('date_to', filters.date_to);
+      if (filters.technician) params.append('technician', filters.technician);
 
       const response = await fetch(`/api/help-desk/tickets?${params.toString()}`);
 
@@ -331,6 +353,7 @@ function TicketsBoard() {
         activity: '',
         description: '',
       });
+      setTechnicalsError(null);
 
       fetchTickets();
       setModalOpened(false);
@@ -625,6 +648,19 @@ function TicketsBoard() {
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Técnico Asignado'
+                    placeholder='Todos los técnicos'
+                    clearable
+                    data={technicals}
+                    value={filters.technician}
+                    onChange={(value) => handleFilterChange('technician', value || '')}
+                    leftSection={<IconUser size={16} />}
+                    disabled={loadingOptions || loadingTechnicals}
+                    rightSection={loadingTechnicals ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div> : null}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <TextInput
                     label='Fecha Desde'
                     type='date'
@@ -654,6 +690,7 @@ function TicketsBoard() {
                       assigned_user: '',
                       date_from: '',
                       date_to: '',
+                      technician: '',
                     })
                   }
                   leftSection={<IconX size={16} />}
@@ -772,6 +809,7 @@ function TicketsBoard() {
           onClose={() => {
             setModalOpened(false);
             setFormErrors({});
+            setTechnicalsError(null);
           }}
           title={
             <Group>
@@ -955,15 +993,47 @@ function TicketsBoard() {
               <Grid.Col span={{ base: 12, md: 6 }}>
                 <Select
                   label='Técnico Asignado'
-                  placeholder='Seleccione el técnico (opcional)'
+                  placeholder={
+                    loadingTechnicals
+                      ? 'Cargando técnicos...'
+                      : technicals.length === 0 && !loadingTechnicals && !technicalsError
+                        ? 'No hay técnicos disponibles'
+                        : 'Seleccione el técnico (opcional)'
+                  }
                   data={technicals}
                   value={formData.technician}
-                  onChange={(value) => handleFormChange('technician', value || '')}
-                  disabled={loadingOptions}
+                  onChange={(value) => {
+                    // Validar que el valor sea un técnico válido o vacío
+                    if (value === '' || technicals.some(t => t.value === value)) {
+                      handleFormChange('technician', value || '');
+                    }
+                  }}
+                  disabled={loadingOptions || loadingTechnicals || (technicals.length === 0 && !technicalsError)}
                   leftSection={<IconUser size={16} />}
                   clearable
-                  description='Puede dejarse sin asignar'
+                  description={
+                    technicalsError
+                      ? 'Error al cargar técnicos'
+                      : technicals.length === 0 && !loadingTechnicals && !technicalsError
+                        ? 'No se encontraron técnicos disponibles en este momento'
+                        : 'Puede dejarse sin asignar'
+                  }
+                  error={technicalsError}
+                  rightSection={loadingTechnicals ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div> : null}
                 />
+                {technicalsError && (
+                  <Group justify="flex-end" mt="xs">
+                    <Button
+                      variant="subtle"
+                      size="xs"
+                      onClick={handleRetryTechnicals}
+                      loading={loadingTechnicals}
+                      leftSection={<IconRefresh size={12} />}
+                    >
+                      Reintentar
+                    </Button>
+                  </Group>
+                )}
               </Grid.Col>
             </Grid>
 

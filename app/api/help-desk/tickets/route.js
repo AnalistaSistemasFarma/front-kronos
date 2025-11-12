@@ -12,6 +12,7 @@ export async function GET(req) {
     const assigned_user = searchParams.get('assigned_user');
     const date_from = searchParams.get('date_from');
     const date_to = searchParams.get('date_to');
+    const technician = searchParams.get('technician');
 
     let query = `
       SELECT 
@@ -28,7 +29,7 @@ export async function GET(req) {
       INNER JOIN activity a ON a.id_activity = cc.id_activity
       INNER JOIN status_case sc ON sc.id_status_case = c.id_status_case
       INNER JOIN department d ON d.id_department = c.id_department
-      INNER JOIN subprocess_user_company suc ON suc.id_subprocess_user_company = c.id_technical
+      LEFT JOIN subprocess_user_company suc ON suc.id_subprocess_user_company = c.id_technical
       LEFT JOIN company_user cu ON cu.id_company_user = suc.id_company_user
       LEFT JOIN [user] u ON u.id = cu.id_user
 	    LEFT JOIN company co ON co.id_company = c.company
@@ -39,6 +40,7 @@ export async function GET(req) {
     if (status && status !== '0') query += ` AND sc.id_status_case = @status`;
     else if (!status) query += ` AND sc.id_status_case = 1`; // Por defecto mostrar solo tickets abiertos (id_status_case = 1)
     if (assigned_user) query += ` AND u.name LIKE '%' + @assigned_user + '%'`;
+    if (technician) query += ` AND c.id_technical = @technician`;
     if (date_from && date_to) query += ` AND c.creation_date BETWEEN @date_from AND @date_to`;
 
     query += ` ORDER BY c.id_case DESC`;
@@ -47,6 +49,7 @@ export async function GET(req) {
     if (priority) request.input('priority', sql.NVarChar, priority);
     if (status) request.input('status', sql.Int, status);
     if (assigned_user) request.input('assigned_user', sql.NVarChar, assigned_user);
+    if (technician) request.input('technician', sql.Int, technician);
     if (date_from && date_to) {
       request.input('date_from', sql.Date, date_from);
       request.input('date_to', sql.Date, date_to);
