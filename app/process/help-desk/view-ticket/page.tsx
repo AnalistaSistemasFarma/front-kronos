@@ -145,6 +145,11 @@ function ViewTicketPage() {
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
 
+  const [noteData, setNoteData] = useState({
+    correo: '',
+    notificarPorCorreo: false,
+  });
+
   const isTicketResolved = () => {
     return ticket?.id_status_case === 2 || ticket?.status?.toLowerCase() === 'resuelto';
   };
@@ -534,6 +539,14 @@ function ViewTicketPage() {
       if (response.ok) {
         setNewNote('');
         await fetchNotes();
+
+        // Enviar notificación por correo si está marcado
+        if (noteData.notificarPorCorreo) {
+          await sendNoteEmailNotification();
+        }
+
+        // Resetear los datos de nota
+        setNoteData({ correo: '', notificarPorCorreo: false });
       } else {
         const errorData = await response.json();
         console.error('Error al agregar nota:', errorData.error);
@@ -683,6 +696,45 @@ function ViewTicketPage() {
         type: 'error',
         text: error instanceof Error ? error.message : 'Error al enviar la notificación por correo'
       });
+      return false;
+    }
+  };
+
+  const sendNoteEmailNotification = async (): Promise<boolean> => {
+    if (!process.env.API_EMAIL) {
+      console.error('Error: La variable de entorno API_EMAIL no está configurada');
+      return false;
+    }
+
+    try {
+      const message = `Nueva Nota en Caso #${ticket?.id_case} - ${ticket?.subject_case}`;
+      const emails = noteData.correo;
+
+      const table: Array<Record<string, string | number | undefined>> = [
+        {
+          'ID del Caso': ticket?.id_case,
+          'Asunto': ticket?.subject_case,
+          'Nota': newNote,
+          'Creado por': userName,
+          'Fecha de Creación': ticket?.creation_date ? new Date(ticket.creation_date).toISOString().split('T')[0] : 'N/A'
+        }
+      ];
+
+      const outro = `Este es un mensaje automático del sistema de Mesa de Ayuda. Se ha agregado una nueva nota al caso #${ticket?.id_case}. Si tiene alguna pregunta, por favor contacte al administrador del sistema.`;
+
+      const result = await sendMessage(
+        message,
+        emails,
+        table,
+        outro,
+        'https://farmalogica.com.co/imagenes/logos/logo20.png',
+        []
+      );
+
+      console.log('Notificación por correo de nota enviada exitosamente:', result);
+      return true;
+    } catch (error) {
+      console.error('Error al enviar la notificación por correo de nota:', error);
       return false;
     }
   };
@@ -1152,24 +1204,53 @@ function ViewTicketPage() {
                   </Text>
                 )}
 
-                <Group align='flex-end'>
+                <Stack gap='sm'>
                   <Textarea
                     placeholder='Escribe una nota...'
                     value={newNote}
                     onChange={(e) => setNewNote(e.target.value)}
                     minRows={2}
-                    className='flex-1'
                     disabled={!userId || loadingUserId || isTicketResolved()}
                   />
-                  <ActionIcon
-                    variant='filled'
-                    color='blue'
-                    onClick={handleAddNote}
-                    disabled={!userId || loadingUserId || !newNote.trim() || isTicketResolved()}
-                  >
-                    <IconCheck size={16} />
-                  </ActionIcon>
-                </Group>
+                  <Checkbox
+                    label='¿Notificar por correo electrónico?'
+                    checked={noteData.notificarPorCorreo}
+                    onChange={(e) =>
+                      setNoteData({
+                        ...noteData,
+                        notificarPorCorreo: e.currentTarget.checked,
+                        correo: e.currentTarget.checked ? noteData.correo : '',
+                      })
+                    }
+                    disabled={!userId || loadingUserId || isTicketResolved()}
+                    mb='sm'
+                  />
+                  {noteData.notificarPorCorreo && (
+                    <TextInput
+                      label='Correo electrónico de contacto'
+                      placeholder='correo@empresa.com'
+                      value={noteData.correo}
+                      onChange={(e) =>
+                        setNoteData({
+                          ...noteData,
+                          correo: e.currentTarget.value,
+                        })
+                      }
+                      disabled={!userId || loadingUserId || isTicketResolved()}
+                      required
+                    />
+                  )}
+                  <Group justify='flex-end'>
+                    <ActionIcon
+                      variant='filled'
+                      color='blue'
+                      onClick={handleAddNote}
+                      disabled={!userId || loadingUserId || !newNote.trim() || isTicketResolved()}
+                    >
+                      <IconCheck size={16} />
+                    </ActionIcon>
+                  </Group>
+                </Stack>
                 {isTicketResolved() && (
                   <Text size='xs' color='dimmed' mt='xs'>
                     No se pueden agregar notas a casos resueltos.
