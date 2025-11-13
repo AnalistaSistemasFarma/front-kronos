@@ -2,6 +2,8 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { useGetMicrosoftToken as getMicrosoftToken } from "../../../../components/microsoft-365/useGetMicrosoftToken";
+import axios from "axios";
 import { useSession } from 'next-auth/react';
 import {
   Title,
@@ -24,6 +26,7 @@ import {
   Anchor,
   Flex,
   ActionIcon,
+  Box,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -39,9 +42,15 @@ import {
   IconTicket,
   IconFilter,
   IconClock,
+  IconUpload,
+  IconFile,
+  IconFileText,
+  IconFileSpreadsheet,
+  IconPhoto,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../components/email/utils/sendMessage';
+import FileUpload, { UploadedFile } from '../../../../components/ui/FileUpload';
 
 interface Ticket {
   id_case: number;
@@ -93,6 +102,14 @@ interface Activity {
   id_subcategory: number | null;
 }
 
+interface FolderFile {
+  id: string;
+  name: string;
+  size?: number;
+  lastModifiedDateTime?: string;
+  '@microsoft.graph.downloadUrl'?: string;
+}
+
 function ViewTicketPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -107,6 +124,7 @@ function ViewTicketPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [folderContents, setFolderContents] = useState([]);
   const [newNote, setNewNote] = useState('');
   const [loadingNotes, setLoadingNotes] = useState(false);
   const [showResolution, setShowResolution] = useState(false);
@@ -125,9 +143,18 @@ function ViewTicketPage() {
   const userName = session?.user?.name || '';
   const [userId, setUserId] = useState<number | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
 
   const isTicketResolved = () => {
     return ticket?.id_status_case === 2 || ticket?.status?.toLowerCase() === 'resuelto';
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   useEffect(() => {
@@ -155,6 +182,31 @@ function ViewTicketPage() {
         });
     }
   }, [id]);
+
+  // Load attached files from localStorage
+  useEffect(() => {
+    if (ticket?.id_case) {
+      const storedFiles = localStorage.getItem(`ticket-${ticket.id_case}-files`);
+      if (storedFiles) {
+        try {
+          const parsedFiles = JSON.parse(storedFiles);
+          setAttachedFiles(parsedFiles);
+        } catch (error) {
+          console.error('Error loading stored files:', error);
+        }
+      }
+    }
+  }, [ticket?.id_case]);
+
+  // Save attached files to localStorage whenever they change
+  useEffect(() => {
+    if (ticket?.id_case && attachedFiles.length > 0) {
+      localStorage.setItem(`ticket-${ticket.id_case}-files`, JSON.stringify(attachedFiles));
+    } else if (ticket?.id_case) {
+      // Clear localStorage if no files
+      localStorage.removeItem(`ticket-${ticket.id_case}-files`);
+    }
+  }, [attachedFiles, ticket?.id_case]);
 
   useEffect(() => {
     if (ticket) {
@@ -343,6 +395,126 @@ function ViewTicketPage() {
     }
   };
 
+  //Onedrive 365
+  async function GetToken() {
+    const token = await getMicrosoftToken();
+
+    // const formData = new FormData();
+    // formData.append("file", file);
+
+    try {
+      const response = await axios.get(
+        `https://graph.microsoft.com/v1.0/drive/special/documents/children`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = response.data;
+      console.log(data);
+    } catch (error) {
+      console.log(error);
+    }
+  }
+
+  const fetchFolderContents = async () => {
+    if (!ticket?.id_case) return;
+
+    const folderName = `Ticket-${ticket.id_case}`;
+    try {
+      const token = await getMicrosoftToken();
+      if (!token) {
+        throw new Error('No se pudo obtener el token de acceso.');
+      }
+
+      // Consulta los elementos de la carpeta
+      const response = await axios.get(
+        `${process.env.NEXT_PUBLIC_MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}:/children`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      // Filtrar solo archivos (no carpetas)
+      const files = response.data.value.filter((item: Record<string, unknown>) => 'file' in item && !!item.file);
+      setFolderContents(files);
+      console.log('Archivos existentes listados exitosamente:', files);
+    } catch (error) {
+      console.error('Error al listar los archivos de la carpeta:', error);
+      // No mostrar error al usuario si la carpeta no existe aún
+      setFolderContents([]);
+    }
+  };
+
+  useEffect(() => {
+    if (ticket?.id_case) {
+      fetchFolderContents();
+    }
+  }, [ticket?.id_case]);
+
+  async function CheckOrCreateFolderAndUpload(folderName: string, files: { file: File }[], token: string) {
+
+    let folderId: string;
+
+    try {
+        // Intentar obtener la carpeta existente
+        const getResponse = await axios.get(
+            `${process.env.NEXT_PUBLIC_MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}`,
+            {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            }
+        );
+
+        if (getResponse.status === 200) {
+            // Carpeta existe, obtener su ID
+            folderId = (getResponse.data as { id: string }).id;
+        } else {
+            throw new Error("Error al verificar la existencia de la carpeta.");
+        }
+    } catch (getError: unknown) {
+      if (getError instanceof Error) {
+        console.error(getError.message);
+      } else {
+        console.error(getError);
+      }
+    }
+
+    // Subir archivos a la carpeta
+    if (files && files.length > 0) {
+        const uploadPromises = files.map((file: { file: File }) =>
+            axios.put(
+                `${process.env.NEXT_PUBLIC_MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
+                file.file,
+                {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        "Content-Type": file.file.type,
+                    },
+                }
+            )
+        );
+
+        // Esperar a que todos los archivos se suban
+        const results = await Promise.all(uploadPromises);
+
+        results.forEach((response, index) => {
+            if (response.status === 201 || response.status === 200) {
+                console.log(`Archivo subido: ${files[index].file.name}`, response.data);
+            } else {
+                console.log(`Error al subir el archivo: ${files[index].file.name}`);
+            }
+        });
+    } else {
+        console.log("No hay archivos seleccionados para subir.");
+    }
+  }
+
   const handleAddNote = async () => {
     if (!newNote.trim() || !ticket?.id_case || !userId) return;
     
@@ -524,6 +696,23 @@ function ViewTicketPage() {
     setUpdateMessage(null);
 
     try {
+      // Subir archivos adjuntos si existen
+      if (attachedFiles.length > 0) {
+        const token = await getMicrosoftToken();
+        if (!token) {
+          throw new Error('No se pudo obtener el token de acceso para subir archivos.');
+        }
+
+        const folderName = `Ticket-${ticket?.id_case}`;
+        const filesToUpload = attachedFiles
+          .filter(file => file.status === 'success')
+          .map(file => ({ file: file.file }));
+
+        if (filesToUpload.length > 0) {
+          await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
+        }
+      }
+
       const updateData = {
         id_case: ticket?.id_case,
         status: resolutionData.estado || ticket?.id_status_case,
@@ -575,6 +764,11 @@ function ViewTicketPage() {
       
       setOriginalTicket(ticket);
       setIsEditing(false);
+
+      // Refrescar la lista de archivos existentes después de actualizar el ticket
+      if (attachedFiles.length > 0) {
+        setTimeout(() => fetchFolderContents(), 2000); // Esperar 2 segundos para que se complete la subida
+      }
       
       if (resolutionData.estado) {
         setResolutionData({ ...resolutionData, estado: '', resolucion: '', notificarPorCorreo: false });
@@ -1087,6 +1281,73 @@ function ViewTicketPage() {
             </Stack>
           </Grid.Col>
         </Grid>
+
+        {/* File Attachments */}
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+          <Title order={3} mb='md' className='flex items-center gap-2'>
+            <IconUpload size={20} />
+            Archivos Adjuntos
+          </Title>
+
+          {/* Archivos existentes */}
+          {folderContents.length > 0 && (
+            <Stack gap="sm" mb="md">
+              <Text size="sm" fw={500}>
+                Archivos existentes en el ticket ({folderContents.length})
+              </Text>
+              {folderContents.map((file: FolderFile) => (
+                <Card key={file.id} withBorder p="sm" bg="gray.0">
+                  <Flex align="center" gap="sm">
+                    <Box c="blue">
+                      {file.name.toLowerCase().endsWith('.pdf') && <IconFileText size={20} />}
+                      {(file.name.toLowerCase().endsWith('.doc') || file.name.toLowerCase().endsWith('.docx')) && <IconFileText size={20} />}
+                      {(file.name.toLowerCase().endsWith('.xls') || file.name.toLowerCase().endsWith('.xlsx')) && <IconFileSpreadsheet size={20} />}
+                      {(file.name.toLowerCase().endsWith('.png') || file.name.toLowerCase().endsWith('.jpg') || file.name.toLowerCase().endsWith('.jpeg')) && <IconPhoto size={20} />}
+                      {!file.name.toLowerCase().match(/\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg)$/) && <IconFile size={20} />}
+                    </Box>
+                    <Box style={{ flex: 1 }}>
+                      <Text size="sm" fw={500} lineClamp={1}>
+                        {file.name}
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        {file.size ? formatFileSize(file.size) : 'Tamaño desconocido'}
+                      </Text>
+                      {file.lastModifiedDateTime && (
+                        <Text size="xs" c="dimmed">
+                          Subido: {new Date(file.lastModifiedDateTime).toLocaleDateString('es-CO')}
+                        </Text>
+                      )}
+                    </Box>
+                    <Group gap="xs">
+                      <Badge color="teal" size="sm">
+                        Almacenado
+                      </Badge>
+                      <ActionIcon
+                        variant="subtle"
+                        color="blue"
+                        size="sm"
+                        component="a"
+                        href={file['@microsoft.graph.downloadUrl']}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Descargar archivo ${file.name}`}
+                      >
+                        <IconUpload size={16} />
+                      </ActionIcon>
+                    </Group>
+                  </Flex>
+                </Card>
+              ))}
+            </Stack>
+          )}
+
+          {/* Componente de carga de archivos */}
+          <FileUpload
+            ticketId={ticket.id_case}
+            onFilesChange={setAttachedFiles}
+            disabled={isTicketResolved()}
+          />
+        </Card>
 
         {/* Actions */}
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
