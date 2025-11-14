@@ -8,7 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: self-hosted # Runner instalado en tu servidor
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -39,5 +39,3 @@ jobs:
           cd C:\Users\administrador.DFARUNIADM\projects\front-kronos
           pm2 restart all
           pm2 save
-
-   

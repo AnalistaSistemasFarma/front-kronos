@@ -3,15 +3,16 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
-      allowedOrigins: [
-        'localhost:8080',
-        'groupsharedservices.farmalogica.com',
-      ],
+      allowedOrigins: ['localhost:8080', 'groupsharedservices.farmalogica.com'],
     },
     viewTransition: true,
   },
   env: {
     API_EMAIL: process.env.API_EMAIL,
+    MICROSOFTCLIENTID: process.env.MICROSOFTCLIENTID,
+    MICROSOFTCLIENTSECRET: process.env.MICROSOFTCLIENTSECRET,
+    MICROSOFTTENANTID: process.env.MICROSOFTTENANTID,
+    MICROSOFTGRAPHUSERROUTE: process.env.MICROSOFTGRAPHUSERROUTE,
   },
 };
 

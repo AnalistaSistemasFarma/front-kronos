@@ -32,7 +32,6 @@ export default function Login() {
       if (result?.error) {
         toast.error('Credenciales inválidas. Por favor, inténtalo de nuevo.');
       } else {
-        toast.success('¡Bienvenido de nuevo!');
         router.push('/dashboard');
       }
     } catch {

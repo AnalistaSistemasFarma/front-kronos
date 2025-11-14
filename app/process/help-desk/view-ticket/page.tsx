@@ -2,8 +2,8 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from "../../../../components/microsoft-365/useGetMicrosoftToken";
-import axios from "axios";
+import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
+import axios from 'axios';
 import { useSession } from 'next-auth/react';
 import {
   Title,
@@ -138,7 +138,10 @@ function ViewTicketPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [originalTicket, setOriginalTicket] = useState<Ticket | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [updateMessage, setUpdateMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [updateMessage, setUpdateMessage] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
   const [userId, setUserId] = useState<number | null>(null);
@@ -243,9 +246,9 @@ function ViewTicketPage() {
 
     try {
       setLoadingUserId(true);
-      
+
       const params = new URLSearchParams({
-        userName: userName.trim()
+        userName: userName.trim(),
       });
 
       const response = await fetch(`/api/requests-general/get-user-id?${params}`, {
@@ -263,7 +266,6 @@ function ViewTicketPage() {
 
       const data = await response.json();
       return data.success ? data.userId : null;
-
     } catch (error) {
       console.error('Error en la llamada al endpoint:', error);
       return null;
@@ -274,7 +276,7 @@ function ViewTicketPage() {
 
   useEffect(() => {
     if (status === 'authenticated' && userName && !userId) {
-      getUserIdByName(userName).then(id => {
+      getUserIdByName(userName).then((id) => {
         if (id) {
           setUserId(id);
           console.log('ID de usuario obtenido:', id);
@@ -382,11 +384,11 @@ function ViewTicketPage() {
 
   const fetchNotes = async () => {
     if (!ticket?.id_case) return;
-    
+
     try {
       setLoadingNotes(true);
       const response = await fetch(`/api/help-desk/notes?id_case=${ticket.id_case}`);
-      
+
       if (response.ok) {
         const data: Note[] = await response.json();
         setNotes(data);
@@ -436,7 +438,7 @@ function ViewTicketPage() {
 
       // Consulta los elementos de la carpeta
       const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}:/children`,
+        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}:/children`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -445,7 +447,9 @@ function ViewTicketPage() {
       );
 
       // Filtrar solo archivos (no carpetas)
-      const files = response.data.value.filter((item: Record<string, unknown>) => 'file' in item && !!item.file);
+      const files = response.data.value.filter(
+        (item: Record<string, unknown>) => 'file' in item && !!item.file
+      );
       setFolderContents(files);
       console.log('Archivos existentes listados exitosamente:', files);
     } catch (error) {
@@ -461,27 +465,30 @@ function ViewTicketPage() {
     }
   }, [ticket?.id_case]);
 
-  async function CheckOrCreateFolderAndUpload(folderName: string, files: { file: File }[], token: string) {
-
+  async function CheckOrCreateFolderAndUpload(
+    folderName: string,
+    files: { file: File }[],
+    token: string
+  ) {
     let folderId: string;
 
     try {
-        // Intentar obtener la carpeta existente
-        const getResponse = await axios.get(
-            `${process.env.NEXT_PUBLIC_MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}`,
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            }
-        );
-
-        if (getResponse.status === 200) {
-            // Carpeta existe, obtener su ID
-            folderId = (getResponse.data as { id: string }).id;
-        } else {
-            throw new Error("Error al verificar la existencia de la carpeta.");
+      // Intentar obtener la carpeta existente
+      const getResponse = await axios.get(
+        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         }
+      );
+
+      if (getResponse.status === 200) {
+        // Carpeta existe, obtener su ID
+        folderId = (getResponse.data as { id: string }).id;
+      } else {
+        throw new Error('Error al verificar la existencia de la carpeta.');
+      }
     } catch (getError: unknown) {
       if (getError instanceof Error) {
         console.error(getError.message);
@@ -492,37 +499,37 @@ function ViewTicketPage() {
 
     // Subir archivos a la carpeta
     if (files && files.length > 0) {
-        const uploadPromises = files.map((file: { file: File }) =>
-            axios.put(
-                `${process.env.NEXT_PUBLIC_MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
-                file.file,
-                {
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                        "Content-Type": file.file.type,
-                    },
-                }
-            )
-        );
+      const uploadPromises = files.map((file: { file: File }) =>
+        axios.put(
+          `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
+          file.file,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': file.file.type,
+            },
+          }
+        )
+      );
 
-        // Esperar a que todos los archivos se suban
-        const results = await Promise.all(uploadPromises);
+      // Esperar a que todos los archivos se suban
+      const results = await Promise.all(uploadPromises);
 
-        results.forEach((response, index) => {
-            if (response.status === 201 || response.status === 200) {
-                console.log(`Archivo subido: ${files[index].file.name}`, response.data);
-            } else {
-                console.log(`Error al subir el archivo: ${files[index].file.name}`);
-            }
-        });
+      results.forEach((response, index) => {
+        if (response.status === 201 || response.status === 200) {
+          console.log(`Archivo subido: ${files[index].file.name}`, response.data);
+        } else {
+          console.log(`Error al subir el archivo: ${files[index].file.name}`);
+        }
+      });
     } else {
-        console.log("No hay archivos seleccionados para subir.");
+      console.log('No hay archivos seleccionados para subir.');
     }
   }
 
   const handleAddNote = async () => {
     if (!newNote.trim() || !ticket?.id_case || !userId) return;
-    
+
     try {
       const response = await fetch('/api/help-desk/notes', {
         method: 'POST',
@@ -585,7 +592,6 @@ function ViewTicketPage() {
     }
   };
 
-
   const handleStartEditing = () => {
     setIsEditing(true);
     setUpdateMessage(null);
@@ -602,7 +608,7 @@ function ViewTicketPage() {
 
   const validateFields = (): boolean => {
     const errors: Record<string, string> = {};
-    
+
     if (!ticket?.case_type) {
       errors.case_type = 'El tipo de caso es requerido';
     }
@@ -624,14 +630,16 @@ function ViewTicketPage() {
 
     if (resolutionData.estado) {
       if (!resolutionData.resolucion || resolutionData.resolucion.trim() === '') {
-        errors.resolucion = 'La descripción de la resolución es requerida cuando se cambia el estado';
+        errors.resolucion =
+          'La descripción de la resolución es requerida cuando se cambia el estado';
       }
     }
 
     // Validación para el campo de correo cuando el checkbox está marcado
     if (resolutionData.notificarPorCorreo) {
       if (!resolutionData.correo || resolutionData.correo.trim() === '') {
-        errors.correo = 'El correo electrónico es requerido cuando se selecciona notificar por correo';
+        errors.correo =
+          'El correo electrónico es requerido cuando se selecciona notificar por correo';
       } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolutionData.correo)) {
         errors.correo = 'Por favor ingrese un correo electrónico válido';
       }
@@ -647,7 +655,7 @@ function ViewTicketPage() {
       console.error('Error: La variable de entorno API_EMAIL no está configurada');
       setUpdateMessage({
         type: 'error',
-        text: 'Error de configuración: No se puede enviar la notificación por correo. Contacte al administrador.'
+        text: 'Error de configuración: No se puede enviar la notificación por correo. Contacte al administrador.',
       });
       return false;
     }
@@ -656,23 +664,25 @@ function ViewTicketPage() {
       // Preparar los datos en el formato esperado por la función sendMessage
       const message = `Actualización del Caso #${ticket?.id_case} - ${ticket?.subject_case}`;
       const emails = resolutionData.correo;
-      
+
       // Crear la tabla con los detalles del caso
       const table: Array<Record<string, string | number | undefined>> = [
         {
           'ID del Caso': ticket?.id_case,
-          'Asunto': ticket?.subject_case,
-          'Articulo': ticket?.activity,
-          'Departamento': ticket?.department,
-          'Empresa': ticket?.company,
-          'Fecha de Creación': ticket?.creation_date ? new Date(ticket.creation_date).toISOString().split('T')[0] : 'N/A'
-        }
+          Asunto: ticket?.subject_case,
+          Articulo: ticket?.activity,
+          Departamento: ticket?.department,
+          Empresa: ticket?.company,
+          'Fecha de Creación': ticket?.creation_date
+            ? new Date(ticket.creation_date).toISOString().split('T')[0]
+            : 'N/A',
+        },
       ];
 
       // Si hay una resolución, añadirla como una fila adicional
       if (resolutionData.resolucion) {
         table.push({
-          'Resolución': resolutionData.resolucion
+          Resolución: resolutionData.resolucion,
         });
       }
 
@@ -694,7 +704,7 @@ function ViewTicketPage() {
       console.error('Error al enviar la notificación por correo:', error);
       setUpdateMessage({
         type: 'error',
-        text: error instanceof Error ? error.message : 'Error al enviar la notificación por correo'
+        text: error instanceof Error ? error.message : 'Error al enviar la notificación por correo',
       });
       return false;
     }
@@ -713,11 +723,13 @@ function ViewTicketPage() {
       const table: Array<Record<string, string | number | undefined>> = [
         {
           'ID del Caso': ticket?.id_case,
-          'Asunto': ticket?.subject_case,
-          'Nota': newNote,
+          Asunto: ticket?.subject_case,
+          Nota: newNote,
           'Creado por': userName,
-          'Fecha de Creación': ticket?.creation_date ? new Date(ticket.creation_date).toISOString().split('T')[0] : 'N/A'
-        }
+          'Fecha de Creación': ticket?.creation_date
+            ? new Date(ticket.creation_date).toISOString().split('T')[0]
+            : 'N/A',
+        },
       ];
 
       const outro = `Este es un mensaje automático del sistema de Mesa de Ayuda. Se ha agregado una nueva nota al caso #${ticket?.id_case}. Si tiene alguna pregunta, por favor contacte al administrador del sistema.`;
@@ -757,8 +769,8 @@ function ViewTicketPage() {
 
         const folderName = `Ticket-${ticket?.id_case}`;
         const filesToUpload = attachedFiles
-          .filter(file => file.status === 'success')
-          .map(file => ({ file: file.file }));
+          .filter((file) => file.status === 'success')
+          .map((file) => ({ file: file.file }));
 
         if (filesToUpload.length > 0) {
           await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
@@ -793,27 +805,27 @@ function ViewTicketPage() {
       }
 
       const result = await response.json();
-      
+
       // Enviar notificación por correo si el checkbox está marcado
       let emailSent = true;
       if (resolutionData.notificarPorCorreo) {
         emailSent = await sendEmailNotification();
       }
-      
+
       // Mostrar mensaje de éxito considerando el estado de la notificación
       if (emailSent) {
         setUpdateMessage({
           type: 'success',
           text: resolutionData.notificarPorCorreo
             ? 'Caso actualizado exitosamente y notificación por correo enviada'
-            : 'Caso actualizado exitosamente'
+            : 'Caso actualizado exitosamente',
         });
       }
-      
+
       if (resolutionData.estado) {
-        setTicket(prev => prev ? { ...prev, status: resolutionData.estado } : null);
+        setTicket((prev) => (prev ? { ...prev, status: resolutionData.estado } : null));
       }
-      
+
       setOriginalTicket(ticket);
       setIsEditing(false);
 
@@ -821,16 +833,21 @@ function ViewTicketPage() {
       if (attachedFiles.length > 0) {
         setTimeout(() => fetchFolderContents(), 2000); // Esperar 2 segundos para que se complete la subida
       }
-      
+
       if (resolutionData.estado) {
-        setResolutionData({ ...resolutionData, estado: '', resolucion: '', notificarPorCorreo: false });
+        setResolutionData({
+          ...resolutionData,
+          estado: '',
+          resolucion: '',
+          notificarPorCorreo: false,
+        });
         setShowResolution(false);
       }
     } catch (error) {
       console.error('Error updating case:', error);
       setUpdateMessage({
         type: 'error',
-        text: error instanceof Error ? error.message : 'Error al actualizar el caso'
+        text: error instanceof Error ? error.message : 'Error al actualizar el caso',
       });
     } finally {
       setIsUpdating(false);
@@ -988,13 +1005,9 @@ function ViewTicketPage() {
 
           {/* Alerta de caso resuelto */}
           {isTicketResolved() && (
-            <Alert
-              icon={<IconCheck size={16} />}
-              title='Caso Resuelto'
-              color='teal'
-              mb='4'
-            >
-              Este caso ha sido marcado como resuelto y no se puede modificar. Si necesita realizar cambios, contacte al administrador del sistema.
+            <Alert icon={<IconCheck size={16} />} title='Caso Resuelto' color='teal' mb='4'>
+              Este caso ha sido marcado como resuelto y no se puede modificar. Si necesita realizar
+              cambios, contacte al administrador del sistema.
             </Alert>
           )}
         </Card>
@@ -1059,7 +1072,9 @@ function ViewTicketPage() {
                         value={ticket.id_subcategory?.toString() || ''}
                         onChange={(val) => handleFormChange('id_subcategory', val ?? '')}
                         leftSection={<IconFilter size={16} />}
-                        disabled={!isEditing || !ticket.id_category || loadingOptions || isTicketResolved()}
+                        disabled={
+                          !isEditing || !ticket.id_category || loadingOptions || isTicketResolved()
+                        }
                         error={formErrors.id_subcategory}
                       />
                     </Grid.Col>
@@ -1070,7 +1085,12 @@ function ViewTicketPage() {
                         value={ticket.id_activity?.toString() || ''}
                         onChange={(val) => handleFormChange('id_activity', val ?? '')}
                         leftSection={<IconFilter size={16} />}
-                        disabled={!isEditing || !ticket.id_subcategory || loadingOptions || isTicketResolved()}
+                        disabled={
+                          !isEditing ||
+                          !ticket.id_subcategory ||
+                          loadingOptions ||
+                          isTicketResolved()
+                        }
                         error={formErrors.id_activity}
                       />
                     </Grid.Col>
@@ -1169,7 +1189,10 @@ function ViewTicketPage() {
                   <div className='max-h-40 overflow-y-auto border border-gray-200 rounded-md p-3 mb-3 bg-gray-50'>
                     <Stack gap='xs'>
                       {notes.map((note) => (
-                        <div key={note.id_note} className='border-b border-gray-200 pb-2 last:border-b-0'>
+                        <div
+                          key={note.id_note}
+                          className='border-b border-gray-200 pb-2 last:border-b-0'
+                        >
                           <Text size='sm' className='text-gray-700 mb-1'>
                             {note.note}
                           </Text>
@@ -1185,10 +1208,10 @@ function ViewTicketPage() {
                                   year: 'numeric',
                                   hour: '2-digit',
                                   minute: '2-digit',
-                                  hour12: true
+                                  hour12: true,
                                 }).format(
                                   new Date(
-                                    new Date(note.creation_date).getTime() + (5 * 60 * 60 * 1000) // +5 horas
+                                    new Date(note.creation_date).getTime() + 5 * 60 * 60 * 1000 // +5 horas
                                   )
                                 )}
                               </Text>
@@ -1258,7 +1281,9 @@ function ViewTicketPage() {
                 )}
                 {(!userId || loadingUserId) && !isTicketResolved() && (
                   <Text size='xs' color='orange.6' mt='xs'>
-                    {loadingUserId ? 'Cargando información del usuario...' : 'No se pudo identificar al usuario actual'}
+                    {loadingUserId
+                      ? 'Cargando información del usuario...'
+                      : 'No se pudo identificar al usuario actual'}
                   </Text>
                 )}
               </Card>
@@ -1281,9 +1306,7 @@ function ViewTicketPage() {
                 {isTicketResolved() && (
                   <Card withBorder radius='md' p='md' bg='teal.0' mb='md'>
                     <Stack gap='sm'>
-                      <Text fw={600}>
-                        Información de Resolución
-                      </Text>
+                      <Text fw={600}>Información de Resolución</Text>
                       <Text size='sm' className='whitespace-pre-line text-gray-700'>
                         {ticket.resolution}
                       </Text>
@@ -1372,45 +1395,53 @@ function ViewTicketPage() {
 
           {/* Archivos existentes */}
           {folderContents.length > 0 && (
-            <Stack gap="sm" mb="md">
-              <Text size="sm" fw={500}>
+            <Stack gap='sm' mb='md'>
+              <Text size='sm' fw={500}>
                 Archivos existentes en el ticket ({folderContents.length})
               </Text>
               {folderContents.map((file: FolderFile) => (
-                <Card key={file.id} withBorder p="sm" bg="gray.0">
-                  <Flex align="center" gap="sm">
-                    <Box c="blue">
+                <Card key={file.id} withBorder p='sm' bg='gray.0'>
+                  <Flex align='center' gap='sm'>
+                    <Box c='blue'>
                       {file.name.toLowerCase().endsWith('.pdf') && <IconFileText size={20} />}
-                      {(file.name.toLowerCase().endsWith('.doc') || file.name.toLowerCase().endsWith('.docx')) && <IconFileText size={20} />}
-                      {(file.name.toLowerCase().endsWith('.xls') || file.name.toLowerCase().endsWith('.xlsx')) && <IconFileSpreadsheet size={20} />}
-                      {(file.name.toLowerCase().endsWith('.png') || file.name.toLowerCase().endsWith('.jpg') || file.name.toLowerCase().endsWith('.jpeg')) && <IconPhoto size={20} />}
-                      {!file.name.toLowerCase().match(/\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg)$/) && <IconFile size={20} />}
+                      {(file.name.toLowerCase().endsWith('.doc') ||
+                        file.name.toLowerCase().endsWith('.docx')) && <IconFileText size={20} />}
+                      {(file.name.toLowerCase().endsWith('.xls') ||
+                        file.name.toLowerCase().endsWith('.xlsx')) && (
+                        <IconFileSpreadsheet size={20} />
+                      )}
+                      {(file.name.toLowerCase().endsWith('.png') ||
+                        file.name.toLowerCase().endsWith('.jpg') ||
+                        file.name.toLowerCase().endsWith('.jpeg')) && <IconPhoto size={20} />}
+                      {!file.name
+                        .toLowerCase()
+                        .match(/\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg)$/) && <IconFile size={20} />}
                     </Box>
                     <Box style={{ flex: 1 }}>
-                      <Text size="sm" fw={500} lineClamp={1}>
+                      <Text size='sm' fw={500} lineClamp={1}>
                         {file.name}
                       </Text>
-                      <Text size="xs" c="dimmed">
+                      <Text size='xs' c='dimmed'>
                         {file.size ? formatFileSize(file.size) : 'Tamaño desconocido'}
                       </Text>
                       {file.lastModifiedDateTime && (
-                        <Text size="xs" c="dimmed">
+                        <Text size='xs' c='dimmed'>
                           Subido: {new Date(file.lastModifiedDateTime).toLocaleDateString('es-CO')}
                         </Text>
                       )}
                     </Box>
-                    <Group gap="xs">
-                      <Badge color="teal" size="sm">
+                    <Group gap='xs'>
+                      <Badge color='teal' size='sm'>
                         Almacenado
                       </Badge>
                       <ActionIcon
-                        variant="subtle"
-                        color="blue"
-                        size="sm"
-                        component="a"
+                        variant='subtle'
+                        color='blue'
+                        size='sm'
+                        component='a'
                         href={file['@microsoft.graph.downloadUrl']}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        target='_blank'
+                        rel='noopener noreferrer'
                         aria-label={`Descargar archivo ${file.name}`}
                       >
                         <IconUpload size={16} />
@@ -1437,7 +1468,13 @@ function ViewTicketPage() {
             <Alert
               color={updateMessage.type === 'success' ? 'green' : 'red'}
               mb='md'
-              icon={updateMessage.type === 'success' ? <IconCheck size={16} /> : <IconAlertCircle size={16} />}
+              icon={
+                updateMessage.type === 'success' ? (
+                  <IconCheck size={16} />
+                ) : (
+                  <IconAlertCircle size={16} />
+                )
+              }
             >
               {updateMessage.text}
             </Alert>
