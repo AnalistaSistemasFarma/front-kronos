@@ -3,7 +3,11 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
-      allowedOrigins: ['localhost:8080', 'groupsharedservices.farmalogica.com'],
+      allowedOrigins: [
+        'localhost:8080',
+        'groupsharedservices.farmalogica.com:8445',
+        'localhost:3003',
+      ],
     },
     viewTransition: true,
   },
