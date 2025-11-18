@@ -61,7 +61,7 @@ export async function GET(req) {
     }
 
     if (assigned_to) {
-      query += ` AND rg.[user] = @assigned_to`;
+      query += ` AND up.name = @assigned_to`;
       console.log('API requests-general: Agregando filtro por assigned_to:', assigned_to);
     }
 
@@ -71,8 +71,8 @@ export async function GET(req) {
       console.log('API requests-general: Usando sql.NVarChar para idUser');
     }
     if (assigned_to) {
-      request.input('assignedTo', sql.NVarChar, assigned_to);
-      console.log('API requests-general: Usando sql.NVarChar para assignedTo');
+      request.input('assigned_to', sql.NVarChar, assigned_to);
+      console.log('API requests-general: Usando sql.NVarChar para assigned_to');
     }
 
     if (status) {
@@ -89,10 +89,6 @@ export async function GET(req) {
 
     if (date_to) {
       request.input('date_to', sql.DateTime, new Date(date_to + 'T23:59:59'));
-    }
-
-    if (assigned_to) {
-      request.input('assigned_to', sql.NVarChar, assigned_to);
     }
 
     console.log('API requests-general: Ejecutando consulta:', query);

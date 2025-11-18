@@ -537,21 +537,45 @@ function ViewRequestPage() {
           </div>
 
           {/* Columna derecha: Panel de detalles de la solicitud */}
-          <div className='w-full lg:w-80 order-1 lg:order-2'>
+          <div className='w-full lg:w-150 order-1 lg:order-2'>
             <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white'>
               <Title order={4} mb='md' className='flex items-center gap-2'>
                 <IconFileDescription size={18} />
                 Detalles de la Solicitud
               </Title>
 
+              <div className='pb-2'>
+                <Text size='sm' color='gray.6' fw={500}>
+                  Fecha y Hora de Creación
+                </Text>
+                <Text size='sm'>
+                  {new Intl.DateTimeFormat('es-CO', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: true,
+                  }).format(
+                    new Date(
+                      new Date(request.created_at).getTime() + 5 * 60 * 60 * 1000 // +5 horas
+                    )
+                  )}
+                </Text>
+              </div>
+
+              <div className='pb-2'>
+                <Text size='sm' color='gray.6' fw={500}>
+                  Solicitante
+                </Text>
+                <Text size='sm'>{request.requester}</Text>
+              </div>
+
               <Stack gap='md'>
                 {/* Información básica */}
                 <div>
                   <Text size='sm' color='gray.6' fw={500}>
-                    ID de Solicitud
-                  </Text>
-                  <Text size='lg' fw={600}>
-                    #{request.id}
+                    Compañia
                   </Text>
                   <Card withBorder radius='md' p='md' bg='gray.0'>
                     <Group>
@@ -565,7 +589,7 @@ function ViewRequestPage() {
                 </div>
 
                 <div>
-                  <Text fw={600} mb='xs'>
+                  <Text size='sm' color='gray.6' fw={500}>
                     Asunto
                   </Text>
                   <Card withBorder radius='md' p='md' bg='gray.0'>
@@ -574,62 +598,6 @@ function ViewRequestPage() {
                       <Text size='sm'>{request?.subject}</Text>
                     </Group>
                   </Card>
-                </div>
-
-                <div>
-                  <Text size='sm' color='gray.6' fw={500}>
-                    Fecha y Hora de Creación
-                  </Text>
-                  <Text size='sm'>
-                    {new Intl.DateTimeFormat('es-CO', {
-                      day: 'numeric',
-                      month: 'long',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      hour12: true,
-                    }).format(
-                      new Date(
-                        new Date(request.created_at).getTime() + 5 * 60 * 60 * 1000 // +5 horas
-                      )
-                    )}
-                  </Text>
-                </div>
-
-                <div>
-                  <Text size='sm' color='gray.6' fw={500}>
-                    Estado Actual
-                  </Text>
-                  <Badge
-                    color={getStatusColor(request.status)}
-                    size='lg'
-                    radius='sm'
-                    variant='light'
-                    mt='xs'
-                  >
-                    {request.status}
-                  </Badge>
-                </div>
-
-                <div>
-                  <Text size='sm' color='gray.6' fw={500}>
-                    Solicitante
-                  </Text>
-                  <Text size='sm'>{request.requester}</Text>
-                </div>
-
-                <div>
-                  <Text size='sm' color='gray.6' fw={500}>
-                    Tipo de Solicitud
-                  </Text>
-                  <Text size='sm'>{request.category}</Text>
-                </div>
-
-                <div>
-                  <Text size='sm' color='gray.6' fw={500}>
-                    Empresa
-                  </Text>
-                  <Text size='sm'>{request.company}</Text>
                 </div>
 
                 <div>
@@ -678,19 +646,6 @@ function ViewRequestPage() {
                               {processCategories.find((p) => p.value === request?.process)?.label ||
                                 request?.process}
                             </Text>
-                          </div>
-                        </Group>
-                      </Card>
-                    </Grid.Col>
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Card withBorder radius='md' p='md' bg='gray.0'>
-                        <Group>
-                          <IconFlag size={16} />
-                          <div>
-                            <Text size='xs' color='gray.6'>
-                              Estado
-                            </Text>
-                            <Text size='sm'>{request?.status}</Text>
                           </div>
                         </Group>
                       </Card>

@@ -60,6 +60,7 @@ interface Ticket {
   id_company: number;
   requester: string;
   company: string;
+  subject: string;
 }
 
 interface CompanyData {
@@ -83,6 +84,7 @@ interface ConsultResponse {
   companies: CompanyData[];
   categories: CategoryData[];
   processCategories: ProcessCategoryData[];
+  assignedUsers: { id: string; name: string }[];
 }
 
 function RequestBoard() {
@@ -117,6 +119,7 @@ function RequestBoard() {
   const [filteredProcesses, setFilteredProcesses] = useState<{ value: string; label: string }[]>(
     []
   );
+  const [assignedUsers, setAssignedUsers] = useState<{ value: string; label: string }[]>([]);
   const [formDataLoading, setFormDataLoading] = useState(false);
   const [formDataError, setFormDataError] = useState<string | null>(null);
   const [idUser, setIdUser] = useState('');
@@ -126,6 +129,7 @@ function RequestBoard() {
     company: '',
     date_from: '',
     date_to: '',
+    assigned_to: '',
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -211,6 +215,13 @@ function RequestBoard() {
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
 
+      // Add filters to params
+      if (filters.status) params.append('status', filters.status);
+      if (filters.company) params.append('company', filters.company);
+      if (filters.date_from) params.append('date_from', filters.date_from);
+      if (filters.date_to) params.append('date_to', filters.date_to);
+      if (filters.assigned_to) params.append('assigned_to', filters.assigned_to);
+
       const url = `/api/requests-general?${params.toString()}`;
 
       const response = await fetch(url);
@@ -225,6 +236,51 @@ function RequestBoard() {
       setError('Unable to load tickets. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const validateFilters = () => {
+    const errors: string[] = [];
+
+    // Validate date range
+    if (filters.date_from && filters.date_to) {
+      const fromDate = new Date(filters.date_from);
+      const toDate = new Date(filters.date_to);
+      if (fromDate > toDate) {
+        errors.push('La fecha "Desde" no puede ser mayor que la fecha "Hasta"');
+      }
+    }
+
+    // Validate company filter
+    if (filters.company && !companies.find((c) => c.value === filters.company)) {
+      errors.push('La empresa seleccionada no es válida');
+    }
+
+    // Validate status filter
+    if (filters.status && !['Pendiente', 'En Progreso', 'Completada'].includes(filters.status)) {
+      errors.push('El estado seleccionado no es válido');
+    }
+
+    // Validate assigned user filter
+    if (filters.assigned_to && !assignedUsers.find((u) => u.value === filters.assigned_to)) {
+      errors.push('La persona asignada seleccionada no es válida');
+    }
+
+    if (errors.length > 0) {
+      setError(errors.join('. '));
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleApplyFilters = async () => {
+    if (!validateFilters()) {
+      return;
+    }
+
+    if (userId) {
+      await fetchTicketsWithUserId(userId);
     }
   };
 
@@ -290,6 +346,9 @@ function RequestBoard() {
             id_category_request: p.id_category_request,
           }))
         );
+        if (data.assignedUsers) {
+          setAssignedUsers(data.assignedUsers.map((u) => ({ value: u.name, label: u.name })));
+        }
       } else {
         console.error('Frontend - fetchFormData failed with status:', response.status);
         setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
@@ -321,6 +380,11 @@ function RequestBoard() {
       ...prev,
       [field]: value,
     }));
+
+    // Clear any existing error when user changes a filter
+    if (error) {
+      setError(null);
+    }
   };
 
   const validateForm = () => {
@@ -563,6 +627,7 @@ function RequestBoard() {
               variant='subtle'
               onClick={() => setFiltersExpanded(!filtersExpanded)}
               aria-label={filtersExpanded ? 'Ocultar filtros' : 'Mostrar filtros'}
+              data-testid='filter-toggle'
             >
               {filtersExpanded ? <IconX size={16} /> : <IconFilter size={16} />}
             </ActionIcon>
@@ -584,6 +649,7 @@ function RequestBoard() {
                     value={filters.status}
                     onChange={(value) => handleFilterChange('status', value || '')}
                     leftSection={<IconFlag size={16} />}
+                    data-testid='status-filter'
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
@@ -595,6 +661,7 @@ function RequestBoard() {
                     value={filters.company}
                     onChange={(value) => handleFilterChange('company', value || '')}
                     leftSection={<IconBuilding size={16} />}
+                    data-testid='company-filter'
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
@@ -604,6 +671,7 @@ function RequestBoard() {
                     value={filters.date_from}
                     onChange={(e) => handleFilterChange('date_from', e.target.value)}
                     leftSection={<IconCalendarEvent size={16} />}
+                    data-testid='date_from-filter'
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
@@ -613,6 +681,19 @@ function RequestBoard() {
                     value={filters.date_to}
                     onChange={(e) => handleFilterChange('date_to', e.target.value)}
                     leftSection={<IconCalendarEvent size={16} />}
+                    data-testid='date_to-filter'
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Persona Asignada'
+                    placeholder='Todas las personas'
+                    clearable
+                    data={assignedUsers}
+                    value={filters.assigned_to}
+                    onChange={(value) => handleFilterChange('assigned_to', value || '')}
+                    leftSection={<IconUserCheck size={16} />}
+                    data-testid='assigned_to-filter'
                   />
                 </Grid.Col>
               </Grid>
@@ -620,19 +701,37 @@ function RequestBoard() {
               <Group justify='flex-end' mt='md'>
                 <Button
                   variant='outline'
-                  onClick={() =>
-                    setFilters({
+                  onClick={async () => {
+                    // Clear all filters first
+                    const clearedFilters = {
                       status: '',
                       company: '',
                       date_from: '',
                       date_to: '',
-                    })
-                  }
+                      assigned_to: '',
+                    };
+                    setFilters(clearedFilters);
+
+                    // Clear any existing errors
+                    setError(null);
+
+                    // Wait a moment for state to update, then fetch all tickets
+                    setTimeout(async () => {
+                      if (userId) {
+                        await fetchTicketsWithUserId(userId);
+                      }
+                    }, 100);
+                  }}
                   leftSection={<IconX size={16} />}
+                  data-testid='clear-filters'
                 >
                   Limpiar Filtros
                 </Button>
-                <Button onClick={fetchTickets} leftSection={<IconRefresh size={16} />}>
+                <Button
+                  onClick={handleApplyFilters}
+                  leftSection={<IconRefresh size={16} />}
+                  data-testid='apply-filters'
+                >
                   Aplicar Filtros
                 </Button>
               </Group>
@@ -654,13 +753,15 @@ function RequestBoard() {
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>ID</Table.Th>
-                  <Table.Th>Empresa</Table.Th>
+
+                  <Table.Th>Asunto</Table.Th>
+                  <Table.Th>Compañia</Table.Th>
+
                   <Table.Th>Estado</Table.Th>
                   <Table.Th>Fecha de Solicitud</Table.Th>
                   <Table.Th>Categoría</Table.Th>
                   <Table.Th>Solicitado por</Table.Th>
                   <Table.Th>Asignado a</Table.Th>
-                  <Table.Th>Descripción</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -694,9 +795,17 @@ function RequestBoard() {
                         </Badge>
                       </Table.Td>
                       <Table.Td>
+                        <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
+                          {ticket.subject}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
                         <Group gap={4}>
                           <IconBuilding size={14} className='text-gray-400' />
-                          <Text fw={500}>{ticket.company}</Text>
+
+                          <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
+                            {ticket.company}
+                          </Text>
                         </Group>
                       </Table.Td>
                       <Table.Td>
@@ -710,7 +819,7 @@ function RequestBoard() {
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text fw={500} className='max-w-xs truncate'>
+                        <Text fw={500} className='max-w-xs truncate' size='sm'>
                           {ticket.category}
                         </Text>
                       </Table.Td>
@@ -725,11 +834,6 @@ function RequestBoard() {
                           <IconUserCheck size={14} className='text-gray-400' />
                           <Text size='sm'>{ticket.user}</Text>
                         </Group>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
-                          {ticket.description}
-                        </Text>
                       </Table.Td>
                     </Table.Tr>
                   ))
@@ -797,7 +901,7 @@ function RequestBoard() {
                   }}
                   error={formErrors.subject}
                   required
-                  maxLength={255}
+                  maxLength={254}
                   leftSection={<IconFileDescription size={16} />}
                 />
               </Grid.Col>
@@ -850,8 +954,8 @@ function RequestBoard() {
               error={formErrors.descripcion}
               required
               minRows={5}
-              maxLength={1000}
-              description='Mínimo 10 caracteres, máximo 1000 caracteres'
+              maxLength={254}
+              description='Mínimo 10 caracteres, máximo 254 caracteres'
               autosize
             />
 
