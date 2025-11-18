@@ -269,7 +269,7 @@ function RequestBoard() {
     }
   };
 
-  const fetchCompanies = async () => {
+  const fetchFormData = async () => {
     try {
       setFormDataLoading(true);
       setFormDataError(null);
@@ -654,14 +654,13 @@ function RequestBoard() {
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>ID</Table.Th>
-                  <Table.Th>Descripción</Table.Th>
                   <Table.Th>Empresa</Table.Th>
-
+                  <Table.Th>Estado</Table.Th>
                   <Table.Th>Fecha de Solicitud</Table.Th>
-
+                  <Table.Th>Categoría</Table.Th>
                   <Table.Th>Solicitado por</Table.Th>
                   <Table.Th>Asignado a</Table.Th>
-                  <Table.Th>Estado</Table.Th>
+                  <Table.Th>Descripción</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -695,25 +694,26 @@ function RequestBoard() {
                         </Badge>
                       </Table.Td>
                       <Table.Td>
-                        <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
-                          {ticket.description}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
                         <Group gap={4}>
                           <IconBuilding size={14} className='text-gray-400' />
-                          <Text fw={500} size='sm'>
-                            {ticket.company}
-                          </Text>
+                          <Text fw={500}>{ticket.company}</Text>
                         </Group>
                       </Table.Td>
-
+                      <Table.Td>
+                        <Badge color={getStatusColor(ticket.status)} variant='light' size='sm'>
+                          {ticket.status}
+                        </Badge>
+                      </Table.Td>
                       <Table.Td>
                         <Text size='sm' c='gray.7'>
                           {new Date(ticket.created_at).toISOString().split('T')[0]}
                         </Text>
                       </Table.Td>
-
+                      <Table.Td>
+                        <Text fw={500} className='max-w-xs truncate'>
+                          {ticket.category}
+                        </Text>
+                      </Table.Td>
                       <Table.Td>
                         <Group gap={4}>
                           <IconUser size={14} className='text-gray-400' />
@@ -727,9 +727,9 @@ function RequestBoard() {
                         </Group>
                       </Table.Td>
                       <Table.Td>
-                        <Badge color={getStatusColor(ticket.status)} variant='light' size='sm'>
-                          {ticket.status}
-                        </Badge>
+                        <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
+                          {ticket.description}
+                        </Text>
                       </Table.Td>
                     </Table.Tr>
                   ))

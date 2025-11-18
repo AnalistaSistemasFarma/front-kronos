@@ -103,7 +103,9 @@ function ViewRequestPage() {
   const [request, setRequest] = useState<Request | null>(null);
   const [companies, setCompanies] = useState<Option[]>([]);
   const [categories, setCategories] = useState<Option[]>([]);
-  const [processCategories, setProcessCategories] = useState<{ value: string; label: string; id_category_request: number }[]>([]);
+  const [processCategories, setProcessCategories] = useState<
+    { value: string; label: string; id_category_request: number }[]
+  >([]);
   const [filteredProcesses, setFilteredProcesses] = useState<Option[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -209,7 +211,9 @@ function ViewRequestPage() {
 
   useEffect(() => {
     if (request?.category) {
-      const filtered = processCategories.filter(p => p.id_category_request === parseInt(request.category));
+      const filtered = processCategories.filter(
+        (p) => p.id_category_request === parseInt(request.category)
+      );
       setFilteredProcesses(filtered);
     } else {
       setFilteredProcesses([]);
@@ -223,9 +227,17 @@ function ViewRequestPage() {
 
       if (response.ok) {
         const data: ConsultResponse = await response.json();
-        setCompanies(data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company })));
+        setCompanies(
+          data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
+        );
         setCategories(data.categories.map((c) => ({ value: c.id.toString(), label: c.category })));
-        setProcessCategories(data.processCategories.map((p) => ({ value: p.id_process.toString(), label: p.process, id_category_request: p.id_category_request })));
+        setProcessCategories(
+          data.processCategories.map((p) => ({
+            value: p.id_process.toString(),
+            label: p.process,
+            id_category_request: p.id_category_request,
+          }))
+        );
       }
     } catch (error) {
       console.error('Error fetching form data:', error);
@@ -280,7 +292,6 @@ function ViewRequestPage() {
       console.error('Error adding note:', error);
     }
   };
-
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -382,9 +393,7 @@ function ViewRequestPage() {
                 <IconFileDescription size={32} className='text-blue-6' />
                 Solicitud #{request.id}
               </Title>
-              <Text size='lg'>
-                {request.subject}
-              </Text>
+              <Text size='lg'>{request.subject}</Text>
             </div>
 
             <Group>
@@ -513,7 +522,7 @@ function ViewRequestPage() {
                     onClick={handleAddNote}
                     disabled={!userId || loadingUserId || !newNote.trim()}
                   >
-                    <IconSend size={18} />
+                    <IconCheck size={18} />
                   </ActionIcon>
                 </Group>
                 {(!userId || loadingUserId) && (
@@ -548,7 +557,8 @@ function ViewRequestPage() {
                     <Group>
                       <IconBuilding size={16} />
                       <Text size='sm'>
-                        {companies.find(c => c.value === request?.id_company?.toString())?.label || request?.company}
+                        {companies.find((c) => c.value === request?.id_company?.toString())
+                          ?.label || request?.company}
                       </Text>
                     </Group>
                   </Card>
@@ -561,9 +571,7 @@ function ViewRequestPage() {
                   <Card withBorder radius='md' p='md' bg='gray.0'>
                     <Group>
                       <IconFileDescription size={16} />
-                      <Text size='sm'>
-                        {request?.subject}
-                      </Text>
+                      <Text size='sm'>{request?.subject}</Text>
                     </Group>
                   </Card>
                 </div>
@@ -647,9 +655,12 @@ function ViewRequestPage() {
                         <Group>
                           <IconTag size={16} />
                           <div>
-                            <Text size='xs' color='gray.6'>Categoría</Text>
+                            <Text size='xs' color='gray.6'>
+                              Categoría
+                            </Text>
                             <Text size='sm'>
-                              {categories.find(c => c.value === request?.category)?.label || request?.category}
+                              {categories.find((c) => c.value === request?.category)?.label ||
+                                request?.category}
                             </Text>
                           </div>
                         </Group>
@@ -660,9 +671,12 @@ function ViewRequestPage() {
                         <Group>
                           <IconProgress size={16} />
                           <div>
-                            <Text size='xs' color='gray.6'>Proceso</Text>
+                            <Text size='xs' color='gray.6'>
+                              Proceso
+                            </Text>
                             <Text size='sm'>
-                              {processCategories.find(p => p.value === request?.process)?.label || request?.process}
+                              {processCategories.find((p) => p.value === request?.process)?.label ||
+                                request?.process}
                             </Text>
                           </div>
                         </Group>
@@ -673,10 +687,10 @@ function ViewRequestPage() {
                         <Group>
                           <IconFlag size={16} />
                           <div>
-                            <Text size='xs' color='gray.6'>Estado</Text>
-                            <Text size='sm'>
-                              {request?.status}
+                            <Text size='xs' color='gray.6'>
+                              Estado
                             </Text>
+                            <Text size='sm'>{request?.status}</Text>
                           </div>
                         </Group>
                       </Card>
@@ -687,116 +701,6 @@ function ViewRequestPage() {
             </Card>
           </div>
         </div>
-
-          <Grid.Col span={{ base: 12, lg: 4 }}>
-            <Stack gap='md'>
-              <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
-                <Title order={4} mb='md' className='flex items-center gap-2'>
-                  <IconCalendar size={18} />
-                  Información General
-                </Title>
-
-                <Stack gap='sm'>
-                  <div>
-                    <Text size='sm' color='gray.6'>
-                      Fecha de Creación
-                    </Text>
-                    <Text fw={500}>
-                      {new Date(request?.created_at).toISOString().split('T')[0]}
-                    </Text>
-                  </div>
-
-                  <div>
-                    <Text size='sm' color='gray.6'>
-                      Solicitante
-                    </Text>
-                    <Text fw={500}>
-                      {request?.requester}
-                    </Text>
-                  </div>
-
-                  <div>
-                    <Text size='sm' color='gray.6'>
-                      Empresa
-                    </Text>
-                    <Text fw={500}>
-                      {request?.company}
-                    </Text>
-                  </div>
-                </Stack>
-              </Card>
-              <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
-                <Title order={4} mb='md' className='flex items-center gap-2'>
-                  <IconNote size={18} className='text-blue-6' />
-                  Notas de la Solicitud
-                </Title>
-
-                {notes.length > 0 ? (
-                  <div className='max-h-40 overflow-y-auto border border-gray-200 rounded-md p-3 mb-3 bg-gray-50'>
-                    <Stack gap='xs'>
-                      {notes.map((note) => (
-                        <div key={note.id_note} className='border-b border-gray-200 pb-2 last:border-b-0'>
-                          <Text size='sm' className='text-gray-700 mb-1'>
-                            {note.note}
-                          </Text>
-                          <div className='flex justify-between items-center'>
-                            <Text size='xs' color='gray.6'>
-                              Creado por: {note.createdBy}
-                            </Text>
-                            {note.creation_date && (
-                              <Text size='xs' color='gray.6'>
-                                {new Intl.DateTimeFormat('es-CO', {
-                                  day: 'numeric',
-                                  month: 'long',
-                                  year: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  hour12: true
-                                }).format(
-                                  new Date(
-                                    new Date(note.creation_date).getTime() + (5 * 60 * 60 * 1000) // +5 horas
-                                  )
-                                )}
-                              </Text>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </Stack>
-                  </div>
-                ) : (
-                  <Text size='sm' color='dimmed' mb='xs'>
-                    {loadingNotes ? 'Cargando notas...' : 'No hay notas registradas.'}
-                  </Text>
-                )}
-
-                <Group align='flex-end'>
-                  <Textarea
-                    placeholder='Escribe una nota...'
-                    value={newNote}
-                    onChange={(e) => setNewNote(e.target.value)}
-                    minRows={2}
-                    className='flex-1'
-                    disabled={!userId || loadingUserId}
-                  />
-                  <ActionIcon
-                    variant='filled'
-                    color='blue'
-                    onClick={handleAddNote}
-                    disabled={!userId || loadingUserId || !newNote.trim()}
-                  >
-                    <IconCheck size={16} />
-                  </ActionIcon>
-                </Group>
-                {(!userId || loadingUserId) && (
-                  <Text size='xs' color='orange.6' mt='xs'>
-                    {loadingUserId ? 'Cargando información del usuario...' : 'No se pudo identificar al usuario actual'}
-                  </Text>
-                )}
-              </Card>
-            </Stack>
-          </Grid.Col>
-        </Grid>
 
         {/* Actions */}
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
