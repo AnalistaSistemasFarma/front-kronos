@@ -558,7 +558,7 @@ function TicketsBoard() {
                       En Progreso
                     </Text>
                     <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'en progreso').length}
+                      {tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
                     </Text>
                   </div>
                 </Group>

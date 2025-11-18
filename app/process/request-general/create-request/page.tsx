@@ -62,6 +62,29 @@ interface Ticket {
   company: string;
 }
 
+interface CompanyData {
+  id_company: number;
+  company: string;
+}
+
+interface CategoryData {
+  id: number;
+  category: string;
+}
+
+interface ProcessCategoryData {
+  id_process: number;
+  process: string;
+  id_category_request: number;
+  category: string;
+}
+
+interface ConsultResponse {
+  companies: CompanyData[];
+  categories: CategoryData[];
+  processCategories: ProcessCategoryData[];
+}
+
 function RequestBoard() {
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
@@ -79,13 +102,19 @@ function RequestBoard() {
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
     company: '',
-    usuario: '',
-    descripcion: '',
+    subject: '',
     category: '',
+    process: '',
+    descripcion: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
+  const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
+  const [processCategories, setProcessCategories] = useState<{ value: string; label: string; id_category_request: number }[]>([]);
+  const [filteredProcesses, setFilteredProcesses] = useState<{ value: string; label: string }[]>([]);
+  const [formDataLoading, setFormDataLoading] = useState(false);
+  const [formDataError, setFormDataError] = useState<string | null>(null);
   const [idUser, setIdUser] = useState('');
 
   const [filters, setFilters] = useState({
@@ -103,7 +132,7 @@ function RequestBoard() {
       router.push('/login');
       return;
     }
-    fetchCompanies();
+    fetchFormData();
   }, [session, status, router]);
 
   useEffect(() => {
@@ -146,6 +175,20 @@ function RequestBoard() {
       setIdUser('');
     }
   }, []);
+
+  useEffect(() => {
+    if (formData.category) {
+      const filtered = processCategories.filter(p => p.id_category_request === parseInt(formData.category));
+      setFilteredProcesses(filtered);
+      // Reset process if not in filtered
+      if (!filtered.find(p => p.value === formData.process)) {
+        setFormData(prev => ({ ...prev, process: '' }));
+      }
+    } else {
+      setFilteredProcesses([]);
+      setFormData(prev => ({ ...prev, process: '' }));
+    }
+  }, [formData.category, processCategories]);
 
   const fetchTickets = async () => {
     if (!userId) {
@@ -222,28 +265,28 @@ function RequestBoard() {
   };
 
 
-  const fetchCompanies = async () => {
+  const fetchFormData = async () => {
     try {
-      setLoading(true);
+      setFormDataLoading(true);
+      setFormDataError(null);
 
       const response = await fetch(`/api/requests-general/consult-request`);
 
       if (response.ok) {
-        const data: { id_company: number; company: string }[] = await response.json();
-        console.log('Frontend - fetchCompanies received data:', data);
-        setCompany(data.map((sub) => ({ value: sub.id_company.toString(), label: sub.company })));
-        console.log(
-          'Frontend - fetchCompanies state updated:',
-          data.map((sub) => ({ value: sub.id_company.toString(), label: sub.company }))
-        );
+        const data: ConsultResponse = await response.json();
+        console.log('Frontend - fetchFormData received data:', data);
+        setCompany(data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company })));
+        setCategories(data.categories.map((c) => ({ value: c.id.toString(), label: c.category })));
+        setProcessCategories(data.processCategories.map((p) => ({ value: p.id_process.toString(), label: p.process, id_category_request: p.id_category_request })));
       } else {
-        console.error('Frontend - fetchCompanies failed with status:', response.status);
+        console.error('Frontend - fetchFormData failed with status:', response.status);
+        setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
       }
     } catch (err) {
-      console.error('Error fetching tickets:', err);
-      setError('Unable to load tickets. Please try again.');
+      console.error('Error fetching form data:', err);
+      setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
     } finally {
-      setLoading(false);
+      setFormDataLoading(false);
     }
   };
 
@@ -274,11 +317,14 @@ function RequestBoard() {
     if (!formData.company) {
       errors.company = 'La empresa es obligatoria';
     }
-    if (!formData.usuario) {
-      errors.usuario = 'El usuario asignado es obligatorio';
+    if (!formData.subject.trim()) {
+      errors.subject = 'El asunto es obligatorio';
     }
-    if (!formData.category.trim()) {
+    if (!formData.category) {
       errors.category = 'La categoría es obligatoria';
+    }
+    if (!formData.process) {
+      errors.process = 'El proceso es obligatorio';
     }
     if (!formData.descripcion.trim()) {
       errors.descripcion = 'La descripción es obligatoria';
@@ -307,9 +353,10 @@ function RequestBoard() {
         },
         body: JSON.stringify({
           company: formData.company,
-          usuario: formData.usuario,
+          subject: formData.subject,
           descripcion: formData.descripcion,
-          category: formData.category,
+          category: parseInt(formData.category),
+          process: parseInt(formData.process),
           createdby: userId,
         }),
       });
@@ -325,9 +372,10 @@ function RequestBoard() {
 
       setFormData({
         company: '',
-        usuario: '',
-        descripcion: '',
+        subject: '',
         category: '',
+        process: '',
+        descripcion: '',
       });
 
       fetchTickets();
@@ -698,7 +746,18 @@ function RequestBoard() {
           radius='md'
           overlayProps={{ blur: 4 }}
         >
-          <LoadingOverlay visible={createLoading} />
+          <LoadingOverlay visible={createLoading || formDataLoading} />
+
+          {formDataError && (
+            <Alert
+              icon={<IconAlertCircle size={20} />}
+              title='Error'
+              color='red'
+              mb='md'
+            >
+              {formDataError}
+            </Alert>
+          )}
 
           <Stack>
             <Grid>
@@ -714,45 +773,62 @@ function RequestBoard() {
                   error={formErrors.company}
                   required
                   leftSection={<IconBuilding size={16} />}
+                  disabled={formDataLoading}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <TextInput
+                  label='Asunto'
+                  placeholder='Ingrese el asunto de la solicitud'
+                  value={formData.subject}
+                  onChange={(e) => {
+                    setFormData({ ...formData, subject: e.target.value });
+                    if (formErrors.subject) {
+                      setFormErrors({ ...formErrors, subject: '' });
+                    }
+                  }}
+                  error={formErrors.subject}
+                  required
+                  maxLength={255}
+                  leftSection={<IconFileDescription size={16} />}
+                />
+              </Grid.Col>
+            </Grid>
+
+            <Grid>
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Categoría'
+                  placeholder='Seleccione la categoría'
+                  data={categories}
+                  value={formData.category}
+                  onChange={(value) => {
+                    handleFormChange('category', value || '');
+                  }}
+                  error={formErrors.category}
+                  required
+                  leftSection={<IconTag size={16} />}
+                  disabled={formDataLoading}
                 />
               </Grid.Col>
 
               <Grid.Col span={{ base: 12, md: 6 }}>
                 <Select
-                  label='Asignado a'
-                  placeholder='Seleccione a quien asignar esta solicitud'
-                  data={[
-                    { value: 'Catalina Sanchez', label: 'Catalina Sanchez' },
-                    { value: 'Camila Murillo', label: 'Camila Murillo' },
-                    { value: 'Lina Ramirez', label: 'Lina Ramirez' },
-                  ]}
-                  value={formData.usuario}
+                  label='Proceso'
+                  placeholder='Seleccione el proceso'
+                  data={filteredProcesses}
+                  value={formData.process}
                   onChange={(value) => {
-                    handleFormChange('usuario', value || '');
+                    handleFormChange('process', value || '');
                   }}
-                  error={formErrors.usuario}
+                  error={formErrors.process}
                   required
-                  leftSection={<IconUserCheck size={16} />}
+                  leftSection={<IconProgress size={16} />}
+                  disabled={!formData.category || formDataLoading}
                 />
               </Grid.Col>
             </Grid>
-
-            <TextInput
-              label='Categoría'
-              placeholder='Ingrese la categoría que necesite'
-              value={formData.category}
-              onChange={(e) => {
-                setFormData({ ...formData, category: e.target.value });
-                if (formErrors.category) {
-                  setFormErrors({ ...formErrors, category: '' });
-                }
-              }}
-              error={formErrors.category}
-              required
-              maxLength={100}
-              description='Máximo 100 caracteres'
-              leftSection={<IconTag size={16} />}
-            />
 
             <Textarea
               label='Descripción Detallada'

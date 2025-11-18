@@ -6,16 +6,17 @@ export async function POST(req) {
     const body = await req.json();
     const {
       company,
-      usuario,
+      subject,
       descripcion,
       category,
+      process,
       createdby,
     } = body;
 
     if (
       !company ||
-      !usuario ||
-      !category ||
+      !subject ||
+      !process ||
       !descripcion
     ) {
       return new Response(
@@ -34,30 +35,31 @@ export async function POST(req) {
       const insertCaseQuery = `
         INSERT INTO [requests_general] (
           [description],
-          category,
-          [user],
+          subject_request,
+          id_process_category,
           id_company,
           created_at,
           id_requester,
-          [status]
+          status_req
         )
         OUTPUT INSERTED.id
         VALUES (
           @descripcion,
-          @category,
-          @usuario,
+          @subject,
+          @process,
           @company,
           @creation_date,
           @createdby,
-          'Pendiente'
+          1
         );
       `;
 
       const request = new sql.Request(transaction);
       request.input("creation_date", sql.Date, creation_date);
       request.input("descripcion", sql.NVarChar(255), descripcion);
-      request.input("category", sql.NVarChar(255), category);
-      request.input("usuario", sql.NVarChar(255), usuario);
+      request.input("subject", sql.NVarChar(255), subject);
+      request.input("category", sql.Int, category);
+      request.input("process", sql.Int, process);
       request.input("company", sql.Int, company);
       request.input("createdby", sql.NVarChar(1000), createdby);
 
