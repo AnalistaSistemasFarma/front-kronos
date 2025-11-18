@@ -436,7 +436,6 @@ function ViewTicketPage() {
         throw new Error('No se pudo obtener el token de acceso.');
       }
 
-      // Consulta los elementos de la carpeta
       const response = await axios.get(
         `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}:/children`,
         {
@@ -446,7 +445,6 @@ function ViewTicketPage() {
         }
       );
 
-      // Filtrar solo archivos (no carpetas)
       const files = response.data.value.filter(
         (item: Record<string, unknown>) => 'file' in item && !!item.file
       );
@@ -454,7 +452,6 @@ function ViewTicketPage() {
       console.log('Archivos existentes listados exitosamente:', files);
     } catch (error) {
       console.error('Error al listar los archivos de la carpeta:', error);
-      // No mostrar error al usuario si la carpeta no existe aún
       setFolderContents([]);
     }
   };
@@ -473,7 +470,6 @@ function ViewTicketPage() {
     let folderId: string;
 
     try {
-      // Intentar obtener la carpeta existente
       const getResponse = await axios.get(
         `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}`,
         {
@@ -484,7 +480,6 @@ function ViewTicketPage() {
       );
 
       if (getResponse.status === 200) {
-        // Carpeta existe, obtener su ID
         folderId = (getResponse.data as { id: string }).id;
       } else {
         throw new Error('Error al verificar la existencia de la carpeta.');
@@ -497,7 +492,6 @@ function ViewTicketPage() {
       }
     }
 
-    // Subir archivos a la carpeta
     if (files && files.length > 0) {
       const uploadPromises = files.map((file: { file: File }) =>
         axios.put(
@@ -512,7 +506,6 @@ function ViewTicketPage() {
         )
       );
 
-      // Esperar a que todos los archivos se suban
       const results = await Promise.all(uploadPromises);
 
       results.forEach((response, index) => {
@@ -547,7 +540,6 @@ function ViewTicketPage() {
         setNewNote('');
         await fetchNotes();
 
-        // Enviar notificación por correo si está marcado
         if (noteData.notificarPorCorreo) {
           await sendNoteEmailNotification();
         }
@@ -635,7 +627,6 @@ function ViewTicketPage() {
       }
     }
 
-    // Validación para el campo de correo cuando el checkbox está marcado
     if (resolutionData.notificarPorCorreo) {
       if (!resolutionData.correo || resolutionData.correo.trim() === '') {
         errors.correo =
@@ -650,7 +641,6 @@ function ViewTicketPage() {
   };
 
   const sendEmailNotification = async (): Promise<boolean> => {
-    // Verificar que la variable de entorno API_EMAIL esté configurada
     if (!process.env.API_EMAIL) {
       console.error('Error: La variable de entorno API_EMAIL no está configurada');
       setUpdateMessage({
@@ -661,11 +651,9 @@ function ViewTicketPage() {
     }
 
     try {
-      // Preparar los datos en el formato esperado por la función sendMessage
       const message = `Actualización del Caso #${ticket?.id_case} - ${ticket?.subject_case}`;
       const emails = resolutionData.correo;
 
-      // Crear la tabla con los detalles del caso
       const table: Array<Record<string, string | number | undefined>> = [
         {
           'ID del Caso': ticket?.id_case,
@@ -679,7 +667,6 @@ function ViewTicketPage() {
         },
       ];
 
-      // Si hay una resolución, añadirla como una fila adicional
       if (resolutionData.resolucion) {
         table.push({
           Resolución: resolutionData.resolucion,
@@ -688,14 +675,13 @@ function ViewTicketPage() {
 
       const outro = `Este es un mensaje automático del sistema de Mesa de Ayuda. El caso #${ticket?.id_case} ha sido actualizado. Si tiene alguna pregunta, por favor contacte al administrador del sistema.`;
 
-      // Usar la función sendMessage para enviar el correo
       const result = await sendMessage(
         message,
         emails,
         table,
         outro,
         'https://farmalogica.com.co/imagenes/logos/logo20.png', // Logo por defecto
-        [] // Sin archivos adjuntos
+        []
       );
 
       console.log('Notificación por correo enviada exitosamente:', result);
@@ -760,7 +746,6 @@ function ViewTicketPage() {
     setUpdateMessage(null);
 
     try {
-      // Subir archivos adjuntos si existen
       if (attachedFiles.length > 0) {
         const token = await getMicrosoftToken();
         if (!token) {
@@ -806,13 +791,11 @@ function ViewTicketPage() {
 
       const result = await response.json();
 
-      // Enviar notificación por correo si el checkbox está marcado
       let emailSent = true;
       if (resolutionData.notificarPorCorreo) {
         emailSent = await sendEmailNotification();
       }
 
-      // Mostrar mensaje de éxito considerando el estado de la notificación
       if (emailSent) {
         setUpdateMessage({
           type: 'success',
@@ -829,9 +812,8 @@ function ViewTicketPage() {
       setOriginalTicket(ticket);
       setIsEditing(false);
 
-      // Refrescar la lista de archivos existentes después de actualizar el ticket
       if (attachedFiles.length > 0) {
-        setTimeout(() => fetchFolderContents(), 2000); // Esperar 2 segundos para que se complete la subida
+        setTimeout(() => fetchFolderContents(), 2000);
       }
 
       if (resolutionData.estado) {
