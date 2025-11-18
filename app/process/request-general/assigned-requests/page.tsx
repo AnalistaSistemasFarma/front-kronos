@@ -52,11 +52,14 @@ import {
 
 interface Ticket {
   id: number;
+  subject: string;
   description: string;
   user: string;
   status: string;
   created_at: string;
   category: string;
+  process: string;
+  id_category: number;
   id_company: number;
   requester: string;
   company: string;
@@ -120,7 +123,7 @@ function RequestBoard() {
           if (id) {
             setUserId(id);
             setUserIdInitialized(true);
-            fetchTicketsWithUserName(userName);
+            fetchTicketsWithUserId(id);
           } else {
             setUserIdInitialized(true);
             setError('No se pudo obtener el ID del usuario. Por favor, recargue la página.');
@@ -149,39 +152,32 @@ function RequestBoard() {
   }, []);
 
   const fetchTickets = async () => {
-    if (!userName) {
-      console.log('fetchTickets: No se puede ejecutar sin userName');
+    if (!userId) {
+      console.log('fetchTickets: No se puede ejecutar sin userId');
       return;
     }
-    await fetchTicketsWithUserName(userName);
+    await fetchTicketsWithUserId(userId);
   };
 
-  const fetchTicketsWithUserName = async (userNameToUse: string) => {
+  const fetchTicketsWithUserId = async (userIdToUse: number) => {
     try {
       setLoading(true);
 
       const params = new URLSearchParams();
-      params.append('assignedTo', userNameToUse);
+      params.append('idUser', userIdToUse.toString());
 
-      // Agregar filtros activos
-      if (filters.status) params.append('status', filters.status);
-      if (filters.company) params.append('company', filters.company);
-      if (filters.date_from) params.append('date_from', filters.date_from);
-      if (filters.date_to) params.append('date_to', filters.date_to);
-      if (filters.assigned_to) params.append('assigned_to', filters.assigned_to);
-
-      const url = `/api/requests-general?${params.toString()}`;
+      const url = `/api/requests-general/request-assigned?${params.toString()}`;
 
       const response = await fetch(url);
 
-      if (!response.ok) throw new Error('Failed to fetch tickets');
+      if (!response.ok) throw new Error('Failed to fetch assigned tickets');
 
       const data = await response.json();
-      console.log('fetchTicketsWithUserName: Tickets recibidos:', data.length, 'tickets');
+      console.log('fetchTicketsWithUserId: Tickets asignados recibidos:', data.length, 'tickets');
       setTickets(data);
     } catch (err) {
-      console.error('Error fetching tickets:', err);
-      setError('Unable to load tickets. Please try again.');
+      console.error('Error fetching assigned tickets:', err);
+      setError('Unable to load assigned tickets. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -272,78 +268,6 @@ function RequestBoard() {
       ...prev,
       [field]: value,
     }));
-  };
-
-  const validateForm = () => {
-    const errors: Record<string, string> = {};
-
-    if (!formData.company) {
-      errors.company = 'La empresa es obligatoria';
-    }
-    if (!formData.usuario) {
-      errors.usuario = 'El usuario asignado es obligatorio';
-    }
-    if (!formData.category.trim()) {
-      errors.category = 'La categoría es obligatoria';
-    }
-    if (!formData.descripcion.trim()) {
-      errors.descripcion = 'La descripción es obligatoria';
-    } else if (formData.descripcion.trim().length < 10) {
-      errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
-    }
-
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  const handleCreateTicketWithValidation = async () => {
-    if (!validateForm()) {
-      return;
-    }
-    await handleCreateTicket();
-  };
-
-  const handleCreateTicket = async () => {
-    try {
-      setCreateLoading(true);
-      const response = await fetch('/api/requests-general/create-request', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          company: formData.company,
-          usuario: formData.usuario,
-          descripcion: formData.descripcion,
-          category: formData.category,
-          createdby: userId,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create ticket');
-      }
-
-      const newTicket = await response.json();
-
-      setTickets((prev) => [newTicket, ...prev]);
-
-      setFormData({
-        company: '',
-        usuario: '',
-        descripcion: '',
-        category: '',
-      });
-
-      fetchTickets();
-      setModalOpened(false);
-    } catch (err) {
-      console.error('Error creating ticket:', err);
-      setError('Failed to create ticket. Please try again.');
-    } finally {
-      setCreateLoading(false);
-    }
   };
 
   if (status === 'loading' || loading) {
@@ -593,11 +517,10 @@ function RequestBoard() {
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>ID</Table.Th>
-                  <Table.Th>Descripción</Table.Th>
+                  <Table.Th>Asunto</Table.Th>
+                  <Table.Th>Proceso</Table.Th>
                   <Table.Th>Empresa</Table.Th>
-
                   <Table.Th>Fecha de Solicitud</Table.Th>
-
                   <Table.Th>Solicitado por</Table.Th>
                   <Table.Th>Asignado a</Table.Th>
                   <Table.Th>Estado</Table.Th>
@@ -637,7 +560,12 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
-                          {ticket.description}
+                          {ticket.subject}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size='sm' className='max-w-xs truncate'>
+                          {ticket.process}
                         </Text>
                       </Table.Td>
                       <Table.Td>
@@ -648,13 +576,11 @@ function RequestBoard() {
                           </Text>
                         </Group>
                       </Table.Td>
-
                       <Table.Td>
                         <Text size='sm' c='gray.7'>
                           {new Date(ticket.created_at).toISOString().split('T')[0]}
                         </Text>
                       </Table.Td>
-
                       <Table.Td>
                         <Group gap={4}>
                           <IconUser size={14} className='text-gray-400' />
