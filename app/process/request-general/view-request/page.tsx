@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
@@ -24,6 +24,8 @@ import {
   Anchor,
   Flex,
   ActionIcon,
+  Avatar,
+  ScrollArea,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -113,6 +115,7 @@ function ViewRequestPage() {
   const userName = session?.user?.name || '';
   const [userId, setUserId] = useState<number | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const storedRequest = sessionStorage.getItem('selectedRequest');
@@ -145,6 +148,13 @@ function ViewRequestPage() {
     }
   }, [request]);
 
+  useEffect(() => {
+    // Auto-scroll al final del chat cuando se cargan nuevas notas
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [notes]);
+
   const getUserIdByName = async (userName: string): Promise<number | null> => {
     if (!session || status !== 'authenticated') {
       console.error('No hay sesión activa para realizar esta operación');
@@ -158,9 +168,9 @@ function ViewRequestPage() {
 
     try {
       setLoadingUserId(true);
-      
+
       const params = new URLSearchParams({
-        userName: userName.trim()
+        userName: userName.trim(),
       });
 
       const response = await fetch(`/api/requests-general/get-user-id?${params}`, {
@@ -178,7 +188,6 @@ function ViewRequestPage() {
 
       const data = await response.json();
       return data.success ? data.userId : null;
-
     } catch (error) {
       console.error('Error en la llamada al endpoint:', error);
       return null;
@@ -189,7 +198,7 @@ function ViewRequestPage() {
 
   useEffect(() => {
     if (status === 'authenticated' && userName && !userId) {
-      getUserIdByName(userName).then(id => {
+      getUserIdByName(userName).then((id) => {
         if (id) {
           setUserId(id);
           console.log('ID de usuario obtenido:', id);
@@ -230,7 +239,7 @@ function ViewRequestPage() {
     try {
       setLoadingNotes(true);
       const response = await fetch(`/api/requests-general/notes?id_request=${request.id}`);
-      
+
       if (response.ok) {
         const data: Note[] = await response.json();
         setNotes(data);
@@ -246,7 +255,7 @@ function ViewRequestPage() {
 
   const handleAddNote = async () => {
     if (!newNote.trim() || !request?.id || !userId) return;
-    
+
     try {
       const response = await fetch('/api/requests-general/notes', {
         method: 'POST',
@@ -357,7 +366,7 @@ function ViewRequestPage() {
 
   return (
     <div className='min-h-screen bg-gray-50'>
-      <div className='max-w-6xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
+      <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
         {/* Header */}
         <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
@@ -386,18 +395,154 @@ function ViewRequestPage() {
           </Flex>
         </Card>
 
-        <Grid>
-          <Grid.Col span={{ base: 12, lg: 8 }}>
-            <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white h-full'>
+        {/* Layout de dos columnas para escritorio, una columna para móviles */}
+        <div className='flex flex-col lg:flex-row gap-6'>
+          {/* Columna izquierda: Historial de interacciones (Chat) */}
+          <div className='flex-1 order-2 lg:order-1'>
+            <Card
+              shadow='sm'
+              p='xl'
+              radius='md'
+              withBorder
+              className='bg-white h-full flex flex-col'
+            >
               <Title order={3} mb='md' className='flex items-center gap-2'>
                 <IconNote size={20} />
+                Historial de Interacciones
+              </Title>
+
+              {/* Área de chat con scroll */}
+              <ScrollArea h={400} className='flex-1 mb-4' offsetScrollbars>
+                <div className='space-y-4 p-2'>
+                  {notes.length > 0 ? (
+                    notes.map((note) => {
+                      const isCurrentUser = note.createdBy === userName;
+                      return (
+                        <div
+                          key={note.id_note}
+                          className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
+                        >
+                          <div
+                            className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl ${
+                              isCurrentUser
+                                ? 'bg-blue-400 text-white rounded-br-none'
+                                : 'bg-gray-100 text-gray-800 rounded-bl-none'
+                            }`}
+                          >
+                            <div className='flex items-center gap-2 mb-2'>
+                              <Avatar
+                                size='sm'
+                                radius='xl'
+                                color={isCurrentUser ? 'white' : 'gray'}
+                              >
+                                {note.createdBy.charAt(0).toUpperCase()}
+                              </Avatar>
+                              <Text
+                                size='xs'
+                                fw={500}
+                                className={
+                                  isCurrentUser
+                                    ? 'text-blue-100 font-bold'
+                                    : 'text-gray-600 font-bold'
+                                }
+                              >
+                                {note.createdBy}
+                              </Text>
+                            </div>
+                            <Text size='sm' className='whitespace-pre-line mb-2'>
+                              {note.note}
+                            </Text>
+                            {note.creation_date && (
+                              <Text
+                                size='xs'
+                                className={isCurrentUser ? 'text-blue-100' : 'text-gray-500'}
+                              >
+                                {new Intl.DateTimeFormat('es-CO', {
+                                  day: 'numeric',
+                                  month: 'short',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  hour12: true,
+                                }).format(
+                                  new Date(
+                                    new Date(note.creation_date).getTime() + 5 * 60 * 60 * 1000 // +5 horas
+                                  )
+                                )}
+                              </Text>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className='text-center py-8'>
+                      <Text size='lg' color='gray.5' mb='xs'>
+                        No hay interacciones registradas
+                      </Text>
+                      <Text size='sm' color='gray.4'>
+                        Sé el primero en añadir un comentario
+                      </Text>
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+              </ScrollArea>
+
+              {/* Área de entrada de texto para nuevas notas */}
+              <div className='border-t pt-4'>
+                <Group align='flex-end'>
+                  <Textarea
+                    placeholder='Escribe una nota...'
+                    value={newNote}
+                    onChange={(e) => setNewNote(e.target.value)}
+                    minRows={2}
+                    className='flex-1'
+                    disabled={!userId || loadingUserId}
+                    styles={{
+                      input: {
+                        borderRadius: '12px',
+                      },
+                    }}
+                  />
+                  <ActionIcon
+                    variant='filled'
+                    color='blue'
+                    size='lg'
+                    radius='xl'
+                    onClick={handleAddNote}
+                    disabled={!userId || loadingUserId || !newNote.trim()}
+                  >
+                    <IconSend size={18} />
+                  </ActionIcon>
+                </Group>
+                {(!userId || loadingUserId) && (
+                  <Text size='xs' color='orange.6' mt='xs'>
+                    {loadingUserId
+                      ? 'Cargando información del usuario...'
+                      : 'No se pudo identificar al usuario actual'}
+                  </Text>
+                )}
+              </div>
+            </Card>
+          </div>
+
+          {/* Columna derecha: Panel de detalles de la solicitud */}
+          <div className='w-full lg:w-80 order-1 lg:order-2'>
+            <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white'>
+              <Title order={4} mb='md' className='flex items-center gap-2'>
+                <IconFileDescription size={18} />
                 Detalles de la Solicitud
               </Title>
 
-              <Stack>
+              <Stack gap='md'>
+                {/* Información básica */}
                 <div>
-                  <Text fw={600} mb='xs'>
-                    Empresa
+                  <Text size='sm' color='gray.6' fw={500}>
+                    ID de Solicitud
+                  </Text>
+                  <Text size='lg' fw={600}>
+                    #{request.id}
                   </Text>
                   <Card withBorder radius='md' p='md' bg='gray.0'>
                     <Group>
@@ -424,12 +569,68 @@ function ViewRequestPage() {
                 </div>
 
                 <div>
-                  <Text fw={600} mb='xs'>
-                    Descripción de la Solicitud
+                  <Text size='sm' color='gray.6' fw={500}>
+                    Fecha y Hora de Creación
                   </Text>
-                  <Card withBorder radius='md' p='md' bg='gray.0'>
+                  <Text size='sm'>
+                    {new Intl.DateTimeFormat('es-CO', {
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: true,
+                    }).format(
+                      new Date(
+                        new Date(request.created_at).getTime() + 5 * 60 * 60 * 1000 // +5 horas
+                      )
+                    )}
+                  </Text>
+                </div>
+
+                <div>
+                  <Text size='sm' color='gray.6' fw={500}>
+                    Estado Actual
+                  </Text>
+                  <Badge
+                    color={getStatusColor(request.status)}
+                    size='lg'
+                    radius='sm'
+                    variant='light'
+                    mt='xs'
+                  >
+                    {request.status}
+                  </Badge>
+                </div>
+
+                <div>
+                  <Text size='sm' color='gray.6' fw={500}>
+                    Solicitante
+                  </Text>
+                  <Text size='sm'>{request.requester}</Text>
+                </div>
+
+                <div>
+                  <Text size='sm' color='gray.6' fw={500}>
+                    Tipo de Solicitud
+                  </Text>
+                  <Text size='sm'>{request.category}</Text>
+                </div>
+
+                <div>
+                  <Text size='sm' color='gray.6' fw={500}>
+                    Empresa
+                  </Text>
+                  <Text size='sm'>{request.company}</Text>
+                </div>
+
+                <div>
+                  <Text size='sm' color='gray.6' fw={500}>
+                    Descripción
+                  </Text>
+                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
                     <Text size='sm' className='whitespace-pre-line text-gray-700'>
-                      {request?.description}
+                      {request.description}
                     </Text>
                   </Card>
                 </div>
@@ -484,7 +685,8 @@ function ViewRequestPage() {
                 </div>
               </Stack>
             </Card>
-          </Grid.Col>
+          </div>
+        </div>
 
           <Grid.Col span={{ base: 12, lg: 4 }}>
             <Stack gap='md'>

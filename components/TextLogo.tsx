@@ -115,7 +115,7 @@ const TextLogo: React.FC<TextLogoProps> = ({
           : undefined
       }
     >
-      Centro de Servicios
+      CDS
     </div>
   );
 };

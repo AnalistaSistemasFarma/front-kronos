@@ -62,29 +62,6 @@ interface Ticket {
   company: string;
 }
 
-interface CompanyData {
-  id_company: number;
-  company: string;
-}
-
-interface CategoryData {
-  id: number;
-  category: string;
-}
-
-interface ProcessCategoryData {
-  id_process: number;
-  process: string;
-  id_category_request: number;
-  category: string;
-}
-
-interface ConsultResponse {
-  companies: CompanyData[];
-  categories: CategoryData[];
-  processCategories: ProcessCategoryData[];
-}
-
 function RequestBoard() {
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
@@ -102,23 +79,13 @@ function RequestBoard() {
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
     company: '',
-    subject: '',
-    category: '',
-    process: '',
+    usuario: '',
     descripcion: '',
+    category: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
-  const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
-  const [processCategories, setProcessCategories] = useState<
-    { value: string; label: string; id_category_request: number }[]
-  >([]);
-  const [filteredProcesses, setFilteredProcesses] = useState<{ value: string; label: string }[]>(
-    []
-  );
-  const [formDataLoading, setFormDataLoading] = useState(false);
-  const [formDataError, setFormDataError] = useState<string | null>(null);
   const [idUser, setIdUser] = useState('');
 
   const [filters, setFilters] = useState({
@@ -126,6 +93,7 @@ function RequestBoard() {
     company: '',
     date_from: '',
     date_to: '',
+    assigned_to: '',
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -136,7 +104,7 @@ function RequestBoard() {
       router.push('/login');
       return;
     }
-    fetchFormData();
+    fetchCompanies();
   }, [session, status, router]);
 
   useEffect(() => {
@@ -152,7 +120,7 @@ function RequestBoard() {
           if (id) {
             setUserId(id);
             setUserIdInitialized(true);
-            fetchTicketsWithUserId(id);
+            fetchTicketsWithUserName(userName);
           } else {
             setUserIdInitialized(true);
             setError('No se pudo obtener el ID del usuario. Por favor, recargue la página.');
@@ -180,36 +148,27 @@ function RequestBoard() {
     }
   }, []);
 
-  useEffect(() => {
-    if (formData.category) {
-      const filtered = processCategories.filter(
-        (p) => p.id_category_request === parseInt(formData.category)
-      );
-      setFilteredProcesses(filtered);
-      // Reset process if not in filtered
-      if (!filtered.find((p) => p.value === formData.process)) {
-        setFormData((prev) => ({ ...prev, process: '' }));
-      }
-    } else {
-      setFilteredProcesses([]);
-      setFormData((prev) => ({ ...prev, process: '' }));
-    }
-  }, [formData.category, processCategories]);
-
   const fetchTickets = async () => {
-    if (!userId) {
-      console.log('fetchTickets: No se puede ejecutar sin userId');
+    if (!userName) {
+      console.log('fetchTickets: No se puede ejecutar sin userName');
       return;
     }
-    await fetchTicketsWithUserId(userId);
+    await fetchTicketsWithUserName(userName);
   };
 
-  const fetchTicketsWithUserId = async (userIdToUse: number) => {
+  const fetchTicketsWithUserName = async (userNameToUse: string) => {
     try {
       setLoading(true);
 
       const params = new URLSearchParams();
-      params.append('idUser', userIdToUse.toString());
+      params.append('assignedTo', userNameToUse);
+
+      // Agregar filtros activos
+      if (filters.status) params.append('status', filters.status);
+      if (filters.company) params.append('company', filters.company);
+      if (filters.date_from) params.append('date_from', filters.date_from);
+      if (filters.date_to) params.append('date_to', filters.date_to);
+      if (filters.assigned_to) params.append('assigned_to', filters.assigned_to);
 
       const url = `/api/requests-general?${params.toString()}`;
 
@@ -218,7 +177,7 @@ function RequestBoard() {
       if (!response.ok) throw new Error('Failed to fetch tickets');
 
       const data = await response.json();
-      console.log('fetchTicketsWithUserId: Tickets recibidos:', data.length, 'tickets');
+      console.log('fetchTicketsWithUserName: Tickets recibidos:', data.length, 'tickets');
       setTickets(data);
     } catch (err) {
       console.error('Error fetching tickets:', err);
@@ -271,34 +230,26 @@ function RequestBoard() {
 
   const fetchCompanies = async () => {
     try {
-      setFormDataLoading(true);
-      setFormDataError(null);
+      setLoading(true);
 
       const response = await fetch(`/api/requests-general/consult-request`);
 
       if (response.ok) {
-        const data: ConsultResponse = await response.json();
-        console.log('Frontend - fetchFormData received data:', data);
-        setCompany(
-          data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
-        );
-        setCategories(data.categories.map((c) => ({ value: c.id.toString(), label: c.category })));
-        setProcessCategories(
-          data.processCategories.map((p) => ({
-            value: p.id_process.toString(),
-            label: p.process,
-            id_category_request: p.id_category_request,
-          }))
+        const data: { id_company: number; company: string }[] = await response.json();
+        console.log('Frontend - fetchCompanies received data:', data);
+        setCompany(data.map((sub) => ({ value: sub.id_company.toString(), label: sub.company })));
+        console.log(
+          'Frontend - fetchCompanies state updated:',
+          data.map((sub) => ({ value: sub.id_company.toString(), label: sub.company }))
         );
       } else {
-        console.error('Frontend - fetchFormData failed with status:', response.status);
-        setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
+        console.error('Frontend - fetchCompanies failed with status:', response.status);
       }
     } catch (err) {
-      console.error('Error fetching form data:', err);
-      setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
+      console.error('Error fetching tickets:', err);
+      setError('Unable to load tickets. Please try again.');
     } finally {
-      setFormDataLoading(false);
+      setLoading(false);
     }
   };
 
@@ -329,14 +280,11 @@ function RequestBoard() {
     if (!formData.company) {
       errors.company = 'La empresa es obligatoria';
     }
-    if (!formData.subject.trim()) {
-      errors.subject = 'El asunto es obligatorio';
+    if (!formData.usuario) {
+      errors.usuario = 'El usuario asignado es obligatorio';
     }
-    if (!formData.category) {
+    if (!formData.category.trim()) {
       errors.category = 'La categoría es obligatoria';
-    }
-    if (!formData.process) {
-      errors.process = 'El proceso es obligatorio';
     }
     if (!formData.descripcion.trim()) {
       errors.descripcion = 'La descripción es obligatoria';
@@ -365,10 +313,9 @@ function RequestBoard() {
         },
         body: JSON.stringify({
           company: formData.company,
-          subject: formData.subject,
+          usuario: formData.usuario,
           descripcion: formData.descripcion,
-          category: parseInt(formData.category),
-          process: parseInt(formData.process),
+          category: formData.category,
           createdby: userId,
         }),
       });
@@ -384,10 +331,9 @@ function RequestBoard() {
 
       setFormData({
         company: '',
-        subject: '',
-        category: '',
-        process: '',
+        usuario: '',
         descripcion: '',
+        category: '',
       });
 
       fetchTickets();
@@ -428,7 +374,7 @@ function RequestBoard() {
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
     { title: 'Solicitudes Generales', href: '#' },
-    { title: 'Panel de Solicitudes', href: '#' },
+    { title: 'Solicitudes Asignadas', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (
       <Link key={index} href={item.href} passHref>
@@ -459,21 +405,12 @@ function RequestBoard() {
                 className='text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3'
               >
                 <IconFileDescription size={32} className='text-blue-600' />
-                Solicitudes Generales
+                Solicitudes Asignadas
               </Title>
               <Text size='lg' c='gray.6'>
-                Gestión y seguimiento de solicitudes generales
+                Gestión de solicitudes asignadas a ti
               </Text>
             </div>
-
-            <Button
-              onClick={() => setModalOpened(true)}
-              size='lg'
-              leftSection={<IconPlus size={18} />}
-              className='bg-blue-600 hover:bg-blue-700'
-            >
-              Crear Nueva Solicitud
-            </Button>
           </Flex>
 
           <Grid>
@@ -620,14 +557,16 @@ function RequestBoard() {
               <Group justify='flex-end' mt='md'>
                 <Button
                   variant='outline'
-                  onClick={() =>
+                  onClick={() => {
                     setFilters({
                       status: '',
                       company: '',
                       date_from: '',
                       date_to: '',
-                    })
-                  }
+                      assigned_to: '',
+                    });
+                    fetchTickets(); // Refetch tickets without filters
+                  }}
                   leftSection={<IconX size={16} />}
                 >
                   Limpiar Filtros
@@ -646,7 +585,7 @@ function RequestBoard() {
 
           <Title order={3} mb='md' className='flex items-center gap-2'>
             <IconFileDescription size={20} />
-            Lista de Solicitudes
+            Lista de Solicitudes Asignadas
           </Title>
 
           <div className='overflow-x-auto'>
@@ -671,10 +610,10 @@ function RequestBoard() {
                       <div className='flex flex-col items-center gap-3'>
                         <IconFileDescription size={48} className='text-gray-300' />
                         <Text size='lg' fw={500}>
-                          No se encontraron solicitudes
+                          No se encontraron solicitudes asignadas
                         </Text>
                         <Text size='sm' c='gray.5'>
-                          Intenta ajustar los filtros o crea una nueva solicitud
+                          No tienes solicitudes asignadas actualmente
                         </Text>
                       </div>
                     </Table.Td>
@@ -686,7 +625,9 @@ function RequestBoard() {
                       className='cursor-pointer hover:bg-gray-50 transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
-                        router.push(`/process/request-general/view-request?id=${ticket.id}`);
+                        router.push(
+                          `/process/request-general/view-request?id=${ticket.id}&mode=assigned`
+                        );
                       }}
                     >
                       <Table.Td>
@@ -700,8 +641,8 @@ function RequestBoard() {
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <Group gap={4}>
-                          <IconBuilding size={14} className='text-gray-400' />
+                        <Group gap={4} className='flex'>
+                          <IconBuilding size={12} className='text-gray-400' />
                           <Text fw={500} size='sm'>
                             {ticket.company}
                           </Text>
@@ -738,148 +679,6 @@ function RequestBoard() {
             </Table>
           </div>
         </Card>
-
-        {/* Enhanced Modal for creating request */}
-        <Modal
-          opened={modalOpened}
-          onClose={() => {
-            setModalOpened(false);
-            setFormErrors({});
-          }}
-          title={
-            <Group>
-              <IconPlus size={20} />
-              <Text size='lg' fw={600}>
-                Crear Nueva Solicitud
-              </Text>
-            </Group>
-          }
-          size='xl'
-          radius='md'
-          overlayProps={{ blur: 4 }}
-        >
-          <LoadingOverlay visible={createLoading || formDataLoading} />
-
-          {formDataError && (
-            <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' mb='md'>
-              {formDataError}
-            </Alert>
-          )}
-
-          <Stack>
-            <Grid>
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Select
-                  label='Empresa Solicitante'
-                  placeholder='Seleccione la empresa'
-                  data={companies}
-                  value={formData.company}
-                  onChange={(value) => {
-                    handleFormChange('company', value || '');
-                  }}
-                  error={formErrors.company}
-                  required
-                  leftSection={<IconBuilding size={16} />}
-                  disabled={formDataLoading}
-                />
-              </Grid.Col>
-
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <TextInput
-                  label='Asunto'
-                  placeholder='Ingrese el asunto de la solicitud'
-                  value={formData.subject}
-                  onChange={(e) => {
-                    setFormData({ ...formData, subject: e.target.value });
-                    if (formErrors.subject) {
-                      setFormErrors({ ...formErrors, subject: '' });
-                    }
-                  }}
-                  error={formErrors.subject}
-                  required
-                  maxLength={255}
-                  leftSection={<IconFileDescription size={16} />}
-                />
-              </Grid.Col>
-            </Grid>
-
-            <Grid>
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Select
-                  label='Categoría'
-                  placeholder='Seleccione la categoría'
-                  data={categories}
-                  value={formData.category}
-                  onChange={(value) => {
-                    handleFormChange('category', value || '');
-                  }}
-                  error={formErrors.category}
-                  required
-                  leftSection={<IconTag size={16} />}
-                  disabled={formDataLoading}
-                />
-              </Grid.Col>
-
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Select
-                  label='Proceso'
-                  placeholder='Seleccione el proceso'
-                  data={filteredProcesses}
-                  value={formData.process}
-                  onChange={(value) => {
-                    handleFormChange('process', value || '');
-                  }}
-                  error={formErrors.process}
-                  required
-                  leftSection={<IconProgress size={16} />}
-                  disabled={!formData.category || formDataLoading}
-                />
-              </Grid.Col>
-            </Grid>
-
-            <Textarea
-              label='Descripción Detallada'
-              placeholder='Describa detalladamente la solicitud. Incluya toda la información relevante para una mejor atención.'
-              value={formData.descripcion}
-              onChange={(e) => {
-                setFormData({ ...formData, descripcion: e.target.value });
-                if (formErrors.descripcion) {
-                  setFormErrors({ ...formErrors, descripcion: '' });
-                }
-              }}
-              error={formErrors.descripcion}
-              required
-              minRows={5}
-              maxLength={1000}
-              description='Mínimo 10 caracteres, máximo 1000 caracteres'
-              autosize
-            />
-
-            <Divider />
-
-            <Group justify='flex-end' gap='md'>
-              <Button
-                variant='outline'
-                onClick={() => {
-                  setModalOpened(false);
-                  setFormErrors({});
-                }}
-                size='md'
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleCreateTicketWithValidation}
-                loading={createLoading}
-                size='md'
-                leftSection={<IconPlus size={16} />}
-                className='bg-blue-600 hover:bg-blue-700'
-              >
-                Crear Solicitud
-              </Button>
-            </Group>
-          </Stack>
-        </Modal>
       </div>
     </div>
   );
