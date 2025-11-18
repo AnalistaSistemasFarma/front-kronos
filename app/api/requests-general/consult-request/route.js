@@ -2,7 +2,7 @@ import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig';
 import { NextResponse } from 'next/server';
 
-export async function GET(req) {
+export async function GET(_req) {
   try {
     const pool = await sql.connect(sqlConfig);
 

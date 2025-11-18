@@ -13,10 +13,8 @@ import {
   Badge,
   Box,
   Flex,
-  rem,
 } from '@mantine/core';
 import {
-  IconUpload,
   IconX,
   IconFile,
   IconFileText,

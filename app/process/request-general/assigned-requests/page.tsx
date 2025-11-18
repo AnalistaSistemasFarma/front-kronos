@@ -1,54 +1,64 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
+import axios from 'axios';
 import { useSession } from 'next-auth/react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import {
   Title,
   Paper,
+  Text,
+  Badge,
+  Button,
+  Divider,
+  Group,
   Stack,
-  Alert,
-  Breadcrumbs,
-  Anchor,
-  Table,
+  Card,
+  Textarea,
   TextInput,
   Select,
-  Button,
-  Group,
-  Badge,
-  Modal,
-  Textarea,
+  Checkbox,
   Grid,
-  Card,
-  Text,
-  Divider,
+  Alert,
   LoadingOverlay,
-  ActionIcon,
-  Tooltip,
-  Collapse,
-  Box,
+  Breadcrumbs,
+  Anchor,
   Flex,
+  ActionIcon,
+  Box,
+  Modal,
+  Collapse,
+  Table,
 } from '@mantine/core';
 import {
-  IconAlertCircle,
-  IconChevronRight,
-  IconSearch,
-  IconPlus,
-  IconFilter,
-  IconX,
-  IconCheck,
-  IconRefresh,
-  IconFileDescription,
-  IconCalendarEvent,
+  IconCalendar,
   IconUser,
-  IconFlag,
-  IconClock,
   IconBuilding,
+  IconNote,
+  IconChevronRight,
+  IconAlertCircle,
+  IconArrowLeft,
+  IconCheck,
+  IconX,
+  IconFlag,
+  IconTicket,
+  IconFilter,
+  IconClock,
+  IconUpload,
+  IconFile,
+  IconFileText,
+  IconFileSpreadsheet,
+  IconPhoto,
+  IconRefresh,
   IconProgress,
   IconUserCheck,
   IconTag,
+  IconCalendarEvent,
 } from '@tabler/icons-react';
+import Link from 'next/link';
+import { sendMessage } from '../../../../components/email/utils/sendMessage';
+import FileUpload, { UploadedFile } from '../../../../components/ui/FileUpload';
 
 interface Ticket {
   id: number;
@@ -63,6 +73,33 @@ interface Ticket {
   id_company: number;
   requester: string;
   company: string;
+}
+
+interface Note {
+  id_note: number;
+  note: string;
+  createdBy: string;
+  creation_date?: string;
+}
+
+interface Option {
+  value: string;
+  label: string;
+}
+
+interface ProcessCategoryData {
+  id_process: number;
+  process: string;
+  id_category_request: number;
+  category: string;
+}
+
+interface FolderFile {
+  id: string;
+  name: string;
+  size?: number;
+  lastModifiedDateTime?: string;
+  '@microsoft.graph.downloadUrl'?: string;
 }
 
 function RequestBoard() {
@@ -85,10 +122,19 @@ function RequestBoard() {
     usuario: '',
     descripcion: '',
     category: '',
+    process: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
+  const [categories, setCategories] = useState<Option[]>([]);
+  const [processCategories, setProcessCategories] = useState<
+    { value: string; label: string; id_category_request: number }[]
+  >([]);
+  const [filteredProcesses, setFilteredProcesses] = useState<{ value: string; label: string }[]>(
+    []
+  );
+  const [assignedUsers, setAssignedUsers] = useState<{ value: string; label: string }[]>([]);
   const [idUser, setIdUser] = useState('');
 
   const [filters, setFilters] = useState({
@@ -100,6 +146,30 @@ function RequestBoard() {
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [folderContents, setFolderContents] = useState([]);
+  const [newNote, setNewNote] = useState('');
+  const [loadingNotes, setLoadingNotes] = useState(false);
+  const [showResolution, setShowResolution] = useState(false);
+  const [resolutionData, setResolutionData] = useState({
+    estado: '',
+    correo: '',
+    resolucion: '',
+    notificarPorCorreo: false,
+  });
+  const [isEditing, setIsEditing] = useState(false);
+  const [originalTicket, setOriginalTicket] = useState<Ticket | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
+
+  const [noteData, setNoteData] = useState({
+    correo: '',
+    notificarPorCorreo: false,
+  });
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -108,6 +178,7 @@ function RequestBoard() {
       return;
     }
     fetchCompanies();
+    fetchFormData();
   }, [session, status, router]);
 
   useEffect(() => {
@@ -150,6 +221,22 @@ function RequestBoard() {
       setIdUser('');
     }
   }, []);
+
+  useEffect(() => {
+    if (formData.category) {
+      const filtered = processCategories.filter(
+        (p) => p.id_category_request === parseInt(formData.category)
+      );
+      setFilteredProcesses(filtered);
+      // Reset process if not in filtered
+      if (!filtered.find((p) => p.value === formData.process)) {
+        setFormData((prev) => ({ ...prev, process: '' }));
+      }
+    } else {
+      setFilteredProcesses([]);
+      setFormData((prev) => ({ ...prev, process: '' }));
+    }
+  }, [formData.category, processCategories]);
 
   const fetchTickets = async () => {
     if (!userId) {
@@ -231,21 +318,70 @@ function RequestBoard() {
       const response = await fetch(`/api/requests-general/consult-request`);
 
       if (response.ok) {
-        const data: { id_company: number; company: string }[] = await response.json();
+        const data = await response.json();
         console.log('Frontend - fetchCompanies received data:', data);
-        setCompany(data.map((sub) => ({ value: sub.id_company.toString(), label: sub.company })));
-        console.log(
-          'Frontend - fetchCompanies state updated:',
-          data.map((sub) => ({ value: sub.id_company.toString(), label: sub.company }))
-        );
+
+        if (data.companies && Array.isArray(data.companies)) {
+          setCompany(
+            data.companies.map((sub: { id_company: number; company: string }) => ({
+              value: sub.id_company.toString(),
+              label: sub.company,
+            }))
+          );
+          console.log(
+            'Frontend - fetchCompanies state updated:',
+            data.companies.map((sub: { id_company: number; company: string }) => ({
+              value: sub.id_company.toString(),
+              label: sub.company,
+            }))
+          );
+        } else {
+          console.error('Frontend - fetchCompanies: companies data is not an array or missing');
+          setCompany([]);
+        }
       } else {
         console.error('Frontend - fetchCompanies failed with status:', response.status);
       }
     } catch (err) {
-      console.error('Error fetching tickets:', err);
-      setError('Unable to load tickets. Please try again.');
+      console.error('Error fetching companies:', err);
+      setError('Unable to load companies. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchFormData = async () => {
+    try {
+      const response = await fetch(`/api/requests-general/consult-request`);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Frontend - fetchFormData received data:', data);
+        setCategories(
+          data.categories.map((c: { id: number; category: string }) => ({
+            value: c.id.toString(),
+            label: c.category,
+          }))
+        );
+        setProcessCategories(
+          data.processCategories.map(
+            (p: { id_process: number; process: string; id_category_request: number }) => ({
+              value: p.id_process.toString(),
+              label: p.process,
+              id_category_request: p.id_category_request,
+            })
+          )
+        );
+        if (data.assignedUsers) {
+          setAssignedUsers(
+            data.assignedUsers.map((u: { name: string }) => ({ value: u.name, label: u.name }))
+          );
+        }
+      } else {
+        console.error('Frontend - fetchFormData failed with status:', response.status);
+      }
+    } catch (err) {
+      console.error('Error fetching form data:', err);
     }
   };
 
@@ -268,6 +404,131 @@ function RequestBoard() {
       ...prev,
       [field]: value,
     }));
+  };
+
+  const fetchNotes = async () => {
+    // This function will be used when viewing a specific ticket
+    // Not needed in the list view
+  };
+
+  const fetchFolderContents = async () => {
+    // This function will be used when viewing a specific ticket
+    // Not needed in the list view
+  };
+
+  async function CheckOrCreateFolderAndUpload(
+    folderName: string,
+    files: { file: File }[],
+    token: string
+  ) {
+    let folderId: string;
+
+    try {
+      const getResponse = await axios.get(
+        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (getResponse.status === 200) {
+        folderId = (getResponse.data as { id: string }).id;
+      } else {
+        throw new Error('Error al verificar la existencia de la carpeta.');
+      }
+    } catch (getError: unknown) {
+      if (getError instanceof Error) {
+        console.error(getError.message);
+      } else {
+        console.error(getError);
+      }
+    }
+
+    if (files && files.length > 0) {
+      const uploadPromises = files.map((file: { file: File }) =>
+        axios.put(
+          `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
+          file.file,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': file.file.type,
+            },
+          }
+        )
+      );
+
+      const results = await Promise.all(uploadPromises);
+
+      results.forEach((response, index) => {
+        if (response.status === 201 || response.status === 200) {
+          console.log(`Archivo subido: ${files[index].file.name}`, response.data);
+        } else {
+          console.log(`Error al subir el archivo: ${files[index].file.name}`);
+        }
+      });
+    } else {
+      console.log('No hay archivos seleccionados para subir.');
+    }
+  }
+
+  const handleAddNote = async () => {
+    // This function will be used when viewing a specific ticket
+    // Not needed in the list view
+  };
+
+  const handleTicketFormChange = (field: string, value: string) => {
+    // This function will be used when viewing a specific ticket
+    // Not needed in the list view
+  };
+
+  const handleStartEditing = () => {
+    // This function will be used when viewing a specific ticket
+    // Not needed in the list view
+  };
+
+  const handleCancelEditing = () => {
+    // This function will be used when viewing a specific ticket
+    // Not needed in the list view
+  };
+
+  const validateFields = (): boolean => {
+    // This function will be used when viewing a specific ticket
+    // Not needed in the list view
+    return true;
+  };
+
+  const sendEmailNotification = async (): Promise<boolean> => {
+    // This function will be used when viewing a specific ticket
+    // Not needed in the list view
+    return true;
+  };
+
+  const sendNoteEmailNotification = async (): Promise<boolean> => {
+    // This function will be used when viewing a specific ticket
+    // Not needed in the list view
+    return true;
+  };
+
+  const handleUpdateRequest = async () => {
+    // This function will be used when viewing a specific ticket
+    // Not needed in the list view
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const isRequestResolved = () => {
+    // This function will be used when viewing a specific ticket
+    // Not needed in the list view
+    return false;
   };
 
   if (status === 'loading' || loading) {
@@ -328,7 +589,7 @@ function RequestBoard() {
                 order={1}
                 className='text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3'
               >
-                <IconFileDescription size={32} className='text-blue-600' />
+                <IconTicket size={32} className='text-blue-600' />
                 Solicitudes Asignadas
               </Title>
               <Text size='lg' c='gray.6'>
@@ -341,7 +602,7 @@ function RequestBoard() {
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
               <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
                 <Group>
-                  <IconFileDescription size={24} className='text-blue-600' />
+                  <IconTicket size={24} className='text-blue-600' />
                   <div>
                     <Text size='xs' c='blue.6'>
                       Total de Solicitudes
@@ -508,7 +769,7 @@ function RequestBoard() {
           <LoadingOverlay visible={loading} />
 
           <Title order={3} mb='md' className='flex items-center gap-2'>
-            <IconFileDescription size={20} />
+            <IconTicket size={20} />
             Lista de Solicitudes Asignadas
           </Title>
 
@@ -531,7 +792,7 @@ function RequestBoard() {
                   <Table.Tr>
                     <Table.Td colSpan={8} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
-                        <IconFileDescription size={48} className='text-gray-300' />
+                        <IconTicket size={48} className='text-gray-300' />
                         <Text size='lg' fw={500}>
                           No se encontraron solicitudes asignadas
                         </Text>
@@ -571,7 +832,8 @@ function RequestBoard() {
                       <Table.Td>
                         <Group gap={4} className='flex'>
                           <IconBuilding size={12} className='text-gray-400' />
-                          <Text fw={500} size='sm'>
+
+                          <Text size='sm' className='max-w-xs truncate'>
                             {ticket.company}
                           </Text>
                         </Group>

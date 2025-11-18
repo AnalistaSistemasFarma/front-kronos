@@ -3,8 +3,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { Title, Text, Loader, Alert, Stack, Group, ActionIcon, SimpleGrid } from '@mantine/core';
-import { IconPlus, IconLayoutGrid, IconList, IconX } from '@tabler/icons-react';
+import { Title, Text, Alert, Group, ActionIcon, SimpleGrid } from '@mantine/core';
+import { IconLayoutGrid, IconList, IconX } from '@tabler/icons-react';
 import GlassCard from '../../components/ui/GlassCard';
 import ProcessCard from '../../components/process/ProcessCard';
 import ProcessSearch from '../../components/process/ProcessSearch';

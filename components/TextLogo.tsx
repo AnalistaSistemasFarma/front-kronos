@@ -76,14 +76,6 @@ const TextLogo: React.FC<TextLogoProps> = ({
     ...style,
   };
 
-  const hoverStyles = withHover
-    ? {
-        ':hover': {
-          transform: 'scale(1.05)',
-        },
-      }
-    : {};
-
   const shadowStyles = withShadow
     ? {
         filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.2))',

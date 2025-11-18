@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Title, Text, Group, Badge, Stack, ActionIcon } from '@mantine/core';
+import { Title, Text, Group, ActionIcon } from '@mantine/core';
 import {
   IconChevronDown,
   IconChevronUp,

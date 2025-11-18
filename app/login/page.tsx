@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Paper, Title, TextInput, Button, Stack, Group, Text, Divider } from '@mantine/core';
 import { IconEye, IconEyeOff, IconLock, IconAt, IconArrowRight } from '@tabler/icons-react';
-import Image from 'next/image';
 import Link from 'next/link';
 import TextLogo from '../../components/TextLogo';
 

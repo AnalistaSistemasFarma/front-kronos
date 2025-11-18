@@ -12,7 +12,7 @@ export const sendMessage = async (message, emails, table, outro, logoUrl, files 
       formData.append('logoUrl', logoUrl || 'https://farmalogica.com.co/imagenes/logos/logo20.png');
 
       // Add files
-      files.forEach((file, index) => {
+      files.forEach((file) => {
         formData.append('files', file);
       });
 

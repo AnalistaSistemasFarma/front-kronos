@@ -1,8 +1,10 @@
 'use client';
 
 import { Suspense, useEffect, useState, useRef } from 'react';
-import { useSession } from 'next-auth/react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
+import axios from 'axios';
+import { useSession } from 'next-auth/react';
 import {
   Title,
   Paper,
@@ -26,6 +28,8 @@ import {
   ActionIcon,
   Avatar,
   ScrollArea,
+  Modal,
+  Box,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -45,8 +49,15 @@ import {
   IconUserCheck,
   IconFileDescription,
   IconProgress,
+  IconUpload,
+  IconFile,
+  IconFileText,
+  IconFileSpreadsheet,
+  IconPhoto,
 } from '@tabler/icons-react';
 import Link from 'next/link';
+import { sendMessage } from '../../../../components/email/utils/sendMessage';
+import FileUpload, { UploadedFile } from '../../../../components/ui/FileUpload';
 
 interface Request {
   id: number;
@@ -96,6 +107,14 @@ interface ConsultResponse {
   processCategories: ProcessCategoryData[];
 }
 
+interface FolderFile {
+  id: string;
+  name: string;
+  size?: number;
+  lastModifiedDateTime?: string;
+  '@microsoft.graph.downloadUrl'?: string;
+}
+
 function ViewRequestPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -118,6 +137,23 @@ function ViewRequestPage() {
   const [userId, setUserId] = useState<number | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [originalRequest, setOriginalRequest] = useState<Request | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
+  const [folderContents, setFolderContents] = useState([]);
+  const [showResolution, setShowResolution] = useState(false);
+  const [resolutionData, setResolutionData] = useState({
+    estado: '',
+    correo: '',
+    resolucion: '',
+    notificarPorCorreo: false,
+  });
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const storedRequest = sessionStorage.getItem('selectedRequest');
@@ -147,6 +183,7 @@ function ViewRequestPage() {
     if (request) {
       fetchFormData();
       fetchNotes();
+      fetchFolderContents();
     }
   }, [request]);
 
@@ -207,7 +244,7 @@ function ViewRequestPage() {
         }
       });
     }
-  }, [status, userName, userId]);
+  }, [status, userName, userId, getUserIdByName]);
 
   useEffect(() => {
     if (request?.category) {
@@ -218,7 +255,7 @@ function ViewRequestPage() {
     } else {
       setFilteredProcesses([]);
     }
-  }, [request?.category, processCategories]);
+  }, [request?.category, processCategories, request?.process]);
 
   const fetchFormData = async () => {
     try {
@@ -228,11 +265,16 @@ function ViewRequestPage() {
       if (response.ok) {
         const data: ConsultResponse = await response.json();
         setCompanies(
-          data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
+          data.companies.map((c: CompanyData) => ({
+            value: c.id_company.toString(),
+            label: c.company,
+          }))
         );
-        setCategories(data.categories.map((c) => ({ value: c.id.toString(), label: c.category })));
+        setCategories(
+          data.categories.map((c: CategoryData) => ({ value: c.id.toString(), label: c.category }))
+        );
         setProcessCategories(
-          data.processCategories.map((p) => ({
+          data.processCategories.map((p: ProcessCategoryData) => ({
             value: p.id_process.toString(),
             label: p.process,
             id_category_request: p.id_category_request,
@@ -265,6 +307,329 @@ function ViewRequestPage() {
     }
   };
 
+  const fetchFolderContents = async () => {
+    if (!request?.id) return;
+
+    const folderName = `Request-${request.id}`;
+    try {
+      const token = await getMicrosoftToken();
+      if (!token) {
+        throw new Error('No se pudo obtener el token de acceso.');
+      }
+
+      const response = await axios.get(
+        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}:/children`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const files = response.data.value.filter(
+        (item: Record<string, unknown>) => 'file' in item && !!item.file
+      );
+      setFolderContents(files);
+      console.log('Archivos existentes listados exitosamente:', files);
+    } catch (error) {
+      console.error('Error al listar los archivos de la carpeta:', error);
+      setFolderContents([]);
+    }
+  };
+
+  async function CheckOrCreateFolderAndUpload(
+    folderName: string,
+    files: { file: File }[],
+    token: string
+  ) {
+    let folderId: string;
+
+    try {
+      const getResponse = await axios.get(
+        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (getResponse.status === 200) {
+        folderId = (getResponse.data as { id: string }).id;
+      } else {
+        throw new Error('Error al verificar la existencia de la carpeta.');
+      }
+    } catch (getError: unknown) {
+      if (getError instanceof Error) {
+        console.error(getError.message);
+      } else {
+        console.error(getError);
+      }
+    }
+
+    if (files && files.length > 0) {
+      const uploadPromises = files.map((file: { file: File }) =>
+        axios.put(
+          `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
+          file.file,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': file.file.type,
+            },
+          }
+        )
+      );
+
+      const results = await Promise.all(uploadPromises);
+
+      results.forEach((response, index) => {
+        if (response.status === 201 || response.status === 200) {
+          console.log(`Archivo subido: ${files[index].file.name}`, response.data);
+        } else {
+          console.log(`Error al subir el archivo: ${files[index].file.name}`);
+        }
+      });
+    } else {
+      console.log('No hay archivos seleccionados para subir.');
+    }
+  }
+
+  const handleFormChange = (field: string, value: string) => {
+    setRequest((prev) => {
+      if (!prev) return prev;
+      const updatedRequest = { ...prev, [field]: value };
+
+      if (field === 'category' && value) {
+        const filtered = processCategories.filter((p) => p.id_category_request === parseInt(value));
+        updatedRequest.process = '';
+      }
+
+      return updatedRequest;
+    });
+
+    if (formErrors[field]) {
+      setFormErrors((prev) => {
+        const newErrors = { ...prev };
+        delete newErrors[field];
+        return newErrors;
+      });
+    }
+  };
+
+  const handleStartEditing = () => {
+    setIsEditing(true);
+    setUpdateMessage(null);
+  };
+
+  const handleCancelEditing = () => {
+    if (originalRequest) {
+      setRequest(originalRequest);
+    }
+    setIsEditing(false);
+    setFormErrors({});
+    setUpdateMessage(null);
+  };
+
+  const validateFields = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    if (!request?.subject || request.subject.trim() === '') {
+      errors.subject = 'El asunto es requerido';
+    }
+    if (!request?.category) {
+      errors.category = 'La categoría es requerida';
+    }
+    if (!request?.process) {
+      errors.process = 'El proceso es requerido';
+    }
+    if (!request?.description || request.description.trim() === '') {
+      errors.description = 'La descripción es requerida';
+    }
+
+    if (resolutionData.estado) {
+      if (!resolutionData.resolucion || resolutionData.resolucion.trim() === '') {
+        errors.resolucion =
+          'La descripción de la resolución es requerida cuando se cambia el estado';
+      }
+    }
+
+    if (resolutionData.notificarPorCorreo) {
+      if (!resolutionData.correo || resolutionData.correo.trim() === '') {
+        errors.correo =
+          'El correo electrónico es requerido cuando se selecciona notificar por correo';
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolutionData.correo)) {
+        errors.correo = 'Por favor ingrese un correo electrónico válido';
+      }
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const sendEmailNotification = async (): Promise<boolean> => {
+    if (!process.env.API_EMAIL) {
+      console.error('Error: La variable de entorno API_EMAIL no está configurada');
+      setUpdateMessage({
+        type: 'error',
+        text: 'Error de configuración: No se puede enviar la notificación por correo. Contacte al administrador.',
+      });
+      return false;
+    }
+
+    try {
+      const message = `Actualización de la Solicitud #${request?.id} - ${request?.subject}`;
+      const emails = resolutionData.correo;
+
+      const table: Array<Record<string, string | number | undefined>> = [
+        {
+          'ID de la Solicitud': request?.id,
+          Asunto: request?.subject,
+          Categoría: request?.category,
+          Proceso: request?.process,
+          Empresa: request?.company,
+          'Fecha de Creación': request?.created_at
+            ? new Date(request.created_at).toISOString().split('T')[0]
+            : 'N/A',
+        },
+      ];
+
+      if (resolutionData.resolucion) {
+        table.push({
+          Resolución: resolutionData.resolucion,
+        });
+      }
+
+      const outro = `Este es un mensaje automático del sistema de Solicitudes Generales. La solicitud #${request?.id} ha sido actualizada. Si tiene alguna pregunta, por favor contacte al administrador del sistema.`;
+
+      const result = await sendMessage(
+        message,
+        emails,
+        table,
+        outro,
+        'https://farmalogica.com.co/imagenes/logos/logo20.png', // Logo por defecto
+        []
+      );
+
+      console.log('Notificación por correo enviada exitosamente:', result);
+      return true;
+    } catch (error) {
+      console.error('Error al enviar la notificación por correo:', error);
+      setUpdateMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Error al enviar la notificación por correo',
+      });
+      return false;
+    }
+  };
+
+  const handleUpdateRequest = async () => {
+    if (!validateFields()) {
+      return;
+    }
+
+    setIsUpdating(true);
+    setUpdateMessage(null);
+
+    try {
+      if (attachedFiles.length > 0) {
+        const token = await getMicrosoftToken();
+        if (!token) {
+          throw new Error('No se pudo obtener el token de acceso para subir archivos.');
+        }
+
+        const folderName = `Request-${request?.id}`;
+        const filesToUpload = attachedFiles
+          .filter((file) => file.status === 'success')
+          .map((file) => ({ file: file.file }));
+
+        if (filesToUpload.length > 0) {
+          await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
+        }
+      }
+
+      const updateData = {
+        id: request?.id,
+        subject: request?.subject,
+        description: request?.description,
+        category: request?.category,
+        process: request?.process,
+        status: resolutionData.estado || request?.status,
+        resolucion: resolutionData.resolucion,
+      };
+
+      const response = await fetch('/api/requests-general/update-request', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updateData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Error al actualizar la solicitud');
+      }
+
+      const result = await response.json();
+
+      let emailSent = true;
+      if (resolutionData.notificarPorCorreo) {
+        emailSent = await sendEmailNotification();
+      }
+
+      if (emailSent) {
+        setUpdateMessage({
+          type: 'success',
+          text: resolutionData.notificarPorCorreo
+            ? 'Solicitud actualizada exitosamente y notificación por correo enviada'
+            : 'Solicitud actualizada exitosamente',
+        });
+      }
+
+      if (resolutionData.estado) {
+        setRequest((prev) => (prev ? { ...prev, status: resolutionData.estado } : null));
+      }
+
+      setOriginalRequest(request);
+      setIsEditing(false);
+
+      if (attachedFiles.length > 0) {
+        setTimeout(() => fetchFolderContents(), 2000);
+      }
+
+      if (resolutionData.estado) {
+        setResolutionData({
+          ...resolutionData,
+          estado: '',
+          resolucion: '',
+          notificarPorCorreo: false,
+        });
+        setShowResolution(false);
+      }
+    } catch (error) {
+      console.error('Error updating request:', error);
+      setUpdateMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Error al actualizar la solicitud',
+      });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const isRequestResolved = () => {
+    return request?.status?.toLowerCase() === 'completada';
+  };
+
   const handleAddNote = async () => {
     if (!newNote.trim() || !request?.id || !userId) return;
 
@@ -292,6 +657,31 @@ function ViewRequestPage() {
       console.error('Error adding note:', error);
     }
   };
+
+  // Load attached files from localStorage
+  useEffect(() => {
+    if (request?.id) {
+      const storedFiles = localStorage.getItem(`request-${request.id}-files`);
+      if (storedFiles) {
+        try {
+          const parsedFiles = JSON.parse(storedFiles);
+          setAttachedFiles(parsedFiles);
+        } catch (error) {
+          console.error('Error loading stored files:', error);
+        }
+      }
+    }
+  }, [request?.id]);
+
+  // Save attached files to localStorage whenever they change
+  useEffect(() => {
+    if (request?.id && attachedFiles.length > 0) {
+      localStorage.setItem(`request-${request.id}-files`, JSON.stringify(attachedFiles));
+    } else if (request?.id) {
+      // Clear localStorage if no files
+      localStorage.removeItem(`request-${request.id}-files`);
+    }
+  }, [attachedFiles, request?.id]);
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -402,6 +792,14 @@ function ViewRequestPage() {
               </Badge>
             </Group>
           </Flex>
+
+          {/* Alerta de solicitud resuelta */}
+          {isRequestResolved() && (
+            <Alert icon={<IconCheck size={16} />} title='Solicitud Completada' color='teal' mb='4'>
+              Esta solicitud ha sido marcada como completada y no se puede modificar. Si necesita
+              realizar cambios, contacte al administrador del sistema.
+            </Alert>
+          )}
         </Card>
 
         {/* Layout de dos columnas para escritorio, una columna para móviles */}
@@ -592,23 +990,42 @@ function ViewRequestPage() {
                   <Text size='sm' color='gray.6' fw={500}>
                     Asunto
                   </Text>
-                  <Card withBorder radius='md' p='md' bg='gray.0'>
-                    <Group>
-                      <IconFileDescription size={16} />
-                      <Text size='sm'>{request?.subject}</Text>
-                    </Group>
-                  </Card>
+                  {isEditing ? (
+                    <TextInput
+                      value={request?.subject || ''}
+                      onChange={(e) => handleFormChange('subject', e.target.value)}
+                      error={formErrors.subject}
+                      disabled={isRequestResolved()}
+                    />
+                  ) : (
+                    <Card withBorder radius='md' p='md' bg='gray.0'>
+                      <Group>
+                        <IconFileDescription size={16} />
+                        <Text size='sm'>{request?.subject}</Text>
+                      </Group>
+                    </Card>
+                  )}
                 </div>
 
                 <div>
                   <Text size='sm' color='gray.6' fw={500}>
                     Descripción
                   </Text>
-                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
-                    <Text size='sm' className='whitespace-pre-line text-gray-700'>
-                      {request.description}
-                    </Text>
-                  </Card>
+                  {isEditing ? (
+                    <Textarea
+                      value={request?.description || ''}
+                      onChange={(e) => handleFormChange('description', e.target.value)}
+                      minRows={3}
+                      error={formErrors.description}
+                      disabled={isRequestResolved()}
+                    />
+                  ) : (
+                    <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
+                      <Text size='sm' className='whitespace-pre-line text-gray-700'>
+                        {request.description}
+                      </Text>
+                    </Card>
+                  )}
                 </div>
 
                 <Divider />
@@ -626,10 +1043,20 @@ function ViewRequestPage() {
                             <Text size='xs' color='gray.6'>
                               Categoría
                             </Text>
-                            <Text size='sm'>
-                              {categories.find((c) => c.value === request?.category)?.label ||
-                                request?.category}
-                            </Text>
+                            {isEditing ? (
+                              <Select
+                                data={categories}
+                                value={request?.category?.toString() || ''}
+                                onChange={(val) => handleFormChange('category', val ?? '')}
+                                error={formErrors.category}
+                                disabled={isRequestResolved()}
+                              />
+                            ) : (
+                              <Text size='sm'>
+                                {categories.find((c) => c.value === request?.category)?.label ||
+                                  request?.category}
+                              </Text>
+                            )}
                           </div>
                         </Group>
                       </Card>
@@ -642,24 +1069,240 @@ function ViewRequestPage() {
                             <Text size='xs' color='gray.6'>
                               Proceso
                             </Text>
-                            <Text size='sm'>
-                              {processCategories.find((p) => p.value === request?.process)?.label ||
-                                request?.process}
-                            </Text>
+                            {isEditing ? (
+                              <Select
+                                data={filteredProcesses}
+                                value={request?.process?.toString() || ''}
+                                onChange={(val) => handleFormChange('process', val ?? '')}
+                                error={formErrors.process}
+                                disabled={isRequestResolved()}
+                              />
+                            ) : (
+                              <Text size='sm'>
+                                {processCategories.find((p) => p.value === request?.process)
+                                  ?.label || request?.process}
+                              </Text>
+                            )}
                           </div>
                         </Group>
                       </Card>
                     </Grid.Col>
                   </Grid>
                 </div>
+
+                {/* Resolución */}
+                <div>
+                  <Group justify='space-between' mb='md'>
+                    <Title order={4} className='flex items-center gap-2'>
+                      <IconCheck size={18} className='text-green-6' />
+                      Resolución de la Solicitud
+                    </Title>
+                    {!isRequestResolved() && isEditing && (
+                      <ActionIcon
+                        variant='subtle'
+                        onClick={() => setShowResolution(!showResolution)}
+                      >
+                        {showResolution ? <IconX size={16} /> : <IconCheck size={16} />}
+                      </ActionIcon>
+                    )}
+                  </Group>
+
+                  {/* Formulario de resolución para solicitudes no resueltas */}
+                  {!isRequestResolved() && isEditing && showResolution && (
+                    <Stack>
+                      <Select
+                        label='Estado de la solicitud'
+                        placeholder='Selecciona estado'
+                        data={[
+                          { value: 'Completada', label: 'Completada' },
+                          { value: 'Cancelada', label: 'Cancelada' },
+                        ]}
+                        value={resolutionData.estado}
+                        onChange={(val) =>
+                          setResolutionData({ ...resolutionData, estado: val || '' })
+                        }
+                        error={formErrors.estado}
+                      />
+                      <Checkbox
+                        label='¿Notificar por correo electrónico?'
+                        checked={resolutionData.notificarPorCorreo}
+                        onChange={(e) =>
+                          setResolutionData({
+                            ...resolutionData,
+                            notificarPorCorreo: e.currentTarget.checked,
+                            correo: e.currentTarget.checked ? resolutionData.correo : '',
+                          })
+                        }
+                        mb='sm'
+                      />
+                      {resolutionData.notificarPorCorreo && (
+                        <TextInput
+                          label='Correo electrónico de contacto'
+                          placeholder='correo@empresa.com'
+                          value={resolutionData.correo}
+                          onChange={(e) =>
+                            setResolutionData({
+                              ...resolutionData,
+                              correo: e.currentTarget.value,
+                            })
+                          }
+                          error={formErrors.correo}
+                          required
+                        />
+                      )}
+                      <Textarea
+                        label='Descripción de la resolución'
+                        placeholder='Describe la resolución aplicada...'
+                        value={resolutionData.resolucion}
+                        onChange={(e) =>
+                          setResolutionData({
+                            ...resolutionData,
+                            resolucion: e.currentTarget.value,
+                          })
+                        }
+                        minRows={3}
+                        error={formErrors.resolucion}
+                      />
+                    </Stack>
+                  )}
+                </div>
               </Stack>
             </Card>
           </div>
         </div>
 
+        {/* File Attachments */}
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+          <Title order={3} mb='md' className='flex items-center gap-2'>
+            <IconUpload size={20} />
+            Archivos Adjuntos
+          </Title>
+
+          {/* Archivos existentes */}
+          {folderContents.length > 0 && (
+            <Stack gap='sm' mb='md'>
+              <Text size='sm' fw={500}>
+                Archivos existentes en la solicitud ({folderContents.length})
+              </Text>
+              {folderContents.map((file: FolderFile) => (
+                <Card key={file.id} withBorder p='sm' bg='gray.0'>
+                  <Flex align='center' gap='sm'>
+                    <Box c='blue'>
+                      {file.name.toLowerCase().endsWith('.pdf') && <IconFileText size={20} />}
+                      {(file.name.toLowerCase().endsWith('.doc') ||
+                        file.name.toLowerCase().endsWith('.docx')) && <IconFileText size={20} />}
+                      {(file.name.toLowerCase().endsWith('.xls') ||
+                        file.name.toLowerCase().endsWith('.xlsx')) && (
+                        <IconFileSpreadsheet size={20} />
+                      )}
+                      {(file.name.toLowerCase().endsWith('.png') ||
+                        file.name.toLowerCase().endsWith('.jpg') ||
+                        file.name.toLowerCase().endsWith('.jpeg')) && <IconPhoto size={20} />}
+                      {!file.name
+                        .toLowerCase()
+                        .match(/\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg)$/) && <IconFile size={20} />}
+                    </Box>
+                    <Box style={{ flex: 1 }}>
+                      <Text size='sm' fw={500} lineClamp={1}>
+                        {file.name}
+                      </Text>
+                      <Text size='xs' c='dimmed'>
+                        {file.size ? formatFileSize(file.size) : 'Tamaño desconocido'}
+                      </Text>
+                      {file.lastModifiedDateTime && (
+                        <Text size='xs' c='dimmed'>
+                          Subido: {new Date(file.lastModifiedDateTime).toLocaleDateString('es-CO')}
+                        </Text>
+                      )}
+                    </Box>
+                    <Group gap='xs'>
+                      <Badge color='teal' size='sm'>
+                        Almacenado
+                      </Badge>
+                      <ActionIcon
+                        variant='subtle'
+                        color='blue'
+                        size='sm'
+                        component='a'
+                        href={file['@microsoft.graph.downloadUrl']}
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        aria-label={`Descargar archivo ${file.name}`}
+                      >
+                        <IconUpload size={16} />
+                      </ActionIcon>
+                    </Group>
+                  </Flex>
+                </Card>
+              ))}
+            </Stack>
+          )}
+
+          {/* Componente de carga de archivos */}
+          <FileUpload
+            ticketId={request.id}
+            onFilesChange={setAttachedFiles}
+            disabled={isRequestResolved() || !isEditing}
+          />
+        </Card>
+
         {/* Actions */}
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
-          <Group justify='flex-end'>
+          {/* Mensaje de actualización */}
+          {updateMessage && (
+            <Alert
+              color={updateMessage.type === 'success' ? 'green' : 'red'}
+              mb='md'
+              icon={
+                updateMessage.type === 'success' ? (
+                  <IconCheck size={16} />
+                ) : (
+                  <IconAlertCircle size={16} />
+                )
+              }
+            >
+              {updateMessage.text}
+            </Alert>
+          )}
+
+          <Group justify='space-between'>
+            <Group>
+              {!isEditing ? (
+                <Button
+                  color='blue'
+                  onClick={handleStartEditing}
+                  leftSection={<IconTicket size={16} />}
+                  disabled={isRequestResolved()}
+                >
+                  Editar Solicitud
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    color='green'
+                    onClick={handleUpdateRequest}
+                    leftSection={<IconCheck size={16} />}
+                    loading={isUpdating}
+                  >
+                    Guardar Cambios
+                  </Button>
+                  <Button
+                    variant='outline'
+                    color='gray'
+                    onClick={handleCancelEditing}
+                    leftSection={<IconX size={16} />}
+                  >
+                    Cancelar
+                  </Button>
+                </>
+              )}
+              {isRequestResolved() && (
+                <Text size='sm' color='dimmed'>
+                  Las solicitudes completadas no se pueden modificar.
+                </Text>
+              )}
+            </Group>
+
             <Button
               variant='outline'
               onClick={() => router.push('/process/request-general/create-request')}

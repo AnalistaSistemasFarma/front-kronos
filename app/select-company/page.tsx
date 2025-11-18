@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { Select, Button, Paper, Title, Stack, Loader, Alert } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
 import { useUserContext } from '../../lib/user-context';
-import Image from 'next/image';
 import TextLogo from '../../components/TextLogo';
 
 interface Company {
