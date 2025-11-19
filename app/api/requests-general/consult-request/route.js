@@ -22,10 +22,13 @@ export async function GET(_req) {
         pc.id as id_process,
         pc.process,
         pc.id_category_request,
-        cr.category
+        cr.category,
+        u.email
       FROM process_category pc
       INNER JOIN category_request cr
         ON cr.id = pc.id_category_request
+      LEFT JOIN [user] u
+        ON u.id = pc.assigned
     `;
 
     const queryAssignedUsers = `

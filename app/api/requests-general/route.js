@@ -65,6 +65,8 @@ export async function GET(req) {
       console.log('API requests-general: Agregando filtro por assigned_to:', assigned_to);
     }
 
+    query += ` ORDER BY rg.id DESC`;
+
     const request = pool.request();
     if (idUser) {
       request.input('idUser', sql.NVarChar, idUser);

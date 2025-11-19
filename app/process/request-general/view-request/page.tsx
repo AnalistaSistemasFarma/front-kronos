@@ -188,7 +188,6 @@ function ViewRequestPage() {
   }, [request]);
 
   useEffect(() => {
-    // Auto-scroll al final del chat cuando se cargan nuevas notas
     if (chatEndRef.current) {
       chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
@@ -507,7 +506,7 @@ function ViewRequestPage() {
         emails,
         table,
         outro,
-        'https://farmalogica.com.co/imagenes/logos/logo20.png', // Logo por defecto
+        'https://farmalogica.com.co/imagenes/logos/logo20.png', 
         []
       );
 
@@ -658,7 +657,6 @@ function ViewRequestPage() {
     }
   };
 
-  // Load attached files from localStorage
   useEffect(() => {
     if (request?.id) {
       const storedFiles = localStorage.getItem(`request-${request.id}-files`);
@@ -673,12 +671,10 @@ function ViewRequestPage() {
     }
   }, [request?.id]);
 
-  // Save attached files to localStorage whenever they change
   useEffect(() => {
     if (request?.id && attachedFiles.length > 0) {
       localStorage.setItem(`request-${request.id}-files`, JSON.stringify(attachedFiles));
     } else if (request?.id) {
-      // Clear localStorage if no files
       localStorage.removeItem(`request-${request.id}-files`);
     }
   }, [attachedFiles, request?.id]);
@@ -766,7 +762,6 @@ function ViewRequestPage() {
   return (
     <div className='min-h-screen bg-gray-50'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        {/* Header */}
         <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
@@ -791,7 +786,6 @@ function ViewRequestPage() {
             </Group>
           </Flex>
 
-          {/* Alerta de solicitud resuelta */}
           {isRequestResolved() && (
             <Alert icon={<IconCheck size={16} />} title='Solicitud Completada' color='teal' mb='4'>
               Esta solicitud ha sido marcada como completada y no se puede modificar.
@@ -799,9 +793,7 @@ function ViewRequestPage() {
           )}
         </Card>
 
-        {/* Layout de dos columnas para escritorio, una columna para móviles */}
         <div className='flex flex-col lg:flex-row gap-6'>
-          {/* Columna izquierda: Historial de interacciones (Chat) */}
           <div className='flex-1 order-2 lg:order-1'>
             <Card
               shadow='sm'
@@ -815,7 +807,6 @@ function ViewRequestPage() {
                 Historial de Interacciones
               </Title>
 
-              {/* Área de chat con scroll */}
               <ScrollArea h={400} className='flex-1 mb-4' offsetScrollbars>
                 <div className='space-y-4 p-2'>
                   {notes.length > 0 ? (
@@ -893,7 +884,6 @@ function ViewRequestPage() {
                 </div>
               </ScrollArea>
 
-              {/* Área de entrada de texto para nuevas notas */}
               <div className='border-t pt-4'>
                 <Group align='flex-end'>
                   <Textarea
@@ -931,7 +921,6 @@ function ViewRequestPage() {
             </Card>
           </div>
 
-          {/* Columna derecha: Panel de detalles de la solicitud */}
           <div className='w-full lg:w-150 order-1 lg:order-2'>
             <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white'>
               <Title order={4} mb='md' className='flex items-center gap-2'>
@@ -967,7 +956,6 @@ function ViewRequestPage() {
               </div>
 
               <Stack gap='md'>
-                {/* Información básica */}
                 <div>
                   <Text size='sm' color='gray.6' fw={500}>
                     Compañia
@@ -1168,14 +1156,12 @@ function ViewRequestPage() {
           </div>
         </div>
 
-        {/* File Attachments */}
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
           <Title order={3} mb='md' className='flex items-center gap-2'>
             <IconUpload size={20} />
             Archivos Adjuntos
           </Title>
 
-          {/* Archivos existentes */}
           {folderContents.length > 0 && (
             <Stack gap='sm' mb='md'>
               <Text size='sm' fw={500}>
@@ -1235,7 +1221,6 @@ function ViewRequestPage() {
             </Stack>
           )}
 
-          {/* Componente de carga de archivos */}
           <FileUpload
             ticketId={request.id}
             onFilesChange={setAttachedFiles}
@@ -1245,9 +1230,7 @@ function ViewRequestPage() {
           />
         </Card>
 
-        {/* Actions */}
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
-          {/* Mensaje de actualización */}
           {updateMessage && (
             <Alert
               color={updateMessage.type === 'success' ? 'green' : 'red'}
