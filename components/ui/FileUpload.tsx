@@ -40,6 +40,8 @@ interface FileUploadProps {
   onFilesChange?: (files: UploadedFile[]) => void;
   maxFiles?: number;
   disabled?: boolean;
+  storagePath?: string;
+  entityType?: string;
 }
 
 const ALLOWED_TYPES = [
@@ -60,6 +62,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
   onFilesChange,
   maxFiles = 10,
   disabled = false,
+  storagePath = 'MA',
+  entityType = 'Ticket',
 }) => {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -100,8 +104,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
         throw new Error('No se pudo obtener el token de acceso');
       }
 
-      // Crear carpeta única con el ID del ticket
-      const folderName = `Ticket-${ticketId}`;
+      // Crear carpeta única con el ID de la entidad
+      const folderName = `${entityType}-${ticketId}`;
 
       // Preparar archivo para subida
       const filesToUpload = [{ file }];
@@ -123,7 +127,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       }, 200);
 
       // Usar la nueva función CheckOrCreateFolderAndUpload
-      await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
+      await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token, storagePath);
 
       clearInterval(progressInterval);
 
@@ -151,14 +155,15 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const CheckOrCreateFolderAndUpload = async (
     folderName: string,
     files: { file: File }[],
-    token: string
+    token: string,
+    storagePath: string
   ) => {
     try {
       let folderId: string;
 
       // Intentar obtener la carpeta existente
       const getResponse = await fetch(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}`,
+        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/${storagePath}/${folderName}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -173,7 +178,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       } else if (getResponse.status === 404) {
         // Carpeta no existe, crearla
         const createResponse = await fetch(
-          `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA:/children`,
+          `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/${storagePath}:/children`,
           {
             method: 'POST',
             headers: {
