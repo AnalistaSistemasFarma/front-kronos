@@ -77,15 +77,6 @@ function UserManagement() {
   });
   const [formLoading, setFormLoading] = useState(false);
 
-  useEffect(() => {
-    if (status === 'loading') return;
-    if (!session) {
-      router.push('/login');
-      return;
-    }
-    fetchUsers();
-  }, [session, status, router, filters, pagination.page]);
-
   const fetchUsers = useCallback(async () => {
     try {
       setLoading(true);
@@ -120,6 +111,15 @@ function UserManagement() {
       setLoading(false);
     }
   }, [filters, pagination]);
+
+  useEffect(() => {
+    if (status === 'loading') return;
+    if (!session) {
+      router.push('/login');
+      return;
+    }
+    fetchUsers();
+  }, [session, status, router, filters, pagination.page, fetchUsers]);
 
   const handleFilterChange = (field: string, value: string) => {
     setFilters((prev) => ({

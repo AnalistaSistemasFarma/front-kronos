@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { TextInput, Group } from '@mantine/core';
+import { TextInput } from '@mantine/core';
 import { IconSearch, IconFilter } from '@tabler/icons-react';
 import GradientButton from '../ui/GradientButton';
 

@@ -283,7 +283,7 @@ function ViewTicketPage() {
         }
       });
     }
-  }, [status, userName, userId]);
+  }, [status, userName, userId, getUserIdByName]);
 
   const fetchOptions = async () => {
     try {
