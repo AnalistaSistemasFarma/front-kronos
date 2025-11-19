@@ -318,7 +318,7 @@ function ViewRequestPage() {
       }
 
       const response = await axios.get(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}:/children`,
+        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG/${folderName}:/children`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -346,7 +346,7 @@ function ViewRequestPage() {
 
     try {
       const getResponse = await axios.get(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}`,
+        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG/${folderName}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -719,7 +719,7 @@ function ViewRequestPage() {
       <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
         <div className='text-center'>
           <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4'></div>
-          <Text size='lg' color='gray.6'>
+          <Text size='lg'>
             Cargando detalles de la solicitud...
           </Text>
         </div>
@@ -1243,6 +1243,8 @@ function ViewRequestPage() {
             ticketId={request.id}
             onFilesChange={setAttachedFiles}
             disabled={isRequestResolved() || !isEditing}
+            storagePath='SG'
+            entityType='Request'
           />
         </Card>
 
