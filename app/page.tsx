@@ -318,6 +318,7 @@ export default function LandingPage() {
           <Grid gutter='xl'>
             <GridCol span={{ base: 12, md: 6, lg: 4 }}>
               <Group align='center' gap='xs' mb='md'>
+                Solicitudes Generales
                 <IconBuilding size={32} style={{ color: '#3b82f6' }} />
                 <Text size='xl' fw={700}>
                   ServiciosCompartidos

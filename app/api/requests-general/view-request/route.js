@@ -1,6 +1,6 @@
-import sql from "mssql";
-import sqlConfig from "../../../../dbconfig.js";
-import { NextResponse } from "next/server";
+import sql from 'mssql';
+import sqlConfig from '../../../../dbconfig.js';
+import { NextResponse } from 'next/server';
 
 export async function GET(req) {
   try {
@@ -8,16 +8,13 @@ export async function GET(req) {
     const id = searchParams.get('id');
 
     if (!id) {
-      return NextResponse.json(
-        { error: "ID de solicitud es requerido" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'ID de solicitud es requerido' }, { status: 400 });
     }
 
     const pool = await sql.connect(sqlConfig);
 
     const query = `
-      SELECT 
+      SELECT
         rg.id,
         rg.category,
         rg.[user] as usuario,
@@ -26,9 +23,15 @@ export async function GET(req) {
         c.company,
         rg.created_at,
         rg.requester,
-        rg.[status]
+        rg.[status],
+        rg.id_process_category,
+        pc.assigned as assignedUserId,
+        assignedUser.name as assignedUserName,
+        rg.subject_request as subject
       FROM requests_general rg
       INNER JOIN company c ON c.id_company = rg.id_company
+      LEFT JOIN process_category pc ON pc.id = rg.id_process_category
+      LEFT JOIN [user] assignedUser ON assignedUser.id = pc.assigned
       WHERE rg.id = @id
     `;
 
@@ -38,17 +41,14 @@ export async function GET(req) {
     const result = await request.query(query);
 
     if (result.recordset.length === 0) {
-      return NextResponse.json(
-        { error: "Solicitud no encontrada" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'Solicitud no encontrada' }, { status: 404 });
     }
 
     return NextResponse.json(result.recordset[0], { status: 200 });
   } catch (err) {
-    console.error("Error al obtener la solicitud:", err);
+    console.error('Error al obtener la solicitud:', err);
     return NextResponse.json(
-      { error: "Error al obtener la solicitud", details: err.message },
+      { error: 'Error al obtener la solicitud', details: err.message },
       { status: 500 }
     );
   }

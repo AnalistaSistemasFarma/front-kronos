@@ -534,7 +534,7 @@ function RequestBoard() {
   if (status === 'loading' || loading) {
     return (
       <div className='min-h-screen flex items-center justify-center'>
-        <div>Loading...</div>
+        <div>Cargando...</div>
       </div>
     );
   }
@@ -874,7 +874,7 @@ function RequestBoard() {
 
 export default function TicketsBoardPage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense fallback={<div>Cargando...</div>}>
       <RequestBoard />
     </Suspense>
   );
