@@ -18,7 +18,7 @@ export async function GET(req) {
 
     let query = `
       SELECT
-        rg.id, cr.category as category, up.name as [user], rg.[description], rg.id_company, c.company ,rg.created_at, u.name as 'requester', sc.status as [status], rg.subject_request as [subject], pc.process, cr.id as id_category
+        rg.id, cr.category as category, up.name as [user], rg.[description], rg.id_company, c.company ,rg.created_at, u.name as 'requester', sc.status as [status], rg.subject_request as [subject], pc.process, rg.id_process_category
       FROM requests_general rg
         INNER JOIN company c ON c.id_company = rg.id_company
         LEFT JOIN [user] u ON u.id = rg.id_requester
@@ -95,6 +95,7 @@ export async function GET(req) {
     }
 
     console.log('API requests-general: Ejecutando consulta:', query);
+    query += ` ORDER BY rg.id DESC`;
     const result = await request.query(query);
     console.log(
       'API requests-general: Resultados obtenidos:',

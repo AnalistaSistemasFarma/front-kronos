@@ -545,12 +545,12 @@ function RequestBoard() {
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
-      case 'pendiente':
-        return 'orange';
-      case 'en progreso':
-        return 'blue';
-      case 'completada':
+      case 'abierto':
         return 'green';
+      case 'cancelado':
+        return 'gray';
+      case 'resuelto':
+        return 'blue';
       default:
         return 'gray';
     }
@@ -615,30 +615,15 @@ function RequestBoard() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-orange-50 border-orange-200'>
-                <Group>
-                  <IconClock size={24} className='text-orange-600' />
-                  <div>
-                    <Text size='xs' c='orange.6'>
-                      Pendientes
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'pendiente').length}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
               <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
                 <Group>
                   <IconProgress size={24} className='text-blue-600' />
                   <div>
                     <Text size='xs' c='blue.6'>
-                      En Progreso
+                      Pendiente
                     </Text>
                     <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'en progreso').length}
+                      {tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
                     </Text>
                   </div>
                 </Group>
@@ -653,7 +638,7 @@ function RequestBoard() {
                       Completadas
                     </Text>
                     <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'completada').length}
+                      {tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length}
                     </Text>
                   </div>
                 </Group>
@@ -699,9 +684,9 @@ function RequestBoard() {
                     placeholder='Todos los estados'
                     clearable
                     data={[
-                      { value: 'Pendiente', label: 'Pendiente' },
-                      { value: 'En Progreso', label: 'En Progreso' },
-                      { value: 'Completada', label: 'Completada' },
+                      { value: 'Abierto', label: 'Pendiente' },
+                      { value: 'Cancelado', label: 'Cancelado' },
+                      { value: 'Resuelto', label: 'Completada' },
                     ]}
                     value={filters.status}
                     onChange={(value) => handleFilterChange('status', value || '')}

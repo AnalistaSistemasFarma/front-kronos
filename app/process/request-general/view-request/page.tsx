@@ -86,6 +86,10 @@ interface Request {
   assignedUserName?: string;
   id_process_category?: number;
   user?: string;
+  id_status_case: number;
+  id_category: number;
+
+  idProceso: number;
 }
 
 interface Option {
@@ -320,7 +324,7 @@ function ViewRequestPage() {
     } else {
       setFilteredProcesses([]);
     }
-  }, [request?.category, processCategories, request?.process]);
+  }, [request?.category, processCategories]);
 
   const fetchFormData = async () => {
     try {
@@ -615,12 +619,10 @@ function ViewRequestPage() {
 
       const updateData = {
         id: request?.id,
-        subject: request?.subject,
-        description: request?.description,
-        category: request?.category,
-        process: request?.process,
-        status: resolutionData.estado || request?.status,
-        resolucion: resolutionData.resolucion,
+        id_technical: userId,
+        process_category: Number(request?.id_process_category),
+        status: resolutionData.estado || request?.id_status_case,
+        resolucion: resolutionData.resolucion || null,
       };
 
       const response = await fetch('/api/requests-general/update-request', {
@@ -1033,7 +1035,7 @@ function ViewRequestPage() {
                   <Text size='sm' color='gray.6' fw={500}>
                     Compañia
                   </Text>
-                  <Card withBorder radius='md' p='md' bg='gray.0'>
+                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
                     <Group>
                       <IconBuilding size={16} />
                       <Text size='sm'>
@@ -1048,42 +1050,25 @@ function ViewRequestPage() {
                   <Text size='sm' color='gray.6' fw={500}>
                     Asunto
                   </Text>
-                  {isEditing ? (
-                    <TextInput
-                      value={request?.subject || ''}
-                      onChange={(e) => handleFormChange('subject', e.target.value)}
-                      error={formErrors.subject}
-                      disabled={isRequestResolved() || !canEdit}
-                    />
-                  ) : (
-                    <Card withBorder radius='md' p='md' bg='gray.0'>
-                      <Group>
-                        <IconFileDescription size={16} />
-                        <Text size='sm'>{request?.subject}</Text>
-                      </Group>
-                    </Card>
-                  )}
+
+                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
+                    <Group>
+                      <IconFileDescription size={16} />
+                      <Text size='sm'>{request?.subject}</Text>
+                    </Group>
+                  </Card>
                 </div>
 
                 <div>
                   <Text size='sm' color='gray.6' fw={500}>
                     Descripción
                   </Text>
-                  {isEditing ? (
-                    <Textarea
-                      value={request?.description || ''}
-                      onChange={(e) => handleFormChange('description', e.target.value)}
-                      minRows={3}
-                      error={formErrors.description}
-                      disabled={isRequestResolved() || !canEdit}
-                    />
-                  ) : (
-                    <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
-                      <Text size='sm' className='whitespace-pre-line text-gray-700'>
-                        {request.description}
-                      </Text>
-                    </Card>
-                  )}
+
+                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
+                    <Text size='sm' className='whitespace-pre-line text-gray-700'>
+                      {request.description}
+                    </Text>
+                  </Card>
                 </div>
 
                 <Divider />
@@ -1130,8 +1115,10 @@ function ViewRequestPage() {
                             {isEditing ? (
                               <Select
                                 data={filteredProcesses}
-                                value={request?.process?.toString() || ''}
-                                onChange={(val) => handleFormChange('process', val ?? '')}
+                                value={request?.id_process_category?.toString() || ''}
+                                onChange={(val) =>
+                                  handleFormChange('id_process_category', val ?? '')
+                                }
                                 error={formErrors.process}
                                 disabled={isRequestResolved() || !canEdit}
                               />
@@ -1172,8 +1159,8 @@ function ViewRequestPage() {
                         label='Estado de la solicitud'
                         placeholder='Selecciona estado'
                         data={[
-                          { value: 'Completada', label: 'Completada' },
-                          { value: 'Cancelada', label: 'Cancelada' },
+                          { value: '2', label: 'Resuelto' },
+                          { value: '3', label: 'Cancelado' },
                         ]}
                         value={resolutionData.estado}
                         onChange={(val) =>
@@ -1358,13 +1345,25 @@ function ViewRequestPage() {
               )}
             </Group>
 
-            <Button
-              variant='outline'
-              onClick={() => router.push('/process/request-general/create-request')}
-              leftSection={<IconArrowLeft size={16} />}
-            >
-              Volver al Panel
-            </Button>
+            {!canEdit && (
+              <Button
+                variant='outline'
+                onClick={() => router.push('/process/request-general/create-request')}
+                leftSection={<IconArrowLeft size={16} />}
+              >
+                Volver al Panel
+              </Button>
+            )}
+
+            {canEdit && (
+              <Button
+                variant='outline'
+                onClick={() => router.push('/process/request-general/assigned-requests')}
+                leftSection={<IconArrowLeft size={16} />}
+              >
+                Volver al Panel
+              </Button>
+            )}
           </Group>
         </Card>
       </div>
