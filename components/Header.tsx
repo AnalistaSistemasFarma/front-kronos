@@ -31,7 +31,7 @@ export default function Header() {
               <Link
                 href='/dashboard'
                 className={`${
-                  theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                  theme === 'dark' ? 'text-white' : 'text-gray-700'
                 } hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors`}
               >
                 Dashboard
@@ -39,7 +39,7 @@ export default function Header() {
               <Link
                 href='/process'
                 className={`${
-                  theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                  theme === 'dark' ? 'text-white' : 'text-gray-700'
                 } hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors`}
               >
                 Procesos
@@ -63,10 +63,10 @@ export default function Header() {
               <Menu>
                 <Menu.Target>
                   <button
-                    className='flex items-center space-x-2 hover:bg-gray-100 px-3 py-2 rounded'
+                    className='flex items-center space-x-2 hover:bg-gray-100 px-3 py-2 rounded hover:text-gray-700'
                     aria-label='User menu'
                   >
-                    <div className='aspect-square  rounded-full object-cover relative '>
+                    <div className='aspect-square  rounded-full object-cover relative hover:text-gray-700'>
                       <Avatar
                         src={session.user?.image}
                         alt={session.user?.name || 'User'}
@@ -77,7 +77,11 @@ export default function Header() {
                       </Avatar>
                     </div>
 
-                    <span className='hidden sm:block text-sm font-medium'>
+                    <span
+                      className={`hidden sm:block text-sm font-medium ${
+                        theme === 'dark' ? 'text-white ' : 'text-gray-700'
+                      }`}
+                    >
                       {session.user?.name || 'User'}
                     </span>
                   </button>

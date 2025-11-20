@@ -52,6 +52,7 @@ interface FilterOption {
 export default function ProcessPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { theme } = useTheme();
   const [processes, setProcesses] = useState<Process[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -199,12 +200,10 @@ export default function ProcessPage() {
         <AnimatedBackground />
         <div className='max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8 relative z-10'>
           <div className='mb-8'>
-            <Title order={1} className='text-3xl font-bold text-white dark:text-gray-100 mb-2'>
+            <Title order={1} className='text-3xl font-bold text-white mb-2'>
               Procesos
             </Title>
-            <Text className='text-white/80 dark:text-gray-300'>
-              Cargando procesos disponibles...
-            </Text>
+            <Text className='text-white/80'>Cargando procesos disponibles...</Text>
           </div>
 
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 4 }} spacing='lg'>
@@ -226,10 +225,15 @@ export default function ProcessPage() {
       <div className='max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8 relative z-10'>
         {/* Page Header */}
         <div className='mb-8'>
-          <Title order={1} className='text-3xl font-bold text-gray-900 dark:text-white mb-6'>
+          <Title
+            order={1}
+            className={`text-3xl font-bold mb-6 ${
+              theme === 'dark' ? 'text-white' : 'text-gray-900'
+            }`}
+          >
             Procesos
           </Title>
-          <Text className='text-gray-600 dark:text-gray-300 mb-8'>
+          <Text className={`mb-8 ${theme === 'dark' ? 'text-white' : 'text-gray-600'}`}>
             Lista de procesos disponibles para tu usuario
           </Text>
 
@@ -252,7 +256,7 @@ export default function ProcessPage() {
 
         {/* View Controls */}
         <Group justify='space-between' mb='md'>
-          <Text size='sm' className='text-gray-600 dark:text-gray-300'>
+          <Text size='sm' className={theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}>
             {filteredProcesses.length} {filteredProcesses.length === 1 ? 'proceso' : 'procesos'}{' '}
             encontrado{filteredProcesses.length !== 1 ? 's' : ''}
           </Text>
@@ -289,12 +293,15 @@ export default function ProcessPage() {
           <GlassCard className='text-center py-12'>
             <div className='empty-state'>
               <div className='empty-state-icon'>📁</div>
-              <Title order={3} className='text-gray-500 dark:text-gray-400 mb-2'>
+              <Title
+                order={3}
+                className={`mb-2 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}
+              >
                 {searchTerm || selectedCategory
                   ? 'No se encontraron procesos'
                   : 'No hay procesos disponibles'}
               </Title>
-              <Text className='text-gray-400 dark:text-gray-500 mb-4'>
+              <Text className={`mb-4 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
                 {searchTerm || selectedCategory
                   ? 'Intenta ajustar tu búsqueda o filtros'
                   : 'No tienes procesos asignados en este momento.'}
