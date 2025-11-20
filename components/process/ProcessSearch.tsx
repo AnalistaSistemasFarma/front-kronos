@@ -57,6 +57,11 @@ const ProcessSearch: React.FC<ProcessSearchProps> = ({
           transition: all 0.3s ease;
         }
 
+        :global(.dark) .process-search {
+          background: rgba(31, 41, 55, 0.8);
+          border: 1px solid rgba(75, 85, 99, 0.3);
+        }
+
         .process-search:focus-within {
           border-color: #667eea;
           box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
@@ -86,8 +91,16 @@ const ProcessSearch: React.FC<ProcessSearchProps> = ({
           padding: 0;
         }
 
+        :global(.dark) .search-input :global(input) {
+          color: #e5e7eb;
+        }
+
         .search-input :global(input::placeholder) {
           color: #999;
+        }
+
+        :global(.dark) .search-input :global(input::placeholder) {
+          color: #6b7280;
         }
 
         .search-actions {

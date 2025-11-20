@@ -66,6 +66,11 @@ const ProcessFilters: React.FC<ProcessFiltersProps> = ({
           border: 1px solid rgba(255, 255, 255, 0.2);
         }
 
+        :global(.dark) .process-filters {
+          background: rgba(31, 41, 55, 0.8);
+          border: 1px solid rgba(75, 85, 99, 0.3);
+        }
+
         .filter-tabs {
           display: flex;
           gap: 8px;
@@ -89,10 +94,19 @@ const ProcessFilters: React.FC<ProcessFiltersProps> = ({
           position: relative;
         }
 
+        :global(.dark) .filter-tab {
+          color: #9ca3af;
+        }
+
         .filter-tab:hover:not(.filter-tab--active) {
           background: rgba(102, 126, 234, 0.1);
           color: #667eea;
           transform: translateY(-1px);
+        }
+
+        :global(.dark) .filter-tab:hover:not(.filter-tab--active) {
+          background: rgba(102, 126, 234, 0.2);
+          color: #818cf8;
         }
 
         .filter-tab--active {

@@ -1,14 +1,14 @@
 import { PrismaAdapter } from '@next-auth/prisma-adapter';
 import bcrypt from 'bcryptjs';
-import NextAuth from 'next-auth';
+import NextAuth, { AuthOptions, Session, User } from 'next-auth';
+import { JWT } from 'next-auth/jwt';
 import AzureADProvider from 'next-auth/providers/azure-ad';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { prisma } from '../../../../lib/prisma';
 
-export const authOptions = {
+export const authOptions: AuthOptions = {
   adapter: PrismaAdapter(prisma),
   debug: process.env.NODE_ENV === 'development',
-  baseUrl: process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : undefined,
   providers: [
     CredentialsProvider({
       name: 'credentials',
@@ -34,6 +34,7 @@ export const authOptions = {
           id: user.id,
           email: user.email,
           name: user.name,
+          image: user.image,
         };
       },
     }),
@@ -45,6 +46,20 @@ export const authOptions = {
   ],
   session: {
     strategy: 'jwt' as const,
+  },
+  callbacks: {
+    async jwt({ token, user }: { token: JWT; user?: User }) {
+      if (user) {
+        token.image = user.image;
+      }
+      return token;
+    },
+    async session({ session, token }: { session: Session; token: JWT }) {
+      if (token && session.user) {
+        session.user.image = token.image as string;
+      }
+      return session;
+    },
   },
   pages: {
     signIn: '/login',

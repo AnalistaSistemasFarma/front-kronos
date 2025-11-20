@@ -85,9 +85,10 @@ interface Request {
   assignedUserId?: number;
   assignedUserName?: string;
   id_process_category?: number;
+  user?: string;
   id_status_case: number;
   id_category: number;
-  user: string;
+
   idProceso: number;
 }
 
@@ -575,7 +576,7 @@ function ViewRequestPage() {
         emails,
         table,
         outro,
-        'https://farmalogica.com.co/imagenes/logos/logo20.png', 
+        'https://farmalogica.com.co/imagenes/logos/logo20.png',
         []
       );
 
@@ -1115,7 +1116,9 @@ function ViewRequestPage() {
                               <Select
                                 data={filteredProcesses}
                                 value={request?.id_process_category?.toString() || ''}
-                                onChange={(val) => handleFormChange('id_process_category', val ?? '')}
+                                onChange={(val) =>
+                                  handleFormChange('id_process_category', val ?? '')
+                                }
                                 error={formErrors.process}
                                 disabled={isRequestResolved() || !canEdit}
                               />
@@ -1341,25 +1344,25 @@ function ViewRequestPage() {
                 </Text>
               )}
             </Group>
-            
+
             {!canEdit && (
-            <Button
-              variant='outline'
-              onClick={() => router.push('/process/request-general/create-request')}
-              leftSection={<IconArrowLeft size={16} />}
-            >
-              Volver al Panel
-            </Button>
+              <Button
+                variant='outline'
+                onClick={() => router.push('/process/request-general/create-request')}
+                leftSection={<IconArrowLeft size={16} />}
+              >
+                Volver al Panel
+              </Button>
             )}
 
             {canEdit && (
-            <Button
-              variant='outline'
-              onClick={() => router.push('/process/request-general/assigned-requests')}
-              leftSection={<IconArrowLeft size={16} />}
-            >
-              Volver al Panel
-            </Button>
+              <Button
+                variant='outline'
+                onClick={() => router.push('/process/request-general/assigned-requests')}
+                leftSection={<IconArrowLeft size={16} />}
+              >
+                Volver al Panel
+              </Button>
             )}
           </Group>
         </Card>
