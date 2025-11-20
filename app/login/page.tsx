@@ -31,7 +31,7 @@ export default function Login() {
       if (result?.error) {
         toast.error('Credenciales inválidas. Por favor, inténtalo de nuevo.');
       } else {
-        router.push('/dashboard');
+        router.push('/process');
       }
     } catch {
       toast.error('Ocurrió un error. Por favor, inténtalo más tarde.');
@@ -323,7 +323,7 @@ export default function Login() {
                 c='#667eea'
                 style={{ textDecoration: 'none' }}
               >
-                ¿Olvidaste tu contraseña?
+                ¿Olvidaste tu contraseña? Solicita una nueva.
               </Text>
             </Group>
 
@@ -345,24 +345,10 @@ export default function Login() {
             </Button>
           </Stack>
         </form>
-
-        <Divider label='O' labelPosition='center' my='lg' />
-
-        <Text ta='center' size='sm'>
-          ¿No tienes una cuenta?{' '}
-          <Text
-            component={Link}
-            href='/register'
-            c='#667eea'
-            style={{ textDecoration: 'none', fontWeight: 600 }}
-          >
-            Regístrate
-          </Text>
-        </Text>
       </Paper>
 
       <Text ta='center' size='xs' c='rgba(255, 255, 255, 0.8)' mt='md'>
-        © 2024 Portal de servicios. Todos los derechos reservados.
+        © 2025 Portal de servicios. Todos los derechos reservados.
       </Text>
     </div>
   );

@@ -1516,7 +1516,7 @@ function ViewTicketPage() {
 
 export default function TicketsViewBoardPage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense fallback={<div>Cargando..</div>}>
       <ViewTicketPage />
     </Suspense>
   );

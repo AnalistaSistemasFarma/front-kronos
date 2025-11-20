@@ -5,6 +5,18 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
 import { useSession } from 'next-auth/react';
+
+// Extend the session type to include role
+declare module 'next-auth' {
+  interface Session {
+    user?: {
+      name?: string | null;
+      email?: string | null;
+      image?: string | null;
+      role?: string;
+    };
+  }
+}
 import {
   Title,
   Paper,
@@ -70,6 +82,9 @@ interface Request {
   created_at: string;
   requester: string;
   status: string;
+  assignedUserId?: number;
+  assignedUserName?: string;
+  id_process_category?: number;
 }
 
 interface Option {
@@ -136,6 +151,9 @@ function ViewRequestPage() {
   const userName = session?.user?.name || '';
   const [userId, setUserId] = useState<number | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loadingPermissions, setLoadingPermissions] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [originalRequest, setOriginalRequest] = useState<Request | null>(null);
@@ -234,6 +252,46 @@ function ViewRequestPage() {
     }
   };
 
+  const checkEditPermissions = async () => {
+    if (!session?.user?.email || !request) {
+      setCanEdit(false);
+      setIsAdmin(false);
+      setLoadingPermissions(false);
+      return;
+    }
+
+    try {
+      // Check if user has admin privileges
+      const userRole = session.user?.role;
+      const hasAdminRole = userRole === 'admin' || userRole === 'super_user';
+
+      // For client-side, we'll use the role from session
+      // Server-side verification should be done for critical operations
+      setIsAdmin(hasAdminRole);
+
+      // Check if user is assigned to this request
+      const isAssignedUser = request.user === userName;
+
+      // User can edit if they are admin or assigned to the request
+      const hasEditPermission = hasAdminRole || isAssignedUser;
+
+      setCanEdit(hasEditPermission);
+      console.log('Permission check:', {
+        userName,
+        assignedUserName: request.user,
+        isAssignedUser,
+        hasAdminRole,
+        canEdit: hasEditPermission,
+      });
+    } catch (error) {
+      console.error('Error checking permissions:', error);
+      setCanEdit(false);
+      setIsAdmin(false);
+    } finally {
+      setLoadingPermissions(false);
+    }
+  };
+
   useEffect(() => {
     if (status === 'authenticated' && userName && !userId) {
       getUserIdByName(userName).then((id) => {
@@ -244,6 +302,13 @@ function ViewRequestPage() {
       });
     }
   }, [status, userName, userId, getUserIdByName]);
+
+  useEffect(() => {
+    if (request && session) {
+      setLoadingPermissions(true);
+      checkEditPermissions();
+    }
+  }, [request, session, userName]);
 
   useEffect(() => {
     if (request?.category) {
@@ -955,6 +1020,13 @@ function ViewRequestPage() {
                 <Text size='sm'>{request.requester}</Text>
               </div>
 
+              <div className='pb-2'>
+                <Text size='sm' color='gray.6' fw={500}>
+                  Asignado a
+                </Text>
+                <Text size='sm'>{request.user}</Text>
+              </div>
+
               <Stack gap='md'>
                 <div>
                   <Text size='sm' color='gray.6' fw={500}>
@@ -980,7 +1052,7 @@ function ViewRequestPage() {
                       value={request?.subject || ''}
                       onChange={(e) => handleFormChange('subject', e.target.value)}
                       error={formErrors.subject}
-                      disabled={isRequestResolved()}
+                      disabled={isRequestResolved() || !canEdit}
                     />
                   ) : (
                     <Card withBorder radius='md' p='md' bg='gray.0'>
@@ -1002,7 +1074,7 @@ function ViewRequestPage() {
                       onChange={(e) => handleFormChange('description', e.target.value)}
                       minRows={3}
                       error={formErrors.description}
-                      disabled={isRequestResolved()}
+                      disabled={isRequestResolved() || !canEdit}
                     />
                   ) : (
                     <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
@@ -1034,7 +1106,7 @@ function ViewRequestPage() {
                                 value={request?.category?.toString() || ''}
                                 onChange={(val) => handleFormChange('category', val ?? '')}
                                 error={formErrors.category}
-                                disabled={isRequestResolved()}
+                                disabled={isRequestResolved() || !canEdit}
                               />
                             ) : (
                               <Text size='sm'>
@@ -1060,7 +1132,7 @@ function ViewRequestPage() {
                                 value={request?.process?.toString() || ''}
                                 onChange={(val) => handleFormChange('process', val ?? '')}
                                 error={formErrors.process}
-                                disabled={isRequestResolved()}
+                                disabled={isRequestResolved() || !canEdit}
                               />
                             ) : (
                               <Text size='sm'>
@@ -1082,7 +1154,7 @@ function ViewRequestPage() {
                       <IconCheck size={18} className='text-green-6' />
                       Resolución de la Solicitud
                     </Title>
-                    {!isRequestResolved() && isEditing && (
+                    {!isRequestResolved() && isEditing && canEdit && (
                       <ActionIcon
                         variant='subtle'
                         onClick={() => setShowResolution(!showResolution)}
@@ -1093,7 +1165,7 @@ function ViewRequestPage() {
                   </Group>
 
                   {/* Formulario de resolución para solicitudes no resueltas */}
-                  {!isRequestResolved() && isEditing && showResolution && (
+                  {!isRequestResolved() && isEditing && showResolution && canEdit && (
                     <Stack>
                       <Select
                         label='Estado de la solicitud'
@@ -1224,7 +1296,7 @@ function ViewRequestPage() {
           <FileUpload
             ticketId={request.id}
             onFilesChange={setAttachedFiles}
-            disabled={isRequestResolved() || !isEditing}
+            disabled={isRequestResolved()}
             storagePath='SG'
             entityType='Request'
           />
@@ -1254,7 +1326,7 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
-                  disabled={isRequestResolved()}
+                  disabled={isRequestResolved() || !canEdit || loadingPermissions}
                 >
                   Editar Solicitud
                 </Button>
