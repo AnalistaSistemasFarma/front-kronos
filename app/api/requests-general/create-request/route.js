@@ -64,7 +64,7 @@ export async function POST(req) {
       request.input("createdby", sql.NVarChar(1000), createdby);
 
       const caseResult = await request.query(insertCaseQuery);
-      const newCaseId = caseResult.recordset[0].id_case;
+      const newCaseId = caseResult.recordset[0].id;
 
       await transaction.commit();
 

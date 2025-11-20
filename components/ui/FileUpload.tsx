@@ -42,6 +42,7 @@ interface FileUploadProps {
   disabled?: boolean;
   storagePath?: string;
   entityType?: string;
+  autoUpload?: boolean;
 }
 
 const ALLOWED_TYPES = [
@@ -64,6 +65,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
   disabled = false,
   storagePath = 'MA',
   entityType = 'Ticket',
+  autoUpload = true,
 }) => {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -267,15 +269,17 @@ const FileUpload: React.FC<FileUploadProps> = ({
       const uploadedFiles: UploadedFile[] = validFiles.map((file) => ({
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         file,
-        status: 'uploading' as const,
-        progress: 0,
+        status: autoUpload ? 'uploading' : 'success', // Si no autoUpload, marcar como success para que se muestre
+        progress: autoUpload ? 0 : 100,
       }));
 
       setFiles((prev) => [...prev, ...uploadedFiles]);
 
-      // Subir archivos
-      for (const uploadedFile of uploadedFiles) {
-        await uploadFile(uploadedFile.file, uploadedFile.id);
+      // Subir archivos solo si autoUpload
+      if (autoUpload) {
+        for (const uploadedFile of uploadedFiles) {
+          await uploadFile(uploadedFile.file, uploadedFile.id);
+        }
       }
 
       // Notificar cambios
