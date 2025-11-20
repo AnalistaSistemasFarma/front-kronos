@@ -85,6 +85,7 @@ interface Request {
   assignedUserId?: number;
   assignedUserName?: string;
   id_process_category?: number;
+  user?: string;
 }
 
 interface Option {
@@ -571,7 +572,7 @@ function ViewRequestPage() {
         emails,
         table,
         outro,
-        'https://farmalogica.com.co/imagenes/logos/logo20.png', 
+        'https://farmalogica.com.co/imagenes/logos/logo20.png',
         []
       );
 

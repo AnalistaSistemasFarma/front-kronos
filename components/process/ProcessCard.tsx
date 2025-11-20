@@ -310,12 +310,20 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
           flex: 1;
         }
 
+        :global(.dark) .process-title {
+          color: #f3f4f6;
+        }
+
         .process-description {
           margin: 0;
           line-height: 1.5;
           color: #666;
           flex: 1;
           margin-bottom: 8px;
+        }
+
+        :global(.dark) .process-description {
+          color: #9ca3af;
         }
 
         .list-view-card .process-description {
@@ -420,6 +428,10 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
           color: #333;
           font-size: 14px;
           line-height: 1.4;
+        }
+
+        :global(.dark) .subprocess-name {
+          color: #e5e7eb;
         }
 
         .subprocess-arrow {

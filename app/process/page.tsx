@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { Title, Text, Alert, Group, ActionIcon, SimpleGrid } from '@mantine/core';
 import { IconLayoutGrid, IconList, IconX } from '@tabler/icons-react';
+import { useTheme } from '../../components/providers';
 import GlassCard from '../../components/ui/GlassCard';
 import ProcessCard from '../../components/process/ProcessCard';
 import ProcessSearch from '../../components/process/ProcessSearch';
@@ -198,10 +199,12 @@ export default function ProcessPage() {
         <AnimatedBackground />
         <div className='max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8 relative z-10'>
           <div className='mb-8'>
-            <Title order={1} className='text-3xl font-bold text-white mb-2'>
+            <Title order={1} className='text-3xl font-bold text-white dark:text-gray-100 mb-2'>
               Procesos
             </Title>
-            <Text className='text-white/80'>Cargando procesos disponibles...</Text>
+            <Text className='text-white/80 dark:text-gray-300'>
+              Cargando procesos disponibles...
+            </Text>
           </div>
 
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 4 }} spacing='lg'>
@@ -223,10 +226,12 @@ export default function ProcessPage() {
       <div className='max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8 relative z-10'>
         {/* Page Header */}
         <div className='mb-8'>
-          <Title order={1} className='text-3xl font-bold text-black mb-6'>
+          <Title order={1} className='text-3xl font-bold text-gray-900 dark:text-white mb-6'>
             Procesos
           </Title>
-          <Text className='text-white/80 mb-8'>Lista de procesos disponibles para tu usuario</Text>
+          <Text className='text-gray-600 dark:text-gray-300 mb-8'>
+            Lista de procesos disponibles para tu usuario
+          </Text>
 
           {/* Search and Filters */}
           <ProcessSearch
@@ -247,7 +252,7 @@ export default function ProcessPage() {
 
         {/* View Controls */}
         <Group justify='space-between' mb='md'>
-          <Text size='sm' c='white/80'>
+          <Text size='sm' className='text-gray-600 dark:text-gray-300'>
             {filteredProcesses.length} {filteredProcesses.length === 1 ? 'proceso' : 'procesos'}{' '}
             encontrado{filteredProcesses.length !== 1 ? 's' : ''}
           </Text>
@@ -284,12 +289,12 @@ export default function ProcessPage() {
           <GlassCard className='text-center py-12'>
             <div className='empty-state'>
               <div className='empty-state-icon'>📁</div>
-              <Title order={3} className='text-gray-500 mb-2'>
+              <Title order={3} className='text-gray-500 dark:text-gray-400 mb-2'>
                 {searchTerm || selectedCategory
                   ? 'No se encontraron procesos'
                   : 'No hay procesos disponibles'}
               </Title>
-              <Text className='text-gray-400 mb-4'>
+              <Text className='text-gray-400 dark:text-gray-500 mb-4'>
                 {searchTerm || selectedCategory
                   ? 'Intenta ajustar tu búsqueda o filtros'
                   : 'No tienes procesos asignados en este momento.'}

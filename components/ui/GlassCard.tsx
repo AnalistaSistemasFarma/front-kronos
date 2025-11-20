@@ -38,10 +38,6 @@ const GlassCard: React.FC<GlassCardProps> = ({
         } ${className}`}
         onClick={onClick}
         style={{
-          background: 'rgba(255, 255, 255, 0.95)',
-          backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
           padding: paddingMap[padding],
           transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           position: 'relative',
@@ -53,10 +49,28 @@ const GlassCard: React.FC<GlassCardProps> = ({
       </Paper>
 
       <style jsx>{`
+        .glass-card {
+          background: rgba(255, 255, 255, 0.95);
+          backdrop-filter: blur(10px);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        :global(.dark) .glass-card {
+          background: rgba(31, 41, 55, 0.95);
+          border: 1px solid rgba(75, 85, 99, 0.3);
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
         .glass-card--hoverable:hover {
           transform: translateY(-4px);
           box-shadow: 0 12px 40px rgba(102, 126, 234, 0.2);
           background: rgba(255, 255, 255, 1);
+        }
+
+        :global(.dark) .glass-card--hoverable:hover {
+          background: rgba(31, 41, 55, 1);
+          box-shadow: 0 12px 40px rgba(102, 126, 234, 0.4);
         }
 
         .glass-card--interactive:active {
