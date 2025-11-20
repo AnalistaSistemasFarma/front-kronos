@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
+import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
+import axios from 'axios';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -49,6 +51,8 @@ import {
   IconUserCheck,
   IconTag,
 } from '@tabler/icons-react';
+import { sendMessage } from '../../../../components/email/utils/sendMessage';
+import FileUpload, { UploadedFile } from '../../../../components/ui/FileUpload';
 
 interface Ticket {
   id: number;
@@ -78,6 +82,7 @@ interface ProcessCategoryData {
   process: string;
   id_category_request: number;
   category: string;
+  email?: string;
 }
 
 interface ConsultResponse {
@@ -85,6 +90,14 @@ interface ConsultResponse {
   categories: CategoryData[];
   processCategories: ProcessCategoryData[];
   assignedUsers: { id: string; name: string }[];
+}
+
+interface FolderFile {
+  id: string;
+  name: string;
+  size?: number;
+  lastModifiedDateTime?: string;
+  '@microsoft.graph.downloadUrl'?: string;
 }
 
 function RequestBoard() {
@@ -114,7 +127,7 @@ function RequestBoard() {
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
   const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
   const [processCategories, setProcessCategories] = useState<
-    { value: string; label: string; id_category_request: number }[]
+    { value: string; label: string; id_category_request: number; email?: string }[]
   >([]);
   const [filteredProcesses, setFilteredProcesses] = useState<{ value: string; label: string }[]>(
     []
@@ -123,6 +136,8 @@ function RequestBoard() {
   const [formDataLoading, setFormDataLoading] = useState(false);
   const [formDataError, setFormDataError] = useState<string | null>(null);
   const [idUser, setIdUser] = useState('');
+  const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
+  const [folderContents, setFolderContents] = useState([]);
 
   const [filters, setFilters] = useState({
     status: '',
@@ -344,6 +359,7 @@ function RequestBoard() {
             value: p.id_process.toString(),
             label: p.process,
             id_category_request: p.id_category_request,
+            email: p.email,
           }))
         );
         if (data.assignedUsers) {
@@ -446,6 +462,24 @@ function RequestBoard() {
 
       setTickets((prev) => [newTicket, ...prev]);
 
+      // Upload attached files if any
+      if (attachedFiles.length > 0) {
+        const token = await getMicrosoftToken();
+        if (!token) {
+          throw new Error('No se pudo obtener el token de acceso para subir archivos.');
+        }
+
+        const folderName = `Request-${newTicket.id_request}`;
+        const filesToUpload = attachedFiles.map((file) => ({ file: file.file }));
+
+        if (filesToUpload.length > 0) {
+          await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
+        }
+      }
+
+      // Send email notification to assigned user
+      await sendRequestEmailNotification(newTicket.id_request, formData.subject, parseInt(formData.process));
+
       setFormData({
         company: '',
         subject: '',
@@ -454,6 +488,8 @@ function RequestBoard() {
         descripcion: '',
       });
 
+      setAttachedFiles([]); // Clear attached files
+
       fetchTickets();
       setModalOpened(false);
     } catch (err) {
@@ -461,6 +497,111 @@ function RequestBoard() {
       setError('Failed to create ticket. Please try again.');
     } finally {
       setCreateLoading(false);
+    }
+  };
+
+  async function CheckOrCreateFolderAndUpload(
+    folderName: string,
+    files: { file: File }[],
+    token: string
+  ) {
+    try {
+      // Crear la carpeta directamente
+      const createResponse = await axios.post(
+        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG:/children`,
+        {
+          name: folderName,
+          folder: {},
+          '@microsoft.graph.conflictBehavior': 'replace'
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (createResponse.status !== 201) {
+        throw new Error('Error al crear la carpeta.');
+      }
+
+      const folderId = createResponse.data.id;
+
+      if (files && files.length > 0) {
+        const uploadPromises = files.map((file: { file: File }) =>
+          axios.put(
+            `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
+            file.file,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': file.file.type,
+              },
+            }
+          )
+        );
+
+        const results = await Promise.all(uploadPromises);
+
+        results.forEach((response, index) => {
+          if (response.status === 201 || response.status === 200) {
+            console.log(`Archivo subido: ${files[index].file.name}`, response.data);
+          } else {
+            console.log(`Error al subir el archivo: ${files[index].file.name}`);
+          }
+        });
+      } else {
+        console.log('No hay archivos seleccionados para subir.');
+      }
+    } catch (error) {
+      console.error('Error en CheckOrCreateFolderAndUpload:', error);
+      throw error;
+    }
+  }
+
+  const sendRequestEmailNotification = async (requestId: number, subject: string, processId: number): Promise<boolean> => {
+    if (!process.env.API_EMAIL) {
+      console.error('Error: La variable de entorno API_EMAIL no está configurada');
+      return false;
+    }
+
+    try {
+      // Find the email of the assigned user for this process
+      const selectedProcess = processCategories.find(p => p.value === processId.toString());
+      const assignedEmail = selectedProcess?.email;
+
+      if (!assignedEmail) {
+        console.log('No email found for assigned user, skipping email notification');
+        return true;
+      }
+
+      const message = `Nueva Solicitud Asignada #${requestId} - ${subject}`;
+
+      const table: Array<Record<string, string | number | undefined>> = [
+        {
+          'ID de Solicitud': requestId,
+          Asunto: subject,
+          'Creado por': userName,
+        },
+      ];
+
+      const outro = `Este es un mensaje automático del sistema de Solicitudes Generales. Se le ha asignado una nueva solicitud. Si tiene alguna pregunta, por favor contacte al administrador del sistema.`;
+
+      const result = await sendMessage(
+        message,
+        assignedEmail,
+        table,
+        outro,
+        'https://farmalogica.com.co/imagenes/logos/logo20.png',
+        []
+      );
+
+      console.log('Notificación por correo de solicitud enviada exitosamente:', result);
+      return true;
+    } catch (error) {
+      console.error('Error al enviar la notificación por correo de solicitud:', error);
+      return false;
     }
   };
 
@@ -799,8 +940,10 @@ function RequestBoard() {
                         </Badge>
                       </Table.Td>
                       <Table.Td>
-                        <Text size='sm' c='gray.7'>
-                          {new Date(ticket.created_at).toISOString().split('T')[0]}
+                        <Text size="sm" c="gray.7">
+                          {ticket.created_at && !isNaN(new Date(ticket.created_at).getTime())
+                            ? new Date(ticket.created_at).toISOString().split("T")[0]
+                            : "Fecha inválida"}
                         </Text>
                       </Table.Td>
                       <Table.Td>
@@ -834,6 +977,7 @@ function RequestBoard() {
           onClose={() => {
             setModalOpened(false);
             setFormErrors({});
+            setAttachedFiles([]);
           }}
           title={
             <Group>
@@ -946,12 +1090,29 @@ function RequestBoard() {
 
             <Divider />
 
+            {/* File Upload Section */}
+            <div>
+              <Text fw={600} mb='xs'>
+                Archivos Adjuntos (Opcional)
+              </Text>
+              <FileUpload
+                ticketId={0} // Dummy ID since request doesn't exist yet
+                onFilesChange={setAttachedFiles}
+                autoUpload={false}
+                maxFiles={10}
+                disabled={formDataLoading}
+              />
+            </div>
+
+            <Divider />
+
             <Group justify='flex-end' gap='md'>
               <Button
                 variant='outline'
                 onClick={() => {
                   setModalOpened(false);
                   setFormErrors({});
+                  setAttachedFiles([]);
                 }}
                 size='md'
               >
