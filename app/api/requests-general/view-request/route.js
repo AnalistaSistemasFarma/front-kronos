@@ -27,7 +27,9 @@ export async function GET(req) {
         rg.id_process_category,
         pc.assigned as assignedUserId,
         assignedUser.name as assignedUserName,
-        rg.subject_request as subject
+        rg.subject_request as subject, 
+        rg.resolution as resolutioncase, 
+        rg.date_resolution
       FROM requests_general rg
       INNER JOIN company c ON c.id_company = rg.id_company
       LEFT JOIN process_category pc ON pc.id = rg.id_process_category
