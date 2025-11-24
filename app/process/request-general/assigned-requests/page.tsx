@@ -194,7 +194,7 @@ function RequestBoard() {
           if (id) {
             setUserId(id);
             setUserIdInitialized(true);
-            fetchTicketsWithUserId(id);
+            fetchTicketsWithUserId(id, filters);
           } else {
             setUserIdInitialized(true);
             setError('No se pudo obtener el ID del usuario. Por favor, recargue la página.');
@@ -243,15 +243,24 @@ function RequestBoard() {
       console.log('fetchTickets: No se puede ejecutar sin userId');
       return;
     }
-    await fetchTicketsWithUserId(userId);
+    await fetchTicketsWithUserId(userId, filters);
   };
 
-  const fetchTicketsWithUserId = async (userIdToUse: number) => {
+  const fetchTicketsWithUserId = async (userIdToUse: number, filtersToUse?: typeof filters) => {
     try {
       setLoading(true);
 
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
+
+      // Agregar filtros si se proporcionan
+      if (filtersToUse) {
+        if (filtersToUse.status) params.append('status', filtersToUse.status);
+        if (filtersToUse.company) params.append('company', filtersToUse.company);
+        if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
+        if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
+        if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
+      }
 
       const url = `/api/requests-general/request-assigned?${params.toString()}`;
 
@@ -474,49 +483,6 @@ function RequestBoard() {
     }
   }
 
-  const handleAddNote = async () => {
-    // This function will be used when viewing a specific ticket
-    // Not needed in the list view
-  };
-
-  const handleTicketFormChange = (field: string, value: string) => {
-    // This function will be used when viewing a specific ticket
-    // Not needed in the list view
-  };
-
-  const handleStartEditing = () => {
-    // This function will be used when viewing a specific ticket
-    // Not needed in the list view
-  };
-
-  const handleCancelEditing = () => {
-    // This function will be used when viewing a specific ticket
-    // Not needed in the list view
-  };
-
-  const validateFields = (): boolean => {
-    // This function will be used when viewing a specific ticket
-    // Not needed in the list view
-    return true;
-  };
-
-  const sendEmailNotification = async (): Promise<boolean> => {
-    // This function will be used when viewing a specific ticket
-    // Not needed in the list view
-    return true;
-  };
-
-  const sendNoteEmailNotification = async (): Promise<boolean> => {
-    // This function will be used when viewing a specific ticket
-    // Not needed in the list view
-    return true;
-  };
-
-  const handleUpdateRequest = async () => {
-    // This function will be used when viewing a specific ticket
-    // Not needed in the list view
-  };
-
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -546,11 +512,11 @@ function RequestBoard() {
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
       case 'abierto':
-        return 'green';
-      case 'cancelado':
         return 'gray';
-      case 'resuelto':
+      case 'cancelado':
         return 'blue';
+      case 'resuelto':
+        return 'green';
       default:
         return 'gray';
     }
@@ -684,9 +650,9 @@ function RequestBoard() {
                     placeholder='Todos los estados'
                     clearable
                     data={[
-                      { value: 'Abierto', label: 'Pendiente' },
-                      { value: 'Cancelado', label: 'Cancelado' },
-                      { value: 'Resuelto', label: 'Completada' },
+                      { value: '1', label: 'Abierto' },
+                      { value: '3', label: 'Cancelado' },
+                      { value: '2', label: 'Completada' },
                     ]}
                     value={filters.status}
                     onChange={(value) => handleFilterChange('status', value || '')}
@@ -728,14 +694,17 @@ function RequestBoard() {
                 <Button
                   variant='outline'
                   onClick={() => {
-                    setFilters({
+                    const clearedFilters = {
                       status: '',
                       company: '',
                       date_from: '',
                       date_to: '',
                       assigned_to: '',
-                    });
-                    fetchTickets(); // Refetch tickets without filters
+                    };
+                    setFilters(clearedFilters);
+                    if (userId) {
+                      fetchTicketsWithUserId(userId, clearedFilters);
+                    }
                   }}
                   leftSection={<IconX size={16} />}
                 >

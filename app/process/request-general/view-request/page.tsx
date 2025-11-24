@@ -88,6 +88,8 @@ interface Request {
   user?: string;
   id_status_case: number;
   id_category: number;
+  resolution?: string;
+  date_resolution?: string;
 
   idProceso: number;
 }
@@ -191,7 +193,13 @@ function ViewRequestPage() {
           return res.json();
         })
         .then((data) => {
-          setRequest(data);
+          // Mapear los campos de resolución de la API
+          const mappedData = {
+            ...data,
+            resolution: data.resolutioncase || null,
+            date_resolution: data.date_resolution || null,
+          };
+          setRequest(mappedData);
           setLoading(false);
         })
         .catch((err) => {
@@ -694,7 +702,7 @@ function ViewRequestPage() {
   };
 
   const isRequestResolved = () => {
-    return request?.status?.toLowerCase() === 'completada';
+    return request?.status?.toLowerCase() === 'completada' || Boolean(request?.resolution && request.resolution.trim() !== '');
   };
 
   const handleAddNote = async () => {
@@ -855,8 +863,8 @@ function ViewRequestPage() {
           </Flex>
 
           {isRequestResolved() && (
-            <Alert icon={<IconCheck size={16} />} title='Solicitud Completada' color='teal' mb='4'>
-              Esta solicitud ha sido marcada como completada y no se puede modificar.
+            <Alert icon={<IconCheck size={16} />} title='Solicitud Resuelta' color='teal' mb='4'>
+              Esta solicitud ha sido resuelta y no se puede modificar.
             </Alert>
           )}
         </Card>
@@ -1072,6 +1080,58 @@ function ViewRequestPage() {
                 </div>
 
                 <Divider />
+
+                {/* Sección de Resolución */}
+                {request?.resolution && request.resolution.trim() !== '' && (
+                  <div>
+                    <Text fw={600} mb='xs'>
+                      Resolución de la Solicitud
+                    </Text>
+                    <Card withBorder radius='md' p='md' bg='teal.0' className='border-teal-300'>
+                      <Stack gap='sm'>
+                        <Group>
+                          <IconCheck size={20} className='text-teal-6' />
+                          <Text size='sm' fw={500} className='text-teal-7'>
+                            Resolución Aplicada
+                          </Text>
+                        </Group>
+                        <Text size='sm' className='whitespace-pre-line text-gray-700'>
+                          {request.resolution}
+                        </Text>
+                        {request.date_resolution && (
+                          <Group>
+                            <IconCalendar size={16} className='text-gray-5' />
+                            <Text size='xs' color='gray.6'>
+                              Fecha de Resolución: {
+                                (() => {
+                                  try {
+                                    const date = new Date(request.date_resolution);
+                                    if (isNaN(date.getTime())) {
+                                      return 'Fecha inválida';
+                                    }
+                                    return new Intl.DateTimeFormat('es-CO', {
+                                      day: 'numeric',
+                                      month: 'long',
+                                      year: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                      hour12: true,
+                                    }).format(
+                                      new Date(date.getTime() + 5 * 60 * 60 * 1000) // +5 horas
+                                    );
+                                  } catch (error) {
+                                    console.error('Error formatting date:', error);
+                                    return 'Fecha inválida';
+                                  }
+                                })()
+                              }
+                            </Text>
+                          </Group>
+                        )}
+                      </Stack>
+                    </Card>
+                  </div>
+                )}
 
                 <div>
                   <Text fw={600} mb='xs'>
