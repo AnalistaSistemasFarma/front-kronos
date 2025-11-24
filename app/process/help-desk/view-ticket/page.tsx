@@ -107,6 +107,7 @@ interface FolderFile {
   name: string;
   size?: number;
   lastModifiedDateTime?: string;
+  webUrl?: string;
   '@microsoft.graph.downloadUrl'?: string;
 }
 
@@ -1421,7 +1422,7 @@ function ViewTicketPage() {
                         color='blue'
                         size='sm'
                         component='a'
-                        href={file['@microsoft.graph.downloadUrl']}
+                        href={file.webUrl}
                         target='_blank'
                         rel='noopener noreferrer'
                         aria-label={`Descargar archivo ${file.name}`}
