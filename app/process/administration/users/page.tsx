@@ -110,7 +110,7 @@ function UserManagement() {
     } finally {
       setLoading(false);
     }
-  }, [filters, pagination]);
+  }, [filters.search, filters.role, filters.status, pagination.page, pagination.limit]);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -119,7 +119,7 @@ function UserManagement() {
       return;
     }
     fetchUsers();
-  }, [session, status, router, filters, pagination.page, fetchUsers]);
+  }, [session, status, router, fetchUsers]);
 
   const handleFilterChange = (field: string, value: string) => {
     setFilters((prev) => ({
