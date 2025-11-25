@@ -15,24 +15,54 @@ export async function GET() {
 
     const userEmail = session.user.email;
 
-    // Fetch companies associated with the user
-    const companyUsers = await prisma.companyUser.findMany({
+    // Check if user has admin access
+    const adminSubprocess = await prisma.subprocessUserCompany.findFirst({
       where: {
-        user: {
-          email: userEmail,
+        companyUser: {
+          user: {
+            email: userEmail,
+          },
         },
-      },
-      include: {
-        company: true,
+        subprocess: {
+          subprocess_url: '/process/administration/users',
+        },
       },
     });
 
-    const companies = companyUsers.map((cu) => ({
-      id: cu.company.id_company,
-      name: cu.company.company,
-    }));
+    // If admin, return all companies; otherwise return only user's companies
+    if (adminSubprocess) {
+      const allCompanies = await prisma.company.findMany({
+        orderBy: {
+          company: 'asc',
+        },
+      });
 
-    return NextResponse.json(companies);
+      const companies = allCompanies.map((c) => ({
+        id: c.id_company,
+        name: c.company,
+      }));
+
+      return NextResponse.json(companies);
+    } else {
+      // Fetch companies associated with the user
+      const companyUsers = await prisma.companyUser.findMany({
+        where: {
+          user: {
+            email: userEmail,
+          },
+        },
+        include: {
+          company: true,
+        },
+      });
+
+      const companies = companyUsers.map((cu) => ({
+        id: cu.company.id_company,
+        name: cu.company.company,
+      }));
+
+      return NextResponse.json(companies);
+    }
   } catch (error) {
     console.error('Error fetching companies:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

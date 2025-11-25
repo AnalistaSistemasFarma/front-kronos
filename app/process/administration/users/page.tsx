@@ -30,6 +30,9 @@ import {
   IconTrash,
   IconPlus,
   IconDownload,
+  IconSettings,
+  IconCheck,
+  IconX,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 
@@ -40,6 +43,36 @@ interface User {
   role: string;
   isActive: boolean;
   createdAt: string;
+}
+
+interface Subprocess {
+  id_subprocess: number;
+  subprocess: string;
+  subprocess_url: string | null;
+  id_process: number;
+  process: {
+    id_process: number;
+    process: string;
+  };
+}
+
+interface Company {
+  id: number;
+  name: string;
+}
+
+interface AssignedSubprocess {
+  companyId: number;
+  companyName: string;
+  companyUserId: number;
+  subprocesses: {
+    id: number;
+    subprocessId: number;
+    subprocessName: string;
+    subprocessUrl: string | null;
+    processId: number;
+    processName: string;
+  }[];
 }
 
 function UserManagement() {
@@ -65,7 +98,17 @@ function UserManagement() {
   const [createModalOpened, setCreateModalOpened] = useState(false);
   const [editModalOpened, setEditModalOpened] = useState(false);
   const [deleteModalOpened, setDeleteModalOpened] = useState(false);
+  const [subprocessModalOpened, setSubprocessModalOpened] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+
+  // Subprocess management states
+  const [allSubprocesses, setAllSubprocesses] = useState<Subprocess[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [selectedCompany, setSelectedCompany] = useState<string>('');
+  const [assignedSubprocesses, setAssignedSubprocesses] = useState<AssignedSubprocess[]>([]);
+  const [selectedSubprocessIds, setSelectedSubprocessIds] = useState<number[]>([]);
+  const [subprocessSearch, setSubprocessSearch] = useState('');
+  const [subprocessLoading, setSubprocessLoading] = useState(false);
 
   // Form states
   const [formData, setFormData] = useState({
@@ -262,6 +305,135 @@ function UserManagement() {
     setDeleteModalOpened(true);
   };
 
+  const openSubprocessModal = async (user: User) => {
+    setSelectedUser(user);
+    setSubprocessModalOpened(true);
+    setSubprocessLoading(true);
+    setSelectedCompany('');
+    setSelectedSubprocessIds([]);
+    setSubprocessSearch('');
+
+    try {
+      // Fetch all subprocesses
+      const subprocessesResponse = await fetch('/api/subprocesses');
+      if (subprocessesResponse.ok) {
+        const { subprocesses } = await subprocessesResponse.json();
+        setAllSubprocesses(subprocesses);
+      }
+
+      // Fetch companies
+      const companiesResponse = await fetch('/api/companies');
+      if (companiesResponse.ok) {
+        const companiesData = await companiesResponse.json();
+        setCompanies(companiesData);
+      }
+
+      // Fetch user's assigned subprocesses
+      const assignedResponse = await fetch(`/api/users/${user.id}/subprocesses`);
+      if (assignedResponse.ok) {
+        const { assignedSubprocesses: assigned } = await assignedResponse.json();
+        setAssignedSubprocesses(assigned);
+
+        // Set default company if user has assignments
+        if (assigned.length > 0 && companies.length > 0) {
+          setSelectedCompany(assigned[0].companyId.toString());
+          setSelectedSubprocessIds(
+            assigned[0].subprocesses.map((s: { subprocessId: number }) => s.subprocessId)
+          );
+        } else if (companies.length > 0) {
+          // Set first company as default if no assignments
+          setSelectedCompany(companies[0].id.toString());
+        }
+      }
+    } catch (error) {
+      console.error('Error loading subprocess data:', error);
+      toast.error('Error al cargar los datos de subprocesos');
+    } finally {
+      setSubprocessLoading(false);
+    }
+  };
+
+  const handleCompanyChange = (companyId: string) => {
+    setSelectedCompany(companyId);
+
+    // Load assigned subprocesses for this company
+    const companyAssignments = assignedSubprocesses.find(
+      (a) => a.companyId === parseInt(companyId)
+    );
+
+    if (companyAssignments) {
+      setSelectedSubprocessIds(companyAssignments.subprocesses.map((s) => s.subprocessId));
+    } else {
+      setSelectedSubprocessIds([]);
+    }
+  };
+
+  const handleSubprocessToggle = (subprocessId: number) => {
+    setSelectedSubprocessIds((prev) =>
+      prev.includes(subprocessId)
+        ? prev.filter((id) => id !== subprocessId)
+        : [...prev, subprocessId]
+    );
+  };
+
+  const handleSelectAll = () => {
+    const filteredSubprocesses = getFilteredSubprocesses();
+    const allIds = filteredSubprocesses.map((s) => s.id_subprocess);
+    setSelectedSubprocessIds(allIds);
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedSubprocessIds([]);
+  };
+
+  const getFilteredSubprocesses = () => {
+    if (!subprocessSearch) return allSubprocesses;
+
+    const searchLower = subprocessSearch.toLowerCase();
+    return allSubprocesses.filter(
+      (s) =>
+        s.subprocess.toLowerCase().includes(searchLower) ||
+        s.process.process.toLowerCase().includes(searchLower)
+    );
+  };
+
+  const handleSaveSubprocesses = async () => {
+    if (!selectedUser || !selectedCompany) {
+      toast.error('Por favor seleccione una empresa');
+      return;
+    }
+
+    try {
+      setSubprocessLoading(true);
+      const response = await fetch(`/api/users/${selectedUser.id}/subprocesses`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          companyId: parseInt(selectedCompany),
+          subprocessIds: selectedSubprocessIds,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to update subprocesses');
+      }
+
+      const result = await response.json();
+      toast.success(
+        `Subprocesos actualizados: ${result.added} agregados, ${result.removed} removidos`
+      );
+      setSubprocessModalOpened(false);
+    } catch (error) {
+      console.error('Error saving subprocesses:', error);
+      toast.error(error instanceof Error ? error.message : 'Error al guardar subprocesos');
+    } finally {
+      setSubprocessLoading(false);
+    }
+  };
+
   const exportToCSV = () => {
     const csvContent = [
       ['ID', 'Nombre', 'Email', 'Rol', 'Estado', 'Fecha de Registro'],
@@ -455,6 +627,14 @@ function UserManagement() {
                         </ActionIcon>
                         <ActionIcon
                           variant='subtle'
+                          color='violet'
+                          onClick={() => openSubprocessModal(user)}
+                          title='Asignar subprocesos'
+                        >
+                          <IconSettings size={16} />
+                        </ActionIcon>
+                        <ActionIcon
+                          variant='subtle'
                           color='red'
                           onClick={() => openDeleteModal(user)}
                           title='Desactivar usuario'
@@ -620,6 +800,148 @@ function UserManagement() {
               Desactivar Usuario
             </Button>
           </Group>
+        </Stack>
+      </Modal>
+
+      {/* Subprocess Assignment Modal */}
+      <Modal
+        opened={subprocessModalOpened}
+        onClose={() => setSubprocessModalOpened(false)}
+        title={`Asignar Subprocesos - ${selectedUser?.name || selectedUser?.email}`}
+        size='xl'
+      >
+        <Stack>
+          {subprocessLoading ? (
+            <div className='flex justify-center py-8'>
+              <Loader size='lg' />
+            </div>
+          ) : (
+            <>
+              <Select
+                label='Empresa'
+                placeholder='Seleccione una empresa'
+                data={companies.map((c) => ({
+                  value: c.id.toString(),
+                  label: c.name,
+                }))}
+                value={selectedCompany}
+                onChange={(value) => handleCompanyChange(value || '')}
+                required
+                disabled={companies.length === 0}
+              />
+
+              {companies.length === 0 && (
+                <Alert color='yellow' variant='light'>
+                  No hay empresas disponibles. Por favor, asegúrese de que el usuario esté asociado
+                  a al menos una empresa.
+                </Alert>
+              )}
+
+              {selectedCompany && (
+                <>
+                  <TextInput
+                    label='Buscar subprocesos'
+                    placeholder='Buscar por nombre de subproceso o proceso'
+                    leftSection={<IconSearch size={16} />}
+                    value={subprocessSearch}
+                    onChange={(e) => setSubprocessSearch(e.target.value)}
+                  />
+
+                  <Group justify='space-between'>
+                    <div>
+                      <Badge color='blue' variant='light'>
+                        {selectedSubprocessIds.length} seleccionados
+                      </Badge>
+                    </div>
+                    <Group gap='xs'>
+                      <Button
+                        size='xs'
+                        variant='light'
+                        leftSection={<IconCheck size={14} />}
+                        onClick={handleSelectAll}
+                      >
+                        Seleccionar Todos
+                      </Button>
+                      <Button
+                        size='xs'
+                        variant='light'
+                        color='red'
+                        leftSection={<IconX size={14} />}
+                        onClick={handleDeselectAll}
+                      >
+                        Deseleccionar Todos
+                      </Button>
+                    </Group>
+                  </Group>
+
+                  <Paper withBorder p='md' style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                    <Stack gap='xs'>
+                      {getFilteredSubprocesses().length === 0 ? (
+                        <div className='text-center py-4 text-gray-500'>
+                          No se encontraron subprocesos
+                        </div>
+                      ) : (
+                        getFilteredSubprocesses().map((subprocess) => (
+                          <Paper
+                            key={subprocess.id_subprocess}
+                            p='sm'
+                            withBorder
+                            style={{
+                              cursor: 'pointer',
+                              backgroundColor: selectedSubprocessIds.includes(
+                                subprocess.id_subprocess
+                              )
+                                ? 'rgba(102, 126, 234, 0.1)'
+                                : 'transparent',
+                            }}
+                            onClick={() => handleSubprocessToggle(subprocess.id_subprocess)}
+                          >
+                            <Group justify='space-between'>
+                              <div>
+                                <div className='font-medium'>{subprocess.subprocess}</div>
+                                <div className='text-sm text-gray-600'>
+                                  Proceso: {subprocess.process.process}
+                                </div>
+                                {subprocess.subprocess_url && (
+                                  <div className='text-xs text-gray-500'>
+                                    URL: {subprocess.subprocess_url}
+                                  </div>
+                                )}
+                              </div>
+                              {selectedSubprocessIds.includes(subprocess.id_subprocess) && (
+                                <IconCheck size={20} color='#667eea' />
+                              )}
+                            </Group>
+                          </Paper>
+                        ))
+                      )}
+                    </Stack>
+                  </Paper>
+
+                  <Alert color='blue' variant='light'>
+                    <div className='text-sm'>
+                      <strong>Nota:</strong> Los subprocesos seleccionados serán asignados al
+                      usuario para la empresa seleccionada. Los cambios se guardarán al hacer clic
+                      en &quot;Guardar Cambios&quot;.
+                    </div>
+                  </Alert>
+                </>
+              )}
+
+              <Group justify='flex-end'>
+                <Button variant='default' onClick={() => setSubprocessModalOpened(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleSaveSubprocesses}
+                  loading={subprocessLoading}
+                  disabled={!selectedCompany}
+                >
+                  Guardar Cambios
+                </Button>
+              </Group>
+            </>
+          )}
         </Stack>
       </Modal>
     </div>
