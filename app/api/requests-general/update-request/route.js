@@ -46,7 +46,7 @@ export async function POST(req) {
       `;
 
       const updateCaseRequest = new sql.Request(transaction);
-      updateCaseRequest.input('status', sql.Int, status || null);
+      updateCaseRequest.input('status', sql.Int, status);
       updateCaseRequest.input('process_category', sql.Int, process_category || null);
       updateCaseRequest.input('resolucion', sql.NVarChar(255), resolucion || null);
       updateCaseRequest.input('id', sql.Int, id);

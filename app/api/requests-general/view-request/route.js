@@ -23,7 +23,7 @@ export async function GET(req) {
         c.company,
         rg.created_at,
         rg.requester,
-        rg.[status],
+        rg.status_req as id_status_case,
         rg.id_process_category,
         pc.assigned as assignedUserId,
         assignedUser.name as assignedUserName,
