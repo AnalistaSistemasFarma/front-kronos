@@ -271,11 +271,6 @@ function RequestBoard() {
       errors.push('La empresa seleccionada no es válida');
     }
 
-    // Validate status filter
-    if (filters.status && !['Pendiente', 'En Progreso', 'Completada'].includes(filters.status)) {
-      errors.push('El estado seleccionado no es válido');
-    }
-
     // Validate assigned user filter
     if (filters.assigned_to && !assignedUsers.find((u) => u.value === filters.assigned_to)) {
       errors.push('La persona asignada seleccionada no es válida');
@@ -396,11 +391,6 @@ function RequestBoard() {
       ...prev,
       [field]: value,
     }));
-
-    // Clear any existing error when user changes a filter
-    if (error) {
-      setError(null);
-    }
   };
 
   const validateForm = () => {
@@ -768,9 +758,9 @@ function RequestBoard() {
                     placeholder='Todos los estados'
                     clearable
                     data={[
-                      { value: 'Abierto', label: 'Pendiente' },
-                      { value: 'Cancelado', label: 'Cancelado' },
-                      { value: 'Resuelto', label: 'Completada' },
+                      { value: '1', label: 'Abierto' },
+                      { value: '3', label: 'Cancelado' },
+                      { value: '2', label: 'Resuelto' },
                     ]}
                     value={filters.status}
                     onChange={(value) => handleFilterChange('status', value || '')}

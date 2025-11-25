@@ -41,7 +41,7 @@ export async function GET(req) {
     }
 
     if (status) {
-      query += ` AND rg.[status] = @status`;
+      query += ` AND rg.status_req = @status`;
       console.log('API requests-general: Agregando filtro por status:', status);
     }
 
