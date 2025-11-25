@@ -84,7 +84,7 @@ interface Request {
   status: string;
   assignedUserId?: number;
   assignedUserName?: string;
-  id_process_category?: number;
+  id_process_category?: number | null;
   user?: string;
   id_status_case: number;
   id_category: number;
@@ -479,8 +479,12 @@ function ViewRequestPage() {
       const updatedRequest = { ...prev, [field]: value };
 
       if (field === 'category' && value) {
-        const filtered = processCategories.filter((p) => p.id_category_request === parseInt(value));
-        updatedRequest.process = '';
+        const filtered = processCategories.filter(
+          (p) => p.id_category_request === parseInt(value)
+        );
+
+        updatedRequest.id_process_category = null; // corregido
+        setFilteredProcesses(filtered);
       }
 
       return updatedRequest;
@@ -517,9 +521,6 @@ function ViewRequestPage() {
     }
     if (!request?.category) {
       errors.category = 'La categoría es requerida';
-    }
-    if (!request?.process) {
-      errors.process = 'El proceso es requerido';
     }
     if (!request?.description || request.description.trim() === '') {
       errors.description = 'La descripción es requerida';
@@ -629,8 +630,10 @@ function ViewRequestPage() {
       const updateData = {
         id: request?.id,
         id_technical: userId,
-        process_category: Number(request?.id_process_category),
-        status: resolutionData.estado || request?.id_status_case,
+        process_category: request?.id_process_category ? Number(request.id_process_category) : null,
+        status: resolutionData.estado !== '' 
+          ? Number(resolutionData.estado)
+          : Number(request?.id_status_case),
         resolucion: resolutionData.resolucion || null,
       };
 
