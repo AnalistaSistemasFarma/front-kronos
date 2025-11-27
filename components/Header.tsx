@@ -3,10 +3,10 @@
 import { useSession, signOut } from 'next-auth/react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Menu, Avatar, Loader, ActionIcon } from '@mantine/core';
 import { IconMoon, IconSun } from '@tabler/icons-react';
 import { useTheme } from './providers';
-import TextLogo from './TextLogo';
 
 export default function Header() {
   const { data: session, status } = useSession();
@@ -19,9 +19,16 @@ export default function Header() {
       <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
         <div className='flex justify-between items-center h-16'>
           {/* Left: Logo */}
-          <div className='flex items-center'>
+          <div className='flex items-center '>
             <Link href='/dashboard' aria-label='Go to dashboard'>
-              <TextLogo size='small' className={`h-12 w-auto ${isDashboard ? '' : ''}`} />
+              <Image
+                src='/logo.png'
+                alt='Logo'
+                width={1980}
+                height={100}
+                className='h-12 w-auto'
+                priority
+              />
             </Link>
           </div>
 

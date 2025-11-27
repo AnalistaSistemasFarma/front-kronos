@@ -63,7 +63,7 @@ const ProcessSearch: React.FC<ProcessSearchProps> = ({
         }
 
         .process-search:focus-within {
-          border-color: #667eea;
+          border-color: #113562;
           box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
           transform: translateY(-1px);
         }
@@ -76,7 +76,7 @@ const ProcessSearch: React.FC<ProcessSearchProps> = ({
         }
 
         .search-icon {
-          color: #667eea;
+          color: #113562;
           flex-shrink: 0;
         }
 

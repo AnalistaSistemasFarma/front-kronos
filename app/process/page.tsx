@@ -266,7 +266,7 @@ export default function ProcessPage() {
               variant={viewMode === 'grid' ? 'filled' : 'light'}
               color='blue'
               onClick={() => setViewMode('grid')}
-              style={{ backgroundColor: viewMode === 'grid' ? '#667eea' : 'transparent' }}
+              style={{ backgroundColor: viewMode === 'grid' ? '#113562' : 'transparent' }}
             >
               <IconLayoutGrid size={16} />
             </ActionIcon>
@@ -274,7 +274,7 @@ export default function ProcessPage() {
               variant={viewMode === 'list' ? 'filled' : 'light'}
               color='blue'
               onClick={() => setViewMode('list')}
-              style={{ backgroundColor: viewMode === 'list' ? '#667eea' : 'transparent' }}
+              style={{ backgroundColor: viewMode === 'list' ? '#113562' : 'transparent' }}
             >
               <IconList size={16} />
             </ActionIcon>

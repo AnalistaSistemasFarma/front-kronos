@@ -909,7 +909,7 @@ function UserManagement() {
                                 )}
                               </div>
                               {selectedSubprocessIds.includes(subprocess.id_subprocess) && (
-                                <IconCheck size={20} color='#667eea' />
+                                <IconCheck size={20} color='#113562' />
                               )}
                             </Group>
                           </Paper>

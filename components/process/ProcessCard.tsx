@@ -415,7 +415,7 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
           height: 36px;
           background: rgba(102, 126, 234, 0.1);
           border-radius: 8px;
-          color: #667eea;
+          color: #113562;
           flex-shrink: 0;
         }
 
@@ -435,7 +435,7 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
         }
 
         .subprocess-arrow {
-          color: #667eea;
+          color: #113562;
           opacity: 0.7;
           transition: all 0.2s ease;
         }

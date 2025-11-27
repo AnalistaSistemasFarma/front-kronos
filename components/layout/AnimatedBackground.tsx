@@ -23,7 +23,7 @@ const AnimatedBackground: React.FC = () => {
           left: 0;
           right: 0;
           bottom: 0;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+          background: linear-gradient(135deg, #113562 0%, #3db6e0 50%, #3db6e0 100%);
           z-index: -2;
         }
 

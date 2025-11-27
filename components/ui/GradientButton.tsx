@@ -22,7 +22,7 @@ const GradientButton: React.FC<GradientButtonProps> = ({
     switch (variant) {
       case 'primary':
         return {
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          background: 'linear-gradient(135deg, #113562 0%, #3db6e0 100%)',
           border: 'none',
           color: 'white',
           position: 'relative' as const,
@@ -31,14 +31,14 @@ const GradientButton: React.FC<GradientButtonProps> = ({
       case 'outline':
         return {
           background: 'transparent',
-          border: '1px solid #667eea',
-          color: '#667eea',
+          border: '1px solid #113562',
+          color: '#113562',
         };
       case 'ghost':
         return {
           background: 'transparent',
           border: 'none',
-          color: '#667eea',
+          color: '#113562',
         };
       default:
         return {};

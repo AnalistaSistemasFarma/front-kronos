@@ -39,12 +39,16 @@ export default function LandingPage() {
       >
         <Container size='xl' py='md'>
           <Group justify='space-between' align='center'>
-            <Group align='center' gap='xs'>
-              <IconBuilding size={32} style={{ color: '#3b82f6' }} />
-              <Text size='xl' fw={700} c='dark'>
-                ServiciosCompartidos
-              </Text>
-            </Group>
+            <Link href='/' style={{ textDecoration: 'none' }}>
+              <Image
+                src='/logo.png'
+                alt='ServiciosCompartidos Logo'
+                height={40}
+                width={120}
+                fit='contain'
+                className='h-12'
+              />
+            </Link>
 
             <Group gap='xl' visibleFrom='md'>
               <Link href='#services' style={{ textDecoration: 'none' }}>
@@ -97,7 +101,7 @@ export default function LandingPage() {
       {/* Hero Section */}
       <Box
         style={{
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          background: 'linear-gradient(135deg, #113562 0%, #3db6e0 100%)',
           color: 'white',
           padding: '80px 0',
           position: 'relative',
@@ -143,7 +147,7 @@ export default function LandingPage() {
                 rightSection={<IconArrowRight size={16} />}
                 style={{
                   backgroundColor: 'white',
-                  color: '#667eea',
+                  color: '#113562',
                   '&:hover': { backgroundColor: '#f8f9fa' },
                 }}
               >
@@ -272,7 +276,7 @@ export default function LandingPage() {
               { value: '35%', label: 'Ahorro Promedio' },
             ].map((stat, index) => (
               <Stack key={index} align='center' gap='xs'>
-                <Text size='3rem' fw={700} style={{ color: '#667eea' }}>
+                <Text size='3rem' fw={700} style={{ color: '#113562' }}>
                   {stat.value}
                 </Text>
                 <Text size='lg' c='dimmed' ta='center'>
@@ -285,7 +289,7 @@ export default function LandingPage() {
       </Box>
 
       {/* CTA Section */}
-      <Box py={80} style={{ backgroundColor: '#667eea', color: 'white' }}>
+      <Box py={80} style={{ backgroundColor: '#113562', color: 'white' }}>
         <Container size='xl'>
           <Stack align='center' gap='lg' style={{ textAlign: 'center' }}>
             <Title order={2} size='2.5rem' fw={700}>
@@ -300,7 +304,7 @@ export default function LandingPage() {
                 size='lg'
                 component={Link}
                 href='/register'
-                style={{ backgroundColor: 'white', color: '#667eea' }}
+                style={{ backgroundColor: 'white', color: '#113562' }}
               >
                 Comenzar Ahora
               </Button>
@@ -318,11 +322,13 @@ export default function LandingPage() {
           <Grid gutter='xl'>
             <GridCol span={{ base: 12, md: 6, lg: 4 }}>
               <Group align='center' gap='xs' mb='md'>
-                Solicitudes Generales
-                <IconBuilding size={32} style={{ color: '#3b82f6' }} />
-                <Text size='xl' fw={700}>
-                  ServiciosCompartidos
-                </Text>
+                <Image
+                  src='/logo.png'
+                  alt='ServiciosCompartidos Logo'
+                  height={40}
+                  width={120}
+                  fit='contain'
+                />
               </Group>
               <Text size='sm' style={{ lineHeight: 1.6 }}>
                 Entregando excelencia operativa a través de servicios empresariales centralizados.

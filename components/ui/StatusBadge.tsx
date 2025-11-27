@@ -18,7 +18,7 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
   const getStatusColor = () => {
     switch (status) {
       case 'active':
-        return '#667eea';
+        return '#113562';
       case 'inactive':
         return '#999';
       case 'pending':

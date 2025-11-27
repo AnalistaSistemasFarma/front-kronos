@@ -4,10 +4,10 @@ import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
+import Image from 'next/image';
 import { Paper, Title, TextInput, Button, Stack, Group, Text, Divider } from '@mantine/core';
 import { IconEye, IconEyeOff, IconLock, IconAt, IconArrowRight } from '@tabler/icons-react';
 import Link from 'next/link';
-import TextLogo from '../../components/TextLogo';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -63,7 +63,7 @@ export default function Login() {
           left: 0,
           right: 0,
           bottom: 0,
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)',
+          background: 'linear-gradient(135deg, #113562 0%, #3db6e0 50%, #3db6e0 100%)',
           zIndex: -2,
         }}
       />
@@ -228,7 +228,7 @@ export default function Login() {
         }
       `}</style>
 
-      <TextLogo size='large' className='mb-6 logo' withShadow={true} withHover={true} />
+      <div className='mb-6 logo' style={{ filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.2))' }}></div>
 
       <Paper
         shadow='xl'
@@ -238,18 +238,27 @@ export default function Login() {
         style={{
           maxWidth: 450,
           width: '100%',
-          background: 'rgba(255, 255, 255, 0.95)',
+          background: 'white',
           backdropFilter: 'blur(10px)',
           border: '1px solid rgba(255, 255, 255, 0.2)',
           boxShadow: '0 20px 40px rgba(0, 0, 0, 0.1)',
         }}
         className='form-container'
       >
+        <Image
+          src='/logo.png'
+          alt='Logo'
+          width={1000}
+          height={100}
+          priority
+          className='h-12'
+          style={{ objectFit: 'contain' }}
+        />
         <Title
           order={2}
           ta='center'
           mb='lg'
-          style={{ color: '#333', fontWeight: 600 }}
+          style={{ color: '#333', fontWeight: 600, paddingTop: '20px' }}
           id='login-title'
         >
           Bienvenido al Portal de servicios
@@ -296,7 +305,7 @@ export default function Login() {
                     border: 'none',
                     cursor: 'pointer',
                     transition: 'color 0.3s ease',
-                    color: visible ? '#667eea' : '#999',
+                    color: visible ? '#113562' : '#999',
                   }}
                   aria-label={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                 >
@@ -320,7 +329,7 @@ export default function Login() {
                 size='sm'
                 component={Link}
                 href='/forgot-password'
-                c='#667eea'
+                c='#113562'
                 style={{ textDecoration: 'none' }}
               >
                 ¿Olvidaste tu contraseña? Solicita una nueva.
@@ -334,7 +343,7 @@ export default function Login() {
               size='lg'
               rightSection={!loading && <IconArrowRight size={16} />}
               style={{
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                background: 'linear-gradient(135deg, #113562 0%, #3db6e0 100%)',
                 border: 'none',
                 transition: 'all 0.3s ease',
                 marginTop: '10px',
