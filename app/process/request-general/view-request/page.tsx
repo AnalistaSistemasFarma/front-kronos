@@ -6,7 +6,6 @@ import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../component
 import axios from 'axios';
 import { useSession } from 'next-auth/react';
 
-// Extend the session type to include role
 declare module 'next-auth' {
   interface Session {
     user?: {
@@ -194,7 +193,6 @@ function ViewRequestPage() {
           return res.json();
         })
         .then((data) => {
-          // Mapear los campos de resolución de la API
           const mappedData = {
             ...data,
             resolution: data.resolutioncase || null,
@@ -478,7 +476,7 @@ function ViewRequestPage() {
           (p) => p.id_category_request === parseInt(value)
         );
 
-        updatedRequest.id_process_category = null; // corregido
+        updatedRequest.id_process_category = null; 
         setFilteredProcesses(filtered);
       }
 

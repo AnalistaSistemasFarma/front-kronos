@@ -207,7 +207,6 @@ function TicketsBoard() {
 
         console.log('Frontend - fetchSubprocessUsers received data:', data);
 
-        // Validar que los datos sean válidos
         if (Array.isArray(data) && data.length > 0) {
           setTechnicals(
             data.map((item) => ({
@@ -1000,7 +999,6 @@ function TicketsBoard() {
                   data={technicals}
                   value={formData.technician}
                   onChange={(value) => {
-                    // Validar que el valor sea un técnico válido o vacío
                     if (value === '' || technicals.some(t => t.value === value)) {
                       handleFormChange('technician', value || '');
                     }

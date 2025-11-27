@@ -205,7 +205,6 @@ function RequestBoard() {
         (p) => p.id_category_request === parseInt(formData.category)
       );
       setFilteredProcesses(filtered);
-      // Reset process if not in filtered
       if (!filtered.find((p) => p.value === formData.process)) {
         setFormData((prev) => ({ ...prev, process: '' }));
       }
@@ -230,7 +229,6 @@ function RequestBoard() {
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
 
-      // Add filters to params
       if (filters.status) params.append('status', filters.status);
       if (filters.company) params.append('company', filters.company);
       if (filters.date_from) params.append('date_from', filters.date_from);
@@ -257,7 +255,6 @@ function RequestBoard() {
   const validateFilters = () => {
     const errors: string[] = [];
 
-    // Validate date range
     if (filters.date_from && filters.date_to) {
       const fromDate = new Date(filters.date_from);
       const toDate = new Date(filters.date_to);
@@ -266,12 +263,10 @@ function RequestBoard() {
       }
     }
 
-    // Validate company filter
     if (filters.company && !companies.find((c) => c.value === filters.company)) {
       errors.push('La empresa seleccionada no es válida');
     }
 
-    // Validate assigned user filter
     if (filters.assigned_to && !assignedUsers.find((u) => u.value === filters.assigned_to)) {
       errors.push('La persona asignada seleccionada no es válida');
     }
@@ -497,7 +492,6 @@ function RequestBoard() {
     token: string
   ) {
     try {
-      // Crear la carpeta directamente
       const createResponse = await axios.post(
         `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG:/children`,
         {
@@ -817,7 +811,6 @@ function RequestBoard() {
                 <Button
                   variant='outline'
                   onClick={async () => {
-                    // Clear all filters first
                     const clearedFilters = {
                       status: '',
                       company: '',
@@ -1081,7 +1074,7 @@ function RequestBoard() {
                 Archivos Adjuntos (Opcional)
               </Text>
               <FileUpload
-                ticketId={0} // Dummy ID since request doesn't exist yet
+                ticketId={0} 
                 onFilesChange={setAttachedFiles}
                 autoUpload={false}
                 maxFiles={10}

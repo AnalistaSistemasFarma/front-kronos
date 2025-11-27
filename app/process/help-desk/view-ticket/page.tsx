@@ -210,7 +210,6 @@ function ViewTicketPage() {
     if (ticket?.id_case && attachedFiles.length > 0) {
       localStorage.setItem(`ticket-${ticket.id_case}-files`, JSON.stringify(attachedFiles));
     } else if (ticket?.id_case) {
-      // Clear localStorage if no files
       localStorage.removeItem(`ticket-${ticket.id_case}-files`);
     }
   }, [attachedFiles, ticket?.id_case]);
@@ -401,12 +400,8 @@ function ViewTicketPage() {
     }
   };
 
-  //Onedrive 365
   async function GetToken() {
     const token = await getMicrosoftToken();
-
-    // const formData = new FormData();
-    // formData.append("file", file);
 
     try {
       const response = await axios.get(
@@ -543,7 +538,6 @@ function ViewTicketPage() {
           await sendNoteEmailNotification();
         }
 
-        // Resetear los datos de nota
         setNoteData({ correo: '', notificarPorCorreo: false });
       } else {
         const errorData = await response.json();
@@ -679,7 +673,7 @@ function ViewTicketPage() {
         emails,
         table,
         outro,
-        'https://farmalogica.com.co/imagenes/logos/logo20.png', // Logo por defecto
+        'https://farmalogica.com.co/imagenes/logos/logo20.png', 
         []
       );
 

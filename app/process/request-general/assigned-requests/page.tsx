@@ -252,7 +252,6 @@ function RequestBoard() {
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
 
-      // Agregar filtros si se proporcionan
       if (filtersToUse) {
         if (filtersToUse.status) params.append('status', filtersToUse.status);
         if (filtersToUse.company) params.append('company', filtersToUse.company);
