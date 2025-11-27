@@ -348,6 +348,11 @@ function RequestBoard() {
         setCompany(
           data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
         );
+        // 🔥 Establecer empresa por defecto (ONELATAMPHARMA, id 3)
+        setFormData((prev) => ({
+          ...prev,
+          company: "3",
+        }));
         setCategories(data.categories.map((c) => ({ value: c.id.toString(), label: c.category })));
         setProcessCategories(
           data.processCategories.map((p) => ({
