@@ -275,18 +275,13 @@ function ViewRequestPage() {
     }
 
     try {
-      // Check if user has admin privileges
       const userRole = session.user?.role;
       const hasAdminRole = userRole === 'admin' || userRole === 'super_user';
 
-      // For client-side, we'll use the role from session
-      // Server-side verification should be done for critical operations
       setIsAdmin(hasAdminRole);
 
-      // Check if user is assigned to this request
       const isAssignedUser = request.user === userName;
 
-      // User can edit if they are admin or assigned to the request
       const hasEditPermission = hasAdminRole || isAssignedUser;
 
       setCanEdit(hasEditPermission);
@@ -1199,7 +1194,6 @@ function ViewRequestPage() {
                   </Grid>
                 </div>
 
-                {/* Resolución */}
                 <div>
                   <Group justify='space-between' mb='md'>
                     <Title order={4} className='flex items-center gap-2'>
@@ -1216,7 +1210,6 @@ function ViewRequestPage() {
                     )}
                   </Group>
 
-                  {/* Formulario de resolución para solicitudes no resueltas */}
                   {!isRequestResolved() && isEditing && showResolution && canEdit && (
                     <Stack>
                       <Select

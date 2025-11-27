@@ -192,7 +192,6 @@ function ViewTicketPage() {
     }
   }, [id]);
 
-  // Load attached files from localStorage
   useEffect(() => {
     if (ticket?.id_case) {
       const storedFiles = localStorage.getItem(`ticket-${ticket.id_case}-files`);
@@ -207,7 +206,6 @@ function ViewTicketPage() {
     }
   }, [ticket?.id_case]);
 
-  // Save attached files to localStorage whenever they change
   useEffect(() => {
     if (ticket?.id_case && attachedFiles.length > 0) {
       localStorage.setItem(`ticket-${ticket.id_case}-files`, JSON.stringify(attachedFiles));
@@ -986,7 +984,6 @@ function ViewTicketPage() {
             </Group>
           </Flex>
 
-          {/* Alerta de caso resuelto */}
           {isTicketResolved() && (
             <Alert icon={<IconCheck size={16} />} title='Caso Resuelto' color='teal' mb='4'>
               Este caso ha sido marcado como resuelto y no se puede modificar. Si necesita realizar
@@ -995,7 +992,6 @@ function ViewTicketPage() {
           )}
         </Card>
 
-        {/* Main Content */}
         <Grid>
           <Grid.Col span={{ base: 12, lg: 8 }}>
             <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white h-full'>
@@ -1302,7 +1298,6 @@ function ViewTicketPage() {
                   </Card>
                 )}
 
-                {/* Formulario de resolución para casos no resueltos */}
                 {!isTicketResolved() && showResolution && (
                   <Stack>
                     <Select
@@ -1436,7 +1431,6 @@ function ViewTicketPage() {
             </Stack>
           )}
 
-          {/* Componente de carga de archivos */}
           <FileUpload
             ticketId={ticket.id_case}
             onFilesChange={setAttachedFiles}

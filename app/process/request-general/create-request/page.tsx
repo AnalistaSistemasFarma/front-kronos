@@ -344,11 +344,9 @@ function RequestBoard() {
 
       if (response.ok) {
         const data: ConsultResponse = await response.json();
-        console.log('Frontend - fetchFormData received data:', data);
         setCompany(
           data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
         );
-        // 🔥 Establecer empresa por defecto (ONELATAMPHARMA, id 3)
         setFormData((prev) => ({
           ...prev,
           company: "3",
@@ -457,7 +455,6 @@ function RequestBoard() {
 
       setTickets((prev) => [newTicket, ...prev]);
 
-      // Upload attached files if any
       if (attachedFiles.length > 0) {
         const token = await getMicrosoftToken();
         if (!token) {
@@ -472,7 +469,6 @@ function RequestBoard() {
         }
       }
 
-      // Send email notification to assigned user
       await sendRequestEmailNotification(newTicket.id_request, formData.subject, parseInt(formData.process));
 
       setFormData({
@@ -483,7 +479,7 @@ function RequestBoard() {
         descripcion: '',
       });
 
-      setAttachedFiles([]); // Clear attached files
+      setAttachedFiles([]); 
 
       fetchTickets();
       setModalOpened(false);
@@ -562,7 +558,6 @@ function RequestBoard() {
     }
 
     try {
-      // Find the email of the assigned user for this process
       const selectedProcess = processCategories.find(p => p.value === processId.toString());
       const assignedEmail = selectedProcess?.email;
 
@@ -737,7 +732,6 @@ function RequestBoard() {
           </Alert>
         )}
 
-        {/* Filters Section */}
         <Card shadow='sm' p='lg' radius='md' withBorder mb='6' className='bg-white'>
           <Group justify='space-between' mb='md'>
             <Title order={3} className='flex items-center gap-2'>
@@ -833,10 +827,8 @@ function RequestBoard() {
                     };
                     setFilters(clearedFilters);
 
-                    // Clear any existing errors
                     setError(null);
 
-                    // Wait a moment for state to update, then fetch all tickets
                     setTimeout(async () => {
                       if (userId) {
                         await fetchTicketsWithUserId(userId);
@@ -966,7 +958,6 @@ function RequestBoard() {
           </div>
         </Card>
 
-        {/* Enhanced Modal for creating request */}
         <Modal
           opened={modalOpened}
           onClose={() => {
@@ -1085,7 +1076,6 @@ function RequestBoard() {
 
             <Divider />
 
-            {/* File Upload Section */}
             <div>
               <Text fw={600} mb='xs'>
                 Archivos Adjuntos (Opcional)

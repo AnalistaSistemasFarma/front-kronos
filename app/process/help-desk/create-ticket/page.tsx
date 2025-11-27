@@ -72,11 +72,11 @@ function TicketsBoard() {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState({
     priority: '',
-    status: '1', // Por defecto mostrar solo tickets con estado "Abierto"
+    status: '1',
     assigned_user: '',
     date_from: '',
     date_to: '',
-    technician: '', // Nuevo filtro por técnico
+    technician: '',
   });
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
@@ -582,7 +582,6 @@ function TicketsBoard() {
           </Grid>
         </Card>
 
-        {/* Reports Section - Only show for users with help-desk access */}
         {hasHelpDeskAccess && <ReportsChart className='mb-6' />}
 
         {error && (
@@ -705,7 +704,6 @@ function TicketsBoard() {
           </Collapse>
         </Card>
 
-        {/* Tickets Table */}
         <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
@@ -803,7 +801,6 @@ function TicketsBoard() {
           </div>
         </Card>
 
-        {/* Modal for creating ticket */}
         <Modal
           opened={modalOpened}
           onClose={() => {
