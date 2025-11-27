@@ -205,7 +205,6 @@ function RequestBoard() {
         (p) => p.id_category_request === parseInt(formData.category)
       );
       setFilteredProcesses(filtered);
-      // Reset process if not in filtered
       if (!filtered.find((p) => p.value === formData.process)) {
         setFormData((prev) => ({ ...prev, process: '' }));
       }
@@ -230,7 +229,6 @@ function RequestBoard() {
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
 
-      // Add filters to params
       if (filters.status) params.append('status', filters.status);
       if (filters.company) params.append('company', filters.company);
       if (filters.date_from) params.append('date_from', filters.date_from);
@@ -257,7 +255,6 @@ function RequestBoard() {
   const validateFilters = () => {
     const errors: string[] = [];
 
-    // Validate date range
     if (filters.date_from && filters.date_to) {
       const fromDate = new Date(filters.date_from);
       const toDate = new Date(filters.date_to);
@@ -266,12 +263,10 @@ function RequestBoard() {
       }
     }
 
-    // Validate company filter
     if (filters.company && !companies.find((c) => c.value === filters.company)) {
       errors.push('La empresa seleccionada no es válida');
     }
 
-    // Validate assigned user filter
     if (filters.assigned_to && !assignedUsers.find((u) => u.value === filters.assigned_to)) {
       errors.push('La persona asignada seleccionada no es válida');
     }
@@ -344,10 +339,13 @@ function RequestBoard() {
 
       if (response.ok) {
         const data: ConsultResponse = await response.json();
-        console.log('Frontend - fetchFormData received data:', data);
         setCompany(
           data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
         );
+        setFormData((prev) => ({
+          ...prev,
+          company: "3",
+        }));
         setCategories(data.categories.map((c) => ({ value: c.id.toString(), label: c.category })));
         setProcessCategories(
           data.processCategories.map((p) => ({
@@ -452,7 +450,6 @@ function RequestBoard() {
 
       setTickets((prev) => [newTicket, ...prev]);
 
-      // Upload attached files if any
       if (attachedFiles.length > 0) {
         const token = await getMicrosoftToken();
         if (!token) {
@@ -467,7 +464,6 @@ function RequestBoard() {
         }
       }
 
-      // Send email notification to assigned user
       await sendRequestEmailNotification(newTicket.id_request, formData.subject, parseInt(formData.process));
 
       setFormData({
@@ -478,7 +474,7 @@ function RequestBoard() {
         descripcion: '',
       });
 
-      setAttachedFiles([]); // Clear attached files
+      setAttachedFiles([]); 
 
       fetchTickets();
       setModalOpened(false);
@@ -496,7 +492,6 @@ function RequestBoard() {
     token: string
   ) {
     try {
-      // Crear la carpeta directamente
       const createResponse = await axios.post(
         `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG:/children`,
         {
@@ -557,7 +552,6 @@ function RequestBoard() {
     }
 
     try {
-      // Find the email of the assigned user for this process
       const selectedProcess = processCategories.find(p => p.value === processId.toString());
       const assignedEmail = selectedProcess?.email;
 
@@ -732,7 +726,6 @@ function RequestBoard() {
           </Alert>
         )}
 
-        {/* Filters Section */}
         <Card shadow='sm' p='lg' radius='md' withBorder mb='6' className='bg-white'>
           <Group justify='space-between' mb='md'>
             <Title order={3} className='flex items-center gap-2'>
@@ -818,7 +811,6 @@ function RequestBoard() {
                 <Button
                   variant='outline'
                   onClick={async () => {
-                    // Clear all filters first
                     const clearedFilters = {
                       status: '',
                       company: '',
@@ -828,10 +820,8 @@ function RequestBoard() {
                     };
                     setFilters(clearedFilters);
 
-                    // Clear any existing errors
                     setError(null);
 
-                    // Wait a moment for state to update, then fetch all tickets
                     setTimeout(async () => {
                       if (userId) {
                         await fetchTicketsWithUserId(userId);
@@ -961,7 +951,6 @@ function RequestBoard() {
           </div>
         </Card>
 
-        {/* Enhanced Modal for creating request */}
         <Modal
           opened={modalOpened}
           onClose={() => {
@@ -1080,13 +1069,12 @@ function RequestBoard() {
 
             <Divider />
 
-            {/* File Upload Section */}
             <div>
               <Text fw={600} mb='xs'>
                 Archivos Adjuntos (Opcional)
               </Text>
               <FileUpload
-                ticketId={0} // Dummy ID since request doesn't exist yet
+                ticketId={0} 
                 onFilesChange={setAttachedFiles}
                 autoUpload={false}
                 maxFiles={10}

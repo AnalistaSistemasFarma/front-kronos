@@ -192,7 +192,6 @@ function ViewTicketPage() {
     }
   }, [id]);
 
-  // Load attached files from localStorage
   useEffect(() => {
     if (ticket?.id_case) {
       const storedFiles = localStorage.getItem(`ticket-${ticket.id_case}-files`);
@@ -207,12 +206,10 @@ function ViewTicketPage() {
     }
   }, [ticket?.id_case]);
 
-  // Save attached files to localStorage whenever they change
   useEffect(() => {
     if (ticket?.id_case && attachedFiles.length > 0) {
       localStorage.setItem(`ticket-${ticket.id_case}-files`, JSON.stringify(attachedFiles));
     } else if (ticket?.id_case) {
-      // Clear localStorage if no files
       localStorage.removeItem(`ticket-${ticket.id_case}-files`);
     }
   }, [attachedFiles, ticket?.id_case]);
@@ -403,12 +400,8 @@ function ViewTicketPage() {
     }
   };
 
-  //Onedrive 365
   async function GetToken() {
     const token = await getMicrosoftToken();
-
-    // const formData = new FormData();
-    // formData.append("file", file);
 
     try {
       const response = await axios.get(
@@ -545,7 +538,6 @@ function ViewTicketPage() {
           await sendNoteEmailNotification();
         }
 
-        // Resetear los datos de nota
         setNoteData({ correo: '', notificarPorCorreo: false });
       } else {
         const errorData = await response.json();
@@ -681,7 +673,7 @@ function ViewTicketPage() {
         emails,
         table,
         outro,
-        'https://farmalogica.com.co/imagenes/logos/logo20.png', // Logo por defecto
+        'https://farmalogica.com.co/imagenes/logos/logo20.png', 
         []
       );
 
@@ -986,7 +978,6 @@ function ViewTicketPage() {
             </Group>
           </Flex>
 
-          {/* Alerta de caso resuelto */}
           {isTicketResolved() && (
             <Alert icon={<IconCheck size={16} />} title='Caso Resuelto' color='teal' mb='4'>
               Este caso ha sido marcado como resuelto y no se puede modificar. Si necesita realizar
@@ -995,7 +986,6 @@ function ViewTicketPage() {
           )}
         </Card>
 
-        {/* Main Content */}
         <Grid>
           <Grid.Col span={{ base: 12, lg: 8 }}>
             <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white h-full'>
@@ -1302,7 +1292,6 @@ function ViewTicketPage() {
                   </Card>
                 )}
 
-                {/* Formulario de resolución para casos no resueltos */}
                 {!isTicketResolved() && showResolution && (
                   <Stack>
                     <Select
@@ -1436,7 +1425,6 @@ function ViewTicketPage() {
             </Stack>
           )}
 
-          {/* Componente de carga de archivos */}
           <FileUpload
             ticketId={ticket.id_case}
             onFilesChange={setAttachedFiles}

@@ -228,7 +228,6 @@ function RequestBoard() {
         (p) => p.id_category_request === parseInt(formData.category)
       );
       setFilteredProcesses(filtered);
-      // Reset process if not in filtered
       if (!filtered.find((p) => p.value === formData.process)) {
         setFormData((prev) => ({ ...prev, process: '' }));
       }
@@ -253,7 +252,6 @@ function RequestBoard() {
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
 
-      // Agregar filtros si se proporcionan
       if (filtersToUse) {
         if (filtersToUse.status) params.append('status', filtersToUse.status);
         if (filtersToUse.company) params.append('company', filtersToUse.company);
@@ -416,13 +414,9 @@ function RequestBoard() {
   };
 
   const fetchNotes = async () => {
-    // This function will be used when viewing a specific ticket
-    // Not needed in the list view
   };
 
   const fetchFolderContents = async () => {
-    // This function will be used when viewing a specific ticket
-    // Not needed in the list view
   };
 
   async function CheckOrCreateFolderAndUpload(
@@ -492,8 +486,6 @@ function RequestBoard() {
   };
 
   const isRequestResolved = () => {
-    // This function will be used when viewing a specific ticket
-    // Not needed in the list view
     return false;
   };
 
@@ -543,7 +535,6 @@ function RequestBoard() {
   return (
     <div className='min-h-screen bg-gray-50'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        {/* Header Section */}
         <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
@@ -625,7 +616,6 @@ function RequestBoard() {
           </Alert>
         )}
 
-        {/* Filters Section */}
         <Card shadow='sm' p='lg' radius='md' withBorder mb='6' className='bg-white'>
           <Group justify='space-between' mb='md'>
             <Title order={3} className='flex items-center gap-2'>
@@ -718,7 +708,6 @@ function RequestBoard() {
           </Collapse>
         </Card>
 
-        {/* Enhanced Table */}
         <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
