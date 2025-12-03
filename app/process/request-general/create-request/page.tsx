@@ -921,9 +921,18 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Text size="sm" c="gray.7">
-                          {ticket.created_at && !isNaN(new Date(ticket.created_at).getTime())
-                            ? new Date(ticket.created_at).toISOString().split("T")[0]
-                            : "Fecha inválida"}
+                          {new Intl.DateTimeFormat('es-CO', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true,
+                          }).format(
+                            new Date(
+                              new Date(ticket.created_at).getTime() + 5 * 60 * 60 * 1000 // +5 horas
+                            )
+                          )}
                         </Text>
                       </Table.Td>
                       <Table.Td>
