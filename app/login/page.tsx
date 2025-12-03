@@ -246,12 +246,12 @@ export default function Login() {
         className='form-container'
       >
         <Image
-          src='/logo.png'
+          src='/Logo_Principal.svg'
           alt='Logo'
           width={1000}
           height={100}
           priority
-          className='h-12'
+          className='h-28'
           style={{ objectFit: 'contain' }}
         />
         <Title

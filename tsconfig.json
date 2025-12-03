@@ -13,14 +13,15 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
+    "types": [], 
+    "paths": {
+      "@/*": ["./*"]
+    },
     "plugins": [
       {
         "name": "next"
       }
-    ],
-    "paths": {
-      "@/*": ["./*"]
-    }
+    ]
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "app/api/help-desk/tickets/route.js"],
   "exclude": ["node_modules"]

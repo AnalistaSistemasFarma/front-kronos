@@ -52,7 +52,9 @@ export default function Header() {
             <div className='flex items-center '>
               <Link href='/dashboard' aria-label='Go to dashboard'>
                 <Image
-                  src='/logo.png'
+                  src={`${
+                    theme === 'dark' ? '/Logo_Principal_Blanco_Ancho.svg' : '/Logo_Principal.svg'
+                  }`}
                   alt='Logo'
                   width={1980}
                   height={100}
