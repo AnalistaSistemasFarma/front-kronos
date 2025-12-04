@@ -921,18 +921,26 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Text size="sm" c="gray.7">
-                          {new Intl.DateTimeFormat('es-CO', {
-                            day: 'numeric',
-                            month: 'long',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            hour12: true,
-                          }).format(
-                            new Date(
-                              new Date(ticket.created_at).getTime() + 5 * 60 * 60 * 1000 // +5 horas
-                            )
-                          )}
+                          {
+                            (() => {
+                              const raw = ticket.created_at;
+                              if (!raw) return "Sin fecha";
+
+                              const date = new Date(raw);
+                              if (isNaN(date.getTime())) return "Fecha inválida";
+
+                              const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
+
+                              return new Intl.DateTimeFormat("es-CO", {
+                                day: "numeric",
+                                month: "long",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                hour12: true,
+                              }).format(adjusted);
+                            })()
+                          }
                         </Text>
                       </Table.Td>
                       <Table.Td>
