@@ -27,7 +27,6 @@ export async function POST(req) {
 
     const pool = await sql.connect(sqlConfig);
     const transaction = new sql.Transaction(pool);
-    const creation_date = new Date().toISOString().split("T")[0];
 
     try {
       await transaction.begin();
@@ -38,7 +37,6 @@ export async function POST(req) {
           subject_request,
           id_process_category,
           id_company,
-          created_at,
           id_requester,
           status_req
         )
@@ -48,14 +46,12 @@ export async function POST(req) {
           @subject,
           @process,
           @company,
-          @creation_date,
           @createdby,
           1
         );
       `;
 
       const request = new sql.Request(transaction);
-      request.input("creation_date", sql.Date, creation_date);
       request.input("descripcion", sql.NVarChar(255), descripcion);
       request.input("subject", sql.NVarChar(255), subject);
       request.input("category", sql.Int, category);
