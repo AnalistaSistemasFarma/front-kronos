@@ -41,7 +41,7 @@ export default function LandingPage() {
           <Group justify='space-between' align='center'>
             <Link href='/' style={{ textDecoration: 'none' }}>
               <Image
-                src='/logo.png'
+                src='/Logo_Principal.svg'
                 alt='ServiciosCompartidos Logo'
                 height={40}
                 width={120}
@@ -323,7 +323,7 @@ export default function LandingPage() {
             <GridCol span={{ base: 12, md: 6, lg: 4 }}>
               <Group align='center' gap='xs' mb='md'>
                 <Image
-                  src='/logo.png'
+                  src='/Logo_Principal_Blanco_Ancho.svg'
                   alt='ServiciosCompartidos Logo'
                   height={40}
                   width={120}
