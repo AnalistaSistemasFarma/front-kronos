@@ -413,12 +413,6 @@ function RequestBoard() {
     }));
   };
 
-  const fetchNotes = async () => {
-  };
-
-  const fetchFolderContents = async () => {
-  };
-
   async function CheckOrCreateFolderAndUpload(
     folderName: string,
     files: { file: File }[],

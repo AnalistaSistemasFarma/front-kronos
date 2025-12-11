@@ -185,6 +185,7 @@ function ViewRequestPage() {
     if (storedRequest) {
       const requestData = JSON.parse(storedRequest);
       setRequest(requestData);
+      setOriginalRequest(requestData);
       setLoading(false);
     } else if (id) {
       fetch(`/api/requests-general/view-request?id=${id}`)
@@ -199,6 +200,7 @@ function ViewRequestPage() {
             date_resolution: data.date_resolution || null,
           };
           setRequest(mappedData);
+          setOriginalRequest(mappedData);
           setLoading(false);
         })
         .catch((err) => {
@@ -493,6 +495,7 @@ function ViewRequestPage() {
   };
 
   const handleStartEditing = () => {
+    setOriginalRequest(request);
     setIsEditing(true);
     setUpdateMessage(null);
   };
@@ -595,6 +598,9 @@ function ViewRequestPage() {
     }
   };
 
+  console.log("id process anterior "+originalRequest?.id_process_category);
+  console.log("id process anterior "+request?.id_process_category);
+
   const handleUpdateRequest = async () => {
     if (!validateFields()) {
       return;
@@ -602,6 +608,14 @@ function ViewRequestPage() {
 
     setIsUpdating(true);
     setUpdateMessage(null);
+
+    const processChanged =
+      originalRequest?.id_process_category !== request?.id_process_category;
+      
+
+    if (processChanged) {
+      await addSystemNote('Se ha cambiado la categoría de la solicitud');
+    }
 
     try {
       if (attachedFiles.length > 0) {
@@ -720,6 +734,33 @@ function ViewRequestPage() {
 
       if (response.ok) {
         setNewNote('');
+        await fetchNotes();
+      } else {
+        const errorData = await response.json();
+        console.error('Error al agregar nota:', errorData.error);
+      }
+    } catch (error) {
+      console.error('Error adding note:', error);
+    }
+  };
+
+  const addSystemNote = async (text: string) => {
+    if (!request?.id || !userId) return;
+
+    try {
+      const response = await fetch('/api/requests-general/notes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id_request: request.id,
+          note: text,
+          created_by: userId,
+        }),
+      });
+
+      if (response.ok) {
         await fetchNotes();
       } else {
         const errorData = await response.json();
