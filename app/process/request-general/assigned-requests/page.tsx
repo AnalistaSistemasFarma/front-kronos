@@ -747,7 +747,7 @@ function RequestBoard() {
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
                         router.push(
-                          `/process/request-general/view-request?id=${ticket.id}&mode=assigned`
+                          `/process/request-general/view-request?id=${ticket.id}&from=assigned-requests`
                         );
                       }}
                     >

@@ -142,6 +142,7 @@ function ViewRequestPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const id = searchParams.get('id');
+  const from = searchParams.get('from') || searchParams.get('mode') || 'create-request';
   const [request, setRequest] = useState<Request | null>(null);
   const [companies, setCompanies] = useState<Option[]>([]);
   const [categories, setCategories] = useState<Option[]>([]);
@@ -807,9 +808,21 @@ function ViewRequestPage() {
     }
   };
 
+  const getBreadcrumbHref = (from: string) => {
+    switch (from) {
+      case 'general-requests':
+        return '/process/request-general/general-requests';
+      case 'assigned-requests':
+        return '/process/request-general/assigned-requests';
+      case 'create-request':
+      default:
+        return '/process/request-general/create-request';
+    }
+  };
+
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
-    { title: 'Solicitudes Generales', href: '/process/request-general/create-request' },
+    { title: 'Solicitudes Generales', href: getBreadcrumbHref(from) },
     { title: 'Detalle de la Solicitud', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (

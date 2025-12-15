@@ -676,7 +676,7 @@ function RequestGeneralPage() {
                       className='cursor-pointer hover:bg-gray-50 transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
-                        router.push(`/process/request-general/view-request?id=${ticket.id}`);
+                        router.push(`/process/request-general/view-request?id=${ticket.id}&from=general-requests`);
                       }}
                     >
                       <Table.Td>
