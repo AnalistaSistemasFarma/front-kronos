@@ -19,7 +19,6 @@ import GlassCard from '../ui/GlassCard';
 import StatusBadge from '../ui/StatusBadge';
 import GradientButton from '../ui/GradientButton';
 
-// Define the interfaces needed for the component
 interface Company {
   id_company: number;
   company: string;
@@ -39,7 +38,7 @@ interface ProcessSubprocess {
   id_subprocess: number;
   subprocess: string;
   subprocess_url?: string;
-  subprocessUserCompanies?: SubprocessUserCompany[]; // Optional to match main interface
+  subprocessUserCompanies?: SubprocessUserCompany[]; 
 }
 
 interface Process {
@@ -137,46 +136,19 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
   return (
     <GlassCard
       className={`process-card ${className}`}
-      hoverable
-      interactive
-      onClick={() => onProcessClick(process.id_process)}
       padding='xl'
     >
-      {/* Header */}
       <div className='process-card-header'>
         <div className='process-icon'>{getProcessIcon(process.process)}</div>
         <div className='process-title-section'>
           <Title order={3} className='process-title'>
             {process.process}
           </Title>
-          <StatusBadge status={process.status || 'active'} size='sm' />
         </div>
       </div>
 
-      {/* Description */}
-      {process.description && (
-        <Text className='process-description' size='sm' c='dimmed'>
-          {process.description}
-        </Text>
-      )}
+      <br />
 
-      {/* Quick Actions */}
-      <Group gap='xs' className='process-actions'>
-        {process.process_url && (
-          <GradientButton
-            size='xs'
-            variant='ghost'
-            onClick={(e) => {
-              e?.stopPropagation();
-              window.open(process.process_url, '_blank');
-            }}
-          >
-            Documentación
-          </GradientButton>
-        )}
-      </Group>
-
-      {/* Subprocesses */}
       {process.subprocesses.length > 0 && (
         <div className='process-subprocesses'>
           <div className='subprocesses-header'>
@@ -234,26 +206,6 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
           </div>
         </div>
       )}
-
-      {/* Metadata */}
-      <div className='process-metadata'>
-        <Group gap='md' className='metadata-items'>
-          <Group gap='xs' className='metadata-item'>
-            <IconClock size={14} color='gray' />
-            <Text size='xs' c='dimmed'>
-              {formatRelativeTime(process.lastAccessed)}
-            </Text>
-          </Group>
-          {process.company && (
-            <Group gap='xs' className='metadata-item'>
-              <IconBuilding size={14} color='gray' />
-              <Text size='xs' c='dimmed'>
-                {process.company}
-              </Text>
-            </Group>
-          )}
-        </Group>
-      </div>
 
       <style jsx>{`
         .process-card {

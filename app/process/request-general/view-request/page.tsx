@@ -65,6 +65,7 @@ import {
   IconFileText,
   IconFileSpreadsheet,
   IconPhoto,
+  IconEye,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../components/email/utils/sendMessage';
@@ -141,6 +142,7 @@ function ViewRequestPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const id = searchParams.get('id');
+  const from = searchParams.get('from') || searchParams.get('mode') || 'create-request';
   const [request, setRequest] = useState<Request | null>(null);
   const [companies, setCompanies] = useState<Option[]>([]);
   const [categories, setCategories] = useState<Option[]>([]);
@@ -806,9 +808,21 @@ function ViewRequestPage() {
     }
   };
 
+  const getBreadcrumbHref = (from: string) => {
+    switch (from) {
+      case 'general-requests':
+        return '/process/request-general/general-requests';
+      case 'assigned-requests':
+        return '/process/request-general/assigned-requests';
+      case 'create-request':
+      default:
+        return '/process/request-general/create-request';
+    }
+  };
+
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
-    { title: 'Solicitudes Generales', href: '/process/request-general/create-request' },
+    { title: 'Solicitudes Generales', href: getBreadcrumbHref(from) },
     { title: 'Detalle de la Solicitud', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (
@@ -975,7 +989,7 @@ function ViewRequestPage() {
                                   hour12: true,
                                 }).format(
                                   new Date(
-                                    new Date(note.creation_date).getTime() + 5 * 60 * 60 * 1000 // +5 horas
+                                    new Date(note.creation_date).getTime() + 5 * 60 * 60 * 1000 
                                   )
                                 )}
                               </Text>
@@ -1056,7 +1070,7 @@ function ViewRequestPage() {
                     hour12: true,
                   }).format(
                     new Date(
-                      new Date(request.created_at).getTime() + 5 * 60 * 60 * 1000 // +5 horas
+                      new Date(request.created_at).getTime() + 5 * 60 * 60 * 1000 
                     )
                   )}
                 </Text>
@@ -1119,7 +1133,6 @@ function ViewRequestPage() {
 
                 <Divider />
 
-                {/* Sección de Resolución */}
                 {request?.resolution && request.resolution.trim() !== '' && (
                   <div>
                     <Text fw={600} mb='xs'>
@@ -1155,7 +1168,7 @@ function ViewRequestPage() {
                                       minute: '2-digit',
                                       hour12: true,
                                     }).format(
-                                      new Date(date.getTime() + 5 * 60 * 60 * 1000) // +5 horas
+                                      new Date(date.getTime() + 5 * 60 * 60 * 1000) 
                                     );
                                   } catch (error) {
                                     console.error('Error formatting date:', error);
@@ -1237,7 +1250,7 @@ function ViewRequestPage() {
                   <Group justify='space-between' mb='md'>
                     <Title order={4} className='flex items-center gap-2'>
                       <IconCheck size={18} className='text-green-6' />
-                      Resolución de la Solicitud
+                      Resolución de la Solicitud - Finalizar Solicitud
                     </Title>
                     {!isRequestResolved() && isEditing && canEdit && (
                       <ActionIcon
@@ -1314,7 +1327,7 @@ function ViewRequestPage() {
 
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
           <Title order={3} mb='md' className='flex items-center gap-2'>
-            <IconUpload size={20} />
+            <IconEye size={20} />
             Archivos Adjuntos
           </Title>
 
@@ -1368,7 +1381,7 @@ function ViewRequestPage() {
                         rel='noopener noreferrer'
                         aria-label={`Descargar archivo ${file.name}`}
                       >
-                        <IconUpload size={16} />
+                        <IconEye size={16} />
                       </ActionIcon>
                     </Group>
                   </Flex>

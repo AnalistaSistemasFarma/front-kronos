@@ -33,7 +33,7 @@ interface Subprocess {
   id_subprocess: number;
   subprocess: string;
   subprocess_url?: string;
-  subprocessUserCompanies?: SubprocessUserCompany[]; // Hacemos opcional para compatibilidad
+  subprocessUserCompanies?: SubprocessUserCompany[]; 
 }
 
 interface Process {
@@ -88,12 +88,10 @@ export default function ProcessPage() {
     }
   };
 
-  // Enhanced process data with additional properties
   const enhancedProcesses = useMemo(() => {
     return processes.map((process) => ({
       ...process,
-      status: 'active' as const, // Default status, could be enhanced with real data
-      lastAccessed: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(), // Random date within last week
+      lastAccessed: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(), 
       company:
         process.subprocesses[0]?.subprocessUserCompanies?.[0]?.companyUser?.company?.company ||
         'Oficina Principal',
@@ -101,7 +99,6 @@ export default function ProcessPage() {
     }));
   }, [processes]);
 
-  // Filter and search logic
   const filteredProcesses = useMemo(() => {
     let filtered = enhancedProcesses;
 
@@ -117,7 +114,6 @@ export default function ProcessPage() {
       );
     }
 
-    // Category filter (simplified - in real app, this would be more sophisticated)
     if (selectedCategory) {
       filtered = filtered.filter((process) => {
         if (selectedCategory === 'administrative') {
@@ -145,7 +141,6 @@ export default function ProcessPage() {
     return filtered;
   }, [enhancedProcesses, searchTerm, selectedCategory]);
 
-  // Generate categories for filters
   const categories = useMemo((): FilterOption[] => {
     const categoryCounts = {
       administrative: enhancedProcesses.filter(
@@ -237,7 +232,6 @@ export default function ProcessPage() {
             Lista de procesos disponibles para tu usuario
           </Text>
 
-          {/* Search and Filters */}
           <ProcessSearch
             value={searchTerm}
             onChange={setSearchTerm}
@@ -246,7 +240,6 @@ export default function ProcessPage() {
           />
         </div>
 
-        {/* Filters */}
         <ProcessFilters
           categories={categories}
           selectedCategory={selectedCategory}
@@ -254,7 +247,6 @@ export default function ProcessPage() {
           className='mb-6'
         />
 
-        {/* View Controls */}
         <Group justify='space-between' mb='md'>
           <Text size='sm' className={theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}>
             {filteredProcesses.length} {filteredProcesses.length === 1 ? 'proceso' : 'procesos'}{' '}
@@ -281,14 +273,12 @@ export default function ProcessPage() {
           </Group>
         </Group>
 
-        {/* Error State */}
         {error && (
           <Alert icon={<IconX size={16} />} title='Error' color='red' mb='md'>
             {error}
           </Alert>
         )}
 
-        {/* Empty State */}
         {filteredProcesses.length === 0 && !error ? (
           <GlassCard className='text-center py-12'>
             <div className='empty-state'>
@@ -320,7 +310,6 @@ export default function ProcessPage() {
             </div>
           </GlassCard>
         ) : (
-          /* Process Grid/List */
           <div className={viewMode === 'list' ? 'process-list-container' : ''}>
             {viewMode === 'list' ? (
               <div className='process-list'>

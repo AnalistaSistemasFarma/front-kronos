@@ -747,14 +747,14 @@ function RequestBoard() {
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
                         router.push(
-                          `/process/request-general/view-request?id=${ticket.id}&mode=assigned`
+                          `/process/request-general/view-request?id=${ticket.id}&from=assigned-requests`
                         );
                       }}
                     >
                       <Table.Td>
-                        <Badge variant='light' color='blue' size='sm'>
-                          #{ticket.id}
-                        </Badge>
+                        <Text size='xs' color='blue'className='max-w-xs truncate' lineClamp={2}>
+                          {ticket.id}
+                        </Text>
                       </Table.Td>
                       <Table.Td>
                         <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
