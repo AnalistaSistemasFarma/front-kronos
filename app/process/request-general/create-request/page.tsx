@@ -896,9 +896,9 @@ function RequestBoard() {
                       }}
                     >
                       <Table.Td>
-                        <Badge variant='light' color='blue' size='sm'>
-                          #{ticket.id}
-                        </Badge>
+                        <Text size='xs' color='blue'className='max-w-xs truncate' lineClamp={2}>
+                          {ticket.id}
+                        </Text>
                       </Table.Td>
                       <Table.Td>
                         <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
