@@ -117,8 +117,6 @@ function ViewTicketPage() {
   const router = useRouter();
   const id = searchParams.get('id');
   const [ticket, setTicket] = useState<Ticket | null>(null);
-  const [ticketsList, setTicketsList] = useState<Ticket[]>([]);
-  const [currentTicketIndex, setCurrentTicketIndex] = useState<number | null>(null);
   const [categories, setCategories] = useState<Option[]>([]);
   const [subcategories, setSubcategories] = useState<Option[]>([]);
   const [activities, setActivities] = useState<Option[]>([]);
@@ -157,29 +155,6 @@ function ViewTicketPage() {
     notificarPorCorreo: false,
   });
 
-  const navigateToPreviousTicket = () => {
-    if (currentTicketIndex !== null && currentTicketIndex > 0) {
-      const previousIndex = currentTicketIndex - 1;
-      const previousTicket = ticketsList[previousIndex];
-      setTicket(previousTicket);
-      setOriginalTicket(previousTicket);
-      setCurrentTicketIndex(previousIndex);
-      sessionStorage.setItem('selectedTicket', JSON.stringify(previousTicket));
-      router.push(`/process/help-desk/view-ticket?id=${previousTicket.id_case}`);
-    }
-  };
-
-  const navigateToNextTicket = () => {
-    if (currentTicketIndex !== null && currentTicketIndex < ticketsList.length - 1) {
-      const nextIndex = currentTicketIndex + 1;
-      const nextTicket = ticketsList[nextIndex];
-      setTicket(nextTicket);
-      setOriginalTicket(nextTicket);
-      setCurrentTicketIndex(nextIndex);
-      sessionStorage.setItem('selectedTicket', JSON.stringify(nextTicket));
-      router.push(`/process/help-desk/view-ticket?id=${nextTicket.id_case}`);
-    }
-  };
 
   const isTicketResolved = () => {
     return ticket?.id_status_case === 2 || ticket?.status?.toLowerCase() === 'resuelto';
@@ -195,20 +170,11 @@ function ViewTicketPage() {
 
   useEffect(() => {
     const storedTicket = sessionStorage.getItem('selectedTicket');
-    const storedTicketsList = sessionStorage.getItem('ticketsList');
-    
+     
     if (storedTicket) {
       const ticketData = JSON.parse(storedTicket);
       setTicket(ticketData);
       setOriginalTicket(ticketData);
-      
-      if (storedTicketsList) {
-        const ticketsList: Ticket[] = JSON.parse(storedTicketsList);
-        setTicketsList(ticketsList);
-        const currentIndex = ticketsList.findIndex((t: Ticket) => t.id_case === ticketData.id_case);
-        setCurrentTicketIndex(currentIndex);
-      }
-      
       setLoading(false);
     } else if (id) {
       fetch(`/api/help-desk/tickets?id=${id}`)
@@ -1022,33 +988,6 @@ function ViewTicketPage() {
             </Alert>
           )}
 
-          {ticketsList.length > 0 && (
-            <Flex justify='space-between' align='center' mt='4'>
-              <ActionIcon
-                variant='subtle'
-                size='lg'
-                onClick={navigateToPreviousTicket}
-                disabled={currentTicketIndex === 0}
-                aria-label='Ticket Anterior'
-              >
-                <IconArrowLeft size={24} />
-              </ActionIcon>
-
-              <Text size='sm' color='gray.6'>
-                {currentTicketIndex !== null ? `${currentTicketIndex + 1} de ${ticketsList.length}` : ''}
-              </Text>
-
-              <ActionIcon
-                variant='subtle'
-                size='lg'
-                onClick={navigateToNextTicket}
-                disabled={currentTicketIndex === ticketsList.length - 1}
-                aria-label='Siguiente Ticket'
-              >
-                <IconArrowRight size={24} />
-              </ActionIcon>
-            </Flex>
-          )}
         </Card>
 
         <Grid>
