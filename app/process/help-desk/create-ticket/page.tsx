@@ -60,6 +60,15 @@ interface Ticket {
   company: string;
 }
 
+interface CompanyData {
+  id_company: number;
+  company: string;
+}
+
+interface ConsultResponse {
+  companies: CompanyData[];
+}
+
 function TicketsBoard() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -68,6 +77,7 @@ function TicketsBoard() {
   const { hasAccess: hasHelpDeskAccess } = useHelpDeskAccess();
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState({
@@ -90,6 +100,7 @@ function TicketsBoard() {
     department: '',
     activity: '',
     description: '',
+    company: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
 
@@ -113,6 +124,7 @@ function TicketsBoard() {
     }
     fetchTickets();
     fetchOptions();
+    fetchFormData();
     fetchSubprocessUsers();
   }, [session, status, router, filters]);
 
@@ -160,6 +172,27 @@ function TicketsBoard() {
       }
     } catch (error) {
       console.error('Error fetching options:', error);
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
+
+  const fetchFormData = async () => {
+    try {
+      setLoadingOptions(true);
+
+      const response = await fetch(`/api/requests-general/consult-request`);
+
+      if (response.ok) {
+        const data: ConsultResponse = await response.json();
+        setCompany(
+          data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
+        );
+      } else {
+        console.error('Frontend - fetchFormData failed with status:', response.status);
+      }
+    } catch (err) {
+      console.error('Error fetching form data:', err);
     } finally {
       setLoadingOptions(false);
     }
@@ -328,6 +361,7 @@ function TicketsBoard() {
           department: formData.department,
           activity: formData.activity,
           description: formData.description,
+          company: formData.company,
         }),
       });
 
@@ -351,6 +385,7 @@ function TicketsBoard() {
         department: '',
         activity: '',
         description: '',
+        company: '',
       });
       setTechnicalsError(null);
 
@@ -746,6 +781,7 @@ function TicketsBoard() {
                       className='cursor-pointer hover:bg-gray-50 transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedTicket', JSON.stringify(ticket));
+                        sessionStorage.setItem('ticketsList', JSON.stringify(tickets));
                         router.push(`/process/help-desk/view-ticket?id=${ticket.id_case}`);
                       }}
                     >
@@ -865,6 +901,45 @@ function TicketsBoard() {
                   leftSection={<IconFlag size={16} />}
                 />
               </Grid.Col>
+              
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Empresa Solicitante'
+                  placeholder='Seleccione la empresa'
+                  data={companies}
+                  value={formData.company}
+                  onChange={(value) => {
+                    handleFormChange('company', value || '');
+                  }}
+                  error={formErrors.company}
+                  required
+                  leftSection={<IconBuilding size={16} />}
+                  disabled={loadingOptions}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Sitio'
+                  placeholder='Seleccione el sitio'
+                  data={[
+                    { value: 'Administrativa', label: 'Administrativa' },
+                    { value: 'Planta', label: 'Planta' },
+                    { value: 'Celta', label: 'Celta' },
+                  ]}
+                  value={formData.site}
+                  onChange={(value) => {
+                    setFormData({ ...formData, site: value || '' });
+                    if (formErrors.site) {
+                      setFormErrors({ ...formErrors, site: '' });
+                    }
+                  }}
+                  error={formErrors.site}
+                  required
+                  leftSection={<IconBuilding size={16} />}
+                />
+              </Grid.Col>
+
             </Grid>
 
             <TextInput
@@ -924,6 +999,26 @@ function TicketsBoard() {
             </Grid>
 
             <Grid>
+              
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Actividad'
+                  placeholder='Seleccione la actividad'
+                  data={activities}
+                  value={formData.activity}
+                  onChange={(value) => {
+                    handleFormChange('activity', value || '');
+                    if (formErrors.activity) {
+                      setFormErrors({ ...formErrors, activity: '' });
+                    }
+                  }}
+                  error={formErrors.activity}
+                  required
+                  disabled={!formData.subcategory || loadingOptions}
+                  leftSection={<IconFilter size={16} />}
+                />
+              </Grid.Col>
+
               <Grid.Col span={{ base: 12, md: 6 }}>
                 <Select
                   label='Departamento'
@@ -943,48 +1038,11 @@ function TicketsBoard() {
                 />
               </Grid.Col>
 
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Select
-                  label='Sitio'
-                  placeholder='Seleccione el sitio'
-                  data={[
-                    { value: 'Administrativa', label: 'Administrativa' },
-                    { value: 'Planta', label: 'Planta' },
-                    { value: 'Celta', label: 'Celta' },
-                  ]}
-                  value={formData.site}
-                  onChange={(value) => {
-                    setFormData({ ...formData, site: value || '' });
-                    if (formErrors.site) {
-                      setFormErrors({ ...formErrors, site: '' });
-                    }
-                  }}
-                  error={formErrors.site}
-                  required
-                  leftSection={<IconBuilding size={16} />}
-                />
-              </Grid.Col>
+              
             </Grid>
 
             <Grid>
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Select
-                  label='Actividad'
-                  placeholder='Seleccione la actividad'
-                  data={activities}
-                  value={formData.activity}
-                  onChange={(value) => {
-                    handleFormChange('activity', value || '');
-                    if (formErrors.activity) {
-                      setFormErrors({ ...formErrors, activity: '' });
-                    }
-                  }}
-                  error={formErrors.activity}
-                  required
-                  disabled={!formData.subcategory || loadingOptions}
-                  leftSection={<IconFilter size={16} />}
-                />
-              </Grid.Col>
+              
 
               <Grid.Col span={{ base: 12, md: 6 }}>
                 <Select

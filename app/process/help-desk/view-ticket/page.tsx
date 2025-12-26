@@ -36,6 +36,7 @@ import {
   IconChevronRight,
   IconAlertCircle,
   IconArrowLeft,
+  IconArrowRight,
   IconCheck,
   IconX,
   IconFlag,
@@ -116,6 +117,8 @@ function ViewTicketPage() {
   const router = useRouter();
   const id = searchParams.get('id');
   const [ticket, setTicket] = useState<Ticket | null>(null);
+  const [ticketsList, setTicketsList] = useState<Ticket[]>([]);
+  const [currentTicketIndex, setCurrentTicketIndex] = useState<number | null>(null);
   const [categories, setCategories] = useState<Option[]>([]);
   const [subcategories, setSubcategories] = useState<Option[]>([]);
   const [activities, setActivities] = useState<Option[]>([]);
@@ -154,6 +157,30 @@ function ViewTicketPage() {
     notificarPorCorreo: false,
   });
 
+  const navigateToPreviousTicket = () => {
+    if (currentTicketIndex !== null && currentTicketIndex > 0) {
+      const previousIndex = currentTicketIndex - 1;
+      const previousTicket = ticketsList[previousIndex];
+      setTicket(previousTicket);
+      setOriginalTicket(previousTicket);
+      setCurrentTicketIndex(previousIndex);
+      sessionStorage.setItem('selectedTicket', JSON.stringify(previousTicket));
+      router.push(`/process/help-desk/view-ticket?id=${previousTicket.id_case}`);
+    }
+  };
+
+  const navigateToNextTicket = () => {
+    if (currentTicketIndex !== null && currentTicketIndex < ticketsList.length - 1) {
+      const nextIndex = currentTicketIndex + 1;
+      const nextTicket = ticketsList[nextIndex];
+      setTicket(nextTicket);
+      setOriginalTicket(nextTicket);
+      setCurrentTicketIndex(nextIndex);
+      sessionStorage.setItem('selectedTicket', JSON.stringify(nextTicket));
+      router.push(`/process/help-desk/view-ticket?id=${nextTicket.id_case}`);
+    }
+  };
+
   const isTicketResolved = () => {
     return ticket?.id_status_case === 2 || ticket?.status?.toLowerCase() === 'resuelto';
   };
@@ -168,10 +195,20 @@ function ViewTicketPage() {
 
   useEffect(() => {
     const storedTicket = sessionStorage.getItem('selectedTicket');
+    const storedTicketsList = sessionStorage.getItem('ticketsList');
+    
     if (storedTicket) {
       const ticketData = JSON.parse(storedTicket);
       setTicket(ticketData);
       setOriginalTicket(ticketData);
+      
+      if (storedTicketsList) {
+        const ticketsList: Ticket[] = JSON.parse(storedTicketsList);
+        setTicketsList(ticketsList);
+        const currentIndex = ticketsList.findIndex((t: Ticket) => t.id_case === ticketData.id_case);
+        setCurrentTicketIndex(currentIndex);
+      }
+      
       setLoading(false);
     } else if (id) {
       fetch(`/api/help-desk/tickets?id=${id}`)
@@ -984,6 +1021,34 @@ function ViewTicketPage() {
               cambios, contacte al administrador del sistema.
             </Alert>
           )}
+
+          {ticketsList.length > 0 && (
+            <Flex justify='space-between' align='center' mt='4'>
+              <ActionIcon
+                variant='subtle'
+                size='lg'
+                onClick={navigateToPreviousTicket}
+                disabled={currentTicketIndex === 0}
+                aria-label='Ticket Anterior'
+              >
+                <IconArrowLeft size={24} />
+              </ActionIcon>
+
+              <Text size='sm' color='gray.6'>
+                {currentTicketIndex !== null ? `${currentTicketIndex + 1} de ${ticketsList.length}` : ''}
+              </Text>
+
+              <ActionIcon
+                variant='subtle'
+                size='lg'
+                onClick={navigateToNextTicket}
+                disabled={currentTicketIndex === ticketsList.length - 1}
+                aria-label='Siguiente Ticket'
+              >
+                <IconArrowRight size={24} />
+              </ActionIcon>
+            </Flex>
+          )}
         </Card>
 
         <Grid>
@@ -1022,64 +1087,213 @@ function ViewTicketPage() {
 
                 <Divider />
 
-                <div>
-                  <Text fw={600} mb='xs'>
-                    Categorización
-                  </Text>
-                  <Grid>
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Select
-                        label='Categoría'
-                        data={categories}
-                        value={ticket.id_category?.toString() || ''}
-                        onChange={(val) => handleFormChange('id_category', val ?? '')}
-                        leftSection={<IconFilter size={16} />}
-                        disabled={!isEditing || loadingOptions || isTicketResolved()}
-                        error={formErrors.id_category}
-                      />
-                    </Grid.Col>
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Select
-                        label='Subcategoría'
-                        data={subcategories}
-                        value={ticket.id_subcategory?.toString() || ''}
-                        onChange={(val) => handleFormChange('id_subcategory', val ?? '')}
-                        leftSection={<IconFilter size={16} />}
-                        disabled={
-                          !isEditing || !ticket.id_category || loadingOptions || isTicketResolved()
+                {/* Notas del caso */}
+                <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+                  <Title order={4} mb='md' className='flex items-center gap-2'>
+                    <IconNote size={18} className='text-blue-6' />
+                    Notas del Caso
+                  </Title>
+
+                  {notes.length > 0 ? (
+                    <div className='max-h-40 overflow-y-auto border border-gray-200 rounded-md p-3 mb-3 bg-gray-50'>
+                      <Stack gap='xs'>
+                        {notes.map((note) => (
+                          <div
+                            key={note.id_note}
+                            className='border-b border-gray-200 pb-2 last:border-b-0'
+                          >
+                            <Text size='sm' className='text-gray-700 mb-1'>
+                              {note.note}
+                            </Text>
+                            <div className='flex justify-between items-center'>
+                              <Text size='xs' color='gray.6'>
+                                Creado por: {note.createdBy}
+                              </Text>
+                              {note.creation_date && (
+                                <Text size='xs' color='gray.6'>
+                                  {new Intl.DateTimeFormat('es-CO', {
+                                    day: 'numeric',
+                                    month: 'long',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: true,
+                                  }).format(
+                                    new Date(
+                                      new Date(note.creation_date).getTime() + 5 * 60 * 60 * 1000 // +5 horas
+                                    )
+                                  )}
+                                </Text>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </Stack>
+                    </div>
+                  ) : (
+                    <Text size='sm' color='dimmed' mb='xs'>
+                      {loadingNotes ? 'Cargando notas...' : 'No hay notas registradas.'}
+                    </Text>
+                  )}
+
+                  <Stack gap='sm'>
+                    <Textarea
+                      placeholder='Escribe una nota...'
+                      value={newNote}
+                      onChange={(e) => setNewNote(e.target.value)}
+                      minRows={2}
+                      disabled={!userId || loadingUserId || isTicketResolved()}
+                    />
+                    <Checkbox
+                      label='¿Notificar por correo electrónico?'
+                      checked={noteData.notificarPorCorreo}
+                      onChange={(e) =>
+                        setNoteData({
+                          ...noteData,
+                          notificarPorCorreo: e.currentTarget.checked,
+                          correo: e.currentTarget.checked ? noteData.correo : '',
+                        })
+                      }
+                      disabled={!userId || loadingUserId || isTicketResolved()}
+                      mb='sm'
+                    />
+                    {noteData.notificarPorCorreo && (
+                      <TextInput
+                        label='Correo electrónico de contacto'
+                        placeholder='correo@empresa.com'
+                        value={noteData.correo}
+                        onChange={(e) =>
+                          setNoteData({
+                            ...noteData,
+                            correo: e.currentTarget.value,
+                          })
                         }
-                        error={formErrors.id_subcategory}
+                        disabled={!userId || loadingUserId || isTicketResolved()}
+                        required
                       />
-                    </Grid.Col>
-                    <Grid.Col span={{ base: 12, md: 6 }}>
+                    )}
+                    <Group justify='flex-end'>
+                      <ActionIcon
+                        variant='filled'
+                        color='blue'
+                        onClick={handleAddNote}
+                        disabled={!userId || loadingUserId || !newNote.trim() || isTicketResolved()}
+                      >
+                        <IconCheck size={16} />
+                      </ActionIcon>
+                    </Group>
+                  </Stack>
+                  {isTicketResolved() && (
+                    <Text size='xs' color='dimmed' mt='xs'>
+                      No se pueden agregar notas a casos resueltos.
+                    </Text>
+                  )}
+                  {(!userId || loadingUserId) && !isTicketResolved() && (
+                    <Text size='xs' color='orange.6' mt='xs'>
+                      {loadingUserId
+                        ? 'Cargando información del usuario...'
+                        : 'No se pudo identificar al usuario actual'}
+                    </Text>
+                  )}
+                </Card>
+
+                <Divider />
+
+                {/* Resolución del caso */}
+                <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+                  <Group justify='space-between' mb='md'>
+                    <Title order={4} className='flex items-center gap-2'>
+                      <IconCheck size={18} className='text-green-6' />
+                      Resolución del Caso
+                    </Title>
+                    {!isTicketResolved() && (
+                      <ActionIcon variant='subtle' onClick={() => setShowResolution(!showResolution)}>
+                        {showResolution ? <IconX size={16} /> : <IconCheck size={16} />}
+                      </ActionIcon>
+                    )}
+                  </Group>
+
+                  {/* Mostrar información de resolución si el caso está resuelto */}
+                  {isTicketResolved() && (
+                    <Card withBorder radius='md' p='md' bg='teal.0' mb='md'>
+                      <Stack gap='sm'>
+                        <Text fw={600}>Información de Resolución</Text>
+                        <Text size='sm' className='whitespace-pre-line text-gray-700'>
+                          {ticket.resolution}
+                        </Text>
+                        {ticket.end_date && (
+                          <Text size='xs'>
+                            Fecha de resolución: {new Date(ticket.end_date).toLocaleDateString()}
+                          </Text>
+                        )}
+                      </Stack>
+                    </Card>
+                  )}
+
+                  {!isTicketResolved() && showResolution && (
+                    <Stack>
                       <Select
-                        label='Actividad'
-                        data={activities}
-                        value={ticket.id_activity?.toString() || ''}
-                        onChange={(val) => handleFormChange('id_activity', val ?? '')}
-                        leftSection={<IconFilter size={16} />}
-                        disabled={
-                          !isEditing ||
-                          !ticket.id_subcategory ||
-                          loadingOptions ||
-                          isTicketResolved()
+                        label='Estado del caso'
+                        placeholder='Selecciona estado'
+                        data={[
+                          { value: '2', label: 'Resuelto' },
+                          { value: '3', label: 'Cancelado' },
+                        ]}
+                        value={resolutionData.estado}
+                        onChange={(val) =>
+                          setResolutionData({ ...resolutionData, estado: val || '' })
                         }
-                        error={formErrors.id_activity}
+                        error={formErrors.estado}
+                        disabled={!isEditing}
                       />
-                    </Grid.Col>
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Select
-                        label='Prioridad'
-                        data={['Baja', 'Media', 'Alta']}
-                        value={ticket.priority}
-                        onChange={(val) => setTicket({ ...ticket, priority: val ?? '' })}
-                        leftSection={<IconFlag size={16} />}
-                        disabled={!isEditing || isTicketResolved()}
-                        error={formErrors.priority}
+                      <Checkbox
+                        label='¿Notificar por correo electrónico?'
+                        checked={resolutionData.notificarPorCorreo}
+                        onChange={(e) =>
+                          setResolutionData({
+                            ...resolutionData,
+                            notificarPorCorreo: e.currentTarget.checked,
+                            correo: e.currentTarget.checked ? resolutionData.correo : '',
+                          })
+                        }
+                        disabled={!isEditing}
+                        mb='sm'
                       />
-                    </Grid.Col>
-                  </Grid>
-                </div>
+                      {resolutionData.notificarPorCorreo && (
+                        <TextInput
+                          label='Correo electrónico de contacto'
+                          placeholder='correo@empresa.com'
+                          value={resolutionData.correo}
+                          onChange={(e) =>
+                            setResolutionData({
+                              ...resolutionData,
+                              correo: e.currentTarget.value,
+                            })
+                          }
+                          error={formErrors.correo}
+                          disabled={!isEditing}
+                          required
+                        />
+                      )}
+                      <Textarea
+                        label='Descripción de la resolución'
+                        placeholder='Describe la resolución aplicada...'
+                        value={resolutionData.resolucion}
+                        onChange={(e) =>
+                          setResolutionData({
+                            ...resolutionData,
+                            resolucion: e.currentTarget.value,
+                          })
+                        }
+                        autosize
+                        minRows={6}
+                        maxRows={15}
+                        error={formErrors.resolucion}
+                        disabled={!isEditing}
+                      />
+                    </Stack>
+                  )}
+                </Card>
               </Stack>
             </Card>
           </Grid.Col>
@@ -1151,208 +1365,58 @@ function ViewTicketPage() {
                 </Stack>
               </Card>
 
-              {/* Notas */}
+              {/* Categorización */}
               <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
                 <Title order={4} mb='md' className='flex items-center gap-2'>
-                  <IconNote size={18} className='text-blue-6' />
-                  Notas del Caso
+                  <IconFilter size={18} />
+                  Categorización
                 </Title>
 
-                {notes.length > 0 ? (
-                  <div className='max-h-40 overflow-y-auto border border-gray-200 rounded-md p-3 mb-3 bg-gray-50'>
-                    <Stack gap='xs'>
-                      {notes.map((note) => (
-                        <div
-                          key={note.id_note}
-                          className='border-b border-gray-200 pb-2 last:border-b-0'
-                        >
-                          <Text size='sm' className='text-gray-700 mb-1'>
-                            {note.note}
-                          </Text>
-                          <div className='flex justify-between items-center'>
-                            <Text size='xs' color='gray.6'>
-                              Creado por: {note.createdBy}
-                            </Text>
-                            {note.creation_date && (
-                              <Text size='xs' color='gray.6'>
-                                {new Intl.DateTimeFormat('es-CO', {
-                                  day: 'numeric',
-                                  month: 'long',
-                                  year: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  hour12: true,
-                                }).format(
-                                  new Date(
-                                    new Date(note.creation_date).getTime() + 5 * 60 * 60 * 1000 // +5 horas
-                                  )
-                                )}
-                              </Text>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </Stack>
-                  </div>
-                ) : (
-                  <Text size='sm' color='dimmed' mb='xs'>
-                    {loadingNotes ? 'Cargando notas...' : 'No hay notas registradas.'}
-                  </Text>
-                )}
-
                 <Stack gap='sm'>
-                  <Textarea
-                    placeholder='Escribe una nota...'
-                    value={newNote}
-                    onChange={(e) => setNewNote(e.target.value)}
-                    minRows={2}
-                    disabled={!userId || loadingUserId || isTicketResolved()}
+                  <Select
+                    label='Categoría'
+                    data={categories}
+                    value={ticket.id_category?.toString() || ''}
+                    onChange={(val) => handleFormChange('id_category', val ?? '')}
+                    leftSection={<IconFilter size={16} />}
+                    disabled={!isEditing || loadingOptions || isTicketResolved()}
+                    error={formErrors.id_category}
                   />
-                  <Checkbox
-                    label='¿Notificar por correo electrónico?'
-                    checked={noteData.notificarPorCorreo}
-                    onChange={(e) =>
-                      setNoteData({
-                        ...noteData,
-                        notificarPorCorreo: e.currentTarget.checked,
-                        correo: e.currentTarget.checked ? noteData.correo : '',
-                      })
+                  <Select
+                    label='Subcategoría'
+                    data={subcategories}
+                    value={ticket.id_subcategory?.toString() || ''}
+                    onChange={(val) => handleFormChange('id_subcategory', val ?? '')}
+                    leftSection={<IconFilter size={16} />}
+                    disabled={
+                      !isEditing || !ticket.id_category || loadingOptions || isTicketResolved()
                     }
-                    disabled={!userId || loadingUserId || isTicketResolved()}
-                    mb='sm'
+                    error={formErrors.id_subcategory}
                   />
-                  {noteData.notificarPorCorreo && (
-                    <TextInput
-                      label='Correo electrónico de contacto'
-                      placeholder='correo@empresa.com'
-                      value={noteData.correo}
-                      onChange={(e) =>
-                        setNoteData({
-                          ...noteData,
-                          correo: e.currentTarget.value,
-                        })
-                      }
-                      disabled={!userId || loadingUserId || isTicketResolved()}
-                      required
-                    />
-                  )}
-                  <Group justify='flex-end'>
-                    <ActionIcon
-                      variant='filled'
-                      color='blue'
-                      onClick={handleAddNote}
-                      disabled={!userId || loadingUserId || !newNote.trim() || isTicketResolved()}
-                    >
-                      <IconCheck size={16} />
-                    </ActionIcon>
-                  </Group>
+                  <Select
+                    label='Actividad'
+                    data={activities}
+                    value={ticket.id_activity?.toString() || ''}
+                    onChange={(val) => handleFormChange('id_activity', val ?? '')}
+                    leftSection={<IconFilter size={16} />}
+                    disabled={
+                      !isEditing ||
+                      !ticket.id_subcategory ||
+                      loadingOptions ||
+                      isTicketResolved()
+                    }
+                    error={formErrors.id_activity}
+                  />
+                  <Select
+                    label='Prioridad'
+                    data={['Baja', 'Media', 'Alta']}
+                    value={ticket.priority}
+                    onChange={(val) => setTicket({ ...ticket, priority: val ?? '' })}
+                    leftSection={<IconFlag size={16} />}
+                    disabled={!isEditing || isTicketResolved()}
+                    error={formErrors.priority}
+                  />
                 </Stack>
-                {isTicketResolved() && (
-                  <Text size='xs' color='dimmed' mt='xs'>
-                    No se pueden agregar notas a casos resueltos.
-                  </Text>
-                )}
-                {(!userId || loadingUserId) && !isTicketResolved() && (
-                  <Text size='xs' color='orange.6' mt='xs'>
-                    {loadingUserId
-                      ? 'Cargando información del usuario...'
-                      : 'No se pudo identificar al usuario actual'}
-                  </Text>
-                )}
-              </Card>
-
-              {/* Resolución */}
-              <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
-                <Group justify='space-between' mb='md'>
-                  <Title order={4} className='flex items-center gap-2'>
-                    <IconCheck size={18} className='text-green-6' />
-                    Resolución del Caso
-                  </Title>
-                  {!isTicketResolved() && (
-                    <ActionIcon variant='subtle' onClick={() => setShowResolution(!showResolution)}>
-                      {showResolution ? <IconX size={16} /> : <IconCheck size={16} />}
-                    </ActionIcon>
-                  )}
-                </Group>
-
-                {/* Mostrar información de resolución si el caso está resuelto */}
-                {isTicketResolved() && (
-                  <Card withBorder radius='md' p='md' bg='teal.0' mb='md'>
-                    <Stack gap='sm'>
-                      <Text fw={600}>Información de Resolución</Text>
-                      <Text size='sm' className='whitespace-pre-line text-gray-700'>
-                        {ticket.resolution}
-                      </Text>
-                      {ticket.end_date && (
-                        <Text size='xs'>
-                          Fecha de resolución: {new Date(ticket.end_date).toLocaleDateString()}
-                        </Text>
-                      )}
-                    </Stack>
-                  </Card>
-                )}
-
-                {!isTicketResolved() && showResolution && (
-                  <Stack>
-                    <Select
-                      label='Estado del caso'
-                      placeholder='Selecciona estado'
-                      data={[
-                        { value: '2', label: 'Resuelto' },
-                        { value: '3', label: 'Cancelado' },
-                      ]}
-                      value={resolutionData.estado}
-                      onChange={(val) =>
-                        setResolutionData({ ...resolutionData, estado: val || '' })
-                      }
-                      error={formErrors.estado}
-                      disabled={!isEditing}
-                    />
-                    <Checkbox
-                      label='¿Notificar por correo electrónico?'
-                      checked={resolutionData.notificarPorCorreo}
-                      onChange={(e) =>
-                        setResolutionData({
-                          ...resolutionData,
-                          notificarPorCorreo: e.currentTarget.checked,
-                          correo: e.currentTarget.checked ? resolutionData.correo : '',
-                        })
-                      }
-                      disabled={!isEditing}
-                      mb='sm'
-                    />
-                    {resolutionData.notificarPorCorreo && (
-                      <TextInput
-                        label='Correo electrónico de contacto'
-                        placeholder='correo@empresa.com'
-                        value={resolutionData.correo}
-                        onChange={(e) =>
-                          setResolutionData({
-                            ...resolutionData,
-                            correo: e.currentTarget.value,
-                          })
-                        }
-                        error={formErrors.correo}
-                        disabled={!isEditing}
-                        required
-                      />
-                    )}
-                    <Textarea
-                      label='Descripción de la resolución'
-                      placeholder='Describe la resolución aplicada...'
-                      value={resolutionData.resolucion}
-                      onChange={(e) =>
-                        setResolutionData({
-                          ...resolutionData,
-                          resolucion: e.currentTarget.value,
-                        })
-                      }
-                      minRows={3}
-                      error={formErrors.resolucion}
-                      disabled={!isEditing}
-                    />
-                  </Stack>
-                )}
               </Card>
             </Stack>
           </Grid.Col>
