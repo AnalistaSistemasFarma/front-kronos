@@ -535,8 +535,6 @@ function ViewRequestPage() {
       if (!resolutionData.correo || resolutionData.correo.trim() === '') {
         errors.correo =
           'El correo electrónico es requerido cuando se selecciona notificar por correo';
-      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolutionData.correo)) {
-        errors.correo = 'Por favor ingrese un correo electrónico válido';
       }
     }
 
@@ -1278,7 +1276,7 @@ function ViewRequestPage() {
                         error={formErrors.estado}
                       />
                       <Checkbox
-                        label='¿Notificar por correo electrónico?'
+                        label='¿Notificar por correo electrónico a los usuarios?'
                         checked={resolutionData.notificarPorCorreo}
                         onChange={(e) =>
                           setResolutionData({
@@ -1292,7 +1290,7 @@ function ViewRequestPage() {
                       {resolutionData.notificarPorCorreo && (
                         <TextInput
                           label='Correo electrónico de contacto'
-                          placeholder='correo@empresa.com'
+                          placeholder='Ejemplo: correo@farmalogica.com; correo2@farmalogica.com'
                           value={resolutionData.correo}
                           onChange={(e) =>
                             setResolutionData({
