@@ -181,6 +181,10 @@ function ViewRequestPage() {
     notificarPorCorreo: false,
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [noteData, setNoteData] = useState({
+    correo: '',
+    notificarPorCorreo: false,
+  });
 
   useEffect(() => {
     const storedRequest = sessionStorage.getItem('selectedRequest');
@@ -535,8 +539,6 @@ function ViewRequestPage() {
       if (!resolutionData.correo || resolutionData.correo.trim() === '') {
         errors.correo =
           'El correo electrónico es requerido cuando se selecciona notificar por correo';
-      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolutionData.correo)) {
-        errors.correo = 'Por favor ingrese un correo electrónico válido';
       }
     }
 
@@ -578,6 +580,62 @@ function ViewRequestPage() {
       }
 
       const outro = `Este es un mensaje automático del sistema de Solicitudes Generales. La solicitud #${request?.id} ha sido actualizada. Si tiene alguna pregunta, por favor contacte al administrador del sistema.`;
+
+      const result = await sendMessage(
+        message,
+        emails,
+        table,
+        outro,
+        'https://farmalogica.com.co/imagenes/logos/logo20.png',
+        []
+      );
+
+      console.log('Notificación por correo enviada exitosamente:', result);
+      return true;
+    } catch (error) {
+      console.error('Error al enviar la notificación por correo:', error);
+      setUpdateMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Error al enviar la notificación por correo',
+      });
+      return false;
+    }
+  };
+
+  const sendNoteEmailNotification = async (): Promise<boolean> => {
+    if (!process.env.API_EMAIL) {
+      console.error('Error: La variable de entorno API_EMAIL no está configurada');
+      setUpdateMessage({
+        type: 'error',
+        text: 'Error de configuración: No se puede enviar la notificación por correo. Contacte al administrador.',
+      });
+      return false;
+    }
+
+    try {
+      const message = `Nueva Nota en la Solicitud #${request?.id} - ${request?.subject}`;
+      const emails = noteData.correo;
+
+      const table: Array<Record<string, string | number | undefined>> = [
+        {
+          'ID de la Solicitud': request?.id,
+          Asunto: request?.subject,
+          Categoría: request?.category,
+          Proceso: request?.process,
+          Empresa: request?.company,
+          'Fecha de Creación': request?.created_at
+            ? new Date(request.created_at).toISOString().split('T')[0]
+            : 'N/A',
+        },
+      ];
+
+      if (newNote) {
+        table.push({
+          Nota: newNote,
+        });
+      }
+
+      const outro = `Este es un mensaje automático del sistema de Solicitudes Generales. Se ha agregado una nueva nota a la solicitud #${request?.id}. Si tiene alguna pregunta, por favor contacte al administrador del sistema.`;
 
       const result = await sendMessage(
         message,
@@ -737,6 +795,16 @@ function ViewRequestPage() {
       if (response.ok) {
         setNewNote('');
         await fetchNotes();
+
+        if (noteData.notificarPorCorreo) {
+          const emailSent = await sendNoteEmailNotification();
+          if (emailSent) {
+            setUpdateMessage({
+              type: 'success',
+              text: 'Nota agregada exitosamente y notificación por correo enviada',
+            });
+          }
+        }
       } else {
         const errorData = await response.json();
         console.error('Error al agregar nota:', errorData.error);
@@ -1013,7 +1081,7 @@ function ViewRequestPage() {
               </ScrollArea>
 
               <div className='border-t pt-4'>
-                <Group align='flex-end'>
+                <Stack gap='sm'>
                   <Textarea
                     placeholder='Escribe una nota...'
                     value={newNote}
@@ -1027,17 +1095,45 @@ function ViewRequestPage() {
                       },
                     }}
                   />
-                  <ActionIcon
-                    variant='filled'
-                    color='blue'
-                    size='lg'
-                    radius='xl'
-                    onClick={handleAddNote}
-                    disabled={!userId || loadingUserId || !newNote.trim()}
-                  >
-                    <IconCheck size={18} />
-                  </ActionIcon>
-                </Group>
+                  <Checkbox
+                    label='¿Notificar por correo electrónico?'
+                    checked={noteData.notificarPorCorreo}
+                    onChange={(e) =>
+                      setNoteData({
+                        ...noteData,
+                        notificarPorCorreo: e.currentTarget.checked,
+                        correo: e.currentTarget.checked ? noteData.correo : '',
+                      })
+                    }
+                    mb='sm'
+                  />
+                  {noteData.notificarPorCorreo && (
+                    <TextInput
+                      label='Correo electrónico de contacto'
+                      placeholder='Ejemplo: correo@farmalogica.com; correo2@farmalogica.com'
+                      value={noteData.correo}
+                      onChange={(e) =>
+                        setNoteData({
+                          ...noteData,
+                          correo: e.currentTarget.value,
+                        })
+                      }
+                      required
+                    />
+                  )}
+                  <Group align='flex-end'>
+                    <ActionIcon
+                      variant='filled'
+                      color='blue'
+                      size='lg'
+                      radius='xl'
+                      onClick={handleAddNote}
+                      disabled={!userId || loadingUserId || !newNote.trim()}
+                    >
+                      <IconCheck size={18} />
+                    </ActionIcon>
+                  </Group>
+                </Stack>
                 {(!userId || loadingUserId) && (
                   <Text size='xs' color='orange.6' mt='xs'>
                     {loadingUserId
@@ -1278,7 +1374,7 @@ function ViewRequestPage() {
                         error={formErrors.estado}
                       />
                       <Checkbox
-                        label='¿Notificar por correo electrónico?'
+                        label='¿Notificar por correo electrónico a los usuarios?'
                         checked={resolutionData.notificarPorCorreo}
                         onChange={(e) =>
                           setResolutionData({
@@ -1292,7 +1388,7 @@ function ViewRequestPage() {
                       {resolutionData.notificarPorCorreo && (
                         <TextInput
                           label='Correo electrónico de contacto'
-                          placeholder='correo@empresa.com'
+                          placeholder='Ejemplo: correo@farmalogica.com; correo2@farmalogica.com'
                           value={resolutionData.correo}
                           onChange={(e) =>
                             setResolutionData({

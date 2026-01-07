@@ -29,29 +29,26 @@ export async function GET(req) {
       WHERE 1=1
     `;
 
-    if (status) {
+    if (status && status !== '0') {
       query += ` AND rg.status_req = @status`;
-      console.log('API requests-general: Agregando filtro por status:', status);
     }
+
+    else if (!status) query += ` AND sc.id_status_case = 1`;
 
     if (company) {
       query += ` AND rg.id_company = @company`;
-      console.log('API requests-general: Agregando filtro por company:', company);
     }
 
     if (date_from) {
       query += ` AND rg.created_at >= @date_from`;
-      console.log('API requests-general: Agregando filtro por date_from:', date_from);
     }
 
     if (date_to) {
       query += ` AND rg.created_at <= @date_to`;
-      console.log('API requests-general: Agregando filtro por date_to:', date_to);
     }
 
     if (assigned_to) {
       query += ` AND up.name = @assigned_to`;
-      console.log('API requests-general: Agregando filtro por assigned_to:', assigned_to);
     }
 
     query += ` ORDER BY rg.id DESC`;
@@ -59,11 +56,9 @@ export async function GET(req) {
     const request = pool.request();
     if (idUser) {
       request.input('idUser', sql.NVarChar, idUser);
-      console.log('API requests-general: Usando sql.NVarChar para idUser');
     }
     if (assigned_to) {
       request.input('assigned_to', sql.NVarChar, assigned_to);
-      console.log('API requests-general: Usando sql.NVarChar para assigned_to');
     }
 
     if (status) {

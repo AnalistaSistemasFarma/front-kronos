@@ -40,29 +40,27 @@ export async function GET(req) {
       );
     }
 
-    if (status) {
+    if (status && status !== '0') {
       query += ` AND rg.status_req = @status`;
       console.log('API requests-general: Agregando filtro por status:', status);
     }
 
+    else if (!status) query += ` AND sc.id_status_case = 1`;
+
     if (company) {
       query += ` AND rg.id_company = @company`;
-      console.log('API requests-general: Agregando filtro por company:', company);
     }
 
     if (date_from) {
       query += ` AND rg.created_at >= @date_from`;
-      console.log('API requests-general: Agregando filtro por date_from:', date_from);
     }
 
     if (date_to) {
       query += ` AND rg.created_at <= @date_to`;
-      console.log('API requests-general: Agregando filtro por date_to:', date_to);
     }
 
     if (assigned_to) {
       query += ` AND rg.[user] = @assigned_to`;
-      console.log('API requests-general: Agregando filtro por assigned_to:', assigned_to);
     }
 
     const request = pool.request();
@@ -71,7 +69,6 @@ export async function GET(req) {
     
     if (assigned_to) {
       request.input('assignedTo', sql.NVarChar, assigned_to);
-      console.log('API requests-general: Usando sql.NVarChar para assignedTo');
     }
 
     if (status) {

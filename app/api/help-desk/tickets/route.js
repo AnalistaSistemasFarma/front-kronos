@@ -38,7 +38,7 @@ export async function GET(req) {
 
     if (priority) query += ` AND c.priority = @priority`;
     if (status && status !== '0') query += ` AND sc.id_status_case = @status`;
-    else if (!status) query += ` AND sc.id_status_case = 1`; // Por defecto mostrar solo tickets abiertos (id_status_case = 1)
+    else if (!status) query += ` AND sc.id_status_case = 1`;
     if (assigned_user) query += ` AND u.name LIKE '%' + @assigned_user + '%'`;
     if (technician) query += ` AND c.id_technical = @technician`;
     if (date_from && date_to) query += ` AND c.creation_date BETWEEN @date_from AND @date_to`;

@@ -634,6 +634,7 @@ function RequestBoard() {
                     placeholder='Todos los estados'
                     clearable
                     data={[
+                      { value: '0', label: 'Todos' },
                       { value: '1', label: 'Abierto' },
                       { value: '3', label: 'Cancelado' },
                       { value: '2', label: 'Completada' },

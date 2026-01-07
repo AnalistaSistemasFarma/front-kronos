@@ -661,8 +661,6 @@ function ViewTicketPage() {
       if (!resolutionData.correo || resolutionData.correo.trim() === '') {
         errors.correo =
           'El correo electrónico es requerido cuando se selecciona notificar por correo';
-      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolutionData.correo)) {
-        errors.correo = 'Por favor ingrese un correo electrónico válido';
       }
     }
 
