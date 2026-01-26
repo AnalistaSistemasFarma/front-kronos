@@ -13,6 +13,7 @@ export async function GET(req) {
     const date_from = searchParams.get('date_from');
     const date_to = searchParams.get('date_to');
     const technician = searchParams.get('technician');
+    const company = searchParams.get('company');
 
     let query = `
       SELECT 
@@ -37,6 +38,7 @@ export async function GET(req) {
     `;
 
     if (priority) query += ` AND c.priority = @priority`;
+    if (company) query += ` AND co.id_company = @company`;
     if (status && status !== '0') query += ` AND sc.id_status_case = @status`;
     else if (!status) query += ` AND sc.id_status_case = 1`;
     if (assigned_user) query += ` AND u.name LIKE '%' + @assigned_user + '%'`;
@@ -48,6 +50,7 @@ export async function GET(req) {
     const request = pool.request();
     if (priority) request.input('priority', sql.NVarChar, priority);
     if (status) request.input('status', sql.Int, status);
+    if (company) request.input('company', sql.Int, company);
     if (assigned_user) request.input('assigned_user', sql.NVarChar, assigned_user);
     if (technician) request.input('technician', sql.Int, technician);
     if (date_from && date_to) {
