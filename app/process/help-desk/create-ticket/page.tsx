@@ -87,6 +87,7 @@ function TicketsBoard() {
     date_from: '',
     date_to: '',
     technician: '',
+    company: '',
   });
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
@@ -294,6 +295,7 @@ function TicketsBoard() {
       if (filters.date_from) params.append('date_from', filters.date_from);
       if (filters.date_to) params.append('date_to', filters.date_to);
       if (filters.technician) params.append('technician', filters.technician);
+      if (filters.company) params.append('company', filters.company);
 
       const response = await fetch(`/api/help-desk/tickets?${params.toString()}`);
 
@@ -682,6 +684,18 @@ function TicketsBoard() {
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <Select
+                    label='Empresa'
+                    placeholder='Todas las empresas'
+                    clearable
+                    data={companies}
+                    value={filters.company}
+                    onChange={(value) => handleFilterChange('company', value || '')}
+                    leftSection={<IconBuilding size={16} />}
+                    disabled={loadingOptions}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
                     label='Técnico Asignado'
                     placeholder='Todos los técnicos'
                     clearable
@@ -724,6 +738,7 @@ function TicketsBoard() {
                       date_from: '',
                       date_to: '',
                       technician: '',
+                      company: '',
                     })
                   }
                   leftSection={<IconX size={16} />}
