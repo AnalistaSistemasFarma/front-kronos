@@ -116,6 +116,15 @@ function ViewTicketPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const id = searchParams.get('id');
+  
+  // Mapeo de IDs de estado a textos de estado
+  const statusMap: Record<string, string> = {
+    '1': 'Abierto',
+    '2': 'Resuelto',
+    '3': 'Cancelado',
+    '4': 'En Progreso',
+  };
+  
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [ticketsList, setTicketsList] = useState<Ticket[]>([]);
   const [currentTicketIndex, setCurrentTicketIndex] = useState<number | null>(null);
@@ -834,7 +843,12 @@ function ViewTicketPage() {
       }
 
       if (resolutionData.estado) {
-        setTicket((prev) => (prev ? { ...prev, status: resolutionData.estado } : null));
+        setTicket((prev) => {
+          if (!prev) return null;
+          const statusText = statusMap[resolutionData.estado] || prev.status;
+          const statusId = parseInt(resolutionData.estado) || prev.id_status_case;
+          return { ...prev, status: statusText, id_status_case: statusId };
+        });
       }
 
       setOriginalTicket(ticket);
