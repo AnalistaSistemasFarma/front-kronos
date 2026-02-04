@@ -117,7 +117,6 @@ function ViewTicketPage() {
   const router = useRouter();
   const id = searchParams.get('id');
   
-  // Mapeo de IDs de estado a textos de estado
   const statusMap: Record<string, string> = {
     '1': 'Abierto',
     '2': 'Resuelto',
@@ -660,9 +659,9 @@ function ViewTicketPage() {
     }
 
     if (resolutionData.estado) {
-      if (!resolutionData.resolucion || resolutionData.resolucion.trim() === '') {
-        errors.resolucion =
-          'La descripción de la resolución es requerida cuando se cambia el estado';
+      if (!hasValidCriticalFields()) {
+        errors.criticalFields =
+          'Para resolver o cancelar el caso, debe modificar los siguientes campos: Técnico Asignado, Categoría, Subcategoría, Actividad y Prioridad.';
       }
     }
 
@@ -772,6 +771,28 @@ function ViewTicketPage() {
       console.error('Error al enviar la notificación por correo de nota:', error);
       return false;
     }
+  };
+
+  const hasValidCriticalFields = (): boolean => {
+    if (!ticket) return false;
+
+    const hasInvalidTechnical = ticket.id_technical === null;
+    const hasInvalidCategory = ticket.id_category == '10';
+    const hasInvalidSubcategory = ticket.id_subcategory == '288';
+    const hasInvalidActivity = ticket.id_activity == '230';
+    const hasInvalidPriority = ticket.priority === 'Sin Asignar';
+
+    if (
+      hasInvalidTechnical ||
+      hasInvalidCategory ||
+      hasInvalidSubcategory ||
+      hasInvalidActivity ||
+      hasInvalidPriority
+    ) {
+      return false;
+    }
+
+    return true;
   };
 
   const handleUpdateCase = async () => {
@@ -1259,6 +1280,11 @@ function ViewTicketPage() {
                         error={formErrors.estado}
                         disabled={!isEditing}
                       />
+                      {formErrors.criticalFields && (
+                        <Alert icon={<IconAlertCircle size={16} />} title='Error' color='red'>
+                          {formErrors.criticalFields}
+                        </Alert>
+                      )}
                       <Checkbox
                         label='¿Notificar por correo electrónico?'
                         checked={resolutionData.notificarPorCorreo}
