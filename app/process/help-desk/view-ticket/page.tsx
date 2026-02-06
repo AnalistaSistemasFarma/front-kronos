@@ -116,6 +116,14 @@ function ViewTicketPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const id = searchParams.get('id');
+  
+  const statusMap: Record<string, string> = {
+    '1': 'Abierto',
+    '2': 'Resuelto',
+    '3': 'Cancelado',
+    '4': 'En Progreso',
+  };
+  
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [ticketsList, setTicketsList] = useState<Ticket[]>([]);
   const [currentTicketIndex, setCurrentTicketIndex] = useState<number | null>(null);
@@ -651,9 +659,9 @@ function ViewTicketPage() {
     }
 
     if (resolutionData.estado) {
-      if (!resolutionData.resolucion || resolutionData.resolucion.trim() === '') {
-        errors.resolucion =
-          'La descripción de la resolución es requerida cuando se cambia el estado';
+      if (!hasValidCriticalFields()) {
+        errors.criticalFields =
+          'Para resolver o cancelar el caso, debe modificar los siguientes campos: Técnico Asignado, Categoría, Subcategoría, Actividad y Prioridad.';
       }
     }
 
@@ -765,6 +773,28 @@ function ViewTicketPage() {
     }
   };
 
+  const hasValidCriticalFields = (): boolean => {
+    if (!ticket) return false;
+
+    const hasInvalidTechnical = ticket.id_technical === null;
+    const hasInvalidCategory = ticket.id_category == '10';
+    const hasInvalidSubcategory = ticket.id_subcategory == '288';
+    const hasInvalidActivity = ticket.id_activity == '230';
+    const hasInvalidPriority = ticket.priority === 'Sin Asignar';
+
+    if (
+      hasInvalidTechnical ||
+      hasInvalidCategory ||
+      hasInvalidSubcategory ||
+      hasInvalidActivity ||
+      hasInvalidPriority
+    ) {
+      return false;
+    }
+
+    return true;
+  };
+
   const handleUpdateCase = async () => {
     if (!validateFields()) {
       return;
@@ -834,7 +864,12 @@ function ViewTicketPage() {
       }
 
       if (resolutionData.estado) {
-        setTicket((prev) => (prev ? { ...prev, status: resolutionData.estado } : null));
+        setTicket((prev) => {
+          if (!prev) return null;
+          const statusText = statusMap[resolutionData.estado] || prev.status;
+          const statusId = parseInt(resolutionData.estado) || prev.id_status_case;
+          return { ...prev, status: statusText, id_status_case: statusId };
+        });
       }
 
       setOriginalTicket(ticket);
@@ -1245,6 +1280,11 @@ function ViewTicketPage() {
                         error={formErrors.estado}
                         disabled={!isEditing}
                       />
+                      {formErrors.criticalFields && (
+                        <Alert icon={<IconAlertCircle size={16} />} title='Error' color='red'>
+                          {formErrors.criticalFields}
+                        </Alert>
+                      )}
                       <Checkbox
                         label='¿Notificar por correo electrónico?'
                         checked={resolutionData.notificarPorCorreo}
