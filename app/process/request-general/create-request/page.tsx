@@ -83,6 +83,7 @@ interface ProcessCategoryData {
   id_category_request: number;
   category: string;
   email?: string;
+  description?: string;
 }
 
 interface ConsultResponse {
@@ -127,8 +128,9 @@ function RequestBoard() {
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
   const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
   const [processCategories, setProcessCategories] = useState<
-    { value: string; label: string; id_category_request: number; email?: string }[]
+    { value: string; label: string; id_category_request: number; email?: string; description?: string }[]
   >([]);
+  const [processSearch, setProcessSearch] = useState('');
   const [filteredProcesses, setFilteredProcesses] = useState<{ value: string; label: string }[]>(
     []
   );
@@ -201,18 +203,31 @@ function RequestBoard() {
 
   useEffect(() => {
     if (formData.category) {
-      const filtered = processCategories.filter(
+      let filtered = processCategories.filter(
         (p) => p.id_category_request === parseInt(formData.category)
       );
-      setFilteredProcesses(filtered);
-      if (!filtered.find((p) => p.value === formData.process)) {
-        setFormData((prev) => ({ ...prev, process: '' }));
+      
+      // Filtrar por descripción - solo si hay término de búsqueda
+      if (processSearch.trim()) {
+        const searchLower = processSearch.toLowerCase();
+        filtered = filtered.filter(
+          (p) => p.description && p.description.toLowerCase().includes(searchLower)
+        );
       }
+      
+      // Asegurar que el proceso ya seleccionado siempre esté disponible
+      if (formData.process && !filtered.find((p) => p.value === formData.process)) {
+        const selectedProcess = processCategories.find((p) => p.value === formData.process);
+        if (selectedProcess) {
+          filtered = [selectedProcess, ...filtered];
+        }
+      }
+      
+      setFilteredProcesses(filtered);
     } else {
       setFilteredProcesses([]);
-      setFormData((prev) => ({ ...prev, process: '' }));
     }
-  }, [formData.category, processCategories]);
+  }, [formData.category, processCategories, processSearch, formData.process]);
 
   const fetchTickets = async () => {
     if (!userId) {
@@ -350,9 +365,10 @@ function RequestBoard() {
         setProcessCategories(
           data.processCategories.map((p) => ({
             value: p.id_process.toString(),
-            label: p.process,
+            label: p.description ? `${p.process} - ${p.description}` : p.process,
             id_category_request: p.id_category_request,
             email: p.email,
+            description: p.description,
           }))
         );
         if (data.assignedUsers) {
@@ -1058,6 +1074,9 @@ function RequestBoard() {
                   onChange={(value) => {
                     handleFormChange('process', value || '');
                   }}
+                  onSearchChange={(value) => setProcessSearch(value)}
+                  searchValue={processSearch}
+                  searchable
                   error={formErrors.process}
                   required
                   leftSection={<IconProgress size={16} />}

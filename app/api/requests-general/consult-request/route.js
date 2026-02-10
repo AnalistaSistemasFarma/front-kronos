@@ -23,7 +23,8 @@ export async function GET(_req) {
         pc.process,
         pc.id_category_request,
         cr.category,
-        u.email
+        u.email,
+        pc.description
       FROM process_category pc
       INNER JOIN category_request cr
         ON cr.id = pc.id_category_request
