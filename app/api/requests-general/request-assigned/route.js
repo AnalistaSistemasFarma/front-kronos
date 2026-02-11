@@ -24,13 +24,14 @@ export async function GET(req) {
         LEFT JOIN [user] u ON u.id = rg.id_requester
         LEFT JOIN process_category pc ON pc.id = rg.id_process_category
         INNER JOIN category_request cr ON cr.id = pc.id_category_request
-        INNER JOIN [user] up ON up.id = pc.assigned
+        LEFT JOIN user_process_category_request_general upcrg ON upcrg.id_process_category = pc.id
+		    LEFT JOIN [user] up ON up.id = upcrg.id_user
         INNER JOIN status_case sc ON sc.id_status_case = rg.status_req
       WHERE 1=1
     `;
 
     if (idUser) {
-      query += ` AND pc.assigned = @idUser`;
+      query += ` AND upcrg.id_user = @idUser`;
       console.log('API requests-general: Agregando filtro por assigned user:', idUser);
     } else {
       console.log('API requests-general: No se proporcionó idUser, devolviendo error');

@@ -207,7 +207,6 @@ function RequestBoard() {
         (p) => p.id_category_request === parseInt(formData.category)
       );
       
-      // Filtrar por descripción - solo si hay término de búsqueda
       if (processSearch.trim()) {
         const searchLower = processSearch.toLowerCase();
         filtered = filtered.filter(
@@ -215,7 +214,6 @@ function RequestBoard() {
         );
       }
       
-      // Asegurar que el proceso ya seleccionado siempre esté disponible
       if (formData.process && !filtered.find((p) => p.value === formData.process)) {
         const selectedProcess = processCategories.find((p) => p.value === formData.process);
         if (selectedProcess) {
@@ -357,11 +355,15 @@ function RequestBoard() {
         setCompany(
           data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
         );
+        
+        const defaultCompanyId = "3";
+        await fetchCategoriesByCompanyOnLoad(defaultCompanyId, data.processCategories);
+        
         setFormData((prev) => ({
           ...prev,
-          company: "3",
+          company: defaultCompanyId,
         }));
-        setCategories(data.categories.map((c) => ({ value: c.id.toString(), label: c.category })));
+        
         setProcessCategories(
           data.processCategories.map((p) => ({
             value: p.id_process.toString(),
@@ -381,6 +383,43 @@ function RequestBoard() {
     } catch (err) {
       console.error('Error fetching form data:', err);
       setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
+    } finally {
+      setFormDataLoading(false);
+    }
+  };
+
+  const fetchCategoriesByCompanyOnLoad = async (companyId: string, allProcessCategories: ProcessCategoryData[]) => {
+    try {
+      const url = `/api/requests-general/consult-request?companyId=${companyId}`;
+      const response = await fetch(url);
+
+      if (response.ok) {
+        const data = await response.json();
+        setCategories(data.categories.map((c: CategoryData) => ({ value: c.id.toString(), label: c.category })));
+      } else {
+        console.error('Frontend - fetchCategoriesByCompanyOnLoad failed with status:', response.status);
+      }
+    } catch (err) {
+      console.error('Error fetching categories by company on load:', err);
+    }
+  };
+
+  const fetchCategoriesByCompany = async (companyId: string) => {
+    try {
+      setFormDataLoading(true);
+      const url = `/api/requests-general/consult-request?companyId=${companyId}`;
+      const response = await fetch(url);
+
+      if (response.ok) {
+        const data = await response.json();
+        setCategories(data.categories.map((c: CategoryData) => ({ value: c.id.toString(), label: c.category })));
+        setFormData((prev) => ({ ...prev, category: '', process: '' }));
+        setFilteredProcesses([]);
+      } else {
+        console.error('Frontend - fetchCategoriesByCompany failed with status:', response.status);
+      }
+    } catch (err) {
+      console.error('Error fetching categories by company:', err);
     } finally {
       setFormDataLoading(false);
     }
@@ -1021,6 +1060,9 @@ function RequestBoard() {
                   value={formData.company}
                   onChange={(value) => {
                     handleFormChange('company', value || '');
+                    if (value) {
+                      fetchCategoriesByCompany(value);
+                    }
                   }}
                   error={formErrors.company}
                   required
