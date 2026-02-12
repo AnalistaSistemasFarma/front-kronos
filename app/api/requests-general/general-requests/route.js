@@ -22,8 +22,7 @@ export async function GET(req) {
       FROM requests_general rg
         INNER JOIN company c ON c.id_company = rg.id_company
         LEFT JOIN [user] u ON u.id = rg.id_requester
-        INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
-        LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+        LEFT JOIN process_category pc ON pc.id = rg.id_process_category
         INNER JOIN category_request cr ON cr.id = pc.id_category_request
         LEFT JOIN user_process_category_request_general upcrg ON upcrg.id_process_category = pc.id
 		    LEFT JOIN [user] up ON up.id = upcrg.id_user
