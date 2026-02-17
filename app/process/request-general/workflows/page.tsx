@@ -1526,7 +1526,7 @@ function RequestBoard() {
                             setTaskForm({ ...taskForm, costo: value?.toString() || '' })
                           }
                           min={0}
-                          precision={2}
+                          decimalScale={2}
                           hideControls
                           size='lg'
                           classNames={{
