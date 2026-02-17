@@ -98,11 +98,11 @@ function ViewWorkFlowPage() {
     try {
       setLoadingTasks(true);
       const response = await fetch(`/api/requests-general/workflow-tasks?id_process=${processId}`);
-      
+
       if (!response.ok) {
         throw new Error('Error al cargar las tareas');
       }
-      
+
       const data = await response.json();
       setTasks(data);
     } catch (err) {
@@ -236,18 +236,13 @@ function ViewWorkFlowPage() {
             </div>
 
             <Group>
-              <Badge 
-                color={getActiveColor(workflow.active)} 
-                size='lg' 
-                radius='sm' 
-                variant='light'
-              >
+              <Badge color={getActiveColor(workflow.active)} size='lg' radius='sm' variant='light'>
                 {getActiveText(workflow.active)}
               </Badge>
-              <Badge 
-                color={getStatusColor(workflow.status_process)} 
-                size='lg' 
-                radius='sm' 
+              <Badge
+                color={getStatusColor(workflow.status_process)}
+                size='lg'
+                radius='sm'
                 variant='light'
               >
                 {workflow.status_process}
@@ -256,289 +251,354 @@ function ViewWorkFlowPage() {
           </Flex>
         </Card>
 
-        {/* Contenido Principal - Esquema Jerárquico */}
-        <Stack gap='lg'>
-          
-          {/* NIVEL 1: CATEGORÍA */}
-          <Card 
-            shadow='sm' 
-            p='xl' 
-            radius='md' 
-            withBorder 
-            className='bg-gradient-to-r from-indigo-50 to-blue-50 border-indigo-200'
-          >
-            <Group mb='md'>
-              <Box 
-                className='bg-indigo-500 p-2 rounded-lg'
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        {/* Contenido Principal - Layout de 2 Columnas */}
+        <Grid gutter='lg'>
+          {/* COLUMNA IZQUIERDA: Categoría y Proceso */}
+          <Grid.Col span={{ base: 12, lg: 4 }}>
+            <Stack gap='lg'>
+              {/* NIVEL 1: CATEGORÍA */}
+              <Card
+                shadow='sm'
+                p='xl'
+                radius='md'
+                withBorder
+                className='bg-gradient-to-r from-indigo-50 to-blue-50 border-indigo-200'
               >
-                <IconCategory size={24} color='white' />
-              </Box>
-              <Title order={2} className='text-indigo-700'>
-                Categoría
-              </Title>
-            </Group>
+                <Group mb='md'>
+                  <Box
+                    className='bg-indigo-500 p-2 rounded-lg'
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <IconCategory size={24} color='white' />
+                  </Box>
+                  <Title order={2} className='text-indigo-700'>
+                    Categoría
+                  </Title>
+                </Group>
 
-            <Grid>
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Card withBorder radius='md' p='md' bg='white' className='h-full'>
-                  <Stack gap='sm'>
-                    <Group>
-                      <IconBuilding size={18} className='text-gray-500' />
-                      <Text size='sm' c='gray.6' fw={500}>Empresa</Text>
-                    </Group>
-                    <Text size='lg' fw={600} c='gray.8'>
-                      {workflow.company}
-                    </Text>
-                  </Stack>
-                </Card>
-              </Grid.Col>
+                <Stack gap='md'>
+                  <Card withBorder radius='md' p='md' bg='white'>
+                    <Stack gap='sm'>
+                      <Group>
+                        <IconBuilding size={18} className='text-gray-500' />
+                        <Text size='sm' c='gray.6' fw={500}>
+                          Empresa
+                        </Text>
+                      </Group>
+                      <Text size='lg' fw={600} c='gray.8'>
+                        {workflow.company}
+                      </Text>
+                    </Stack>
+                  </Card>
 
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Card withBorder radius='md' p='md' bg='white' className='h-full'>
-                  <Stack gap='sm'>
-                    <Group>
-                      <IconCategory size={18} className='text-gray-500' />
-                      <Text size='sm' c='gray.6' fw={500}>Nombre de Categoría</Text>
-                    </Group>
-                    <Text size='lg' fw={600} c='gray.8'>
-                      {workflow.category}
-                    </Text>
-                  </Stack>
-                </Card>
-              </Grid.Col>
+                  <Card withBorder radius='md' p='md' bg='white'>
+                    <Stack gap='sm'>
+                      <Group>
+                        <IconCategory size={18} className='text-gray-500' />
+                        <Text size='sm' c='gray.6' fw={500}>
+                          Nombre de Categoría
+                        </Text>
+                      </Group>
+                      <Text size='lg' fw={600} c='gray.8'>
+                        {workflow.category}
+                      </Text>
+                    </Stack>
+                  </Card>
+                </Stack>
+              </Card>
 
-              <Grid.Col span={{ base: 12 }}>
-                <Card withBorder radius='md' p='md' bg='white'>
-                  <Stack gap='sm'>
-                    <Group>
-                      <IconUserCheck size={18} className='text-gray-500' />
-                      <Text size='sm' c='gray.6' fw={500}>Usuario Asignado a Categoría</Text>
-                    </Group>
-                    <Text size='lg' fw={600} c='gray.8'>
-                      {workflow.assigned_category}
-                    </Text>
-                  </Stack>
-                </Card>
-              </Grid.Col>
-            </Grid>
-          </Card>
+              {/* Conector visual */}
+              <Flex justify='center' align='center'>
+                <div className='w-1 h-8 bg-gradient-to-b from-indigo-300 to-teal-300 rounded-full'></div>
+              </Flex>
 
-          {/* Conector visual */}
-          <Flex justify='center' align='center'>
-            <div className='w-1 h-8 bg-gradient-to-b from-indigo-300 to-teal-300 rounded-full'></div>
-          </Flex>
-
-          {/* NIVEL 2: PROCESO */}
-          <Card 
-            shadow='sm' 
-            p='xl' 
-            radius='md' 
-            withBorder 
-            className='bg-gradient-to-r from-teal-50 to-green-50 border-teal-200'
-          >
-            <Group mb='md'>
-              <Box 
-                className='bg-teal-500 p-2 rounded-lg'
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              {/* NIVEL 2: PROCESO */}
+              <Card
+                shadow='sm'
+                p='xl'
+                radius='md'
+                withBorder
+                className='bg-gradient-to-r from-teal-50 to-green-50 border-teal-200'
               >
-                <IconProgress size={24} color='white' />
-              </Box>
-              <Title order={2} className='text-teal-700'>
-                Proceso
-              </Title>
-            </Group>
+                <Group mb='md'>
+                  <Box
+                    className='bg-teal-500 p-2 rounded-lg'
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <IconProgress size={24} color='white' />
+                  </Box>
+                  <Title order={2} className='text-teal-700'>
+                    Proceso
+                  </Title>
+                </Group>
 
-            <Grid>
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Card withBorder radius='md' p='md' bg='white' className='h-full'>
-                  <Stack gap='sm'>
-                    <Group>
-                      <IconProgress size={18} className='text-gray-500' />
-                      <Text size='sm' c='gray.6' fw={500}>Nombre del Proceso</Text>
-                    </Group>
-                    <Text size='lg' fw={600} c='gray.8'>
-                      {workflow.process}
-                    </Text>
-                  </Stack>
-                </Card>
-              </Grid.Col>
+                <Stack gap='md'>
+                  <Card withBorder radius='md' p='md' bg='white'>
+                    <Stack gap='sm'>
+                      <Group>
+                        <IconProgress size={18} className='text-gray-500' />
+                        <Text size='sm' c='gray.6' fw={500}>
+                          Nombre del Proceso
+                        </Text>
+                      </Group>
+                      <Text size='lg' fw={600} c='gray.8'>
+                        {workflow.process}
+                      </Text>
+                    </Stack>
+                  </Card>
 
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Card withBorder radius='md' p='md' bg='white' className='h-full'>
-                  <Stack gap='sm'>
-                    <Group>
-                      <IconUserCheck size={18} className='text-gray-500' />
-                      <Text size='sm' c='gray.6' fw={500}>Usuario Asignado al Proceso</Text>
-                    </Group>
-                    <Text size='lg' fw={600} c='gray.8'>
-                      {workflow.assigned_process_category}
-                    </Text>
-                  </Stack>
-                </Card>
-              </Grid.Col>
+                  <Card withBorder radius='md' p='md' bg='white'>
+                    <Stack gap='sm'>
+                      <Group>
+                        <IconUserCheck size={18} className='text-gray-500' />
+                        <Text size='sm' c='gray.6' fw={500}>
+                          Usuario Asignado al Proceso
+                        </Text>
+                      </Group>
+                      <Text size='lg' fw={600} c='gray.8'>
+                        {workflow.assigned_process_category}
+                      </Text>
+                    </Stack>
+                  </Card>
 
-              <Grid.Col span={{ base: 12 }}>
-                <Card withBorder radius='md' p='md' bg='white'>
-                  <Stack gap='sm'>
-                    <Text size='sm' c='gray.6' fw={500}>Descripción</Text>
-                    <Text size='md' c='gray.8' className='whitespace-pre-line'>
-                      {workflow.description || 'Sin descripción'}
-                    </Text>
-                  </Stack>
-                </Card>
-              </Grid.Col>
+                  <Card withBorder radius='md' p='md' bg='white'>
+                    <Stack gap='sm'>
+                      <Text size='sm' c='gray.6' fw={500}>
+                        Descripción
+                      </Text>
+                      <Text size='md' c='gray.8' className='whitespace-pre-line'>
+                        {workflow.description || 'Sin descripción'}
+                      </Text>
+                    </Stack>
+                  </Card>
 
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Card withBorder radius='md' p='md' bg='white'>
-                  <Stack gap='sm'>
-                    <Text size='sm' c='gray.6' fw={500}>Estado del Proceso</Text>
-                    <Badge 
-                      color={getStatusColor(workflow.status_process)} 
-                      size='lg' 
-                      variant='light'
-                    >
-                      {workflow.status_process}
-                    </Badge>
-                  </Stack>
-                </Card>
-              </Grid.Col>
+                  <Card withBorder radius='md' p='md' bg='white'>
+                    <Stack gap='sm'>
+                      <Text size='sm' c='gray.6' fw={500}>
+                        Estado del Proceso
+                      </Text>
+                      <Badge
+                        color={getStatusColor(workflow.status_process)}
+                        size='lg'
+                        variant='light'
+                      >
+                        {workflow.status_process}
+                      </Badge>
+                    </Stack>
+                  </Card>
 
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <Card withBorder radius='md' p='md' bg='white'>
-                  <Stack gap='sm'>
-                    <Text size='sm' c='gray.6' fw={500}>Activo</Text>
-                    <Group gap='xs'>
-                      {workflow.active === 1 ? (
-                        <>
-                          <IconCheck size={18} className='text-green-500' />
-                          <Badge color='green' size='lg' variant='light'>Sí</Badge>
-                        </>
-                      ) : (
-                        <>
-                          <IconX size={18} className='text-gray-400' />
-                          <Badge color='gray' size='lg' variant='light'>No</Badge>
-                        </>
-                      )}
-                    </Group>
-                  </Stack>
-                </Card>
-              </Grid.Col>
-            </Grid>
-          </Card>
+                  <Card withBorder radius='md' p='md' bg='white'>
+                    <Stack gap='sm'>
+                      <Text size='sm' c='gray.6' fw={500}>
+                        Activo
+                      </Text>
+                      <Group gap='xs'>
+                        {workflow.active === 1 ? (
+                          <>
+                            <IconCheck size={18} className='text-green-500' />
+                            <Badge color='green' size='lg' variant='light'>
+                              Sí
+                            </Badge>
+                          </>
+                        ) : (
+                          <>
+                            <IconX size={18} className='text-gray-400' />
+                            <Badge color='gray' size='lg' variant='light'>
+                              No
+                            </Badge>
+                          </>
+                        )}
+                      </Group>
+                    </Stack>
+                  </Card>
+                </Stack>
+              </Card>
+            </Stack>
+          </Grid.Col>
 
-          {/* Conector visual */}
-          <Flex justify='center' align='center'>
-            <div className='w-1 h-8 bg-gradient-to-b from-teal-300 to-amber-300 rounded-full'></div>
-          </Flex>
-
-          {/* NIVEL 3: TAREAS */}
-          <Card 
-            shadow='sm' 
-            p='xl' 
-            radius='md' 
-            withBorder 
-            className='bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200'
-          >
-            <Group mb='md'>
-              <Box 
-                className='bg-amber-500 p-2 rounded-lg'
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              >
-                <IconListCheck size={24} color='white' />
-              </Box>
-              <Title order={2} className='text-amber-700'>
-                Tareas
-              </Title>
-              <Badge color='amber' size='lg' variant='light' ml='auto'>
-                {tasks.length} tareas
-              </Badge>
-            </Group>
-
-            <LoadingOverlay visible={loadingTasks} zIndex={1000} overlayProps={{ radius: 'sm', blur: 2 }} />
-
-            {tasks.length === 0 && !loadingTasks ? (
-              <Alert 
-                icon={<IconAlertCircle size={16} />} 
-                title='Sin tareas' 
-                color='gray' 
-                variant='light'
-              >
-                Este flujo de trabajo no tiene tareas asignadas.
-              </Alert>
-            ) : (
-              <ScrollArea>
-                <Table 
-                  striped 
-                  highlightOnHover 
-                  withTableBorder 
-                  withColumnBorders
-                  className='bg-white'
+          {/* COLUMNA DERECHA: WORKFLOW DE TAREAS */}
+          <Grid.Col span={{ base: 12, lg: 8 }}>
+            {/* NIVEL 3: TAREAS - WORKFLOW VISUALIZATION */}
+            <Card
+              shadow='sm'
+              p='xl'
+              radius='md'
+              withBorder
+              className='bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200 h-full'
+            >
+              <Group mb='md'>
+                <Box
+                  className='bg-amber-500 p-2 rounded-lg'
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>#</Table.Th>
-                      <Table.Th>Tarea</Table.Th>
-                      <Table.Th>Asignado</Table.Th>
-                      <Table.Th>Costo</Table.Th>
-                      <Table.Th>Centro de Costo</Table.Th>
-                      <Table.Th>Estado</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
+                  <IconListCheck size={24} color='white' />
+                </Box>
+                <Title order={2} className='text-amber-700'>
+                  Flujo de Tareas
+                </Title>
+                <Badge color='amber' size='lg' variant='light' ml='auto'>
+                  {tasks.length} {tasks.length === 1 ? 'tarea' : 'tareas'}
+                </Badge>
+              </Group>
+
+              <LoadingOverlay
+                visible={loadingTasks}
+                zIndex={1000}
+                overlayProps={{ radius: 'sm', blur: 2 }}
+              />
+
+              {tasks.length === 0 && !loadingTasks ? (
+                <Alert
+                  icon={<IconAlertCircle size={16} />}
+                  title='Sin tareas'
+                  color='gray'
+                  variant='light'
+                >
+                  Este flujo de trabajo no tiene tareas asignadas.
+                </Alert>
+              ) : (
+                <ScrollArea>
+                  {/* Workflow Timeline - Vertical Flow */}
+                  <div className='space-y-0'>
                     {tasks.map((task, index) => (
-                      <Table.Tr key={task.id}>
-                        <Table.Td>
-                          <Text size='sm' fw={600} c='gray.7'>
-                            {index + 1}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size='sm' fw={500}>
-                            {task.task}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Group gap='xs'>
-                            <IconUserCheck size={14} className='text-gray-400' />
-                            <Text size='sm'>
-                              {task.assigned_user || 'Sin asignar'}
-                            </Text>
-                          </Group>
-                        </Table.Td>
-                        <Table.Td>
-                          <Group gap='xs'>
-                            <IconCoin size={14} className='text-green-500' />
-                            <Text size='sm' fw={500}>
-                              {task.cost ? `$${task.cost.toLocaleString('es-CO')}` : '$0'}
-                            </Text>
-                          </Group>
-                        </Table.Td>
-                        <Table.Td>
-                          <Group gap='xs'>
-                            <IconMapPin size={14} className='text-gray-400' />
-                            <Text size='sm'>
-                              {task.cost_center || 'N/A'}
-                            </Text>
-                          </Group>
-                        </Table.Td>
-                        <Table.Td>
-                          <Badge 
-                            color={task.active === 1 ? 'green' : 'gray'} 
-                            size='sm' 
-                            variant='light'
-                          >
-                            {task.active === 1 ? 'Activo' : 'Inactivo'}
-                          </Badge>
-                        </Table.Td>
-                      </Table.Tr>
+                      <div key={task.id} className='relative'>
+                        {/* Workflow Step Card */}
+                        <Card
+                          shadow='sm'
+                          p='md'
+                          radius='lg'
+                          withBorder
+                          className={`
+                            transition-all duration-200 ease-in-out
+                            ${
+                              task.active === 1
+                                ? 'bg-white border-amber-300 hover:border-amber-400 hover:shadow-md'
+                                : 'bg-gray-50 border-gray-200 opacity-75'
+                            }
+                            cursor-pointer
+                          `}
+                        >
+                          <Grid>
+                            <Grid.Col span={{ base: 12, md: 1 }}>
+                              {/* Step Number Indicator */}
+                              <div
+                                className={`
+                                  w-12 h-12 rounded-full flex items-center justify-center
+                                  transition-all duration-200
+                                  ${
+                                    task.active === 1
+                                      ? 'bg-amber-500 text-white shadow-lg shadow-amber-200'
+                                      : 'bg-gray-300 text-gray-600'
+                                  }
+                                `}
+                              >
+                                <Text size='lg' fw={700}>
+                                  {index + 1}
+                                </Text>
+                              </div>
+                            </Grid.Col>
+
+                            <Grid.Col span={{ base: 12, md: 11 }}>
+                              <Stack gap='xs'>
+                                {/* Task Name */}
+                                <Group justify='space-between' align='flex-start'>
+                                  <div>
+                                    <Text size='md' fw={600} c='gray.9' className='mb-1'>
+                                      {task.task}
+                                    </Text>
+                                    {task.active === 1 && (
+                                      <Badge
+                                        color='green'
+                                        size='sm'
+                                        variant='light'
+                                        leftSection={<IconCheck size={12} />}
+                                      >
+                                        Activo
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  {/* <Badge
+                                    color={task.active === 1 ? 'amber' : 'gray'}
+                                    size='lg'
+                                    variant='light'
+                                    radius='sm'
+                                  >
+                                    {task.active === 1 ? 'En curso' : 'Pendiente'}
+                                  </Badge> */}
+                                </Group>
+
+                                {/* Task Details Grid */}
+                                <Grid mt='sm'>
+                                  <Grid.Col span={{ base: 12, sm: 4 }}>
+                                    <div className='bg-gray-50 rounded-lg p-3 transition-colors duration-200 hover:bg-gray-100'>
+                                      <Group gap='xs' mb='1'>
+                                        <IconUserCheck size={16} className='text-gray-500' />
+                                        <Text size='xs' c='gray.6' fw={500} className='uppercase'>
+                                          Asignado a
+                                        </Text>
+                                      </Group>
+                                      <Text size='sm' fw={500} c='gray.8'>
+                                        {task.assigned_user || 'Sin asignar'}
+                                      </Text>
+                                    </div>
+                                  </Grid.Col>
+
+                                  <Grid.Col span={{ base: 12, sm: 4 }}>
+                                    <div className='bg-gray-50 rounded-lg p-3 transition-colors duration-200 hover:bg-gray-100'>
+                                      <Group gap='xs' mb='1'>
+                                        <IconCoin size={16} className='text-green-600' />
+                                        <Text size='xs' c='gray.6' fw={500} className='uppercase'>
+                                          Costo
+                                        </Text>
+                                      </Group>
+                                      <Text size='sm' fw={600} c='green-700'>
+                                        {task.cost ? `$${task.cost.toLocaleString('es-CO')}` : '$0'}
+                                      </Text>
+                                    </div>
+                                  </Grid.Col>
+
+                                  <Grid.Col span={{ base: 12, sm: 4 }}>
+                                    <div className='bg-gray-50 rounded-lg p-3 transition-colors duration-200 hover:bg-gray-100'>
+                                      <Group gap='xs' mb='1'>
+                                        <IconMapPin size={16} className='text-gray-500' />
+                                        <Text size='xs' c='gray.6' fw={500} className='uppercase'>
+                                          Centro de Costo
+                                        </Text>
+                                      </Group>
+                                      <Text size='sm' fw={500} c='gray.8'>
+                                        {task.cost_center || 'N/A'}
+                                      </Text>
+                                    </div>
+                                  </Grid.Col>
+                                </Grid>
+                              </Stack>
+                            </Grid.Col>
+                          </Grid>
+                        </Card>
+
+                        {/* Connector Line - Show between tasks, not after last one */}
+                        {index < tasks.length - 1 && (
+                          <div className='flex justify-center py-3'>
+                            <div
+                              className={`
+                                w-1 h-12 rounded-full transition-all duration-300
+                                ${
+                                  task.active === 1
+                                    ? 'bg-gradient-to-b from-amber-400 to-amber-200'
+                                    : 'bg-gray-300'
+                                }
+                              `}
+                            />
+                          </div>
+                        )}
+                      </div>
                     ))}
-                  </Table.Tbody>
-                </Table>
-              </ScrollArea>
-            )}
-          </Card>
-        </Stack>
+                  </div>
+                </ScrollArea>
+              )}
+            </Card>
+          </Grid.Col>
+        </Grid>
 
         {/* Footer con acciones */}
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>

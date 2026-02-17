@@ -128,12 +128,31 @@ function RequestBoard() {
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
   const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
   const [processCategories, setProcessCategories] = useState<
-    { value: string; label: string; id_category_request: number; email?: string; description?: string }[]
+    {
+      value: string;
+      label: string;
+      id_category_request: number;
+      email?: string;
+      description?: string;
+    }[]
   >([]);
   const [processSearch, setProcessSearch] = useState('');
   const [filteredProcesses, setFilteredProcesses] = useState<{ value: string; label: string }[]>(
     []
   );
+  const [activitySearch, setActivitySearch] = useState('');
+  const [searchResults, setSearchResults] = useState<
+    {
+      value: string;
+      label: string;
+      id_category_request: number;
+      category: string;
+      process: string;
+      description?: string;
+      email?: string;
+    }[]
+  >([]);
+  const [showActivitySearch, setShowActivitySearch] = useState(false);
   const [assignedUsers, setAssignedUsers] = useState<{ value: string; label: string }[]>([]);
   const [formDataLoading, setFormDataLoading] = useState(false);
   const [formDataError, setFormDataError] = useState<string | null>(null);
@@ -206,26 +225,63 @@ function RequestBoard() {
       let filtered = processCategories.filter(
         (p) => p.id_category_request === parseInt(formData.category)
       );
-      
+
       if (processSearch.trim()) {
         const searchLower = processSearch.toLowerCase();
         filtered = filtered.filter(
           (p) => p.description && p.description.toLowerCase().includes(searchLower)
         );
       }
-      
+
       if (formData.process && !filtered.find((p) => p.value === formData.process)) {
         const selectedProcess = processCategories.find((p) => p.value === formData.process);
         if (selectedProcess) {
           filtered = [selectedProcess, ...filtered];
         }
       }
-      
+
       setFilteredProcesses(filtered);
     } else {
       setFilteredProcesses([]);
     }
   }, [formData.category, processCategories, processSearch, formData.process]);
+
+  // Activity search effect - search across all processes
+  useEffect(() => {
+    if (activitySearch.trim()) {
+      const searchLower = activitySearch.toLowerCase();
+      const results = processCategories
+        .filter((p) => {
+          return (
+            (p.description && p.description.toLowerCase().includes(searchLower)) ||
+            p.label.toLowerCase().includes(searchLower)
+          );
+        })
+        .map((p) => {
+          const category = categories.find((c) => c.value === p.id_category_request.toString());
+          return {
+            ...p,
+            category: category?.label || '',
+            process: p.label.split(' - ')[0],
+          };
+        })
+        .filter((p) => p.category !== '');
+
+      setSearchResults(results);
+    } else {
+      setSearchResults([]);
+    }
+  }, [activitySearch, processCategories, categories]);
+
+  const handleActivitySelect = (result: (typeof searchResults)[0]) => {
+    setFormData({
+      ...formData,
+      category: result.id_category_request.toString(),
+      process: result.value,
+    });
+    setActivitySearch('');
+    setSearchResults([]);
+  };
 
   const fetchTickets = async () => {
     if (!userId) {
@@ -355,15 +411,15 @@ function RequestBoard() {
         setCompany(
           data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
         );
-        
-        const defaultCompanyId = "3";
+
+        const defaultCompanyId = '3';
         await fetchCategoriesByCompanyOnLoad(defaultCompanyId, data.processCategories);
-        
+
         setFormData((prev) => ({
           ...prev,
           company: defaultCompanyId,
         }));
-        
+
         setProcessCategories(
           data.processCategories.map((p) => ({
             value: p.id_process.toString(),
@@ -388,16 +444,24 @@ function RequestBoard() {
     }
   };
 
-  const fetchCategoriesByCompanyOnLoad = async (companyId: string, allProcessCategories: ProcessCategoryData[]) => {
+  const fetchCategoriesByCompanyOnLoad = async (
+    companyId: string,
+    allProcessCategories: ProcessCategoryData[]
+  ) => {
     try {
       const url = `/api/requests-general/consult-request?companyId=${companyId}`;
       const response = await fetch(url);
 
       if (response.ok) {
         const data = await response.json();
-        setCategories(data.categories.map((c: CategoryData) => ({ value: c.id.toString(), label: c.category })));
+        setCategories(
+          data.categories.map((c: CategoryData) => ({ value: c.id.toString(), label: c.category }))
+        );
       } else {
-        console.error('Frontend - fetchCategoriesByCompanyOnLoad failed with status:', response.status);
+        console.error(
+          'Frontend - fetchCategoriesByCompanyOnLoad failed with status:',
+          response.status
+        );
       }
     } catch (err) {
       console.error('Error fetching categories by company on load:', err);
@@ -412,7 +476,9 @@ function RequestBoard() {
 
       if (response.ok) {
         const data = await response.json();
-        setCategories(data.categories.map((c: CategoryData) => ({ value: c.id.toString(), label: c.category })));
+        setCategories(
+          data.categories.map((c: CategoryData) => ({ value: c.id.toString(), label: c.category }))
+        );
         setFormData((prev) => ({ ...prev, category: '', process: '' }));
         setFilteredProcesses([]);
       } else {
@@ -519,7 +585,11 @@ function RequestBoard() {
         }
       }
 
-      await sendRequestEmailNotification(newTicket.id_request, formData.subject, parseInt(formData.process));
+      await sendRequestEmailNotification(
+        newTicket.id_request,
+        formData.subject,
+        parseInt(formData.process)
+      );
 
       setFormData({
         company: '',
@@ -529,7 +599,7 @@ function RequestBoard() {
         descripcion: '',
       });
 
-      setAttachedFiles([]); 
+      setAttachedFiles([]);
 
       fetchTickets();
       setModalOpened(false);
@@ -552,7 +622,7 @@ function RequestBoard() {
         {
           name: folderName,
           folder: {},
-          '@microsoft.graph.conflictBehavior': 'replace'
+          '@microsoft.graph.conflictBehavior': 'replace',
         },
         {
           headers: {
@@ -600,14 +670,18 @@ function RequestBoard() {
     }
   }
 
-  const sendRequestEmailNotification = async (requestId: number, subject: string, processId: number): Promise<boolean> => {
+  const sendRequestEmailNotification = async (
+    requestId: number,
+    subject: string,
+    processId: number
+  ): Promise<boolean> => {
     if (!process.env.API_EMAIL) {
       console.error('Error: La variable de entorno API_EMAIL no está configurada');
       return false;
     }
 
     try {
-      const selectedProcess = processCategories.find(p => p.value === processId.toString());
+      const selectedProcess = processCategories.find((p) => p.value === processId.toString());
       const assignedEmail = selectedProcess?.email;
 
       if (!assignedEmail) {
@@ -947,11 +1021,13 @@ function RequestBoard() {
                       className='cursor-pointer hover:bg-gray-50 transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
-                        router.push(`/process/request-general/view-request?id=${ticket.id}&from=create-request`);
+                        router.push(
+                          `/process/request-general/view-request?id=${ticket.id}&from=create-request`
+                        );
                       }}
                     >
                       <Table.Td>
-                        <Text size='xs' color='blue'className='max-w-xs truncate' lineClamp={2}>
+                        <Text size='xs' color='blue' className='max-w-xs truncate' lineClamp={2}>
                           {ticket.id}
                         </Text>
                       </Table.Td>
@@ -975,27 +1051,25 @@ function RequestBoard() {
                         </Badge>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm" c="gray.7">
-                          {
-                            (() => {
-                              const raw = ticket.created_at;
-                              if (!raw) return "Sin fecha";
+                        <Text size='sm' c='gray.7'>
+                          {(() => {
+                            const raw = ticket.created_at;
+                            if (!raw) return 'Sin fecha';
 
-                              const date = new Date(raw);
-                              if (isNaN(date.getTime())) return "Fecha inválida";
+                            const date = new Date(raw);
+                            if (isNaN(date.getTime())) return 'Fecha inválida';
 
-                              const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
+                            const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
 
-                              return new Intl.DateTimeFormat("es-CO", {
-                                day: "numeric",
-                                month: "long",
-                                year: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                                hour12: true,
-                              }).format(adjusted);
-                            })()
-                          }
+                            return new Intl.DateTimeFormat('es-CO', {
+                              day: 'numeric',
+                              month: 'long',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              hour12: true,
+                            }).format(adjusted);
+                          })()}
                         </Text>
                       </Table.Td>
                       <Table.Td>
@@ -1029,6 +1103,9 @@ function RequestBoard() {
             setModalOpened(false);
             setFormErrors({});
             setAttachedFiles([]);
+            setActivitySearch('');
+            setSearchResults([]);
+            setShowActivitySearch(false);
           }}
           title={
             <Group>
@@ -1071,7 +1148,7 @@ function RequestBoard() {
                 />
               </Grid.Col>
 
-              <Grid.Col span={{ base: 12, md: 6 }}>
+              <Grid.Col span={{ base: 12, md: 12 }}>
                 <TextInput
                   label='Asunto'
                   placeholder='Ingrese el asunto de la solicitud'
@@ -1089,6 +1166,95 @@ function RequestBoard() {
                 />
               </Grid.Col>
             </Grid>
+
+            {/* Activity Search Section */}
+            <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
+              <Group justify='space-between' mb='xs'>
+                <Text fw={600} size='sm' c='blue.9'>
+                  ¿No sabes qué categoría elegir?
+                </Text>
+                <Button
+                  variant='subtle'
+                  size='xs'
+                  onClick={() => setShowActivitySearch(!showActivitySearch)}
+                  rightSection={showActivitySearch ? <IconX size={14} /> : <IconSearch size={14} />}
+                >
+                  {showActivitySearch ? 'Ocultar' : 'Buscar por Actividad'}
+                </Button>
+              </Group>
+
+              {showActivitySearch && (
+                <Stack gap='sm'>
+                  <TextInput
+                    placeholder='Escribe la actividad que necesitas solicitar...'
+                    value={activitySearch}
+                    onChange={(e) => setActivitySearch(e.target.value)}
+                    leftSection={<IconSearch size={16} />}
+                    rightSection={
+                      activitySearch && (
+                        <ActionIcon
+                          size='sm'
+                          variant='transparent'
+                          onClick={() => {
+                            setActivitySearch('');
+                            setSearchResults([]);
+                          }}
+                        >
+                          <IconX size={14} />
+                        </ActionIcon>
+                      )
+                    }
+                  />
+
+                  {searchResults.length > 0 && (
+                    <Card
+                      p='xs'
+                      radius='md'
+                      withBorder
+                      className='bg-white max-h-64 overflow-y-auto'
+                    >
+                      <Stack gap='xs'>
+                        <Text size='xs' c='gray.5' fw={500}>
+                          {searchResults.length}{' '}
+                          {searchResults.length === 1 ? 'resultado' : 'resultados'} encontrado
+                          {searchResults.length === 1 ? '' : 's'}
+                        </Text>
+                        {searchResults.map((result) => (
+                          <Card
+                            key={result.value}
+                            p='sm'
+                            radius='md'
+                            withBorder
+                            className='cursor-pointer hover:bg-blue-50 hover:border-blue-300 transition-all duration-200'
+                            onClick={() => handleActivitySelect(result)}
+                          >
+                            <Stack gap={4}>
+                              <Group gap={6} wrap='nowrap'>
+                                <Badge size='xs' variant='light' color='blue'>
+                                  {result.category}
+                                </Badge>
+                                <Text size='xs' c='gray.5' fw={500}>
+                                  {result.process}
+                                </Text>
+                              </Group>
+                              <Text size='sm' lineClamp={2} c='gray.8'>
+                                {result.description || result.label}
+                              </Text>
+                            </Stack>
+                          </Card>
+                        ))}
+                      </Stack>
+                    </Card>
+                  )}
+
+                  {activitySearch && searchResults.length === 0 && (
+                    <Text size='sm' c='gray.5' ta='center' py='md'>
+                      No se encontraron actividades que coincidan con tu búsqueda.
+                    </Text>
+                  )}
+                </Stack>
+              )}
+            </Card>
 
             <Grid>
               <Grid.Col span={{ base: 12, md: 6 }}>
@@ -1152,7 +1318,7 @@ function RequestBoard() {
                 Archivos Adjuntos (Opcional)
               </Text>
               <FileUpload
-                ticketId={0} 
+                ticketId={0}
                 onFilesChange={setAttachedFiles}
                 autoUpload={false}
                 maxFiles={10}
@@ -1169,6 +1335,9 @@ function RequestBoard() {
                   setModalOpened(false);
                   setFormErrors({});
                   setAttachedFiles([]);
+                  setActivitySearch('');
+                  setSearchResults([]);
+                  setShowActivitySearch(false);
                 }}
                 size='md'
               >
