@@ -80,7 +80,6 @@ function ViewWorkFlowPage() {
       setWorkflow(workflowData);
       setLoading(false);
     } else if (id) {
-      // Si no hay datos en sessionStorage, podríamos hacer fetch aquí
       setError('No se encontraron datos del flujo de trabajo');
       setLoading(false);
     } else {
