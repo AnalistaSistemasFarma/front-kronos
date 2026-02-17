@@ -2,20 +2,34 @@ import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig';
 import { NextResponse } from 'next/server';
 
-export async function GET(_req) {
+export async function GET(req) {
   try {
+    const { searchParams } = new URL(req.url);
+    const companyId = searchParams.get('companyId');
+    
     const pool = await sql.connect(sqlConfig);
 
-    // --- Consultas ---
     const queryCompanies = `
       SELECT 
         c.id_company, c.company
       FROM company c
     `;
 
-    const queryCategories = `
-      SELECT * FROM category_request
+    let queryCategories = `
+      SELECT 
+        c.id_company, cr.id, c.company, cr.category
+      FROM company_category_request ccr
+      INNER JOIN company c 
+        ON c.id_company = ccr.id_company
+      INNER JOIN category_request cr 
+        ON cr.id = ccr.id_category_request
     `;
+    
+    if (companyId) {
+      queryCategories += ` WHERE c.id_company = ${companyId}`;
+    }
+    
+    queryCategories += ` ORDER BY cr.category`;
 
     const queryProcessCategories = `
       SELECT
@@ -42,7 +56,6 @@ export async function GET(_req) {
       ORDER BY u.name
     `;
 
-    // Ejecutar en paralelo para mejorar rendimiento
     const [companiesRes, categoriesRes, processCategoriesRes, assignedUsersRes] = await Promise.all(
       [
         pool.request().query(queryCompanies),

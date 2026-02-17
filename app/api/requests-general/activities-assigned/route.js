@@ -14,39 +14,42 @@ export async function GET(req) {
     const date_to = searchParams.get('date_to');
     const assigned_to = searchParams.get('assigned_to');
 
-    console.log('API requests-general: idUser recibido:', idUser);
+    console.log('API: idUser recibido:', idUser);
 
     let query = `
-      SELECT
-        rg.id, cr.category as category, up.name as [user], rg.[description], rg.id_company, c.company ,rg.created_at, u.name as 'requester', sc.status as [status], rg.subject_request as [subject], pc.process, rg.id_process_category, rg.resolution, rg.date_resolution, rg.status_req as id_status_case
-      FROM requests_general rg
-        INNER JOIN company c ON c.id_company = rg.id_company
-        LEFT JOIN [user] u ON u.id = rg.id_requester
-        LEFT JOIN process_category pc ON pc.id = rg.id_process_category
-        INNER JOIN category_request cr ON cr.id = pc.id_category_request
-        LEFT JOIN user_process_category_request_general upcrg ON upcrg.id_process_category = pc.id
-		    LEFT JOIN [user] up ON up.id = upcrg.id_user
-        INNER JOIN status_case sc ON sc.id_status_case = rg.status_req
-      WHERE 1=1
+        SELECT trg.id, trg.id_task, tpc.task ,rg.id as id_request_general, rg.description, rg.subject_request, rg.id_company, c.company ,rg.created_at, 
+            rg.id_requester, urq.name as name_requester ,rg.status_req, trg.id_status ,sc.status as status_task, u.name as assigned, pc.process, cr.category,
+            trg.start_date, trg.resolution, trg.date_resolution
+        FROM task_request_general trg
+          INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+          LEFT JOIN requests_general rg ON rg.id = trg.id_request_general
+		      LEFT JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+          LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+          LEFT JOIN category_request cr ON cr.id = pc.id_category_request
+          INNER JOIN status_case sc ON sc.id_status_case = trg.id_status
+          INNER JOIN [user] u ON u.id = trg.id_assigned
+          INNER JOIN [user] urq ON urq.id = rg.id_requester
+          INNER JOIN company c ON c.id_company = rg.id_company
+        WHERE 1=1
     `;
 
     if (idUser) {
-      query += ` AND pc.assigned = @idUser`;
-      console.log('API requests-general: Agregando filtro por assigned user:', idUser);
+      query += ` AND trg.id_assigned = @idUser`;
+      console.log('API activities: Agregando filtro por assigned user:', idUser);
     } else {
-      console.log('API requests-general: No se proporcionó idUser, devolviendo error');
+      console.log('API activities: No se proporcionó idUser, devolviendo error');
       return NextResponse.json(
-        { error: 'Se requiere el parámetro idUser para filtrar tickets asignados' },
+        { error: 'Se requiere el parámetro idUser para filtrar actividades asignados' },
         { status: 400 }
       );
     }
 
     if (status && status !== '0') {
-      query += ` AND rg.status_req = @status`;
-      console.log('API requests-general: Agregando filtro por status:', status);
+      query += ` AND trg.id_status = @status`;
+      console.log('API activities: Agregando filtro por status:', status);
     }
 
-    else if (!status) query += ` AND sc.id_status_case = 1`;
+    else if (!status) query += ` AND sc.id_status_case = 4`;
 
     if (company) {
       query += ` AND rg.id_company = @company`;
@@ -92,11 +95,11 @@ export async function GET(req) {
       request.input('assigned_to', sql.NVarChar, assigned_to);
     }
 
-    console.log('API requests-general: Ejecutando consulta:', query);
-    query += ` ORDER BY rg.id DESC`;
+    console.log('API activities: Ejecutando consulta:', query);
+    query += ` ORDER BY trg.id DESC`;
     const result = await request.query(query);
     console.log(
-      'API requests-general: Resultados obtenidos:',
+      'API activities: Resultados obtenidos:',
       result.recordset.length,
       'registros'
     );
