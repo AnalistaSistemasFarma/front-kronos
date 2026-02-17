@@ -41,6 +41,7 @@ import {
   ScrollArea,
   Modal,
   Box,
+  Table,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -106,6 +107,21 @@ interface Note {
   creation_date?: string;
 }
 
+interface ViewTasksRequestGeneral {
+  id: number;
+  id_request_general: number;
+  id_task: number;
+  task: string;
+  id_status: number;
+  status: string;
+  id_assigned: number;
+  name: string;
+  start_date: string;
+  end_date: string;
+  resolution: string;
+  date_resolution: string;
+}
+
 interface CompanyData {
   id_company: number;
   company: string;
@@ -154,8 +170,10 @@ function ViewRequestPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [taskRQ, setTaskRQ] = useState<ViewTasksRequestGeneral[]>([]);
   const [newNote, setNewNote] = useState('');
   const [loadingNotes, setLoadingNotes] = useState(false);
+  const [loadingTaskRG, setLoadingTaskRG] = useState(false);
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
   const [userId, setUserId] = useState<number | null>(null);
@@ -185,6 +203,7 @@ function ViewRequestPage() {
     correo: '',
     notificarPorCorreo: false,
   });
+  const [modalTasksOpened, setModalTasksOpened] = useState(false);
 
   useEffect(() => {
     const storedRequest = sessionStorage.getItem('selectedRequest');
@@ -221,6 +240,7 @@ function ViewRequestPage() {
     if (request) {
       fetchFormData();
       fetchNotes();
+      fetchTasksRG();
       fetchFolderContents();
     }
   }, [request]);
@@ -383,6 +403,25 @@ function ViewRequestPage() {
       console.error('Error fetching notes:', error);
     } finally {
       setLoadingNotes(false);
+    }
+  };
+
+  const fetchTasksRG = async () => {
+    if (!request?.id) return;
+    try {
+      setLoadingTaskRG(true);
+      const response = await fetch(`/api/requests-general/view-tasks_request-general?idReq=${request.id}`);
+
+      if (response.ok) {
+        const data: ViewTasksRequestGeneral[] = await response.json();
+        setTaskRQ(data);
+      } else {
+        console.error('Error al cargar tareas de la solicitud');
+      }
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+    } finally {
+      setLoadingTaskRG(false);
     }
   };
 
@@ -658,9 +697,6 @@ function ViewRequestPage() {
     }
   };
 
-  console.log("id process anterior "+originalRequest?.id_process_category);
-  console.log("id process anterior "+request?.id_process_category);
-
   const handleUpdateRequest = async () => {
     if (!validateFields()) {
       return;
@@ -839,6 +875,10 @@ function ViewRequestPage() {
     } catch (error) {
       console.error('Error adding note:', error);
     }
+  };
+
+  const handleViewTask = (task: ViewTasksRequestGeneral) => {
+    router.push(`/process/request-general/view-activities?id=${task.id}`);
   };
 
   useEffect(() => {
@@ -1548,6 +1588,15 @@ function ViewRequestPage() {
                   Las solicitudes completadas no se pueden modificar.
                 </Text>
               )}
+              {!isEditing && (
+                <Button
+                  color='blue'
+                  onClick={() => setModalTasksOpened(true)}
+                  leftSection={<IconTicket size={16} />}
+                >
+                  Ver Tareas
+                </Button>
+              ) }
             </Group>
 
             {!canEdit && (
@@ -1571,6 +1620,74 @@ function ViewRequestPage() {
             )}
           </Group>
         </Card>
+
+        <Modal
+          opened={modalTasksOpened}
+          onClose={() => setModalTasksOpened(false)}
+          title={
+            <Text fw={600} size="lg">
+              Tareas Asignadas - Solicitud #{request?.id}
+            </Text>
+          }
+          size="xl"
+          centered
+        >
+          {loadingTaskRG ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <Text>Cargando tareas...</Text>
+            </div>
+          ) : taskRQ.length > 0 ? (
+            <Table striped highlightOnHover withTableBorder>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Tarea</Table.Th>
+                  <Table.Th>Asignado</Table.Th>
+                  <Table.Th>Estado</Table.Th>
+                  <Table.Th>Fecha Inicio</Table.Th>
+                  <Table.Th>Fecha Fin</Table.Th>
+                  <Table.Th>Acción</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {taskRQ.map((task) => (
+                  <Table.Tr key={task.id}>
+                    <Table.Td>{task.task}</Table.Td>
+                    <Table.Td>{task.name}</Table.Td>
+                    <Table.Td>
+                      <Badge color={getStatusColor(task.status)} size="sm">
+                        {task.status}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      {task.start_date
+                        ? new Date(task.start_date).toLocaleDateString('es-CO')
+                        : 'N/A'}
+                    </Table.Td>
+                    <Table.Td>
+                      {task.end_date
+                        ? new Date(task.end_date).toLocaleDateString('es-CO')
+                        : 'N/A'}
+                    </Table.Td>
+                    <Table.Td>
+                      <ActionIcon
+                        variant="subtle"
+                        color="blue"
+                        onClick={() => handleViewTask(task)}
+                      >
+                        <IconEye size={16} />
+                      </ActionIcon>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          ) : (
+            <div className="text-center py-8">
+              <Text color="gray">No hay tareas asignadas a esta solicitud</Text>
+            </div>
+          )}
+        </Modal>
       </div>
     </div>
   );
