@@ -18,7 +18,7 @@ export async function GET(req) {
 
     let query = `
       SELECT
-        rg.id, cr.category as category, up.name as [user], rg.[description], rg.id_company, c.company ,rg.created_at, u.name as 'requester', sc.status as [status], rg.subject_request as [subject], pc.process, cr.id as id_category, rg.resolution, rg.date_resolution, rg.status_req as id_status_case
+        rg.id, cr.category as category, up.name as [user], rg.[description], rg.id_company, c.company ,rg.created_at, u.name as 'requester', sc.status as [status], rg.subject_request as [subject], pc.process, cr.id as id_category, rg.resolution, rg.date_resolution, rg.status_req as id_status_case, uex.name as executor_final
       FROM requests_general rg
       INNER JOIN company c ON c.id_company = rg.id_company
       LEFT JOIN [user] u ON u.id = rg.id_requester
@@ -28,6 +28,7 @@ export async function GET(req) {
       LEFT JOIN user_process_category_request_general upcrg ON upcrg.id_process_category = pc.id
 		  LEFT JOIN [user] up ON up.id = upcrg.id_user
       INNER JOIN status_case sc ON sc.id_status_case = rg.status_req
+	    LEFT JOIN [user] uex ON uex.id = rg.id_executor_final
     `;
 
     if (idUser) {

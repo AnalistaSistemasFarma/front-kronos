@@ -91,7 +91,7 @@ interface Request {
   id_category: number;
   resolution?: string;
   date_resolution?: string;
-
+  executor_final: string;
   idProceso: number;
 }
 
@@ -120,6 +120,13 @@ interface ViewTasksRequestGeneral {
   end_date: string;
   resolution: string;
   date_resolution: string;
+  description: string;
+  id_company: number;
+  company: string;
+  created_at: string;
+  id_requester: number;
+  name_requester: string;
+  status_req: number;
 }
 
 interface CompanyData {
@@ -788,6 +795,7 @@ function ViewRequestPage() {
           notificarPorCorreo: false,
         });
         setShowResolution(false);
+        await addSystemNote('Se ha cerrado la solicitud');
       }
     } catch (error) {
       console.error('Error updating request:', error);
@@ -1312,6 +1320,9 @@ function ViewRequestPage() {
                                   }
                                 })()
                               }
+                            </Text>
+                            <Text size='xs' color='gray.6'>
+                              Resuelto Por: {request.executor_final}
                             </Text>
                           </Group>
                         )}

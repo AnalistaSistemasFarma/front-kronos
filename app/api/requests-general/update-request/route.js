@@ -37,6 +37,7 @@ export async function POST(req) {
           status_req = @status,
 		      id_process_category = @process_category,
           resolution = @resolucion,
+          id_executor_final = @id_executor_final,
           date_resolution = CASE 
             WHEN @resolucion IS NOT NULL AND LTRIM(RTRIM(@resolucion)) <> '' 
             THEN GETDATE()
@@ -49,6 +50,7 @@ export async function POST(req) {
       updateCaseRequest.input('status', sql.Int, status);
       updateCaseRequest.input('process_category', sql.Int, process_category || null);
       updateCaseRequest.input('resolucion', sql.NVarChar(255), resolucion || null);
+      updateCaseRequest.input('id_executor_final', sql.NVarChar(1000), id_technical || null);
       updateCaseRequest.input('id', sql.Int, id);
 
       await updateCaseRequest.query(updateCaseQuery);

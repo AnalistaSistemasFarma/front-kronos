@@ -12,13 +12,17 @@ export async function GET(req) {
     console.log('API view-tasks_request-general: idReq recibido:', idReq);
 
     let query = `
-        SELECT trg.id, trg.id_request_general, trg.id_task, tpc.task, trg.id_status, sc.status, trg.id_assigned, u.name, trg.start_date, trg.end_date, trg.resolution, trg.date_resolution
+        SELECT 
+          trg.id, trg.id_request_general, trg.id_task, tpc.task, trg.id_status, sc.status, trg.id_assigned, u.name, trg.start_date, trg.end_date, trg.resolution, trg.date_resolution, rg.description, 
+          rg.subject_request, rg.id_company, c.company, rg.created_at, rg.id_requester, urg.name as name_requester, rg.status_req
         FROM task_request_general trg
         INNER JOIN requests_general rg ON rg.id = trg.id_request_general
+        INNER JOIN [user] urg ON urg.id = rg.id_requester
+        INNER JOIN company c ON c.id_company = rg.id_company
         INNER JOIN status_case sc ON sc.id_status_case = trg.id_status
+		    INNER JOIN status_case scrg ON scrg.id_status_case = rg.status_req
         INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
-        INNER JOIN user_task_request_general utrg ON utrg.id_user = trg.id_assigned
-        INNER JOIN [user] u ON u.id = utrg.id_user
+        INNER JOIN [user] u ON u.id = trg.id_assigned
         WHERE 1=1
     `;
 
