@@ -93,6 +93,8 @@ interface Request {
   date_resolution?: string;
   executor_final: string;
   idProceso: number;
+  id_assigned_category: number;
+  id_assigned_process_category: number;
 }
 
 interface Option {
@@ -954,6 +956,9 @@ function ViewRequestPage() {
     )
   );
 
+  console.log("Asignado Proceso Categoria "+request?.id_assigned_process_category);
+  console.log("Asignado Proceso Categoria "+request?.id_assigned_category);
+
   if (loading) {
     return (
       <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
@@ -1599,7 +1604,7 @@ function ViewRequestPage() {
                   Las solicitudes completadas no se pueden modificar.
                 </Text>
               )}
-              {!isEditing && (
+              {(request.id_assigned_process_category || request.id_assigned_category) == userId && (
                 <Button
                   color='blue'
                   onClick={() => setModalTasksOpened(true)}
@@ -1607,7 +1612,7 @@ function ViewRequestPage() {
                 >
                   Ver Tareas
                 </Button>
-              ) }
+              )}
             </Group>
 
             {!canEdit && (

@@ -1445,7 +1445,7 @@ function ViewRequestPage() {
             {!canEdit && (
               <Button
                 variant='outline'
-                onClick={() => router.push('/process/request-general/assigned-requests')}
+                onClick={() => router.push('/process/request-general/assigned-activities')}
                 leftSection={<IconArrowLeft size={16} />}
               >
                 Volver al Panel
@@ -1455,7 +1455,7 @@ function ViewRequestPage() {
             {canEdit && (
               <Button
                 variant='outline'
-                onClick={() => router.push('/process/request-general/assigned-requests')}
+                onClick={() => router.push('/process/request-general/assigned-activities')}
                 leftSection={<IconArrowLeft size={16} />}
               >
                 Volver al Panel
