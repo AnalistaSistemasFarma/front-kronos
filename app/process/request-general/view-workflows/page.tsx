@@ -31,6 +31,7 @@ import {
   IconProgress,
   IconListCheck,
   IconUserCheck,
+  IconTicket,
   IconCoin,
   IconMapPin,
   IconCheck,
@@ -73,6 +74,15 @@ function ViewWorkFlowPage() {
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [originalRequest, setOriginalRequest] = useState<WorkFlow | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [canEdit, setCanEdit] = useState(false);
+
   useEffect(() => {
     const storedWorkflow = sessionStorage.getItem('selectedRequest');
     if (storedWorkflow) {
@@ -111,6 +121,21 @@ function ViewWorkFlowPage() {
     } finally {
       setLoadingTasks(false);
     }
+  };
+
+  const handleStartEditing = () => {
+    setOriginalRequest(workflow);
+    setIsEditing(true);
+    setUpdateMessage(null);
+  };
+
+  const handleCancelEditing = () => {
+    if (originalRequest) {
+      setWorkflow(originalRequest);
+    }
+    setIsEditing(false);
+    setFormErrors({});
+    setUpdateMessage(null);
   };
 
   const getActiveColor = (active: number) => {
@@ -602,7 +627,53 @@ function ViewWorkFlowPage() {
 
         {/* Footer con acciones */}
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+          {updateMessage && (
+            <Alert
+              color={updateMessage.type === 'success' ? 'green' : 'red'}
+              mb='md'
+              icon={
+                updateMessage.type === 'success' ? (
+                  <IconCheck size={16} />
+                ) : (
+                  <IconAlertCircle size={16} />
+                )
+              }
+            >
+              {updateMessage.text}
+            </Alert>
+          )}
+          
           <Group justify='space-between'>
+            {!isEditing ? (
+              <Button
+                color='blue'
+                onClick={handleStartEditing}
+                leftSection={<IconTicket size={16} />}
+                //disabled={!canEdit || loadingPermissions || isRequestResolved()}
+              >
+                Editar Tarea
+              </Button>
+            ) : (
+              <>
+                <Button
+                  color='green'
+                  //onClick={handleUpdateRequest}
+                  leftSection={<IconCheck size={16} />}
+                  //loading={isUpdating}
+                >
+                  Guardar Cambios
+                </Button>
+                <Button
+                  variant='outline'
+                  color='gray'
+                  onClick={handleCancelEditing}
+                  leftSection={<IconX size={16} />}
+                >
+                  Cancelar
+                </Button>
+              </>
+            )}
+
             <Button
               variant='outline'
               onClick={() => router.push('/process/request-general/workflows')}
