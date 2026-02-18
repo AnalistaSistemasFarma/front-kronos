@@ -102,58 +102,56 @@ export async function POST(req) {
 
         for (const t of task) {
 
-        const insertTaskQuery = `
-            INSERT INTO task_process_category
-            (
-            task,
-            id_process_category,
-            active,
-            cost,
-            cost_center
-            )
-            OUTPUT INSERTED.id
-            VALUES
-            (
-            @task,
-            @id_process,
-            1,
-            @cost,
-            @cost_center
-            );
-        `;
+          const insertTaskQuery = `
+              INSERT INTO task_process_category
+              (
+              task,
+              id_process_category,
+              active,
+              cost,
+              cost_center
+              )
+              OUTPUT INSERTED.id
+              VALUES
+              (
+              @task,
+              @id_process,
+              1,
+              @cost,
+              @cost_center
+              );
+          `;
 
-        const taskRequest = new sql.Request(transaction);
+          const taskRequest = new sql.Request(transaction);
 
-        taskRequest.input("task", sql.NVarChar(1000), t.task);
-        taskRequest.input("id_process", sql.Int, processId);
-        taskRequest.input("cost", sql.Numeric(12,0), t.cost || 0);
-        taskRequest.input("cost_center", sql.NVarChar(1000), t.cost_center || null);
+          taskRequest.input("task", sql.NVarChar(1000), t.task);
+          taskRequest.input("id_process", sql.Int, processId);
+          taskRequest.input("cost", sql.Numeric(12,0), t.cost || 0);
+          taskRequest.input("cost_center", sql.NVarChar(1000), t.cost_center || null);
 
-        const taskResult = await taskRequest.query(insertTaskQuery);
+          const taskResult = await taskRequest.query(insertTaskQuery);
 
-        const taskId = taskResult.recordset[0].id;
+          const taskId = taskResult.recordset[0].id;
 
 
-        /* =========================
-            USER - TASK
-        ========================= */
+          /* =========================
+              USER - TASK
+          ========================= */
 
-        if (t.id_user) {
+          if (t.id_user) {
+              const insertUserTaskQuery = `
+              INSERT INTO user_task_request_general
+              (id_task, id_user)
+              VALUES (@id_task, @id_user);
+              `;
 
-            const insertUserTaskQuery = `
-            INSERT INTO user_task_request_general
-            (id_task, id_user)
-            VALUES (@id_task, @id_user);
-            `;
+              await new sql.Request(transaction)
+              .input("id_task", sql.Int, taskId)
+              .input("id_user", sql.NVarChar(1000), t.id_user)
+              .query(insertUserTaskQuery);
+          }
 
-            await new sql.Request(transaction)
-            .input("id_task", sql.Int, taskId)
-            .input("id_user", sql.NVarChar(1000), t.id_user)
-            .query(insertUserTaskQuery);
         }
-
-        }
-
 
       /* =========================
          COMMIT
@@ -166,11 +164,6 @@ export async function POST(req) {
         JSON.stringify({
           success: true,
           message: "Flujo creado correctamente",
-          data: {
-            categoryId,
-            processId,
-            taskId
-          }
         }),
         { status: 201 }
       );

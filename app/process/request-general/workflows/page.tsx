@@ -631,6 +631,7 @@ function RequestBoard() {
 
       // Preparar las tareas para enviar
       const tasksToSend = tasks.map((task) => ({
+        id: task.id,
         task: task.tarea,
         id_user: task.asignado || null,
         cost: task.costo || 0,
