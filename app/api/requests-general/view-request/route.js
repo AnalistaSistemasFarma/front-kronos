@@ -23,17 +23,21 @@ export async function GET(req) {
         c.company,
         rg.created_at,
         rg.requester,
-        rg.status_req as id_status_case,
-        rg.id_process_category,
+        rg.status_req,
+        pc.id as id_process_category,
         pc.assigned as assignedUserId,
         assignedUser.name as assignedUserName,
-        rg.subject_request as subject, 
+        rg.subject_request, 
         rg.resolution as resolutioncase, 
-        rg.date_resolution
+        rg.date_resolution,
+		    uex.name as executor_final
       FROM requests_general rg
       INNER JOIN company c ON c.id_company = rg.id_company
-      LEFT JOIN process_category pc ON pc.id = rg.id_process_category
-      LEFT JOIN [user] assignedUser ON assignedUser.id = pc.assigned
+	    INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+      INNER JOIN process_category pc ON pc.id = pcrg.id_process_category
+	    INNER JOIN user_process_category_request_general upcrg ON upcrg.id_process_category = pc.id
+      INNER JOIN [user] assignedUser ON assignedUser.id = upcrg.id_user
+	    LEFT JOIN [user] uex ON uex.id = rg.id_executor_final
       WHERE rg.id = @id
     `;
 

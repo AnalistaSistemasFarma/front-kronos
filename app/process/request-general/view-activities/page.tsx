@@ -96,6 +96,7 @@ interface Request {
   resolution?: string;
   date_resolution?: string;
   start_date?:string;
+  executor_final: string;
 }
 
 interface Option {
@@ -837,7 +838,7 @@ function ViewRequestPage() {
                 className='text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3'
               >
                 <IconFileDescription size={32} className='text-blue-6' />
-                Tarea #{request.id}
+                Tarea #{request.id} - Solicitud #{request.id_request_general}
               </Title>
               <Text size='lg'>{request.task}</Text>
             </div>
@@ -1162,6 +1163,9 @@ function ViewRequestPage() {
                                 })()
                               }
                             </Text>
+                            <Text size='xs' color='gray.6'>
+                              Resuelto Por: {request.executor_final}
+                            </Text>
                           </Group>
                         )}
                       </Stack>
@@ -1407,7 +1411,7 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
-                  disabled={!canEdit || loadingPermissions}
+                  disabled={!canEdit || loadingPermissions || isRequestResolved()}
                 >
                   Editar Tarea
                 </Button>

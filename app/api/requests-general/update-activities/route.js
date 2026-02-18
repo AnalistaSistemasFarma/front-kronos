@@ -36,6 +36,7 @@ export async function POST(req) {
           start_date = @start_date,
           end_date = @end_date,
           resolution = @resolution,
+          id_executor_final = @id_executor_final,
           date_resolution = CASE
             WHEN @resolution IS NOT NULL
                  AND LTRIM(RTRIM(@resolution)) <> ''
@@ -66,6 +67,12 @@ export async function POST(req) {
         'resolution',
         sql.NVarChar(sql.MAX),
         resolution
+      );
+
+      request.input(
+        'id_executor_final',
+        sql.NVarChar(1000),
+        id_assigned
       );
 
       await request.query(updateQuery);
