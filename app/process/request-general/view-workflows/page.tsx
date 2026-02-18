@@ -459,7 +459,7 @@ function ViewWorkFlowPage() {
                   <IconListCheck size={24} color='white' />
                 </Box>
                 <Title order={2} className='text-amber-700'>
-                  Flujo de Tareas
+                  Flujo de Actividades
                 </Title>
                 <Badge color='amber' size='lg' variant='light' ml='auto'>
                   {tasks.length} {tasks.length === 1 ? 'tarea' : 'tareas'}
