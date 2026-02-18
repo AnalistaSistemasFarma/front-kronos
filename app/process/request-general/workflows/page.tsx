@@ -1469,14 +1469,6 @@ function RequestBoard() {
                         <Badge color='blue' variant='light' size='lg' radius='sm'>
                           {tasks.length} {tasks.length === 1 ? 'tarea' : 'tareas'}
                         </Badge>
-                        <div className='bg-green-50 px-4 py-2 rounded-lg border border-green-200'>
-                          <Text size='sm' fw={600} c='green.700'>
-                            Total: $
-                            {tasks
-                              .reduce((sum, t) => sum + t.costo, 0)
-                              .toLocaleString('es-CO', { minimumFractionDigits: 2 })}
-                          </Text>
-                        </div>
                       </div>
                     )}
                   </div>
