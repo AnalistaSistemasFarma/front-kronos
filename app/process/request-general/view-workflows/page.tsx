@@ -206,54 +206,93 @@ function ViewWorkFlowPage() {
 
     setIsSaving(true);
     try {
-      // Guardar cambios del workflow
-      const workflowResponse = await fetch('/api/requests-general/update-workflow', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id_process: editedWorkflow.id,
-          process: editedWorkflow.process,
-          description: editedWorkflow.description,
-          active: editedWorkflow.active,
-          id_status: editedWorkflow.id_status_process,
-          id_user_assigned: editedWorkflow.assigned_process_category,
-        }),
-      });
+      // Detectar qué cambió comparando con los valores originales
+      const processChanged = 
+        originalRequest?.process !== editedWorkflow.process ||
+        originalRequest?.description !== editedWorkflow.description ||
+        originalRequest?.active !== editedWorkflow.active ||
+        originalRequest?.id_status_process !== editedWorkflow.id_status_process ||
+        originalRequest?.id_assigned_process_category !== editedWorkflow.id_assigned_process_category;
 
-      if (!workflowResponse.ok) {
-        const errorData = await workflowResponse.json();
-        throw new Error(errorData.error || 'Error al guardar el workflow');
+      // Detectar cambios en las tareas
+      const tasksChanged = 
+        originalTasks.length !== editedTasks.length ||
+        originalTasks.some((origTask, index) => {
+          const editedTask = editedTasks[index];
+          return !editedTask ||
+            origTask.task !== editedTask.task ||
+            origTask.active !== editedTask.active ||
+            origTask.cost !== editedTask.cost ||
+            origTask.cost_center !== editedTask.cost_center ||
+            origTask.id_assigned_user !== editedTask.id_assigned_user;
+        });
+
+      // Preparar el cuerpo de la petición
+      const requestBody: any = {
+        id_process: editedWorkflow.id,
+      };
+
+      // Solo incluir datos del proceso si cambió
+      if (processChanged) {
+        requestBody.process = editedWorkflow.process;
+        requestBody.description = editedWorkflow.description;
+        requestBody.active = editedWorkflow.active;
+        requestBody.id_status = editedWorkflow.id_status_process;
+        requestBody.id_user_assigned = editedWorkflow.id_assigned_process_category;
+        requestBody.updateProcess = true;
+      } else {
+        requestBody.updateProcess = false;
       }
 
-      // Guardar cambios de las tareas
-      const tasksToUpdate = editedTasks.map((task) => ({
-        id: task.id,
-        task: task.task,
-        active: task.active,
-        cost: task.cost,
-        cost_center: task.cost_center,
-        id_user_assigned: task.assigned_user,
-        action: 'update',
-      }));
+      // Solo incluir tareas si cambiaron
+      if (tasksChanged) {
+        const tasksToUpdate = editedTasks.map((task) => ({
+          id: task.id,
+          task: task.task,
+          active: task.active,
+          cost: task.cost,
+          cost_center: task.cost_center,
+          id_user_assigned: task.id_assigned_user,
+          action: 'update',
+        }));
+        requestBody.tasks = tasksToUpdate;
+        requestBody.updateTasks = true;
+      } else {
+        requestBody.updateTasks = false;
+      }
 
-      const tasksResponse = await fetch('/api/requests-general/update-workflow-tasks', {
+      // Si nada cambió, mostrar mensaje y salir
+      if (!processChanged && !tasksChanged) {
+        setUpdateMessage({ type: 'success', text: 'No se detectaron cambios para guardar' });
+        setIsEditing(false);
+        setEditedWorkflow(null);
+        setEditedTasks([]);
+        return;
+      }
+
+      // Llamar al endpoint unificado
+      const response = await fetch('/api/requests-general/update-workflow-complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id_process: editedWorkflow.id,
-          tasks: tasksToUpdate,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
-      if (!tasksResponse.ok) {
-        const errorData = await tasksResponse.json();
-        throw new Error(errorData.error || 'Error al guardar las tareas');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Error al guardar los cambios');
       }
+
+      const result = await response.json();
 
       // Actualizar estados locales
       setWorkflow(editedWorkflow);
       setTasks(editedTasks);
-      setUpdateMessage({ type: 'success', text: 'Cambios guardados correctamente' });
+      
+      // Mostrar mensaje específico según lo que se actualizó
+      setUpdateMessage({ 
+        type: 'success', 
+        text: result.message || 'Cambios guardados correctamente' 
+      });
       setIsEditing(false);
       setEditedWorkflow(null);
       setEditedTasks([]);
