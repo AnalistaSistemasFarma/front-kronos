@@ -21,6 +21,11 @@ import {
   Divider,
   ScrollArea,
   Box,
+  Select,
+  Textarea,
+  TextInput,
+  NumberInput,
+  Switch,
 } from '@mantine/core';
 import {
   IconBuilding,
@@ -51,6 +56,7 @@ interface WorkFlow {
   assigned_category: string;
   assigned_process_category: string;
   company: string;
+  id_assigned_process_category: string;
 }
 
 interface Task {
@@ -60,6 +66,7 @@ interface Task {
   cost: number;
   cost_center: string;
   assigned_user: string;
+  id_assigned_user: string;
 }
 
 function ViewWorkFlowPage() {
@@ -75,6 +82,7 @@ function ViewWorkFlowPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [originalRequest, setOriginalRequest] = useState<WorkFlow | null>(null);
+  const [originalTasks, setOriginalTasks] = useState<Task[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<{
     type: 'success' | 'error';
@@ -82,6 +90,13 @@ function ViewWorkFlowPage() {
   } | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [canEdit, setCanEdit] = useState(false);
+
+  // Estados para edición
+  const [editedWorkflow, setEditedWorkflow] = useState<WorkFlow | null>(null);
+  const [editedTasks, setEditedTasks] = useState<Task[]>([]);
+  const [users, setUsers] = useState<{ value: string; label: string }[]>([]);
+  const [statusOptions, setStatusOptions] = useState<{ value: string; label: string }[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     const storedWorkflow = sessionStorage.getItem('selectedRequest');
@@ -104,6 +119,12 @@ function ViewWorkFlowPage() {
     }
   }, [workflow?.id]);
 
+  // Cargar usuarios y estados al montar el componente
+  useEffect(() => {
+    fetchUsers();
+    fetchStatusOptions();
+  }, []);
+
   const fetchTasks = async (processId: number) => {
     try {
       setLoadingTasks(true);
@@ -123,8 +144,45 @@ function ViewWorkFlowPage() {
     }
   };
 
+  const fetchUsers = async () => {
+    try {
+      const response = await fetch('/api/requests-general/consult-worflow');
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (data.assignedUsers) {
+          setUsers(
+            data.assignedUsers.map((u: { id: number; name: string }) => ({
+            value: u.id.toString(),
+            label: u.name,
+          }))
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching users:', err);
+    }
+  };
+
+  const fetchStatusOptions = async () => {
+    // Estados disponibles según la base de datos
+    setStatusOptions([
+      { value: '1', label: 'Activo' },
+      { value: '2', label: 'Pendiente' },
+      { value: '3', label: 'En progreso' },
+      { value: '4', label: 'Completado' },
+      { value: '5', label: 'Cancelado' },
+      { value: '6', label: 'En borrador' },
+    ]);
+  };
+
   const handleStartEditing = () => {
     setOriginalRequest(workflow);
+    setOriginalTasks([...tasks]);
+    if (workflow) {
+      setEditedWorkflow({ ...workflow });
+    }
+    setEditedTasks([...tasks]);
     setIsEditing(true);
     setUpdateMessage(null);
   };
@@ -133,9 +191,78 @@ function ViewWorkFlowPage() {
     if (originalRequest) {
       setWorkflow(originalRequest);
     }
+    if (originalTasks.length > 0) {
+      setTasks(originalTasks);
+    }
+    setEditedWorkflow(null);
+    setEditedTasks([]);
     setIsEditing(false);
     setFormErrors({});
     setUpdateMessage(null);
+  };
+
+  const handleSaveChanges = async () => {
+    if (!editedWorkflow) return;
+
+    setIsSaving(true);
+    try {
+      // Guardar cambios del workflow
+      const workflowResponse = await fetch('/api/requests-general/update-workflow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id_process: editedWorkflow.id,
+          process: editedWorkflow.process,
+          description: editedWorkflow.description,
+          active: editedWorkflow.active,
+          id_status: editedWorkflow.id_status_process,
+          id_user_assigned: editedWorkflow.assigned_process_category,
+        }),
+      });
+
+      if (!workflowResponse.ok) {
+        const errorData = await workflowResponse.json();
+        throw new Error(errorData.error || 'Error al guardar el workflow');
+      }
+
+      // Guardar cambios de las tareas
+      const tasksToUpdate = editedTasks.map((task) => ({
+        id: task.id,
+        task: task.task,
+        active: task.active,
+        cost: task.cost,
+        cost_center: task.cost_center,
+        id_user_assigned: task.assigned_user,
+        action: 'update',
+      }));
+
+      const tasksResponse = await fetch('/api/requests-general/update-workflow-tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id_process: editedWorkflow.id,
+          tasks: tasksToUpdate,
+        }),
+      });
+
+      if (!tasksResponse.ok) {
+        const errorData = await tasksResponse.json();
+        throw new Error(errorData.error || 'Error al guardar las tareas');
+      }
+
+      // Actualizar estados locales
+      setWorkflow(editedWorkflow);
+      setTasks(editedTasks);
+      setUpdateMessage({ type: 'success', text: 'Cambios guardados correctamente' });
+      setIsEditing(false);
+      setEditedWorkflow(null);
+      setEditedTasks([]);
+    } catch (err: any) {
+      console.error('Error saving changes:', err);
+      setUpdateMessage({ type: 'error', text: err.message || 'Error al guardar los cambios' });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const getActiveColor = (active: number) => {
@@ -158,6 +285,15 @@ function ViewWorkFlowPage() {
         return 'red';
       default:
         return 'gray';
+    }
+  };
+
+  const getCostCenter = (cost_center: string) => {
+    switch (cost_center) {
+      case '1':
+        return 'Contabilidad';
+      default:
+        return 'Otro';
     }
   };
 
@@ -240,7 +376,6 @@ function ViewWorkFlowPage() {
   return (
     <div className='min-h-screen bg-gray-50'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        {/* Header con Breadcrumbs */}
         <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
@@ -276,12 +411,9 @@ function ViewWorkFlowPage() {
           </Flex>
         </Card>
 
-        {/* Contenido Principal - Layout de 2 Columnas */}
         <Grid gutter='lg'>
-          {/* COLUMNA IZQUIERDA: Categoría y Proceso */}
           <Grid.Col span={{ base: 12, lg: 4 }}>
             <Stack gap='lg'>
-              {/* NIVEL 1: CATEGORÍA */}
               <Card
                 shadow='sm'
                 p='xl'
@@ -332,12 +464,10 @@ function ViewWorkFlowPage() {
                 </Stack>
               </Card>
 
-              {/* Conector visual */}
               <Flex justify='center' align='center'>
                 <div className='w-1 h-8 bg-gradient-to-b from-indigo-300 to-teal-300 rounded-full'></div>
               </Flex>
 
-              {/* NIVEL 2: PROCESO */}
               <Card
                 shadow='sm'
                 p='xl'
@@ -380,9 +510,24 @@ function ViewWorkFlowPage() {
                           Usuario Asignado al Proceso
                         </Text>
                       </Group>
-                      <Text size='lg' fw={600} c='gray.8'>
-                        {workflow.assigned_process_category}
-                      </Text>
+                      {isEditing ? (
+                        <Select
+                          value={editedWorkflow?.id_assigned_process_category || ''}
+                          onChange={(value) =>
+                            setEditedWorkflow((prev) =>
+                              prev ? { ...prev, id_assigned_process_category: value || '' } : prev
+                            )
+                          }
+                          data={users}
+                          placeholder='Seleccionar usuario'
+                          searchable
+                          clearable
+                        />
+                      ) : (
+                        <Text size='lg' fw={600} c='gray.8'>
+                          {workflow.assigned_process_category}
+                        </Text>
+                      )}
                     </Stack>
                   </Card>
 
@@ -391,9 +536,23 @@ function ViewWorkFlowPage() {
                       <Text size='sm' c='gray.6' fw={500}>
                         Descripción
                       </Text>
-                      <Text size='md' c='gray.8' className='whitespace-pre-line'>
-                        {workflow.description || 'Sin descripción'}
-                      </Text>
+                      {isEditing ? (
+                        <Textarea
+                          value={editedWorkflow?.description || ''}
+                          onChange={(e) =>
+                            setEditedWorkflow((prev) =>
+                              prev ? { ...prev, description: e.target.value } : prev
+                            )
+                          }
+                          placeholder='Ingrese la descripción'
+                          minRows={3}
+                          autosize
+                        />
+                      ) : (
+                        <Text size='md' c='gray.8' className='whitespace-pre-line'>
+                          {workflow.description || 'Sin descripción'}
+                        </Text>
+                      )}
                     </Stack>
                   </Card>
 
@@ -417,23 +576,36 @@ function ViewWorkFlowPage() {
                       <Text size='sm' c='gray.6' fw={500}>
                         Activo
                       </Text>
-                      <Group gap='xs'>
-                        {workflow.active === 1 ? (
-                          <>
-                            <IconCheck size={18} className='text-green-500' />
-                            <Badge color='green' size='lg' variant='light'>
-                              Sí
-                            </Badge>
-                          </>
-                        ) : (
-                          <>
-                            <IconX size={18} className='text-gray-400' />
-                            <Badge color='gray' size='lg' variant='light'>
-                              No
-                            </Badge>
-                          </>
-                        )}
-                      </Group>
+                      {isEditing ? (
+                        <Switch
+                          checked={editedWorkflow?.active === 1}
+                          onChange={(e) =>
+                            setEditedWorkflow((prev) =>
+                              prev ? { ...prev, active: e.target.checked ? 1 : 0 } : prev
+                            )
+                          }
+                          label={editedWorkflow?.active === 1 ? 'Sí' : 'No'}
+                          color='green'
+                        />
+                      ) : (
+                        <Group gap='xs'>
+                          {workflow.active === 1 ? (
+                            <>
+                              <IconCheck size={18} className='text-green-500' />
+                              <Badge color='green' size='lg' variant='light'>
+                                Sí
+                              </Badge>
+                            </>
+                          ) : (
+                            <>
+                              <IconX size={18} className='text-gray-400' />
+                              <Badge color='gray' size='lg' variant='light'>
+                                No
+                              </Badge>
+                            </>
+                          )}
+                        </Group>
+                      )}
                     </Stack>
                   </Card>
                 </Stack>
@@ -441,9 +613,7 @@ function ViewWorkFlowPage() {
             </Stack>
           </Grid.Col>
 
-          {/* COLUMNA DERECHA: WORKFLOW DE TAREAS */}
           <Grid.Col span={{ base: 12, lg: 8 }}>
-            {/* NIVEL 3: TAREAS - WORKFLOW VISUALIZATION */}
             <Card
               shadow='sm'
               p='xl'
@@ -483,11 +653,9 @@ function ViewWorkFlowPage() {
                 </Alert>
               ) : (
                 <ScrollArea>
-                  {/* Workflow Timeline - Vertical Flow */}
                   <div className='space-y-0'>
                     {tasks.map((task, index) => (
                       <div key={task.id} className='relative'>
-                        {/* Workflow Step Card */}
                         <Card
                           shadow='sm'
                           p='md'
@@ -505,7 +673,6 @@ function ViewWorkFlowPage() {
                         >
                           <Grid>
                             <Grid.Col span={{ base: 12, md: 1 }}>
-                              {/* Step Number Indicator */}
                               <div
                                 className={`
                                   w-12 h-12 rounded-full flex items-center justify-center
@@ -525,34 +692,26 @@ function ViewWorkFlowPage() {
 
                             <Grid.Col span={{ base: 12, md: 11 }}>
                               <Stack gap='xs'>
-                                {/* Task Name */}
                                 <Group justify='space-between' align='flex-start'>
-                                  <div>
-                                    <Text size='md' fw={600} c='gray.9' className='mb-1'>
-                                      {task.task}
-                                    </Text>
-                                    {task.active === 1 && (
-                                      <Badge
-                                        color='green'
-                                        size='sm'
-                                        variant='light'
-                                        leftSection={<IconCheck size={12} />}
-                                      >
-                                        Activo
-                                      </Badge>
+                                  <div style={{ flex: 1 }}>
+                                    {isEditing ? (
+                                      <TextInput
+                                        value={editedTasks[index]?.task || ''}
+                                        onChange={(e) => {
+                                          const newTasks = [...editedTasks];
+                                          newTasks[index] = { ...newTasks[index], task: e.target.value };
+                                          setEditedTasks(newTasks);
+                                        }}
+                                        placeholder='Nombre de la tarea'
+                                      />
+                                    ) : (
+                                      <Text size='md' fw={600} c='gray.9' className='mb-1'>
+                                        {task.task}
+                                      </Text>
                                     )}
                                   </div>
-                                  {/* <Badge
-                                    color={task.active === 1 ? 'amber' : 'gray'}
-                                    size='lg'
-                                    variant='light'
-                                    radius='sm'
-                                  >
-                                    {task.active === 1 ? 'En curso' : 'Pendiente'}
-                                  </Badge> */}
                                 </Group>
 
-                                {/* Task Details Grid */}
                                 <Grid mt='sm'>
                                   <Grid.Col span={{ base: 12, sm: 4 }}>
                                     <div className='bg-gray-50 rounded-lg p-3 transition-colors duration-200 hover:bg-gray-100'>
@@ -562,9 +721,25 @@ function ViewWorkFlowPage() {
                                           Asignado a
                                         </Text>
                                       </Group>
-                                      <Text size='sm' fw={500} c='gray.8'>
-                                        {task.assigned_user || 'Sin asignar'}
-                                      </Text>
+                                      {isEditing ? (
+                                        <Select
+                                          value={editedTasks[index]?.id_assigned_user || ''}
+                                          onChange={(value) => {
+                                            const newTasks = [...editedTasks];
+                                            newTasks[index] = { ...newTasks[index], id_assigned_user: value || '' };
+                                            setEditedTasks(newTasks);
+                                          }}
+                                          data={users}
+                                          placeholder='Seleccionar usuario'
+                                          searchable
+                                          clearable
+                                          size='sm'
+                                        />
+                                      ) : (
+                                        <Text size='sm' fw={500} c='gray.8'>
+                                          {task.assigned_user || 'Sin asignar'}
+                                        </Text>
+                                      )}
                                     </div>
                                   </Grid.Col>
 
@@ -576,9 +751,24 @@ function ViewWorkFlowPage() {
                                           Costo
                                         </Text>
                                       </Group>
-                                      <Text size='sm' fw={600} c='green-700'>
-                                        {task.cost ? `$${task.cost.toLocaleString('es-CO')}` : '$0'}
-                                      </Text>
+                                      {isEditing ? (
+                                        <NumberInput
+                                          value={editedTasks[index]?.cost || 0}
+                                          onChange={(value) => {
+                                            const newTasks = [...editedTasks];
+                                            newTasks[index] = { ...newTasks[index], cost: Number(value) || 0 };
+                                            setEditedTasks(newTasks);
+                                          }}
+                                          placeholder='Costo'
+                                          min={0}
+                                          size='sm'
+                                          hideControls
+                                        />
+                                      ) : (
+                                        <Text size='sm' fw={600} c='green-700'>
+                                          {task.cost ? `$${task.cost.toLocaleString('es-CO')}` : '$0'}
+                                        </Text>
+                                      )}
                                     </div>
                                   </Grid.Col>
 
@@ -590,9 +780,27 @@ function ViewWorkFlowPage() {
                                           Centro de Costo
                                         </Text>
                                       </Group>
-                                      <Text size='sm' fw={500} c='gray.8'>
-                                        {task.cost_center || 'N/A'}
-                                      </Text>
+                                      {isEditing ? (
+                                        <>
+                                        <Select
+                                          value={editedTasks[index]?.cost_center || ''}
+                                          onChange={(value) => {
+                                            const newTasks = [...editedTasks];
+                                            newTasks[index] = { ...newTasks[index], cost_center: value || '' };
+                                            setEditedTasks(newTasks);
+                                          }}
+                                          data={[{ value: '1', label: 'Contabilidad' }]}
+                                          placeholder='Seleccione el centro de costo'
+                                          searchable
+                                          clearable
+                                          size='sm'
+                                        />
+                                        </>
+                                      ) : (
+                                        <Text size='sm' fw={500} c='gray.8'>
+                                          {getCostCenter(task.cost_center) || 'N/A'}
+                                        </Text>
+                                      )}
                                     </div>
                                   </Grid.Col>
                                 </Grid>
@@ -601,7 +809,6 @@ function ViewWorkFlowPage() {
                           </Grid>
                         </Card>
 
-                        {/* Connector Line - Show between tasks, not after last one */}
                         {index < tasks.length - 1 && (
                           <div className='flex justify-center py-3'>
                             <div
@@ -625,7 +832,6 @@ function ViewWorkFlowPage() {
           </Grid.Col>
         </Grid>
 
-        {/* Footer con acciones */}
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
           {updateMessage && (
             <Alert
@@ -649,17 +855,16 @@ function ViewWorkFlowPage() {
                 color='blue'
                 onClick={handleStartEditing}
                 leftSection={<IconTicket size={16} />}
-                //disabled={!canEdit || loadingPermissions || isRequestResolved()}
               >
-                Editar Tarea
+                Editar Flujo de Trabajo
               </Button>
             ) : (
               <>
                 <Button
                   color='green'
-                  //onClick={handleUpdateRequest}
+                  onClick={handleSaveChanges}
                   leftSection={<IconCheck size={16} />}
-                  //loading={isUpdating}
+                  loading={isSaving}
                 >
                   Guardar Cambios
                 </Button>

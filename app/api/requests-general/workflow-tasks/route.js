@@ -25,7 +25,8 @@ export async function GET(req) {
         tpc.active,
         tpc.cost,
         tpc.cost_center,
-        u.name as assigned_user
+        u.name as assigned_user,
+		    u.id as id_assigned_user
       FROM task_process_category tpc
       LEFT JOIN user_task_request_general utrg ON utrg.id_task = tpc.id
       LEFT JOIN [user] u ON u.id = utrg.id_user

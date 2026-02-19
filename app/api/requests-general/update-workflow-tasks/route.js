@@ -7,7 +7,6 @@ export async function POST(req) {
 
     const { id_process, tasks } = body;
 
-    // Validación
     if (!id_process) {
       return new Response(
         JSON.stringify({ error: 'ID del proceso es requerido' }),

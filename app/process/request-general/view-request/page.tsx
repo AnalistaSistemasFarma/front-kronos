@@ -955,10 +955,7 @@ function ViewRequestPage() {
       </span>
     )
   );
-
-  console.log("Asignado Proceso Categoria "+request?.id_assigned_process_category);
-  console.log("Asignado Proceso Categoria "+request?.id_assigned_category);
-
+  
   if (loading) {
     return (
       <div className='min-h-screen bg-gray-50 flex items-center justify-center'>

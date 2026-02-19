@@ -15,7 +15,6 @@ export async function POST(req) {
       id_user_assigned
     } = body;
 
-    // Validación
     if (!id_process) {
       return new Response(
         JSON.stringify({ error: 'ID del proceso es requerido' }),
@@ -43,7 +42,6 @@ export async function POST(req) {
     try {
       await transaction.begin();
 
-      // Actualizar proceso
       const updateProcessQuery = `
         UPDATE process_category
         SET
@@ -65,8 +63,6 @@ export async function POST(req) {
 
       await processRequest.query(updateProcessQuery);
 
-      // Actualizar usuario asignado al proceso
-      // Primero eliminar la asignación anterior
       const deleteAssignedQuery = `
         DELETE FROM user_process_category_request_general
         WHERE id_process_category = @id_process
@@ -76,7 +72,6 @@ export async function POST(req) {
         .input('id_process', sql.Int, id_process)
         .query(deleteAssignedQuery);
 
-      // Insertar nueva asignación
       const insertAssignedQuery = `
         INSERT INTO user_process_category_request_general
         (id_process_category, id_user)

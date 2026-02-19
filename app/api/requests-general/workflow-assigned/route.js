@@ -19,7 +19,7 @@ export async function GET(req) {
     let query = `
         SELECT 
             pc.id ,cr.id as id_category, cr.category, pc.process, pc.description, pc.active, pc.id_status as id_status_process, scpc.status as status_process, 
-            ucr.name as assigned_category, upc.name as assigned_process_category, c.company
+            ucr.name as assigned_category, upc.id as id_assigned_process_category ,upc.name as assigned_process_category, c.company
         FROM process_category pc
         LEFT JOIN category_request cr ON cr.id = pc.id_category_request
         INNER JOIN status_case scpc ON scpc.id_status_case = pc.id_status
