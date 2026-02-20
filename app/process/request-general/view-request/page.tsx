@@ -93,6 +93,8 @@ interface Request {
   date_resolution?: string;
   executor_final: string;
   idProceso: number;
+  id_assigned_category: number;
+  id_assigned_process_category: number;
 }
 
 interface Option {
@@ -953,7 +955,7 @@ function ViewRequestPage() {
       </span>
     )
   );
-
+  
   if (loading) {
     return (
       <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
@@ -1599,7 +1601,7 @@ function ViewRequestPage() {
                   Las solicitudes completadas no se pueden modificar.
                 </Text>
               )}
-              {!isEditing && (
+              {(request.id_assigned_process_category || request.id_assigned_category) == userId && (
                 <Button
                   color='blue'
                   onClick={() => setModalTasksOpened(true)}
@@ -1607,7 +1609,7 @@ function ViewRequestPage() {
                 >
                   Ver Tareas
                 </Button>
-              ) }
+              )}
             </Group>
 
             {!canEdit && (
@@ -1657,6 +1659,7 @@ function ViewRequestPage() {
                   <Table.Th>Estado</Table.Th>
                   <Table.Th>Fecha Inicio</Table.Th>
                   <Table.Th>Fecha Fin</Table.Th>
+                  <Table.Th>Resolución</Table.Th>
                   <Table.Th>Acción</Table.Th>
                 </Table.Tr>
               </Table.Thead>
@@ -1679,6 +1682,9 @@ function ViewRequestPage() {
                       {task.end_date
                         ? new Date(task.end_date).toLocaleDateString('es-CO')
                         : 'N/A'}
+                    </Table.Td>
+                    <Table.Td>
+                      {task.resolution}
                     </Table.Td>
                     <Table.Td>
                       <ActionIcon

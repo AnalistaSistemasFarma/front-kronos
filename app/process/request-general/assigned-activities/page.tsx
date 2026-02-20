@@ -546,7 +546,7 @@ function RequestBoard() {
             <Table striped highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>ID</Table.Th>
+                  <Table.Th>ID Solicitud</Table.Th>
                   <Table.Th>Tarea</Table.Th>
                   <Table.Th>Asunto</Table.Th>
                   <Table.Th>Empresa</Table.Th>
@@ -585,7 +585,7 @@ function RequestBoard() {
                     >
                       <Table.Td>
                         <Text size='xs' color='blue'className='max-w-xs truncate' lineClamp={2}>
-                          {task.id}
+                          {task.id_request_general}
                         </Text>
                       </Table.Td>
                       <Table.Td>

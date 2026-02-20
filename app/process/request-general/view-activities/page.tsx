@@ -41,6 +41,7 @@ import {
   ScrollArea,
   Modal,
   Box,
+  Table,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -120,6 +121,28 @@ interface FolderFile {
   '@microsoft.graph.downloadUrl'?: string;
 }
 
+interface ViewTasksRequestGeneral {
+  id: number;
+  id_request_general: number;
+  id_task: number;
+  task: string;
+  id_status: number;
+  status: string;
+  id_assigned: number;
+  name: string;
+  start_date: string;
+  end_date: string;
+  resolution: string;
+  date_resolution: string;
+  description: string;
+  id_company: number;
+  company: string;
+  created_at: string;
+  id_requester: number;
+  name_requester: string;
+  status_req: number;
+}
+
 function ViewRequestPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -163,6 +186,10 @@ function ViewRequestPage() {
     notificarPorCorreo: false,
   });
 
+  const [modalTasksOpened, setModalTasksOpened] = useState(false);
+  const [loadingTaskRG, setLoadingTaskRG] = useState(false);
+  const [taskRQ, setTaskRQ] = useState<ViewTasksRequestGeneral[]>([]);
+
   useEffect(() => {
     const storedRequest = sessionStorage.getItem('selectedRequest');
     if (storedRequest) {
@@ -198,6 +225,7 @@ function ViewRequestPage() {
     if (request) {
       fetchNotes();
       fetchFolderContents();
+      fetchTasksRG();
     }
   }, [request]);
 
@@ -361,6 +389,25 @@ function ViewRequestPage() {
     }
   };
 
+  const fetchTasksRG = async () => {
+    if (!request?.id) return;
+    try {
+      setLoadingTaskRG(true);
+      const response = await fetch(`/api/requests-general/view-tasks_request-general?idReq=${request.id_request_general}`);
+
+      if (response.ok) {
+        const data: ViewTasksRequestGeneral[] = await response.json();
+        setTaskRQ(data);
+      } else {
+        console.error('Error al cargar tareas de la solicitud');
+      }
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+    } finally {
+      setLoadingTaskRG(false);
+    }
+  };
+
   async function CheckOrCreateFolderAndUpload(
     folderName: string,
     files: { file: File }[],
@@ -418,23 +465,6 @@ function ViewRequestPage() {
       console.log('No hay archivos seleccionados para subir.');
     }
   }
-
-  const handleFormChange = (field: string, value: string) => {
-    setRequest((prev) => {
-      if (!prev) return prev;
-      const updatedRequest = { ...prev, [field]: value };
-
-      return updatedRequest;
-    });
-
-    if (formErrors[field]) {
-      setFormErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[field];
-        return newErrors;
-      });
-    }
-  };
 
   const handleStartEditing = () => {
     setOriginalRequest(request);
@@ -639,16 +669,8 @@ function ViewRequestPage() {
     return request?.status_task?.toLowerCase() === 'completada' || Boolean(request?.resolution && request.resolution.trim() !== '');
   };
 
-  const canEditStatus = () => {
-    return canEdit;
-  };
-
-  const canEditOtherFields = () => {
-    return canEdit && !isRequestResolved();
-  };
-
   const handleAddNote = async () => {
-    if (!newNote.trim() || !request?.id || !userId) return;
+    if (!newNote.trim() || !request?.id_request_general || !userId) return;
 
     try {
       const response = await fetch('/api/requests-general/notes', {
@@ -657,7 +679,7 @@ function ViewRequestPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          id_request: request.id,
+          id_request: request.id_request_general,
           note: newNote.trim(),
           created_by: userId,
         }),
@@ -687,7 +709,7 @@ function ViewRequestPage() {
   };
 
   const addSystemNote = async (text: string) => {
-    if (!request?.id || !userId) return;
+    if (!request?.id_request_general || !userId) return;
 
     try {
       const response = await fetch('/api/requests-general/notes', {
@@ -696,7 +718,7 @@ function ViewRequestPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          id_request: request.id,
+          id_request: request.id_request_general,
           note: text,
           created_by: userId,
         }),
@@ -714,7 +736,7 @@ function ViewRequestPage() {
   };
 
   useEffect(() => {
-    if (request?.id) {
+    if (request?.id_request_general) {
       const storedFiles = localStorage.getItem(`request-${request.id}-files`);
       if (storedFiles) {
         try {
@@ -725,13 +747,13 @@ function ViewRequestPage() {
         }
       }
     }
-  }, [request?.id]);
+  }, [request?.id_request_general]);
 
   useEffect(() => {
-    if (request?.id && attachedFiles.length > 0) {
-      localStorage.setItem(`request-${request.id}-files`, JSON.stringify(attachedFiles));
-    } else if (request?.id) {
-      localStorage.removeItem(`request-${request.id}-files`);
+    if (request?.id_request_general && attachedFiles.length > 0) {
+      localStorage.setItem(`request-${request.id_request_general}-files`, JSON.stringify(attachedFiles));
+    } else if (request?.id_request_general) {
+      localStorage.removeItem(`request-${request.id_request_general}-files`);
     }
   }, [attachedFiles, request?.id]);
 
@@ -1440,12 +1462,20 @@ function ViewRequestPage() {
                   Esta tarea tiene una resolución registrada. El estado aún puede modificarse.
                 </Text>
               )}
+
+              <Button
+                color='blue'
+                onClick={() => setModalTasksOpened(true)}
+                leftSection={<IconTicket size={16} />}
+              >
+                Ver Tareas
+              </Button>
             </Group>
 
             {!canEdit && (
               <Button
                 variant='outline'
-                onClick={() => router.push('/process/request-general/assigned-requests')}
+                onClick={() => router.push('/process/request-general/assigned-activities')}
                 leftSection={<IconArrowLeft size={16} />}
               >
                 Volver al Panel
@@ -1455,7 +1485,7 @@ function ViewRequestPage() {
             {canEdit && (
               <Button
                 variant='outline'
-                onClick={() => router.push('/process/request-general/assigned-requests')}
+                onClick={() => router.push('/process/request-general/assigned-activities')}
                 leftSection={<IconArrowLeft size={16} />}
               >
                 Volver al Panel
@@ -1463,6 +1493,90 @@ function ViewRequestPage() {
             )}
           </Group>
         </Card>
+
+        <Modal
+          opened={modalTasksOpened}
+          onClose={() => setModalTasksOpened(false)}
+          title={
+            <Text fw={600} size="lg">
+              Tareas Asignadas - Solicitud #{request?.id_request_general}
+            </Text>
+          }
+          size="xl"
+          centered
+        >
+          {loadingTaskRG ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <Text>Cargando tareas...</Text>
+            </div>
+          ) : taskRQ.length > 0 ? (
+            <Table striped highlightOnHover withTableBorder>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Tarea</Table.Th>
+                  <Table.Th>Asignado</Table.Th>
+                  <Table.Th>Estado</Table.Th>
+                  <Table.Th>Fecha Inicio</Table.Th>
+                  <Table.Th>Fecha Fin</Table.Th>
+                  <Table.Th>Resolución</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {taskRQ.map((task) => (
+                  <Table.Tr key={task.id}>
+                    <Table.Td>{task.task}</Table.Td>
+                    <Table.Td>{task.name}</Table.Td>
+                    <Table.Td>
+                      <Badge color={getStatusColor(task.status)} size="sm">
+                        {task.status}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      {task.start_date
+                        ? new Intl.DateTimeFormat('es-CO', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true,
+                          }).format(
+                            new Date(
+                              new Date(task.start_date).getTime()
+                            )
+                          )
+                        : 'N/A'}
+                    </Table.Td>
+                    <Table.Td>
+                      {task.end_date
+                        ? new Intl.DateTimeFormat('es-CO', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true,
+                          }).format(
+                            new Date(
+                              new Date(task.end_date).getTime()
+                            )
+                          )
+                        : 'N/A'}
+                    </Table.Td>
+                    <Table.Td>
+                      {task.resolution}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          ) : (
+            <div className="text-center py-8">
+              <Text color="gray">No hay tareas asignadas a esta solicitud</Text>
+            </div>
+          )}
+        </Modal>
       </div>
     </div>
   );

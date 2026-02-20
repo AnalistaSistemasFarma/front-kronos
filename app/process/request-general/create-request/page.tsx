@@ -84,6 +84,7 @@ interface ProcessCategoryData {
   category: string;
   email?: string;
   description?: string;
+  active: number;
 }
 
 interface ConsultResponse {
@@ -246,7 +247,6 @@ function RequestBoard() {
     }
   }, [formData.category, processCategories, processSearch, formData.process]);
 
-  // Activity search effect - search across all processes
   useEffect(() => {
     if (activitySearch.trim()) {
       const searchLower = activitySearch.toLowerCase();
@@ -421,7 +421,9 @@ function RequestBoard() {
         }));
 
         setProcessCategories(
-          data.processCategories.map((p) => ({
+          data.processCategories
+          .filter((p) => p.active === 1)
+          .map((p) => ({
             value: p.id_process.toString(),
             label: p.description ? `${p.process} - ${p.description}` : p.process,
             id_category_request: p.id_category_request,
@@ -1106,6 +1108,12 @@ function RequestBoard() {
             setActivitySearch('');
             setSearchResults([]);
             setShowActivitySearch(false);
+            setFormData({
+              company: '',
+              subject: '',
+              category: '',
+              process: '',
+              descripcion: '',});
           }}
           title={
             <Group>
