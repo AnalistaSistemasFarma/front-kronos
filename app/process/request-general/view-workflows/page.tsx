@@ -26,6 +26,8 @@ import {
   TextInput,
   NumberInput,
   Switch,
+  Modal,
+  ActionIcon,
 } from '@mantine/core';
 import {
   IconBuilding,
@@ -41,6 +43,9 @@ import {
   IconMapPin,
   IconCheck,
   IconX,
+  IconPlus,
+  IconTrash,
+  IconUser,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 
@@ -97,6 +102,15 @@ function ViewWorkFlowPage() {
   const [users, setUsers] = useState<{ value: string; label: string }[]>([]);
   const [statusOptions, setStatusOptions] = useState<{ value: string; label: string }[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Estados para el modal de agregar tareas
+  const [addTaskModalOpened, setAddTaskModalOpened] = useState(false);
+  const [newTaskForm, setNewTaskForm] = useState({
+    task: '',
+    id_assigned_user: '',
+    cost: 0,
+    cost_center: '',
+  });
 
   useEffect(() => {
     const storedWorkflow = sessionStorage.getItem('selectedRequest');
@@ -176,6 +190,29 @@ function ViewWorkFlowPage() {
     ]);
   };
 
+  // Funciones para manejar tareas nuevas
+  const handleAddTask = () => {
+    if (!newTaskForm.task.trim()) return;
+
+    const newTask: Task = {
+      id: Date.now() * -1, // ID negativo para identificar que es nueva
+      task: newTaskForm.task,
+      active: 1,
+      cost: newTaskForm.cost || 0,
+      cost_center: newTaskForm.cost_center,
+      assigned_user: users.find(u => u.value === newTaskForm.id_assigned_user)?.label || '',
+      id_assigned_user: newTaskForm.id_assigned_user,
+    };
+
+    setEditedTasks([...editedTasks, newTask]);
+    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '' });
+    setAddTaskModalOpened(false);
+  };
+
+  const handleRemoveTask = (taskId: number) => {
+    setEditedTasks(editedTasks.filter(t => t.id !== taskId));
+  };
+
   const handleStartEditing = () => {
     setOriginalRequest(workflow);
     setOriginalTasks([...tasks]);
@@ -214,18 +251,29 @@ function ViewWorkFlowPage() {
         originalRequest?.id_status_process !== editedWorkflow.id_status_process ||
         originalRequest?.id_assigned_process_category !== editedWorkflow.id_assigned_process_category;
 
-      // Detectar cambios en las tareas
-      const tasksChanged = 
-        originalTasks.length !== editedTasks.length ||
-        originalTasks.some((origTask, index) => {
-          const editedTask = editedTasks[index];
-          return !editedTask ||
-            origTask.task !== editedTask.task ||
-            origTask.active !== editedTask.active ||
-            origTask.cost !== editedTask.cost ||
-            origTask.cost_center !== editedTask.cost_center ||
-            origTask.id_assigned_user !== editedTask.id_assigned_user;
-        });
+      // Detectar tareas nuevas (ID negativo)
+      const newTasks = editedTasks.filter(task => task.id < 0);
+      
+      // Detectar tareas eliminadas (están en originalTasks pero no en editedTasks)
+      const deletedTaskIds = originalTasks
+        .filter(origTask => !editedTasks.find(et => et.id === origTask.id))
+        .map(t => t.id);
+      
+      // Detectar tareas actualizadas (ID positivo y cambiaron)
+      const updatedTasks = editedTasks.filter(task => {
+        if (task.id < 0) return false; // Es nueva, ya se procesó
+        const originalTask = originalTasks.find(ot => ot.id === task.id);
+        if (!originalTask) return false;
+        return (
+          originalTask.task !== task.task ||
+          originalTask.active !== task.active ||
+          originalTask.cost !== task.cost ||
+          originalTask.cost_center !== task.cost_center ||
+          originalTask.id_assigned_user !== task.id_assigned_user
+        );
+      });
+
+      const tasksChanged = newTasks.length > 0 || deletedTaskIds.length > 0 || updatedTasks.length > 0;
 
       // Preparar el cuerpo de la petición
       const requestBody: any = {
@@ -246,16 +294,33 @@ function ViewWorkFlowPage() {
 
       // Solo incluir tareas si cambiaron
       if (tasksChanged) {
-        const tasksToUpdate = editedTasks.map((task) => ({
-          id: task.id,
-          task: task.task,
-          active: task.active,
-          cost: task.cost,
-          cost_center: task.cost_center,
-          id_user_assigned: task.id_assigned_user,
-          action: 'update',
-        }));
-        requestBody.tasks = tasksToUpdate;
+        const tasksToProcess = [
+          // Tareas nuevas
+          ...newTasks.map((task) => ({
+            task: task.task,
+            active: task.active,
+            cost: task.cost,
+            cost_center: task.cost_center,
+            id_user_assigned: task.id_assigned_user,
+            action: 'create',
+          })),
+          // Tareas actualizadas
+          ...updatedTasks.map((task) => ({
+            id: task.id,
+            task: task.task,
+            active: task.active,
+            cost: task.cost,
+            cost_center: task.cost_center,
+            id_user_assigned: task.id_assigned_user,
+            action: 'update',
+          })),
+          // Tareas eliminadas
+          ...deletedTaskIds.map((id) => ({
+            id,
+            action: 'delete',
+          })),
+        ];
+        requestBody.tasks = tasksToProcess;
         requestBody.updateTasks = true;
       } else {
         requestBody.updateTasks = false;
@@ -598,21 +663,6 @@ function ViewWorkFlowPage() {
                   <Card withBorder radius='md' p='md' bg='white'>
                     <Stack gap='sm'>
                       <Text size='sm' c='gray.6' fw={500}>
-                        Estado del Proceso
-                      </Text>
-                      <Badge
-                        color={getStatusColor(workflow.status_process)}
-                        size='lg'
-                        variant='light'
-                      >
-                        {workflow.status_process}
-                      </Badge>
-                    </Stack>
-                  </Card>
-
-                  <Card withBorder radius='md' p='md' bg='white'>
-                    <Stack gap='sm'>
-                      <Text size='sm' c='gray.6' fw={500}>
                         Activo
                       </Text>
                       {isEditing ? (
@@ -660,19 +710,34 @@ function ViewWorkFlowPage() {
               withBorder
               className='bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200 h-full'
             >
-              <Group mb='md'>
-                <Box
-                  className='bg-amber-500 p-2 rounded-lg'
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <IconListCheck size={24} color='white' />
-                </Box>
-                <Title order={2} className='text-amber-700'>
-                  Flujo de Actividades
-                </Title>
-                <Badge color='amber' size='lg' variant='light' ml='auto'>
-                  {tasks.length} {tasks.length === 1 ? 'tarea' : 'tareas'}
-                </Badge>
+              <Group mb='md' justify='space-between'>
+                <Group>
+                  <Box
+                    className='bg-amber-500 p-2 rounded-lg'
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <IconListCheck size={24} color='white' />
+                  </Box>
+                  <Title order={2} className='text-amber-700'>
+                    Flujo de Actividades
+                  </Title>
+                </Group>
+                <Group>
+                  <Badge color='amber' size='lg' variant='light'>
+                    {isEditing ? editedTasks.length : tasks.length} {((isEditing ? editedTasks.length : tasks.length) === 1) ? 'tarea' : 'tareas'}
+                  </Badge>
+                  {isEditing && (
+                    <Button
+                      size='sm'
+                      leftSection={<IconPlus size={16} />}
+                      onClick={() => setAddTaskModalOpened(true)}
+                      color='blue'
+                      variant='light'
+                    >
+                      Agregar Tarea
+                    </Button>
+                  )}
+                </Group>
               </Group>
 
               <LoadingOverlay
@@ -681,7 +746,7 @@ function ViewWorkFlowPage() {
                 overlayProps={{ radius: 'sm', blur: 2 }}
               />
 
-              {tasks.length === 0 && !loadingTasks ? (
+              {(isEditing ? editedTasks.length === 0 : tasks.length === 0) && !loadingTasks ? (
                 <Alert
                   icon={<IconAlertCircle size={16} />}
                   title='Sin tareas'
@@ -689,11 +754,23 @@ function ViewWorkFlowPage() {
                   variant='light'
                 >
                   Este flujo de trabajo no tiene tareas asignadas.
+                  {isEditing && (
+                    <Button
+                      size='xs'
+                      mt='sm'
+                      leftSection={<IconPlus size={14} />}
+                      onClick={() => setAddTaskModalOpened(true)}
+                      color='blue'
+                      variant='light'
+                    >
+                      Agregar primera tarea
+                    </Button>
+                  )}
                 </Alert>
               ) : (
                 <ScrollArea>
                   <div className='space-y-0'>
-                    {tasks.map((task, index) => (
+                    {(isEditing ? editedTasks : tasks).map((task, index) => (
                       <div key={task.id} className='relative'>
                         <Card
                           shadow='sm'
@@ -707,7 +784,7 @@ function ViewWorkFlowPage() {
                                 ? 'bg-white border-amber-300 hover:border-amber-400 hover:shadow-md'
                                 : 'bg-gray-50 border-gray-200 opacity-75'
                             }
-                            cursor-pointer
+                            ${task.id < 0 ? 'border-blue-400 border-dashed' : ''}
                           `}
                         >
                           <Grid>
@@ -729,7 +806,7 @@ function ViewWorkFlowPage() {
                               </div>
                             </Grid.Col>
 
-                            <Grid.Col span={{ base: 12, md: 11 }}>
+                            <Grid.Col span={{ base: 12, md: 10 }}>
                               <Stack gap='xs'>
                                 <Group justify='space-between' align='flex-start'>
                                   <div style={{ flex: 1 }}>
@@ -749,6 +826,17 @@ function ViewWorkFlowPage() {
                                       </Text>
                                     )}
                                   </div>
+                                  {isEditing && (
+                                    <ActionIcon
+                                      color='red'
+                                      variant='subtle'
+                                      size='lg'
+                                      onClick={() => handleRemoveTask(task.id)}
+                                      title='Eliminar tarea'
+                                    >
+                                      <IconTrash size={18} />
+                                    </ActionIcon>
+                                  )}
                                 </Group>
 
                                 <Grid mt='sm'>
@@ -820,7 +908,6 @@ function ViewWorkFlowPage() {
                                         </Text>
                                       </Group>
                                       {isEditing ? (
-                                        <>
                                         <Select
                                           value={editedTasks[index]?.cost_center || ''}
                                           onChange={(value) => {
@@ -834,7 +921,6 @@ function ViewWorkFlowPage() {
                                           clearable
                                           size='sm'
                                         />
-                                        </>
                                       ) : (
                                         <Text size='sm' fw={500} c='gray.8'>
                                           {getCostCenter(task.cost_center) || 'N/A'}
@@ -848,7 +934,7 @@ function ViewWorkFlowPage() {
                           </Grid>
                         </Card>
 
-                        {index < tasks.length - 1 && (
+                        {index < (isEditing ? editedTasks.length : tasks.length) - 1 && (
                           <div className='flex justify-center py-3'>
                             <div
                               className={`
@@ -927,6 +1013,144 @@ function ViewWorkFlowPage() {
             </Button>
           </Group>
         </Card>
+
+        {/* Modal para agregar nueva tarea */}
+        <Modal
+          opened={addTaskModalOpened}
+          onClose={() => {
+            setAddTaskModalOpened(false);
+            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '' });
+          }}
+          title={
+            <Group gap='sm'>
+              <div className='flex items-center justify-center w-10 h-10 rounded-lg bg-blue-100'>
+                <IconPlus size={20} className='text-blue-600' />
+              </div>
+              <div>
+                <Text size='lg' fw={600} className='text-gray-900'>
+                  Agregar Nueva Tarea
+                </Text>
+                <Text size='xs' c='gray.5'>
+                  Complete los campos para agregar una tarea
+                </Text>
+              </div>
+            </Group>
+          }
+          size='lg'
+          radius='lg'
+          overlayProps={{ blur: 4 }}
+          centered
+          classNames={{
+            header: 'border-b border-gray-100 pb-4',
+            body: 'pt-4',
+          }}
+        >
+          <Stack gap='lg'>
+            <Grid>
+              <Grid.Col span={12}>
+                <TextInput
+                  label='Nombre de la Tarea'
+                  placeholder='Ingrese el nombre de la tarea'
+                  value={newTaskForm.task}
+                  onChange={(e) => setNewTaskForm({ ...newTaskForm, task: e.target.value })}
+                  required
+                  leftSection={<IconListCheck size={16} />}
+                  size='lg'
+                  classNames={{
+                    label: 'text-sm font-medium text-gray-700 mb-2',
+                    input: 'min-h-[48px] text-base',
+                  }}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label='Asignado a'
+                  placeholder='Seleccione un usuario'
+                  data={users}
+                  value={newTaskForm.id_assigned_user}
+                  onChange={(value) => setNewTaskForm({ ...newTaskForm, id_assigned_user: value || '' })}
+                  leftSection={<IconUser size={16} />}
+                  searchable
+                  clearable
+                  size='lg'
+                  classNames={{
+                    label: 'text-sm font-medium text-gray-700 mb-2',
+                    input: 'min-h-[48px] text-base',
+                  }}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <NumberInput
+                  label='Costo'
+                  placeholder='0'
+                  value={newTaskForm.cost || undefined}
+                  onChange={(value) => setNewTaskForm({ ...newTaskForm, cost: Number(value) || 0 })}
+                  min={0}
+                  decimalScale={2}
+                  hideControls
+                  leftSection={<IconCoin size={16} />}
+                  size='lg'
+                  classNames={{
+                    label: 'text-sm font-medium text-gray-700 mb-2',
+                    input: 'min-h-[48px] text-base',
+                  }}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={12}>
+                <Select
+                  label='Centro de Costo'
+                  placeholder='Seleccione el centro de costo'
+                  data={[
+                    { value: 'Abastecimiento y Comex', label: 'Abastecimiento y Comex' },
+                    { value: 'Asuntos Regulatorios', label: 'Asuntos Regulatorios' },
+                    { value: 'Diseño Grafico', label: 'Diseño Grafico' },
+                    { value: 'Oficial de Cumplimiento', label: 'Oficial de Cumplimiento' },
+                    { value: 'Operaciones y Finanzas', label: 'Operaciones y Finanzas' },
+                    { value: 'Planeación', label: 'Planeación' },
+                    { value: 'Dirección General', label: 'Dirección General' },
+                    { value: 'Proyectos', label: 'Proyectos' },
+                    { value: 'SST', label: 'SST' },
+                    { value: 'Talento Humano', label: 'Talento Humano' },
+                    { value: 'Tecnica', label: 'Tecnica' },
+                    { value: 'Tecnología', label: 'Tecnología' }
+                  ]}
+                  value={newTaskForm.cost_center}
+                  onChange={(value) => setNewTaskForm({ ...newTaskForm, cost_center: value || '' })}
+                  leftSection={<IconMapPin size={16} />}
+                  clearable
+                  size='lg'
+                  classNames={{
+                    label: 'text-sm font-medium text-gray-700 mb-2',
+                    input: 'min-h-[48px] text-base',
+                  }}
+                />
+              </Grid.Col>
+            </Grid>
+
+            <Group justify='flex-end' gap='sm' mt='md'>
+              <Button
+                variant='outline'
+                onClick={() => {
+                  setAddTaskModalOpened(false);
+                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '' });
+                }}
+                className='cursor-pointer hover:bg-gray-50 transition-colors duration-200'
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleAddTask}
+                disabled={!newTaskForm.task.trim()}
+                className='bg-blue-600 hover:bg-blue-700 cursor-pointer transition-colors duration-200'
+              >
+                Agregar Tarea
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
       </div>
     </div>
   );

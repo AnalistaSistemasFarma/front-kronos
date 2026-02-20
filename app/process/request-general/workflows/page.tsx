@@ -116,7 +116,6 @@ function RequestBoard() {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
-  // Estados para el manejo de tareas
   const [tasks, setTasks] = useState<
     Array<{
       id: string;
@@ -133,7 +132,6 @@ function RequestBoard() {
     centroCosto: '',
   });
 
-  // Funciones para manejar tareas
   const addTask = () => {
     if (!taskForm.tarea.trim()) return;
 
@@ -173,7 +171,6 @@ function RequestBoard() {
     assignedUsers: Array<{ id: number; name: string }>;
   }>({ categories: [], processCategories: [], assignedUsers: [] });
 
-  // Estados para modales de creación
   const [categoryModalOpened, setCategoryModalOpened] = useState(false);
   const [processModalOpened, setProcessModalOpened] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -183,13 +180,11 @@ function RequestBoard() {
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [creatingProcess, setCreatingProcess] = useState(false);
 
-  // Estado para el asignado de categoría automático
   const [assignedCategoryInfo, setAssignedCategoryInfo] = useState<{
     id: string;
     name: string;
   } | null>(null);
 
-  // Función para obtener datos de workflow por empresa
   const fetchWorkflowData = async (companyId?: string) => {
     try {
       setFormDataLoading(true);
@@ -202,7 +197,6 @@ function RequestBoard() {
 
       setWorkflowData(data);
 
-      // Mapear categorías para el Select
       if (data.categories && data.categories.length > 0) {
         setCategoriesWF(
           data.categories.map((c: { id_category: number; category: string }) => ({
@@ -214,7 +208,6 @@ function RequestBoard() {
         setCategoriesWF([]);
       }
 
-      // Mapear procesos para el Select
       if (data.processCategories && data.processCategories.length > 0) {
         setProcessWF(
           data.processCategories.map((p: { id_process: number; process: string }) => ({
@@ -226,7 +219,6 @@ function RequestBoard() {
         setProcessWF([]);
       }
 
-      // Mapear usuarios asignados
       if (data.assignedUsers) {
         setAssignedUsers(
           data.assignedUsers.map((u: { id: number; name: string }) => ({
@@ -259,7 +251,6 @@ function RequestBoard() {
     }
   };
 
-  // Función para manejar cambio de categoría
   const handleCategoryChange = (value: string | null) => {
     const categoryValue = value || '';
     const selectedCategory = workflowData.categories.find(
@@ -282,7 +273,6 @@ function RequestBoard() {
     }
   };
 
-  // Función para crear categoría
   const handleCreateCategory = async () => {
     if (!newCategoryName.trim() || !newCategoryAssigned || !formData.company) return;
 
@@ -313,22 +303,17 @@ function RequestBoard() {
         throw new Error(data.message || 'Error al crear la categoría');
       }
 
-      // Cerrar modal y limpiar campos
       setCategoryModalOpened(false);
       setNewCategoryName('');
       setNewCategoryAssigned('');
 
-      // Refrescar categorías
       await fetchWorkflowData(formData.company);
 
-      // Seleccionar la nueva categoría automáticamente
-      // El ID vendría en la respuesta del endpoint
       if (data.id_request) {
         setFormData((prev) => ({
           ...prev,
           category: data.id_request.toString(),
         }));
-        // Actualizar el asignado de categoría usando el valor guardado
         const assignedUser = assignedUsers.find((u) => u.value === assignedUserId);
         if (assignedUser) {
           setAssignedCategoryInfo({
@@ -345,13 +330,10 @@ function RequestBoard() {
     }
   };
 
-  // Función para crear proceso (placeholder - el usuario implementará el endpoint)
   const handleCreateProcess = async () => {
     if (!newProcessName.trim()) return;
 
     setCreatingProcess(true);
-    // Placeholder: Aquí iría la llamada al endpoint para crear proceso
-    // Por ahora solo cerramos el modal y refrescamos
     console.log(
       'Crear proceso:',
       newProcessName,
@@ -361,12 +343,11 @@ function RequestBoard() {
       formData.category
     );
 
-    // Simular creación exitosa
     setTimeout(() => {
       setProcessModalOpened(false);
       setNewProcessName('');
       setNewProcessAssigned('');
-      fetchWorkflowData(formData.company); // Refrescar procesos
+      fetchWorkflowData(formData.company); 
       setCreatingProcess(false);
     }, 500);
   };
@@ -629,7 +610,6 @@ function RequestBoard() {
     try {
       setCreateLoading(true);
 
-      // Preparar las tareas para enviar
       const tasksToSend = tasks.map((task) => ({
         id: task.id,
         task: task.tarea,
@@ -664,7 +644,6 @@ function RequestBoard() {
 
       const result = await response.json();
 
-      // Limpiar formulario
       setFormData({
         company: '',
         category: '',
@@ -678,7 +657,6 @@ function RequestBoard() {
       setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
       setAssignedCategoryInfo(null);
 
-      // Refrescar lista y cerrar modal
       fetchWorkFlows();
       setModalOpened(false);
     } catch (err) {
@@ -1173,6 +1151,15 @@ function RequestBoard() {
             setFormErrors({});
             setTasks([]);
             setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+            setFormData({
+              company: '',
+              category: '',
+              usuario: '',
+              process: '',
+              descripcion: '',
+              costCenter: '',
+              assignedProcess: '',
+            });
           }}
           title={
             <Group gap='sm'>
@@ -1429,7 +1416,20 @@ function RequestBoard() {
                       <Select
                         label='Centro de Costo *'
                         placeholder='Seleccione el centro de costo'
-                        data={[{ value: '1', label: 'Contabilidad' }]}
+                        data={[
+                          { value: 'Abastecimiento y Comex', label: 'Abastecimiento y Comex' },
+                          { value: 'Asuntos Regulatorios', label: 'Asuntos Regulatorios' },
+                          { value: 'Diseño Grafico', label: 'Diseño Grafico' },
+                          { value: 'Oficial de Cumplimiento', label: 'Oficial de Cumplimiento' },
+                          { value: 'Operaciones y Finanzas', label: 'Operaciones y Finanzas' },
+                          { value: 'Planeación', label: 'Planeación' },
+                          { value: 'Dirección General', label: 'Dirección General' },
+                          { value: 'Proyectos', label: 'Proyectos' },
+                          { value: 'SST', label: 'SST' },
+                          { value: 'Talento Humano', label: 'Talento Humano' },
+                          { value: 'Tecnica', label: 'Tecnica' },
+                          { value: 'Tecnología', label: 'Tecnología' }
+                        ]}
                         value={formData.costCenter}
                         onChange={(value) => setFormData({ ...formData, costCenter: value || '' })}
                         error={formErrors.costCenter}
@@ -1533,7 +1533,20 @@ function RequestBoard() {
                         <Select
                           label='Centro de Costo'
                           placeholder='Seleccione'
-                          data={[{ value: '1', label: 'Contabilidad' }]}
+                          data={[
+                            { value: 'Abastecimiento y Comex', label: 'Abastecimiento y Comex' },
+                            { value: 'Asuntos Regulatorios', label: 'Asuntos Regulatorios' },
+                            { value: 'Diseño Grafico', label: 'Diseño Grafico' },
+                            { value: 'Oficial de Cumplimiento', label: 'Oficial de Cumplimiento' },
+                            { value: 'Operaciones y Finanzas', label: 'Operaciones y Finanzas' },
+                            { value: 'Planeación', label: 'Planeación' },
+                            { value: 'Dirección General', label: 'Dirección General' },
+                            { value: 'Proyectos', label: 'Proyectos' },
+                            { value: 'SST', label: 'SST' },
+                            { value: 'Talento Humano', label: 'Talento Humano' },
+                            { value: 'Tecnica', label: 'Tecnica' },
+                            { value: 'Tecnología', label: 'Tecnología' }
+                          ]}
                           value={taskForm.centroCosto}
                           onChange={(value) =>
                             setTaskForm({ ...taskForm, centroCosto: value || '' })

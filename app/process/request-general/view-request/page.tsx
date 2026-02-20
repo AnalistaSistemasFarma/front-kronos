@@ -1659,6 +1659,7 @@ function ViewRequestPage() {
                   <Table.Th>Estado</Table.Th>
                   <Table.Th>Fecha Inicio</Table.Th>
                   <Table.Th>Fecha Fin</Table.Th>
+                  <Table.Th>Resolución</Table.Th>
                   <Table.Th>Acción</Table.Th>
                 </Table.Tr>
               </Table.Thead>
@@ -1681,6 +1682,9 @@ function ViewRequestPage() {
                       {task.end_date
                         ? new Date(task.end_date).toLocaleDateString('es-CO')
                         : 'N/A'}
+                    </Table.Td>
+                    <Table.Td>
+                      {task.resolution}
                     </Table.Td>
                     <Table.Td>
                       <ActionIcon
