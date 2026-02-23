@@ -243,7 +243,6 @@ function ViewWorkFlowPage() {
 
     setIsSaving(true);
     try {
-      // Detectar qué cambió comparando con los valores originales
       const processChanged = 
         originalRequest?.process !== editedWorkflow.process ||
         originalRequest?.description !== editedWorkflow.description ||
@@ -251,17 +250,14 @@ function ViewWorkFlowPage() {
         originalRequest?.id_status_process !== editedWorkflow.id_status_process ||
         originalRequest?.id_assigned_process_category !== editedWorkflow.id_assigned_process_category;
 
-      // Detectar tareas nuevas (ID negativo)
       const newTasks = editedTasks.filter(task => task.id < 0);
       
-      // Detectar tareas eliminadas (están en originalTasks pero no en editedTasks)
       const deletedTaskIds = originalTasks
         .filter(origTask => !editedTasks.find(et => et.id === origTask.id))
         .map(t => t.id);
       
-      // Detectar tareas actualizadas (ID positivo y cambiaron)
       const updatedTasks = editedTasks.filter(task => {
-        if (task.id < 0) return false; // Es nueva, ya se procesó
+        if (task.id < 0) return false;
         const originalTask = originalTasks.find(ot => ot.id === task.id);
         if (!originalTask) return false;
         return (
@@ -275,12 +271,34 @@ function ViewWorkFlowPage() {
 
       const tasksChanged = newTasks.length > 0 || deletedTaskIds.length > 0 || updatedTasks.length > 0;
 
-      // Preparar el cuerpo de la petición
-      const requestBody: any = {
+      interface TaskToProcess {
+        id?: number;
+        task?: string;
+        active?: number;
+        cost?: number;
+        cost_center?: string;
+        id_user_assigned?: string;
+        action: 'create' | 'update' | 'delete';
+      }
+
+      interface RequestBody {
+        id_process: number;
+        process?: string;
+        description?: string;
+        active?: number;
+        id_status?: number;
+        id_user_assigned?: string;
+        updateProcess: boolean;
+        updateTasks: boolean;
+        tasks?: TaskToProcess[];
+      }
+
+      const requestBody: RequestBody = {
         id_process: editedWorkflow.id,
+        updateProcess: false,
+        updateTasks: false,
       };
 
-      // Solo incluir datos del proceso si cambió
       if (processChanged) {
         requestBody.process = editedWorkflow.process;
         requestBody.description = editedWorkflow.description;
@@ -292,19 +310,16 @@ function ViewWorkFlowPage() {
         requestBody.updateProcess = false;
       }
 
-      // Solo incluir tareas si cambiaron
       if (tasksChanged) {
-        const tasksToProcess = [
-          // Tareas nuevas
+        const tasksToProcess: TaskToProcess[] = [
           ...newTasks.map((task) => ({
             task: task.task,
             active: task.active,
             cost: task.cost,
             cost_center: task.cost_center,
             id_user_assigned: task.id_assigned_user,
-            action: 'create',
+            action: 'create' as const,
           })),
-          // Tareas actualizadas
           ...updatedTasks.map((task) => ({
             id: task.id,
             task: task.task,
@@ -312,12 +327,12 @@ function ViewWorkFlowPage() {
             cost: task.cost,
             cost_center: task.cost_center,
             id_user_assigned: task.id_assigned_user,
-            action: 'update',
+            action: 'update' as const,
           })),
           // Tareas eliminadas
           ...deletedTaskIds.map((id) => ({
             id,
-            action: 'delete',
+            action: 'delete' as const,
           })),
         ];
         requestBody.tasks = tasksToProcess;
@@ -326,7 +341,6 @@ function ViewWorkFlowPage() {
         requestBody.updateTasks = false;
       }
 
-      // Si nada cambió, mostrar mensaje y salir
       if (!processChanged && !tasksChanged) {
         setUpdateMessage({ type: 'success', text: 'No se detectaron cambios para guardar' });
         setIsEditing(false);
@@ -335,7 +349,6 @@ function ViewWorkFlowPage() {
         return;
       }
 
-      // Llamar al endpoint unificado
       const response = await fetch('/api/requests-general/update-workflow-complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -349,11 +362,9 @@ function ViewWorkFlowPage() {
 
       const result = await response.json();
 
-      // Actualizar estados locales
       setWorkflow(editedWorkflow);
       setTasks(editedTasks);
       
-      // Mostrar mensaje específico según lo que se actualizó
       setUpdateMessage({ 
         type: 'success', 
         text: result.message || 'Cambios guardados correctamente' 
@@ -361,10 +372,20 @@ function ViewWorkFlowPage() {
       setIsEditing(false);
       setEditedWorkflow(null);
       setEditedTasks([]);
-    } catch (err: any) {
+    } catch (err: unknown) {
+
       console.error('Error saving changes:', err);
-      setUpdateMessage({ type: 'error', text: err.message || 'Error al guardar los cambios' });
-    } finally {
+
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : 'Error al guardar los cambios';
+
+      setUpdateMessage({
+        type: 'error',
+        text: errorMessage
+      });
+    }finally {
       setIsSaving(false);
     }
   };
