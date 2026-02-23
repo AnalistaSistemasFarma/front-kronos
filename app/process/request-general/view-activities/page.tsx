@@ -549,6 +549,17 @@ function ViewRequestPage() {
     const currentStatus = resolutionData.estado 
       ? Number(resolutionData.estado) 
       : request?.id_status;
+
+    if (
+      currentStatus === 2 &&
+      (!resolutionData.resolucion || resolutionData.resolucion.trim() === '')
+    ) {
+      setUpdateMessage({
+        type: 'error',
+        text: 'No se puede cerrar la tarea ya que no hay descripción de la resolución.',
+      });
+      return;
+    }
     
     if (resolutionData.resolucion && resolutionData.resolucion.trim() !== '' && currentStatus !== 2) {
       setUpdateMessage({
@@ -564,16 +575,12 @@ function ViewRequestPage() {
     const processChanged =
       originalRequest?.id_process_category !== request?.id_process_category;
 
-    const statusChangedFrom4To1 =
-      originalRequest?.id_status === 4 &&
-      Number(resolutionData.estado) === 1;
+    const statusChangedFrom2To1 =
+      (originalRequest?.id_status === 1 || originalRequest?.id_status ===4) &&
+      Number(resolutionData.estado) === 2;
 
     if (processChanged) {
       await addSystemNote('Se ha cambiado la categoría de la solicitud');
-    }
-
-    if (statusChangedFrom4To1) {
-      await addSystemNote('El funcionario ha comenzado a ejecutar esta tarea');
     }
 
     try {
@@ -627,6 +634,10 @@ function ViewRequestPage() {
       }
 
       const result = await response.json();
+
+      if (statusChangedFrom2To1) {
+        await addSystemNote(resolutionData.resolucion);
+      }
 
       // Refrescar datos desde el servidor
       await fetchRequestData();
@@ -756,6 +767,26 @@ function ViewRequestPage() {
       localStorage.removeItem(`request-${request.id_request_general}-files`);
     }
   }, [attachedFiles, request?.id]);
+
+  const statusOptions = (() => {
+
+    if (request?.id_status === 1) {
+      return [
+        { value: '2', label: 'Resuelto' }
+      ];
+    }
+
+    if (request?.id_status === 4) {
+      return [
+        { value: '1', label: 'En progreso' }
+      ];
+    }
+
+    return [
+      { value: '1', label: 'En progreso' },
+      { value: '2', label: 'Resuelto' },
+    ];
+  })();
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -1239,15 +1270,12 @@ function ViewRequestPage() {
                     Cambiar Estado de la Tarea
                   </Title>
 
-                  {isEditing && canEdit ? (
+                  {isEditing ? (
                     <Stack>
                       <Select
                         label='Estado de la Tarea'
                         placeholder='Selecciona estado'
-                        data={[
-                          { value: '1', label: 'En progreso' },
-                          { value: '2', label: 'Resuelto' },
-                        ]}
+                        data={statusOptions}
                         value={resolutionData.estado}
                         onChange={(val) =>
                           setResolutionData({ ...resolutionData, estado: val || '' })
@@ -1280,7 +1308,7 @@ function ViewRequestPage() {
                       <IconCheck size={18} className='text-green-6' />
                       Resolución de la Tarea
                     </Title>
-                    {isEditing && canEdit && (
+                    {isEditing && (
                       <ActionIcon
                         variant='subtle'
                         onClick={() => setShowResolution(!showResolution)}
@@ -1290,7 +1318,7 @@ function ViewRequestPage() {
                     )}
                   </Group>
 
-                  {isEditing && showResolution && canEdit && (
+                  {isEditing && showResolution && (
                     <Stack>
                       {/* Validación: solo permitir resolución si el estado es 2 */}
                       {resolutionData.resolucion && resolutionData.estado !== '2' && !resolutionData.estado ? (
@@ -1433,7 +1461,7 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
-                  disabled={!canEdit || loadingPermissions || isRequestResolved()}
+                  disabled={isRequestResolved()}
                 >
                   Editar Tarea
                 </Button>

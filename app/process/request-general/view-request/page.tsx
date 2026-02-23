@@ -888,6 +888,8 @@ function ViewRequestPage() {
   };
 
   const handleViewTask = (task: ViewTasksRequestGeneral) => {
+    sessionStorage.removeItem('selectedRequest');
+
     router.push(`/process/request-general/view-activities?id=${task.id}`);
   };
 
@@ -912,6 +914,19 @@ function ViewRequestPage() {
       localStorage.removeItem(`request-${request.id}-files`);
     }
   }, [attachedFiles, request?.id]);
+
+  const getStatusColorTask = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'sin empezar':
+        return 'gray';
+      case 'abierto':
+        return 'blue';
+      case 'resuelto':
+        return 'green';
+      default:
+        return 'red';
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -1669,18 +1684,40 @@ function ViewRequestPage() {
                     <Table.Td>{task.task}</Table.Td>
                     <Table.Td>{task.name}</Table.Td>
                     <Table.Td>
-                      <Badge color={getStatusColor(task.status)} size="sm">
+                      <Badge color={getStatusColorTask(task.status)} size="sm">
                         {task.status}
                       </Badge>
                     </Table.Td>
                     <Table.Td>
                       {task.start_date
-                        ? new Date(task.start_date).toLocaleDateString('es-CO')
+                        ? new Intl.DateTimeFormat('es-CO', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true,
+                          }).format(
+                            new Date(
+                              new Date(task.start_date).getTime()
+                            )
+                          )
                         : 'N/A'}
                     </Table.Td>
                     <Table.Td>
                       {task.end_date
-                        ? new Date(task.end_date).toLocaleDateString('es-CO')
+                        ? new Intl.DateTimeFormat('es-CO', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true,
+                          }).format(
+                            new Date(
+                              new Date(task.end_date).getTime()
+                            )
+                          )
                         : 'N/A'}
                     </Table.Td>
                     <Table.Td>

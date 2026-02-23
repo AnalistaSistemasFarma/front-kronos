@@ -36,22 +36,19 @@ export async function GET(req) {
     `;
 
     if (idUser) {
-      query += ` AND upcrg.id_user = @idUser OR ucrg.id_user = @idUser`;
-      console.log('API requests-general: Agregando filtro por assigned user:', idUser);
+      query += ` AND (upcrg.id_user = @idUser OR ucrg.id_user = @idUser)`;
     } else {
-      console.log('API requests-general: No se proporcionó idUser, devolviendo error');
       return NextResponse.json(
-        { error: 'Se requiere el parámetro idUser para filtrar tickets asignados' },
+        { error: 'Se requiere el parámetro idUser' },
         { status: 400 }
       );
     }
 
     if (status && status !== '0') {
       query += ` AND rg.status_req = @status`;
-      console.log('API requests-general: Agregando filtro por status:', status);
+    } else if (!status) {
+      query += ` AND rg.status_req = 1`;
     }
-
-    else if (!status) query += ` AND sc.id_status_case = 1`;
 
     if (company) {
       query += ` AND rg.id_company = @company`;
@@ -72,10 +69,6 @@ export async function GET(req) {
     const request = pool.request();
 
     request.input('idUser', sql.NVarChar, idUser);
-    
-    if (assigned_to) {
-      request.input('assignedTo', sql.NVarChar, assigned_to);
-    }
 
     if (status) {
       request.input('status', sql.Int, parseInt(status));

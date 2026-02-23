@@ -413,13 +413,24 @@ function ViewWorkFlowPage() {
     }
   };
 
-  const getCostCenter = (cost_center: string) => {
-    switch (cost_center) {
-      case '1':
-        return 'Contabilidad';
-      default:
-        return 'Otro';
-    }
+  const costCenters = [
+    'Abastecimiento y Comex',
+    'Asuntos Regulatorios',
+    'Diseño Grafico',
+    'Oficial de Cumplimiento',
+    'Operaciones y Finanzas',
+    'Planeación',
+    'Dirección General',
+    'Proyectos',
+    'SST',
+    'Talento Humano',
+    'Tecnica',
+    'Tecnología'
+  ];
+
+  const getCostCenter = (cost_center?: string) => {
+    if (!cost_center) return 'N/A';
+    return costCenters.includes(cost_center) ? cost_center : 'Otro';
   };
 
   const getBreadcrumbHref = (from: string) => {
@@ -936,7 +947,20 @@ function ViewWorkFlowPage() {
                                             newTasks[index] = { ...newTasks[index], cost_center: value || '' };
                                             setEditedTasks(newTasks);
                                           }}
-                                          data={[{ value: '1', label: 'Contabilidad' }]}
+                                          data={[
+                                            { value: 'Abastecimiento y Comex', label: 'Abastecimiento y Comex' },
+                                            { value: 'Asuntos Regulatorios', label: 'Asuntos Regulatorios' },
+                                            { value: 'Diseño Grafico', label: 'Diseño Grafico' },
+                                            { value: 'Oficial de Cumplimiento', label: 'Oficial de Cumplimiento' },
+                                            { value: 'Operaciones y Finanzas', label: 'Operaciones y Finanzas' },
+                                            { value: 'Planeación', label: 'Planeación' },
+                                            { value: 'Dirección General', label: 'Dirección General' },
+                                            { value: 'Proyectos', label: 'Proyectos' },
+                                            { value: 'SST', label: 'SST' },
+                                            { value: 'Talento Humano', label: 'Talento Humano' },
+                                            { value: 'Tecnica', label: 'Tecnica' },
+                                            { value: 'Tecnología', label: 'Tecnología' }
+                                          ]}
                                           placeholder='Seleccione el centro de costo'
                                           searchable
                                           clearable
