@@ -86,7 +86,7 @@ function RequestBoard() {
   const [idUser, setIdUser] = useState('');
 
   const [filters, setFilters] = useState({
-    status: '',
+    status: '0',
     company: '',
     date_from: '',
     date_to: '',
@@ -277,20 +277,6 @@ function RequestBoard() {
     }
   };
 
-  const handleFormChange = (field: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-
-    if (formErrors[field]) {
-      setFormErrors((prev) => ({
-        ...prev,
-        [field]: '',
-      }));
-    }
-  };
-
   const handleFilterChange = (field: string, value: string) => {
     setFilters((prev) => ({
       ...prev,
@@ -468,7 +454,7 @@ function RequestBoard() {
                       { value: '4', label: 'Sin Empezar' },
                       { value: '1', label: 'Abierto' },
                       { value: '3', label: 'Cancelado' },
-                      { value: '2', label: 'Completada' },
+                      { value: '2', label: 'Resuelto' },
                     ]}
                     value={filters.status}
                     onChange={(value) => handleFilterChange('status', value || '')}

@@ -116,7 +116,6 @@ function RequestBoard() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
     company: '',
     usuario: '',
@@ -124,7 +123,6 @@ function RequestBoard() {
     category: '',
     process: '',
   });
-  const [createLoading, setCreateLoading] = useState(false);
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
   const [categories, setCategories] = useState<Option[]>([]);
@@ -145,31 +143,6 @@ function RequestBoard() {
     assigned_to: '',
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [folderContents, setFolderContents] = useState([]);
-  const [newNote, setNewNote] = useState('');
-  const [loadingNotes, setLoadingNotes] = useState(false);
-  const [showResolution, setShowResolution] = useState(false);
-  const [resolutionData, setResolutionData] = useState({
-    estado: '',
-    correo: '',
-    resolucion: '',
-    notificarPorCorreo: false,
-  });
-  const [isEditing, setIsEditing] = useState(false);
-  const [originalTicket, setOriginalTicket] = useState<Ticket | null>(null);
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [updateMessage, setUpdateMessage] = useState<{
-    type: 'success' | 'error';
-    text: string;
-  } | null>(null);
-  const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
-
-  const [noteData, setNoteData] = useState({
-    correo: '',
-    notificarPorCorreo: false,
-  });
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -392,95 +365,11 @@ function RequestBoard() {
     }
   };
 
-  const handleFormChange = (field: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-
-    if (formErrors[field]) {
-      setFormErrors((prev) => ({
-        ...prev,
-        [field]: '',
-      }));
-    }
-  };
-
   const handleFilterChange = (field: string, value: string) => {
     setFilters((prev) => ({
       ...prev,
       [field]: value,
     }));
-  };
-
-  async function CheckOrCreateFolderAndUpload(
-    folderName: string,
-    files: { file: File }[],
-    token: string
-  ) {
-    let folderId: string;
-
-    try {
-      const getResponse = await axios.get(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (getResponse.status === 200) {
-        folderId = (getResponse.data as { id: string }).id;
-      } else {
-        throw new Error('Error al verificar la existencia de la carpeta.');
-      }
-    } catch (getError: unknown) {
-      if (getError instanceof Error) {
-        console.error(getError.message);
-      } else {
-        console.error(getError);
-      }
-    }
-
-    if (files && files.length > 0) {
-      const uploadPromises = files.map((file: { file: File }) =>
-        axios.put(
-          `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
-          file.file,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': file.file.type,
-            },
-          }
-        )
-      );
-
-      const results = await Promise.all(uploadPromises);
-
-      results.forEach((response, index) => {
-        if (response.status === 201 || response.status === 200) {
-          console.log(`Archivo subido: ${files[index].file.name}`, response.data);
-        } else {
-          console.log(`Error al subir el archivo: ${files[index].file.name}`);
-        }
-      });
-    } else {
-      console.log('No hay archivos seleccionados para subir.');
-    }
-  }
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  const isRequestResolved = () => {
-    return false;
   };
 
   if (status === 'loading' || loading) {
@@ -498,9 +387,9 @@ function RequestBoard() {
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
       case 'abierto':
-        return 'gray';
-      case 'cancelado':
         return 'blue';
+      case 'cancelado':
+        return 'red';
       case 'resuelto':
         return 'green';
       default:
@@ -637,7 +526,7 @@ function RequestBoard() {
                       { value: '0', label: 'Todos' },
                       { value: '1', label: 'Abierto' },
                       { value: '3', label: 'Cancelado' },
-                      { value: '2', label: 'Completada' },
+                      { value: '2', label: 'Resuelto' },
                     ]}
                     value={filters.status}
                     onChange={(value) => handleFilterChange('status', value || '')}

@@ -132,6 +132,8 @@ function RequestBoard() {
     centroCosto: '',
   });
 
+  const [taskFormKey, setTaskFormKey] = useState(0);
+
   const addTask = () => {
     if (!taskForm.tarea.trim()) return;
 
@@ -147,6 +149,8 @@ function RequestBoard() {
     ]);
 
     setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+
+    setTaskFormKey(prev => prev + 1);
   };
 
   const removeTask = (id: string) => {
@@ -765,6 +769,13 @@ function RequestBoard() {
     }
   };
 
+  const getAssignedName = (id: string | null | undefined) => {
+    if (!id) return 'Sin asignar';
+
+    const user = assignedUsers.find(u => u.value === id);
+    return user ? user.label : id;
+  };
+
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
     { title: 'Flujos de Trabajo', href: '#' },
@@ -920,28 +931,6 @@ function RequestBoard() {
               <Grid>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <Select
-                    label='Estado'
-                    placeholder='Todos los estados'
-                    clearable
-                    data={[
-                      { value: '0', label: 'Todos' },
-                      { value: '1', label: 'Abierto' },
-                      { value: '3', label: 'Cancelado' },
-                      { value: '6', label: 'En Borrador' },
-                      { value: '5', label: 'Por Autorizar' },
-                    ]}
-                    value={filters.status}
-                    onChange={(value) => handleFilterChange('status', value || '')}
-                    leftSection={<IconFlag size={16} />}
-                    size='md'
-                    classNames={{
-                      label: 'text-sm font-medium text-gray-700 mb-2',
-                      input: 'min-h-[44px] text-base',
-                    }}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
                     label='Empresa'
                     placeholder='Todas las empresas'
                     clearable
@@ -1056,7 +1045,6 @@ function RequestBoard() {
                   <Table.Th>Proceso</Table.Th>
                   <Table.Th>Asignado Proceso</Table.Th>
                   <Table.Th>Activo</Table.Th>
-                  <Table.Th>Estado</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -1124,15 +1112,6 @@ function RequestBoard() {
                       <Table.Td>
                         <Badge color={getActiveColor(workflow.active)} variant='light' size='sm'>
                           {getActive(workflow.active)}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge
-                          color={getStatusColor(workflow.status_process)}
-                          variant='light'
-                          size='sm'
-                        >
-                          {workflow.status_process}
                         </Badge>
                       </Table.Td>
                     </Table.Tr>
@@ -1475,7 +1454,7 @@ function RequestBoard() {
                   </div>
 
                   {/* Formulario para agregar tarea - Mejorado */}
-                  <div className='bg-gray-50 rounded-lg p-6'>
+                  <div key={taskFormKey} className='bg-gray-50 rounded-lg p-6'>
                     <Text fw={600} size='sm' mb={4} className='text-gray-700'>
                       Agregar Nueva Tarea
                     </Text>
@@ -1619,7 +1598,7 @@ function RequestBoard() {
                                 <Group gap={4}>
                                   <IconUser size={16} className='text-gray-400' />
                                   <Text size='base' className='text-gray-700'>
-                                    {task.asignado || 'Sin asignar'}
+                                    {getAssignedName(task.asignado)}
                                   </Text>
                                 </Group>
                               </Table.Td>
