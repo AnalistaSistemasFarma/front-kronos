@@ -3,6 +3,16 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
+declare module 'next-auth' {
+  interface Session {
+    user?: {
+      name?: string | null;
+      email?: string | null;
+      image?: string | null;
+      role?: string;
+    };
+  }
+}
 import {
   Title,
   Text,
@@ -74,6 +84,13 @@ interface Task {
   id_assigned_user: string;
 }
 
+interface Note {
+  id_note: number;
+  note: string;
+  createdBy: string;
+  creation_date?: string;
+}
+
 function ViewWorkFlowPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -102,6 +119,12 @@ function ViewWorkFlowPage() {
   const [users, setUsers] = useState<{ value: string; label: string }[]>([]);
   const [statusOptions, setStatusOptions] = useState<{ value: string; label: string }[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [loadingNotes, setLoadingNotes] = useState(false);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [userId, setUserId] = useState<number | null>(null);
+  const [loadingUserId, setLoadingUserId] = useState(false);
+  const { data: session, status } = useSession();
+  const userName = session?.user?.name || '';
 
   // Estados para el modal de agregar tareas
   const [addTaskModalOpened, setAddTaskModalOpened] = useState(false);
@@ -137,7 +160,56 @@ function ViewWorkFlowPage() {
   useEffect(() => {
     fetchUsers();
     fetchStatusOptions();
+    fetchNotes();
   }, []);
+
+  const getUserIdByName = async (userName: string): Promise<number | null> => {
+
+    if (!userName || userName.trim() === '') {
+      console.error('El nombre de usuario es requerido');
+      return null;
+    }
+
+    try {
+      setLoadingUserId(true);
+
+      const params = new URLSearchParams({
+        userName: userName.trim(),
+      });
+
+      const response = await fetch(`/api/requests-general/get-user-id?${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error al obtener ID de usuario:', errorData.error);
+        return null;
+      }
+
+      const data = await response.json();
+      return data.success ? data.userId : null;
+    } catch (error) {
+      console.error('Error en la llamada al endpoint:', error);
+      return null;
+    } finally {
+      setLoadingUserId(false);
+    }
+  };
+
+  useEffect(() => {
+    if (userName && !userId) {
+      getUserIdByName(userName).then((id) => {
+        if (id) {
+          setUserId(id);
+          console.log('ID de usuario obtenido:', id);
+        }
+      });
+    }
+  }, [status, userName, userId, getUserIdByName]);
 
   const fetchTasks = async (processId: number) => {
     try {
@@ -188,6 +260,52 @@ function ViewWorkFlowPage() {
       { value: '5', label: 'Cancelado' },
       { value: '6', label: 'En borrador' },
     ]);
+  };
+
+  const fetchNotes = async () => {
+    if (!workflow?.id) return;
+    try {
+      setLoadingNotes(true);
+      const response = await fetch(`/api/requests-general/notes-workflow?id_process_category=${workflow.id}`);
+
+      if (response.ok) {
+        const data: Note[] = await response.json();
+        setNotes(data);
+      } else {
+        console.error('Error al cargar notas');
+      }
+    } catch (error) {
+      console.error('Error fetching notes:', error);
+    } finally {
+      setLoadingNotes(false);
+    }
+  };
+
+  const addSystemNote = async (text: string) => {
+    if (!workflow?.id || !userId) return;
+
+    try {
+      const response = await fetch('/api/requests-general/notes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id_process_category: workflow.id,
+          note: text,
+          created_by: userId,
+        }),
+      });
+
+      if (response.ok) {
+        await fetchNotes();
+      } else {
+        const errorData = await response.json();
+        console.error('Error al agregar nota:', errorData.error);
+      }
+    } catch (error) {
+      console.error('Error adding note:', error);
+    }
   };
 
   // Funciones para manejar tareas nuevas
