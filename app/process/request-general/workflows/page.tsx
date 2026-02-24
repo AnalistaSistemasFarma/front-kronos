@@ -382,7 +382,6 @@ function RequestBoard() {
             fetchWorkFlowsWithUserId(id, filters);
           } else {
             setUserIdInitialized(true);
-            setError('No se pudo obtener el ID del usuario. Por favor, recargue la página.');
           }
         });
       } else if (!userName) {
@@ -1250,7 +1249,7 @@ function RequestBoard() {
                   <Grid>
                     <Grid.Col span={{ base: 12, md: 8 }}>
                       <Select
-                        label='Empresa Solicitante *'
+                        label='Empresa Solicitante'
                         placeholder='Seleccione la empresa'
                         data={companies}
                         value={formData.company}
@@ -1382,6 +1381,8 @@ function RequestBoard() {
                         }
                         error={formErrors.assignedProcess}
                         leftSection={<IconUserCheck size={16} />}
+                        searchable
+                        clearable
                         disabled={!formData.process || formDataLoading}
                         size='lg'
                         classNames={{
@@ -1393,7 +1394,7 @@ function RequestBoard() {
 
                     <Grid.Col span={{ base: 12, md: 4 }}>
                       <Select
-                        label='Centro de Costo *'
+                        label='Centro de Costo'
                         placeholder='Seleccione el centro de costo'
                         data={[
                           { value: 'Abastecimiento y Comex', label: 'Abastecimiento y Comex' },
@@ -1481,6 +1482,8 @@ function RequestBoard() {
                           value={taskForm.asignado}
                           onChange={(value) => setTaskForm({ ...taskForm, asignado: value || '' })}
                           leftSection={<IconUser size={16} />}
+                          searchable
+                          clearable
                           size='lg'
                           classNames={{
                             label: 'text-sm font-medium text-gray-700 mb-2',
@@ -1492,13 +1495,15 @@ function RequestBoard() {
                       <Grid.Col span={{ base: 12, md: 2 }}>
                         <NumberInput
                           label='Costo'
-                          placeholder='0'
+                          placeholder='Sin puntos o comas'
                           value={taskForm.costo ? parseFloat(taskForm.costo) : undefined}
                           onChange={(value) =>
                             setTaskForm({ ...taskForm, costo: value?.toString() || '' })
                           }
                           min={0}
                           decimalScale={2}
+                          thousandSeparator="."
+                          decimalSeparator=","
                           hideControls
                           size='lg'
                           classNames={{

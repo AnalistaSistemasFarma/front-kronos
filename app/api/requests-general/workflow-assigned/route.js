@@ -89,7 +89,7 @@ export async function GET(req) {
     }
 
     console.log('API activities: Ejecutando consulta:', query);
-    query += ` ORDER BY cr.category`;
+    query += ` ORDER BY pc.id DESC`;
     const result = await request.query(query);
     console.log(
       'API activities: Resultados obtenidos:',

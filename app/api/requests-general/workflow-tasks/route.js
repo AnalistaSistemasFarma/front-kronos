@@ -30,7 +30,7 @@ export async function GET(req) {
       FROM task_process_category tpc
       LEFT JOIN user_task_request_general utrg ON utrg.id_task = tpc.id
       LEFT JOIN [user] u ON u.id = utrg.id_user
-      WHERE tpc.id_process_category = @idProcess
+      WHERE tpc.active = 1 AND tpc.id_process_category = @idProcess
       ORDER BY tpc.id
     `;
 
