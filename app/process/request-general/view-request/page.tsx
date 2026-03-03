@@ -1447,20 +1447,10 @@ function ViewRequestPage() {
                             <Text size='xs' color='gray.6'>
                               Categoría
                             </Text>
-                            {isEditing ? (
-                              <Select
-                                data={categories}
-                                value={request?.category?.toString() || ''}
-                                onChange={(val) => handleFormChange('category', val ?? '')}
-                                error={formErrors.category}
-                                disabled={isRequestResolved() || !canEdit}
-                              />
-                            ) : (
-                              <Text size='sm'>
-                                {categories.find((c) => c.value === request?.category)?.label ||
-                                  request?.category}
-                              </Text>
-                            )}
+                            <Text size='sm'>
+                              {categories.find((c) => c.value === request?.category)?.label ||
+                                request?.category}
+                            </Text>
                           </div>
                         </Group>
                       </Card>
@@ -1473,22 +1463,10 @@ function ViewRequestPage() {
                             <Text size='xs' color='gray.6'>
                               Proceso
                             </Text>
-                            {isEditing ? (
-                              <Select
-                                data={filteredProcesses}
-                                value={request?.id_process_category?.toString() || ''}
-                                onChange={(val) =>
-                                  handleFormChange('id_process_category', val ?? '')
-                                }
-                                error={formErrors.process}
-                                disabled={isRequestResolved() || !canEdit}
-                              />
-                            ) : (
-                              <Text size='sm'>
-                                {processCategories.find((p) => p.value === request?.process)
-                                  ?.label || request?.process}
-                              </Text>
-                            )}
+                            <Text size='sm'>
+                              {processCategories.find((p) => p.value === request?.process)
+                                ?.label || request?.process}
+                            </Text>
                           </div>
                         </Group>
                       </Card>
