@@ -42,6 +42,7 @@ import {
   Modal,
   Box,
   Table,
+  MultiSelect,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -143,6 +144,11 @@ interface ViewTasksRequestGeneral {
   status_req: number;
 }
 
+interface UserEmail {
+  value: string;
+  label: string;
+}
+
 function ViewRequestPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -189,6 +195,10 @@ function ViewRequestPage() {
   const [modalTasksOpened, setModalTasksOpened] = useState(false);
   const [loadingTaskRG, setLoadingTaskRG] = useState(false);
   const [taskRQ, setTaskRQ] = useState<ViewTasksRequestGeneral[]>([]);
+  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
+  const [availableUsers, setAvailableUsers] = useState<UserEmail[]>([]);
+  const [selectedNoteEmails, setSelectedNoteEmails] = useState<string[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
   useEffect(() => {
     const storedRequest = sessionStorage.getItem('selectedRequest');
@@ -340,6 +350,31 @@ function ViewRequestPage() {
       setLoadingNotes(false);
     }
   };
+
+  const fetchUsersWithEmails = async () => {
+    try {
+      setLoadingUsers(true);
+      const response = await fetch('/api/requests-general/users-emails');
+      if (response.ok) {
+        const data = await response.json();
+        const formattedUsers = data.users.map((user: { name: string; email: string }) => ({
+          value: user.email,
+          label: `${user.name} - ${user.email}`,
+        }));
+        setAvailableUsers(formattedUsers);
+      } else {
+        console.error('Error al cargar usuarios:', response.statusText);
+      }
+    } catch (error) {
+      console.error('Error cargando usuarios:', error);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsersWithEmails();
+  }, []);
 
   const fetchFolderContents = async () => {
     if (!request?.id_request_general) return;
@@ -698,6 +733,7 @@ function ViewRequestPage() {
 
       if (response.ok) {
         setNewNote('');
+        setSelectedNoteEmails([]);
         await fetchNotes();
 
         if (noteData.notificarPorCorreo) {
@@ -1019,27 +1055,36 @@ function ViewRequestPage() {
                   <Checkbox
                     label='¿Notificar por correo electrónico?'
                     checked={noteData.notificarPorCorreo}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const checked = e.currentTarget.checked;
                       setNoteData({
                         ...noteData,
                         notificarPorCorreo: e.currentTarget.checked,
                         correo: e.currentTarget.checked ? noteData.correo : '',
                       })
-                    }
+                      if (!checked) {
+                        setSelectedNoteEmails([]);
+                      }
+                    }}
                     mb='sm'
                   />
                   {noteData.notificarPorCorreo && (
-                    <TextInput
+                    <MultiSelect
                       label='Correo electrónico de contacto'
-                      placeholder='Ejemplo: correo@farmalogica.com; correo2@farmalogica.com'
-                      value={noteData.correo}
-                      onChange={(e) =>
+                      placeholder='Buscar y seleccionar usuarios...'
+                      data={availableUsers}
+                      value={selectedNoteEmails}
+                      onChange={(values) => {
+                        setSelectedNoteEmails(values);
                         setNoteData({
                           ...noteData,
-                          correo: e.currentTarget.value,
-                        })
-                      }
-                      required
+                          correo: values.join('; '),
+                        });
+                      }}
+                      searchable
+                      clearable
+                      nothingFoundMessage='No se encontraron usuarios'
+                      disabled={loadingUsers}
                     />
                   )}
                   <Group align='flex-end'>

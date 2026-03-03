@@ -42,6 +42,7 @@ import {
   Modal,
   Box,
   Table,
+  MultiSelect,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -163,6 +164,11 @@ interface FolderFile {
   '@microsoft.graph.downloadUrl'?: string;
 }
 
+interface UserEmail {
+  value: string;
+  label: string;
+}
+
 function ViewRequestPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -213,6 +219,10 @@ function ViewRequestPage() {
     notificarPorCorreo: false,
   });
   const [modalTasksOpened, setModalTasksOpened] = useState(false);
+  const [availableUsers, setAvailableUsers] = useState<UserEmail[]>([]);
+  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
+  const [selectedNoteEmails, setSelectedNoteEmails] = useState<string[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
   useEffect(() => {
     const storedRequest = sessionStorage.getItem('selectedRequest');
@@ -259,6 +269,32 @@ function ViewRequestPage() {
       chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [notes]);
+
+  const fetchUsersWithEmails = async () => {
+    try {
+      setLoadingUsers(true);
+      const response = await fetch('/api/requests-general/users-emails');
+      if (response.ok) {
+        const data = await response.json();
+        const formattedUsers = data.users.map((user: { name: string; email: string }) => ({
+          value: user.email,
+          label: `${user.name} - ${user.email}`,
+        }));
+        setAvailableUsers(formattedUsers);
+      } else {
+        console.error('Error al cargar usuarios:', response.statusText);
+      }
+    } catch (error) {
+      console.error('Error cargando usuarios:', error);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  // Cargar usuarios al montar el componente
+  useEffect(() => {
+    fetchUsersWithEmails();
+  }, []);
 
   const getUserIdByName = async (userName: string): Promise<number | null> => {
     if (!session || status !== 'authenticated') {
@@ -621,14 +657,34 @@ function ViewRequestPage() {
         },
       ];
 
-      if (resolutionData.resolucion) {
-        table.push({
-          Resolución: resolutionData.resolucion,
-        });
-      }
+      const resolutionSection = resolutionData.resolucion
+      ? `
+        <div style="margin-top:20px;padding:15px;border-radius:8px;background:#f8f9fa;border:1px solid #e0e0e0;">
+          <h3 style="margin:0 0 10px 0;font-size:16px;">Resolución agregada</h3>
+          <p style="
+            margin:0;
+            white-space:pre-wrap;
+            word-break:break-word;
+            overflow-wrap:break-word;
+            line-height:1.6;
+            font-size:14px;
+          ">
+            ${resolutionData.resolucion}
+          </p>
+        </div>
+      `
+      : '';
 
-      const outro = `Este es un mensaje automático del sistema de Solicitudes Generales. La solicitud #${request?.id} ha sido actualizada. Si tiene alguna pregunta, por favor contacte al administrador del sistema.`;
+      const outro = `
+        ${resolutionSection}
 
+        <p style="margin-top:20px;">
+          Este es un mensaje automático del sistema de Solicitudes Generales.
+          La solicitud #${request?.id} ha sido actualizada.
+          Si tiene alguna pregunta, por favor contacte al administrador del sistema.
+        </p>
+      `;
+      
       const result = await sendMessage(
         message,
         emails,
@@ -677,13 +733,33 @@ function ViewRequestPage() {
         },
       ];
 
-      if (newNote) {
-        table.push({
-          Nota: newNote,
-        });
-      }
+      const noteSection = newNote
+      ? `
+        <div style="margin-top:20px;padding:15px;border-radius:8px;background:#f8f9fa;border:1px solid #e0e0e0;">
+          <h3 style="margin:0 0 10px 0;font-size:16px;">📝 Nota agregada</h3>
+          <p style="
+            margin:0;
+            white-space:pre-wrap;
+            word-break:break-word;
+            overflow-wrap:break-word;
+            line-height:1.6;
+            font-size:14px;
+          ">
+            ${newNote}
+          </p>
+        </div>
+      `
+      : '';
 
-      const outro = `Este es un mensaje automático del sistema de Solicitudes Generales. Se ha agregado una nueva nota a la solicitud #${request?.id}. Si tiene alguna pregunta, por favor contacte al administrador del sistema.`;
+      const outro = `
+        ${noteSection}
+
+        <p style="margin-top:20px;">
+          Este es un mensaje automático del sistema de Solicitudes Generales.
+          Se ha agregado una nueva nota a la solicitud #${request?.id}.
+          Si tiene alguna pregunta, por favor contacte al administrador del sistema.
+        </p>
+      `;
 
       const result = await sendMessage(
         message,
@@ -840,6 +916,7 @@ function ViewRequestPage() {
 
       if (response.ok) {
         setNewNote('');
+        setSelectedNoteEmails([]);
         await fetchNotes();
 
         if (noteData.notificarPorCorreo) {
@@ -1163,27 +1240,36 @@ function ViewRequestPage() {
                   <Checkbox
                     label='¿Notificar por correo electrónico?'
                     checked={noteData.notificarPorCorreo}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const checked = e.currentTarget.checked;
                       setNoteData({
                         ...noteData,
-                        notificarPorCorreo: e.currentTarget.checked,
-                        correo: e.currentTarget.checked ? noteData.correo : '',
-                      })
-                    }
+                        notificarPorCorreo: checked,
+                        correo: checked ? noteData.correo : '',
+                      });
+                      if (!checked) {
+                        setSelectedNoteEmails([]);
+                      }
+                    }}
                     mb='sm'
                   />
                   {noteData.notificarPorCorreo && (
-                    <TextInput
+                    <MultiSelect
                       label='Correo electrónico de contacto'
-                      placeholder='Ejemplo: correo@farmalogica.com; correo2@farmalogica.com'
-                      value={noteData.correo}
-                      onChange={(e) =>
+                      placeholder='Buscar y seleccionar usuarios...'
+                      data={availableUsers}
+                      value={selectedNoteEmails}
+                      onChange={(values) => {
+                        setSelectedNoteEmails(values);
                         setNoteData({
                           ...noteData,
-                          correo: e.currentTarget.value,
-                        })
-                      }
-                      required
+                          correo: values.join('; '),
+                        });
+                      }}
+                      searchable
+                      clearable
+                      nothingFoundMessage='No se encontraron usuarios'
+                      disabled={loadingUsers}
                     />
                   )}
                   <Group align='flex-end'>
@@ -1444,28 +1530,37 @@ function ViewRequestPage() {
                       <Checkbox
                         label='¿Notificar por correo electrónico a los usuarios?'
                         checked={resolutionData.notificarPorCorreo}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          const checked = e.currentTarget.checked;
                           setResolutionData({
                             ...resolutionData,
-                            notificarPorCorreo: e.currentTarget.checked,
-                            correo: e.currentTarget.checked ? resolutionData.correo : '',
-                          })
-                        }
+                            notificarPorCorreo: checked,
+                            correo: checked ? resolutionData.correo : '',
+                          });
+                          if (!checked) {
+                            setSelectedEmails([]);
+                          }
+                        }}
                         mb='sm'
                       />
                       {resolutionData.notificarPorCorreo && (
-                        <TextInput
+                        <MultiSelect
                           label='Correo electrónico de contacto'
-                          placeholder='Ejemplo: correo@farmalogica.com; correo2@farmalogica.com'
-                          value={resolutionData.correo}
-                          onChange={(e) =>
+                          placeholder='Buscar y seleccionar usuarios...'
+                          data={availableUsers}
+                          value={selectedEmails}
+                          onChange={(values) => {
+                            setSelectedEmails(values);
                             setResolutionData({
                               ...resolutionData,
-                              correo: e.currentTarget.value,
-                            })
-                          }
+                              correo: values.join('; '),
+                            });
+                          }}
+                          searchable
+                          clearable
+                          nothingFoundMessage='No se encontraron usuarios'
                           error={formErrors.correo}
-                          required
+                          disabled={loadingUsers}
                         />
                       )}
                       <Textarea
