@@ -1,20 +1,312 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import {
+  Card,
+  Title,
+  Text,
+  Grid,
+  SimpleGrid,
+  Stack,
+  Group,
+  Select,
+  Button,
+  Alert,
+  Skeleton,
+  Badge,
+  Tabs,
+  Box,
+  Container,
+  Paper,
+  Flex,
+} from '@mantine/core';
+import { BarChart, PieChart, LineChart } from '@mantine/charts';
+import {
+  IconAlertCircle,
+  IconRefresh,
+  IconChartBar,
+  IconChartPie,
+  IconChartLine,
+  IconTrendingUp,
+  IconTrendingDown,
+  IconClock,
+  IconCheck,
+  IconX,
+  IconCoin,
+} from '@tabler/icons-react';
+
+interface TaskData {
+  id_tarea: number;
+  tarea: string;
+  estado_tarea: string;
+  asignado_tarea: string;
+  hora_inicio_tarea: string | null;
+  fecha_fin_tarea: string | null;
+  resolucion_tarea: string | null;
+  fecha_resolucion_tarea: string | null;
+  costo_tarea: number | null;
+  centro_costo_tarea: string | null;
+  activo_tarea: boolean;
+  ejecutor_final_tarea: string | null;
+  id_solicitud: number;
+  asunto_solicitud: string;
+  descripcion_solicitud: string;
+  fecha_creacion_solicitud: string;
+  empresa_solicitud: string;
+  creador_solicitud: string;
+  estado_solicitud: string;
+  resolucion_solicitud: string | null;
+  fecha_resolucion_solicitud: string | null;
+  ejecutor_final_solicitud: string | null;
+  proceso_solicitud: string;
+  categoria_solicitud: string;
+}
+
+type DateFilter = 'month' | 'quarter' | 'semester' | 'year';
 
 export default function Dashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
+  const [tasks, setTasks] = useState<TaskData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [dateFilter, setDateFilter] = useState<DateFilter>('month');
+  const [activeTab, setActiveTab] = useState<string>('overview');
+
   useEffect(() => {
-    if (status === 'loading') return; // Still loading
+    if (status === 'loading') return;
     if (!session) router.push('/login');
   }, [session, status, router]);
 
+  useEffect(() => {
+    fetchTasks();
+  }, [dateFilter]);
+
+  const fetchTasks = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { startDate, endDate } = getDateRange(dateFilter);
+
+      const params = new URLSearchParams({
+        date_from: startDate,
+        date_to: endDate,
+      });
+
+      const response = await fetch(`/api/requests-general/view-tasks?${params}`);
+      if (!response.ok) {
+        throw new Error('Error al cargar los datos del dashboard');
+      }
+
+      const result = await response.json();
+      setTasks(result.data || []);
+    } catch (err) {
+      console.error('Error fetching tasks:', err);
+      setError(err instanceof Error ? err.message : 'Error desconocido al cargar los datos');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getDateRange = (filter: DateFilter): { startDate: string; endDate: string } => {
+    const now = new Date();
+    let startDate: Date;
+    const endDate: Date = new Date(now);
+
+    switch (filter) {
+      case 'month':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        break;
+      case 'quarter':
+        const quarter = Math.floor(now.getMonth() / 3);
+        startDate = new Date(now.getFullYear(), quarter * 3, 1);
+        break;
+      case 'semester':
+        const semester = Math.floor(now.getMonth() / 6);
+        startDate = new Date(now.getFullYear(), semester * 6, 1);
+        break;
+      case 'year':
+        startDate = new Date(now.getFullYear(), 0, 1);
+        break;
+      default:
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+
+    return {
+      startDate: startDate.toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0],
+    };
+  };
+
+  const getFilterLabel = (filter: DateFilter): string => {
+    const labels = {
+      month: 'Mensual',
+      quarter: 'Trimestral',
+      semester: 'Semestral',
+      year: 'Anual',
+    };
+    return labels[filter];
+  };
+
+  // Calculate statistics
+  const stats = {
+    total: tasks.length,
+    completed: tasks.filter((t) => t.estado_tarea === 'Completada').length,
+    pending: tasks.filter((t) => t.estado_tarea === 'Pendiente').length,
+    inProgress: tasks.filter((t) => t.estado_tarea === 'En Proceso').length,
+    active: tasks.filter((t) => t.activo_tarea).length,
+  };
+
+  // Prepare data for charts
+  const statusData = [
+    { name: 'Completadas', value: stats.completed, color: '#10B981' },
+    { name: 'Pendientes', value: stats.pending, color: '#F59E0B' },
+    { name: 'En Proceso', value: stats.inProgress, color: '#3B82F6' },
+  ];
+
+  const processData = tasks.reduce((acc, task) => {
+    const process = task.proceso_solicitud || 'Sin Proceso';
+    acc[process] = (acc[process] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const processChartData = Object.entries(processData)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10);
+
+  const categoryData = tasks.reduce((acc, task) => {
+    const category = task.categoria_solicitud || 'Sin Categoría';
+    acc[category] = (acc[category] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const categoryChartData = Object.entries(categoryData)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10);
+
+  // Time series data
+  const timeSeriesData = tasks.reduce((acc, task) => {
+    const date = new Date(task.fecha_creacion_solicitud);
+    const key = date.toISOString().split('T')[0];
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const timeSeriesChartData = Object.entries(timeSeriesData)
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Cost per activity data
+  const costStats = {
+    totalCost: tasks.reduce((sum, t) => sum + (t.costo_tarea || 0), 0),
+    tasksWithCost: tasks.filter((t) => t.costo_tarea && t.costo_tarea > 0).length,
+    averageCost:
+      tasks.filter((t) => t.costo_tarea && t.costo_tarea > 0).length > 0
+        ? tasks.reduce((sum, t) => sum + (t.costo_tarea || 0), 0) /
+          tasks.filter((t) => t.costo_tarea && t.costo_tarea > 0).length
+        : 0,
+    maxCost: Math.max(...tasks.map((t) => t.costo_tarea || 0), 0),
+  };
+
+  // Cost by activity (task name)
+  const costByActivityData = tasks.reduce((acc, task) => {
+    const activity = task.tarea || 'Sin Actividad';
+    if (!acc[activity]) {
+      acc[activity] = { cost: 0, count: 0 };
+    }
+    acc[activity].cost += task.costo_tarea || 0;
+    acc[activity].count += 1;
+    return acc;
+  }, {} as Record<string, { cost: number; count: number }>);
+
+  const costByActivityChartData = Object.entries(costByActivityData)
+    .map(([name, data]) => ({
+      name,
+      cost: data.cost,
+      count: data.count,
+      avgCost: data.count > 0 ? data.cost / data.count : 0,
+    }))
+    .sort((a, b) => b.cost - a.cost)
+    .slice(0, 10);
+
+  // Cost by cost center
+  const costByCenterData = tasks.reduce((acc, task) => {
+    const center = task.centro_costo_tarea || 'Sin Centro de Costo';
+    if (!acc[center]) {
+      acc[center] = { cost: 0, count: 0 };
+    }
+    acc[center].cost += task.costo_tarea || 0;
+    acc[center].count += 1;
+    return acc;
+  }, {} as Record<string, { cost: number; count: number }>);
+
+  const costByCenterChartData = Object.entries(costByCenterData)
+    .map(([name, data]) => ({
+      name,
+      cost: data.cost,
+      count: data.count,
+    }))
+    .filter((item) => item.cost > 0)
+    .sort((a, b) => b.cost - a.cost)
+    .slice(0, 10);
+
+  // Cost by process
+  const costByProcessData = tasks.reduce((acc, task) => {
+    const process = task.proceso_solicitud || 'Sin Proceso';
+    if (!acc[process]) {
+      acc[process] = { cost: 0, count: 0 };
+    }
+    acc[process].cost += task.costo_tarea || 0;
+    acc[process].count += 1;
+    return acc;
+  }, {} as Record<string, { cost: number; count: number }>);
+
+  const costByProcessChartData = Object.entries(costByProcessData)
+    .map(([name, data]) => ({
+      name,
+      cost: data.cost,
+      count: data.count,
+    }))
+    .filter((item) => item.cost > 0)
+    .sort((a, b) => b.cost - a.cost)
+    .slice(0, 10);
+
+  // Cost distribution for pie chart
+  const costDistributionData = costByProcessChartData.slice(0, 5).map((item, index) => ({
+    name: item.name,
+    value: item.cost,
+    color: ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'][index] || '#6B7280',
+  }));
+
+  // Format currency
+  const formatCurrency = (value: number): string => {
+    return new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value);
+  };
+
+  // Format number with separators
+  const formatNumber = (value: number): string => {
+    return new Intl.NumberFormat('es-CO').format(value);
+  };
+
   if (status === 'loading') {
-    return <div className='min-h-screen flex items-center justify-center'>Cargando...</div>;
+    return (
+      <div className='min-h-screen flex items-center justify-center'>
+        <Skeleton height={50} circle mb='xl' />
+        <Skeleton height={8} radius='xl' />
+        <Skeleton height={8} mt={6} radius='xl' width='70%' />
+      </div>
+    );
   }
 
   if (!session) {
@@ -22,34 +314,527 @@ export default function Dashboard() {
   }
 
   return (
-    <div className='max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8'>
-      <div className='bg-white overflow-hidden shadow rounded-lg'>
-        <div className='px-4 py-5 sm:p-6'>
-          <h1 className='text-2xl font-bold text-gray-900 mb-4'>Dashboard</h1>
-          <div className='border-t border-gray-200'>
-            <dl>
-              <div className='bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6'>
-                <dt className='text-sm font-medium text-gray-500'>Name</dt>
-                <dd className='mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2'>
-                  {session.user?.name || 'N/A'}
-                </dd>
-              </div>
-              <div className='bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6'>
-                <dt className='text-sm font-medium text-gray-500'>Email</dt>
-                <dd className='mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2'>
-                  {session.user?.email}
-                </dd>
-              </div>
-              <div className='bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6'>
-                <dt className='text-sm font-medium text-gray-500'>Provider</dt>
-                <dd className='mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2'>
-                  {session.user?.image ? 'Azure AD' : 'Credentials'}
-                </dd>
-              </div>
-            </dl>
+    <Container size='xl' py='xl'>
+      <Stack gap='lg'>
+        {/* Header */}
+        <Group justify='space-between'>
+          <div>
+            <Title order={2}>Dashboard - Actividades de Solicitudes</Title>
+            <Text size='sm' c='dimmed'>
+              Análisis y visualización de tareas por periodo
+            </Text>
           </div>
-        </div>
-      </div>
-    </div>
+          <Group>
+            <Select
+              label='Periodo'
+              placeholder='Seleccionar periodo'
+              data={[
+                { value: 'month', label: 'Mensual' },
+                { value: 'quarter', label: 'Trimestral' },
+                { value: 'semester', label: 'Semestral' },
+                { value: 'year', label: 'Anual' },
+              ]}
+              value={dateFilter}
+              onChange={(value) => setDateFilter(value as DateFilter)}
+              w={200}
+            />
+            <Button
+              variant='light'
+              onClick={fetchTasks}
+              loading={loading}
+              leftSection={<IconRefresh size={16} />}
+            >
+              Actualizar
+            </Button>
+          </Group>
+        </Group>
+
+        {error && (
+          <Alert
+            icon={<IconAlertCircle size={20} />}
+            title='Error al cargar los datos'
+            color='red'
+            variant='light'
+          >
+            {error}
+          </Alert>
+        )}
+
+        {/* Tabs */}
+        <Tabs
+          value={activeTab}
+          onChange={(value) => setActiveTab(value || 'overview')}
+          styles={{
+            tab: {
+              '&:hover': {
+                backgroundColor: 'var(--mantine-color-gray-1)',
+              },
+              '&[data-active]:hover': {
+                backgroundColor: 'var(--mantine-color-blue-light)',
+              },
+            },
+          }}
+        >
+          <Tabs.List>
+            <Tabs.Tab value='overview' leftSection={<IconChartBar size={16} />}>
+              Resumen General
+            </Tabs.Tab>
+            <Tabs.Tab value='status' leftSection={<IconChartPie size={16} />}>
+              Por Estado
+            </Tabs.Tab>
+            <Tabs.Tab value='process' leftSection={<IconChartLine size={16} />}>
+              Por Proceso
+            </Tabs.Tab>
+            <Tabs.Tab value='category' leftSection={<IconTrendingUp size={16} />}>
+              Por Categoría
+            </Tabs.Tab>
+            <Tabs.Tab value='cost' leftSection={<IconCoin size={16} />}>
+              Costo por Actividad
+            </Tabs.Tab>
+          </Tabs.List>
+
+          {/* Overview Tab */}
+          <Tabs.Panel value='overview'>
+            <Stack gap='lg' mt='md'>
+              {/* Stats Cards */}
+              <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
+                <Card shadow='sm' padding='lg' radius='md' withBorder>
+                  <Group justify='space-between' mb='xs'>
+                    <Text size='sm' c='dimmed'>
+                      Total Tareas
+                    </Text>
+                    <IconChartBar size={20} color='blue' />
+                  </Group>
+                  <Title order={3}>{formatNumber(stats.total)}</Title>
+                  <Text size='xs' c='dimmed'>
+                    Periodo: {getFilterLabel(dateFilter)}
+                  </Text>
+                </Card>
+
+                <Card shadow='sm' padding='lg' radius='md' withBorder>
+                  <Group justify='space-between' mb='xs'>
+                    <Text size='sm' c='dimmed'>
+                      Completadas
+                    </Text>
+                    <IconCheck size={20} color='green' />
+                  </Group>
+                  <Title order={3} c='green'>
+                    {formatNumber(stats.completed)}
+                  </Title>
+                  <Text size='xs' c='dimmed'>
+                    {stats.total > 0
+                      ? `${((stats.completed / stats.total) * 100).toFixed(1)}%`
+                      : '0%'}
+                  </Text>
+                </Card>
+
+                <Card shadow='sm' padding='lg' radius='md' withBorder>
+                  <Group justify='space-between' mb='xs'>
+                    <Text size='sm' c='dimmed'>
+                      Pendientes
+                    </Text>
+                    <IconClock size={20} color='orange' />
+                  </Group>
+                  <Title order={3} c='orange'>
+                    {formatNumber(stats.pending)}
+                  </Title>
+                  <Text size='xs' c='dimmed'>
+                    {stats.total > 0
+                      ? `${((stats.pending / stats.total) * 100).toFixed(1)}%`
+                      : '0%'}
+                  </Text>
+                </Card>
+
+                <Card shadow='sm' padding='lg' radius='md' withBorder>
+                  <Group justify='space-between' mb='xs'>
+                    <Text size='sm' c='dimmed'>
+                      En Proceso
+                    </Text>
+                    <IconTrendingUp size={20} color='blue' />
+                  </Group>
+                  <Title order={3} c='blue'>
+                    {formatNumber(stats.inProgress)}
+                  </Title>
+                  <Text size='xs' c='dimmed'>
+                    {stats.total > 0
+                      ? `${((stats.inProgress / stats.total) * 100).toFixed(1)}%`
+                      : '0%'}
+                  </Text>
+                </Card>
+              </SimpleGrid>
+
+              {/* Charts Grid */}
+              <Grid>
+                <Grid.Col span={{ base: 12, md: 6 }}>
+                  <Card shadow='sm' padding='lg' radius='md' withBorder>
+                    <Title order={4} mb='md'>
+                      Distribución por Estado
+                    </Title>
+                    <PieChart
+                      data={statusData}
+                      withLabels
+                      labelsType='percent'
+                      withTooltip
+                      tooltipDataSource='segment'
+                      size={300}
+                      mx='auto'
+                    />
+                  </Card>
+                </Grid.Col>
+
+                <Grid.Col span={{ base: 12, md: 6 }}>
+                  <Card shadow='sm' padding='lg' radius='md' withBorder>
+                    <Title order={4} mb='md'>
+                      Tendencia de Tareas
+                    </Title>
+                    <LineChart
+                      h={300}
+                      data={timeSeriesChartData}
+                      dataKey='date'
+                      series={[{ name: 'count', label: 'Tareas', color: 'blue.6' }]}
+                      curveType='monotone'
+                      withDots={false}
+                      withTooltip
+                    />
+                  </Card>
+                </Grid.Col>
+              </Grid>
+            </Stack>
+          </Tabs.Panel>
+
+          {/* Status Tab */}
+          <Tabs.Panel value='status'>
+            <Stack gap='lg' mt='md'>
+              <Card shadow='sm' padding='lg' radius='md' withBorder>
+                <Title order={4} mb='md'>
+                  Tareas por Estado
+                </Title>
+                <BarChart
+                  h={400}
+                  data={statusData}
+                  dataKey='name'
+                  series={[{ name: 'value', label: 'Cantidad' }]}
+                  withTooltip
+                  withLegend
+                />
+              </Card>
+
+              <Card shadow='sm' padding='lg' radius='md' withBorder>
+                <Title order={4} mb='md'>
+                  Detalle por Estado
+                </Title>
+                <Stack gap='sm'>
+                  {statusData.map((item) => (
+                    <Paper key={item.name} p='sm' withBorder>
+                      <Flex justify='space-between' align='center'>
+                        <Group>
+                          <Badge
+                            color={
+                              item.color === '#10B981'
+                                ? 'green'
+                                : item.color === '#F59E0B'
+                                ? 'orange'
+                                : 'blue'
+                            }
+                          >
+                            {item.name}
+                          </Badge>
+                        </Group>
+                        <Text fw={500}>{formatNumber(item.value)} tareas</Text>
+                      </Flex>
+                    </Paper>
+                  ))}
+                </Stack>
+              </Card>
+            </Stack>
+          </Tabs.Panel>
+
+          {/* Process Tab */}
+          <Tabs.Panel value='process'>
+            <Stack gap='lg' mt='md'>
+              <Card shadow='sm' padding='lg' radius='md' withBorder>
+                <Title order={4} mb='md'>
+                  Tareas por Proceso (Top 10)
+                </Title>
+                <BarChart
+                  h={400}
+                  data={processChartData}
+                  dataKey='name'
+                  series={[{ name: 'value', label: 'Cantidad', color: 'blue.6' }]}
+                  withTooltip
+                  withLegend
+                  xAxisProps={{
+                    angle: -45,
+                    textAnchor: 'end',
+                    height: 100,
+                  }}
+                />
+              </Card>
+
+              <Card shadow='sm' padding='lg' radius='md' withBorder>
+                <Title order={4} mb='md'>
+                  Resumen por Proceso
+                </Title>
+                <Stack gap='sm'>
+                  {processChartData.map((item) => (
+                    <Paper key={item.name} p='sm' withBorder>
+                      <Flex justify='space-between' align='center'>
+                        <Text size='sm'>{item.name}</Text>
+                        <Badge variant='light'>{formatNumber(item.value)} tareas</Badge>
+                      </Flex>
+                    </Paper>
+                  ))}
+                </Stack>
+              </Card>
+            </Stack>
+          </Tabs.Panel>
+
+          {/* Category Tab */}
+          <Tabs.Panel value='category'>
+            <Stack gap='lg' mt='md'>
+              <Card shadow='sm' padding='lg' radius='md' withBorder>
+                <Title order={4} mb='md'>
+                  Tareas por Categoría (Top 10)
+                </Title>
+                <BarChart
+                  h={400}
+                  data={categoryChartData}
+                  dataKey='name'
+                  series={[{ name: 'value', label: 'Cantidad', color: 'green.6' }]}
+                  withTooltip
+                  withLegend
+                  xAxisProps={{
+                    angle: -45,
+                    textAnchor: 'end',
+                    height: 100,
+                  }}
+                />
+              </Card>
+
+              <Card shadow='sm' padding='lg' radius='md' withBorder>
+                <Title order={4} mb='md'>
+                  Resumen por Categoría
+                </Title>
+                <Stack gap='sm'>
+                  {categoryChartData.map((item) => (
+                    <Paper key={item.name} p='sm' withBorder>
+                      <Flex justify='space-between' align='center'>
+                        <Text size='sm'>{item.name}</Text>
+                        <Badge variant='light' color='green'>
+                          {formatNumber(item.value)} tareas
+                        </Badge>
+                      </Flex>
+                    </Paper>
+                  ))}
+                </Stack>
+              </Card>
+            </Stack>
+          </Tabs.Panel>
+
+          {/* Cost Tab */}
+          <Tabs.Panel value='cost'>
+            <Stack gap='lg' mt='md'>
+              {/* Cost Stats Cards */}
+              <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
+                <Card shadow='sm' padding='lg' radius='md' withBorder>
+                  <Group justify='space-between' mb='xs'>
+                    <Text size='sm' c='dimmed'>
+                      Costo Total
+                    </Text>
+                    <IconCoin size={20} color='green' />
+                  </Group>
+                  <Title order={3} c='green'>
+                    {formatCurrency(costStats.totalCost)}
+                  </Title>
+                  <Text size='xs' c='dimmed'>
+                    Periodo: {getFilterLabel(dateFilter)}
+                  </Text>
+                </Card>
+
+                <Card shadow='sm' padding='lg' radius='md' withBorder>
+                  <Group justify='space-between' mb='xs'>
+                    <Text size='sm' c='dimmed'>
+                      Tareas con Costo
+                    </Text>
+                    <IconChartBar size={20} color='blue' />
+                  </Group>
+                  <Title order={3} c='blue'>
+                    {costStats.tasksWithCost}
+                  </Title>
+                  <Text size='xs' c='dimmed'>
+                    de {stats.total} tareas totales
+                  </Text>
+                </Card>
+
+                <Card shadow='sm' padding='lg' radius='md' withBorder>
+                  <Group justify='space-between' mb='xs'>
+                    <Text size='sm' c='dimmed'>
+                      Costo Promedio
+                    </Text>
+                    <IconTrendingUp size={20} color='orange' />
+                  </Group>
+                  <Title order={3} c='orange'>
+                    {formatCurrency(costStats.averageCost)}
+                  </Title>
+                  <Text size='xs' c='dimmed'>
+                    Por actividad con costo
+                  </Text>
+                </Card>
+
+                <Card shadow='sm' padding='lg' radius='md' withBorder>
+                  <Group justify='space-between' mb='xs'>
+                    <Text size='sm' c='dimmed'>
+                      Costo Máximo
+                    </Text>
+                    <IconTrendingDown size={20} color='red' />
+                  </Group>
+                  <Title order={3} c='red'>
+                    {formatCurrency(costStats.maxCost)}
+                  </Title>
+                  <Text size='xs' c='dimmed'>
+                    Mayor costo registrado
+                  </Text>
+                </Card>
+              </SimpleGrid>
+
+              {/* Cost Charts */}
+              <Grid>
+                <Grid.Col span={{ base: 12, md: 6 }}>
+                  <Card shadow='sm' padding='lg' radius='md' withBorder>
+                    <Title order={4} mb='md'>
+                      Distribución de Costos por Proceso
+                    </Title>
+                    {costDistributionData.length > 0 ? (
+                      <PieChart
+                        data={costDistributionData}
+                        withLabels
+                        labelsType='percent'
+                        withTooltip
+                        tooltipDataSource='segment'
+                        size={300}
+                        mx='auto'
+                      />
+                    ) : (
+                      <Text c='dimmed' ta='center' py='xl'>
+                        No hay datos de costos disponibles
+                      </Text>
+                    )}
+                  </Card>
+                </Grid.Col>
+
+                <Grid.Col span={{ base: 12, md: 6 }}>
+                  <Card shadow='sm' padding='lg' radius='md' withBorder>
+                    <Title order={4} mb='md'>
+                      Costo por Actividad (Top 10)
+                    </Title>
+                    {costByActivityChartData.length > 0 ? (
+                      <BarChart
+                        h={300}
+                        data={costByActivityChartData}
+                        dataKey='name'
+                        series={[{ name: 'cost', label: 'Costo', color: 'teal.6' }]}
+                        withTooltip
+                        xAxisProps={{
+                          angle: -45,
+                          textAnchor: 'end',
+                          height: 100,
+                        }}
+                      />
+                    ) : (
+                      <Text c='dimmed' ta='center' py='xl'>
+                        No hay datos de costos disponibles
+                      </Text>
+                    )}
+                  </Card>
+                </Grid.Col>
+              </Grid>
+
+              {/* Cost by Process */}
+              <Card shadow='sm' padding='lg' radius='md' withBorder>
+                <Title order={4} mb='md'>
+                  Costo por Proceso (Top 10)
+                </Title>
+                {costByProcessChartData.length > 0 ? (
+                  <BarChart
+                    h={400}
+                    data={costByProcessChartData}
+                    dataKey='name'
+                    series={[{ name: 'cost', label: 'Costo', color: 'violet.6' }]}
+                    withTooltip
+                    withLegend
+                    xAxisProps={{
+                      angle: -45,
+                      textAnchor: 'end',
+                      height: 100,
+                    }}
+                  />
+                ) : (
+                  <Text c='dimmed' ta='center' py='xl'>
+                    No hay datos de costos disponibles
+                  </Text>
+                )}
+              </Card>
+
+              {/* Cost by Center */}
+              {costByCenterChartData.length > 0 && (
+                <Card shadow='sm' padding='lg' radius='md' withBorder>
+                  <Title order={4} mb='md'>
+                    Costo por Centro de Costo (Top 10)
+                  </Title>
+                  <BarChart
+                    h={400}
+                    data={costByCenterChartData}
+                    dataKey='name'
+                    series={[{ name: 'cost', label: 'Costo', color: 'cyan.6' }]}
+                    withTooltip
+                    withLegend
+                    xAxisProps={{
+                      angle: -45,
+                      textAnchor: 'end',
+                      height: 100,
+                    }}
+                  />
+                </Card>
+              )}
+
+              {/* Detailed Cost Summary */}
+              <Card shadow='sm' padding='lg' radius='md' withBorder>
+                <Title order={4} mb='md'>
+                  Resumen Detallado de Costos por Actividad
+                </Title>
+                <Stack gap='sm'>
+                  {costByActivityChartData.length > 0 ? (
+                    costByActivityChartData.map((item) => (
+                      <Paper key={item.name} p='sm' withBorder>
+                        <Flex justify='space-between' align='center' wrap='wrap' gap='sm'>
+                          <Text size='sm' fw={500} style={{ flex: 1, minWidth: '200px' }}>
+                            {item.name}
+                          </Text>
+                          <Group gap='md'>
+                            <Badge variant='light' color='teal'>
+                              {item.count} tareas
+                            </Badge>
+                            <Badge variant='filled' color='green'>
+                              {formatCurrency(item.cost)}
+                            </Badge>
+                            <Text size='xs' c='dimmed'>
+                              Prom: {formatCurrency(item.avgCost)}
+                            </Text>
+                          </Group>
+                        </Flex>
+                      </Paper>
+                    ))
+                  ) : (
+                    <Text c='dimmed' ta='center' py='xl'>
+                      No hay datos de costos disponibles
+                    </Text>
+                  )}
+                </Stack>
+              </Card>
+            </Stack>
+          </Tabs.Panel>
+        </Tabs>
+      </Stack>
+    </Container>
   );
 }
