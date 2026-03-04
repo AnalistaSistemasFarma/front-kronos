@@ -490,6 +490,7 @@ function ViewWorkFlowPage() {
       setIsEditing(false);
       setEditedWorkflow(null);
       setEditedTasks([]);
+      fetchTasks(editedWorkflow.id);
     } catch (err: unknown) {
 
       console.error('Error saving changes:', err);
@@ -652,14 +653,6 @@ function ViewWorkFlowPage() {
             <Group>
               <Badge color={getActiveColor(workflow.active)} size='lg' radius='sm' variant='light'>
                 {getActiveText(workflow.active)}
-              </Badge>
-              <Badge
-                color={getStatusColor(workflow.status_process)}
-                size='lg'
-                radius='sm'
-                variant='light'
-              >
-                {workflow.status_process}
               </Badge>
             </Group>
           </Flex>
@@ -1036,9 +1029,11 @@ function ViewWorkFlowPage() {
                                             newTasks[index] = { ...newTasks[index], cost: Number(value) || 0 };
                                             setEditedTasks(newTasks);
                                           }}
-                                          placeholder='Costo'
+                                          placeholder='Sin . o ,'
                                           min={0}
                                           size='sm'
+                                          thousandSeparator="."
+                                          decimalSeparator=","
                                           hideControls
                                         />
                                       ) : (
@@ -1247,12 +1242,14 @@ function ViewWorkFlowPage() {
               <Grid.Col span={{ base: 12, md: 6 }}>
                 <NumberInput
                   label='Costo'
-                  placeholder='0'
+                  placeholder='Sin . o ,'
                   value={newTaskForm.cost || undefined}
                   onChange={(value) => setNewTaskForm({ ...newTaskForm, cost: Number(value) || 0 })}
                   min={0}
                   decimalScale={2}
                   hideControls
+                  thousandSeparator="."
+                  decimalSeparator=","
                   leftSection={<IconCoin size={16} />}
                   size='lg'
                   classNames={{

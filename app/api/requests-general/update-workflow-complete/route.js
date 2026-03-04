@@ -242,7 +242,9 @@ export async function POST(req) {
 
             // Luego eliminar la tarea
             const deleteTaskQuery = `
-              DELETE FROM task_process_category
+              UPDATE task_process_category
+              SET
+                active = 0
               WHERE id = @id
             `;
 

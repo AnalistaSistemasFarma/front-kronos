@@ -1005,6 +1005,19 @@ function ViewRequestPage() {
     }
   };
 
+  const getStatusTask = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'sin empezar':
+        return 'Sin Empezar';
+      case 'abierto':
+        return 'En Progreso';
+      case 'resuelto':
+        return 'Resuelto';
+      default:
+        return 'red';
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
       case 'pendiente':
@@ -1735,7 +1748,7 @@ function ViewRequestPage() {
         >
           {loadingTaskRG ? (
             <div className="text-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-4"></div>
               <Text>Cargando tareas...</Text>
             </div>
           ) : taskRQ.length > 0 ? (
@@ -1758,7 +1771,7 @@ function ViewRequestPage() {
                     <Table.Td>{task.name}</Table.Td>
                     <Table.Td>
                       <Badge color={getStatusColorTask(task.status)} size="sm">
-                        {task.status}
+                        {getStatusTask(task.status)}
                       </Badge>
                     </Table.Td>
                     <Table.Td>
