@@ -382,7 +382,6 @@ function RequestBoard() {
             fetchWorkFlowsWithUserId(id, filters);
           } else {
             setUserIdInitialized(true);
-            setError('No se pudo obtener el ID del usuario. Por favor, recargue la página.');
           }
         });
       } else if (!userName) {
