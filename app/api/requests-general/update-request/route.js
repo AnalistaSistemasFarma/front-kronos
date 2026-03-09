@@ -35,7 +35,6 @@ export async function POST(req) {
         UPDATE requests_general
         SET
           status_req = @status,
-		      id_process_category = @process_category,
           resolution = @resolucion,
           id_executor_final = @id_executor_final,
           date_resolution = CASE 
@@ -48,12 +47,25 @@ export async function POST(req) {
 
       const updateCaseRequest = new sql.Request(transaction);
       updateCaseRequest.input('status', sql.Int, status);
-      updateCaseRequest.input('process_category', sql.Int, process_category || null);
       updateCaseRequest.input('resolucion', sql.NVarChar(255), resolucion || null);
       updateCaseRequest.input('id_executor_final', sql.NVarChar(1000), id_technical || null);
       updateCaseRequest.input('id', sql.Int, id);
 
       await updateCaseRequest.query(updateCaseQuery);
+
+      if (process_category) {
+        const updateCategoryQuery = `
+          UPDATE process_category_request_general
+          SET id_process_category = @process_category
+          WHERE id_request_general = @id
+        `;
+
+        const updateCategoryRequest = new sql.Request(transaction);
+        updateCategoryRequest.input('process_category', sql.Int, process_category);
+        updateCategoryRequest.input('id', sql.Int, id);
+
+        await updateCategoryRequest.query(updateCategoryQuery);
+      }
 
       await transaction.commit();
 
