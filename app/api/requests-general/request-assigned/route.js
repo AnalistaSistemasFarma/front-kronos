@@ -31,7 +31,7 @@ export async function GET(req) {
         LEFT JOIN [user] up ON up.id = upcrg.id_user
         INNER JOIN status_case sc ON sc.id_status_case = rg.status_req
 		    LEFT JOIN [user] uex ON uex.id = rg.id_executor_final
-      WHERE 1=1
+      WHERE 1=1 
     `;
 
     if (idUser) {
