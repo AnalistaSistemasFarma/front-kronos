@@ -16,18 +16,12 @@ export async function GET(req) {
         c.id_company as id,
         cr.id AS id_category,
         c.company,
-        cr.category,
-        u.id AS id_assigned_category,
-        u.name AS assigned_category
+        cr.category
       FROM company_category_request ccr
       INNER JOIN company c 
         ON c.id_company = ccr.id_company
       INNER JOIN category_request cr 
         ON cr.id = ccr.id_category_request
-      INNER JOIN user_category_request_general ucrg
-        ON ucrg.id_category = cr.id
-      INNER JOIN [user] u
-        ON u.id = ucrg.id_user
     `;
 
     const categoriesRequest = pool.request();
