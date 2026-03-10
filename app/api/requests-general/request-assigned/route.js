@@ -42,7 +42,6 @@ export async function GET(req) {
         { status: 400 }
       );
     }
-
     if (status && status !== '0') {
       query += ` AND rg.status_req = @status`;
     } else if (!status) {

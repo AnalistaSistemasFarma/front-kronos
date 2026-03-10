@@ -23,10 +23,11 @@ export async function GET(req) {
         ON c.id_company = ccr.id_company
       INNER JOIN category_request cr 
         ON cr.id = ccr.id_category_request
+      WHERE cr.active = 1
     `;
     
     if (companyId) {
-      queryCategories += ` WHERE c.id_company = ${companyId}`;
+      queryCategories += ` AND c.id_company = ${companyId}`;
     }
     
     queryCategories += ` ORDER BY cr.category`;
