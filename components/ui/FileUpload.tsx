@@ -56,12 +56,12 @@ const ALLOWED_TYPES = [
   'image/jpg',
 ];
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE = Number.MAX_SAFE_INTEGER; // Sin límite de tamaño
 
 const FileUpload: React.FC<FileUploadProps> = ({
   ticketId,
   onFilesChange,
-  maxFiles = 10,
+  maxFiles = Number.MAX_SAFE_INTEGER, // Sin límite de archivos
   disabled = false,
   storagePath = 'MA',
   entityType = 'Ticket',
@@ -93,9 +93,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
     if (!ALLOWED_TYPES.includes(file.type)) {
       return `Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG`;
     }
-    if (file.size > MAX_FILE_SIZE) {
-      return `El archivo es demasiado grande. Tamaño máximo: 10MB`;
-    }
+    // Sin límite de tamaño de archivo
     return null;
   };
 
@@ -395,7 +393,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
               </Text>
             </Text>
             <Text size='xs' c='dimmed'>
-              Tipos permitidos: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG (máx. 10MB cada uno)
+              Tipos permitidos: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG (sin límite de tamaño)
             </Text>
           </Stack>
         </Stack>

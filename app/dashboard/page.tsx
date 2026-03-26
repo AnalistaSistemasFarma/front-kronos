@@ -64,7 +64,18 @@ interface TaskData {
   categoria_solicitud: string;
 }
 
-type DateFilter = 'month' | 'quarter' | 'semester' | 'year';
+type DateFilter = 'month' | 'quarter' | 'semester' | 'year' | 'all';
+
+// Project color palette
+const projectColors = {
+  primary: '#113562',
+  secondary: '#3db6e0',
+  success: '#10b981',
+  warning: '#f59E0B',
+  error: '#ef4444',
+  purple: '#8B5CF6',
+  teal: '#14b8a6',
+};
 
 export default function Dashboard() {
   const { data: session, status } = useSession();
@@ -73,7 +84,7 @@ export default function Dashboard() {
   const [tasks, setTasks] = useState<TaskData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [dateFilter, setDateFilter] = useState<DateFilter>('month');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('all');
   const [activeTab, setActiveTab] = useState<string>('overview');
 
   useEffect(() => {
@@ -90,14 +101,18 @@ export default function Dashboard() {
       setLoading(true);
       setError(null);
 
-      const { startDate, endDate } = getDateRange(dateFilter);
+      const dateRange = getDateRange(dateFilter);
 
-      const params = new URLSearchParams({
-        date_from: startDate,
-        date_to: endDate,
-      });
+      let url = '/api/requests-general/view-tasks';
+      if (dateRange) {
+        const params = new URLSearchParams({
+          date_from: dateRange.startDate,
+          date_to: dateRange.endDate,
+        });
+        url = `${url}?${params}`;
+      }
 
-      const response = await fetch(`/api/requests-general/view-tasks?${params}`);
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Error al cargar los datos del dashboard');
       }
@@ -112,7 +127,19 @@ export default function Dashboard() {
     }
   };
 
-  const getDateRange = (filter: DateFilter): { startDate: string; endDate: string } => {
+  const formatDateToLocal = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getDateRange = (filter: DateFilter): { startDate: string; endDate: string } | null => {
+    // If 'all' is selected, return null to indicate no date filtering
+    if (filter === 'all') {
+      return null;
+    }
+
     const now = new Date();
     let startDate: Date;
     const endDate: Date = new Date(now);
@@ -137,13 +164,14 @@ export default function Dashboard() {
     }
 
     return {
-      startDate: startDate.toISOString().split('T')[0],
-      endDate: endDate.toISOString().split('T')[0],
+      startDate: formatDateToLocal(startDate),
+      endDate: formatDateToLocal(endDate),
     };
   };
 
   const getFilterLabel = (filter: DateFilter): string => {
-    const labels = {
+    const labels: Record<DateFilter, string> = {
+      all: 'Todas',
       month: 'Mensual',
       quarter: 'Trimestral',
       semester: 'Semestral',
@@ -161,11 +189,11 @@ export default function Dashboard() {
     active: tasks.filter((t) => t.activo_tarea).length,
   };
 
-  // Prepare data for charts
+  // Prepare data for charts with project colors
   const statusData = [
-    { name: 'Completadas', value: stats.completed, color: '#10B981' },
-    { name: 'Pendientes', value: stats.pending, color: '#F59E0B' },
-    { name: 'En Proceso', value: stats.inProgress, color: '#3B82F6' },
+    { name: 'Completadas', value: stats.completed, color: projectColors.success },
+    { name: 'Pendientes', value: stats.pending, color: projectColors.warning },
+    { name: 'En Proceso', value: stats.inProgress, color: projectColors.secondary },
   ];
 
   const processData = tasks.reduce((acc, task) => {
@@ -190,17 +218,59 @@ export default function Dashboard() {
     .sort((a, b) => b.value - a.value)
     .slice(0, 10);
 
-  // Time series data
+  // Get date key based on filter period for dynamic grouping
+  const getDateKey = (date: Date, filter: DateFilter): string => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const day = date.getDate();
+
+    switch (filter) {
+      case 'month':
+        // Daily grouping for monthly view
+        return formatDateToLocal(date);
+      case 'quarter':
+        // Weekly grouping for quarterly view
+        const weekNumber = Math.ceil((day + new Date(year, month, 1).getDay()) / 7);
+        const weekStart = new Date(year, month, day - date.getDay());
+        return `Sem ${weekNumber} (${weekStart.toLocaleDateString('es-CO', {
+          day: '2-digit',
+          month: 'short',
+        })})`;
+      case 'semester':
+        // Monthly grouping for semester view
+        return date.toLocaleDateString('es-CO', { month: 'short', year: 'numeric' });
+      case 'year':
+        // Monthly grouping for yearly view
+        return date.toLocaleDateString('es-CO', { month: 'short' });
+      case 'all':
+        // Quarterly grouping for all time view
+        const quarterNum = Math.floor(month / 3) + 1;
+        return `Q${quarterNum} ${year}`;
+      default:
+        return formatDateToLocal(date);
+    }
+  };
+
+  // Time series data with dynamic grouping based on filter
   const timeSeriesData = tasks.reduce((acc, task) => {
     const date = new Date(task.fecha_creacion_solicitud);
-    const key = date.toISOString().split('T')[0];
+    const key = getDateKey(date, dateFilter);
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
 
-  const timeSeriesChartData = Object.entries(timeSeriesData)
-    .map(([date, count]) => ({ date, count }))
-    .sort((a, b) => a.date.localeCompare(b.date));
+  // Sort time series data appropriately
+  const sortTimeSeriesData = (data: [string, number][]): [string, number][] => {
+    if (dateFilter === 'month') {
+      return data.sort((a, b) => a[0].localeCompare(b[0]));
+    }
+    // For other filters, maintain insertion order (already sorted by date)
+    return data;
+  };
+
+  const timeSeriesChartData = sortTimeSeriesData(Object.entries(timeSeriesData)).map(
+    ([date, count]) => ({ date, Tareas: count })
+  );
 
   // Cost per activity data
   const costStats = {
@@ -277,11 +347,18 @@ export default function Dashboard() {
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 10);
 
-  // Cost distribution for pie chart
+  // Cost distribution for pie chart with project colors
   const costDistributionData = costByProcessChartData.slice(0, 5).map((item, index) => ({
     name: item.name,
     value: item.cost,
-    color: ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'][index] || '#6B7280',
+    color:
+      [
+        projectColors.success,
+        projectColors.secondary,
+        projectColors.warning,
+        projectColors.error,
+        projectColors.purple,
+      ][index] || projectColors.primary,
   }));
 
   // Format currency
@@ -329,6 +406,7 @@ export default function Dashboard() {
               label='Periodo'
               placeholder='Seleccionar periodo'
               data={[
+                { value: 'all', label: 'Todas' },
                 { value: 'month', label: 'Mensual' },
                 { value: 'quarter', label: 'Trimestral' },
                 { value: 'semester', label: 'Semestral' },
@@ -403,9 +481,11 @@ export default function Dashboard() {
                     <Text size='sm' c='dimmed'>
                       Total Tareas
                     </Text>
-                    <IconChartBar size={20} color='blue' />
+                    <IconChartBar size={20} color={projectColors.primary} />
                   </Group>
-                  <Title order={3}>{formatNumber(stats.total)}</Title>
+                  <Title order={3} style={{ color: projectColors.primary }}>
+                    {formatNumber(stats.total)}
+                  </Title>
                   <Text size='xs' c='dimmed'>
                     Periodo: {getFilterLabel(dateFilter)}
                   </Text>
@@ -416,9 +496,9 @@ export default function Dashboard() {
                     <Text size='sm' c='dimmed'>
                       Completadas
                     </Text>
-                    <IconCheck size={20} color='green' />
+                    <IconCheck size={20} color={projectColors.success} />
                   </Group>
-                  <Title order={3} c='green'>
+                  <Title order={3} style={{ color: projectColors.success }}>
                     {formatNumber(stats.completed)}
                   </Title>
                   <Text size='xs' c='dimmed'>
@@ -433,9 +513,9 @@ export default function Dashboard() {
                     <Text size='sm' c='dimmed'>
                       Pendientes
                     </Text>
-                    <IconClock size={20} color='orange' />
+                    <IconClock size={20} color={projectColors.warning} />
                   </Group>
-                  <Title order={3} c='orange'>
+                  <Title order={3} style={{ color: projectColors.warning }}>
                     {formatNumber(stats.pending)}
                   </Title>
                   <Text size='xs' c='dimmed'>
@@ -450,9 +530,9 @@ export default function Dashboard() {
                     <Text size='sm' c='dimmed'>
                       En Proceso
                     </Text>
-                    <IconTrendingUp size={20} color='blue' />
+                    <IconTrendingUp size={20} color={projectColors.secondary} />
                   </Group>
-                  <Title order={3} c='blue'>
+                  <Title order={3} style={{ color: projectColors.secondary }}>
                     {formatNumber(stats.inProgress)}
                   </Title>
                   <Text size='xs' c='dimmed'>
@@ -484,18 +564,90 @@ export default function Dashboard() {
 
                 <Grid.Col span={{ base: 12, md: 6 }}>
                   <Card shadow='sm' padding='lg' radius='md' withBorder>
-                    <Title order={4} mb='md'>
-                      Tendencia de Tareas
-                    </Title>
-                    <LineChart
-                      h={300}
-                      data={timeSeriesChartData}
-                      dataKey='date'
-                      series={[{ name: 'count', label: 'Tareas', color: 'blue.6' }]}
-                      curveType='monotone'
-                      withDots={false}
-                      withTooltip
-                    />
+                    <Group justify='space-between' mb='md'>
+                      <Title order={4}>Tendencia de Tareas</Title>
+                      <Badge
+                        size='lg'
+                        style={{
+                          background: 'linear-gradient(135deg, #113562 0%, #3db6e0 100%)',
+                          color: 'white',
+                          border: 'none',
+                        }}
+                      >
+                        {getFilterLabel(dateFilter)}
+                      </Badge>
+                    </Group>
+                    {timeSeriesChartData.length > 0 ? (
+                      <LineChart
+                        h={300}
+                        data={timeSeriesChartData}
+                        dataKey='date'
+                        series={[
+                          {
+                            name: 'Tareas',
+                            label: 'Tareas',
+                            color: projectColors.secondary,
+                          },
+                        ]}
+                        curveType='monotone'
+                        withDots
+                        dotProps={{
+                          r: 5,
+                          strokeWidth: 2,
+                          fill: projectColors.primary,
+                          stroke: projectColors.secondary,
+                        }}
+                        activeDotProps={{
+                          r: 8,
+                          strokeWidth: 3,
+                          fill: projectColors.secondary,
+                          stroke: projectColors.primary,
+                        }}
+                        withTooltip
+                        tooltipProps={{
+                          contentStyle: {
+                            backgroundColor: projectColors.primary,
+                            border: 'none',
+                            borderRadius: '12px',
+                            color: 'white',
+                            padding: '12px 16px',
+                            boxShadow: '0 4px 20px rgba(17, 53, 98, 0.3)',
+                            fontSize: '14px',
+                            fontWeight: 500,
+                          },
+                          labelStyle: {
+                            color: projectColors.secondary,
+                            fontWeight: 600,
+                            marginBottom: '4px',
+                            fontSize: '13px',
+                          },
+                          itemStyle: {
+                            color: 'white',
+                            fontSize: '16px',
+                            fontWeight: 700,
+                          },
+                          wrapperStyle: {
+                            outline: 'none',
+                          },
+                        }}
+                        strokeDasharray='0'
+                        gridProps={{
+                          stroke: '#e0e0e0',
+                          strokeDasharray: '3 3',
+                          vertical: false,
+                        }}
+                        withPointLabels={timeSeriesChartData.length <= 15}
+                      />
+                    ) : (
+                      <Flex h={300} align='center' justify='center'>
+                        <Stack align='center' gap='sm'>
+                          <IconChartLine size={48} color={projectColors.primary} opacity={0.3} />
+                          <Text c='dimmed' size='sm'>
+                            No hay datos disponibles para este periodo
+                          </Text>
+                        </Stack>
+                      </Flex>
+                    )}
                   </Card>
                 </Grid.Col>
               </Grid>

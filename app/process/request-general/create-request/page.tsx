@@ -421,14 +421,14 @@ function RequestBoard() {
 
         setProcessCategories(
           data.processCategories
-          .filter((p) => p.active === 1)
-          .map((p) => ({
-            value: p.id_process.toString(),
-            label: p.description ? `${p.process} - ${p.description}` : p.process,
-            id_category_request: p.id_category_request,
-            email: p.email,
-            description: p.description,
-          }))
+            .filter((p) => p.active === 1)
+            .map((p) => ({
+              value: p.id_process.toString(),
+              label: p.description ? `${p.process} - ${p.description}` : p.process,
+              id_category_request: p.id_category_request,
+              email: p.email,
+              description: p.description,
+            }))
         );
         if (data.assignedUsers) {
           setAssignedUsers(data.assignedUsers.map((u) => ({ value: u.name, label: u.name })));
@@ -1112,7 +1112,8 @@ function RequestBoard() {
               subject: '',
               category: '',
               process: '',
-              descripcion: '',});
+              descripcion: '',
+            });
           }}
           title={
             <Group>
@@ -1328,7 +1329,6 @@ function RequestBoard() {
                 ticketId={0}
                 onFilesChange={setAttachedFiles}
                 autoUpload={false}
-                maxFiles={10}
                 disabled={formDataLoading}
               />
             </div>
