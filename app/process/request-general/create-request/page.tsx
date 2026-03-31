@@ -539,6 +539,8 @@ function RequestBoard() {
   };
 
   const handleCreateTicketWithValidation = async () => {
+    if (createLoading) return;
+
     if (!validateForm()) {
       return;
     }
@@ -546,6 +548,8 @@ function RequestBoard() {
   };
 
   const handleCreateTicket = async () => {
+    if (createLoading) return;
+    
     try {
       setCreateLoading(true);
       const response = await fetch('/api/requests-general/create-request', {
@@ -1353,6 +1357,7 @@ function RequestBoard() {
               <Button
                 onClick={handleCreateTicketWithValidation}
                 loading={createLoading}
+                disabled={createLoading}
                 size='md'
                 leftSection={<IconPlus size={16} />}
                 className='bg-blue-600 hover:bg-blue-700'
