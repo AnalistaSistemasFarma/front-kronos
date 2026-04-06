@@ -1474,7 +1474,7 @@ function ViewRequestPage() {
           )}
 
           <FileUpload
-            ticketId={request.id}
+            ticketId={request.id_request_general}
             onFilesChange={setAttachedFiles}
             disabled={isRequestResolved()}
             storagePath='SG'
