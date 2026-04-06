@@ -3,6 +3,8 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import Link from 'next/link';
 import {
   Title,
@@ -47,6 +49,7 @@ import {
   IconFlag,
   IconClock,
   IconBuilding,
+  IconDownload,
 } from '@tabler/icons-react';
 
 interface Ticket {
@@ -514,6 +517,27 @@ function TicketsBoard() {
     await handleCreateTicket();
   };
 
+  async function exportToExcel() {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Datos');
+
+    const headers = Object.keys(tickets[0]);
+    worksheet.columns = headers.map((header) => ({
+      header,
+      key: header,
+      width: 20,
+    }));
+
+    tickets.forEach((row) => worksheet.addRow(row));
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+
+    saveAs(blob, 'InformeCasos.xlsx');
+  }
+
   return (
     <div className='min-h-screen bg-gray-50'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
@@ -601,17 +625,16 @@ function TicketsBoard() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-red-50 border-red-200'>
+              <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
                 <Group>
-                  <IconFlag size={24} className='text-red-600' />
-                  <div>
-                    <Text size='xs' color='red.6'>
-                      Alta Prioridad
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.priority?.toLowerCase() === 'alta').length}
-                    </Text>
-                  </div>
+                  <Button
+                    onClick={() => exportToExcel()}
+                    size='lg'
+                    leftSection={<IconDownload size={18} />}
+                    className='bg-green-500 hover:bg-green-700'
+                  >
+                    Descargar XLSX
+                  </Button>
                 </Group>
               </Card>
             </Grid.Col>
