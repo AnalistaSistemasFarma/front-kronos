@@ -409,6 +409,7 @@ function ViewRequestPage() {
   };
 
   const downloadAllFilesAsZip = async () => {
+    setLoadingOptions(true);
     if (!folderContents.length) return;
 
     try {
@@ -431,6 +432,7 @@ function ViewRequestPage() {
       if (!request) return;
 
       saveAs(content, `Request-${request.id_request_general}.zip`);
+      setLoadingOptions(false);
     } catch (error) {
       console.error('Error descargando archivos en ZIP:', error);
     }
@@ -1456,6 +1458,7 @@ function ViewRequestPage() {
                   variant="light"
                   color="blue"
                   onClick={downloadAllFilesAsZip}
+                  disabled={loadingOptions}
                 >
                   Descargar todos
                 </Button>

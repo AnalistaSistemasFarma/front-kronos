@@ -184,6 +184,7 @@ function ViewRequestPage() {
   >([]);
   const [filteredProcesses, setFilteredProcesses] = useState<Option[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
+  const [loadingDownload, setLoadingDownload] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -503,6 +504,7 @@ function ViewRequestPage() {
   };
 
   const downloadAllFilesAsZip = async () => {
+    setLoadingDownload(true);
     if (!folderContents.length) return;
 
     try {
@@ -525,6 +527,8 @@ function ViewRequestPage() {
       if (!request) return;
 
       saveAs(content, `Request-${request.id}.zip`);
+
+      setLoadingDownload(false);
     } catch (error) {
       console.error('Error descargando archivos en ZIP:', error);
     }
@@ -1645,6 +1649,7 @@ function ViewRequestPage() {
                   variant="light"
                   color="blue"
                   onClick={downloadAllFilesAsZip}
+                  disabled={loadingDownload}
                 >
                   Descargar todos
                 </Button>
