@@ -4,6 +4,8 @@ import { Suspense, useEffect, useState, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 import { useSession } from 'next-auth/react';
 
 declare module 'next-auth' {
@@ -178,7 +180,7 @@ function ViewRequestPage() {
     text: string;
   } | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
-  const [folderContents, setFolderContents] = useState([]);
+  const [folderContents, setFolderContents] = useState<FolderFile[]>([]);
   const [showResolution, setShowResolution] = useState(false);
   const [resolutionData, setResolutionData] = useState({
     estado: '',
@@ -403,6 +405,34 @@ function ViewRequestPage() {
     } catch (error) {
       console.error('Error al listar los archivos de la carpeta:', error);
       setFolderContents([]);
+    }
+  };
+
+  const downloadAllFilesAsZip = async () => {
+    if (!folderContents.length) return;
+
+    try {
+      const zip = new JSZip();
+
+      for (const file of folderContents) {
+        const url = file["@microsoft.graph.downloadUrl"];
+
+        if (!url) continue;
+
+        const response = await axios.get(url, {
+          responseType: 'blob',
+        });
+
+        zip.file(file.name, response.data);
+      }
+
+      const content = await zip.generateAsync({ type: 'blob' });
+
+      if (!request) return;
+
+      saveAs(content, `Request-${request.id_request_general}.zip`);
+    } catch (error) {
+      console.error('Error descargando archivos en ZIP:', error);
     }
   };
 
@@ -1416,9 +1446,20 @@ function ViewRequestPage() {
 
           {folderContents.length > 0 && (
             <Stack gap='sm' mb='md'>
-              <Text size='sm' fw={500}>
-                Archivos existentes en la solicitud ({folderContents.length})
-              </Text>
+              <Group justify="space-between" mb="sm">
+                <Text size="sm" fw={500}>
+                  Archivos existentes en la solicitud ({folderContents.length})
+                </Text>
+
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="blue"
+                  onClick={downloadAllFilesAsZip}
+                >
+                  Descargar todos
+                </Button>
+              </Group>
               {folderContents.map((file: FolderFile) => (
                 <Card key={file.id} withBorder p='sm' bg='gray.0'>
                   <Flex align='center' gap='sm'>
