@@ -31,6 +31,7 @@ import {
   Collapse,
   Box,
   Flex,
+  ScrollArea,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -1231,6 +1232,8 @@ function RequestBoard() {
                           {searchResults.length === 1 ? 'resultado' : 'resultados'} encontrado
                           {searchResults.length === 1 ? '' : 's'}
                         </Text>
+
+                        <ScrollArea h={250} type="auto">
                         {searchResults.map((result) => (
                           <Card
                             key={result.value}
@@ -1255,6 +1258,7 @@ function RequestBoard() {
                             </Stack>
                           </Card>
                         ))}
+                        </ScrollArea>
                       </Stack>
                     </Card>
                   )}
