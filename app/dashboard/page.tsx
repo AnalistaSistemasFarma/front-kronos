@@ -23,7 +23,7 @@ import {
   Flex,
   ActionIcon,
 } from '@mantine/core';
-import { BarChart, PieChart, LineChart } from '@mantine/charts';
+import { BarChart, PieChart, AreaChart } from '@mantine/charts';
 import {
   IconAlertCircle,
   IconRefresh,
@@ -88,7 +88,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DateFilter>('month');
-  const [trendFilter, setTrendFilter] = useState<DateFilter>('month');
   const [selectedMonthDate, setSelectedMonthDate] = useState<Date>(
     new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   );
@@ -262,24 +261,24 @@ export default function Dashboard() {
     }
   };
 
-  // Time series data with dynamic grouping based on trendFilter (independent of global dateFilter)
+  // Time series data with dynamic grouping based on dateFilter (independent of global dateFilter)
   const timeSeriesData = tasks.reduce((acc, task) => {
     const date = new Date(task.fecha_creacion_solicitud);
-    const key = getDateKey(date, trendFilter);
+    const key = getDateKey(date, dateFilter);
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
 
   const formatTimeSeriesLabel = (key: string): string => {
-    if (trendFilter === 'year' || trendFilter === 'semester') {
+    if (dateFilter === 'year' || dateFilter === 'semester') {
       const [y, m] = key.split('-').map(Number);
       return new Date(y, m - 1, 1).toLocaleDateString('es-CO', { month: 'short', year: '2-digit' });
     }
-    if (trendFilter === 'month' || trendFilter === 'quarter') {
+    if (dateFilter === 'month' || dateFilter === 'quarter') {
       const [y, m, d] = key.split('-').map(Number);
       return new Date(y, m - 1, d).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
     }
-    if (trendFilter === 'all') {
+    if (dateFilter === 'all') {
       // "2025-Q1" → "Q1 2025"
       const [year, q] = key.split('-');
       return `${q} ${year}`;
@@ -287,10 +286,10 @@ export default function Dashboard() {
     return key;
   };
 
-  // Build complete time series for trendFilter, filling missing periods with 0
+  // Build complete time series for dateFilter, filling missing periods with 0
   const buildCompleteTimeSeries = (): [string, number][] => {
     const now = new Date();
-    switch (trendFilter) {
+    switch (dateFilter) {
       case 'month': {
         const range = getDateRange('month')!;
         const result: [string, number][] = [];
@@ -319,7 +318,7 @@ export default function Dashboard() {
       }
       case 'semester':
       case 'year': {
-        const range = getDateRange(trendFilter)!;
+        const range = getDateRange(dateFilter)!;
         const start = new Date(range.startDate + 'T00:00:00');
         const end = new Date(range.endDate + 'T00:00:00');
         const result: [string, number][] = [];
@@ -494,7 +493,6 @@ export default function Dashboard() {
                 { value: 'quarter', label: 'Trimestral' },
                 { value: 'semester', label: 'Semestral' },
                 { value: 'year', label: 'Anual' },
-                { value: 'all', label: 'Todas' },
               ]}
               value={dateFilter}
               onChange={(value) => setDateFilter((value as DateFilter) ?? 'month')}
@@ -572,9 +570,6 @@ export default function Dashboard() {
           <Tabs.List>
             <Tabs.Tab value='overview' leftSection={<IconChartBar size={16} />}>
               Resumen General
-            </Tabs.Tab>
-            <Tabs.Tab value='status' leftSection={<IconChartPie size={16} />}>
-              Por Estado
             </Tabs.Tab>
             <Tabs.Tab value='process' leftSection={<IconChartLine size={16} />}>
               Por Proceso
@@ -690,10 +685,9 @@ export default function Dashboard() {
                           { value: 'quarter', label: 'Trimestral' },
                           { value: 'semester', label: 'Semestral' },
                           { value: 'year', label: 'Anual' },
-                          { value: 'all', label: 'Todas' },
                         ]}
-                        value={trendFilter}
-                        onChange={(v) => setTrendFilter((v as DateFilter) ?? 'month')}
+                        value={dateFilter}
+                        onChange={(v) => setDateFilter((v as DateFilter) ?? 'month')}
                         allowDeselect={false}
                         styles={{
                           input: {
@@ -706,7 +700,7 @@ export default function Dashboard() {
                       />
                     </Group>
                     {timeSeriesChartData.length > 0 ? (
-                      <LineChart
+                      <AreaChart
                         h={300}
                         data={timeSeriesChartData}
                         dataKey='date'
@@ -720,51 +714,64 @@ export default function Dashboard() {
                         curveType='monotone'
                         withDots
                         dotProps={{
-                          r: 5,
+                          r: 4,
                           strokeWidth: 2,
-                          fill: projectColors.primary,
+                          fill: 'white',
                           stroke: projectColors.secondary,
                         }}
                         activeDotProps={{
-                          r: 8,
-                          strokeWidth: 3,
+                          r: 6,
+                          strokeWidth: 2,
                           fill: projectColors.secondary,
-                          stroke: projectColors.primary,
+                          stroke: 'white',
                         }}
                         withTooltip
                         tooltipProps={{
-                          contentStyle: {
-                            backgroundColor: projectColors.primary,
-                            border: 'none',
-                            borderRadius: '12px',
-                            color: 'white',
-                            padding: '12px 16px',
-                            boxShadow: '0 4px 20px rgba(17, 53, 98, 0.3)',
-                            fontSize: '14px',
-                            fontWeight: 500,
-                          },
-                          labelStyle: {
-                            color: projectColors.secondary,
-                            fontWeight: 600,
-                            marginBottom: '4px',
-                            fontSize: '13px',
-                          },
-                          itemStyle: {
-                            color: 'white',
-                            fontSize: '16px',
-                            fontWeight: 700,
-                          },
-                          wrapperStyle: {
-                            outline: 'none',
+                          content: ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string | number }) => {
+                            if (!active || !payload?.length) return null;
+                            return (
+                              <Paper
+                                shadow='md'
+                                p='sm'
+                                radius='md'
+                                withBorder
+                                style={{ minWidth: 130, borderColor: '#e9ecef' }}
+                              >
+                                <Text size='xs' c='dimmed' mb={6} tt='capitalize'>
+                                  {label}
+                                </Text>
+                                <Group gap='xs' align='baseline'>
+                                  <Box
+                                    style={{
+                                      width: 8,
+                                      height: 8,
+                                      borderRadius: '50%',
+                                      backgroundColor: projectColors.secondary,
+                                      flexShrink: 0,
+                                    }}
+                                  />
+                                  <Text
+                                    fw={700}
+                                    size='xl'
+                                    style={{ color: projectColors.primary, lineHeight: 1 }}
+                                  >
+                                    {payload[0].value}
+                                  </Text>
+                                  <Text size='xs' c='dimmed'>
+                                    tareas
+                                  </Text>
+                                </Group>
+                              </Paper>
+                            );
                           },
                         }}
-                        strokeDasharray='0'
                         gridProps={{
                           stroke: '#e0e0e0',
                           strokeDasharray: '3 3',
                           vertical: false,
                         }}
                         withPointLabels={timeSeriesChartData.length <= 15}
+                        fillOpacity={0.15}
                       />
                     ) : (
                       <Flex h={300} align='center' justify='center'>
@@ -782,52 +789,6 @@ export default function Dashboard() {
             </Stack>
           </Tabs.Panel>
 
-          {/* Status Tab */}
-          <Tabs.Panel value='status'>
-            <Stack gap='lg' mt='md'>
-              <Card shadow='sm' padding='lg' radius='md' withBorder>
-                <Title order={4} mb='md'>
-                  Tareas por Estado
-                </Title>
-                <BarChart
-                  h={400}
-                  data={statusData}
-                  dataKey='name'
-                  series={[{ name: 'value', label: 'Cantidad' }]}
-                  withTooltip
-                  withLegend
-                />
-              </Card>
-
-              <Card shadow='sm' padding='lg' radius='md' withBorder>
-                <Title order={4} mb='md'>
-                  Detalle por Estado
-                </Title>
-                <Stack gap='sm'>
-                  {statusData.map((item) => (
-                    <Paper key={item.name} p='sm' withBorder>
-                      <Flex justify='space-between' align='center'>
-                        <Group>
-                          <Badge
-                            color={
-                              item.color === '#10B981'
-                                ? 'green'
-                                : item.color === '#F59E0B'
-                                ? 'orange'
-                                : 'blue'
-                            }
-                          >
-                            {item.name}
-                          </Badge>
-                        </Group>
-                        <Text fw={500}>{formatNumber(item.value)} tareas</Text>
-                      </Flex>
-                    </Paper>
-                  ))}
-                </Stack>
-              </Card>
-            </Stack>
-          </Tabs.Panel>
 
           {/* Process Tab */}
           <Tabs.Panel value='process'>
@@ -842,6 +803,21 @@ export default function Dashboard() {
                   dataKey='name'
                   series={[{ name: 'value', label: 'Cantidad', color: 'blue.6' }]}
                   withTooltip
+                  tooltipProps={{
+                    content: ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string | number }) => {
+                      if (!active || !payload?.length) return null;
+                      return (
+                        <Paper shadow='md' p='sm' radius='md' withBorder style={{ minWidth: 160, borderColor: '#e9ecef' }}>
+                          <Text size='xs' c='dimmed' mb={6}>{label}</Text>
+                          <Group gap='xs' align='baseline'>
+                            <Box style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: projectColors.primary, flexShrink: 0 }} />
+                            <Text fw={700} size='xl' style={{ color: projectColors.primary, lineHeight: 1 }}>{payload[0].value}</Text>
+                            <Text size='xs' c='dimmed'>tareas</Text>
+                          </Group>
+                        </Paper>
+                      );
+                    },
+                  }}
                   withLegend
                   xAxisProps={{
                     angle: -45,
@@ -882,6 +858,21 @@ export default function Dashboard() {
                   dataKey='name'
                   series={[{ name: 'value', label: 'Cantidad', color: 'green.6' }]}
                   withTooltip
+                  tooltipProps={{
+                    content: ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string | number }) => {
+                      if (!active || !payload?.length) return null;
+                      return (
+                        <Paper shadow='md' p='sm' radius='md' withBorder style={{ minWidth: 160, borderColor: '#e9ecef' }}>
+                          <Text size='xs' c='dimmed' mb={6}>{label}</Text>
+                          <Group gap='xs' align='baseline'>
+                            <Box style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: projectColors.success, flexShrink: 0 }} />
+                            <Text fw={700} size='xl' style={{ color: projectColors.primary, lineHeight: 1 }}>{payload[0].value}</Text>
+                            <Text size='xs' c='dimmed'>tareas</Text>
+                          </Group>
+                        </Paper>
+                      );
+                    },
+                  }}
                   withLegend
                   xAxisProps={{
                     angle: -45,
