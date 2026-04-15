@@ -21,6 +21,7 @@ import {
   Container,
   Paper,
   Flex,
+  ActionIcon,
 } from '@mantine/core';
 import { BarChart, PieChart, LineChart } from '@mantine/charts';
 import {
@@ -35,6 +36,8 @@ import {
   IconCheck,
   IconX,
   IconCoin,
+  IconChevronLeft,
+  IconChevronRight,
 } from '@tabler/icons-react';
 
 interface TaskData {
@@ -84,7 +87,11 @@ export default function Dashboard() {
   const [tasks, setTasks] = useState<TaskData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [dateFilter, setDateFilter] = useState<DateFilter>('all');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('month');
+  const [trendFilter, setTrendFilter] = useState<DateFilter>('month');
+  const [selectedMonthDate, setSelectedMonthDate] = useState<Date>(
+    new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  );
   const [activeTab, setActiveTab] = useState<string>('overview');
 
   useEffect(() => {
@@ -94,7 +101,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchTasks();
-  }, [dateFilter]);
+  }, [dateFilter, selectedMonthDate]);
 
   const fetchTasks = async () => {
     try {
@@ -146,8 +153,14 @@ export default function Dashboard() {
 
     switch (filter) {
       case 'month':
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        break;
+        return {
+          startDate: formatDateToLocal(
+            new Date(selectedMonthDate.getFullYear(), selectedMonthDate.getMonth(), 1)
+          ),
+          endDate: formatDateToLocal(
+            new Date(selectedMonthDate.getFullYear(), selectedMonthDate.getMonth() + 1, 0)
+          ),
+        };
       case 'quarter':
         const quarter = Math.floor(now.getMonth() / 3);
         startDate = new Date(now.getFullYear(), quarter * 3, 1);
@@ -157,7 +170,8 @@ export default function Dashboard() {
         startDate = new Date(now.getFullYear(), semester * 6, 1);
         break;
       case 'year':
-        startDate = new Date(now.getFullYear(), 0, 1);
+        // Últimos 12 meses rodantes
+        startDate = new Date(now.getFullYear() - 1, now.getMonth(), 1);
         break;
       default:
         startDate = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -218,59 +232,130 @@ export default function Dashboard() {
     .sort((a, b) => b.value - a.value)
     .slice(0, 10);
 
-  // Get date key based on filter period for dynamic grouping
+  // Sortable keys per filter:
+  //   month    → YYYY-MM-DD  (daily)
+  //   quarter  → YYYY-MM-DD of week's Sunday (weekly)
+  //   semester → YYYY-MM     (monthly)
+  //   year     → YYYY-MM     (monthly)
+  //   all      → YYYY-Qn     (quarterly, e.g. "2025-Q1")
   const getDateKey = (date: Date, filter: DateFilter): string => {
     const year = date.getFullYear();
     const month = date.getMonth();
-    const day = date.getDate();
 
     switch (filter) {
       case 'month':
-        // Daily grouping for monthly view
         return formatDateToLocal(date);
-      case 'quarter':
-        // Weekly grouping for quarterly view
-        const weekNumber = Math.ceil((day + new Date(year, month, 1).getDay()) / 7);
-        const weekStart = new Date(year, month, day - date.getDay());
-        return `Sem ${weekNumber} (${weekStart.toLocaleDateString('es-CO', {
-          day: '2-digit',
-          month: 'short',
-        })})`;
+      case 'quarter': {
+        const weekStart = new Date(date);
+        weekStart.setDate(date.getDate() - date.getDay()); // rewind to Sunday
+        return formatDateToLocal(weekStart);
+      }
       case 'semester':
-        // Monthly grouping for semester view
-        return date.toLocaleDateString('es-CO', { month: 'short', year: 'numeric' });
       case 'year':
-        // Monthly grouping for yearly view
-        return date.toLocaleDateString('es-CO', { month: 'short' });
-      case 'all':
-        // Quarterly grouping for all time view
-        const quarterNum = Math.floor(month / 3) + 1;
-        return `Q${quarterNum} ${year}`;
+        return `${year}-${String(month + 1).padStart(2, '0')}`;
+      case 'all': {
+        const q = Math.floor(month / 3) + 1;
+        return `${year}-Q${q}`;
+      }
       default:
         return formatDateToLocal(date);
     }
   };
 
-  // Time series data with dynamic grouping based on filter
+  // Time series data with dynamic grouping based on trendFilter (independent of global dateFilter)
   const timeSeriesData = tasks.reduce((acc, task) => {
     const date = new Date(task.fecha_creacion_solicitud);
-    const key = getDateKey(date, dateFilter);
+    const key = getDateKey(date, trendFilter);
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
 
-  // Sort time series data appropriately
-  const sortTimeSeriesData = (data: [string, number][]): [string, number][] => {
-    if (dateFilter === 'month') {
-      return data.sort((a, b) => a[0].localeCompare(b[0]));
+  const formatTimeSeriesLabel = (key: string): string => {
+    if (trendFilter === 'year' || trendFilter === 'semester') {
+      const [y, m] = key.split('-').map(Number);
+      return new Date(y, m - 1, 1).toLocaleDateString('es-CO', { month: 'short', year: '2-digit' });
     }
-    // For other filters, maintain insertion order (already sorted by date)
-    return data;
+    if (trendFilter === 'month' || trendFilter === 'quarter') {
+      const [y, m, d] = key.split('-').map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
+    }
+    if (trendFilter === 'all') {
+      // "2025-Q1" → "Q1 2025"
+      const [year, q] = key.split('-');
+      return `${q} ${year}`;
+    }
+    return key;
   };
 
-  const timeSeriesChartData = sortTimeSeriesData(Object.entries(timeSeriesData)).map(
-    ([date, count]) => ({ date, Tareas: count })
-  );
+  // Build complete time series for trendFilter, filling missing periods with 0
+  const buildCompleteTimeSeries = (): [string, number][] => {
+    const now = new Date();
+    switch (trendFilter) {
+      case 'month': {
+        const range = getDateRange('month')!;
+        const result: [string, number][] = [];
+        const cur = new Date(range.startDate + 'T00:00:00');
+        const end = new Date(range.endDate + 'T00:00:00');
+        while (cur <= end) {
+          const key = formatDateToLocal(cur);
+          result.push([key, timeSeriesData[key] || 0]);
+          cur.setDate(cur.getDate() + 1);
+        }
+        return result;
+      }
+      case 'quarter': {
+        const range = getDateRange('quarter')!;
+        const start = new Date(range.startDate + 'T00:00:00');
+        const end = new Date(range.endDate + 'T00:00:00');
+        const cur = new Date(start);
+        cur.setDate(start.getDate() - start.getDay()); // rewind to Sunday
+        const result: [string, number][] = [];
+        while (cur <= end) {
+          const key = formatDateToLocal(cur);
+          result.push([key, timeSeriesData[key] || 0]);
+          cur.setDate(cur.getDate() + 7);
+        }
+        return result;
+      }
+      case 'semester':
+      case 'year': {
+        const range = getDateRange(trendFilter)!;
+        const start = new Date(range.startDate + 'T00:00:00');
+        const end = new Date(range.endDate + 'T00:00:00');
+        const result: [string, number][] = [];
+        const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+        while (cur <= end) {
+          const key = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`;
+          result.push([key, timeSeriesData[key] || 0]);
+          cur.setMonth(cur.getMonth() + 1);
+        }
+        return result;
+      }
+      case 'all': {
+        if (tasks.length === 0) return [];
+        const minDate = tasks.reduce((min, t) => {
+          const d = new Date(t.fecha_creacion_solicitud);
+          return d < min ? d : min;
+        }, new Date());
+        const result: [string, number][] = [];
+        const cur = new Date(minDate.getFullYear(), Math.floor(minDate.getMonth() / 3) * 3, 1);
+        while (cur <= now) {
+          const q = Math.floor(cur.getMonth() / 3) + 1;
+          const key = `${cur.getFullYear()}-Q${q}`;
+          result.push([key, timeSeriesData[key] || 0]);
+          cur.setMonth(cur.getMonth() + 3);
+        }
+        return result;
+      }
+      default:
+        return Object.entries(timeSeriesData).sort((a, b) => a[0].localeCompare(b[0]));
+    }
+  };
+
+  const timeSeriesChartData = buildCompleteTimeSeries().map(([key, count]) => ({
+    date: formatTimeSeriesLabel(key),
+    Tareas: count,
+  }));
 
   // Cost per activity data
   const costStats = {
@@ -401,21 +486,52 @@ export default function Dashboard() {
               Análisis y visualización de tareas por periodo
             </Text>
           </div>
-          <Group>
+          <Group align='flex-end'>
             <Select
               label='Periodo'
-              placeholder='Seleccionar periodo'
               data={[
-                { value: 'all', label: 'Todas' },
                 { value: 'month', label: 'Mensual' },
                 { value: 'quarter', label: 'Trimestral' },
                 { value: 'semester', label: 'Semestral' },
                 { value: 'year', label: 'Anual' },
+                { value: 'all', label: 'Todas' },
               ]}
               value={dateFilter}
-              onChange={(value) => setDateFilter(value as DateFilter)}
-              w={200}
+              onChange={(value) => setDateFilter((value as DateFilter) ?? 'month')}
+              allowDeselect={false}
+              w={150}
             />
+            {dateFilter === 'month' && (
+              <Group gap={4}>
+                <ActionIcon
+                  variant='light'
+                  onClick={() =>
+                    setSelectedMonthDate(
+                      new Date(selectedMonthDate.getFullYear(), selectedMonthDate.getMonth() - 1, 1)
+                    )
+                  }
+                >
+                  <IconChevronLeft size={16} />
+                </ActionIcon>
+                <Text fw={500} w={110} ta='center' size='sm'>
+                  {selectedMonthDate.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })}
+                </Text>
+                <ActionIcon
+                  variant='light'
+                  disabled={
+                    selectedMonthDate.getFullYear() === new Date().getFullYear() &&
+                    selectedMonthDate.getMonth() === new Date().getMonth()
+                  }
+                  onClick={() =>
+                    setSelectedMonthDate(
+                      new Date(selectedMonthDate.getFullYear(), selectedMonthDate.getMonth() + 1, 1)
+                    )
+                  }
+                >
+                  <IconChevronRight size={16} />
+                </ActionIcon>
+              </Group>
+            )}
             <Button
               variant='light'
               onClick={fetchTasks}
@@ -447,7 +563,7 @@ export default function Dashboard() {
               '&:hover': {
                 backgroundColor: 'var(--mantine-color-gray-1)',
               },
-              '&[data-active]:hover': {
+              '&[dataActive]:hover': {
                 backgroundColor: 'var(--mantine-color-blue-light)',
               },
             },
@@ -566,16 +682,28 @@ export default function Dashboard() {
                   <Card shadow='sm' padding='lg' radius='md' withBorder>
                     <Group justify='space-between' mb='md'>
                       <Title order={4}>Tendencia de Tareas</Title>
-                      <Badge
-                        size='lg'
-                        style={{
-                          background: 'linear-gradient(135deg, #113562 0%, #3db6e0 100%)',
-                          color: 'white',
-                          border: 'none',
+                      <Select
+                        size='xs'
+                        w={130}
+                        data={[
+                          { value: 'month', label: 'Mensual' },
+                          { value: 'quarter', label: 'Trimestral' },
+                          { value: 'semester', label: 'Semestral' },
+                          { value: 'year', label: 'Anual' },
+                          { value: 'all', label: 'Todas' },
+                        ]}
+                        value={trendFilter}
+                        onChange={(v) => setTrendFilter((v as DateFilter) ?? 'month')}
+                        allowDeselect={false}
+                        styles={{
+                          input: {
+                            background: 'linear-gradient(135deg, #113562 0%, #3db6e0 100%)',
+                            color: 'white',
+                            border: 'none',
+                            fontWeight: 600,
+                          },
                         }}
-                      >
-                        {getFilterLabel(dateFilter)}
-                      </Badge>
+                      />
                     </Group>
                     {timeSeriesChartData.length > 0 ? (
                       <LineChart
