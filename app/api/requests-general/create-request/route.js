@@ -70,13 +70,10 @@ export async function POST(req) {
       const getTasksQuery = `
         SELECT 
           tpc.id AS id_task,
-          utrg.id_user,
-          u.email
+          utrg.id_user
         FROM user_task_request_general utrg
         INNER JOIN task_process_category tpc 
           ON tpc.id = utrg.id_task
-        INNER JOIN [user] u 
-          ON u.id = utrg.id_user
         WHERE tpc.id_process_category = @process;
       `;
 
@@ -100,32 +97,12 @@ export async function POST(req) {
 
       }
 
-      const processUserResult = await new sql.Request(transaction)
-        .input("process", sql.Int, process)
-        .query(`
-          SELECT u.email
-          FROM user_process_category_request_general upcrg
-          INNER JOIN process_category pc ON pc.id = upcrg.id_process_category
-          INNER JOIN [user] u ON u.id = upcrg.id_user
-          WHERE pc.id = @process
-        `);
-
-      const processEmail = processUserResult.recordset[0]?.email || null;
-
-      const taskEmails = [
-        ...new Set(tasksResult.recordset.map(t => t.email))
-      ];
-
       await transaction.commit();
 
       return new Response(
         JSON.stringify({
           message: "Solicitud creada correctamente",
           id_request: newRequestId,
-          notifications: {
-            processEmail,
-            taskEmails
-          }
         }),
         { status: 201 }
       );
