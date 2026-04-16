@@ -1,13 +1,13 @@
 import axios from "axios";
-import type { NextApiRequest, NextApiResponse } from "next";
+import { NextResponse } from "next/server";
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse
-) {
-  const code = req.query.code as string;
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const code = searchParams.get("code");
 
-  if (!code) return res.status(400).send("No auth code");
+  if (!code) {
+    return NextResponse.json({ error: "No auth code" }, { status: 400 });
+  }
 
   try {
     const tokenResponse = await axios.post(
@@ -28,11 +28,15 @@ export default async function handler(
     );
 
     const token = tokenResponse.data.access_token;
-    // Opcional: guardar token en cookie o sesión
-    res.redirect(`/dashboard?token=${token}`);
+
+    return NextResponse.redirect(
+      `http://localhost:3003/dashboard?token=${token}`
+    );
   } catch (error) {
     console.error("Token exchange failed:", error);
-    res.status(500).send("Token exchange failed");
+    return NextResponse.json(
+      { error: "Token exchange failed" },
+      { status: 500 }
+    );
   }
 }
- 
