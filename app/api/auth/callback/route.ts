@@ -16,7 +16,7 @@ export default async function handler(
         client_id: process.env.MICROSOFTCLIENTID!,
         scope: "https://graph.microsoft.com/.default offline_access",
         code,
-        redirect_uri: "http://localhost:3000/api/auth/callback",
+        redirect_uri: "http://localhost:3003/api/auth/callback",
         grant_type: "authorization_code",
         client_secret: process.env.MICROSOFTCLIENTSECRET!,
       }),

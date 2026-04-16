@@ -5,6 +5,7 @@ import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../component
 import axios from 'axios';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { formatNumber, getAccessToken, NotifyError, sendMessageTeams } from '../../../utils/utils';
 import Link from 'next/link';
 import {
   Title,
@@ -597,6 +598,13 @@ function RequestBoard() {
         parseInt(formData.process)
       );
 
+      try {
+        await NotifySuccess(newTicket, formData);
+      } catch (err) {
+        console.error('Error en NotifySuccess:', err);
+        setError('No se pudo notificar por Teams, pero la solicitud fue creada.');
+      }
+
       setFormData({
         company: '',
         subject: '',
@@ -616,6 +624,37 @@ function RequestBoard() {
       setCreateLoading(false);
     }
   };
+
+  async function NotifySuccess(newTicket: any, formData: any) {
+    const accessToken = await getAccessToken();
+
+    const notifications = newTicket.notifications;
+
+    if (!notifications) return;
+
+    if (notifications.processEmail) {
+      await sendMessageTeams(
+        notifications.processEmail,
+        `<b>📌 Nueva solicitud asignada a tu proceso</b><br/><br/>
+        <b>ID:</b> ${newTicket.id_request}<br/>
+        <b>Asunto:</b> ${formData.subject}<br/>
+        <b>Descripción:</b> ${formData.descripcion}`,
+        'html'
+      );
+    }
+
+    const uniqueEmails = [...new Set(notifications.taskEmails || [])];
+
+    for (const email of uniqueEmails) {
+      await sendMessageTeams(
+        email,
+        `<b>📝 Nueva tarea asignada</b><br/><br/>
+        <b>Solicitud:</b> #${newTicket.id_request}<br/>
+        <b>Asunto:</b> ${formData.subject}`,
+        'html'
+      );
+    }
+  }
 
   async function CheckOrCreateFolderAndUpload(
     folderName: string,
