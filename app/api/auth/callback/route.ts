@@ -26,7 +26,7 @@ export async function GET(req: Request) {
         },
       }
     );
-
+ 
     const token = tokenResponse.data.access_token;
 
     return NextResponse.redirect(
