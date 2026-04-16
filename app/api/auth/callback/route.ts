@@ -37,6 +37,6 @@ export async function GET(req: Request) {
     return NextResponse.json(
       { error: "Token exchange failed" },
       { status: 500 }
-    );
+    ); 
   }
 }
