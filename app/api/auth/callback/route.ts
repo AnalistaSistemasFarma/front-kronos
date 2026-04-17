@@ -2,8 +2,9 @@ import axios from "axios";
 import { NextResponse } from "next/server";
 
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const code = searchParams.get("code");
+  const hash = window.location.hash;
+  const params = new URLSearchParams(hash.replace('#', ''));
+  const code = params.get('code');
 
   if (!code) {
     return NextResponse.json({ error: "No auth code" }, { status: 400 });
