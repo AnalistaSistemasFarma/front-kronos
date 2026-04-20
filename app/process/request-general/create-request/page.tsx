@@ -5,6 +5,10 @@ import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../component
 import axios from 'axios';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useGetMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
+import { formatNumber, getAccessToken, NotifyError, sendMessageTeams } from '../../../../components/utils/utils';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import Link from 'next/link';
 import {
   Title,
@@ -51,6 +55,7 @@ import {
   IconProgress,
   IconUserCheck,
   IconTag,
+  IconDownload,
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../components/ui/FileUpload';
@@ -163,6 +168,7 @@ function RequestBoard() {
   const [folderContents, setFolderContents] = useState([]);
 
   const [filters, setFilters] = useState({
+    id: '',
     status: '',
     company: '',
     date_from: '',
@@ -298,6 +304,7 @@ function RequestBoard() {
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
 
+      if (filters.id) params.append('id', filters.id);
       if (filters.status) params.append('status', filters.status);
       if (filters.company) params.append('company', filters.company);
       if (filters.date_from) params.append('date_from', filters.date_from);
@@ -596,6 +603,15 @@ function RequestBoard() {
         formData.subject,
         parseInt(formData.process)
       );
+      
+      {/*
+      try {
+        await NotifySuccess(newTicket, formData);
+      } catch (err) {
+        console.error('Error en NotifySuccess:', err);
+        setError('No se pudo notificar por Teams, pero la solicitud fue creada.');
+      }
+      */}
 
       setFormData({
         company: '',
@@ -616,6 +632,36 @@ function RequestBoard() {
       setCreateLoading(false);
     }
   };
+
+  async function NotifySuccess(newTicket: any, formData: any) {
+
+    const notifications = newTicket.notifications;
+
+    if (!notifications) return;
+
+    if (notifications.processEmail) {
+      await sendMessageTeams(
+        notifications.processEmail,
+        `<b>📌 Nueva solicitud asignada a tu proceso</b><br/><br/>
+        <b>ID:</b> ${newTicket.id_request}<br/>
+        <b>Asunto:</b> ${formData.subject}<br/>
+        <b>Descripción:</b> ${formData.descripcion}`,
+        'html'
+      );
+    }
+
+    const uniqueEmails = [...new Set(notifications.taskEmails || [])];
+
+    for (const email of uniqueEmails) {
+      await sendMessageTeams(
+        email,
+        `<b>📝 Nueva tarea asignada</b><br/><br/>
+        <b>Solicitud:</b> #${newTicket.id_request}<br/>
+        <b>Asunto:</b> ${formData.subject}`,
+        'html'
+      );
+    }
+  }
 
   async function CheckOrCreateFolderAndUpload(
     folderName: string,
@@ -767,6 +813,27 @@ function RequestBoard() {
     )
   );
 
+  async function exportToExcel() {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Datos');
+
+    const headers = Object.keys(tickets[0]);
+    worksheet.columns = headers.map((header) => ({
+      header,
+      key: header,
+      width: 20,
+    }));
+
+    tickets.forEach((row) => worksheet.addRow(row));
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+
+    saveAs(blob, 'InformeSolicitudes.xlsx');
+  }
+
   return (
     <div className='min-h-screen bg-gray-50'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
@@ -846,6 +913,20 @@ function RequestBoard() {
                 </Group>
               </Card>
             </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
+                <Group>
+                  <Button
+                    onClick={() => exportToExcel()}
+                    size='lg'
+                    leftSection={<IconDownload size={18} />}
+                    className='bg-green-500 hover:bg-green-700'
+                  >
+                    Descargar XLSX
+                  </Button>
+                </Group>
+              </Card>
+            </Grid.Col>
           </Grid>
         </Card>
 
@@ -880,6 +961,16 @@ function RequestBoard() {
           <Collapse in={filtersExpanded}>
             <Box mt='md'>
               <Grid>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <TextInput
+                    label='ID Solicitud'
+                    type='text'
+                    value={filters.id}
+                    onChange={(e) => handleFilterChange('id', e.target.value)}
+                    leftSection={<IconFilter size={16} />}
+                    data-testid='id-filter'
+                  />
+                </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <Select
                     label='Estado'
@@ -947,6 +1038,7 @@ function RequestBoard() {
                   variant='outline'
                   onClick={async () => {
                     const clearedFilters = {
+                      id: '',
                       status: '',
                       company: '',
                       date_from: '',

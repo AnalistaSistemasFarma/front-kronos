@@ -8,6 +8,7 @@ export async function GET(req) {
 
     const { searchParams } = new URL(req.url);
     const idUser = searchParams.get('idUser');
+    const id = searchParams.get('id');
     const status = searchParams.get('status');
     const company = searchParams.get('company');
     const date_from = searchParams.get('date_from');
@@ -20,7 +21,7 @@ export async function GET(req) {
       SELECT
         rg.id, cr.category as category, up.name as [user], rg.[description], rg.id_company, c.company ,rg.created_at, u.name as 'requester', sc.status as [status], rg.subject_request as [subject], 
         pc.process, cr.id as id_category, rg.resolution, rg.date_resolution, rg.status_req as id_status_case, uex.name as executor_final, ucrg.id_user as id_assigned_category, 
-        upcrg.id_user as id_assigned_process_category
+        upcrg.id_user as id_assigned_process_category, u.email
       FROM requests_general rg
       INNER JOIN company c ON c.id_company = rg.id_company
       LEFT JOIN [user] u ON u.id = rg.id_requester
@@ -44,6 +45,11 @@ export async function GET(req) {
         { error: 'Se requiere el parámetro idUser para filtrar tickets' },
         { status: 400 }
       );
+    }
+
+    if (id) {
+      query += ` AND rg.id = @id`;
+      console.log('API requests-general: Agregando filtro por id:', id);
     }
 
     if (status) {
@@ -81,6 +87,10 @@ export async function GET(req) {
     if (assigned_to) {
       request.input('assigned_to', sql.NVarChar, assigned_to);
       console.log('API requests-general: Usando sql.NVarChar para assigned_to');
+    }
+
+    if (id) {
+      request.input('id', sql.Int, parseInt(id));
     }
 
     if (status) {
