@@ -59,6 +59,7 @@ import {
 import Link from 'next/link';
 import { sendMessage } from '../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../components/ui/FileUpload';
+import { createPrerenderSearchParamsForClientPage } from 'next/dist/server/request/search-params';
 
 interface Ticket {
   id: number;
@@ -136,6 +137,7 @@ function RequestBoard() {
   const [idUser, setIdUser] = useState('');
 
   const [filters, setFilters] = useState({
+    id: '',
     status: '',
     company: '',
     date_from: '',
@@ -225,6 +227,7 @@ function RequestBoard() {
       params.append('idUser', userIdToUse.toString());
 
       if (filtersToUse) {
+        if (filtersToUse.id) params.append('id', filtersToUse.id); 
         if (filtersToUse.status) params.append('status', filtersToUse.status);
         if (filtersToUse.company) params.append('company', filtersToUse.company);
         if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
@@ -517,6 +520,16 @@ function RequestBoard() {
             <Box mt='md'>
               <Grid>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <TextInput
+                    label='ID Solicitud'
+                    type='text'
+                    value={filters.id}
+                    onChange={(e) => handleFilterChange('id', e.target.value)}
+                    leftSection={<IconFilter size={16} />}
+                    data-testid='id-filter'
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <Select
                     label='Estado'
                     placeholder='Todos los estados'
@@ -568,6 +581,7 @@ function RequestBoard() {
                   variant='outline'
                   onClick={() => {
                     const clearedFilters = {
+                      id: '',
                       status: '',
                       company: '',
                       date_from: '',
