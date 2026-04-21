@@ -1434,6 +1434,55 @@ function ViewRequestPage() {
                       />
                     </Stack>
                   )}
+
+                  <br />
+
+                  <Group justify='space-between'>
+                    <Group>
+                      {!isEditing ? (
+                        <Button
+                          color='blue'
+                          onClick={handleStartEditing}
+                          leftSection={<IconTicket size={16} />}
+                          disabled={isRequestResolved()}
+                        >
+                          Editar Tarea
+                        </Button>
+                      ) : (
+                        <>
+                          <Button
+                            color='green'
+                            onClick={handleUpdateRequest}
+                            leftSection={<IconCheck size={16} />}
+                            loading={isUpdating}
+                          >
+                            Guardar Cambios
+                          </Button>
+                          <Button
+                            variant='outline'
+                            color='gray'
+                            onClick={handleCancelEditing}
+                            leftSection={<IconX size={16} />}
+                          >
+                            Cancelar
+                          </Button>
+                        </>
+                      )}
+                      {isRequestResolved() && (
+                        <Text size='sm' color='dimmed'>
+                          Esta tarea tiene una resolución registrada. El estado aún puede modificarse.
+                        </Text>
+                      )}
+
+                      <Button
+                        color='blue'
+                        onClick={() => setModalTasksOpened(true)}
+                        leftSection={<IconTicket size={16} />}
+                      >
+                        Ver Tareas
+                      </Button>
+                    </Group>
+                  </Group>
                 </div>
               </Stack>
             </Card>

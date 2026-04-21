@@ -8,6 +8,7 @@ export async function GET(req) {
 
     const { searchParams } = new URL(req.url);
     const idUser = searchParams.get('idUser');
+    const id = searchParams.get('id');
     const status = searchParams.get('status');
     const company = searchParams.get('company');
     const date_from = searchParams.get('date_from');
@@ -52,6 +53,10 @@ export async function GET(req) {
 
     else if (!status) query += ` AND sc.id_status_case = 4`;
 
+    if (id) {
+      query += ` AND rg.id = @id`;
+    }
+
     if (company) {
       query += ` AND rg.id_company = @company`;
     }
@@ -78,6 +83,10 @@ export async function GET(req) {
 
     if (status) {
       request.input('status', sql.Int, parseInt(status));
+    }
+
+    if (id) {
+      request.input('id', sql.Int, parseInt(id));
     }
 
     if (company) {
