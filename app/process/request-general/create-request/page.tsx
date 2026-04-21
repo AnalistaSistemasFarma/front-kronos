@@ -71,6 +71,15 @@ interface Ticket {
   requester: string;
   company: string;
   subject: string;
+  email: string;
+  process: string;
+  id_category: number;
+  resolution: string;
+  date_resolution: string;
+  id_status_case: number;
+  executor_final: string;
+  id_assigned_category: string;
+  id_assigned_process_category: string;
 }
 
 interface CompanyData {
@@ -817,14 +826,43 @@ function RequestBoard() {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Datos');
 
-    const headers = Object.keys(tickets[0]);
-    worksheet.columns = headers.map((header) => ({
-      header,
-      key: header,
-      width: 20,
-    }));
+    type TicketKeys = keyof Ticket;
+
+    const columnMapOrdered: { key: TicketKeys; header: string }[] = [
+      { key: "id", header: "Numero de Solicitud" },
+      { key: "category", header: "Fecha de Solicitud" },
+      { key: "user", header: "Asignado" },
+      { key: "id_company", header: "id_company" },
+      { key: "company", header: "Empresa" },
+      { key: "created_at", header: "Fecha de Creación" },
+      { key: "requester", header: "Creador Solicitud" },
+      { key: "status", header: "Estado Solicitud" },
+      { key: "subject", header: "nombre_solicitante" },
+      { key: "description", header: "cargo_solicitante" },
+      { key: "email", header: "Correo" },
+      { key: "process", header: "Proceso" },
+      { key: "id_category", header: "id_category" },
+      { key: "resolution", header: "Resolución" },
+      { key: "date_resolution", header: "Fecha Resolución" },
+      { key: "id_status_case", header: "id_status_case" },
+      { key: "executor_final", header: "Ejecutor Final" },
+      { key: "id_assigned_category", header: "Cifrado" },
+      { key: "id_assigned_process_category", header: "Cifrado" }
+    ];
+    
+    worksheet.columns = columnMapOrdered;
 
     tickets.forEach((row) => worksheet.addRow(row));
+
+    tickets.forEach(item => {
+      const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
+
+      columnMapOrdered.forEach(col => {
+        row[col.key] = item[col.key];
+      });
+
+      worksheet.addRow(row);
+    });
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
@@ -1255,7 +1293,7 @@ function RequestBoard() {
 
               <Grid.Col span={{ base: 12, md: 12 }}>
                 <TextInput
-                  label='Asunto'
+                  label={parseInt(formData.process) == 4 ? 'Nombre' : 'Asunto'}
                   placeholder='Ingrese el asunto de la solicitud'
                   value={formData.subject}
                   onChange={(e) => {
@@ -1402,7 +1440,7 @@ function RequestBoard() {
             </Grid>
 
             <Textarea
-              label='Descripción Detallada'
+              label={parseInt(formData.process) == 4 ? 'Cargo' : 'Descripción Detallada'}
               placeholder='Describa detalladamente la solicitud. Incluya toda la información relevante para una mejor atención.'
               value={formData.descripcion}
               onChange={(e) => {
