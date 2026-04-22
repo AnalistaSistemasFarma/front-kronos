@@ -4,6 +4,8 @@ import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import { useSession } from 'next-auth/react';
 import {
   Title,
@@ -55,6 +57,7 @@ import {
   IconUserCheck,
   IconTag,
   IconCalendarEvent,
+  IconDownload,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../components/email/utils/sendMessage';
@@ -74,6 +77,7 @@ interface Ticket {
   id_company: number;
   requester: string;
   company: string;
+  email: string;
 }
 
 interface Note {
@@ -417,6 +421,50 @@ function RequestBoard() {
     )
   );
 
+  async function exportToExcel() {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Datos');
+
+    type TicketKeys = keyof Ticket;
+
+    const columnMapOrdered: { key: TicketKeys; header: string }[] = [
+      { key: "id", header: "Numero de Solicitud" },
+      { key: "category", header: "Fecha de Solicitud" },
+      { key: "user", header: "Asignado" },
+      { key: "id_company", header: "id_company" },
+      { key: "company", header: "Empresa" },
+      { key: "created_at", header: "Fecha de Creación" },
+      { key: "requester", header: "Creador Solicitud" },
+      { key: "status", header: "Estado Solicitud" },
+      { key: "subject", header: "nombre_solicitante" },
+      { key: "description", header: "cargo_solicitante" },
+      { key: "email", header: "Correo" },
+      { key: "process", header: "Proceso" },
+      { key: "id_category", header: "id_category" },
+    ];
+    
+    worksheet.columns = columnMapOrdered;
+
+    tickets.forEach((row) => worksheet.addRow(row));
+
+    tickets.forEach(item => {
+      const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
+
+      columnMapOrdered.forEach(col => {
+        row[col.key] = item[col.key];
+      });
+
+      worksheet.addRow(row);
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+
+    saveAs(blob, 'InformeSolicitudesAsignadas.xlsx');
+  }
+
   return (
     <div className='min-h-screen bg-gray-50'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
@@ -483,6 +531,20 @@ function RequestBoard() {
                       {tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length}
                     </Text>
                   </div>
+                </Group>
+              </Card>
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
+                <Group>
+                  <Button
+                    onClick={() => exportToExcel()}
+                    size='lg'
+                    leftSection={<IconDownload size={18} />}
+                    className='bg-green-500 hover:bg-green-700'
+                  >
+                    Descargar XLSX
+                  </Button>
                 </Group>
               </Card>
             </Grid.Col>
