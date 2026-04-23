@@ -613,14 +613,12 @@ function RequestBoard() {
         parseInt(formData.process)
       );
       
-      {/*
       try {
         await NotifySuccess(newTicket, formData);
       } catch (err) {
         console.error('Error en NotifySuccess:', err);
         setError('No se pudo notificar por Teams, pero la solicitud fue creada.');
       }
-      */}
 
       setFormData({
         company: '',
@@ -830,8 +828,8 @@ function RequestBoard() {
 
     const columnMapOrdered: { key: TicketKeys; header: string }[] = [
       { key: "requester", header: "nombre_solicitante" },
-      { key: "subject", header: "cargo_solicitante" },
-      { key: "description", header: "conocimiento_experiencia" },
+      { key: "subject", header: "cargo" },
+      { key: "description", header: "conocimiento_experiencia_obligatoria" },
       { key: "email", header: "correo_electronico_firmante_1" }
     ];
     
