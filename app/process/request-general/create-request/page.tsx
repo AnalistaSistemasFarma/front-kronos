@@ -829,25 +829,10 @@ function RequestBoard() {
     type TicketKeys = keyof Ticket;
 
     const columnMapOrdered: { key: TicketKeys; header: string }[] = [
-      { key: "id", header: "Numero de Solicitud" },
-      { key: "category", header: "Fecha de Solicitud" },
-      { key: "user", header: "Asignado" },
-      { key: "id_company", header: "id_company" },
-      { key: "company", header: "Empresa" },
-      { key: "created_at", header: "Fecha de Creación" },
-      { key: "requester", header: "Creador Solicitud" },
-      { key: "status", header: "Estado Solicitud" },
-      { key: "subject", header: "nombre_solicitante" },
-      { key: "description", header: "cargo_solicitante" },
-      { key: "email", header: "Correo" },
-      { key: "process", header: "Proceso" },
-      { key: "id_category", header: "id_category" },
-      { key: "resolution", header: "Resolución" },
-      { key: "date_resolution", header: "Fecha Resolución" },
-      { key: "id_status_case", header: "id_status_case" },
-      { key: "executor_final", header: "Ejecutor Final" },
-      { key: "id_assigned_category", header: "Cifrado" },
-      { key: "id_assigned_process_category", header: "Cifrado" }
+      { key: "requester", header: "nombre_solicitante" },
+      { key: "subject", header: "cargo_solicitante" },
+      { key: "description", header: "conocimiento_experiencia" },
+      { key: "email", header: "correo_electronico_firmante_1" }
     ];
     
     worksheet.columns = columnMapOrdered;
@@ -1293,7 +1278,7 @@ function RequestBoard() {
 
               <Grid.Col span={{ base: 12, md: 12 }}>
                 <TextInput
-                  label={parseInt(formData.process) == 4 ? 'Nombre' : 'Asunto'}
+                  label={parseInt(formData.process) == 4 ? 'Cargo' : 'Asunto'}
                   placeholder='Ingrese el asunto de la solicitud'
                   value={formData.subject}
                   onChange={(e) => {
@@ -1440,7 +1425,7 @@ function RequestBoard() {
             </Grid>
 
             <Textarea
-              label={parseInt(formData.process) == 4 ? 'Cargo' : 'Descripción Detallada'}
+              label={parseInt(formData.process) == 4 ? 'Conocimientos - Experiencia' : 'Descripción Detallada'}
               placeholder='Describa detalladamente la solicitud. Incluya toda la información relevante para una mejor atención.'
               value={formData.descripcion}
               onChange={(e) => {

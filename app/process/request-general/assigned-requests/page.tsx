@@ -428,19 +428,10 @@ function RequestBoard() {
     type TicketKeys = keyof Ticket;
 
     const columnMapOrdered: { key: TicketKeys; header: string }[] = [
-      { key: "id", header: "Numero de Solicitud" },
-      { key: "category", header: "Fecha de Solicitud" },
-      { key: "user", header: "Asignado" },
-      { key: "id_company", header: "id_company" },
-      { key: "company", header: "Empresa" },
-      { key: "created_at", header: "Fecha de Creación" },
-      { key: "requester", header: "Creador Solicitud" },
-      { key: "status", header: "Estado Solicitud" },
-      { key: "subject", header: "nombre_solicitante" },
-      { key: "description", header: "cargo_solicitante" },
-      { key: "email", header: "Correo" },
-      { key: "process", header: "Proceso" },
-      { key: "id_category", header: "id_category" },
+      { key: "requester", header: "nombre_solicitante" },
+      { key: "subject", header: "cargo_solicitante" },
+      { key: "description", header: "conocimiento_experiencia" },
+      { key: "email", header: "correo_electronico_firmante_1" }
     ];
     
     worksheet.columns = columnMapOrdered;
