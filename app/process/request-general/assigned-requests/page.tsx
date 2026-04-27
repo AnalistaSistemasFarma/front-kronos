@@ -113,7 +113,7 @@ function RequestBoard() {
   const [userId, setUserId] = useState<number | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [userIdInitialized, setUserIdInitialized] = useState(false);
-
+  const [processes, setProcess] = useState<{ value: string; label: string }[]>([]);
   const router = useRouter();
   const searchParams = useSearchParams();
   const subprocessId = searchParams.get('subprocess_id');
@@ -147,6 +147,7 @@ function RequestBoard() {
     date_from: '',
     date_to: '',
     assigned_to: '',
+    process: '',
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 
@@ -237,6 +238,7 @@ function RequestBoard() {
         if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
         if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
         if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
+        if (filtersToUse.process) params.append('process', filtersToUse.process);
       }
 
       const url = `/api/requests-general/request-assigned?${params.toString()}`;
@@ -324,6 +326,19 @@ function RequestBoard() {
         } else {
           console.error('Frontend - fetchCompanies: companies data is not an array or missing');
           setCompany([]);
+        }
+        if (data.processCategories && Array.isArray(data.processCategories)) {
+          setProcess(
+            data.processCategories.map((sub: { id_process: number; process: string }) => ({
+              value: sub.id_process.toString(),
+              label: sub.process,
+            }))
+          );
+        } else {
+          console.error(
+            'Frontend - fetchCompanies: processCategories data is not an array or missing'
+          );
+          setProcess([]);
         }
       } else {
         console.error('Frontend - fetchCompanies failed with status:', response.status);
@@ -429,8 +444,8 @@ function RequestBoard() {
 
     const columnMapOrdered: { key: TicketKeys; header: string }[] = [
       { key: "requester", header: "nombre_solicitante" },
-      { key: "subject", header: "cargo_solicitante" },
-      { key: "description", header: "conocimiento_experiencia" },
+      { key: "subject", header: "cargo" },
+      { key: "description", header: "conocimiento_experiencia_obligatoria" },
       { key: "email", header: "correo_electronico_firmante_1" }
     ];
     
@@ -525,20 +540,22 @@ function RequestBoard() {
                 </Group>
               </Card>
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
-                <Group>
-                  <Button
-                    onClick={() => exportToExcel()}
-                    size='lg'
-                    leftSection={<IconDownload size={18} />}
-                    className='bg-green-500 hover:bg-green-700'
-                  >
-                    Descargar XLSX
-                  </Button>
-                </Group>
-              </Card>
-            </Grid.Col>
+            {filters.process == '4' && (
+              <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
+                  <Group>
+                    <Button
+                      onClick={() => exportToExcel()}
+                      size='lg'
+                      leftSection={<IconDownload size={18} />}
+                      className='bg-green-500 hover:bg-green-700'
+                    >
+                      Descargar XLSX
+                    </Button>
+                  </Group>
+                </Card>
+              </Grid.Col>
+            )}
           </Grid>
         </Card>
 
@@ -610,6 +627,17 @@ function RequestBoard() {
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Proceso'
+                    placeholder='Todas los procesos'
+                    clearable
+                    data={processes}
+                    value={filters.process}
+                    onChange={(value) => handleFilterChange('process', value || '')}
+                    leftSection={<IconBuilding size={16} />}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <TextInput
                     label='Fecha Desde'
                     type='date'
@@ -640,6 +668,7 @@ function RequestBoard() {
                       date_from: '',
                       date_to: '',
                       assigned_to: '',
+                      process: '',
                     };
                     setFilters(clearedFilters);
                     if (userId) {

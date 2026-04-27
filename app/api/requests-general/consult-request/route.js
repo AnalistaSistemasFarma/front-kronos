@@ -46,6 +46,7 @@ export async function GET(req) {
         ON cr.id = pc.id_category_request
       LEFT JOIN [user] u
         ON u.id = pc.assigned
+      ORDER BY pc.process
     `;
 
     const queryAssignedUsers = `
