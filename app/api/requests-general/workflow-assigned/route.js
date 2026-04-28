@@ -18,13 +18,10 @@ export async function GET(req) {
 
     let query = `
         SELECT 
-            pc.id ,cr.id as id_category, cr.category, pc.process, pc.description, pc.active, pc.id_status as id_status_process, scpc.status as status_process, 
-            ucr.name as assigned_category, upc.id as id_assigned_process_category ,upc.name as assigned_process_category, c.company
+          pc.id ,cr.id as id_category, cr.category, pc.process, pc.description, pc.active, pc.id_status as id_status_process, scpc.status as status_process, upc.id as id_assigned_process_category ,upc.name as assigned_process_category, c.company
         FROM process_category pc
         LEFT JOIN category_request cr ON cr.id = pc.id_category_request
         INNER JOIN status_case scpc ON scpc.id_status_case = pc.id_status
-        LEFT JOIN user_category_request_general ucrg ON ucrg.id_category = cr.id
-        LEFT JOIN [user] ucr ON ucr.id = ucrg.id_user
         LEFT JOIN user_process_category_request_general upcrg ON upcrg.id_process_category = pc.id
         LEFT JOIN [user] upc ON upc.id = upcrg.id_user
         INNER JOIN company_category_request ccr ON ccr.id_category_request = cr.id
@@ -33,7 +30,7 @@ export async function GET(req) {
     `;
 
     if (idUser) {
-      query += ` AND (ucrg.id_user = @idUser OR upcrg.id_user = @idUser)`;
+      query += ` AND upcrg.id_user = @idUser`;
       console.log('API activities: Agregando filtro por assigned user:', idUser);
     } else {
       console.log('API activities: No se proporcionó idUser, devolviendo error');

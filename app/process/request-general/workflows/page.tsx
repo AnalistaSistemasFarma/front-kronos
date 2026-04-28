@@ -62,7 +62,6 @@ interface WorkFlow {
   active: number;
   id_status_process: number;
   status_process: string;
-  assigned_category: string;
   assigned_process_category: string;
   company: string;
 }
@@ -163,8 +162,6 @@ function RequestBoard() {
       id_category: number;
       company: string;
       category: string;
-      id_assigned_category: number;
-      assigned_category: string;
     }>;
     processCategories: Array<{
       id_process_category: number;
@@ -266,15 +263,6 @@ function RequestBoard() {
       category: categoryValue,
       process: '',
     });
-
-    if (selectedCategory) {
-      setAssignedCategoryInfo({
-        id: selectedCategory.id_assigned_category.toString(),
-        name: selectedCategory.assigned_category,
-      });
-    } else {
-      setAssignedCategoryInfo(null);
-    }
   };
 
   const handleCreateCategory = async () => {
@@ -1040,7 +1028,6 @@ function RequestBoard() {
                   <Table.Th>ID</Table.Th>
                   <Table.Th>Empresa</Table.Th>
                   <Table.Th>Categoria</Table.Th>
-                  <Table.Th>Asignado Categoria</Table.Th>
                   <Table.Th>Proceso</Table.Th>
                   <Table.Th>Asignado Proceso</Table.Th>
                   <Table.Th>Activo</Table.Th>
@@ -1090,12 +1077,6 @@ function RequestBoard() {
                         <Text size='sm' className='max-w-xs truncate'>
                           {workflow.category}
                         </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={4}>
-                          <IconUserCheck size={14} className='text-gray-400' />
-                          <Text size='sm'>{workflow.assigned_category}</Text>
-                        </Group>
                       </Table.Td>
                       <Table.Td>
                         <Text size='sm' c='gray.7'>
