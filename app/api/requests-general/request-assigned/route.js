@@ -16,34 +16,111 @@ export async function GET(req) {
     const assigned_to = searchParams.get('assigned_to');
     const process = searchParams.get('process');
 
-    console.log('API requests-general: idUser recibido:', idUser);
-
     let query = `
       SELECT
-        rg.id, cr.category as category, up.name as [user], rg.[description], rg.id_company, c.company ,rg.created_at, u.name as 'requester', sc.status as [status],
-        rg.subject_request as [subject], pc.process, pc.id as id_process_category, rg.resolution, rg.date_resolution, rg.status_req as id_status_case, 
-        uex.name as executor_final,upcrg.id_user as id_assigned_process_category, u.email
+        rg.id,
+        cr.category,
+        rg.[description],
+        rg.id_company,
+        c.company,
+        rg.created_at,
+        u.name AS requester,
+        sc.status,
+        rg.subject_request AS subject,
+        pc.process,
+        pc.id AS id_process_category,
+        rg.resolution,
+        rg.date_resolution,
+        rg.status_req AS id_status_case,
+        uex.name AS executor_final,
+        u.email,
+        users_proc.[user],
+        users_proc.id_assigned_process_category,
+        users_cat.users_category
+
       FROM requests_general rg
-        INNER JOIN company c ON c.id_company = rg.id_company
-        LEFT JOIN [user] u ON u.id = rg.id_requester
-        INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
-        LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
-        INNER JOIN category_request cr ON cr.id = pc.id_category_request
-        LEFT JOIN user_process_category_request_general upcrg ON upcrg.id_process_category = pc.id
-        LEFT JOIN [user] up ON up.id = upcrg.id_user
-        INNER JOIN status_case sc ON sc.id_status_case = rg.status_req
-		    LEFT JOIN [user] uex ON uex.id = rg.id_executor_final
-      WHERE 1=1 
+
+      INNER JOIN company c 
+        ON c.id_company = rg.id_company
+
+      LEFT JOIN [user] u 
+        ON u.id = rg.id_requester
+
+      INNER JOIN process_category_request_general pcrg 
+        ON pcrg.id_request_general = rg.id
+
+      LEFT JOIN process_category pc 
+        ON pc.id = pcrg.id_process_category
+
+      INNER JOIN category_request cr 
+        ON cr.id = pc.id_category_request
+
+      INNER JOIN status_case sc 
+        ON sc.id_status_case = rg.status_req
+
+      LEFT JOIN [user] uex 
+        ON uex.id = rg.id_executor_final
+
+      OUTER APPLY (
+        SELECT 
+            STUFF((
+                SELECT DISTINCT ', ' + u2.name
+                FROM user_process_category_request_general upcrg2
+                INNER JOIN [user] u2 
+                    ON u2.id = upcrg2.id_user
+                WHERE upcrg2.id_process_category = pc.id
+                FOR XML PATH(''), TYPE
+            ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS [user],
+
+            STUFF((
+                SELECT DISTINCT ', ' + CAST(upcrg2.id_user AS VARCHAR)
+                FROM user_process_category_request_general upcrg2
+                WHERE upcrg2.id_process_category = pc.id
+                FOR XML PATH(''), TYPE
+            ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS id_assigned_process_category
+
+      ) users_proc
+
+      OUTER APPLY (
+        SELECT 
+          STUFF((
+            SELECT DISTINCT ', ' + u3.name
+            FROM user_category_request_general ucrg
+            INNER JOIN [user] u3 
+              ON u3.id = ucrg.id_user
+            WHERE ucrg.id_category = cr.id
+            FOR XML PATH(''), TYPE
+          ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS users_category
+      ) users_cat
+
+      WHERE 1=1
     `;
 
     if (idUser) {
-      query += ` AND upcrg.id_user = @idUser`;
+      query += `
+        AND (
+          EXISTS (
+            SELECT 1
+            FROM user_process_category_request_general upcrg
+            WHERE upcrg.id_process_category = pc.id
+            AND upcrg.id_user = @idUser
+          )
+          OR
+          EXISTS (
+            SELECT 1
+            FROM user_category_request_general ucrg
+            WHERE ucrg.id_category = cr.id
+            AND ucrg.id_user = @idUser
+          )
+        )
+      `;
     } else {
       return NextResponse.json(
         { error: 'Se requiere el parámetro idUser' },
         { status: 400 }
       );
     }
+
     if (status && status !== '0') {
       query += ` AND rg.status_req = @status`;
     } else if (!status) {
@@ -52,7 +129,6 @@ export async function GET(req) {
 
     if (id) {
       query += ` AND rg.id = @id`;
-      console.log('API requests-general: Agregando filtro por id:', id);
     }
 
     if (company) {
@@ -68,57 +144,41 @@ export async function GET(req) {
     }
 
     if (assigned_to) {
-      query += ` AND upcrg.id_user = @assigned_to`;
+      query += `
+        AND EXISTS (
+          SELECT 1
+          FROM user_process_category_request_general upcrg
+          WHERE upcrg.id_process_category = pc.id
+          AND upcrg.id_user = @assigned_to
+        )
+      `;
     }
 
     if (process) {
       query += ` AND pc.id = @process`;
     }
 
+    query += ` ORDER BY rg.id DESC`;
+
     const request = pool.request();
 
     request.input('idUser', sql.NVarChar, idUser);
 
-    if (status) {
-      request.input('status', sql.Int, parseInt(status));
-    }
-
-    if (id) {
-      request.input('id', sql.Int, parseInt(id));
-    }
-
-    if (company) {
-      request.input('company', sql.Int, parseInt(company));
-    }
-
-    if (date_from) {
-      request.input('date_from', sql.DateTime, new Date(date_from));
-    }
-
-    if (date_to) {
+    if (status) request.input('status', sql.Int, parseInt(status));
+    if (id) request.input('id', sql.Int, parseInt(id));
+    if (company) request.input('company', sql.Int, parseInt(company));
+    if (date_from) request.input('date_from', sql.DateTime, new Date(date_from));
+    if (date_to)
       request.input('date_to', sql.DateTime, new Date(date_to + 'T23:59:59'));
-    }
+    if (assigned_to) request.input('assigned_to', sql.NVarChar, assigned_to);
+    if (process) request.input('process', sql.Int, parseInt(process));
 
-    if (assigned_to) {
-      request.input('assigned_to', sql.NVarChar, assigned_to);
-    }
-
-    if (process) {
-      request.input('process', sql.Int, parseInt(process));
-    }
-
-    console.log('API requests-general: Ejecutando consulta:', query);
-    query += ` ORDER BY rg.id DESC`;
     const result = await request.query(query);
-    console.log(
-      'API requests-general: Resultados obtenidos:',
-      result.recordset.length,
-      'registros'
-    );
 
     return NextResponse.json(result.recordset, { status: 200 });
+
   } catch (err) {
-    console.error('Error en el procesamiento de la solicitud:', err);
+    console.error('Error en el procesamiento:', err);
     return NextResponse.json(
       { error: 'Error procesando la solicitud', details: err.message },
       { status: 500 }

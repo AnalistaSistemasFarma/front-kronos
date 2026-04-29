@@ -19,20 +19,73 @@ export async function GET(req) {
 
     let query = `
       SELECT
-        rg.id, cr.category as category, up.name as [user], rg.[description], rg.id_company, c.company ,rg.created_at, u.name as 'requester', sc.status as [status], rg.subject_request as [subject], 
-        pc.process, cr.id as id_category, rg.resolution, rg.date_resolution, rg.status_req as id_status_case, uex.name as executor_final, ucrg.id_user as id_assigned_category, 
-        upcrg.id_user as id_assigned_process_category, u.email
+        rg.id,
+        cr.category as category,
+        up_user.name as [user],
+        rg.[description],
+        rg.id_company,
+        c.company,
+        rg.created_at,
+        u.name as requester,
+        sc.status as [status],
+        rg.subject_request as [subject],
+        pc.process,
+        cr.id as id_category,
+        rg.resolution,
+        rg.date_resolution,
+        rg.status_req as id_status_case,
+        uex.name as executor_final,
+        cat_user.id_user as id_assigned_category,
+        proc_user.id_user as id_assigned_process_category,
+        u.email
+
       FROM requests_general rg
-      INNER JOIN company c ON c.id_company = rg.id_company
-      LEFT JOIN [user] u ON u.id = rg.id_requester
-      INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
-      LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
-      INNER JOIN category_request cr ON cr.id = pc.id_category_request
-      LEFT JOIN user_process_category_request_general upcrg ON upcrg.id_process_category = pc.id
-	    LEFT JOIN user_category_request_general ucrg ON ucrg.id_category = cr.id
-		  LEFT JOIN [user] up ON up.id = upcrg.id_user
-      INNER JOIN status_case sc ON sc.id_status_case = rg.status_req
-	    LEFT JOIN [user] uex ON uex.id = rg.id_executor_final
+
+      INNER JOIN company c 
+        ON c.id_company = rg.id_company
+
+      LEFT JOIN [user] u 
+        ON u.id = rg.id_requester
+
+      INNER JOIN process_category_request_general pcrg 
+        ON pcrg.id_request_general = rg.id
+
+      LEFT JOIN process_category pc 
+        ON pc.id = pcrg.id_process_category
+
+      INNER JOIN category_request cr 
+        ON cr.id = pc.id_category_request
+
+      INNER JOIN status_case sc 
+        ON sc.id_status_case = rg.status_req
+
+      LEFT JOIN [user] uex 
+        ON uex.id = rg.id_executor_final
+
+      OUTER APPLY (
+        SELECT TOP 1 
+          upcrg.id_user,
+          u2.name
+        FROM user_process_category_request_general upcrg
+        INNER JOIN [user] u2 
+          ON u2.id = upcrg.id_user
+        WHERE upcrg.id_process_category = pc.id
+      ) proc_user
+
+      OUTER APPLY (
+        SELECT TOP 1 
+          ucrg.id_user
+        FROM user_category_request_general ucrg
+        WHERE ucrg.id_category = cr.id
+      ) cat_user
+
+      OUTER APPLY (
+        SELECT TOP 1 u3.name
+        FROM user_process_category_request_general upcrg3
+        INNER JOIN [user] u3 ON u3.id = upcrg3.id_user
+        WHERE upcrg3.id_process_category = pc.id
+      ) up_user
+
       WHERE 1=1
     `;
 
