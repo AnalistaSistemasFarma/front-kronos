@@ -6,7 +6,6 @@ import axios from 'axios';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useGetMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
-import { formatNumber, getAccessToken, NotifyError, sendMessageTeams } from '../../../../components/utils/utils';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import Link from 'next/link';
@@ -641,32 +640,59 @@ function RequestBoard() {
   };
 
   async function NotifySuccess(newTicket: any, formData: any) {
-
     const notifications = newTicket.notifications;
-
     if (!notifications) return;
 
-    if (notifications.processEmail) {
-      await sendMessageTeams(
-        notifications.processEmail,
-        `<b>📌 Nueva solicitud asignada a tu proceso</b><br/><br/>
-        <b>ID:</b> ${newTicket.id_request}<br/>
-        <b>Asunto:</b> ${formData.subject}<br/>
-        <b>Descripción:</b> ${formData.descripcion}`,
-        'html'
+    const requestId = newTicket.id_request;
+    const subject = formData.subject;
+
+    const processEmails = [notifications.processEmail].filter(Boolean) as string[];
+    const taskEmails = ((notifications.taskEmails || []) as string[]).filter(
+      (e) => e && !processEmails.includes(e)
+    );
+
+    const calls: Promise<Response>[] = [];
+
+    if (processEmails.length > 0) {
+      calls.push(
+        fetch('/api/push/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            emails: processEmails,
+            payload: {
+              title: '📌 Solicitud asignada',
+              body: `#${requestId} - ${subject}`,
+              url: `https://groupsharedservices.farmalogica.com:8445/process/request-general/view-request?id=${requestId}&from=general-requests`,
+              tag: `request-assigned-${requestId}`,
+            },
+          }),
+        })
       );
     }
 
-    const uniqueEmails = [...new Set(notifications.taskEmails || [])];
-
-    for (const email of uniqueEmails) {
-      await sendMessageTeams(
-        email,
-        `<b>📝 Nueva tarea asignada</b><br/><br/>
-        <b>Solicitud:</b> #${newTicket.id_request}<br/>
-        <b>Asunto:</b> ${formData.subject}`,
-        'html'
+    if (taskEmails.length > 0) {
+      calls.push(
+        fetch('/api/push/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            emails: taskEmails,
+            payload: {
+              title: '✅ Tarea asignada',
+              body: `Tienes una tarea en la solicitud #${requestId} - ${subject}`,
+              url: `https://groupsharedservices.farmalogica.com:8445/process/request-general/view-activities?id=${requestId}&from=assigned-activities`,
+              tag: `task-assigned-${requestId}`,
+            },
+          }),
+        })
       );
+    }
+
+    try {
+      await Promise.all(calls);
+    } catch (err) {
+      console.error('[NotifySuccess] Error enviando push:', err);
     }
   }
 

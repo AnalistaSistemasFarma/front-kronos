@@ -8,6 +8,7 @@ import { Menu, Avatar, Loader, ActionIcon } from '@mantine/core';
 import { IconMoon, IconSun, IconMenu2, IconX } from '@tabler/icons-react';
 import { useState, useEffect } from 'react';
 import { useTheme } from './providers';
+import NotificationBell from './NotificationBell';
 
 export default function Header() {
   const { data: session, status } = useSession();
@@ -88,6 +89,7 @@ export default function Header() {
 
             {/* Right: Profile Section */}
             <div className='flex items-center space-x-2'>
+              <NotificationBell />
               <ActionIcon
                 variant='subtle'
                 color='gray'

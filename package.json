@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ducanh2912/next-pwa": "^10.2.9",
     "@mantine/charts": "^8.3.6",
     "@mantine/core": "^8.3.3",
     "@mantine/hooks": "^8.3.3",
@@ -25,11 +26,11 @@
     "mssql": "^12.0.0",
     "next": "15.5.4",
     "next-auth": "^4.24.11",
-    "next-pwa": "^5.6.0",
     "prisma": "^6.17.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "react-hot-toast": "^2.6.0"
+    "react-hot-toast": "^2.6.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
@@ -39,6 +40,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
     "eslint": "^9",
     "eslint-config-next": "15.5.4",
     "tailwindcss": "^4",

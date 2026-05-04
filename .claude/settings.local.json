@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep *)",
+      "PowerShell(Copy-Item \"c:\\\\Users\\\\nicolas.rojas\\\\Projects\\\\front-kronos\\\\public\\\\logo.png\" \"c:\\\\Users\\\\nicolas.rojas\\\\Projects\\\\front-kronos\\\\public\\\\iconocel.png\")"
+    ]
+  }
+}
