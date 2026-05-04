@@ -68,14 +68,14 @@ export async function POST(req) {
         .query(insertProcess);
 
       const getTasksQuery = `
-        SELECT 
+        SELECT
           tpc.id AS id_task,
           utrg.id_user,
           u.email
         FROM user_task_request_general utrg
-        INNER JOIN task_process_category tpc 
+        INNER JOIN task_process_category tpc
           ON tpc.id = utrg.id_task
-        INNER JOIN [user] u 
+        INNER JOIN [user] u
           ON u.id = utrg.id_user
         WHERE tpc.id_process_category = @process;
       `;

@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import withPWA from '@ducanh2912/next-pwa';
 
 const nextConfig: NextConfig = {
   experimental: {
@@ -18,7 +19,13 @@ const nextConfig: NextConfig = {
     MICROSOFTTENANTID: process.env.MICROSOFTTENANTID,
     MICROSOFTGRAPHUSERROUTE: process.env.MICROSOFTGRAPHUSERROUTE,
     MSCALLBACKURI: process.env.MSCALLBACKURI,
+    NEXT_PUBLIC_VAPID_PUBLIC_KEY: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
   },
 };
 
-export default nextConfig;
+export default withPWA({
+  dest: 'public',
+  register: true,
+  disable: true,
+  customWorkerSrc: 'worker',
+})(nextConfig);
