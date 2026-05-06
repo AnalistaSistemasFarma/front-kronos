@@ -1055,7 +1055,7 @@ function RequestBoard() {
                       className='cursor-pointer hover:bg-gray-50 transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(workflow));
-                        router.push(
+                        window.open(
                           `/process/request-general/view-workflows?id=${workflow.id}&from=workflows`
                         );
                       }}
