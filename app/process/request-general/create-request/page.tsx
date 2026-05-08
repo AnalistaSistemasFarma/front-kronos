@@ -55,6 +55,7 @@ import {
   IconUserCheck,
   IconTag,
   IconDownload,
+  IconLink,
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../components/ui/FileUpload';
@@ -79,6 +80,7 @@ interface Ticket {
   executor_final: string;
   id_assigned_category: string;
   id_assigned_process_category: string;
+  url: string;
 }
 
 interface CompanyData {
@@ -137,6 +139,7 @@ function RequestBoard() {
     category: '',
     process: '',
     descripcion: '',
+    url: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
 
@@ -580,6 +583,7 @@ function RequestBoard() {
           category: parseInt(formData.category),
           process: parseInt(formData.process),
           createdby: userId,
+          url: formData.url,
         }),
       });
 
@@ -625,6 +629,7 @@ function RequestBoard() {
         category: '',
         process: '',
         descripcion: '',
+        url: '',
       });
 
       setAttachedFiles([]);
@@ -1257,6 +1262,7 @@ function RequestBoard() {
               category: '',
               process: '',
               descripcion: '',
+              url: '',
             });
           }}
           title={
@@ -1464,6 +1470,23 @@ function RequestBoard() {
               maxLength={254}
               description='Mínimo 10 caracteres, máximo 254 caracteres'
               autosize
+            />
+
+            <Divider />
+
+            <TextInput
+              label={'URL'}
+              placeholder='URL (Opcional)...'
+              value={formData.url}
+              onChange={(e) => {
+                setFormData({ ...formData, url: e.target.value });
+                if (formErrors.url) {
+                  setFormErrors({ ...formErrors, url: '' });
+                }
+              }}
+              error={formErrors.url}
+              maxLength={1000}
+              leftSection={<IconLink size={16} />}
             />
 
             <Divider />
