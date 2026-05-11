@@ -12,6 +12,7 @@ export async function POST(req) {
       category,
       process,
       createdby,
+      url,
     } = body;
 
     if (!company || !subject || !process || !descripcion) {
@@ -33,7 +34,8 @@ export async function POST(req) {
           subject_request,
           id_company,
           id_requester,
-          status_req
+          status_req,
+          url
         )
         OUTPUT INSERTED.id
         VALUES (
@@ -41,7 +43,8 @@ export async function POST(req) {
           @subject,
           @company,
           @createdby,
-          1
+          1,
+          @url
         );
       `;
 
@@ -51,6 +54,7 @@ export async function POST(req) {
       reqInsert.input("subject", sql.NVarChar(255), subject);
       reqInsert.input("company", sql.Int, company);
       reqInsert.input("createdby", sql.NVarChar(255), createdby);
+      reqInsert.input("url", sql.NVarChar(1000), url);
 
       const insertResult = await reqInsert.query(insertRequest);
 

@@ -30,7 +30,8 @@ export async function GET(req) {
         rg.subject_request, 
         rg.resolution as resolutioncase, 
         rg.date_resolution,
-		    uex.name as executor_final
+		    uex.name as executor_final,
+        rg.url
       FROM requests_general rg
       INNER JOIN company c ON c.id_company = rg.id_company
 	    INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id

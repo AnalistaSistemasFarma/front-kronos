@@ -731,7 +731,7 @@ function RequestBoard() {
                       className='cursor-pointer hover:bg-gray-50 transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
-                        router.push(
+                        window.open(
                           `/process/request-general/view-request?id=${ticket.id}&from=assigned-requests`
                         );
                       }}

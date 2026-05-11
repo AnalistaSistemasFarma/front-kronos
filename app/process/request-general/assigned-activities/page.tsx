@@ -576,7 +576,7 @@ function RequestBoard() {
                       className='cursor-pointer hover:bg-gray-50 transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(task));
-                        router.push(
+                        window.open(
                           `/process/request-general/view-activities?id=${task.id}&from=assigned-activities`
                         );
                       }}

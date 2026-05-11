@@ -37,7 +37,8 @@ export async function GET(req) {
         uex.name as executor_final,
         cat_user.id_user as id_assigned_category,
         proc_user.id_user as id_assigned_process_category,
-        u.email
+        u.email,
+        rg.url
 
       FROM requests_general rg
 
