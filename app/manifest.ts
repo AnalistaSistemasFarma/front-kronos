@@ -2,8 +2,8 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Kronos',
-    short_name: 'Kronos',
+    name: 'SynerLink',
+    short_name: 'SynerLink',
     description: 'Sistema de gestión de solicitudes',
     start_url: '/',
     display: 'standalone',
