@@ -7,6 +7,7 @@ import axios from 'axios';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { useSession } from 'next-auth/react';
+import toast from 'react-hot-toast';
 
 declare module 'next-auth' {
   interface Session {
@@ -223,6 +224,8 @@ function ViewRequestPage() {
   });
   const [modalTasksOpened, setModalTasksOpened] = useState(false);
   const [availableUsers, setAvailableUsers] = useState<UserEmail[]>([]);
+  const [assignableUsers, setAssignableUsers] = useState<UserEmail[]>([]);
+  const [updatingAssigneeId, setUpdatingAssigneeId] = useState<number | null>(null);
   const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
   const [selectedNoteEmails, setSelectedNoteEmails] = useState<string[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -284,6 +287,11 @@ function ViewRequestPage() {
           label: `${user.name} - ${user.email}`,
         }));
         setAvailableUsers(formattedUsers);
+        const formattedAssignable = data.users.map((user: { id: string; name: string; email: string }) => ({
+          value: user.id,
+          label: user.name,
+        }));
+        setAssignableUsers(formattedAssignable);
       } else {
         console.error('Error al cargar usuarios:', response.statusText);
       }
@@ -1002,6 +1010,29 @@ function ViewRequestPage() {
     sessionStorage.removeItem('selectedRequest');
 
     router.push(`/process/request-general/view-activities?id=${task.id}`);
+  };
+
+  const handleUpdateTaskAssigned = async (taskId: number, newUserId: string | null) => {
+    if (!newUserId) return;
+    try {
+      setUpdatingAssigneeId(taskId);
+      const response = await fetch('/api/requests-general/update-task-assigned', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: taskId, id_assigned: newUserId }),
+      });
+      if (response.ok) {
+        toast.success('Asignado actualizado exitosamente');
+        await fetchTasksRG();
+      } else {
+        const err = await response.json().catch(() => ({}));
+        console.error('Error al actualizar asignado:', err.error || response.statusText);
+      }
+    } catch (error) {
+      console.error('Error updating task assignee:', error);
+    } finally {
+      setUpdatingAssigneeId(null);
+    }
   };
 
   useEffect(() => {
@@ -1836,7 +1867,22 @@ function ViewRequestPage() {
                 {taskRQ.map((task) => (
                   <Table.Tr key={task.id}>
                     <Table.Td>{task.task}</Table.Td>
-                    <Table.Td>{task.name}</Table.Td>
+                    <Table.Td>
+                      {task.status?.toLowerCase() === 'resuelto' ? (
+                        task.name
+                      ) : (
+                        <Select
+                          data={assignableUsers}
+                          value={task.id_assigned ? String(task.id_assigned) : null}
+                          onChange={(value) => handleUpdateTaskAssigned(task.id, value)}
+                          searchable
+                          allowDeselect={false}
+                          disabled={updatingAssigneeId === task.id}
+                          size="xs"
+                          comboboxProps={{ withinPortal: true }}
+                        />
+                      )}
+                    </Table.Td>
                     <Table.Td>
                       <Badge color={getStatusColorTask(task.status)} size="sm">
                         {getStatusTask(task.status)}
