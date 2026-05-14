@@ -1,5 +1,5 @@
 self.addEventListener('push', (event) => {
-  let data = { title: 'Kronos', body: 'Tienes una nueva notificación', url: '/' };
+  let data = { title: 'SynerLink', body: 'Tienes una nueva notificación', url: '/' };
 
   if (event.data) {
     try {

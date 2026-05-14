@@ -2,7 +2,7 @@
 // next-pwa concatena este archivo al final del SW generado por workbox.
 
 self.addEventListener('push', (event) => {
-  let data = { title: 'Kronos', body: 'Tienes una nueva notificación', url: '/' };
+  let data = { title: 'SynerLink', body: 'Tienes una nueva notificación', url: '/' };
 
   if (event.data) {
     try {
