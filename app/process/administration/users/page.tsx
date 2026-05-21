@@ -43,6 +43,8 @@ interface User {
   role: string;
   isActive: boolean;
   createdAt: string;
+  phone?: string | null;
+  identification?: string | null;
 }
 
 interface Subprocess {
@@ -117,6 +119,8 @@ function UserManagement() {
     password: '',
     role: 'user',
     isActive: true,
+    phone: '',
+    identification: '',
   });
   const [formLoading, setFormLoading] = useState(false);
 
@@ -200,6 +204,8 @@ function UserManagement() {
         password: '',
         role: 'user',
         isActive: true,
+        phone: '',
+        identification: '',
       });
       setCreateModalOpened(false);
       toast.success('Usuario creado exitosamente');
@@ -222,6 +228,8 @@ function UserManagement() {
         email: formData.email,
         role: formData.role,
         isActive: formData.isActive,
+        phone: formData.phone || null,
+        identification: formData.identification || null,
         ...(formData.password && { password: formData.password }),
       };
 
@@ -293,9 +301,11 @@ function UserManagement() {
     setFormData({
       name: user.name || '',
       email: user.email,
-      password: '', // Don't prefill password
+      password: '',
       role: user.role,
       isActive: user.isActive,
+      phone: user.phone || '',
+      identification: user.identification || '',
     });
     setEditModalOpened(true);
   };
@@ -704,6 +714,18 @@ function UserManagement() {
             value={formData.role}
             onChange={(value) => setFormData({ ...formData, role: value || 'user' })}
           />
+          <TextInput
+            label='Teléfono'
+            placeholder='Ej: +57 300 123 4567'
+            value={formData.phone}
+            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+          />
+          <TextInput
+            label='Identificación'
+            placeholder='Número de documento'
+            value={formData.identification}
+            onChange={(e) => setFormData({ ...formData, identification: e.target.value })}
+          />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setCreateModalOpened(false)}>
               Cancelar
@@ -764,6 +786,18 @@ function UserManagement() {
             ]}
             value={formData.isActive.toString()}
             onChange={(value) => setFormData({ ...formData, isActive: value === 'true' })}
+          />
+          <TextInput
+            label='Teléfono'
+            placeholder='Ej: +57 300 123 4567'
+            value={formData.phone}
+            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+          />
+          <TextInput
+            label='Identificación'
+            placeholder='Número de documento'
+            value={formData.identification}
+            onChange={(e) => setFormData({ ...formData, identification: e.target.value })}
           />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setEditModalOpened(false)}>

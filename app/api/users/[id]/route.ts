@@ -43,7 +43,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     const { id } = await params;
-    const { name, email, role, isActive, password } = await request.json();
+    const { name, email, role, isActive, password, phone, identification } = await request.json();
 
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
@@ -71,11 +71,15 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       role?: string;
       isActive?: boolean;
       password?: string;
+      phone?: string | null;
+      identification?: string | null;
     } = {};
     if (name !== undefined) updateData.name = name;
     if (email !== undefined) updateData.email = email;
     if (role !== undefined) updateData.role = role;
     if (isActive !== undefined) updateData.isActive = isActive;
+    if (phone !== undefined) updateData.phone = phone || null;
+    if (identification !== undefined) updateData.identification = identification || null;
 
     // Handle password update
     if (password) {
@@ -99,6 +103,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         role: true,
         isActive: true,
         createdAt: true,
+        phone: true,
+        identification: true,
       },
     });
 

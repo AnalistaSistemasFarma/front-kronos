@@ -36,7 +36,9 @@ export async function GET(req) {
         u.email,
         users_proc.[user],
         users_proc.id_assigned_process_category,
-        users_cat.users_category
+        users_cat.users_category,
+        u.phone,
+        u.identification
 
       FROM requests_general rg
 

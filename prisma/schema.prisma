@@ -47,7 +47,9 @@ model User {
   password      String?
   createdAt     DateTime       @default(now())
   isActive      Boolean        @default(true)
-  role          String         @default("user")
+  role           String         @default("user")
+  phone          String?
+  identification String?
   accounts      Account[]
   companyUsers  CompanyUser[]
   sessions      Session[]

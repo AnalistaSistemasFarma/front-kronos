@@ -85,6 +85,8 @@ export async function GET(request: NextRequest) {
           role: true,
           isActive: true,
           createdAt: true,
+          phone: true,
+          identification: true,
         },
         skip,
         take: limit,
@@ -121,7 +123,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }
 
-    const { name, email, password, role = 'user' } = await request.json();
+    const { name, email, password, role = 'user', phone, identification } = await request.json();
 
     if (!name || !email || !password) {
       return NextResponse.json(
@@ -157,6 +159,8 @@ export async function POST(request: NextRequest) {
         email,
         password: hashedPassword,
         role,
+        ...(phone && { phone }),
+        ...(identification && { identification }),
       },
       select: {
         id: true,
@@ -165,6 +169,8 @@ export async function POST(request: NextRequest) {
         role: true,
         isActive: true,
         createdAt: true,
+        phone: true,
+        identification: true,
       },
     });
 
