@@ -38,7 +38,9 @@ export async function GET(req) {
         cat_user.id_user as id_assigned_category,
         proc_user.id_user as id_assigned_process_category,
         u.email,
-        rg.url
+        rg.url,
+        u.phone,
+        u.identification
 
       FROM requests_general rg
 

@@ -81,6 +81,8 @@ interface Ticket {
   id_assigned_category: string;
   id_assigned_process_category: string;
   url: string;
+  phone: string;
+  identification: string;
 }
 
 interface CompanyData {
@@ -861,7 +863,9 @@ function RequestBoard() {
       { key: "requester", header: "nombre_solicitante" },
       { key: "subject", header: "cargo" },
       { key: "description", header: "conocimiento_experiencia_obligatoria" },
-      { key: "email", header: "correo_electronico_firmante_1" }
+      { key: "email", header: "correo_electronico_firmante_1" },
+      { key: "phone", header: "numero_celular_firmante_1" },
+      { key: "identification", header: "numero_documento_firmante_1" }
     ];
     
     worksheet.columns = columnMapOrdered;
