@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import {
@@ -38,6 +40,7 @@ import {
   IconCoin,
   IconChevronLeft,
   IconChevronRight,
+  IconDownload,
 } from '@tabler/icons-react';
 
 interface TaskData {
@@ -92,6 +95,7 @@ export default function Dashboard() {
     new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   );
   const [activeTab, setActiveTab] = useState<string>('overview');
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -101,6 +105,39 @@ export default function Dashboard() {
   useEffect(() => {
     fetchTasks();
   }, [dateFilter, selectedMonthDate]);
+
+  const exportDashboardToExcel = async () => {
+    try {
+      setExportingExcel(true);
+      const res = await fetch('/api/dashboard/export');
+      if (!res.ok) throw new Error('Error al obtener datos del servidor');
+      const { solicitudes, actividades } = await res.json();
+
+      const workbook = new ExcelJS.Workbook();
+
+      const sheet1 = workbook.addWorksheet('Solicitudes');
+      if (solicitudes.length > 0) {
+        sheet1.columns = Object.keys(solicitudes[0]).map((k: string) => ({ header: k, key: k }));
+        solicitudes.forEach((row: Record<string, unknown>) => sheet1.addRow(row));
+      }
+
+      const sheet2 = workbook.addWorksheet('Actividades');
+      if (actividades.length > 0) {
+        sheet2.columns = Object.keys(actividades[0]).map((k: string) => ({ header: k, key: k }));
+        actividades.forEach((row: Record<string, unknown>) => sheet2.addRow(row));
+      }
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      saveAs(blob, 'Dashboard-Kronos.xlsx');
+    } catch (err) {
+      console.error('Error exportando Excel:', err);
+    } finally {
+      setExportingExcel(false);
+    }
+  };
 
   const fetchTasks = async () => {
     try {
@@ -537,6 +574,15 @@ export default function Dashboard() {
               leftSection={<IconRefresh size={16} />}
             >
               Actualizar
+            </Button>
+            <Button
+              variant='outline'
+              color='green'
+              onClick={exportDashboardToExcel}
+              loading={exportingExcel}
+              leftSection={<IconDownload size={16} />}
+            >
+              Descargar Excel
             </Button>
           </Group>
         </Group>
