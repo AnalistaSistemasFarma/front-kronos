@@ -198,9 +198,9 @@ function StatusDistributionBar({
         background: dashboardChartTheme.blue50,
       }}
     >
-      {segments.map((seg, i) => (
+      {segments.map((seg) => (
         <Box
-          key={i}
+          key={seg.color}
           style={{
             flex: seg.value,
             backgroundColor: seg.color,

@@ -1,7 +1,7 @@
 import sql from 'mssql';
-import sqlConfig from '../../../../dbconfig.js';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
+import { getPool } from '../../../../lib/mssqlPool';
 import {
   parseViewTasksFilters,
   queryDashboardTasks,
@@ -25,12 +25,11 @@ export async function GET(req) {
       return Response.json({ error: dateError }, { status: 400 });
     }
 
-    const pool = await sql.connect(sqlConfig);
-    try {
-      const actividades = await queryDashboardTasks(pool, filters);
+    const pool = await getPool();
+    const actividades = await queryDashboardTasks(pool, filters);
 
-      const solReq = pool.request();
-      let solQuery = `
+    const solReq = pool.request();
+    let solQuery = `
         SELECT DISTINCT
           rg.id,
           rg.subject_request,
@@ -45,33 +44,27 @@ export async function GET(req) {
         LEFT JOIN status_case scrg ON scrg.id_status_case = rg.status_req
         WHERE 1=1`;
 
-      if (filters.date_from && filters.date_to) {
-        solQuery += `
+    if (filters.date_from && filters.date_to) {
+      solQuery += `
           AND rg.created_at >= CAST(@date_from AS DATE)
           AND rg.created_at < DATEADD(day, 1, CAST(@date_to AS DATE))`;
-        solReq.input('date_from', sql.Date, filters.date_from);
-        solReq.input('date_to', sql.Date, filters.date_to);
-      }
-
-      solQuery += ` ORDER BY rg.created_at DESC`;
-      const solicitudes = await solReq.query(solQuery);
-
-      return Response.json({
-        solicitudes: solicitudes.recordset,
-        actividades,
-        filters_applied: {
-          date_from: filters.date_from ?? null,
-          date_to: filters.date_to ?? null,
-        },
-      });
-    } finally {
-      await pool.close();
+      solReq.input('date_from', sql.Date, filters.date_from);
+      solReq.input('date_to', sql.Date, filters.date_to);
     }
+
+    solQuery += ` ORDER BY rg.created_at DESC`;
+    const solicitudes = await solReq.query(solQuery);
+
+    return Response.json({
+      solicitudes: solicitudes.recordset,
+      actividades,
+      filters_applied: {
+        date_from: filters.date_from ?? null,
+        date_to: filters.date_to ?? null,
+      },
+    });
   } catch (err) {
     console.error('Error exportando dashboard:', err);
-    return Response.json(
-      { error: 'Error al obtener datos', details: err.message },
-      { status: 500 }
-    );
+    return Response.json({ error: 'Error interno del servidor' }, { status: 500 });
   }
 }

@@ -1,6 +1,5 @@
-import sql from 'mssql';
 import { NextResponse } from 'next/server';
-import sqlConfig from '../../../../dbconfig';
+import { getPool } from '../../../../lib/mssqlPool';
 import {
   buildSummary,
   parseViewTasksFilters,
@@ -15,8 +14,6 @@ import {
  * de la solicitud (rg.created_at), inclusive en date_to.
  */
 export async function GET(req: Request) {
-  let pool: sql.ConnectionPool | null = null;
-
   try {
     const filters = parseViewTasksFilters(new URL(req.url).searchParams);
 
@@ -36,7 +33,7 @@ export async function GET(req: Request) {
       );
     }
 
-    pool = await sql.connect(sqlConfig);
+    const pool = await getPool();
     const data = await queryDashboardTasks(pool, filters);
     const summary = buildSummary(data);
 
@@ -64,18 +61,9 @@ export async function GET(req: Request) {
         success: false,
         error: 'Error al obtener las actividades de solicitudes',
         message: 'No se pudieron recuperar las tareas. Por favor intente nuevamente.',
-        details: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 }
     );
-  } finally {
-    if (pool?.connected) {
-      try {
-        await pool.close();
-      } catch (closeError) {
-        console.error('Error closing database connection:', closeError);
-      }
-    }
   }
 }
 
