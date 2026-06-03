@@ -181,6 +181,17 @@ export async function GET(req) {
       );
     }
 
+    if (userEmail.toLowerCase() !== session.user.email.toLowerCase()) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'No autorizado para consultar otro usuario',
+          code: 'FORBIDDEN',
+        },
+        { status: 403 }
+      );
+    }
+
     const pool = await sql.connect(sqlConfig);
 
     try {

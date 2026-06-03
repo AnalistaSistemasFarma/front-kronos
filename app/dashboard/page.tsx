@@ -24,8 +24,29 @@ import {
   Paper,
   Flex,
   ActionIcon,
+  Divider,
+  Loader,
 } from '@mantine/core';
 import { BarChart, PieChart, AreaChart } from '@mantine/charts';
+import EncargadoActivitiesChart from '../../components/dashboard/EncargadoActivitiesChart';
+import {
+  formatDateLocal,
+  getDashboardDateRange,
+  getFilterLabel,
+  getPeriodRangeLabel,
+  getQuarterLabel,
+  getSemesterLabel,
+  isReferenceAtCurrentPeriod,
+  shiftReferenceMonth,
+  type DashboardDateFilter,
+} from '../../lib/dashboard/dateRange';
+import {
+  chartAxisTickStyle,
+  chartYAxisProps,
+  dashboardChartTheme,
+  statusChartColors,
+} from '../../components/dashboard/chartTheme';
+import { ChartContainer } from '../../components/dashboard/ChartContainer';
 import {
   IconAlertCircle,
   IconRefresh,
@@ -68,19 +89,20 @@ interface TaskData {
   ejecutor_final_solicitud: string | null;
   proceso_solicitud: string;
   categoria_solicitud: string;
+  encargado_proceso?: string | null;
 }
 
-type DateFilter = 'month' | 'quarter' | 'semester' | 'year' | 'all';
+type DateFilter = DashboardDateFilter;
 
-// Project color palette
+// Paleta azul SynerLink (compartida con chartTheme)
 const projectColors = {
-  primary: '#113562',
-  secondary: '#3db6e0',
-  success: '#10b981',
-  warning: '#f59E0B',
-  error: '#ef4444',
-  purple: '#8B5CF6',
-  teal: '#14b8a6',
+  primary: dashboardChartTheme.primary,
+  secondary: dashboardChartTheme.secondary,
+  success: statusChartColors.completada,
+  warning: statusChartColors.pendiente,
+  error: dashboardChartTheme.blue600,
+  purple: dashboardChartTheme.blue500,
+  teal: dashboardChartTheme.blue300,
 };
 
 export default function Dashboard() {
@@ -96,11 +118,42 @@ export default function Dashboard() {
   );
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loadingAdmin, setLoadingAdmin] = useState(true);
+  const [appliedRange, setAppliedRange] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === 'loading') return;
     if (!session) router.push('/login');
   }, [session, status, router]);
+
+  useEffect(() => {
+    const checkAdmin = async () => {
+      if (!session?.user?.email) {
+        setIsAdmin(false);
+        setLoadingAdmin(false);
+        return;
+      }
+      try {
+        const res = await fetch(
+          `/api/requests-general/verify-permissions?email=${encodeURIComponent(session.user.email)}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setIsAdmin(Boolean(data.user?.isAdmin));
+        } else {
+          setIsAdmin(false);
+        }
+      } catch {
+        setIsAdmin(false);
+      } finally {
+        setLoadingAdmin(false);
+      }
+    };
+    if (status === 'authenticated') {
+      checkAdmin();
+    }
+  }, [session?.user?.email, status]);
 
   useEffect(() => {
     fetchTasks();
@@ -109,7 +162,16 @@ export default function Dashboard() {
   const exportDashboardToExcel = async () => {
     try {
       setExportingExcel(true);
-      const res = await fetch('/api/dashboard/export');
+      const dateRange = getDashboardDateRange(dateFilter, selectedMonthDate);
+      let exportUrl = '/api/dashboard/export';
+      if (dateRange) {
+        const params = new URLSearchParams({
+          date_from: dateRange.startDate,
+          date_to: dateRange.endDate,
+        });
+        exportUrl = `${exportUrl}?${params}`;
+      }
+      const res = await fetch(exportUrl);
       if (!res.ok) throw new Error('Error al obtener datos del servidor');
       const { solicitudes, actividades } = await res.json();
 
@@ -144,7 +206,7 @@ export default function Dashboard() {
       setLoading(true);
       setError(null);
 
-      const dateRange = getDateRange(dateFilter);
+      const dateRange = getDashboardDateRange(dateFilter, selectedMonthDate);
 
       let url = '/api/requests-general/view-tasks';
       if (dateRange) {
@@ -157,11 +219,22 @@ export default function Dashboard() {
 
       const response = await fetch(url);
       if (!response.ok) {
-        throw new Error('Error al cargar los datos del dashboard');
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(
+          (errBody as { error?: string }).error || 'Error al cargar los datos del dashboard'
+        );
       }
 
       const result = await response.json();
       setTasks(result.data || []);
+      const applied = result.filters_applied as
+        | { date_from?: string | null; date_to?: string | null }
+        | undefined;
+      if (applied?.date_from && applied?.date_to) {
+        setAppliedRange(`${applied.date_from} → ${applied.date_to}`);
+      } else {
+        setAppliedRange(null);
+      }
     } catch (err) {
       console.error('Error fetching tasks:', err);
       setError(err instanceof Error ? err.message : 'Error desconocido al cargar los datos');
@@ -170,65 +243,7 @@ export default function Dashboard() {
     }
   };
 
-  const formatDateToLocal = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  const getDateRange = (filter: DateFilter): { startDate: string; endDate: string } | null => {
-    // If 'all' is selected, return null to indicate no date filtering
-    if (filter === 'all') {
-      return null;
-    }
-
-    const now = new Date();
-    let startDate: Date;
-    const endDate: Date = new Date(now);
-
-    switch (filter) {
-      case 'month':
-        return {
-          startDate: formatDateToLocal(
-            new Date(selectedMonthDate.getFullYear(), selectedMonthDate.getMonth(), 1)
-          ),
-          endDate: formatDateToLocal(
-            new Date(selectedMonthDate.getFullYear(), selectedMonthDate.getMonth() + 1, 0)
-          ),
-        };
-      case 'quarter':
-        const quarter = Math.floor(now.getMonth() / 3);
-        startDate = new Date(now.getFullYear(), quarter * 3, 1);
-        break;
-      case 'semester':
-        const semester = Math.floor(now.getMonth() / 6);
-        startDate = new Date(now.getFullYear(), semester * 6, 1);
-        break;
-      case 'year':
-        // Últimos 12 meses rodantes
-        startDate = new Date(now.getFullYear() - 1, now.getMonth(), 1);
-        break;
-      default:
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    }
-
-    return {
-      startDate: formatDateToLocal(startDate),
-      endDate: formatDateToLocal(endDate),
-    };
-  };
-
-  const getFilterLabel = (filter: DateFilter): string => {
-    const labels: Record<DateFilter, string> = {
-      all: 'Todas',
-      month: 'Mensual',
-      quarter: 'Trimestral',
-      semester: 'Semestral',
-      year: 'Anual',
-    };
-    return labels[filter];
-  };
+  const activeDateRange = getDashboardDateRange(dateFilter, selectedMonthDate);
 
   // Calculate statistics
   const stats = {
@@ -240,11 +255,18 @@ export default function Dashboard() {
   };
 
   // Prepare data for charts with project colors
+  const otrosEstado = tasks.filter(
+    (t) => !['Completada', 'Pendiente', 'En Proceso'].includes(t.estado_tarea)
+  ).length;
+
   const statusData = [
-    { name: 'Completadas', value: stats.completed, color: projectColors.success },
-    { name: 'Pendientes', value: stats.pending, color: projectColors.warning },
-    { name: 'En Proceso', value: stats.inProgress, color: projectColors.secondary },
-  ];
+    { name: 'Completadas', value: stats.completed, color: statusChartColors.completada },
+    { name: 'Pendientes', value: stats.pending, color: statusChartColors.pendiente },
+    { name: 'En Proceso', value: stats.inProgress, color: statusChartColors.enProceso },
+    ...(otrosEstado > 0
+      ? [{ name: 'Otros', value: otrosEstado, color: dashboardChartTheme.blue600 }]
+      : []),
+  ].filter((item) => item.value > 0);
 
   const processData = tasks.reduce((acc, task) => {
     const process = task.proceso_solicitud || 'Sin Proceso';
@@ -280,11 +302,11 @@ export default function Dashboard() {
 
     switch (filter) {
       case 'month':
-        return formatDateToLocal(date);
+        return formatDateLocal(date);
       case 'quarter': {
         const weekStart = new Date(date);
         weekStart.setDate(date.getDate() - date.getDay()); // rewind to Sunday
-        return formatDateToLocal(weekStart);
+        return formatDateLocal(weekStart);
       }
       case 'semester':
       case 'year':
@@ -294,7 +316,7 @@ export default function Dashboard() {
         return `${year}-Q${q}`;
       }
       default:
-        return formatDateToLocal(date);
+        return formatDateLocal(date);
     }
   };
 
@@ -328,26 +350,26 @@ export default function Dashboard() {
     const now = new Date();
     switch (dateFilter) {
       case 'month': {
-        const range = getDateRange('month')!;
+        const range = getDashboardDateRange('month', selectedMonthDate)!;
         const result: [string, number][] = [];
         const cur = new Date(range.startDate + 'T00:00:00');
         const end = new Date(range.endDate + 'T00:00:00');
         while (cur <= end) {
-          const key = formatDateToLocal(cur);
+          const key = formatDateLocal(cur);
           result.push([key, timeSeriesData[key] || 0]);
           cur.setDate(cur.getDate() + 1);
         }
         return result;
       }
       case 'quarter': {
-        const range = getDateRange('quarter')!;
+        const range = getDashboardDateRange('quarter', selectedMonthDate)!;
         const start = new Date(range.startDate + 'T00:00:00');
         const end = new Date(range.endDate + 'T00:00:00');
         const cur = new Date(start);
         cur.setDate(start.getDate() - start.getDay()); // rewind to Sunday
         const result: [string, number][] = [];
         while (cur <= end) {
-          const key = formatDateToLocal(cur);
+          const key = formatDateLocal(cur);
           result.push([key, timeSeriesData[key] || 0]);
           cur.setDate(cur.getDate() + 7);
         }
@@ -355,7 +377,7 @@ export default function Dashboard() {
       }
       case 'semester':
       case 'year': {
-        const range = getDateRange(dateFilter)!;
+        const range = getDashboardDateRange(dateFilter, selectedMonthDate)!;
         const start = new Date(range.startDate + 'T00:00:00');
         const end = new Date(range.endDate + 'T00:00:00');
         const result: [string, number][] = [];
@@ -474,11 +496,11 @@ export default function Dashboard() {
     value: item.cost,
     color:
       [
-        projectColors.success,
-        projectColors.secondary,
-        projectColors.warning,
-        projectColors.error,
-        projectColors.purple,
+        dashboardChartTheme.blue800,
+        dashboardChartTheme.blue400,
+        dashboardChartTheme.blue300,
+        dashboardChartTheme.blue600,
+        dashboardChartTheme.blue500,
       ][index] || projectColors.primary,
   }));
 
@@ -519,8 +541,16 @@ export default function Dashboard() {
           <div>
             <Title order={2}>Dashboard - Actividades de Solicitudes</Title>
             <Text size='sm' c='dimmed'>
-              Análisis y visualización de tareas por periodo
+              Análisis por fecha de creación de la solicitud
             </Text>
+            {activeDateRange && (
+              <Text size='xs' c='dimmed' mt={4}>
+                {getFilterLabel(dateFilter)} · {appliedRange ?? getPeriodRangeLabel(dateFilter, selectedMonthDate)}
+                {dateFilter === 'quarter' && ` (${getQuarterLabel(selectedMonthDate)})`}
+                {dateFilter === 'semester' && ` (${getSemesterLabel(selectedMonthDate)} ${selectedMonthDate.getFullYear()})`}
+                {dateFilter === 'year' && ` (${selectedMonthDate.getFullYear()})`}
+              </Text>
+            )}
           </div>
           <Group align='flex-end'>
             <Select
@@ -536,31 +566,35 @@ export default function Dashboard() {
               allowDeselect={false}
               w={150}
             />
-            {dateFilter === 'month' && (
+            {(dateFilter === 'month' ||
+              dateFilter === 'quarter' ||
+              dateFilter === 'semester' ||
+              dateFilter === 'year') && (
               <Group gap={4}>
                 <ActionIcon
                   variant='light'
                   onClick={() =>
-                    setSelectedMonthDate(
-                      new Date(selectedMonthDate.getFullYear(), selectedMonthDate.getMonth() - 1, 1)
-                    )
+                    setSelectedMonthDate(shiftReferenceMonth(selectedMonthDate, dateFilter, -1))
                   }
                 >
                   <IconChevronLeft size={16} />
                 </ActionIcon>
-                <Text fw={500} w={110} ta='center' size='sm'>
-                  {selectedMonthDate.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })}
+                <Text fw={500} w={140} ta='center' size='sm'>
+                  {dateFilter === 'month' &&
+                    selectedMonthDate.toLocaleDateString('es-CO', {
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  {dateFilter === 'quarter' && getQuarterLabel(selectedMonthDate)}
+                  {dateFilter === 'semester' &&
+                    `${getSemesterLabel(selectedMonthDate)} ${selectedMonthDate.getFullYear()}`}
+                  {dateFilter === 'year' && String(selectedMonthDate.getFullYear())}
                 </Text>
                 <ActionIcon
                   variant='light'
-                  disabled={
-                    selectedMonthDate.getFullYear() === new Date().getFullYear() &&
-                    selectedMonthDate.getMonth() === new Date().getMonth()
-                  }
+                  disabled={isReferenceAtCurrentPeriod(selectedMonthDate, dateFilter)}
                   onClick={() =>
-                    setSelectedMonthDate(
-                      new Date(selectedMonthDate.getFullYear(), selectedMonthDate.getMonth() + 1, 1)
-                    )
+                    setSelectedMonthDate(shiftReferenceMonth(selectedMonthDate, dateFilter, 1))
                   }
                 >
                   <IconChevronRight size={16} />
@@ -602,6 +636,7 @@ export default function Dashboard() {
         <Tabs
           value={activeTab}
           onChange={(value) => setActiveTab(value || 'overview')}
+          keepMounted={false}
           styles={{
             tab: {
               '&:hover': {
@@ -700,28 +735,39 @@ export default function Dashboard() {
                 </Card>
               </SimpleGrid>
 
-              {/* Charts Grid */}
-              <Grid>
+              {/* Gráficos principales: 50% / 50% */}
+              <Grid gutter='lg' align='stretch'>
                 <Grid.Col span={{ base: 12, md: 6 }}>
-                  <Card shadow='sm' padding='lg' radius='md' withBorder>
+                  <Card shadow='sm' padding='lg' radius='md' withBorder h='100%'>
                     <Title order={4} mb='md'>
                       Distribución por Estado
                     </Title>
-                    <PieChart
-                      data={statusData}
-                      withLabels
-                      labelsType='percent'
-                      withTooltip
-                      tooltipDataSource='segment'
-                      size={300}
-                      mx='auto'
-                    />
+                    {statusData.length > 0 ? (
+                      <ChartContainer height={300} minWidth={0}>
+                        <Flex justify='center' align='center' w='100%' mih={300}>
+                          <PieChart
+                            data={statusData}
+                            withLabels
+                            labelsType='percent'
+                            withTooltip
+                            tooltipDataSource='segment'
+                            size={240}
+                          />
+                        </Flex>
+                      </ChartContainer>
+                    ) : (
+                      <Flex h={300} align='center' justify='center'>
+                        <Text size='sm' c='dimmed' ta='center'>
+                          No hay actividades con estado en este periodo
+                        </Text>
+                      </Flex>
+                    )}
                   </Card>
                 </Grid.Col>
 
                 <Grid.Col span={{ base: 12, md: 6 }}>
-                  <Card shadow='sm' padding='lg' radius='md' withBorder>
-                    <Group justify='space-between' mb='md'>
+                  <Card shadow='sm' padding='lg' radius='md' withBorder h='100%'>
+                    <Group justify='space-between' mb='md' wrap='nowrap'>
                       <Title order={4}>Tendencia de Tareas</Title>
                       <Select
                         size='xs'
@@ -746,7 +792,9 @@ export default function Dashboard() {
                       />
                     </Group>
                     {timeSeriesChartData.length > 0 ? (
+                      <ChartContainer height={300}>
                       <AreaChart
+                        w='100%'
                         h={300}
                         data={timeSeriesChartData}
                         dataKey='date'
@@ -812,13 +860,16 @@ export default function Dashboard() {
                           },
                         }}
                         gridProps={{
-                          stroke: '#e0e0e0',
-                          strokeDasharray: '3 3',
+                          stroke: '#cbd5e1',
+                          strokeDasharray: '4 4',
                           vertical: false,
                         }}
+                        xAxisProps={{ tick: chartAxisTickStyle }}
+                        yAxisProps={chartYAxisProps}
                         withPointLabels={timeSeriesChartData.length <= 15}
                         fillOpacity={0.15}
                       />
+                      </ChartContainer>
                     ) : (
                       <Flex h={300} align='center' justify='center'>
                         <Stack align='center' gap='sm'>
@@ -832,6 +883,25 @@ export default function Dashboard() {
                   </Card>
                 </Grid.Col>
               </Grid>
+
+              {/* Encargados: fila completa debajo (solo admin) */}
+              {loadingAdmin ? (
+                <Group justify='center' py='lg'>
+                  <Loader size='sm' />
+                </Group>
+              ) : isAdmin ? (
+                <Card shadow='sm' padding='lg' radius='md' withBorder>
+                  <Divider
+                    mb='lg'
+                    label='Actividades por encargado (solo administrador)'
+                    labelPosition='center'
+                  />
+                  <EncargadoActivitiesChart
+                    tasks={tasks}
+                    periodLabel={getFilterLabel(dateFilter)}
+                  />
+                </Card>
+              ) : null}
             </Stack>
           </Tabs.Panel>
 
@@ -843,7 +913,9 @@ export default function Dashboard() {
                 <Title order={4} mb='md'>
                   Tareas por Proceso (Top 10)
                 </Title>
+                <ChartContainer height={400}>
                 <BarChart
+                  w='100%'
                   h={400}
                   data={processChartData}
                   dataKey='name'
@@ -871,6 +943,7 @@ export default function Dashboard() {
                     height: 100,
                   }}
                 />
+                </ChartContainer>
               </Card>
 
               <Card shadow='sm' padding='lg' radius='md' withBorder>
@@ -898,11 +971,13 @@ export default function Dashboard() {
                 <Title order={4} mb='md'>
                   Tareas por Categoría (Top 10)
                 </Title>
+                <ChartContainer height={400}>
                 <BarChart
+                  w='100%'
                   h={400}
                   data={categoryChartData}
                   dataKey='name'
-                  series={[{ name: 'value', label: 'Cantidad', color: 'green.6' }]}
+                  series={[{ name: 'value', label: 'Cantidad', color: 'blue.5' }]}
                   withTooltip
                   tooltipProps={{
                     content: ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string | number }) => {
@@ -926,6 +1001,7 @@ export default function Dashboard() {
                     height: 100,
                   }}
                 />
+                </ChartContainer>
               </Card>
 
               <Card shadow='sm' padding='lg' radius='md' withBorder>
@@ -1022,15 +1098,18 @@ export default function Dashboard() {
                       Distribución de Costos por Proceso
                     </Title>
                     {costDistributionData.length > 0 ? (
-                      <PieChart
-                        data={costDistributionData}
-                        withLabels
-                        labelsType='percent'
-                        withTooltip
-                        tooltipDataSource='segment'
-                        size={300}
-                        mx='auto'
-                      />
+                      <ChartContainer height={320} minWidth={280}>
+                        <Flex justify='center' w='100%'>
+                          <PieChart
+                            data={costDistributionData}
+                            withLabels
+                            labelsType='percent'
+                            withTooltip
+                            tooltipDataSource='segment'
+                            size={300}
+                          />
+                        </Flex>
+                      </ChartContainer>
                     ) : (
                       <Text c='dimmed' ta='center' py='xl'>
                         No hay datos de costos disponibles
@@ -1045,11 +1124,13 @@ export default function Dashboard() {
                       Costo por Actividad (Top 10)
                     </Title>
                     {costByActivityChartData.length > 0 ? (
+                      <ChartContainer height={300}>
                       <BarChart
+                        w='100%'
                         h={300}
                         data={costByActivityChartData}
                         dataKey='name'
-                        series={[{ name: 'cost', label: 'Costo', color: 'teal.6' }]}
+                        series={[{ name: 'cost', label: 'Costo', color: 'blue.5' }]}
                         withTooltip
                         xAxisProps={{
                           angle: -45,
@@ -1057,6 +1138,7 @@ export default function Dashboard() {
                           height: 100,
                         }}
                       />
+                      </ChartContainer>
                     ) : (
                       <Text c='dimmed' ta='center' py='xl'>
                         No hay datos de costos disponibles
@@ -1072,11 +1154,13 @@ export default function Dashboard() {
                   Costo por Proceso (Top 10)
                 </Title>
                 {costByProcessChartData.length > 0 ? (
+                  <ChartContainer height={400}>
                   <BarChart
+                    w='100%'
                     h={400}
                     data={costByProcessChartData}
                     dataKey='name'
-                    series={[{ name: 'cost', label: 'Costo', color: 'violet.6' }]}
+                    series={[{ name: 'cost', label: 'Costo', color: 'blue.6' }]}
                     withTooltip
                     withLegend
                     xAxisProps={{
@@ -1085,6 +1169,7 @@ export default function Dashboard() {
                       height: 100,
                     }}
                   />
+                  </ChartContainer>
                 ) : (
                   <Text c='dimmed' ta='center' py='xl'>
                     No hay datos de costos disponibles
@@ -1098,11 +1183,13 @@ export default function Dashboard() {
                   <Title order={4} mb='md'>
                     Costo por Centro de Costo (Top 10)
                   </Title>
+                  <ChartContainer height={400}>
                   <BarChart
+                    w='100%'
                     h={400}
                     data={costByCenterChartData}
                     dataKey='name'
-                    series={[{ name: 'cost', label: 'Costo', color: 'cyan.6' }]}
+                    series={[{ name: 'cost', label: 'Costo', color: 'blue.4' }]}
                     withTooltip
                     withLegend
                     xAxisProps={{
@@ -1111,6 +1198,7 @@ export default function Dashboard() {
                       height: 100,
                     }}
                   />
+                  </ChartContainer>
                 </Card>
               )}
 
