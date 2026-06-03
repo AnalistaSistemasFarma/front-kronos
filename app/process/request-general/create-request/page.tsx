@@ -1471,8 +1471,8 @@ function RequestBoard() {
               error={formErrors.descripcion}
               required
               minRows={5}
-              maxLength={254}
-              description='Mínimo 10 caracteres, máximo 254 caracteres'
+              maxLength={1000}
+              description='Mínimo 10 caracteres, máximo 1000 caracteres'
               autosize
             />
 
