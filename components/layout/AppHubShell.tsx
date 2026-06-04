@@ -42,11 +42,11 @@ export default function AppHubShell({ children }: { children: React.ReactNode })
   const instantSwap = isHubInstantSwapRoute(pathname);
 
   if (!instantSwap) {
-    return <main className='min-h-screen'>{children}</main>;
+    return <main className='app-page-shell'>{children}</main>;
   }
 
   return (
-    <main className='min-h-screen bg-gray-50'>
+    <main className='app-page-shell'>
       <HubPanels />
     </main>
   );

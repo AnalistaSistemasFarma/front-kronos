@@ -1,8 +1,23 @@
 @import 'tailwindcss';
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Tokens base (sobrescritos por applyAppThemeToDocument + Mantine) */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --app-header-height: 4rem;
+  --background: #eef1f5;
+  --foreground: #1a1d21;
+  --surface: #ffffff;
+  --surface-muted: #f4f6f8;
+  --border-subtle: #d8dee6;
+}
+
+.dark {
+  --background: #1e1f23;
+  --foreground: #f3f4f6;
+  --surface: #28292e;
+  --surface-muted: #303238;
+  --border-subtle: #404348;
 }
 
 @theme inline {
@@ -12,18 +27,99 @@
   --font-mono: var(--font-geist-mono);
 }
 
-.dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-}
-
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100%;
+  background-color: var(--app-bg, var(--background));
+  color: var(--app-text, var(--foreground));
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* Dashboard: pestañas superpuestas — todas mantienen tamaño para Chart.js */
+/* ─── Páginas con Tailwind (procesos, login, etc.) ─── */
+.app-page-shell {
+  min-height: 100vh;
+  background-color: var(--app-bg, var(--background));
+  color: var(--app-text, var(--foreground));
+}
+
+.dark .bg-white {
+  background-color: var(--app-surface, var(--surface)) !important;
+  color: var(--app-text, var(--foreground));
+}
+
+.dark .bg-gray-50 {
+  background-color: var(--app-bg, var(--background)) !important;
+}
+
+.dark .bg-gray-100 {
+  background-color: var(--app-surface-raised, var(--surface-muted)) !important;
+}
+
+.dark .hover\:bg-gray-50:hover {
+  background-color: var(--app-surface-raised, var(--surface-muted)) !important;
+}
+
+.dark .border-gray-200,
+.dark .border-gray-300 {
+  border-color: var(--app-border, var(--border-subtle)) !important;
+}
+
+.dark .text-gray-900 {
+  color: var(--app-text, var(--foreground)) !important;
+}
+
+.dark .text-gray-800,
+.dark .text-gray-700 {
+  color: var(--app-text, var(--foreground)) !important;
+}
+
+.dark .text-gray-600,
+.dark .text-gray-500,
+.dark .text-gray-400 {
+  color: var(--app-text-muted, #b0b4bc) !important;
+}
+
+.dark input,
+.dark textarea,
+.dark select {
+  color: var(--app-text, var(--foreground));
+}
+
+/* Iconos SVG heredan color en zonas con texto */
+.dark .mantine-ActionIcon-root {
+  color: var(--app-icon, var(--app-text-muted));
+}
+
+/* Tarjetas y paneles — capas navy (sin pisar KPIs con gradiente) */
+.dark .mantine-Card-root:not(.dashboard-kpi-gradient) {
+  background-color: var(--app-surface) !important;
+  border-color: var(--app-border) !important;
+  box-shadow: var(--app-card-shadow, 0 8px 32px rgba(0, 0, 0, 0.35));
+}
+
+.dark .mantine-Paper-root {
+  color: var(--app-text);
+}
+
+.dark .dashboard-chart-card .mantine-Title-root {
+  color: var(--app-text);
+}
+
+/* ─── Dashboard ─── */
+.dashboard-nav-sticky {
+  position: sticky;
+  top: var(--app-header-height);
+  z-index: 40;
+  background-color: var(--app-bg, var(--background));
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+}
+
+.dark .dashboard-nav-sticky {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
 .dashboard-panels {
   display: grid;
   grid-template: 1fr / 1fr;
@@ -36,7 +132,6 @@ body {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0ms;
   min-width: 0;
   overflow-x: clip;
   width: 100%;
@@ -49,7 +144,6 @@ body {
   z-index: 1;
 }
 
-/* Vistas analíticas: sin scroll horizontal de página; scroll solo dentro de .chart-scroll-x */
 .dashboard-analytics-root {
   min-width: 0;
   max-width: 100%;
@@ -81,7 +175,6 @@ body {
   }
 }
 
-/* Hub: Dashboard ↔ Procesos sin recarga */
 .hub-sections {
   display: grid;
   grid-template: 1fr / 1fr;
@@ -92,7 +185,6 @@ body {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0ms;
 }
 
 .hub-section--active {
@@ -100,4 +192,30 @@ body {
   opacity: 1;
   pointer-events: auto;
   z-index: 1;
+}
+
+/* Header */
+.app-header {
+  background-color: var(--app-header);
+  border-bottom: 1px solid var(--app-border);
+  color: var(--app-text);
+}
+
+.app-nav-link {
+  color: var(--app-text-muted);
+}
+
+.app-nav-link:hover {
+  color: var(--app-accent);
+}
+
+.app-nav-link--active {
+  color: var(--app-accent);
+  font-weight: 600;
+}
+
+.app-mobile-menu {
+  background-color: var(--app-header);
+  border-top: 1px solid var(--app-border);
+  color: var(--app-text);
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireDashboardAdminApi } from '../../../../lib/dashboard/dashboardAccess';
 import { getPool } from '../../../../lib/mssqlPool';
 import {
   buildSummary,
@@ -15,6 +16,9 @@ import {
  */
 export async function GET(req: Request) {
   try {
+    const auth = await requireDashboardAdminApi();
+    if (!auth.ok) return auth.response;
+
     const filters = parseViewTasksFilters(new URL(req.url).searchParams);
 
     const dateError = validateDateRange(filters.date_from, filters.date_to);

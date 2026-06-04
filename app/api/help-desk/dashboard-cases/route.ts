@@ -1,6 +1,7 @@
 import sql from 'mssql';
 import { NextResponse } from 'next/server';
 import sqlConfig from '../../../../dbconfig';
+import { requireDashboardAdminApi } from '../../../../lib/dashboard/dashboardAccess';
 
 /**
  * Casos de mesa de ayuda para el dashboard (todos los estados, filtro por fecha de creación).
@@ -10,6 +11,9 @@ export async function GET(req: Request) {
   let pool: sql.ConnectionPool | null = null;
 
   try {
+    const auth = await requireDashboardAdminApi();
+    if (!auth.ok) return auth.response;
+
     pool = await sql.connect(sqlConfig);
     const { searchParams } = new URL(req.url);
     const date_from = searchParams.get('date_from');

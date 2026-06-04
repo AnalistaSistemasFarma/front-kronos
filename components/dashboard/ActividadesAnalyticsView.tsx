@@ -5,6 +5,7 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import { useDashboardData } from '../../lib/dashboard/DashboardDataContext';
 import {
   Card,
   Title,
@@ -47,10 +48,8 @@ import {
   getFilterLabel,
   type DashboardDateFilter,
 } from '../../lib/dashboard/dateRange';
-import {
-  dashboardChartTheme,
-  statusChartColors,
-} from './chartTheme';
+import { dashboardChartTheme } from './chartTheme';
+import { useProjectColors } from './useProjectColors';
 import { ChartContainer } from './ChartContainer';
 import {
   IconAlertCircle,
@@ -96,18 +95,8 @@ interface TaskData {
 
 type DateFilter = DashboardDateFilter;
 
-// Paleta azul SynerLink (compartida con chartTheme)
-const projectColors = {
-  primary: dashboardChartTheme.primary,
-  secondary: dashboardChartTheme.secondary,
-  success: statusChartColors.completada,
-  warning: statusChartColors.pendiente,
-  error: dashboardChartTheme.blue600,
-  purple: dashboardChartTheme.blue500,
-  teal: dashboardChartTheme.blue300,
-};
-
 export default function ActividadesAnalyticsView() {
+  const projectColors = useProjectColors();
   const { data: session, status } = useSession();
   const router = useRouter();
 
@@ -120,40 +109,12 @@ export default function ActividadesAnalyticsView() {
   );
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [exportingExcel, setExportingExcel] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [loadingAdmin, setLoadingAdmin] = useState(true);
+  const { isAdmin, loadingAdmin } = useDashboardData();
+
   useEffect(() => {
     if (status === 'loading') return;
     if (!session) router.push('/login');
   }, [session, status, router]);
-
-  useEffect(() => {
-    const checkAdmin = async () => {
-      if (!session?.user?.email) {
-        setIsAdmin(false);
-        setLoadingAdmin(false);
-        return;
-      }
-      try {
-        const res = await fetch(
-          `/api/requests-general/verify-permissions?email=${encodeURIComponent(session.user.email)}`
-        );
-        if (res.ok) {
-          const data = await res.json();
-          setIsAdmin(Boolean(data.user?.isAdmin));
-        } else {
-          setIsAdmin(false);
-        }
-      } catch {
-        setIsAdmin(false);
-      } finally {
-        setLoadingAdmin(false);
-      }
-    };
-    if (status === 'authenticated') {
-      checkAdmin();
-    }
-  }, [session?.user?.email, status]);
 
   useEffect(() => {
     fetchTasks();
@@ -501,6 +462,11 @@ export default function ActividadesAnalyticsView() {
   const completionRate =
     stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
 
+  const { completada, pendiente, enProceso } = projectColors.chartStatusColors;
+  const doughnutRestColor = projectColors.isDark
+    ? 'rgba(255, 255, 255, 0.14)'
+    : '#e2e8f0';
+
   const totalBreakdownChart = useMemo(
     () =>
       buildHorizontalMultiColorBarChart(
@@ -508,36 +474,39 @@ export default function ActividadesAnalyticsView() {
           {
             label: 'Completadas',
             value: stats.completed,
-            color: statusChartColors.completada,
+            color: completada,
           },
           {
             label: 'Pendientes',
             value: stats.pending,
-            color: statusChartColors.pendiente,
+            color: pendiente,
           },
           {
             label: 'En proceso',
             value: stats.inProgress,
-            color: statusChartColors.enProceso,
+            color: enProceso,
           },
         ],
         false
       ),
-    [stats.completed, stats.pending, stats.inProgress]
+    [stats.completed, stats.pending, stats.inProgress, completada, pendiente, enProceso]
   );
 
-  const doughnutLegend = { showLegend: false } as const;
+  const doughnutOpts = {
+    showLegend: false,
+    restColor: doughnutRestColor,
+  } as const;
 
   const completedShareChart = useMemo(
     () =>
       buildShareDoughnut(
         stats.completed,
         stats.total,
-        statusChartColors.completada,
+        completada,
         'Completadas',
-        doughnutLegend
+        doughnutOpts
       ),
-    [stats.completed, stats.total]
+    [stats.completed, stats.total, completada, doughnutRestColor]
   );
 
   const pendingShareChart = useMemo(
@@ -545,11 +514,11 @@ export default function ActividadesAnalyticsView() {
       buildShareDoughnut(
         stats.pending,
         stats.total,
-        statusChartColors.pendiente,
+        pendiente,
         'Pendientes',
-        doughnutLegend
+        doughnutOpts
       ),
-    [stats.pending, stats.total]
+    [stats.pending, stats.total, pendiente, doughnutRestColor]
   );
 
   const inProgressShareChart = useMemo(
@@ -557,11 +526,11 @@ export default function ActividadesAnalyticsView() {
       buildShareDoughnut(
         stats.inProgress,
         stats.total,
-        statusChartColors.enProceso,
+        enProceso,
         'En proceso',
-        doughnutLegend
+        { ...doughnutOpts, emptyHint: 'Sin tareas en curso' }
       ),
-    [stats.inProgress, stats.total]
+    [stats.inProgress, stats.total, enProceso, doughnutRestColor]
   );
 
   const trendAreaChart = buildAreaLineChart(
@@ -684,9 +653,87 @@ export default function ActividadesAnalyticsView() {
 
           <Tabs.Panel value='overview'>
             <Stack gap='xl' mt='md'>
+              <ActividadesSection
+                priority={1}
+                title='Panorama del periodo'
+                description='Cada tarjeta resume un indicador y su gráfica: composición del total o participación frente al resto.'
+              >
+                <SimpleGrid cols={{ base: 1, xs: 2, lg: 4 }} spacing={{ base: 'sm', sm: 'md' }}>
+                  <MetricInsightCard
+                    compact
+                    label='Total tareas'
+                    value={formatNumber(stats.total)}
+                    hint={`Periodo ${getFilterLabel(dateFilter)}`}
+                    color={projectColors.primary}
+                    icon={IconChartBar}
+                    loading={loading}
+                    chartTitle='Composición del total'
+                    chartDescription='Cuántas tareas hay en cada estado'
+                    chartType='bar'
+                    chartData={totalBreakdownChart.data}
+                    chartOptions={totalBreakdownChart.options}
+                    emptyMessage='No hay tareas en este periodo'
+                  />
+                  <MetricInsightCard
+                    compact
+                    label='Completadas'
+                    value={formatNumber(stats.completed)}
+                    hint={`${completionRate}% del total · avance del equipo`}
+                    sharePercent={pct(stats.completed)}
+                    color={completada}
+                    icon={IconCheck}
+                    loading={loading}
+                    chartTitle='Participación completadas'
+                    chartDescription='Porción del total ya finalizada'
+                    chartType='pie'
+                    chartData={completedShareChart.data}
+                    chartOptions={completedShareChart.options}
+                  />
+                  <MetricInsightCard
+                    compact
+                    label='Pendientes'
+                    value={formatNumber(stats.pending)}
+                    hint='Requieren atención o asignación'
+                    sharePercent={pct(stats.pending)}
+                    color={pendiente}
+                    icon={IconClock}
+                    loading={loading}
+                    chartTitle='Participación pendientes'
+                    chartDescription='Porción del total aún sin iniciar o en espera'
+                    chartType='pie'
+                    chartData={pendingShareChart.data}
+                    chartOptions={pendingShareChart.options}
+                  />
+                  <MetricInsightCard
+                    compact
+                    label='En proceso'
+                    value={formatNumber(stats.inProgress)}
+                    hint='Trabajo en curso en el periodo'
+                    sharePercent={pct(stats.inProgress)}
+                    color={enProceso}
+                    icon={IconTrendingUp}
+                    loading={loading}
+                    chartTitle='Participación en curso'
+                    chartDescription='Porción del total con ejecución activa'
+                    chartType='pie'
+                    chartData={inProgressShareChart.data}
+                    chartOptions={inProgressShareChart.options}
+                  />
+                </SimpleGrid>
+
+                {stats.total > 0 && stats.pending > stats.completed && (
+                  <Paper p='md' radius='md' withBorder bg='orange.0'>
+                    <Text size='sm' c='orange.9'>
+                      Hay más tareas pendientes ({formatNumber(stats.pending)}) que completadas (
+                      {formatNumber(stats.completed)}). Revisa asignaciones y plazos del periodo.
+                    </Text>
+                  </Paper>
+                )}
+              </ActividadesSection>
+
               {(loadingAdmin || isAdmin) && (
                 <ActividadesSection
-                  priority={1}
+                  priority={2}
                   title='Desempeño por encargado'
                   description='Detalle por persona o equipo. Útil para administradores que reparten carga de trabajo.'
                 >
@@ -710,80 +757,6 @@ export default function ActividadesAnalyticsView() {
                   )}
                 </ActividadesSection>
               )}
-
-              <ActividadesSection
-                priority={isAdmin ? 2 : 1}
-                title='Panorama del periodo'
-                description='Cada tarjeta resume un indicador y su gráfica: composición del total o participación frente al resto.'
-              >
-                <SimpleGrid cols={{ base: 1, xs: 2, lg: 4 }} spacing={{ base: 'md', sm: 'lg' }}>
-                  <MetricInsightCard
-                    label='Total tareas'
-                    value={formatNumber(stats.total)}
-                    hint={`Periodo ${getFilterLabel(dateFilter)}`}
-                    color={projectColors.primary}
-                    icon={IconChartBar}
-                    loading={loading}
-                    chartTitle='Composición del total'
-                    chartDescription='Cuántas tareas hay en cada estado'
-                    chartType='bar'
-                    chartData={totalBreakdownChart.data}
-                    chartOptions={totalBreakdownChart.options}
-                    emptyMessage='No hay tareas en este periodo'
-                  />
-                  <MetricInsightCard
-                    label='Completadas'
-                    value={formatNumber(stats.completed)}
-                    hint={`${completionRate}% del total · avance del equipo`}
-                    sharePercent={pct(stats.completed)}
-                    color={projectColors.success}
-                    icon={IconCheck}
-                    loading={loading}
-                    chartTitle='Participación completadas'
-                    chartDescription='Porción del total ya finalizada'
-                    chartType='pie'
-                    chartData={completedShareChart.data}
-                    chartOptions={completedShareChart.options}
-                  />
-                  <MetricInsightCard
-                    label='Pendientes'
-                    value={formatNumber(stats.pending)}
-                    hint='Requieren atención o asignación'
-                    sharePercent={pct(stats.pending)}
-                    color={projectColors.warning}
-                    icon={IconClock}
-                    loading={loading}
-                    chartTitle='Participación pendientes'
-                    chartDescription='Porción del total aún sin iniciar o en espera'
-                    chartType='pie'
-                    chartData={pendingShareChart.data}
-                    chartOptions={pendingShareChart.options}
-                  />
-                  <MetricInsightCard
-                    label='En proceso'
-                    value={formatNumber(stats.inProgress)}
-                    hint='Trabajo en curso en el periodo'
-                    sharePercent={pct(stats.inProgress)}
-                    color={projectColors.secondary}
-                    icon={IconTrendingUp}
-                    loading={loading}
-                    chartTitle='Participación en curso'
-                    chartDescription='Porción del total con ejecución activa'
-                    chartType='pie'
-                    chartData={inProgressShareChart.data}
-                    chartOptions={inProgressShareChart.options}
-                  />
-                </SimpleGrid>
-
-                {stats.total > 0 && stats.pending > stats.completed && (
-                  <Paper p='md' radius='md' withBorder bg='orange.0'>
-                    <Text size='sm' c='orange.9'>
-                      Hay más tareas pendientes ({formatNumber(stats.pending)}) que completadas (
-                      {formatNumber(stats.completed)}). Revisa asignaciones y plazos del periodo.
-                    </Text>
-                  </Paper>
-                )}
-              </ActividadesSection>
 
               <ActividadesSection
                 priority={isAdmin ? 3 : 2}

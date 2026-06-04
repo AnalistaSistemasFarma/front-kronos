@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import { useDashboardAdmin } from './DashboardAdminContext';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { registerCharts } from '../charts/register';
@@ -89,6 +90,7 @@ function periodCacheKey(dateFilter: DashboardDateFilter, selectedMonthDate: Date
 export function DashboardDataProvider({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { isDashboardAdmin, loadingDashboardAdmin } = useDashboardAdmin();
 
   const [tasks, setTasks] = useState<DashboardTask[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
@@ -105,9 +107,9 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   );
   const [exportingExcel, setExportingExcel] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [loadingAdmin, setLoadingAdmin] = useState(true);
   const [appliedRange, setAppliedRange] = useState<string | null>(null);
+  const isAdmin = isDashboardAdmin;
+  const loadingAdmin = loadingDashboardAdmin;
 
   const tasksCacheKey = useRef<string | null>(null);
   const ticketsCacheKey = useRef<string | null>(null);
@@ -120,32 +122,6 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
     if (status === 'loading') return;
     if (!session) router.push('/login');
   }, [session, status, router]);
-
-  useEffect(() => {
-    const checkAdmin = async () => {
-      if (!session?.user?.email) {
-        setIsAdmin(false);
-        setLoadingAdmin(false);
-        return;
-      }
-      try {
-        const res = await fetch(
-          `/api/requests-general/verify-permissions?email=${encodeURIComponent(session.user.email)}`
-        );
-        if (res.ok) {
-          const data = await res.json();
-          setIsAdmin(Boolean(data.user?.isAdmin));
-        } else {
-          setIsAdmin(false);
-        }
-      } catch {
-        setIsAdmin(false);
-      } finally {
-        setLoadingAdmin(false);
-      }
-    };
-    if (status === 'authenticated') checkAdmin();
-  }, [session?.user?.email, status]);
 
   const fetchTasks = useCallback(
     async (opts?: { silent?: boolean }) => {

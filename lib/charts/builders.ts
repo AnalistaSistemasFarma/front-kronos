@@ -41,27 +41,41 @@ export function buildShareDoughnut(
   total: number,
   activeColor: string,
   activeLabel: string,
-  options?: { showLegend?: boolean }
+  options?: { showLegend?: boolean; restColor?: string; emptyHint?: string }
 ): { data: ChartData<'pie'>; options: ChartOptions<'pie'> } {
+  const restColor = options?.restColor ?? '#e2e8f0';
   const other = Math.max(0, total - value);
-  const slices: PieSlice[] =
-    total === 0
-      ? [{ name: 'Sin datos', value: 1, color: '#e2e8f0' }]
-      : [
-          { name: activeLabel, value, color: activeColor },
-          ...(other > 0 ? [{ name: 'Resto del periodo', value: other, color: '#e2e8f0' }] : []),
-        ].filter((s) => s.value > 0);
+
+  let slices: PieSlice[];
+  if (total === 0) {
+    slices = [{ name: 'Sin datos', value: 1, color: restColor }];
+  } else if (value <= 0) {
+    slices = [
+      {
+        name: options?.emptyHint ?? `Sin ${activeLabel.toLowerCase()}`,
+        value: 1,
+        color: `${activeColor}55`,
+      },
+    ];
+  } else {
+    slices = [
+      { name: activeLabel, value, color: activeColor },
+      ...(other > 0 ? [{ name: 'Resto del periodo', value: other, color: restColor }] : []),
+    ].filter((s) => s.value > 0);
+  }
 
   return buildPieChart(slices, {
     showLegend: options?.showLegend ?? true,
     cutout: '62%',
+    borderColor: 'rgba(255,255,255,0.35)',
   });
 }
 
 export function buildPieChart(
   slices: PieSlice[],
-  options?: { showLegend?: boolean; cutout?: string }
+  options?: { showLegend?: boolean; cutout?: string; borderColor?: string }
 ): { data: ChartData<'pie'>; options: ChartOptions<'pie'> } {
+  const sliceBorder = options?.borderColor ?? '#ffffff';
   return {
     data: {
       labels: slices.map((s) => s.name),
@@ -69,8 +83,9 @@ export function buildPieChart(
         {
           data: slices.map((s) => s.value),
           backgroundColor: slices.map((s) => s.color),
-          borderColor: '#ffffff',
+          borderColor: sliceBorder,
           borderWidth: 2,
+          hoverOffset: 6,
         },
       ],
     },
@@ -163,8 +178,10 @@ export function buildHorizontalMultiColorBarChart(
           label: 'Tareas',
           data: items.map((i) => i.value),
           backgroundColor: items.map((i) => i.color),
-          borderRadius: 6,
-          maxBarThickness: isMobile ? 24 : 32,
+          hoverBackgroundColor: items.map((i) => i.color),
+          borderRadius: 8,
+          borderSkipped: false,
+          maxBarThickness: isMobile ? 28 : 36,
         },
       ],
     },
@@ -391,12 +408,227 @@ export type TicketStackedRow = {
   Cerrado: number;
 };
 
-const ticketStatusColors = {
+export const ticketStatusChartColors = {
   abierto: '#3b82f6',
   enProgreso: '#f59e0b',
-  resuelto: '#16a34a',
+  resuelto: '#22c55e',
   cerrado: '#64748b',
+} as const;
+
+export type TicketStatusLinePoint = {
+  label: string;
+  abierto: number;
+  enProgreso: number;
+  resuelto: number;
+  cerrado: number;
 };
+
+function ticketStatusLineDataset(
+  label: string,
+  data: number[],
+  color: string
+): ChartData<'line'>['datasets'][number] {
+  return {
+    label,
+    data,
+    borderColor: color,
+    backgroundColor: `${color}22`,
+    fill: false,
+    tension: 0.4,
+    pointRadius: 4,
+    pointHoverRadius: 7,
+    pointBackgroundColor: color,
+    pointBorderColor: '#ffffff',
+    pointBorderWidth: 2,
+    borderWidth: 2.5,
+  };
+}
+
+function buildTicketStatusMultiLineChartOptions(
+  mode: 'time' | 'technician',
+  labelCount: number
+): ChartOptions<'line'> {
+  const truncateTechnician = (value: string) =>
+    value.length > 14 ? `${value.slice(0, 12)}…` : value;
+
+  return baseChartOptions<'line'>({
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: {
+        ...categoryAxis(),
+        ticks: {
+          ...categoryAxis().ticks,
+          maxRotation: mode === 'technician' ? 35 : 45,
+          minRotation: mode === 'technician' ? 25 : 0,
+          autoSkip: labelCount > 8,
+          maxTicksLimit: mode === 'technician' ? 12 : 12,
+          callback:
+            mode === 'technician'
+              ? (value) => truncateTechnician(String(value))
+              : undefined,
+        },
+      },
+      y: {
+        ...valueAxis(chartLabelColor, false),
+        beginAtZero: true,
+        ticks: { precision: 0 },
+      },
+    },
+    plugins: {
+      legend: {
+        display: true,
+        position: 'bottom',
+        labels: { usePointStyle: true, padding: 16, boxWidth: 8 },
+      },
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+        callbacks: {
+          title: (items) => {
+            const idx = items[0]?.dataIndex;
+            if (mode === 'technician' && typeof idx === 'number') {
+              const full = items[0]?.chart?.data?.labels?.[idx];
+              return full != null ? String(full) : items[0]?.label ?? '';
+            }
+            return items[0]?.label ?? '';
+          },
+          label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y ?? 0} casos`,
+          footer: (items) => {
+            const total = items.reduce((sum, item) => sum + (item.parsed.y ?? 0), 0);
+            return mode === 'technician'
+              ? `Total del técnico: ${total}`
+              : `Total en periodo: ${total}`;
+          },
+        },
+      },
+    },
+  });
+}
+
+/** Líneas por estado a lo largo del tiempo. */
+export function buildTicketStatusMultiLineChart(
+  points: TicketStatusLinePoint[]
+): { data: ChartData<'line'>; options: ChartOptions<'line'> } {
+  const c = ticketStatusChartColors;
+
+  return {
+    data: {
+      labels: points.map((p) => p.label),
+      datasets: [
+        ticketStatusLineDataset('Abierto', points.map((p) => p.abierto), c.abierto),
+        ticketStatusLineDataset(
+          'En progreso',
+          points.map((p) => p.enProgreso),
+          c.enProgreso
+        ),
+        ticketStatusLineDataset('Resuelto', points.map((p) => p.resuelto), c.resuelto),
+        ticketStatusLineDataset('Cerrado', points.map((p) => p.cerrado), c.cerrado),
+      ],
+    },
+    options: buildTicketStatusMultiLineChartOptions('time', points.length),
+  };
+}
+
+const technicianPerformanceLineColors = [
+  '#8b5cf6',
+  '#ec4899',
+  '#3b82f6',
+  '#22c55e',
+  '#f59e0b',
+  '#06b6d4',
+  '#e879f9',
+  '#3dd6c8',
+  '#ff7b8a',
+  '#c084fc',
+  '#fbbf24',
+  '#6366f1',
+] as const;
+
+export type TechnicianPerformanceSeriesInput = {
+  periodLabels: string[];
+  technicians: { name: string; values: number[] }[];
+};
+
+/** Rendimiento por persona: eje X = periodo del filtro, cada línea = un técnico. */
+export function buildTechnicianPerformanceLineChart(
+  series: TechnicianPerformanceSeriesInput,
+  options?: { legendOnRight?: boolean }
+): { data: ChartData<'line'>; options: ChartOptions<'line'> } {
+  const legendPosition = options?.legendOnRight ? ('right' as const) : ('bottom' as const);
+
+  return {
+    data: {
+      labels: series.periodLabels,
+      datasets: series.technicians.map((tech, index) => {
+        const color =
+          technicianPerformanceLineColors[index % technicianPerformanceLineColors.length];
+        return {
+          label: tech.name,
+          data: tech.values,
+          borderColor: color,
+          backgroundColor: `${color}22`,
+          fill: false,
+          tension: 0.4,
+          pointRadius: 4,
+          pointHoverRadius: 7,
+          pointBackgroundColor: color,
+          pointBorderColor: '#ffffff',
+          pointBorderWidth: 2,
+          borderWidth: 2.5,
+        };
+      }),
+    },
+    options: baseChartOptions<'line'>({
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: {
+          ...categoryAxis(),
+          ticks: {
+            ...categoryAxis().ticks,
+            maxRotation: 45,
+            minRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 14,
+          },
+        },
+        y: {
+          ...valueAxis(chartLabelColor, false),
+          beginAtZero: true,
+          ticks: { precision: 0 },
+          title: {
+            display: true,
+            text: 'Casos en el periodo',
+            color: chartLabelColor,
+            font: { size: 11, weight: 600 },
+          },
+        },
+      },
+      plugins: {
+        legend: {
+          display: true,
+          position: legendPosition,
+          align: legendPosition === 'right' ? 'center' : ('center' as const),
+          labels: {
+            usePointStyle: true,
+            padding: legendPosition === 'right' ? 10 : 16,
+            boxWidth: 8,
+            font: { size: 11 },
+          },
+        },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          callbacks: {
+            title: (items) => items[0]?.label ?? '',
+            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y ?? 0} casos`,
+          },
+        },
+      },
+    }),
+  };
+}
+
+const ticketStatusColors = ticketStatusChartColors;
 
 export function buildTicketStatusStackedBar(
   rows: TicketStackedRow[],

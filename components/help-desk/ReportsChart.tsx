@@ -64,7 +64,7 @@ export const ReportsChart: React.FC<ReportsChartProps> = ({ className = '' }) =>
 
   if (loading) {
     return (
-      <Card shadow='sm' p='lg' radius='md' withBorder className={`bg-white ${className}`}>
+      <Card shadow='sm' p='lg' radius='md' withBorder className={className}>
         <Group justify='space-between' mb='md'>
           <Group>
             <IconChartLine size={24} className='text-blue-600' />
@@ -88,7 +88,7 @@ export const ReportsChart: React.FC<ReportsChartProps> = ({ className = '' }) =>
 
   if (error) {
     return (
-      <Card shadow='sm' p='lg' radius='md' withBorder className={`bg-white ${className}`}>
+      <Card shadow='sm' p='lg' radius='md' withBorder className={className}>
         <Group justify='space-between' mb='md'>
           <Group>
             <IconChartLine size={24} className='text-blue-600' />
@@ -125,7 +125,7 @@ export const ReportsChart: React.FC<ReportsChartProps> = ({ className = '' }) =>
   }
 
   return (
-    <Card shadow='sm' p='lg' radius='md' withBorder className={`bg-white ${className}`}>
+    <Card shadow='sm' p='lg' radius='md' withBorder className={className}>
       <Group justify='space-between' mb='md'>
         <Group>
           <IconChartLine size={24} className='text-blue-600' />

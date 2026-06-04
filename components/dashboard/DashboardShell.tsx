@@ -8,6 +8,7 @@ import DashboardNav from './DashboardNav';
 import SolicitudesAnalyticsView from './SolicitudesAnalyticsView';
 import ActividadesAnalyticsView from './ActividadesAnalyticsView';
 import TicketsAnalyticsView from './TicketsAnalyticsView';
+import DashboardAdminGate from './DashboardAdminGate';
 
 const MemoSolicitudes = memo(SolicitudesAnalyticsView);
 const MemoActividades = memo(ActividadesAnalyticsView);
@@ -52,14 +53,16 @@ function RoutePrefetcher() {
 
 export default function DashboardShell() {
   return (
-    <DashboardDataProvider>
-      <DashboardTabProvider>
-        <RoutePrefetcher />
-        <div className='max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 pt-2 sm:pt-4 min-w-0'>
-          <DashboardNav />
-        </div>
-        <DashboardViews />
-      </DashboardTabProvider>
-    </DashboardDataProvider>
+    <DashboardAdminGate>
+      <DashboardDataProvider>
+        <DashboardTabProvider>
+          <RoutePrefetcher />
+          <div className='dashboard-nav-sticky max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 pt-2 sm:pt-4 min-w-0'>
+            <DashboardNav />
+          </div>
+          <DashboardViews />
+        </DashboardTabProvider>
+      </DashboardDataProvider>
+    </DashboardAdminGate>
   );
 }

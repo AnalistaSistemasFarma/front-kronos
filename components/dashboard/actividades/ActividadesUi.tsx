@@ -15,8 +15,16 @@ import {
   ThemeIcon,
   Title,
 } from '@mantine/core';
+import type { CardProps } from '@mantine/core';
 import type { ChartData, ChartOptions, ChartType } from 'chart.js';
 import { resolveChartHeight, getDashboardCardPadding } from '../../../lib/dashboard/responsive';
+import {
+  darkKpiGradients,
+  kpiGradientIndex,
+  statusKpiGradients,
+  type StatusKpiGradientKey,
+} from '../../../lib/theme/tokens';
+import { useTheme } from '../../providers';
 import { ChartContainer } from '../ChartContainer';
 import { useChartViewport } from '../useChartViewport';
 
@@ -38,7 +46,7 @@ export function ActividadesSection({
 
   return (
     <Stack gap='md' style={{ minWidth: 0 }}>
-      <Paper p={{ base: 'xs', sm: 'sm' }} radius='md' withBorder bg='gray.0'>
+      <Paper p={{ base: 'xs', sm: 'sm' }} radius='md' withBorder>
         <Group gap='sm' wrap='wrap' align='flex-start'>
           <Badge variant='light' color={priorityColor} size='sm' style={{ flexShrink: 0 }}>
             {priority === 1
@@ -78,6 +86,10 @@ export function MetricInsightCard({
   chartData,
   chartOptions,
   emptyMessage = 'Sin datos en este periodo',
+  variant = 'surface',
+  compact = false,
+  statusKind,
+  gradientSeed,
 }: {
   label: string;
   value: string;
@@ -92,9 +104,27 @@ export function MetricInsightCard({
   chartData?: ChartData<ChartType>;
   chartOptions?: ChartOptions<ChartType>;
   emptyMessage?: string;
+  /** surface = fondo del tema; gradient = tarjeta con degradé (Tickets / encargado) */
+  variant?: 'surface' | 'gradient';
+  compact?: boolean;
+  statusKind?: StatusKpiGradientKey;
+  gradientSeed?: string;
 }) {
   const viewport = useChartViewport();
-  const chartHeight = resolveChartHeight('kpi', viewport);
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const useGradient = variant === 'gradient';
+  const gradient =
+    useGradient && isDark && statusKind
+      ? statusKpiGradients[statusKind]
+      : useGradient && isDark && gradientSeed
+        ? darkKpiGradients[kpiGradientIndex(gradientSeed)]
+        : undefined;
+  const onGradient = Boolean(gradient);
+  const chartHeight = resolveChartHeight(compact ? 'kpiCompact' : 'kpi', viewport);
+  const cardPadding: CardProps['padding'] = compact
+    ? ({ base: 'xs', sm: 'sm' } as unknown as CardProps['padding'])
+    : getDashboardCardPadding();
 
   const hasChart =
     chartData?.datasets?.some((ds) => {
@@ -104,76 +134,233 @@ export function MetricInsightCard({
 
   if (loading) {
     return (
-      <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder h='100%'>
+      <Card shadow='sm' padding={cardPadding} radius='md' withBorder h='100%'>
         <Skeleton height={14} width='55%' mb='sm' />
-        <Skeleton height={40} width='35%' mb='md' />
+        <Skeleton height={compact ? 28 : 40} width='35%' mb='md' />
         <Skeleton height={chartHeight} radius='md' />
       </Card>
     );
   }
 
+  const valueColor = onGradient ? '#fff' : color;
+
   return (
     <Card
-      shadow='sm'
-      padding={getDashboardCardPadding()}
+      shadow={onGradient ? undefined : 'sm'}
+      padding={cardPadding}
       radius='md'
-      withBorder
+      withBorder={!onGradient}
       h='100%'
-      style={{ minWidth: 0 }}
+      className={
+        onGradient ? 'dashboard-kpi-gradient' : compact ? 'dashboard-chart-card' : undefined
+      }
+      style={{
+        minWidth: 0,
+        ...(onGradient
+          ? {
+              background: gradient,
+              border: 'none',
+              boxShadow: 'var(--app-card-shadow)',
+            }
+          : {}),
+      }}
     >
-      <Group justify='space-between' mb='xs' wrap='nowrap'>
-        <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
+      <Group justify='space-between' mb={compact ? 4 : 'xs'} wrap='nowrap'>
+        <Text
+          size='xs'
+          tt='uppercase'
+          fw={600}
+          c={onGradient ? undefined : 'dimmed'}
+          style={onGradient ? { color: 'rgba(255,255,255,0.9)' } : undefined}
+        >
           {label}
         </Text>
-        <ThemeIcon size='lg' radius='md' variant='light' style={{ color }}>
-          <Icon size={18} />
+        <ThemeIcon
+          size={compact ? 'md' : 'lg'}
+          radius='md'
+          variant={onGradient ? 'white' : 'light'}
+          style={
+            onGradient
+              ? { color: '#fff', background: 'rgba(255,255,255,0.22)' }
+              : { color }
+          }
+        >
+          <Icon size={compact ? 16 : 18} />
         </ThemeIcon>
       </Group>
-      <Title order={2} style={{ color, lineHeight: 1.1, fontSize: 'clamp(1.5rem, 5vw, 2rem)' }}>
+      <Title
+        order={compact ? 3 : 2}
+        style={{
+          color: valueColor,
+          lineHeight: 1.1,
+          fontSize: compact ? 'clamp(1.2rem, 4vw, 1.45rem)' : 'clamp(1.5rem, 5vw, 2rem)',
+        }}
+      >
         {value}
       </Title>
       {sharePercent !== undefined && (
         <Progress
           value={Math.min(100, Math.max(0, sharePercent))}
-          size='sm'
-          mt='md'
+          size={compact ? 'xs' : 'sm'}
+          mt={compact ? 'sm' : 'md'}
           mb='xs'
-          styles={{ section: { backgroundColor: color } }}
+          styles={{
+            section: { backgroundColor: onGradient ? 'rgba(255,255,255,0.92)' : color },
+            root: onGradient
+              ? { backgroundColor: 'rgba(255,255,255,0.25)' }
+              : { backgroundColor: 'var(--app-border-subtle)' },
+          }}
         />
       )}
-      <Text size='xs' c='dimmed' mb='md'>
+      <Text
+        size='xs'
+        mb={compact ? 'sm' : 'md'}
+        c={onGradient ? undefined : 'dimmed'}
+        style={onGradient ? { color: 'rgba(255,255,255,0.82)' } : undefined}
+      >
         {hint}
       </Text>
 
-      <Divider mb='sm' />
-      <Text size='sm' fw={600} mb={2}>
-        {chartTitle}
-      </Text>
-      <Text size='xs' c='dimmed' mb='sm'>
-        {chartDescription}
-      </Text>
+      <Divider mb={compact ? 'xs' : 'sm'} color={onGradient ? 'rgba(255,255,255,0.25)' : undefined} />
 
-      {hasChart && chartData && chartOptions ? (
-        <ChartContainer
-          type={chartType}
-          data={chartData}
-          options={chartOptions}
-          height={chartHeight}
-        />
-      ) : (
-        <Flex
-          h={chartHeight}
-          align='center'
-          justify='center'
-          bg='gray.0'
-          style={{ borderRadius: 8 }}
+      {onGradient ? (
+        <Paper
+          p='sm'
+          radius='md'
+          style={{
+            background: 'rgba(0,0,0,0.22)',
+            border: '1px solid rgba(255,255,255,0.12)',
+          }}
         >
-          <Text size='xs' c='dimmed' ta='center' px='md'>
-            {emptyMessage}
+          <Text size='sm' fw={600} mb={2} c='white'>
+            {chartTitle}
           </Text>
-        </Flex>
+          <Text size='xs' mb='sm' style={{ color: 'rgba(255,255,255,0.75)' }}>
+            {chartDescription}
+          </Text>
+          {hasChart && chartData && chartOptions ? (
+            <ChartContainer
+              type={chartType}
+              data={chartData}
+              options={chartOptions}
+              height={chartHeight}
+            />
+          ) : (
+            <Flex
+              h={chartHeight}
+              align='center'
+              justify='center'
+              style={{ borderRadius: 8, background: 'rgba(255,255,255,0.06)' }}
+            >
+              <Text size='xs' ta='center' px='md' style={{ color: 'rgba(255,255,255,0.7)' }}>
+                {emptyMessage}
+              </Text>
+            </Flex>
+          )}
+        </Paper>
+      ) : (
+        <>
+          <Text size={compact ? 'xs' : 'sm'} fw={600} mb={2}>
+            {chartTitle}
+          </Text>
+          <Text size='xs' c='dimmed' mb={compact ? 'xs' : 'sm'}>
+            {chartDescription}
+          </Text>
+          {hasChart && chartData && chartOptions ? (
+            <ChartContainer
+              type={chartType}
+              data={chartData}
+              options={chartOptions}
+              height={chartHeight}
+            />
+          ) : (
+            <Flex
+              h={chartHeight}
+              align='center'
+              justify='center'
+              style={{
+                borderRadius: 8,
+                background: 'var(--app-surface-raised)',
+              }}
+            >
+              <Text size='xs' c='dimmed' ta='center' px='md'>
+                {emptyMessage}
+              </Text>
+            </Flex>
+          )}
+        </>
       )}
     </Card>
+  );
+}
+
+/** Tarjeta de conteo por estado (gradiente llamativo en oscuro, como KPIs de Tickets). */
+export function StatusMetricGradientCard({
+  label,
+  value,
+  icon: Icon,
+  kind,
+  accentColor,
+}: {
+  label: string;
+  value: number;
+  icon: IconComponent;
+  kind: StatusKpiGradientKey;
+  accentColor: string;
+}) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const gradient = statusKpiGradients[kind];
+
+  return (
+    <Paper
+      p='sm'
+      radius='md'
+      withBorder={!isDark}
+      className={isDark ? 'dashboard-kpi-gradient' : undefined}
+      style={
+        isDark
+          ? {
+              background: gradient,
+              border: 'none',
+              boxShadow: 'var(--app-card-shadow)',
+            }
+          : {
+              background: `${accentColor}18`,
+              borderColor: `${accentColor}55`,
+            }
+      }
+    >
+      <Group gap='xs' mb={4} wrap='nowrap'>
+        <ThemeIcon
+          size='sm'
+          radius='md'
+          variant={isDark ? 'white' : 'light'}
+          style={
+            isDark
+              ? { color: '#fff', background: 'rgba(255,255,255,0.22)' }
+              : { color: accentColor, background: `${accentColor}22` }
+          }
+        >
+          <Icon size={14} />
+        </ThemeIcon>
+        <Text
+          size='xs'
+          fw={600}
+          tt='uppercase'
+          style={isDark ? { color: 'rgba(255,255,255,0.9)' } : { color: accentColor }}
+        >
+          {label}
+        </Text>
+      </Group>
+      <Text
+        fw={800}
+        size='xl'
+        style={{ color: isDark ? '#fff' : accentColor, lineHeight: 1.1 }}
+      >
+        {value}
+      </Text>
+    </Paper>
   );
 }
 
@@ -194,6 +381,11 @@ export function KpiStatCard({
   icon: IconComponent;
   loading?: boolean;
 }) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const gradient = isDark ? darkKpiGradients[kpiGradientIndex(label)] : undefined;
+  const onGradient = Boolean(gradient);
+
   if (loading) {
     return (
       <Card shadow='sm' padding='lg' radius='md' withBorder>
@@ -205,16 +397,49 @@ export function KpiStatCard({
   }
 
   return (
-    <Card shadow='sm' padding='lg' radius='md' withBorder>
+    <Card
+      shadow={onGradient ? undefined : 'sm'}
+      padding='lg'
+      radius='md'
+      withBorder={!onGradient}
+      className={onGradient ? 'dashboard-kpi-gradient' : undefined}
+      style={
+        onGradient
+          ? {
+              background: gradient,
+              border: 'none',
+              boxShadow: 'var(--app-card-shadow)',
+            }
+          : undefined
+      }
+    >
       <Group justify='space-between' mb='xs' wrap='nowrap'>
-        <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
+        <Text
+          size='xs'
+          tt='uppercase'
+          fw={600}
+          c={onGradient ? undefined : 'dimmed'}
+          style={onGradient ? { color: 'rgba(255,255,255,0.88)' } : undefined}
+        >
           {label}
         </Text>
-        <ThemeIcon size='lg' radius='md' variant='light' style={{ color }}>
+        <ThemeIcon
+          size='lg'
+          radius='md'
+          variant={onGradient ? 'white' : 'light'}
+          style={
+            onGradient
+              ? { color: '#fff', background: 'rgba(255,255,255,0.2)' }
+              : { color }
+          }
+        >
           <Icon size={18} />
         </ThemeIcon>
       </Group>
-      <Title order={2} style={{ color, lineHeight: 1.1 }}>
+      <Title
+        order={2}
+        style={{ color: onGradient ? '#fff' : color, lineHeight: 1.1 }}
+      >
         {value}
       </Title>
       {sharePercent !== undefined && (
@@ -223,11 +448,18 @@ export function KpiStatCard({
           size='sm'
           mt='md'
           mb='xs'
-          styles={{ section: { backgroundColor: color } }}
+          styles={{
+            section: { backgroundColor: onGradient ? 'rgba(255,255,255,0.92)' : color },
+            root: onGradient ? { backgroundColor: 'rgba(255,255,255,0.25)' } : undefined,
+          }}
           aria-label={`${label}: ${sharePercent.toFixed(0)}% del total`}
         />
       )}
-      <Text size='xs' c='dimmed'>
+      <Text
+        size='xs'
+        c={onGradient ? undefined : 'dimmed'}
+        style={onGradient ? { color: 'rgba(255,255,255,0.82)' } : undefined}
+      >
         {hint}
       </Text>
     </Card>
@@ -247,6 +479,7 @@ export function ChartCard({
 }) {
   return (
     <Card
+      className='dashboard-chart-card'
       shadow='sm'
       padding={getDashboardCardPadding()}
       radius='md'

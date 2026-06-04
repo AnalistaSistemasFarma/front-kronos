@@ -1,18 +1,38 @@
 import sql from 'mssql';
 
-/** Estados normalizados para el dashboard (coinciden con status_case real) */
+/** Estados normalizados para tareas (coinciden con status_case real) */
 export const ESTADO_TAREA_SQL = `
   CASE
     WHEN LOWER(LTRIM(ISNULL(sc.status, ''))) IN (
       N'resuelto', N'completada', N'completado', N'cerrado', N'closed', N'finalizado'
     ) THEN N'Completada'
     WHEN LOWER(LTRIM(ISNULL(sc.status, ''))) IN (
-      N'abierto', N'en proceso', N'en progreso', N'asignado', N'open', N'en curso'
+      N'abierto', N'abierta', N'en proceso', N'en progreso', N'asignado', N'open', N'en curso'
     ) THEN N'En Proceso'
     WHEN LOWER(LTRIM(ISNULL(sc.status, ''))) IN (
       N'sin empezar', N'pendiente', N'nuevo', N'not started', N'por hacer'
     ) THEN N'Pendiente'
     ELSE COALESCE(NULLIF(LTRIM(sc.status), ''), N'Sin estado')
+  END
+`;
+
+/** Estados de solicitud para el dashboard (Abierto ≠ En proceso) */
+export const ESTADO_SOLICITUD_SQL = `
+  CASE
+    WHEN LOWER(LTRIM(ISNULL(scrg.status, ''))) IN (
+      N'resuelto', N'resuelta', N'completada', N'completado', N'cerrado', N'cerrada',
+      N'closed', N'finalizado', N'finalizada', N'cancelado', N'cancelada'
+    ) THEN N'Cerrada'
+    WHEN LOWER(LTRIM(ISNULL(scrg.status, ''))) IN (N'abierto', N'abierta')
+      OR LOWER(LTRIM(ISNULL(scrg.status, ''))) LIKE N'%abiert%'
+    THEN N'Abierto'
+    WHEN LOWER(LTRIM(ISNULL(scrg.status, ''))) IN (
+      N'en proceso', N'en progreso', N'asignado', N'asignada', N'open', N'en curso'
+    ) THEN N'En proceso'
+    WHEN LOWER(LTRIM(ISNULL(scrg.status, ''))) IN (
+      N'sin empezar', N'pendiente', N'nuevo', N'not started', N'por hacer'
+    ) THEN N'Pendiente'
+    ELSE N'Sin estado'
   END
 `;
 
@@ -179,7 +199,7 @@ export function buildViewTasksQuery(filters: ViewTasksFilters): string {
           rg.created_at AS fecha_creacion_solicitud,
           c.company AS empresa_solicitud,
           urq.name AS creador_solicitud,
-          scrg.status AS estado_solicitud,
+          ${ESTADO_SOLICITUD_SQL} AS estado_solicitud,
           rg.resolution AS resolucion_solicitud,
           rg.date_resolution AS fecha_resolucion_solicitud,
           uex_rg.name AS ejecutor_final_solicitud,

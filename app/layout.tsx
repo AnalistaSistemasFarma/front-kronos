@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import '@mantine/core/styles.css';
 import { Providers } from '../components/providers';
+import { ThemeInitScript } from '../components/theme/ThemeInitScript';
 import { Toaster } from 'react-hot-toast';
 import ServiceWorkerRegistrar from '../components/ServiceWorkerRegistrar';
 
@@ -40,8 +41,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang='en'>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+    <html lang='es' suppressHydrationWarning>
+      <head>
+        <ThemeInitScript />
+      </head>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
+        style={{ background: 'var(--background)', color: 'var(--foreground)' }}
+      >
         <Providers>{children}</Providers>
         <Toaster />
         <ServiceWorkerRegistrar />

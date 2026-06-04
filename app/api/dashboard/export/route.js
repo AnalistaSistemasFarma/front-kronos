@@ -1,6 +1,5 @@
 import sql from 'mssql';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../auth/[...nextauth]/route';
+import { requireDashboardAdminApi } from '../../../../lib/dashboard/dashboardAccess';
 import { getPool } from '../../../../lib/mssqlPool';
 import {
   parseViewTasksFilters,
@@ -14,10 +13,8 @@ import {
  */
 export async function GET(req) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
-      return Response.json({ error: 'No autorizado' }, { status: 401 });
-    }
+    const auth = await requireDashboardAdminApi();
+    if (!auth.ok) return auth.response;
 
     const filters = parseViewTasksFilters(new URL(req.url).searchParams);
     const dateError = validateDateRange(filters.date_from, filters.date_to);

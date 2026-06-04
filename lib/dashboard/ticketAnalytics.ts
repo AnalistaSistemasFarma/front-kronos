@@ -395,3 +395,95 @@ export function formatCaseTimeSeriesLabel(
 export function formatHoursLabel(hours: number): string {
   return formatResolutionDuration(hours);
 }
+
+export type TicketStatusTimeSeriesPoint = {
+  label: string;
+  abierto: number;
+  enProgreso: number;
+  resuelto: number;
+  cerrado: number;
+};
+
+/** Casos creados por periodo, desglosados por estado (para gráfica de líneas). */
+export function buildTicketStatusCreationTimeSeries(
+  cases: HelpDeskCase[],
+  dateFilter: DashboardDateFilter,
+  selectedMonthDate: Date
+): TicketStatusTimeSeriesPoint[] {
+  const byStatus = {
+    abierto: {} as Record<string, number>,
+    enProgreso: {} as Record<string, number>,
+    resuelto: {} as Record<string, number>,
+    cerrado: {} as Record<string, number>,
+  };
+
+  const totalByKey: Record<string, number> = {};
+
+  for (const c of cases) {
+    const d = parseCaseDate(c.creation_date);
+    if (!d) continue;
+    const key = getCaseDateKey(d, dateFilter);
+    totalByKey[key] = (totalByKey[key] || 0) + 1;
+
+    const bucket = normalizeTicketStatus(c.status, c.id_status_case);
+    if (bucket === 'Abierto') byStatus.abierto[key] = (byStatus.abierto[key] || 0) + 1;
+    else if (bucket === 'En progreso')
+      byStatus.enProgreso[key] = (byStatus.enProgreso[key] || 0) + 1;
+    else if (bucket === 'Resuelto') byStatus.resuelto[key] = (byStatus.resuelto[key] || 0) + 1;
+    else byStatus.cerrado[key] = (byStatus.cerrado[key] || 0) + 1;
+  }
+
+  const timeline = buildCompleteCaseTimeSeries(
+    cases,
+    totalByKey,
+    dateFilter,
+    selectedMonthDate
+  );
+
+  return timeline.map(([key]) => ({
+    label: formatCaseTimeSeriesLabel(key, dateFilter),
+    abierto: byStatus.abierto[key] || 0,
+    enProgreso: byStatus.enProgreso[key] || 0,
+    resuelto: byStatus.resuelto[key] || 0,
+    cerrado: byStatus.cerrado[key] || 0,
+  }));
+}
+
+/** Serie temporal de casos creados por técnico (una línea = una persona). */
+export type TechnicianPerformanceTimeSeries = {
+  periodLabels: string[];
+  technicians: { name: string; values: number[] }[];
+};
+
+export function buildTechnicianPerformanceTimeSeries(
+  cases: HelpDeskCase[],
+  dateFilter: DashboardDateFilter,
+  selectedMonthDate: Date,
+  maxTechnicians = 12
+): TechnicianPerformanceTimeSeries | null {
+  const ranked = buildTechnicianMetrics(cases).slice(0, maxTechnicians);
+  if (ranked.length === 0) return null;
+
+  const totalByKey = buildCaseCreationTimeSeries(cases, dateFilter, selectedMonthDate);
+  const timeline = buildCompleteCaseTimeSeries(
+    cases,
+    totalByKey,
+    dateFilter,
+    selectedMonthDate
+  );
+  if (timeline.length === 0) return null;
+
+  const keys = timeline.map(([key]) => key);
+  const periodLabels = keys.map((key) => formatCaseTimeSeriesLabel(key, dateFilter));
+
+  const technicians = ranked.map((tech) => {
+    const techCases = cases.filter((c) => getTechnicianLabel(c) === tech.name);
+    const raw = buildCaseCreationTimeSeries(techCases, dateFilter, selectedMonthDate);
+    return {
+      name: tech.name,
+      values: keys.map((key) => raw[key] || 0),
+    };
+  });
+
+  return { periodLabels, technicians };
+}

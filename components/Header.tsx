@@ -20,6 +20,7 @@ import {
   PROCESS_HUB_URL,
   isHubInstantSwapRoute,
 } from '../lib/navigation/AppSectionContext';
+import { useDashboardAdminOptional } from '../lib/dashboard/DashboardAdminContext';
 
 function useAppSectionOptional(): AppSectionContextValue | null {
   return useContext(AppSectionContext);
@@ -30,8 +31,12 @@ export default function Header() {
   const pathname = usePathname();
   const router = useRouter();
   const sectionCtx = useAppSectionOptional();
+  const dashboardAdmin = useDashboardAdminOptional();
+  const isDashboardAdmin = dashboardAdmin?.isDashboardAdmin ?? false;
+  const loadingDashboardAdmin = dashboardAdmin?.loadingDashboardAdmin ?? false;
   const { theme, toggleTheme } = useTheme();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const showDashboardNav = !loadingDashboardAdmin && isDashboardAdmin;
 
   const activeSection: AppSection | null = sectionCtx
     ? sectionCtx.activeSection
@@ -46,6 +51,7 @@ export default function Header() {
   }, [pathname]);
 
   const goToSection = (section: AppSection) => {
+    if (section === 'dashboard' && !isDashboardAdmin) return;
     const url = section === 'dashboard' ? DASHBOARD_TAB_URL.solicitudes : PROCESS_HUB_URL;
     if (sectionCtx && isHubInstantSwapRoute(pathname)) {
       sectionCtx.setActiveSection(section);
@@ -56,24 +62,23 @@ export default function Header() {
   };
 
   const navLinkClass = (section: AppSection) =>
-    `px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-      activeSection === section
-        ? 'text-blue-600 font-semibold'
-        : theme === 'dark'
-          ? 'text-white hover:text-blue-400'
-          : 'text-gray-700 hover:text-blue-600'
+    `app-nav-link px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+      activeSection === section ? 'app-nav-link--active' : ''
     }`;
+
+  const logoSrc =
+    theme === 'dark' ? '/Logo_Principal_Blanco_Ancho.svg' : '/Logo_Principal.svg';
 
   return (
     <>
       {isMobileMenuOpen && (
         <div
-          className='fixed inset-0 z-40 bg-white bg-opacity-50 md:hidden'
+          className='fixed inset-0 z-40 bg-black/50 md:hidden'
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
 
-      <header className={`sticky top-0 z-50 ${theme === 'dark' ? 'bg-gray-900' : 'bg-white'}`}>
+      <header className='app-header sticky top-0 z-50'>
         <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
           <div className='flex justify-between items-center h-16'>
             <div className='md:hidden'>
@@ -81,7 +86,7 @@ export default function Header() {
                 variant='subtle'
                 color='gray'
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                aria-label={isMobileMenuOpen ? 'Close menu' : 'Open menu'}
+                aria-label={isMobileMenuOpen ? 'Cerrar menú' : 'Abrir menú'}
                 aria-expanded={isMobileMenuOpen}
                 aria-controls='mobile-menu'
               >
@@ -89,18 +94,14 @@ export default function Header() {
               </ActionIcon>
             </div>
 
-            <div className='flex items-center '>
+            <div className='flex items-center'>
               {sectionCtx ? (
                 <UnstyledButton
-                  onClick={() => goToSection('dashboard')}
-                  aria-label='Ir al dashboard'
+                  onClick={() => goToSection(isDashboardAdmin ? 'dashboard' : 'process')}
+                  aria-label={isDashboardAdmin ? 'Ir al dashboard' : 'Ir a procesos'}
                 >
                   <Image
-                    src={
-                      theme === 'dark'
-                        ? '/Logo_Principal_Blanco_Ancho.svg'
-                        : '/Logo_Principal.svg'
-                    }
+                    src={logoSrc}
                     alt='Logo'
                     width={1980}
                     height={100}
@@ -109,13 +110,12 @@ export default function Header() {
                   />
                 </UnstyledButton>
               ) : (
-                <Link href={DASHBOARD_TAB_URL.solicitudes} aria-label='Go to dashboard'>
+                <Link
+                  href={isDashboardAdmin ? DASHBOARD_TAB_URL.solicitudes : PROCESS_HUB_URL}
+                  aria-label={isDashboardAdmin ? 'Ir al dashboard' : 'Ir a procesos'}
+                >
                   <Image
-                    src={
-                      theme === 'dark'
-                        ? '/Logo_Principal_Blanco_Ancho.svg'
-                        : '/Logo_Principal.svg'
-                    }
+                    src={logoSrc}
                     alt='Logo'
                     width={1980}
                     height={100}
@@ -130,13 +130,15 @@ export default function Header() {
               <div className='flex items-center space-x-4'>
                 {sectionCtx ? (
                   <>
-                    <button
-                      type='button'
-                      className={navLinkClass('dashboard')}
-                      onClick={() => goToSection('dashboard')}
-                    >
-                      Dashboard
-                    </button>
+                    {showDashboardNav && (
+                      <button
+                        type='button'
+                        className={navLinkClass('dashboard')}
+                        onClick={() => goToSection('dashboard')}
+                      >
+                        Dashboard
+                      </button>
+                    )}
                     <button
                       type='button'
                       className={navLinkClass('process')}
@@ -147,22 +149,16 @@ export default function Header() {
                   </>
                 ) : (
                   <>
-                    <Link
-                      href={DASHBOARD_TAB_URL.solicitudes}
-                      prefetch
-                      className={`${
-                        theme === 'dark' ? 'text-white' : 'text-gray-700'
-                      } hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors`}
-                    >
-                      Dashboard
-                    </Link>
-                    <Link
-                      href={PROCESS_HUB_URL}
-                      prefetch
-                      className={`${
-                        theme === 'dark' ? 'text-white' : 'text-gray-700'
-                      } hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors`}
-                    >
+                    {showDashboardNav && (
+                      <Link
+                        href={DASHBOARD_TAB_URL.solicitudes}
+                        prefetch
+                        className={navLinkClass('dashboard')}
+                      >
+                        Dashboard
+                      </Link>
+                    )}
+                    <Link href={PROCESS_HUB_URL} prefetch className={navLinkClass('process')}>
                       Procesos
                     </Link>
                   </>
@@ -176,7 +172,8 @@ export default function Header() {
                 variant='subtle'
                 color='gray'
                 onClick={toggleTheme}
-                title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+                title={theme === 'light' ? 'Modo oscuro' : 'Modo claro'}
+                aria-label={theme === 'light' ? 'Activar modo oscuro' : 'Activar modo claro'}
               >
                 {theme === 'light' ? <IconMoon size={18} /> : <IconSun size={18} />}
               </ActionIcon>
@@ -186,23 +183,20 @@ export default function Header() {
                 <Menu>
                   <Menu.Target>
                     <button
-                      className='flex items-center space-x-2 hover:bg-gray-100 px-3 py-2 rounded hover:text-gray-700'
-                      aria-label='User menu'
+                      className='flex items-center space-x-2 px-3 py-2 rounded-md transition-colors hover:opacity-90'
+                      style={{ color: 'var(--app-text)' }}
+                      aria-label='Menú de usuario'
                     >
                       <Avatar
                         src={session.user?.image}
-                        alt={session.user?.name || 'User'}
+                        alt={session.user?.name || 'Usuario'}
                         size='md'
                         className='object-contain'
                       >
                         {!session.user?.image && (session.user?.name?.charAt(0) || 'U')}
                       </Avatar>
-                      <span
-                        className={`hidden sm:block text-sm font-medium ${
-                          theme === 'dark' ? 'text-white ' : 'text-gray-700'
-                        }`}
-                      >
-                        {session.user?.name || 'User'}
+                      <span className='hidden sm:block text-sm font-medium' style={{ color: 'var(--app-text)' }}>
+                        {session.user?.name || 'Usuario'}
                       </span>
                     </button>
                   </Menu.Target>
@@ -210,7 +204,9 @@ export default function Header() {
                     <Menu.Item component={Link} href='/profile'>
                       Perfil
                     </Menu.Item>
-                    <Menu.Item onClick={() => signOut({ callbackUrl: '/login' })}>Cerrar Sesión</Menu.Item>
+                    <Menu.Item onClick={() => signOut({ callbackUrl: '/login' })}>
+                      Cerrar sesión
+                    </Menu.Item>
                   </Menu.Dropdown>
                 </Menu>
               ) : null}
@@ -221,25 +217,27 @@ export default function Header() {
 
       <div
         id='mobile-menu'
-        className={`fixed top-16 left-0 w-full z-50 transform transition-transform duration-300 ease-in-out md:hidden ${
+        className={`app-mobile-menu fixed top-16 left-0 w-full z-50 transform transition-transform duration-300 ease-in-out md:hidden shadow-lg ${
           isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
-        } ${theme === 'dark' ? 'bg-gray-900' : 'bg-white'} shadow-lg`}
+        }`}
         role='navigation'
-        aria-label='Mobile navigation'
+        aria-label='Navegación móvil'
       >
         <nav className='px-4 py-4 space-y-2'>
           {sectionCtx ? (
             <>
+              {showDashboardNav && (
+                <button
+                  type='button'
+                  className={`block w-full text-left text-base font-medium ${navLinkClass('dashboard')}`}
+                  onClick={() => goToSection('dashboard')}
+                >
+                  Dashboard
+                </button>
+              )}
               <button
                 type='button'
-                className={`block w-full text-left px-3 py-2 rounded-md text-base font-medium ${navLinkClass('dashboard')}`}
-                onClick={() => goToSection('dashboard')}
-              >
-                Dashboard
-              </button>
-              <button
-                type='button'
-                className={`block w-full text-left px-3 py-2 rounded-md text-base font-medium ${navLinkClass('process')}`}
+                className={`block w-full text-left text-base font-medium ${navLinkClass('process')}`}
                 onClick={() => goToSection('process')}
               >
                 Procesos
@@ -247,22 +245,20 @@ export default function Header() {
             </>
           ) : (
             <>
-              <Link
-                href={DASHBOARD_TAB_URL.solicitudes}
-                prefetch
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  theme === 'dark' ? 'text-white hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-100'
-                }`}
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                Dashboard
-              </Link>
+              {showDashboardNav && (
+                <Link
+                  href={DASHBOARD_TAB_URL.solicitudes}
+                  prefetch
+                  className={`block px-3 py-2 rounded-md text-base font-medium ${navLinkClass('dashboard')}`}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  Dashboard
+                </Link>
+              )}
               <Link
                 href={PROCESS_HUB_URL}
                 prefetch
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  theme === 'dark' ? 'text-white hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-100'
-                }`}
+                className={`block px-3 py-2 rounded-md text-base font-medium ${navLinkClass('process')}`}
                 onClick={() => setIsMobileMenuOpen(false)}
               >
                 Procesos

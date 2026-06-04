@@ -24,6 +24,7 @@ import {
   IconClock,
   IconClockHour4,
   IconTrendingUp,
+  IconCircleDot,
 } from '@tabler/icons-react';
 import {
   buildAreaLineChart,
@@ -51,50 +52,16 @@ import { ChartContainer } from './ChartContainer';
 import DashboardDateToolbar, { DashboardPeriodHint } from './DashboardDateToolbar';
 import DashboardPageShell from './DashboardPageShell';
 import SolicitudesResolutionTable from './SolicitudesResolutionTable';
-import { dashboardChartTheme, statusChartColors } from './chartTheme';
 import { useChartViewport } from './useChartViewport';
+import { useProjectColors } from './useProjectColors';
 import { getDashboardCardPadding, resolveChartHeight } from '../../lib/dashboard/responsive';
-
-const projectColors = {
-  primary: dashboardChartTheme.primary,
-  secondary: dashboardChartTheme.secondary,
-  success: statusChartColors.completada,
-  warning: statusChartColors.pendiente,
-  error: dashboardChartTheme.blue600,
-};
-
-function normalizeRequestStatus(status: string): string {
-  const s = status?.toLowerCase().trim() ?? '';
-  if (['resuelto', 'completada', 'completado', 'cerrado', 'closed', 'finalizado'].some((x) => s.includes(x))) {
-    return 'Cerrada';
-  }
-  if (['abierto', 'en proceso', 'en progreso', 'asignado', 'open', 'en curso'].some((x) => s.includes(x))) {
-    return 'En proceso';
-  }
-  if (['sin empezar', 'pendiente', 'nuevo', 'not started', 'por hacer'].some((x) => s.includes(x))) {
-    return 'Pendiente';
-  }
-  return status?.trim() || 'Sin estado';
-}
-
-function computeStats(requests: ReturnType<typeof uniqueRequestsFromTasks>) {
-  const byNorm = requests.reduce(
-    (acc, r) => {
-      const key = normalizeRequestStatus(r.estado_solicitud);
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>
-  );
-  return {
-    total: requests.length,
-    cerrada: byNorm['Cerrada'] || 0,
-    pendiente: byNorm['Pendiente'] || 0,
-    enProceso: byNorm['En proceso'] || 0,
-  };
-}
+import {
+  countRequestsByDashboardStatus,
+  normalizeRequestStatus,
+} from '../../lib/dashboard/requestStatus';
 
 export default function SolicitudesAnalyticsView() {
+  const projectColors = useProjectColors();
   const {
     status,
     tasks,
@@ -139,16 +106,17 @@ export default function SolicitudesAnalyticsView() {
     setCompanyFilter(ALL_COMPANIES_VALUE);
   }, [dateFilter, selectedMonthDate]);
 
-  const stats = useMemo(() => computeStats(requests), [requests]);
+  const stats = useMemo(() => countRequestsByDashboardStatus(requests), [requests]);
 
   const statusData = useMemo(
     () =>
       [
-        { name: 'Cerradas', value: stats.cerrada, color: statusChartColors.completada },
-        { name: 'Pendientes', value: stats.pendiente, color: statusChartColors.pendiente },
-        { name: 'En proceso', value: stats.enProceso, color: statusChartColors.enProceso },
+        { name: 'Abiertas', value: stats.abierto, color: projectColors.abierto },
+        { name: 'En proceso', value: stats.enProceso, color: projectColors.enProceso },
+        { name: 'Cerradas', value: stats.cerrada, color: projectColors.success },
+        { name: 'Pendientes', value: stats.pendiente, color: projectColors.warning },
       ].filter((i) => i.value > 0),
-    [stats]
+    [stats, projectColors]
   );
 
   const processChartData = useMemo(() => {
@@ -302,7 +270,14 @@ export default function SolicitudesAnalyticsView() {
         )}
 
         <SimpleGrid
-          cols={{ base: 1, xs: 2, md: 2, lg: isCompanyView ? 3 : 4, xl: isCompanyView ? 5 : 4 }}
+          cols={{
+            base: 1,
+            xs: 2,
+            sm: 2,
+            md: 3,
+            lg: isCompanyView ? 3 : 5,
+            xl: isCompanyView ? 6 : 5,
+          }}
           spacing={{ base: 'sm', sm: 'md' }}
         >
           <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
@@ -316,6 +291,28 @@ export default function SolicitudesAnalyticsView() {
               Periodo: {getFilterLabel(dateFilter)}
               {isCompanyView && ` · ${companyFilter}`}
             </Text>
+          </Card>
+          <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+            <Group justify='space-between' mb='xs'>
+              <Text size='sm' c='dimmed'>
+                Abiertas
+              </Text>
+              <IconCircleDot size={20} color={projectColors.abierto} />
+            </Group>
+            <Title order={3} style={{ color: projectColors.abierto }}>
+              {formatNumber(stats.abierto)}
+            </Title>
+          </Card>
+          <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+            <Group justify='space-between' mb='xs'>
+              <Text size='sm' c='dimmed'>
+                En proceso
+              </Text>
+              <IconTrendingUp size={20} color={projectColors.enProceso} />
+            </Group>
+            <Title order={3} style={{ color: projectColors.enProceso }}>
+              {formatNumber(stats.enProceso)}
+            </Title>
           </Card>
           <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
             <Group justify='space-between' mb='xs'>
@@ -337,17 +334,6 @@ export default function SolicitudesAnalyticsView() {
             </Group>
             <Title order={3} style={{ color: projectColors.warning }}>
               {formatNumber(stats.pendiente)}
-            </Title>
-          </Card>
-          <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
-            <Group justify='space-between' mb='xs'>
-              <Text size='sm' c='dimmed'>
-                En proceso
-              </Text>
-              <IconTrendingUp size={20} color={projectColors.secondary} />
-            </Group>
-            <Title order={3} style={{ color: projectColors.secondary }}>
-              {formatNumber(stats.enProceso)}
             </Title>
           </Card>
           {isCompanyView && (
@@ -374,7 +360,7 @@ export default function SolicitudesAnalyticsView() {
               <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
                 Mediana de cierre
               </Text>
-              <Text size='xl' fw={800} mt={4} style={{ color: dashboardChartTheme.primary }}>
+              <Text size='xl' fw={800} mt={4} style={{ color: projectColors.primary }}>
                 {formatHoursLabel(resolutionSummary.medianHours)}
               </Text>
             </Paper>
@@ -548,8 +534,8 @@ export default function SolicitudesAnalyticsView() {
                 leftSection={<IconClockHour4 size={14} />}
                 styles={{
                   root: {
-                    backgroundColor: dashboardChartTheme.blue50,
-                    color: dashboardChartTheme.primary,
+                    backgroundColor: projectColors.palette.blue50,
+                    color: projectColors.primary,
                   },
                 }}
               >

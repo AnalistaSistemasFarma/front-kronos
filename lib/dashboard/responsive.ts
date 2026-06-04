@@ -1,11 +1,12 @@
 import type { CardProps } from '@mantine/core';
 
-export type ChartHeightPreset = 'kpi' | 'standard' | 'medium' | 'large' | 'hero';
+export type ChartHeightPreset = 'kpi' | 'kpiCompact' | 'standard' | 'medium' | 'large' | 'hero';
 
 const HEIGHTS: Record<
   ChartHeightPreset,
   { mobile: number; tablet: number; desktop: number }
 > = {
+  kpiCompact: { mobile: 96, tablet: 108, desktop: 118 },
   kpi: { mobile: 132, tablet: 152, desktop: 168 },
   standard: { mobile: 220, tablet: 260, desktop: 300 },
   medium: { mobile: 200, tablet: 240, desktop: 280 },

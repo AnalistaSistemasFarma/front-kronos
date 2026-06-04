@@ -14,23 +14,10 @@ import {
 import { IconClockHour4 } from '@tabler/icons-react';
 import type { RequestWithResolution } from '../../lib/dashboard/requestResolution';
 import { formatHoursLabel } from '../../lib/dashboard/requestResolution';
+import { normalizeRequestStatus } from '../../lib/dashboard/requestStatus';
 import { dashboardChartTheme } from './chartTheme';
 
 const PAGE_SIZE = 10;
-
-function normalizeRequestStatus(status: string): string {
-  const s = status?.toLowerCase().trim() ?? '';
-  if (['resuelto', 'completada', 'completado', 'cerrado', 'closed', 'finalizado'].some((x) => s.includes(x))) {
-    return 'Cerrada';
-  }
-  if (['abierto', 'en proceso', 'en progreso', 'asignado', 'open', 'en curso'].some((x) => s.includes(x))) {
-    return 'En proceso';
-  }
-  if (['sin empezar', 'pendiente', 'nuevo', 'not started', 'por hacer'].some((x) => s.includes(x))) {
-    return 'Pendiente';
-  }
-  return status?.trim() || 'Sin estado';
-}
 
 function formatShortDate(iso: string | null): string {
   if (!iso) return '—';

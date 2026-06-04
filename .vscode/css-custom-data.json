@@ -1,0 +1,29 @@
+{
+  "version": 1.1,
+  "atDirectives": [
+    {
+      "name": "@import",
+      "description": "Tailwind CSS v4 — importa capas y utilidades."
+    },
+    {
+      "name": "@theme",
+      "description": "Tailwind CSS v4 — define tokens de tema (colores, fuentes, etc.)."
+    },
+    {
+      "name": "@custom-variant",
+      "description": "Tailwind CSS v4 — variante personalizada (p. ej. dark:)."
+    },
+    {
+      "name": "@apply",
+      "description": "Tailwind CSS — aplica utilidades en CSS."
+    },
+    {
+      "name": "@source",
+      "description": "Tailwind CSS v4 — rutas de contenido para escanear clases."
+    },
+    {
+      "name": "@utility",
+      "description": "Tailwind CSS v4 — utilidad personalizada."
+    }
+  ]
+}

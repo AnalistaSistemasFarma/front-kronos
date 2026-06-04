@@ -1,21 +1,22 @@
 'use client';
 
-import { MantineProvider, createTheme } from '@mantine/core';
+import { MantineProvider } from '@mantine/core';
 import { SessionProvider } from 'next-auth/react';
 import { ReactNode, createContext, useContext, useEffect, useState } from 'react';
-
-const lightTheme = createTheme({
-  primaryColor: 'blue',
-});
-
-const darkTheme = createTheme({
-  primaryColor: 'blue',
-});
-
-type Theme = 'light' | 'dark';
+import {
+  APP_THEME_STORAGE_KEY,
+  applyAppThemeToDocument,
+  readStoredAppTheme,
+  type AppTheme,
+} from '../lib/theme/constants';
+import {
+  appCssVariablesResolver,
+  darkMantineTheme,
+  lightMantineTheme,
+} from '../lib/theme/mantineTheme';
 
 interface ThemeContextType {
-  theme: Theme;
+  theme: AppTheme;
   toggleTheme: () => void;
 }
 
@@ -29,57 +30,40 @@ export function useTheme() {
   return context;
 }
 
-interface ThemeProviderProps {
-  children: ReactNode;
-}
-
-function ThemeProvider({ children }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>('light');
+function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setTheme] = useState<AppTheme>('light');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') as Theme;
-    if (savedTheme) {
-      setTheme(savedTheme);
-    }
-    // Default to light mode if no saved preference
+    setTheme(readStoredAppTheme() ?? 'light');
     setMounted(true);
   }, []);
 
   useEffect(() => {
-    if (mounted) {
-      localStorage.setItem('theme', theme);
-      document.documentElement.setAttribute('data-theme', theme);
-      if (theme === 'dark') {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-    }
+    if (!mounted) return;
+    localStorage.setItem(APP_THEME_STORAGE_KEY, theme);
+    applyAppThemeToDocument(theme);
   }, [theme, mounted]);
 
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
-  if (!mounted) {
-    return null;
-  }
-
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>
-      <MantineProvider theme={theme === 'dark' ? darkTheme : lightTheme}>
+      <MantineProvider
+        theme={theme === 'dark' ? darkMantineTheme : lightMantineTheme}
+        forceColorScheme={theme}
+        cssVariablesResolver={appCssVariablesResolver}
+        defaultColorScheme='light'
+      >
         {children}
       </MantineProvider>
     </ThemeContext.Provider>
   );
 }
 
-interface ProvidersProps {
-  children: ReactNode;
-}
-
-export function Providers({ children }: ProvidersProps) {
+export function Providers({ children }: { children: ReactNode }) {
   return (
     <SessionProvider>
       <ThemeProvider>{children}</ThemeProvider>

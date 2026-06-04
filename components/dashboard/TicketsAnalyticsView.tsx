@@ -35,8 +35,9 @@ import {
   buildAreaLineChart,
   buildHoursLineChart,
   buildPieChart,
-  buildTicketStatusStackedBar,
+  buildTechnicianPerformanceLineChart,
   buildVerticalBarChart,
+  ticketStatusChartColors,
 } from '../../lib/charts/builders';
 import { getFilterLabel } from '../../lib/dashboard/dateRange';
 import {
@@ -46,7 +47,7 @@ import {
   buildCaseResolutionSeries,
   buildCompleteCaseTimeSeries,
   buildTeamSummary,
-  buildTechnicianStackedRows,
+  buildTechnicianPerformanceTimeSeries,
   caseToResolutionTask,
   countByStatus,
   filterCasesByTechnician,
@@ -70,17 +71,10 @@ import {
 import { ChartContainer } from './ChartContainer';
 import DashboardDateToolbar, { DashboardPeriodHint } from './DashboardDateToolbar';
 import DashboardPageShell from './DashboardPageShell';
-import { dashboardChartTheme, statusChartColors } from './chartTheme';
 import { useChartViewport } from './useChartViewport';
+import { useProjectColors } from './useProjectColors';
 import { getDashboardCardPadding, resolveChartHeight } from '../../lib/dashboard/responsive';
-
-const projectColors = {
-  primary: dashboardChartTheme.primary,
-  secondary: dashboardChartTheme.secondary,
-  success: statusChartColors.completada,
-  warning: statusChartColors.pendiente,
-  muted: '#64748b',
-};
+import { dashboardChartTheme } from './chartTheme';
 
 function ScoreBadge({ score, size = 'lg' }: { score: number; size?: 'sm' | 'lg' }) {
   const color =
@@ -93,6 +87,7 @@ function ScoreBadge({ score, size = 'lg' }: { score: number; size?: 'sm' | 'lg' 
 }
 
 export default function TicketsAnalyticsView() {
+  const projectColors = useProjectColors();
   const { status: sessionStatus } = useSession();
   const {
     cases: rawCases,
@@ -160,28 +155,28 @@ export default function TicketsAnalyticsView() {
         label: 'Abiertos',
         count: c.abierto,
         percent: (c.abierto / total) * 100,
-        color: projectColors.secondary,
+        color: ticketStatusChartColors.abierto,
       },
       {
         key: 'progreso',
         label: 'En progreso',
         count: c.enProgreso,
         percent: (c.enProgreso / total) * 100,
-        color: projectColors.warning,
+        color: ticketStatusChartColors.enProgreso,
       },
       {
         key: 'resuelto',
         label: 'Resueltos',
         count: c.resuelto,
         percent: (c.resuelto / total) * 100,
-        color: projectColors.success,
+        color: ticketStatusChartColors.resuelto,
       },
       {
         key: 'cerrado',
         label: 'Cerrados / cancelados',
         count: c.cerrado,
         percent: (c.cerrado / total) * 100,
-        color: projectColors.muted,
+        color: ticketStatusChartColors.cerrado,
       },
     ].filter((i) => i.count > 0);
   }, [scopedCounts]);
@@ -230,9 +225,9 @@ export default function TicketsAnalyticsView() {
     [resolutionSeries.points]
   );
 
-  const stackedRows = useMemo(
-    () => buildTechnicianStackedRows(teamSummary.technicians),
-    [teamSummary.technicians]
+  const technicianPerformanceSeries = useMemo(
+    () => buildTechnicianPerformanceTimeSeries(cases, dateFilter, selectedMonthDate),
+    [cases, dateFilter, selectedMonthDate]
   );
 
   const chartHeights = {
@@ -260,8 +255,12 @@ export default function TicketsAnalyticsView() {
     projectColors.primary,
     { datasetLabel: 'Casos', rotateLabels: chartViewport.isCompact }
   );
-  const techStacked =
-    stackedRows.length > 0 ? buildTicketStatusStackedBar(stackedRows) : null;
+  const techPerformanceLine = useMemo(() => {
+    if (!technicianPerformanceSeries) return null;
+    return buildTechnicianPerformanceLineChart(technicianPerformanceSeries, {
+      legendOnRight: !chartViewport.isMobile,
+    });
+  }, [technicianPerformanceSeries, chartViewport.isMobile]);
 
   const formatNumber = (n: number) => new Intl.NumberFormat('es-CO').format(n);
   const avgHours =
@@ -444,16 +443,18 @@ export default function TicketsAnalyticsView() {
             </Grid.Col>
             <Grid.Col span={{ base: 12, lg: 7 }}>
               <ChartCard
-                title='Estados por técnico'
-                description='Comparativo apilado (máx. 12 responsables)'
+                title='Rendimiento por técnico'
+                description={`Casos por periodo según filtro · ${getFilterLabel(dateFilter)} (máx. 12)${
+                  chartViewport.isCompact ? ' · Toca un punto para ver el detalle' : ''
+                }`}
               >
                 {loading ? (
                   <Skeleton height={chartHeights.bar} />
-                ) : techStacked ? (
+                ) : techPerformanceLine ? (
                   <ChartContainer
-                    type='bar'
-                    data={techStacked.data}
-                    options={techStacked.options}
+                    type='line'
+                    data={techPerformanceLine.data}
+                    options={techPerformanceLine.options}
                     height={chartHeights.bar}
                   />
                 ) : (

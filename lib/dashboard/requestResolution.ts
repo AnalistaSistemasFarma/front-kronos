@@ -1,6 +1,7 @@
 import type { DashboardRequest, DashboardTask } from './types';
 import { formatDateLocal } from './dateRange';
 import { formatResolutionDuration } from './resolutionTimeSeries';
+import { isRequestClosedStatus } from './requestStatus';
 
 export interface RequestWithResolution extends DashboardRequest {
   resolutionHours: number | null;
@@ -17,12 +18,7 @@ export function parseDashboardDate(value: string | null | undefined): Date | nul
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-export function isRequestClosedStatus(status: string): boolean {
-  const s = status?.toLowerCase().trim() ?? '';
-  return ['resuelto', 'completada', 'completado', 'cerrado', 'closed', 'finalizado'].some((x) =>
-    s.includes(x)
-  );
-}
+export { isRequestClosedStatus } from './requestStatus';
 
 function maxDate(dates: (Date | null)[]): Date | null {
   let max: Date | null = null;

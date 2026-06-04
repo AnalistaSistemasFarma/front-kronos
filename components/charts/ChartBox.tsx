@@ -10,8 +10,16 @@ import type {
   ChartType,
   ChartTypeRegistry,
 } from 'chart.js';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Chart } from 'react-chartjs-2';
+import {
+  applyClickOnlyTooltipToChart,
+  mergeClickOnlyTooltipOptions,
+  shouldUseClickOnlyTooltip,
+} from '../../lib/charts/clickOnlyTooltip';
+import { mergeChartOptionsForTheme } from '../../lib/charts/chartColorScheme';
+import { useTheme } from '../providers';
+import { useChartViewport } from '../dashboard/useChartViewport';
 import '../../lib/charts/register';
 
 type ChartBoxProps<T extends ChartType = ChartType> = {
@@ -33,8 +41,30 @@ export function ChartBox<T extends ChartType = ChartType>({
   onChartClick,
   pinnedIndex,
 }: ChartBoxProps<T>) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const { isCompact } = useChartViewport();
   const [ready, setReady] = useState(false);
+  const [clickTooltipActive, setClickTooltipActive] = useState<ActiveElement[] | null>(
+    null
+  );
+  const clickTooltipActiveRef = useRef<ActiveElement[] | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  clickTooltipActiveRef.current = clickTooltipActive;
+
+  const tooltipEnabledOption = options?.plugins?.tooltip?.enabled;
+  const tooltipEnabledByOptions =
+    typeof tooltipEnabledOption === 'boolean' ? tooltipEnabledOption : undefined;
+  const useClickOnlyTooltip = shouldUseClickOnlyTooltip(
+    Boolean(isCompact),
+    tooltipEnabledByOptions,
+    pinnedIndex !== undefined
+  );
+
+  useEffect(() => {
+    setClickTooltipActive(null);
+  }, [data, type]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -47,33 +77,67 @@ export function ChartBox<T extends ChartType = ChartType>({
     return () => observer.disconnect();
   }, []);
 
-  const mergedOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    ...options,
-    onClick: (
-      _event: ChartEvent,
-      elements: ActiveElement[],
-      chart: ChartJS<keyof ChartTypeRegistry>
-    ) => {
+  const handleClick = useCallback(
+    (event: ChartEvent, elements: ActiveElement[], chart: ChartJS<keyof ChartTypeRegistry>) => {
+      if (useClickOnlyTooltip) {
+        applyClickOnlyTooltipToChart(
+          chart,
+          event,
+          elements,
+          clickTooltipActiveRef.current,
+          (next) => {
+            clickTooltipActiveRef.current = next;
+            setClickTooltipActive(next);
+          }
+        );
+      }
+
       if (onChartClick) {
         const index = elements[0]?.index;
         onChartClick(typeof index === 'number' ? index : null);
       }
-      options?.onClick?.(_event, elements, chart);
+
+      options?.onClick?.(event, elements, chart);
     },
+    [useClickOnlyTooltip, onChartClick, options]
+  );
+
+  const tooltipVisible =
+    pinnedIndex !== undefined
+      ? pinnedIndex !== null
+      : useClickOnlyTooltip
+        ? clickTooltipActive !== null && clickTooltipActive.length > 0
+        : tooltipEnabledByOptions !== false;
+
+  const optionsWithInteraction = mergeClickOnlyTooltipOptions(
+    options,
+    useClickOnlyTooltip,
+    tooltipVisible
+  );
+
+  const baseOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    ...optionsWithInteraction,
+    onClick: handleClick,
     plugins: {
-      ...options?.plugins,
+      ...optionsWithInteraction?.plugins,
       tooltip: {
-        ...options?.plugins?.tooltip,
+        ...optionsWithInteraction?.plugins?.tooltip,
         ...(pinnedIndex !== undefined
           ? {
               enabled: pinnedIndex !== null,
             }
-          : {}),
+          : useClickOnlyTooltip
+            ? {
+                enabled: tooltipVisible,
+              }
+            : {}),
       },
     },
-  };
+  } as ChartOptions<T>;
+
+  const mergedOptions = mergeChartOptionsForTheme(baseOptions, isDark);
 
   return (
     <Box
@@ -99,4 +163,3 @@ export function ChartBox<T extends ChartType = ChartType>({
     </Box>
   );
 }
-

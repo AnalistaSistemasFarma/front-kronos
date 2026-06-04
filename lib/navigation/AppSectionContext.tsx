@@ -9,8 +9,9 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { DASHBOARD_TAB_URL } from '../dashboard/DashboardTabContext';
+import { useDashboardAdmin } from '../dashboard/DashboardAdminContext';
 
 export type AppSection = 'dashboard' | 'process';
 
@@ -35,23 +36,39 @@ export const AppSectionContext = createContext<AppSectionContextValue | null>(nu
 
 export function AppSectionProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { isDashboardAdmin, loadingDashboardAdmin } = useDashboardAdmin();
   const [activeSection, setActiveSectionState] = useState<AppSection>(() =>
     pathnameToAppSection(pathname)
   );
 
   useEffect(() => {
     if (isHubInstantSwapRoute(pathname)) {
-      setActiveSectionState(pathnameToAppSection(pathname));
+      const next = pathnameToAppSection(pathname);
+      if (next === 'dashboard' && !loadingDashboardAdmin && !isDashboardAdmin) {
+        setActiveSectionState('process');
+        if (pathname.startsWith('/dashboard')) {
+          router.replace(PROCESS_HUB_URL);
+        }
+        return;
+      }
+      setActiveSectionState(next);
     }
-  }, [pathname]);
+  }, [pathname, loadingDashboardAdmin, isDashboardAdmin, router]);
 
-  const setActiveSection = useCallback((section: AppSection) => {
-    setActiveSectionState(section);
-    const url = section === 'dashboard' ? DASHBOARD_TAB_URL.solicitudes : PROCESS_HUB_URL;
-    if (window.location.pathname !== url) {
-      window.history.replaceState(window.history.state, '', url);
-    }
-  }, []);
+  const setActiveSection = useCallback(
+    (section: AppSection) => {
+      const target =
+        section === 'dashboard' && !isDashboardAdmin ? 'process' : section;
+      setActiveSectionState(target);
+      const url =
+        target === 'dashboard' ? DASHBOARD_TAB_URL.solicitudes : PROCESS_HUB_URL;
+      if (window.location.pathname !== url) {
+        window.history.replaceState(window.history.state, '', url);
+      }
+    },
+    [isDashboardAdmin]
+  );
 
   useEffect(() => {
     const onPopState = () => {

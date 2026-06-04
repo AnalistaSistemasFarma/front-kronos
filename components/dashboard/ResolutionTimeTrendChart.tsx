@@ -31,9 +31,9 @@ import {
   type ResolutionTrend,
   type TaskForResolutionTime,
 } from '../../lib/dashboard/resolutionTimeSeries';
-import { dashboardChartTheme } from './chartTheme';
 import { buildTrendTimeChart } from '../../lib/charts/builders';
-import { chartLabelColor, trendDownColor, trendUpColor, trendFlatColor } from '../../lib/charts/defaults';
+import { trendDownColor, trendUpColor, trendFlatColor } from '../../lib/charts/defaults';
+import { useDashboardChartPalette } from './useDashboardChartPalette';
 
 function TrendBadge({
   trend,
@@ -71,6 +71,7 @@ function TrendBadge({
 }
 
 function TrendPointDetail({ row }: { row: ReturnType<typeof toChartRows>[number] }) {
+  const { palette } = useDashboardChartPalette();
   return (
     <Paper
       shadow='lg'
@@ -79,23 +80,23 @@ function TrendPointDetail({ row }: { row: ReturnType<typeof toChartRows>[number]
       withBorder
       mt='sm'
       style={{
-        borderColor: dashboardChartTheme.blue100,
-        background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+        borderColor: palette.blue100,
+        background: palette.chartSurface,
       }}
     >
-      <Text size='xs' fw={700} mb={6} style={{ color: dashboardChartTheme.primary }}>
+      <Text size='xs' fw={700} mb={6} style={{ color: palette.primary }}>
         {row.period}
       </Text>
       <Group justify='space-between' gap='md' mb={4}>
-        <Text size='xs' style={{ color: chartLabelColor }}>
+        <Text size='xs' c='dimmed'>
           Tiempo promedio
         </Text>
-        <Text size='sm' fw={800} style={{ color: dashboardChartTheme.primary }}>
+        <Text size='sm' fw={800} style={{ color: palette.primary }}>
           {formatResolutionDuration(row.tiempo ?? 0)}
         </Text>
       </Group>
       <Group justify='space-between' gap='md' mb={row.changePct != null ? 6 : 0}>
-        <Text size='xs' style={{ color: chartLabelColor }}>
+        <Text size='xs' c='dimmed'>
           Tareas finalizadas
         </Text>
         <Text size='xs' fw={700}>
@@ -103,9 +104,9 @@ function TrendPointDetail({ row }: { row: ReturnType<typeof toChartRows>[number]
         </Text>
       </Group>
       {row.changePct != null && (
-        <Box pt={6} style={{ borderTop: '1px solid #e2e8f0' }}>
+        <Box pt={6} style={{ borderTop: `1px solid ${palette.chartPanelBorder}` }}>
           <Group justify='space-between'>
-            <Text size='xs' style={{ color: chartLabelColor }}>
+            <Text size='xs' c='dimmed'>
               vs periodo anterior
             </Text>
             <TrendBadge trend={row.trend ?? null} changePct={row.changePct} size='sm' />
@@ -141,6 +142,7 @@ function TrendChartBody({
   isMobile: boolean;
   isCompact: boolean;
 }) {
+  const { palette } = useDashboardChartPalette();
   const [pinnedIndex, setPinnedIndex] = useState<number | null>(null);
 
   useEffect(() => {
@@ -184,15 +186,15 @@ function TrendChartBody({
             size={isMobile ? 40 : 48}
             radius='md'
             variant='gradient'
-            gradient={dashboardChartTheme.gradient}
+            gradient={palette.gradient}
           >
             <IconChartLine size={isMobile ? 20 : 24} />
           </ThemeIcon>
           <Box>
-            <Text size={isMobile ? 'sm' : 'md'} fw={700} style={{ color: dashboardChartTheme.primary }}>
+            <Text size={isMobile ? 'sm' : 'md'} fw={700} style={{ color: palette.primary }}>
               {title}
             </Text>
-            <Text size='xs' mt={2} style={{ color: chartLabelColor }}>
+            <Text size='xs' mt={2} c='dimmed'>
               {subtitle}
             </Text>
           </Box>
@@ -208,15 +210,15 @@ function TrendChartBody({
                 ? 'rgba(22, 163, 74, 0.35)'
                 : summary.latestTrend === 'down'
                   ? 'rgba(220, 38, 38, 0.35)'
-                  : dashboardChartTheme.blue100,
-            background: '#fff',
+                  : palette.blue100,
+            background: palette.chartPanelBg,
           }}
         >
-          <Text size='xs' fw={600} ta='center' style={{ color: chartLabelColor }}>
+          <Text size='xs' fw={600} ta='center' c='dimmed'>
             Último periodo
           </Text>
           <Group gap='xs' justify='center' mt={4}>
-            <Text fw={800} size='lg' style={{ color: dashboardChartTheme.primary }}>
+            <Text fw={800} size='lg' style={{ color: palette.primary }}>
               {formatResolutionDuration(summary.latestAvgHours ?? 0)}
             </Text>
             <TrendBadge
@@ -229,30 +231,30 @@ function TrendChartBody({
       </Group>
 
       <SimpleGrid cols={{ base: 1, xs: 3 }} spacing='sm' mb='md'>
-        <Paper p='sm' radius='md' withBorder bg='white' style={{ borderColor: '#e2e8f0' }}>
+        <Paper p='sm' radius='md' withBorder style={{ borderColor: palette.chartPanelBorder }}>
           <Group gap={6} mb={4}>
-            <IconClockHour4 size={14} color={dashboardChartTheme.primary} />
-            <Text size='xs' fw={600} style={{ color: chartLabelColor }}>
+            <IconClockHour4 size={14} color={palette.primary} />
+            <Text size='xs' fw={600} c='dimmed'>
               Promedio general
             </Text>
           </Group>
-          <Text fw={800} size='xl' style={{ color: dashboardChartTheme.primary }}>
+          <Text fw={800} size='xl' style={{ color: palette.primary }}>
             {formatResolutionDuration(summary.overallAvgHours ?? 0)}
           </Text>
         </Paper>
-        <Paper p='sm' radius='md' withBorder bg='white' style={{ borderColor: '#e2e8f0' }}>
+        <Paper p='sm' radius='md' withBorder style={{ borderColor: palette.chartPanelBorder }}>
           <Group gap={6} mb={4}>
-            <IconChecklist size={14} color={dashboardChartTheme.primary} />
-            <Text size='xs' fw={600} style={{ color: chartLabelColor }}>
+            <IconChecklist size={14} color={palette.primary} />
+            <Text size='xs' fw={600} c='dimmed'>
               Tareas medidas
             </Text>
           </Group>
-          <Text fw={800} size='xl' style={{ color: dashboardChartTheme.primary }}>
+          <Text fw={800} size='xl' style={{ color: palette.primary }}>
             {summary.completedTasks}
           </Text>
         </Paper>
-        <Paper p='sm' radius='md' withBorder bg='white' style={{ borderColor: '#e2e8f0' }}>
-          <Text size='xs' fw={600} mb={4} style={{ color: chartLabelColor }}>
+        <Paper p='sm' radius='md' withBorder style={{ borderColor: palette.chartPanelBorder }}>
+          <Text size='xs' fw={600} mb={4} c='dimmed'>
             Tendencia reciente
           </Text>
           <Group gap='xs' align='center'>
@@ -261,7 +263,7 @@ function TrendChartBody({
               changePct={summary.latestChangePct}
               size='lg'
             />
-            <Text size='xs' style={{ color: chartLabelColor }}>
+            <Text size='xs' c='dimmed'>
               {summary.latestTrend === 'up'
                 ? 'Subió el tiempo'
                 : summary.latestTrend === 'down'
@@ -275,8 +277,8 @@ function TrendChartBody({
       <Box
         style={{
           borderRadius: 12,
-          border: `1px solid ${dashboardChartTheme.blue100}`,
-          background: '#fff',
+          border: `1px solid ${palette.blue100}`,
+          background: palette.chartPanelBg,
         }}
       >
         <ChartContainer
@@ -319,12 +321,12 @@ function TrendChartBody({
                       ? 'rgba(22, 163, 74, 0.25)'
                       : point.trend === 'down'
                         ? 'rgba(220, 38, 38, 0.25)'
-                        : '#e2e8f0',
-                  background: '#fff',
+                        : palette.chartPanelBorder,
+                  background: palette.chartPanelBg,
                 }}
               >
                 <Group gap={6} wrap='nowrap'>
-                  <Text size='xs' fw={600} style={{ color: chartLabelColor }}>
+                  <Text size='xs' fw={600} c='dimmed'>
                     {point.label}
                   </Text>
                   <TrendBadge trend={point.trend} changePct={point.changePct} size='sm' />
@@ -341,7 +343,7 @@ function TrendChartBody({
         </Text>
       )}
 
-      <Text size='xs' ta='center' mt='sm' style={{ color: chartLabelColor }}>
+      <Text size='xs' ta='center' mt='sm' c='dimmed'>
         <Text span fw={700} style={{ color: trendUpColor }}>
           ▲ Verde
         </Text>{' '}
@@ -361,6 +363,7 @@ export function ResolutionTimeTrendChart({
   title,
   subtitle = 'Tiempo desde que empieza a trabajar la tarea hasta que la finaliza',
 }: ResolutionTimeTrendChartProps) {
+  const { palette } = useDashboardChartPalette();
   const [open, setOpen] = useState(false);
   const { isMobile, isCompact } = useChartViewport();
   const chartHeight = isMobile ? 220 : isCompact ? 260 : 300;
@@ -387,8 +390,8 @@ export function ResolutionTimeTrendChart({
           p='md'
           radius='md'
           style={{
-            borderColor: open ? dashboardChartTheme.borderAccentStrong : undefined,
-            background: open ? dashboardChartTheme.blue50 : 'white',
+            borderColor: open ? palette.borderAccentStrong : undefined,
+            background: open ? palette.blue50 : palette.chartPanelBg,
           }}
         >
           <Group justify='space-between' wrap='nowrap' gap='sm'>
@@ -396,7 +399,7 @@ export function ResolutionTimeTrendChart({
               <ThemeIcon
                 size='sm'
                 variant='gradient'
-                gradient={dashboardChartTheme.gradient}
+                gradient={palette.gradient}
                 style={{ flexShrink: 0 }}
               >
                 <IconChartLine size={14} />
@@ -425,8 +428,8 @@ export function ResolutionTimeTrendChart({
                 style={{ flexShrink: 0 }}
                 styles={{
                   root: {
-                    backgroundColor: dashboardChartTheme.blue100,
-                    color: dashboardChartTheme.blue800,
+                    backgroundColor: palette.blue100,
+                    color: palette.blue800,
                   },
                 }}
               >
@@ -449,9 +452,8 @@ export function ResolutionTimeTrendChart({
           p={{ base: 'sm', sm: 'md', lg: 'lg' }}
           mt='xs'
           style={{
-            borderColor: dashboardChartTheme.blue100,
-            background:
-              'linear-gradient(145deg, rgba(255,255,255,0.98) 0%, rgba(232,244,252,0.35) 100%)',
+            borderColor: palette.blue100,
+            background: palette.chartSurface,
           }}
         >
           <TrendChartBody

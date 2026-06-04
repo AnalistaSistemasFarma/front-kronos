@@ -6,7 +6,7 @@ import {
   useDashboardTab,
   type DashboardTab,
 } from '../../lib/dashboard/DashboardTabContext';
-import { dashboardChartTheme } from './chartTheme';
+import { useDashboardChartPalette } from './useDashboardChartPalette';
 
 const navItems: {
   tab: DashboardTab;
@@ -36,16 +36,17 @@ const navItems: {
 
 export default function DashboardNav() {
   const { activeTab, setActiveTab } = useDashboardTab();
+  const { palette } = useDashboardChartPalette();
 
   return (
     <Paper
       p={{ base: 'xs', sm: 'xs' }}
       radius='lg'
       withBorder
-      mb={{ base: 'md', sm: 'lg' }}
+      mb={0}
       style={{
-        background: dashboardChartTheme.chartSurface,
-        borderColor: dashboardChartTheme.blue100,
+        background: palette.chartSurface,
+        borderColor: palette.blue100,
       }}
     >
       <Group gap='xs' wrap='wrap' grow>
@@ -67,14 +68,14 @@ export default function DashboardNav() {
                 withBorder
                 style={{
                   borderColor: isActive
-                    ? dashboardChartTheme.borderAccentStrong
-                    : dashboardChartTheme.blue100,
-                  background: isActive ? dashboardChartTheme.blue50 : '#fff',
+                    ? palette.borderAccentStrong
+                    : palette.blue100,
+                  background: isActive ? palette.blue50 : palette.chartPanelBg,
                 }}
                 styles={{
                   root: {
                     '&:hover': {
-                      borderColor: dashboardChartTheme.blue200,
+                      borderColor: palette.blue200,
                     },
                   },
                 }}
@@ -84,7 +85,7 @@ export default function DashboardNav() {
                     size={36}
                     radius='md'
                     variant={isActive ? 'gradient' : 'light'}
-                    gradient={isActive ? dashboardChartTheme.gradient : undefined}
+                    gradient={isActive ? palette.gradient : undefined}
                     color='blue'
                   >
                     <Icon size={18} />
@@ -96,8 +97,8 @@ export default function DashboardNav() {
                       lineClamp={1}
                       style={{
                         color: isActive
-                          ? dashboardChartTheme.primary
-                          : dashboardChartTheme.blue800,
+                          ? palette.primary
+                          : palette.blue800,
                       }}
                     >
                       {item.label}

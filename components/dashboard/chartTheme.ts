@@ -23,10 +23,57 @@ export const dashboardChartTheme = {
   /** Panel de gráficas: fondo blanco para máximo contraste */
   chartPanelBg: '#ffffff',
   chartPanelBorder: '#e2e8f0',
+  chartAxisColor: '#1e293b',
+  tooltipBg: '#ffffff',
+  tooltipTitleColor: '#113562',
   gradient: { from: '#113562', to: '#3db6e0', deg: 135 as const },
   borderAccent: 'rgba(61, 182, 224, 0.4)',
   borderAccentStrong: 'rgba(61, 182, 224, 0.55)',
 } as const;
+
+/** Paleta dashboard oscuro — navy + acentos vibrantes */
+export const dashboardChartThemeDark = {
+  primary: '#f0f4ff',
+  secondary: '#5eb3e8',
+  blue900: '#e2e8f8',
+  blue800: '#5b9cff',
+  blue700: '#3dd6c8',
+  blue600: '#5b9cff',
+  blue500: '#3db6e0',
+  blue400: '#5eb3e8',
+  blue300: '#7ec8ef',
+  blue200: '#9dd4f2',
+  blue100: 'rgba(255, 255, 255, 0.14)',
+  blue50: 'rgba(91, 155, 255, 0.22)',
+  gridStroke: 'rgba(255, 255, 255, 0.1)',
+  gridDash: '4 4',
+  chartSurface:
+    'linear-gradient(145deg, rgba(37, 99, 235, 0.14) 0%, rgba(21, 28, 46, 0.95) 100%)',
+  chartPanelBg: '#1f2840',
+  chartPanelBorder: 'rgba(255, 255, 255, 0.1)',
+  chartAxisColor: '#e2e8f8',
+  tooltipBg: '#283352',
+  tooltipTitleColor: '#f0f4ff',
+  gradient: { from: '#2563eb', to: '#22d3ee', deg: 135 as const },
+  borderAccent: 'rgba(91, 155, 255, 0.5)',
+  borderAccentStrong: 'rgba(34, 211, 238, 0.65)',
+} as const;
+
+/** Estados en oscuro — misma semántica que claro (azul oscuro, azul medio, cian) */
+export const statusChartColorsDark = {
+  completada: '#7eb8e0',
+  pendiente: '#3d6ea8',
+  enProceso: '#1eb8d4',
+} as const;
+
+export const encargadoBarPaletteDark = [
+  '#5b9cff',
+  '#3dd6c8',
+  '#ff7b8a',
+  '#c084fc',
+  '#fbbf24',
+  '#f472b6',
+] as const;
 
 /**
  * Estados con contraste alto (evitar azules muy claros en barras/números)
@@ -37,11 +84,16 @@ export const statusChartColors = {
   enProceso: '#1eb8d4',
 } as const;
 
-/** Texto de ejes y valores — siempre oscuro, legible sobre fondo claro */
+/** Texto de ejes y valores */
 export const chartAxisTickStyle = {
   fontSize: 12,
   fontWeight: 600 as const,
-  fill: '#1e293b',
+  fill: dashboardChartTheme.chartAxisColor,
+};
+
+export const chartAxisTickStyleDark = {
+  ...chartAxisTickStyle,
+  fill: dashboardChartThemeDark.chartAxisColor,
 };
 
 export const chartGridProps = {
