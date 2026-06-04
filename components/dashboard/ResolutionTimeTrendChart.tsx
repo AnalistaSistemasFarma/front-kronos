@@ -35,27 +35,6 @@ import { dashboardChartTheme } from './chartTheme';
 import { buildTrendTimeChart } from '../../lib/charts/builders';
 import { chartLabelColor, trendDownColor, trendUpColor, trendFlatColor } from '../../lib/charts/defaults';
 
-const chartScrollStyle = {
-  overflowX: 'auto' as const,
-  WebkitOverflowScrolling: 'touch' as const,
-  width: '100%',
-};
-
-/** Ancho mínimo del gráfico lineal para permitir scroll horizontal en móvil/tablet */
-function getTrendChartScrollMinWidth(
-  pointCount: number,
-  isMobile: boolean,
-  isCompact: boolean
-): number {
-  if (!isCompact) {
-    return pointCount > 8 ? pointCount * 56 + 120 : 0;
-  }
-  if (pointCount <= 1) return isMobile ? 300 : 360;
-  const perPoint = isMobile ? 92 : 72;
-  const padding = isMobile ? 128 : 148;
-  return Math.max(pointCount * perPoint + padding, isMobile ? 320 : 400);
-}
-
 function TrendBadge({
   trend,
   changePct,
@@ -295,7 +274,6 @@ function TrendChartBody({
 
       <Box
         style={{
-          ...chartScrollStyle,
           borderRadius: 12,
           border: `1px solid ${dashboardChartTheme.blue100}`,
           background: '#fff',
@@ -306,11 +284,6 @@ function TrendChartBody({
           data={chartData}
           options={mergedOptions}
           height={chartHeight}
-          minWidth={getTrendChartScrollMinWidth(
-            summary.points.length,
-            isMobile,
-            isCompact
-          )}
           onChartClick={
             isMobile
               ? (index) => {
@@ -330,7 +303,7 @@ function TrendChartBody({
       )}
 
       {summary.points.length > 1 && (
-        <Box mt='md' style={chartScrollStyle}>
+        <Box mt='md' className='chart-scroll-x'>
           <Group gap='xs' wrap='nowrap' pb={4} style={{ width: 'max-content', minWidth: '100%' }}>
             {summary.points.slice(1).map((point) => (
               <Paper
@@ -495,3 +468,5 @@ export function ResolutionTimeTrendChart({
     </Box>
   );
 }
+
+export default ResolutionTimeTrendChart;

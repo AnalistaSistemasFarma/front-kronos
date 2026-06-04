@@ -22,3 +22,82 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Dashboard: pestañas superpuestas — todas mantienen tamaño para Chart.js */
+.dashboard-panels {
+  display: grid;
+  grid-template: 1fr / 1fr;
+  min-width: 0;
+  width: 100%;
+}
+
+.dashboard-panel {
+  grid-area: 1 / 1;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0ms;
+  min-width: 0;
+  overflow-x: clip;
+  width: 100%;
+}
+
+.dashboard-panel--active {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  z-index: 1;
+}
+
+/* Vistas analíticas: sin scroll horizontal de página; scroll solo dentro de .chart-scroll-x */
+.dashboard-analytics-root {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.chart-scroll-x {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+}
+
+.dashboard-toolbar-slot {
+  width: 100%;
+}
+
+@media (min-width: 36em) {
+  .dashboard-toolbar-slot {
+    width: auto;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  .dashboard-nav-item {
+    flex: 1 1 140px !important;
+  }
+}
+
+/* Hub: Dashboard ↔ Procesos sin recarga */
+.hub-sections {
+  display: grid;
+  grid-template: 1fr / 1fr;
+}
+
+.hub-section {
+  grid-area: 1 / 1;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0ms;
+}
+
+.hub-section--active {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  z-index: 1;
+}

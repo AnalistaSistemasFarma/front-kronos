@@ -243,16 +243,17 @@ export function applyViewTasksInputs(
     request.input('category', sql.NVarChar, filters.category);
   }
   if (filters.date_from && filters.date_to) {
-    request.input('date_from', sql.Date, filters.date_from);
-    request.input('date_to', sql.Date, filters.date_to);
+    // YYYY-MM-DD como string; el SQL hace CAST(... AS DATE). Evita sql.Date en mssql v12.
+    request.input('date_from', filters.date_from);
+    request.input('date_to', filters.date_to);
   }
   if (filters.task_date_from && filters.task_date_to) {
-    request.input('task_date_from', sql.Date, filters.task_date_from);
-    request.input('task_date_to', sql.Date, filters.task_date_to);
+    request.input('task_date_from', filters.task_date_from);
+    request.input('task_date_to', filters.task_date_to);
   }
   if (filters.active) {
     const isActive = filters.active === 'true' || filters.active === '1';
-    request.input('active', sql.Bit, isActive);
+    request.input('active', isActive);
   }
 }
 

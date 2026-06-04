@@ -35,6 +35,29 @@ export interface TrendPoint {
 
 const STATUS_KEYS = ['Completada', 'Pendiente', 'En Proceso'] as const;
 
+/** Dona: participación de un estado frente al resto del total. */
+export function buildShareDoughnut(
+  value: number,
+  total: number,
+  activeColor: string,
+  activeLabel: string,
+  options?: { showLegend?: boolean }
+): { data: ChartData<'pie'>; options: ChartOptions<'pie'> } {
+  const other = Math.max(0, total - value);
+  const slices: PieSlice[] =
+    total === 0
+      ? [{ name: 'Sin datos', value: 1, color: '#e2e8f0' }]
+      : [
+          { name: activeLabel, value, color: activeColor },
+          ...(other > 0 ? [{ name: 'Resto del periodo', value: other, color: '#e2e8f0' }] : []),
+        ].filter((s) => s.value > 0);
+
+  return buildPieChart(slices, {
+    showLegend: options?.showLegend ?? true,
+    cutout: '62%',
+  });
+}
+
 export function buildPieChart(
   slices: PieSlice[],
   options?: { showLegend?: boolean; cutout?: string }
@@ -251,6 +274,52 @@ export function buildAreaLineChart(
   };
 }
 
+export function buildHoursLineChart(
+  points: TimeSeriesPoint[],
+  lineColor: string,
+  formatHours: (hours: number) => string
+): { data: ChartData<'line'>; options: ChartOptions<'line'> } {
+  return {
+    data: {
+      labels: points.map((p) => p.label),
+      datasets: [
+        {
+          label: 'Tiempo promedio',
+          data: points.map((p) => p.value),
+          borderColor: lineColor,
+          backgroundColor: 'rgba(17, 53, 98, 0.12)',
+          fill: true,
+          tension: 0.35,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#ffffff',
+          pointBorderColor: lineColor,
+          pointBorderWidth: 2,
+        },
+      ],
+    },
+    options: baseChartOptions<'line'>({
+      scales: {
+        x: categoryAxis(),
+        y: {
+          ...valueAxis(),
+          ticks: {
+            callback: (value) => formatHours(Number(value)),
+          },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => formatHours(ctx.parsed.y ?? 0),
+          },
+        },
+      },
+    }),
+  };
+}
+
 export type StackedAssigneeRow = {
   asignado: string;
   Completada: number;
@@ -308,6 +377,74 @@ export function buildHorizontalStackedBarChart(
               return `Total: ${total} · Cumplimiento: ${pct}%`;
             },
           },
+        },
+      },
+    }),
+  };
+}
+
+export type TicketStackedRow = {
+  tecnico: string;
+  Abierto: number;
+  'En progreso': number;
+  Resuelto: number;
+  Cerrado: number;
+};
+
+const ticketStatusColors = {
+  abierto: '#3b82f6',
+  enProgreso: '#f59e0b',
+  resuelto: '#16a34a',
+  cerrado: '#64748b',
+};
+
+export function buildTicketStatusStackedBar(
+  rows: TicketStackedRow[],
+  horizontal = true
+): { data: ChartData<'bar'>; options: ChartOptions<'bar'> } {
+  const indexAxis = horizontal ? ('y' as const) : ('x' as const);
+
+  return {
+    data: {
+      labels: rows.map((r) => r.tecnico),
+      datasets: [
+        {
+          label: 'Abierto',
+          data: rows.map((r) => r.Abierto),
+          backgroundColor: ticketStatusColors.abierto,
+          borderRadius: 0,
+        },
+        {
+          label: 'En progreso',
+          data: rows.map((r) => r['En progreso']),
+          backgroundColor: ticketStatusColors.enProgreso,
+          borderRadius: 0,
+        },
+        {
+          label: 'Resuelto',
+          data: rows.map((r) => r.Resuelto),
+          backgroundColor: ticketStatusColors.resuelto,
+          borderRadius: 0,
+        },
+        {
+          label: 'Cerrado',
+          data: rows.map((r) => r.Cerrado),
+          backgroundColor: ticketStatusColors.cerrado,
+          borderRadius: 0,
+        },
+      ],
+    },
+    options: baseChartOptions<'bar'>({
+      indexAxis,
+      scales: {
+        x: { ...valueAxis(), stacked: true },
+        y: { ...categoryAxis(), stacked: true },
+      },
+      plugins: {
+        legend: { display: true, position: 'bottom' },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
         },
       },
     }),

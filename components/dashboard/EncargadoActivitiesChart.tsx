@@ -313,7 +313,7 @@ function TeamSummaryTable({ people }: { people: AssigneeRow[] }) {
                 {completionRate(person)}% cumpl.
               </Badge>
             </Group>
-            <SimpleGrid cols={4} spacing={6}>
+            <SimpleGrid cols={{ base: 2, xs: 4 }} spacing={6}>
               <Box ta='center'>
                 <Text size='xs' c='dimmed'>
                   Total
@@ -430,14 +430,10 @@ function TeamPerformanceCharts({
   tasks: TaskWithEncargado[];
   encargadoName: string;
 }) {
-  const { isMobile, isCompact } = useChartViewport();
+  const { isCompact } = useChartViewport();
   const names = people.map((p) => p.asignado);
   const chartHeight = getResponsiveChartHeight(people.length, isCompact);
   const stackedChart = useMemo(() => buildHorizontalStackedBarChart(people), [people]);
-  const scrollMinWidth = isCompact
-    ? Math.max(people.length * (isMobile ? 92 : 72) + 140, 320)
-    : 0;
-
   return (
     <Paper
       p={{ base: 'sm', sm: 'md', lg: 'lg' }}
@@ -459,15 +455,12 @@ function TeamPerformanceCharts({
         <ChartStatusLegend fullWidth />
       </Stack>
 
-      <Box w='100%' style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        <ChartContainer
-          type='bar'
-          data={stackedChart.data}
-          options={stackedChart.options}
-          height={chartHeight}
-          minWidth={scrollMinWidth}
-        />
-      </Box>
+      <ChartContainer
+        type='bar'
+        data={stackedChart.data}
+        options={stackedChart.options}
+        height={chartHeight}
+      />
 
       <TeamSummaryTable people={people} />
 
@@ -1254,14 +1247,12 @@ export default function EncargadoActivitiesChart({
             <Text size='xs' fw={600} mb='sm' style={{ color: chartLabelColor }}>
               Tareas por encargado — haga clic en una fila para ver el detalle del equipo
             </Text>
-            <Box w='100%' style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-              <ChartContainer
-                type='bar'
-                data={overviewBarChart.data}
-                options={overviewBarChart.options}
-                height={overviewChartHeight}
-              />
-            </Box>
+            <ChartContainer
+              type='bar'
+              data={overviewBarChart.data}
+              options={overviewBarChart.options}
+              height={overviewChartHeight}
+            />
           </Paper>
 
           <Text size='sm' fw={600} style={{ color: dashboardChartTheme.primary }}>

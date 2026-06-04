@@ -1,0 +1,592 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Badge,
+  Card,
+  Flex,
+  Grid,
+  Group,
+  Paper,
+  Select,
+  SimpleGrid,
+  Skeleton,
+  Stack,
+  Text,
+  Title,
+} from '@mantine/core';
+import {
+  IconAlertCircle,
+  IconBuilding,
+  IconChartLine,
+  IconCheck,
+  IconClock,
+  IconClockHour4,
+  IconTrendingUp,
+} from '@tabler/icons-react';
+import {
+  buildAreaLineChart,
+  buildHoursLineChart,
+  buildPieChart,
+  buildVerticalBarChart,
+} from '../../lib/charts/builders';
+import {
+  buildCompleteRequestTimeSeries,
+  buildRequestTimeSeries,
+  formatRequestTimeSeriesLabel,
+  uniqueRequestsFromTasks,
+} from '../../lib/dashboard/requestAnalytics';
+import { getFilterLabel, type DashboardDateFilter } from '../../lib/dashboard/dateRange';
+import {
+  ALL_COMPANIES_VALUE,
+  buildAvgResolutionTimeSeries,
+  computeResolutionSummary,
+  enrichRequestsWithResolution,
+  formatHoursLabel,
+  listCompaniesFromTasks,
+} from '../../lib/dashboard/requestResolution';
+import { useDashboardTasks } from '../../lib/dashboard/useDashboardTasks';
+import { ChartContainer } from './ChartContainer';
+import DashboardDateToolbar, { DashboardPeriodHint } from './DashboardDateToolbar';
+import DashboardPageShell from './DashboardPageShell';
+import SolicitudesResolutionTable from './SolicitudesResolutionTable';
+import { dashboardChartTheme, statusChartColors } from './chartTheme';
+import { useChartViewport } from './useChartViewport';
+import { getDashboardCardPadding, resolveChartHeight } from '../../lib/dashboard/responsive';
+
+const projectColors = {
+  primary: dashboardChartTheme.primary,
+  secondary: dashboardChartTheme.secondary,
+  success: statusChartColors.completada,
+  warning: statusChartColors.pendiente,
+  error: dashboardChartTheme.blue600,
+};
+
+function normalizeRequestStatus(status: string): string {
+  const s = status?.toLowerCase().trim() ?? '';
+  if (['resuelto', 'completada', 'completado', 'cerrado', 'closed', 'finalizado'].some((x) => s.includes(x))) {
+    return 'Cerrada';
+  }
+  if (['abierto', 'en proceso', 'en progreso', 'asignado', 'open', 'en curso'].some((x) => s.includes(x))) {
+    return 'En proceso';
+  }
+  if (['sin empezar', 'pendiente', 'nuevo', 'not started', 'por hacer'].some((x) => s.includes(x))) {
+    return 'Pendiente';
+  }
+  return status?.trim() || 'Sin estado';
+}
+
+function computeStats(requests: ReturnType<typeof uniqueRequestsFromTasks>) {
+  const byNorm = requests.reduce(
+    (acc, r) => {
+      const key = normalizeRequestStatus(r.estado_solicitud);
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+  return {
+    total: requests.length,
+    cerrada: byNorm['Cerrada'] || 0,
+    pendiente: byNorm['Pendiente'] || 0,
+    enProceso: byNorm['En proceso'] || 0,
+  };
+}
+
+export default function SolicitudesAnalyticsView() {
+  const {
+    status,
+    tasks,
+    loading,
+    error,
+    dateFilter,
+    setDateFilter,
+    selectedMonthDate,
+    setSelectedMonthDate,
+    fetchTasks,
+    appliedRange,
+    activeDateRange,
+    exportDashboardToExcel,
+    exportingExcel,
+  } = useDashboardTasks();
+
+  const [companyFilter, setCompanyFilter] = useState<string>(ALL_COMPANIES_VALUE);
+
+  const allRequests = useMemo(() => uniqueRequestsFromTasks(tasks), [tasks]);
+  const companies = useMemo(() => listCompaniesFromTasks(tasks), [tasks]);
+
+  const filteredTasks = useMemo(() => {
+    if (companyFilter === ALL_COMPANIES_VALUE) return tasks;
+    return tasks.filter((t) => t.empresa_solicitud === companyFilter);
+  }, [tasks, companyFilter]);
+
+  const requests = useMemo(() => uniqueRequestsFromTasks(filteredTasks), [filteredTasks]);
+
+  const enrichedRequests = useMemo(
+    () => enrichRequestsWithResolution(requests, filteredTasks),
+    [requests, filteredTasks]
+  );
+
+  const resolutionSummary = useMemo(
+    () => computeResolutionSummary(enrichedRequests),
+    [enrichedRequests]
+  );
+
+  const isCompanyView = companyFilter !== ALL_COMPANIES_VALUE;
+
+  useEffect(() => {
+    setCompanyFilter(ALL_COMPANIES_VALUE);
+  }, [dateFilter, selectedMonthDate]);
+
+  const stats = useMemo(() => computeStats(requests), [requests]);
+
+  const statusData = useMemo(
+    () =>
+      [
+        { name: 'Cerradas', value: stats.cerrada, color: statusChartColors.completada },
+        { name: 'Pendientes', value: stats.pendiente, color: statusChartColors.pendiente },
+        { name: 'En proceso', value: stats.enProceso, color: statusChartColors.enProceso },
+      ].filter((i) => i.value > 0),
+    [stats]
+  );
+
+  const processChartData = useMemo(() => {
+    const data = requests.reduce(
+      (acc, r) => {
+        const p = r.proceso_solicitud || 'Sin Proceso';
+        acc[p] = (acc[p] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
+    return Object.entries(data)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10);
+  }, [requests]);
+
+  const companyChartData = useMemo(() => {
+    const data = allRequests.reduce(
+      (acc, r) => {
+        const c = r.empresa_solicitud || 'Sin empresa';
+        acc[c] = (acc[c] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
+    return Object.entries(data)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+  }, [allRequests]);
+
+  const timeSeriesChartData = useMemo(() => {
+    const raw = buildRequestTimeSeries(requests, dateFilter, selectedMonthDate);
+    return buildCompleteRequestTimeSeries(requests, raw, dateFilter, selectedMonthDate).map(
+      ([key, count]) => ({
+        date: formatRequestTimeSeriesLabel(key, dateFilter),
+        Solicitudes: count,
+      })
+    );
+  }, [requests, dateFilter, selectedMonthDate]);
+
+  const resolutionTimeSeries = useMemo(() => {
+    const points = buildAvgResolutionTimeSeries(enrichedRequests, (key) =>
+      formatRequestTimeSeriesLabel(key, dateFilter)
+    );
+    return points.map((p) => ({ label: p.label, value: p.avgHours }));
+  }, [enrichedRequests, dateFilter]);
+
+  const statusPieChart = buildPieChart(statusData);
+  const trendLineChart = buildAreaLineChart(
+    timeSeriesChartData.map((d) => ({ label: d.date, value: d.Solicitudes })),
+    projectColors.secondary
+  );
+  const resolutionLineChart = buildHoursLineChart(
+    resolutionTimeSeries,
+    projectColors.primary,
+    formatHoursLabel
+  );
+  const processBarChart = buildVerticalBarChart(
+    processChartData.map((d) => ({ name: d.name, value: d.value })),
+    projectColors.primary,
+    { datasetLabel: 'Solicitudes', showLegend: true, rotateLabels: true }
+  );
+  const companyBarChart = buildVerticalBarChart(
+    companyChartData.map((d) => ({ name: d.name, value: d.value })),
+    projectColors.success,
+    { datasetLabel: 'Solicitudes', showLegend: true, rotateLabels: true }
+  );
+
+  const formatNumber = (n: number) => new Intl.NumberFormat('es-CO').format(n);
+
+  const companySelectData = useMemo(
+    () => [
+      { value: ALL_COMPANIES_VALUE, label: 'General (todas las empresas)' },
+      ...companies.map((c) => ({ value: c, label: c })),
+    ],
+    [companies]
+  );
+
+  const chartViewport = useChartViewport();
+  const chartHeights = {
+    standard: resolveChartHeight('standard', chartViewport),
+    medium: resolveChartHeight('medium', chartViewport),
+    large: resolveChartHeight('large', chartViewport),
+  };
+
+  if (status === 'loading' && !tasks.length) {
+    return (
+      <DashboardPageShell title='Solicitudes'>
+        <Skeleton height={50} mb='xl' />
+        <Skeleton height={200} />
+      </DashboardPageShell>
+    );
+  }
+
+  return (
+    <DashboardPageShell
+      title='Solicitudes'
+      description={
+        <Stack gap={4}>
+          <Text size='sm' c='dimmed' component='span' display='block'>
+            {isCompanyView
+              ? `Analítica de ${companyFilter} · creación y tiempo de cierre por solicitud`
+              : 'Vista general · compare empresas y estados del periodo'}
+          </Text>
+          {activeDateRange ? (
+            <DashboardPeriodHint
+              dateFilter={dateFilter}
+              selectedMonthDate={selectedMonthDate}
+              appliedRange={appliedRange}
+            />
+          ) : null}
+        </Stack>
+      }
+      toolbar={
+        <DashboardDateToolbar
+          dateFilter={dateFilter}
+          onDateFilterChange={setDateFilter}
+          selectedMonthDate={selectedMonthDate}
+          onSelectedMonthDateChange={setSelectedMonthDate}
+          onRefresh={fetchTasks}
+          loading={loading}
+          onExport={exportDashboardToExcel}
+          exportingExcel={exportingExcel}
+        />
+      }
+    >
+        <Paper p={{ base: 'sm', sm: 'md' }} radius='md' withBorder>
+          <Select
+            label='Empresa'
+            description={
+              isCompanyView
+                ? 'Métricas de finalización y detalle por solicitud de esta empresa'
+                : 'Vista comparativa entre todas las empresas del periodo'
+            }
+            leftSection={<IconBuilding size={18} />}
+            data={companySelectData}
+            value={companyFilter}
+            onChange={(v) => setCompanyFilter(v ?? ALL_COMPANIES_VALUE)}
+            allowDeselect={false}
+            searchable={companies.length > 4}
+            nothingFoundMessage='Sin empresas en el periodo'
+          />
+        </Paper>
+
+        {error && (
+          <Alert icon={<IconAlertCircle size={20} />} title='Error al cargar' color='red' variant='light'>
+            {error}
+          </Alert>
+        )}
+
+        <SimpleGrid
+          cols={{ base: 1, xs: 2, md: 2, lg: isCompanyView ? 3 : 4, xl: isCompanyView ? 5 : 4 }}
+          spacing={{ base: 'sm', sm: 'md' }}
+        >
+          <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+            <Text size='sm' c='dimmed'>
+              Total solicitudes
+            </Text>
+            <Title order={3} style={{ color: projectColors.primary }}>
+              {formatNumber(stats.total)}
+            </Title>
+            <Text size='xs' c='dimmed'>
+              Periodo: {getFilterLabel(dateFilter)}
+              {isCompanyView && ` · ${companyFilter}`}
+            </Text>
+          </Card>
+          <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+            <Group justify='space-between' mb='xs'>
+              <Text size='sm' c='dimmed'>
+                Cerradas
+              </Text>
+              <IconCheck size={20} color={projectColors.success} />
+            </Group>
+            <Title order={3} style={{ color: projectColors.success }}>
+              {formatNumber(stats.cerrada)}
+            </Title>
+          </Card>
+          <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+            <Group justify='space-between' mb='xs'>
+              <Text size='sm' c='dimmed'>
+                Pendientes
+              </Text>
+              <IconClock size={20} color={projectColors.warning} />
+            </Group>
+            <Title order={3} style={{ color: projectColors.warning }}>
+              {formatNumber(stats.pendiente)}
+            </Title>
+          </Card>
+          <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+            <Group justify='space-between' mb='xs'>
+              <Text size='sm' c='dimmed'>
+                En proceso
+              </Text>
+              <IconTrendingUp size={20} color={projectColors.secondary} />
+            </Group>
+            <Title order={3} style={{ color: projectColors.secondary }}>
+              {formatNumber(stats.enProceso)}
+            </Title>
+          </Card>
+          {isCompanyView && (
+            <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+              <Group justify='space-between' mb='xs'>
+                <Text size='sm' c='dimmed'>
+                  Tiempo prom. cierre
+                </Text>
+                <IconClockHour4 size={20} color={projectColors.primary} />
+              </Group>
+              <Title order={3} style={{ color: projectColors.primary }}>
+                {formatHoursLabel(resolutionSummary.avgHours)}
+              </Title>
+              <Text size='xs' c='dimmed'>
+                {resolutionSummary.closedWithTime} con fecha de cierre
+              </Text>
+            </Card>
+          )}
+        </SimpleGrid>
+
+        {isCompanyView && (
+          <SimpleGrid cols={{ base: 1, sm: 3 }}>
+            <Paper p='md' radius='md' withBorder>
+              <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
+                Mediana de cierre
+              </Text>
+              <Text size='xl' fw={800} mt={4} style={{ color: dashboardChartTheme.primary }}>
+                {formatHoursLabel(resolutionSummary.medianHours)}
+              </Text>
+            </Paper>
+            <Paper p='md' radius='md' withBorder>
+              <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
+                Más rápida
+              </Text>
+              <Text size='xl' fw={800} mt={4} c='teal'>
+                {formatHoursLabel(resolutionSummary.minHours)}
+              </Text>
+            </Paper>
+            <Paper p='md' radius='md' withBorder>
+              <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
+                Más lenta
+              </Text>
+              <Text size='xl' fw={800} mt={4} c='orange'>
+                {formatHoursLabel(resolutionSummary.maxHours)}
+              </Text>
+              <Text size='xs' c='dimmed' mt={4}>
+                {resolutionSummary.openCount} sin cierre registrado
+              </Text>
+            </Paper>
+          </SimpleGrid>
+        )}
+
+        <Grid gutter='lg' align='stretch'>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder h='100%'>
+              <Title order={4} mb='xs'>
+                Tendencia de solicitudes
+              </Title>
+              <Text size='xs' c='dimmed' mb='md'>
+                Cuándo se crean las solicitudes en el periodo
+              </Text>
+              {loading ? (
+                <Skeleton height={chartHeights.standard} />
+              ) : timeSeriesChartData.length > 0 ? (
+                <ChartContainer
+                  type='line'
+                  data={trendLineChart.data}
+                  options={trendLineChart.options}
+                  height={chartHeights.standard}
+                />
+              ) : (
+                <Flex h={chartHeights.standard} align='center' justify='center'>
+                  <Stack align='center' gap='sm'>
+                    <IconChartLine size={48} color={projectColors.primary} opacity={0.3} />
+                    <Text c='dimmed' size='sm'>
+                      No hay solicitudes en este periodo
+                    </Text>
+                  </Stack>
+                </Flex>
+              )}
+            </Card>
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder h='100%'>
+              <Title order={4} mb='xs'>
+                Estado de solicitudes
+              </Title>
+              <Text size='xs' c='dimmed' mb='md'>
+                {isCompanyView ? `Distribución en ${companyFilter}` : 'Distribución global'}
+              </Text>
+              {loading ? (
+                <Skeleton height={chartHeights.standard} />
+              ) : statusData.length > 0 ? (
+                <ChartContainer
+                  type='pie'
+                  data={statusPieChart.data}
+                  options={statusPieChart.options}
+                  height={chartHeights.standard}
+                />
+              ) : (
+                <Flex h={chartHeights.standard} align='center' justify='center'>
+                  <Text size='sm' c='dimmed'>
+                    Sin datos de estado
+                  </Text>
+                </Flex>
+              )}
+            </Card>
+          </Grid.Col>
+        </Grid>
+
+        {isCompanyView && (
+          <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+            <Title order={4} mb='xs'>
+              Tiempo promedio de finalización
+            </Title>
+            <Text size='xs' c='dimmed' mb='md'>
+              Desde la creación de la solicitud hasta su cierre (fecha de resolución o última tarea
+              cerrada)
+            </Text>
+            {loading ? (
+              <Skeleton height={chartHeights.medium} />
+            ) : resolutionTimeSeries.length > 0 ? (
+              <ChartContainer
+                type='line'
+                data={resolutionLineChart.data}
+                options={resolutionLineChart.options}
+                height={chartHeights.medium}
+              />
+            ) : (
+              <Text c='dimmed' ta='center' py='xl'>
+                Aún no hay solicitudes cerradas con tiempo calculable en este periodo
+              </Text>
+            )}
+          </Card>
+        )}
+
+        <Grid gutter='lg'>
+          <Grid.Col span={{ base: 12, md: isCompanyView ? 12 : 6 }}>
+            <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+              <Title order={4} mb='md'>
+                Solicitudes por proceso (Top 10)
+              </Title>
+              {!loading && processChartData.length > 0 ? (
+                <ChartContainer
+                  type='bar'
+                  data={processBarChart.data}
+                  options={processBarChart.options}
+                  height={chartHeights.large}
+                />
+              ) : (
+                <Text c='dimmed' ta='center' py='xl'>
+                  Sin datos
+                </Text>
+              )}
+            </Card>
+          </Grid.Col>
+          {!isCompanyView && (
+            <Grid.Col span={{ base: 12, md: 6 }}>
+              <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+                <Title order={4} mb='md'>
+                  Solicitudes por empresa
+                </Title>
+                {!loading && companyChartData.length > 0 ? (
+                  <ChartContainer
+                    type='bar'
+                    data={companyBarChart.data}
+                    options={companyBarChart.options}
+                    height={chartHeights.large}
+                  />
+                ) : (
+                  <Text c='dimmed' ta='center' py='xl'>
+                    Sin datos
+                  </Text>
+                )}
+              </Card>
+            </Grid.Col>
+          )}
+        </Grid>
+
+        <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+          <Group justify='space-between' mb='md' wrap='wrap'>
+            <div>
+              <Title order={4}>
+                {isCompanyView
+                  ? 'Tiempo de finalización por solicitud'
+                  : 'Últimas solicitudes del periodo'}
+              </Title>
+              {isCompanyView && (
+                <Text size='xs' c='dimmed' mt={4}>
+                  Compare cuánto tarda el equipo en cerrar cada pedido
+                </Text>
+              )}
+            </div>
+            {isCompanyView && resolutionSummary.avgHours != null && (
+              <Badge
+                size='lg'
+                variant='light'
+                leftSection={<IconClockHour4 size={14} />}
+                styles={{
+                  root: {
+                    backgroundColor: dashboardChartTheme.blue50,
+                    color: dashboardChartTheme.primary,
+                  },
+                }}
+              >
+                Promedio: {formatHoursLabel(resolutionSummary.avgHours)}
+              </Badge>
+            )}
+          </Group>
+          {loading ? (
+            <Skeleton height={120} />
+          ) : isCompanyView ? (
+            <SolicitudesResolutionTable requests={enrichedRequests} />
+          ) : (
+            <Stack gap='sm'>
+              {requests.length > 0 ? (
+                requests.slice(0, 15).map((r) => (
+                  <Paper key={r.id_solicitud} p='sm' withBorder>
+                    <Group justify='space-between' wrap='wrap' gap='xs'>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <Text size='sm' fw={600} lineClamp={1}>
+                          #{r.id_solicitud} · {r.asunto_solicitud}
+                        </Text>
+                        <Text size='xs' c='dimmed'>
+                          {r.empresa_solicitud} · {r.proceso_solicitud} · {r.creador_solicitud}
+                        </Text>
+                      </div>
+                      <Badge variant='light'>{normalizeRequestStatus(r.estado_solicitud)}</Badge>
+                    </Group>
+                  </Paper>
+                ))
+              ) : (
+                <Text c='dimmed' ta='center' py='md'>
+                  No hay solicitudes en el periodo seleccionado
+                </Text>
+              )}
+            </Stack>
+          )}
+        </Card>
+    </DashboardPageShell>
+  );
+}

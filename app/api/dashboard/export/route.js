@@ -48,8 +48,8 @@ export async function GET(req) {
       solQuery += `
           AND rg.created_at >= CAST(@date_from AS DATE)
           AND rg.created_at < DATEADD(day, 1, CAST(@date_to AS DATE))`;
-      solReq.input('date_from', sql.Date, filters.date_from);
-      solReq.input('date_to', sql.Date, filters.date_to);
+      solReq.input('date_from', filters.date_from);
+      solReq.input('date_to', filters.date_to);
     }
 
     solQuery += ` ORDER BY rg.created_at DESC`;
