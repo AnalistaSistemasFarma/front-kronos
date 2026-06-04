@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Badge,
@@ -38,7 +38,11 @@ import {
   formatRequestTimeSeriesLabel,
   uniqueRequestsFromTasks,
 } from '../../lib/dashboard/requestAnalytics';
-import { getFilterLabel, type DashboardDateFilter } from '../../lib/dashboard/dateRange';
+import {
+  getFilterLabel,
+  getPeriodRangeLabel,
+  type DashboardDateFilter,
+} from '../../lib/dashboard/dateRange';
 import {
   ALL_COMPANIES_VALUE,
   buildAvgResolutionTimeSeries,
@@ -59,6 +63,7 @@ import {
   countRequestsByDashboardStatus,
   normalizeRequestStatus,
 } from '../../lib/dashboard/requestStatus';
+import { exportSolicitudesExcel } from '../../lib/dashboard/excel';
 
 export default function SolicitudesAnalyticsView() {
   const projectColors = useProjectColors();
@@ -74,11 +79,27 @@ export default function SolicitudesAnalyticsView() {
     fetchTasks,
     appliedRange,
     activeDateRange,
-    exportDashboardToExcel,
-    exportingExcel,
   } = useDashboardTasks();
 
+  const [exportingExcel, setExportingExcel] = useState(false);
   const [companyFilter, setCompanyFilter] = useState<string>(ALL_COMPANIES_VALUE);
+
+  const handleExportExcel = useCallback(async () => {
+    try {
+      setExportingExcel(true);
+      await exportSolicitudesExcel({
+        tasks,
+        dateFilter,
+        selectedMonthDate,
+        appliedRange,
+        companyFilter,
+      });
+    } catch (err) {
+      console.error('Error exportando solicitudes:', err);
+    } finally {
+      setExportingExcel(false);
+    }
+  }, [tasks, dateFilter, selectedMonthDate, appliedRange, companyFilter]);
 
   const allRequests = useMemo(() => uniqueRequestsFromTasks(tasks), [tasks]);
   const companies = useMemo(() => listCompaniesFromTasks(tasks), [tasks]);
@@ -240,7 +261,7 @@ export default function SolicitudesAnalyticsView() {
           onSelectedMonthDateChange={setSelectedMonthDate}
           onRefresh={fetchTasks}
           loading={loading}
-          onExport={exportDashboardToExcel}
+          onExport={handleExportExcel}
           exportingExcel={exportingExcel}
         />
       }
@@ -288,7 +309,7 @@ export default function SolicitudesAnalyticsView() {
               {formatNumber(stats.total)}
             </Title>
             <Text size='xs' c='dimmed'>
-              Periodo: {getFilterLabel(dateFilter)}
+              Solicitudes únicas (sin repetir por tarea) · {appliedRange ?? getPeriodRangeLabel(dateFilter, selectedMonthDate)}
               {isCompanyView && ` · ${companyFilter}`}
             </Text>
           </Card>

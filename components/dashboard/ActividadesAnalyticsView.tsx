@@ -1,11 +1,10 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useDashboardData } from '../../lib/dashboard/DashboardDataContext';
+import { useDashboardTasks } from '../../lib/dashboard/useDashboardTasks';
+import { exportActividadesExcel } from '../../lib/dashboard/excel';
 import {
   Card,
   Title,
@@ -43,9 +42,15 @@ import {
   buildVerticalBarChart,
 } from '../../lib/charts/builders';
 import {
+  computeActivityStats,
+  uniqueActivityRowsFromTasks,
+} from '../../lib/dashboard/activityMetrics';
+import {
   formatDateLocal,
   getDashboardDateRange,
   getFilterLabel,
+  getPeriodRangeLabel,
+  parseCalendarDate,
   type DashboardDateFilter,
 } from '../../lib/dashboard/dateRange';
 import { dashboardChartTheme } from './chartTheme';
@@ -100,113 +105,57 @@ export default function ActividadesAnalyticsView() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  const [tasks, setTasks] = useState<TaskData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [dateFilter, setDateFilter] = useState<DateFilter>('month');
-  const [selectedMonthDate, setSelectedMonthDate] = useState<Date>(
-    new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  const {
+    tasks: tasksFromCtx,
+    loading,
+    error,
+    dateFilter,
+    setDateFilter,
+    selectedMonthDate,
+    setSelectedMonthDate,
+    fetchTasks,
+    isAdmin,
+    loadingAdmin,
+    appliedRange,
+  } = useDashboardTasks();
+
+  const rawTasks = tasksFromCtx as TaskData[];
+
+  /** 1 solicitud = 1 actividad (misma cantidad que Solicitudes). */
+  const activities = useMemo(
+    () => uniqueActivityRowsFromTasks(rawTasks),
+    [rawTasks]
   );
+
+  const activitiesWithCost = activities;
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [exportingExcel, setExportingExcel] = useState(false);
-  const { isAdmin, loadingAdmin } = useDashboardData();
 
   useEffect(() => {
     if (status === 'loading') return;
     if (!session) router.push('/login');
   }, [session, status, router]);
 
-  useEffect(() => {
-    fetchTasks();
-  }, [dateFilter, selectedMonthDate]);
-
-  const exportDashboardToExcel = async () => {
+  const handleExportExcel = useCallback(async () => {
     try {
       setExportingExcel(true);
-      const dateRange = getDashboardDateRange(dateFilter, selectedMonthDate);
-      let exportUrl = '/api/dashboard/export';
-      if (dateRange) {
-        const params = new URLSearchParams({
-          date_from: dateRange.startDate,
-          date_to: dateRange.endDate,
-        });
-        exportUrl = `${exportUrl}?${params}`;
-      }
-      const res = await fetch(exportUrl);
-      if (!res.ok) throw new Error('Error al obtener datos del servidor');
-      const { solicitudes, actividades } = await res.json();
-
-      const workbook = new ExcelJS.Workbook();
-
-      const sheet1 = workbook.addWorksheet('Solicitudes');
-      if (solicitudes.length > 0) {
-        sheet1.columns = Object.keys(solicitudes[0]).map((k: string) => ({ header: k, key: k }));
-        solicitudes.forEach((row: Record<string, unknown>) => sheet1.addRow(row));
-      }
-
-      const sheet2 = workbook.addWorksheet('Actividades');
-      if (actividades.length > 0) {
-        sheet2.columns = Object.keys(actividades[0]).map((k: string) => ({ header: k, key: k }));
-        actividades.forEach((row: Record<string, unknown>) => sheet2.addRow(row));
-      }
-
-      const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      await exportActividadesExcel({
+        tasks: activitiesWithCost,
+        dateFilter,
+        selectedMonthDate,
+        appliedRange,
       });
-      saveAs(blob, 'Dashboard-Kronos.xlsx');
     } catch (err) {
-      console.error('Error exportando Excel:', err);
+      console.error('Error exportando actividades:', err);
     } finally {
       setExportingExcel(false);
     }
-  };
+  }, [activities, dateFilter, selectedMonthDate, appliedRange]);
 
-  const fetchTasks = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const dateRange = getDashboardDateRange(dateFilter, selectedMonthDate);
-
-      let url = '/api/requests-general/view-tasks';
-      if (dateRange) {
-        const params = new URLSearchParams({
-          date_from: dateRange.startDate,
-          date_to: dateRange.endDate,
-        });
-        url = `${url}?${params}`;
-      }
-
-      const response = await fetch(url);
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => ({}));
-        throw new Error(
-          (errBody as { error?: string }).error || 'Error al cargar los datos del dashboard'
-        );
-      }
-
-      const result = await response.json();
-      setTasks(result.data || []);
-    } catch (err) {
-      console.error('Error fetching tasks:', err);
-      setError(err instanceof Error ? err.message : 'Error desconocido al cargar los datos');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Calculate statistics
-  const stats = {
-    total: tasks.length,
-    completed: tasks.filter((t) => t.estado_tarea === 'Completada').length,
-    pending: tasks.filter((t) => t.estado_tarea === 'Pendiente').length,
-    inProgress: tasks.filter((t) => t.estado_tarea === 'En Proceso').length,
-    active: tasks.filter((t) => t.activo_tarea).length,
-  };
+  const stats = useMemo(() => computeActivityStats(rawTasks), [rawTasks]);
 
   // Prepare data for charts with project colors
-  const processData = tasks.reduce((acc, task) => {
+  const processData = activities.reduce((acc, task) => {
     const process = task.proceso_solicitud || 'Sin Proceso';
     acc[process] = (acc[process] || 0) + 1;
     return acc;
@@ -217,7 +166,7 @@ export default function ActividadesAnalyticsView() {
     .sort((a, b) => b.value - a.value)
     .slice(0, 10);
 
-  const categoryData = tasks.reduce((acc, task) => {
+  const categoryData = activities.reduce((acc, task) => {
     const category = task.categoria_solicitud || 'Sin Categoría';
     acc[category] = (acc[category] || 0) + 1;
     return acc;
@@ -259,8 +208,9 @@ export default function ActividadesAnalyticsView() {
   };
 
   // Time series data with dynamic grouping based on dateFilter (independent of global dateFilter)
-  const timeSeriesData = tasks.reduce((acc, task) => {
-    const date = new Date(task.fecha_creacion_solicitud);
+  const timeSeriesData = activities.reduce((acc, task) => {
+    const date = parseCalendarDate(task.fecha_creacion_solicitud);
+    if (!date) return acc;
     const key = getDateKey(date, dateFilter);
     acc[key] = (acc[key] || 0) + 1;
     return acc;
@@ -328,9 +278,10 @@ export default function ActividadesAnalyticsView() {
         return result;
       }
       case 'all': {
-        if (tasks.length === 0) return [];
-        const minDate = tasks.reduce((min, t) => {
-          const d = new Date(t.fecha_creacion_solicitud);
+        if (activities.length === 0) return [];
+        const minDate = activities.reduce((min, t) => {
+          const d = parseCalendarDate(t.fecha_creacion_solicitud);
+          if (!d) return min;
           return d < min ? d : min;
         }, new Date());
         const result: [string, number][] = [];
@@ -350,23 +301,22 @@ export default function ActividadesAnalyticsView() {
 
   const timeSeriesChartData = buildCompleteTimeSeries().map(([key, count]) => ({
     date: formatTimeSeriesLabel(key),
-    Tareas: count,
+    Actividades: count,
   }));
 
-  // Cost per activity data
+  // Cost per solicitud (actividad)
   const costStats = {
-    totalCost: tasks.reduce((sum, t) => sum + (t.costo_tarea || 0), 0),
-    tasksWithCost: tasks.filter((t) => t.costo_tarea && t.costo_tarea > 0).length,
+    totalCost: activitiesWithCost.reduce((sum, t) => sum + (t.costo_tarea || 0), 0),
+    tasksWithCost: activitiesWithCost.filter((t) => t.costo_tarea && t.costo_tarea > 0).length,
     averageCost:
-      tasks.filter((t) => t.costo_tarea && t.costo_tarea > 0).length > 0
-        ? tasks.reduce((sum, t) => sum + (t.costo_tarea || 0), 0) /
-          tasks.filter((t) => t.costo_tarea && t.costo_tarea > 0).length
+      activitiesWithCost.filter((t) => t.costo_tarea && t.costo_tarea > 0).length > 0
+        ? activitiesWithCost.reduce((sum, t) => sum + (t.costo_tarea || 0), 0) /
+          activitiesWithCost.filter((t) => t.costo_tarea && t.costo_tarea > 0).length
         : 0,
-    maxCost: Math.max(...tasks.map((t) => t.costo_tarea || 0), 0),
+    maxCost: Math.max(...activitiesWithCost.map((t) => t.costo_tarea || 0), 0),
   };
 
-  // Cost by activity (task name)
-  const costByActivityData = tasks.reduce((acc, task) => {
+  const costByActivityData = activitiesWithCost.reduce((acc, task) => {
     const activity = task.tarea || 'Sin Actividad';
     if (!acc[activity]) {
       acc[activity] = { cost: 0, count: 0 };
@@ -387,7 +337,7 @@ export default function ActividadesAnalyticsView() {
     .slice(0, 10);
 
   // Cost by cost center
-  const costByCenterData = tasks.reduce((acc, task) => {
+  const costByCenterData = activitiesWithCost.reduce((acc, task) => {
     const center = task.centro_costo_tarea || 'Sin Centro de Costo';
     if (!acc[center]) {
       acc[center] = { cost: 0, count: 0 };
@@ -408,7 +358,7 @@ export default function ActividadesAnalyticsView() {
     .slice(0, 10);
 
   // Cost by process
-  const costByProcessData = tasks.reduce((acc, task) => {
+  const costByProcessData = activitiesWithCost.reduce((acc, task) => {
     const process = task.proceso_solicitud || 'Sin Proceso';
     if (!acc[process]) {
       acc[process] = { cost: 0, count: 0 };
@@ -486,10 +436,38 @@ export default function ActividadesAnalyticsView() {
             value: stats.inProgress,
             color: enProceso,
           },
+          ...(stats.abierto > 0
+            ? [
+                {
+                  label: 'Abiertas',
+                  value: stats.abierto,
+                  color: projectColors.abierto ?? projectColors.primary,
+                },
+              ]
+            : []),
+          ...(stats.other > 0
+            ? [
+                {
+                  label: 'Otros estados',
+                  value: stats.other,
+                  color: projectColors.warning,
+                },
+              ]
+            : []),
         ],
         false
       ),
-    [stats.completed, stats.pending, stats.inProgress, completada, pendiente, enProceso]
+    [
+      stats.completed,
+      stats.pending,
+      stats.inProgress,
+      stats.abierto,
+      stats.other,
+      completada,
+      pendiente,
+      enProceso,
+      projectColors.warning,
+    ]
   );
 
   const doughnutOpts = {
@@ -524,17 +502,17 @@ export default function ActividadesAnalyticsView() {
   const inProgressShareChart = useMemo(
     () =>
       buildShareDoughnut(
-        stats.inProgress,
+        stats.inProgress + stats.abierto,
         stats.total,
         enProceso,
         'En proceso',
-        { ...doughnutOpts, emptyHint: 'Sin tareas en curso' }
+        { ...doughnutOpts, emptyHint: 'Sin actividades en curso' }
       ),
-    [stats.inProgress, stats.total, enProceso, doughnutRestColor]
+    [stats.inProgress, stats.abierto, stats.total, enProceso, doughnutRestColor]
   );
 
   const trendAreaChart = buildAreaLineChart(
-    timeSeriesChartData.map((d) => ({ label: d.date, value: d.Tareas })),
+    timeSeriesChartData.map((d) => ({ label: d.date, value: d.Actividades })),
     projectColors.secondary
   );
   const processBarChart = buildVerticalBarChart(
@@ -592,7 +570,7 @@ export default function ActividadesAnalyticsView() {
   return (
     <DashboardPageShell
       title='Actividades'
-      description='Sigue el volumen, el estado y la evolución de las tareas. Los filtros usan la fecha de creación de la solicitud.'
+      description='Misma base que Solicitudes: cada actividad es un pedido. Aquí ves desempeño por encargado, estado y costos.'
       toolbar={
         <DashboardDateToolbar
           dateFilter={dateFilter}
@@ -601,7 +579,7 @@ export default function ActividadesAnalyticsView() {
           onSelectedMonthDateChange={setSelectedMonthDate}
           onRefresh={fetchTasks}
           loading={loading}
-          onExport={exportDashboardToExcel}
+          onExport={handleExportExcel}
           exportingExcel={exportingExcel}
         />
       }
@@ -653,26 +631,53 @@ export default function ActividadesAnalyticsView() {
 
           <Tabs.Panel value='overview'>
             <Stack gap='xl' mt='md'>
+              {(loadingAdmin || isAdmin) && (
+                <ActividadesSection
+                  priority={1}
+                  title='Desempeño por encargado'
+                  description='Líderes de área y carga de actividades (una actividad = una solicitud en el periodo).'
+                >
+                  {loadingAdmin ? (
+                    <Group justify='center' py='xl'>
+                      <Loader size='sm' />
+                    </Group>
+                  ) : (
+                    <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+                      <Group gap='xs' mb='md'>
+                        <IconUsers size={18} color={projectColors.primary} />
+                        <Text size='sm' fw={600}>
+                          Actividades por encargado de área
+                        </Text>
+                      </Group>
+                      <EncargadoActivitiesChart
+                        tasks={activities}
+                        periodLabel={getFilterLabel(dateFilter)}
+                      />
+                    </Card>
+                  )}
+                </ActividadesSection>
+              )}
+
               <ActividadesSection
-                priority={1}
+                priority={loadingAdmin || isAdmin ? 2 : 1}
                 title='Panorama del periodo'
-                description='Cada tarjeta resume un indicador y su gráfica: composición del total o participación frente al resto.'
+                description='Mismos totales que Solicitudes: cada actividad es un pedido único en el rango de fechas.'
               >
                 <SimpleGrid cols={{ base: 1, xs: 2, lg: 4 }} spacing={{ base: 'sm', sm: 'md' }}>
                   <MetricInsightCard
                     compact
-                    label='Total tareas'
+                    label='Total actividades'
                     value={formatNumber(stats.total)}
-                    hint={`Periodo ${getFilterLabel(dateFilter)}`}
+                    hint={`Igual que solicitudes · ${appliedRange ?? getPeriodRangeLabel(dateFilter, selectedMonthDate)}`}
                     color={projectColors.primary}
                     icon={IconChartBar}
                     loading={loading}
                     chartTitle='Composición del total'
-                    chartDescription='Cuántas tareas hay en cada estado'
+                    chartDescription='Actividades (solicitudes) por estado'
                     chartType='bar'
                     chartData={totalBreakdownChart.data}
                     chartOptions={totalBreakdownChart.options}
-                    emptyMessage='No hay tareas en este periodo'
+                    emptyMessage='No hay actividades en este periodo'
                   />
                   <MetricInsightCard
                     compact
@@ -707,9 +712,13 @@ export default function ActividadesAnalyticsView() {
                   <MetricInsightCard
                     compact
                     label='En proceso'
-                    value={formatNumber(stats.inProgress)}
-                    hint='Trabajo en curso en el periodo'
-                    sharePercent={pct(stats.inProgress)}
+                    value={formatNumber(stats.inProgress + stats.abierto)}
+                    hint={
+                      stats.abierto > 0
+                        ? `${formatNumber(stats.inProgress)} en curso · ${formatNumber(stats.abierto)} abiertas`
+                        : 'Trabajo en curso en el periodo'
+                    }
+                    sharePercent={pct(stats.inProgress + stats.abierto)}
                     color={enProceso}
                     icon={IconTrendingUp}
                     loading={loading}
@@ -724,48 +733,21 @@ export default function ActividadesAnalyticsView() {
                 {stats.total > 0 && stats.pending > stats.completed && (
                   <Paper p='md' radius='md' withBorder bg='orange.0'>
                     <Text size='sm' c='orange.9'>
-                      Hay más tareas pendientes ({formatNumber(stats.pending)}) que completadas (
+                      Hay más actividades pendientes ({formatNumber(stats.pending)}) que completadas (
                       {formatNumber(stats.completed)}). Revisa asignaciones y plazos del periodo.
                     </Text>
                   </Paper>
                 )}
               </ActividadesSection>
 
-              {(loadingAdmin || isAdmin) && (
-                <ActividadesSection
-                  priority={2}
-                  title='Desempeño por encargado'
-                  description='Detalle por persona o equipo. Útil para administradores que reparten carga de trabajo.'
-                >
-                  {loadingAdmin ? (
-                    <Group justify='center' py='xl'>
-                      <Loader size='sm' />
-                    </Group>
-                  ) : (
-                    <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
-                      <Group gap='xs' mb='md'>
-                        <IconUsers size={18} color={projectColors.primary} />
-                        <Text size='sm' fw={600}>
-                          Actividades por encargado de área
-                        </Text>
-                      </Group>
-                      <EncargadoActivitiesChart
-                        tasks={tasks}
-                        periodLabel={getFilterLabel(dateFilter)}
-                      />
-                    </Card>
-                  )}
-                </ActividadesSection>
-              )}
-
               <ActividadesSection
-                priority={isAdmin ? 3 : 2}
+                priority={loadingAdmin || isAdmin ? 3 : 2}
                 title='Evolución en el tiempo'
-                description='Muestra si el volumen de tareas sube o baja según el periodo elegido en la barra superior.'
+                description='Volumen de actividades (solicitudes) según el periodo elegido en la barra superior.'
               >
                 <ChartCard
-                  title='Tendencia de tareas creadas'
-                  description='Cantidad de tareas por intervalo dentro del rango filtrado'
+                  title='Tendencia de actividades'
+                  description='Cantidad de solicitudes creadas por intervalo en el rango filtrado'
                 >
                   {loading ? (
                     <Skeleton height={chartHeights.trend} radius='md' />

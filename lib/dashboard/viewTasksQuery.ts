@@ -36,6 +36,26 @@ export const ESTADO_SOLICITUD_SQL = `
   END
 `;
 
+/** Estado en gráficas de actividades (1 solicitud = 1 actividad; basado en status de la solicitud). */
+const ESTADO_ACTIVIDAD_SQL = `
+  CASE
+    WHEN LOWER(LTRIM(ISNULL(scrg.status, ''))) IN (
+      N'resuelto', N'resuelta', N'completada', N'completado', N'cerrado', N'cerrada',
+      N'closed', N'finalizado', N'finalizada', N'cancelado', N'cancelada'
+    ) THEN N'Completada'
+    WHEN LOWER(LTRIM(ISNULL(scrg.status, ''))) IN (
+      N'sin empezar', N'pendiente', N'nuevo', N'not started', N'por hacer'
+    ) THEN N'Pendiente'
+    WHEN LOWER(LTRIM(ISNULL(scrg.status, ''))) IN (N'abierto', N'abierta')
+      OR LOWER(LTRIM(ISNULL(scrg.status, ''))) LIKE N'%abiert%'
+      OR LOWER(LTRIM(ISNULL(scrg.status, ''))) IN (
+        N'en proceso', N'en progreso', N'asignado', N'asignada', N'open', N'en curso'
+      )
+    THEN N'En Proceso'
+    ELSE COALESCE(NULLIF(LTRIM(scrg.status), ''), N'Sin estado')
+  END
+`;
+
 export interface ViewTasksFilters {
   task_status?: string | null;
   request_status?: string | null;
@@ -135,102 +155,141 @@ export function validateDateRange(
 }
 
 export function buildViewTasksQuery(filters: ViewTasksFilters): string {
-  let innerWhere = 'WHERE 1=1';
+  let where = 'WHERE 1=1';
 
   if (filters.request_status) {
-    innerWhere += ` AND scrg.status = @request_status`;
+    where += ` AND scrg.status = @request_status`;
   }
   if (filters.assigned_user) {
-    innerWhere += ` AND u.name LIKE '%' + @assigned_user + '%'`;
+    where += ` AND (
+      ISNULL(task.asignado_tarea, N'') LIKE '%' + @assigned_user + '%'
+      OR ISNULL(enc.encargado_proceso, N'') LIKE '%' + @assigned_user + '%'
+    )`;
   }
   if (filters.creator) {
-    innerWhere += ` AND urq.name LIKE '%' + @creator + '%'`;
+    where += ` AND urq.name LIKE '%' + @creator + '%'`;
   }
   if (filters.executor) {
-    innerWhere += ` AND (uex_t.name LIKE '%' + @executor + '%' OR uex_rg.name LIKE '%' + @executor + '%')`;
+    where += ` AND (
+      ISNULL(task.ejecutor_final_tarea, N'') LIKE '%' + @executor + '%'
+      OR uex_rg.name LIKE '%' + @executor + '%'
+    )`;
   }
   if (filters.company) {
-    innerWhere += ` AND c.company = @company`;
+    where += ` AND c.company = @company`;
   }
   if (filters.process) {
-    innerWhere += ` AND pc.process = @process`;
+    where += ` AND ISNULL(pcr.proceso_solicitud, N'') = @process`;
   }
   if (filters.category) {
-    innerWhere += ` AND cr.category = @category`;
+    where += ` AND ISNULL(pcr.categoria_solicitud, N'') = @category`;
   }
   if (filters.date_from && filters.date_to) {
-    innerWhere += `
-      AND rg.created_at >= CAST(@date_from AS DATE)
-      AND rg.created_at < DATEADD(day, 1, CAST(@date_to AS DATE))`;
+    where += `
+      AND CAST(rg.created_at AS DATE) >= CAST(@date_from AS DATE)
+      AND CAST(rg.created_at AS DATE) <= CAST(@date_to AS DATE)`;
   }
   if (filters.task_date_from && filters.task_date_to) {
-    innerWhere += `
-      AND trg.end_date >= CAST(@task_date_from AS DATE)
-      AND trg.end_date < DATEADD(day, 1, CAST(@task_date_to AS DATE))`;
+    where += `
+      AND EXISTS (
+        SELECT 1
+        FROM task_request_general trg_f
+        WHERE trg_f.id_request_general = rg.id
+          AND trg_f.end_date >= CAST(@task_date_from AS DATE)
+          AND trg_f.end_date < DATEADD(day, 1, CAST(@task_date_to AS DATE))
+      )`;
   }
   if (filters.active) {
-    innerWhere += ` AND tpc.active = @active`;
+    where += `
+      AND EXISTS (
+        SELECT 1
+        FROM task_request_general trg_a
+        INNER JOIN task_process_category tpc_a ON tpc_a.id = trg_a.id_task
+        WHERE trg_a.id_request_general = rg.id
+          AND tpc_a.active = @active
+      )`;
   }
-
-  let outerWhere = '';
   if (filters.task_status) {
-    outerWhere += ` AND estado_tarea = @task_status`;
+    where += ` AND ${ESTADO_ACTIVIDAD_SQL} = @task_status`;
   }
 
   return `
-      WITH base AS (
-        SELECT
+      SELECT
+        COALESCE(task.id_tarea, -rg.id) AS id_tarea,
+        COALESCE(NULLIF(LTRIM(task.tarea), N''), rg.subject_request, N'Sin tarea asignada') AS tarea,
+        ${ESTADO_ACTIVIDAD_SQL} AS estado_tarea,
+        scrg.status AS estado_tarea_original,
+        COALESCE(NULLIF(LTRIM(task.asignado_tarea), N''), N'Sin asignar') AS asignado_tarea,
+        task.hora_inicio_tarea,
+        task.fecha_fin_tarea,
+        task.resolucion_tarea,
+        task.fecha_resolucion_tarea,
+        cost_sum.costo_total AS costo_tarea,
+        task.centro_costo_tarea,
+        CAST(COALESCE(task.activo_tarea, 1) AS BIT) AS activo_tarea,
+        COALESCE(task.ejecutor_final_tarea, uex_rg.name) AS ejecutor_final_tarea,
+        rg.id AS id_solicitud,
+        rg.subject_request AS asunto_solicitud,
+        rg.description AS descripcion_solicitud,
+        rg.created_at AS fecha_creacion_solicitud,
+        c.company AS empresa_solicitud,
+        urq.name AS creador_solicitud,
+        ${ESTADO_SOLICITUD_SQL} AS estado_solicitud,
+        rg.resolution AS resolucion_solicitud,
+        rg.date_resolution AS fecha_resolucion_solicitud,
+        uex_rg.name AS ejecutor_final_solicitud,
+        ISNULL(pcr.proceso_solicitud, N'Sin Proceso') AS proceso_solicitud,
+        ISNULL(pcr.categoria_solicitud, N'Sin Categoría') AS categoria_solicitud,
+        enc.encargado_proceso
+      FROM requests_general rg
+      INNER JOIN company c ON c.id_company = rg.id_company
+      LEFT JOIN [user] urq ON urq.id = rg.id_requester
+      LEFT JOIN status_case scrg ON scrg.id_status_case = rg.status_req
+      LEFT JOIN [user] uex_rg ON uex_rg.id = rg.id_executor_final
+      OUTER APPLY (
+        SELECT TOP 1
           trg.id AS id_tarea,
           tpc.task AS tarea,
-          ${ESTADO_TAREA_SQL} AS estado_tarea,
-          sc.status AS estado_tarea_original,
           u.name AS asignado_tarea,
           trg.start_date AS hora_inicio_tarea,
           trg.end_date AS fecha_fin_tarea,
           trg.resolution AS resolucion_tarea,
           trg.date_resolution AS fecha_resolucion_tarea,
-          tpc.cost AS costo_tarea,
           tpc.cost_center AS centro_costo_tarea,
           CAST(ISNULL(tpc.active, 1) AS BIT) AS activo_tarea,
-          uex_t.name AS ejecutor_final_tarea,
-          rg.id AS id_solicitud,
-          rg.subject_request AS asunto_solicitud,
-          rg.description AS descripcion_solicitud,
-          rg.created_at AS fecha_creacion_solicitud,
-          c.company AS empresa_solicitud,
-          urq.name AS creador_solicitud,
-          ${ESTADO_SOLICITUD_SQL} AS estado_solicitud,
-          rg.resolution AS resolucion_solicitud,
-          rg.date_resolution AS fecha_resolucion_solicitud,
-          uex_rg.name AS ejecutor_final_solicitud,
-          ISNULL(pc.process, N'Sin Proceso') AS proceso_solicitud,
-          ISNULL(cr.category, N'Sin Categoría') AS categoria_solicitud,
-          enc.encargado_proceso
+          uex_t.name AS ejecutor_final_tarea
         FROM task_request_general trg
         INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
-        INNER JOIN status_case sc ON sc.id_status_case = trg.id_status
-        INNER JOIN [user] u ON u.id = trg.id_assigned
-        INNER JOIN requests_general rg ON rg.id = trg.id_request_general
-        INNER JOIN company c ON c.id_company = rg.id_company
-        LEFT JOIN [user] urq ON urq.id = rg.id_requester
-        LEFT JOIN status_case scrg ON scrg.id_status_case = rg.status_req
-        LEFT JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
-        LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
-        LEFT JOIN category_request cr ON cr.id = pc.id_category_request
+        LEFT JOIN [user] u ON u.id = trg.id_assigned
         LEFT JOIN [user] uex_t ON uex_t.id = trg.id_executor_final
-        LEFT JOIN [user] uex_rg ON uex_rg.id = rg.id_executor_final
-        OUTER APPLY (
-          SELECT TOP 1 u_enc.name AS encargado_proceso
-          FROM user_process_category_request_general upcrg
-          INNER JOIN [user] u_enc ON u_enc.id = upcrg.id_user
-          WHERE upcrg.id_process_category = pc.id
-        ) enc
-        ${innerWhere}
-      )
-      SELECT *
-      FROM base
-      WHERE 1=1${outerWhere}
-      ORDER BY id_tarea DESC
+        WHERE trg.id_request_general = rg.id
+        ORDER BY trg.id DESC
+      ) task
+      OUTER APPLY (
+        SELECT SUM(CAST(ISNULL(tpc2.cost, 0) AS FLOAT)) AS costo_total
+        FROM task_request_general trg2
+        INNER JOIN task_process_category tpc2 ON tpc2.id = trg2.id_task
+        WHERE trg2.id_request_general = rg.id
+      ) cost_sum
+      OUTER APPLY (
+        SELECT TOP 1
+          pc.process AS proceso_solicitud,
+          cr.category AS categoria_solicitud,
+          pc.id AS id_process_category
+        FROM process_category_request_general pcrg
+        INNER JOIN process_category pc ON pc.id = pcrg.id_process_category
+        INNER JOIN category_request cr ON cr.id = pc.id_category_request
+        WHERE pcrg.id_request_general = rg.id
+        ORDER BY pcrg.id DESC
+      ) pcr
+      OUTER APPLY (
+        SELECT TOP 1 u_enc.name AS encargado_proceso
+        FROM user_process_category_request_general upcrg
+        INNER JOIN [user] u_enc ON u_enc.id = upcrg.id_user
+        WHERE upcrg.id_process_category = pcr.id_process_category
+      ) enc
+      ${where}
+      ORDER BY rg.id DESC
     `;
 }
 
@@ -277,6 +336,14 @@ export function applyViewTasksInputs(
   }
 }
 
+function dedupeBySolicitud(rows: DashboardTaskRow[]): DashboardTaskRow[] {
+  const map = new Map<number, DashboardTaskRow>();
+  for (const row of rows) {
+    if (!map.has(row.id_solicitud)) map.set(row.id_solicitud, row);
+  }
+  return [...map.values()];
+}
+
 export async function queryDashboardTasks(
   pool: sql.ConnectionPool,
   filters: ViewTasksFilters
@@ -285,17 +352,18 @@ export async function queryDashboardTasks(
   const request = pool.request();
   applyViewTasksInputs(request, filters);
   const result = await request.query(query);
-  return result.recordset as DashboardTaskRow[];
+  return dedupeBySolicitud(result.recordset as DashboardTaskRow[]);
 }
 
 export function buildSummary(data: DashboardTaskRow[]) {
-  const completada = data.filter((t) => t.estado_tarea === 'Completada').length;
-  const pendiente = data.filter((t) => t.estado_tarea === 'Pendiente').length;
-  const enProceso = data.filter((t) => t.estado_tarea === 'En Proceso').length;
-  const otros = data.length - completada - pendiente - enProceso;
+  const unique = dedupeBySolicitud(data);
+  const completada = unique.filter((t) => t.estado_tarea === 'Completada').length;
+  const pendiente = unique.filter((t) => t.estado_tarea === 'Pendiente').length;
+  const enProceso = unique.filter((t) => t.estado_tarea === 'En Proceso').length;
+  const otros = unique.length - completada - pendiente - enProceso;
 
   return {
-    total: data.length,
+    total: unique.length,
     completada,
     pendiente,
     en_proceso: enProceso,

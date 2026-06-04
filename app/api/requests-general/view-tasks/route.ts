@@ -47,6 +47,12 @@ export async function GET(req: Request) {
         data,
         count: data.length,
         summary,
+        metrics_definition: {
+          grain: 'request',
+          unique_key: 'id_solicitud',
+          date_field: 'requests_general.created_at',
+          note: 'Todas las solicitudes del periodo, con o sin tarea asignada (1 solicitud = 1 actividad).',
+        },
         filters_applied: {
           date_field: 'requests_general.created_at',
           date_from: filters.date_from ?? null,

@@ -316,7 +316,6 @@ export function StatusMetricGradientCard({
     <Paper
       p='sm'
       radius='md'
-      withBorder={!isDark}
       className={isDark ? 'dashboard-kpi-gradient' : undefined}
       style={
         isDark
@@ -327,7 +326,7 @@ export function StatusMetricGradientCard({
             }
           : {
               background: `${accentColor}18`,
-              borderColor: `${accentColor}55`,
+              border: `1px solid ${accentColor}55`,
             }
       }
     >

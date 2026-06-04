@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import {
   Alert,
@@ -55,8 +55,10 @@ import {
   formatHoursLabel,
   formatResolutionDuration,
   listTechnicians,
+  dedupeHelpDeskCases,
   type HelpDeskCase,
 } from '../../lib/dashboard/ticketAnalytics';
+import { exportTicketsExcel } from '../../lib/dashboard/excel';
 import { useDashboardTickets } from '../../lib/dashboard/useDashboardTickets';
 import { ResolutionTimeTrendChart } from './ResolutionTimeTrendChart';
 import {
@@ -103,12 +105,30 @@ export default function TicketsAnalyticsView() {
   } = useDashboardTickets();
 
   const [technicianFilter, setTechnicianFilter] = useState(ALL_TECHNICIANS_VALUE);
+  const [exportingExcel, setExportingExcel] = useState(false);
   const chartViewport = useChartViewport();
 
   const cases = useMemo(
-    () => rawCases as HelpDeskCase[],
+    () => dedupeHelpDeskCases(rawCases as HelpDeskCase[]),
     [rawCases]
   );
+
+  const handleExportExcel = useCallback(async () => {
+    try {
+      setExportingExcel(true);
+      await exportTicketsExcel({
+        cases,
+        dateFilter,
+        selectedMonthDate,
+        appliedRange,
+        technicianFilter,
+      });
+    } catch (err) {
+      console.error('Error exportando tickets:', err);
+    } finally {
+      setExportingExcel(false);
+    }
+  }, [cases, dateFilter, selectedMonthDate, appliedRange, technicianFilter]);
 
   const teamSummary = useMemo(() => buildTeamSummary(cases), [cases]);
   const scopedCases = useMemo(
@@ -304,7 +324,8 @@ export default function TicketsAnalyticsView() {
           onSelectedMonthDateChange={setSelectedMonthDate}
           onRefresh={fetchTickets}
           loading={loading}
-          showExport={false}
+          onExport={handleExportExcel}
+          exportingExcel={exportingExcel}
         />
       }
     >

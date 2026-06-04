@@ -13,10 +13,9 @@ import {
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useDashboardAdmin } from './DashboardAdminContext';
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
 import { registerCharts } from '../charts/register';
 import {
+  clampReferenceToPresent,
   getDashboardDateRange,
   type DashboardDateFilter,
 } from './dateRange';
@@ -60,9 +59,8 @@ interface DashboardDataContextValue {
   isAdmin: boolean;
   loadingAdmin: boolean;
   appliedRange: string | null;
+  ticketsAppliedRange: string | null;
   activeDateRange: ReturnType<typeof getDashboardDateRange>;
-  exportDashboardToExcel: () => Promise<void>;
-  exportingExcel: boolean;
 }
 
 const DashboardDataContext = createContext<DashboardDataContextValue | null>(null);
@@ -106,17 +104,37 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
   const [selectedMonthDate, setSelectedMonthDate] = useState(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   );
-  const [exportingExcel, setExportingExcel] = useState(false);
   const [appliedRange, setAppliedRange] = useState<string | null>(null);
+  const [ticketsAppliedRange, setTicketsAppliedRange] = useState<string | null>(null);
   const isAdmin = isDashboardAdmin;
   const loadingAdmin = loadingDashboardAdmin;
 
   const tasksCacheKey = useRef<string | null>(null);
   const ticketsCacheKey = useRef<string | null>(null);
+  const ticketsFetchGen = useRef(0);
 
   useEffect(() => {
     registerCharts();
   }, []);
+
+  const setDateFilterSafe = useCallback((filter: DashboardDateFilter) => {
+    setDateFilter(filter);
+    setSelectedMonthDate((prev) => clampReferenceToPresent(prev, filter));
+  }, []);
+
+  const setSelectedMonthDateSafe = useCallback(
+    (date: Date) => {
+      setSelectedMonthDate(clampReferenceToPresent(date, dateFilter));
+    },
+    [dateFilter]
+  );
+
+  useEffect(() => {
+    setSelectedMonthDate((prev) => {
+      const clamped = clampReferenceToPresent(prev, dateFilter);
+      return clamped.getTime() === prev.getTime() ? prev : clamped;
+    });
+  }, [dateFilter]);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -137,7 +155,12 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
         }
         setTasksError(null);
 
-        const response = await fetch(buildTasksUrl(dateFilter, selectedMonthDate));
+        const response = await fetch(buildTasksUrl(dateFilter, selectedMonthDate), {
+          credentials: 'same-origin',
+        });
+        if (response.status === 401) {
+          throw new Error('Sesión no válida. Recarga la página o vuelve a iniciar sesión.');
+        }
         if (!response.ok) {
           const errBody = await response.json().catch(() => ({}));
           throw new Error(
@@ -173,6 +196,7 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
       const key = periodCacheKey(dateFilter, selectedMonthDate);
       const hasCache = ticketsCacheKey.current === key;
       const silent = opts?.silent ?? hasCache;
+      const gen = ++ticketsFetchGen.current;
 
       try {
         if (silent) {
@@ -192,7 +216,10 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
           url = `${url}?${params}`;
         }
 
-        const res = await fetch(url);
+        const res = await fetch(url, { credentials: 'same-origin' });
+        if (res.status === 401) {
+          throw new Error('Sesión no válida. Recarga la página o vuelve a iniciar sesión.');
+        }
         if (!res.ok) {
           const errBody = await res.json().catch(() => ({}));
           throw new Error(
@@ -200,11 +227,25 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
           );
         }
         const data = await res.json();
+        if (gen !== ticketsFetchGen.current) return;
+
         setCases(data.data || []);
         ticketsCacheKey.current = key;
+
+        const applied = data.filters_applied as
+          | { date_from?: string | null; date_to?: string | null }
+          | null
+          | undefined;
+        if (applied?.date_from && applied?.date_to) {
+          setTicketsAppliedRange(`${applied.date_from} → ${applied.date_to}`);
+        } else {
+          setTicketsAppliedRange(null);
+        }
       } catch (err) {
+        if (gen !== ticketsFetchGen.current) return;
         setTicketsError(err instanceof Error ? err.message : 'Error desconocido');
       } finally {
+        if (gen !== ticketsFetchGen.current) return;
         setTicketsLoading(false);
         setTicketsRefreshing(false);
       }
@@ -213,56 +254,14 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (status !== 'authenticated') return;
+    if (status !== 'authenticated' || !session?.user?.email) return;
     void fetchTickets();
-  }, [status, dateFilter, selectedMonthDate, fetchTickets]);
+  }, [status, session?.user?.email, dateFilter, selectedMonthDate, fetchTickets]);
 
   useEffect(() => {
-    if (status !== 'authenticated') return;
+    if (status !== 'authenticated' || !session?.user?.email) return;
     void fetchTasks();
-  }, [status, dateFilter, selectedMonthDate, fetchTasks]);
-
-  const exportDashboardToExcel = async () => {
-    try {
-      setExportingExcel(true);
-      const dateRange = getDashboardDateRange(dateFilter, selectedMonthDate);
-      let exportUrl = '/api/dashboard/export';
-      if (dateRange) {
-        const params = new URLSearchParams({
-          date_from: dateRange.startDate,
-          date_to: dateRange.endDate,
-        });
-        exportUrl = `${exportUrl}?${params}`;
-      }
-      const res = await fetch(exportUrl);
-      if (!res.ok) throw new Error('Error al obtener datos del servidor');
-      const { solicitudes, actividades } = await res.json();
-
-      const workbook = new ExcelJS.Workbook();
-      const sheet1 = workbook.addWorksheet('Solicitudes');
-      if (solicitudes.length > 0) {
-        sheet1.columns = Object.keys(solicitudes[0]).map((k: string) => ({ header: k, key: k }));
-        solicitudes.forEach((row: Record<string, unknown>) => sheet1.addRow(row));
-      }
-      const sheet2 = workbook.addWorksheet('Actividades');
-      if (actividades.length > 0) {
-        sheet2.columns = Object.keys(actividades[0]).map((k: string) => ({ header: k, key: k }));
-        actividades.forEach((row: Record<string, unknown>) => sheet2.addRow(row));
-      }
-
-      const buffer = await workbook.xlsx.writeBuffer();
-      saveAs(
-        new Blob([buffer], {
-          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        }),
-        'Dashboard-Kronos.xlsx'
-      );
-    } catch (err) {
-      console.error('Error exportando Excel:', err);
-    } finally {
-      setExportingExcel(false);
-    }
-  };
+  }, [status, session?.user?.email, dateFilter, selectedMonthDate, fetchTasks]);
 
   const activeDateRange = getDashboardDateRange(dateFilter, selectedMonthDate);
 
@@ -279,17 +278,16 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
       ticketsRefreshing,
       ticketsError,
       dateFilter,
-      setDateFilter,
+      setDateFilter: setDateFilterSafe,
       selectedMonthDate,
-      setSelectedMonthDate,
+      setSelectedMonthDate: setSelectedMonthDateSafe,
       fetchTasks,
       fetchTickets,
       isAdmin,
       loadingAdmin,
       appliedRange,
+      ticketsAppliedRange,
       activeDateRange,
-      exportDashboardToExcel,
-      exportingExcel,
     }),
     [
       session,
@@ -304,13 +302,15 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
       ticketsError,
       dateFilter,
       selectedMonthDate,
+      setDateFilterSafe,
+      setSelectedMonthDateSafe,
       fetchTasks,
       fetchTickets,
       isAdmin,
       loadingAdmin,
       appliedRange,
+      ticketsAppliedRange,
       activeDateRange,
-      exportingExcel,
     ]
   );
 

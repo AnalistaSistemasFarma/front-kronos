@@ -19,8 +19,10 @@ const DashboardAdminContext = createContext<DashboardAdminContextValue | null>(n
 
 async function fetchDashboardAdminFlag(email: string): Promise<boolean> {
   const res = await fetch(
-    `/api/requests-general/verify-permissions?email=${encodeURIComponent(email)}`
+    `/api/requests-general/verify-permissions?email=${encodeURIComponent(email)}`,
+    { credentials: 'same-origin' }
   );
+  if (res.status === 401) return false;
   if (!res.ok) return false;
   const data = await res.json();
   return Boolean(data.user?.isAdmin);

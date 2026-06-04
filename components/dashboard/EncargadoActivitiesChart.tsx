@@ -106,9 +106,11 @@ function ChartStatusLegend({ fullWidth = false }: { fullWidth?: boolean }) {
     <Paper
       p='sm'
       radius='md'
-      withBorder
       w={fullWidth ? '100%' : undefined}
-      style={{ background: 'var(--chart-panel)', borderColor: palette.blue100 }}
+      style={{
+        background: 'var(--chart-panel)',
+        border: `1px solid ${palette.blue100}`,
+      }}
     >
       <Group gap='md' justify='center' wrap='wrap'>
         {statusSeries.map((s) => (
@@ -229,8 +231,7 @@ function PersonCardsGrid({ people }: { people: AssigneeRow[] }) {
             key={person.asignado}
             p={{ base: 'sm', sm: 'md' }}
             radius='md'
-            withBorder
-            style={{ borderColor: palette.blue100 }}
+            style={{ border: `1px solid ${palette.blue100}` }}
           >
             <Group wrap='nowrap' gap='sm' align='flex-start' mb='xs'>
               <ThemeIcon size={40} radius='md' variant='gradient' gradient={palette.gradient}>
@@ -307,10 +308,9 @@ function TeamSummaryTable({ people }: { people: AssigneeRow[] }) {
             key={person.asignado}
             p='sm'
             radius='md'
-            withBorder
             style={{
-              borderColor: palette.chartPanelBorder,
               background: palette.chartPanelBg,
+              border: `1px solid ${palette.chartPanelBorder}`,
             }}
           >
             <Group justify='space-between' mb='xs' wrap='wrap' gap='xs'>
@@ -440,9 +440,8 @@ function TeamPerformanceCharts({
     <Paper
       p={{ base: 'sm', sm: 'md', lg: 'lg' }}
       radius='md'
-      withBorder
       mt='md'
-      style={{ borderColor: palette.chartPanelBorder }}
+      style={{ border: `1px solid ${palette.chartPanelBorder}` }}
     >
       <Stack gap='sm' mb='md'>
         <Box>
@@ -536,8 +535,7 @@ function IndividualPerformanceView({
       <Paper
         p={{ base: 'sm', sm: 'md', lg: 'lg' }}
         radius='md'
-        withBorder
-        style={{ borderColor: palette.blue100 }}
+        style={{ border: `1px solid ${palette.blue100}` }}
       >
         <Group wrap='wrap' gap='md' mb='lg' align='flex-start'>
           <ThemeIcon
@@ -703,8 +701,7 @@ function TaskDetailTable({
             key={row.id_tarea}
             p='sm'
             radius='md'
-            withBorder
-            style={{ borderColor: palette.blue100 }}
+            style={{ border: `1px solid ${palette.blue100}` }}
           >
             <Group justify='space-between' align='flex-start' wrap='nowrap' gap='xs' mb={6}>
               <Text size='sm' fw={600} lineClamp={1} style={{ color: palette.primary, flex: 1 }}>
@@ -974,7 +971,7 @@ export default function EncargadoActivitiesChart({
             Actividades por encargado de área
           </Text>
           <Text size='xs' fw={500} style={{ color: chartLabelColor }}>
-            Periodo {periodLabel} · {totalTasks} tareas en total
+            Periodo {periodLabel} · {totalTasks} actividades en total
           </Text>
         </Box>
         {!selectedEncargado && (
@@ -1001,10 +998,9 @@ export default function EncargadoActivitiesChart({
           <Paper
             p={{ base: 'sm', sm: 'md', lg: 'lg' }}
             radius='lg'
-            withBorder
             style={{
               background: palette.chartSurface,
-              borderColor: palette.borderAccent,
+              border: `1px solid ${palette.borderAccent}`,
             }}
           >
             <Group justify='space-between' mb='lg' wrap='wrap' gap='sm'>
@@ -1149,12 +1145,11 @@ export default function EncargadoActivitiesChart({
 
           <UnstyledButton onClick={() => setTableOpen((o) => !o)} w='100%'>
             <Paper
-              withBorder
               p='md'
               radius='md'
               style={{
-                borderColor: tableOpen ? palette.borderAccentStrong : undefined,
                 background: tableOpen ? palette.blue50 : palette.chartPanelBg,
+                border: `1px solid ${tableOpen ? palette.borderAccentStrong : palette.chartPanelBorder}`,
               }}
             >
               <Group justify='space-between'>
@@ -1189,10 +1184,9 @@ export default function EncargadoActivitiesChart({
 
           <Collapse in={tableOpen}>
             <Paper
-              withBorder
               radius='md'
               p={{ base: 'sm', sm: 'md' }}
-              style={{ borderColor: palette.blue100 }}
+              style={{ border: `1px solid ${palette.blue100}` }}
             >
               <TaskDetailTable
                 rows={detailRows}
@@ -1207,14 +1201,13 @@ export default function EncargadoActivitiesChart({
           <Paper
             p={{ base: 'sm', sm: 'md', lg: 'lg' }}
             radius='lg'
-            withBorder
             style={{
               background: palette.chartPanelBg,
-              borderColor: palette.chartPanelBorder,
+              border: `1px solid ${palette.chartPanelBorder}`,
             }}
           >
             <Text size='xs' fw={600} mb='sm' style={{ color: chartLabelColor }}>
-              Tareas por encargado — haga clic en una fila para ver el detalle del equipo
+              Actividades por encargado — haga clic en una fila para ver el detalle del equipo
             </Text>
             <ChartContainer
               type='bar'
@@ -1236,13 +1229,12 @@ export default function EncargadoActivitiesChart({
                   w='100%'
                 >
                   <Paper
-                    p='md'
+                    p={0}
                     radius='md'
-                    withBorder
                     style={{
-                      borderLeft: `4px solid ${item.barHex}`,
+                      overflow: 'hidden',
                       background: palette.chartPanelBg,
-                      borderColor: palette.chartPanelBorder,
+                      border: `1px solid ${palette.chartPanelBorder}`,
                       transition: 'box-shadow 0.15s ease, transform 0.15s ease',
                     }}
                     styles={{
@@ -1256,6 +1248,13 @@ export default function EncargadoActivitiesChart({
                       },
                     }}
                   >
+                    <Group wrap='nowrap' gap={0} align='stretch'>
+                      <Box
+                        w={4}
+                        style={{ flexShrink: 0, backgroundColor: item.barHex }}
+                        aria-hidden
+                      />
+                      <Box p='md' style={{ flex: 1, minWidth: 0 }}>
                     <Group wrap='nowrap' gap='sm' align='flex-start'>
                       <ThemeIcon size={36} radius='md' color={item.color}>
                         <Text size='xs' fw={700} c='white'>
@@ -1269,7 +1268,7 @@ export default function EncargadoActivitiesChart({
                         <Group gap='xs' mt={4}>
                           <IconUser size={12} color={palette.blue700} />
                           <Text size='xs' fw={500} style={{ color: chartLabelColor }}>
-                            {item.tareas} {item.tareas === 1 ? 'tarea' : 'tareas'}
+                            {item.tareas} {item.tareas === 1 ? 'actividad' : 'actividades'}
                             {encargadoChartData.length > 1 ? ` · ${item.pct}% del máximo` : ''}
                           </Text>
                         </Group>
@@ -1286,6 +1285,8 @@ export default function EncargadoActivitiesChart({
                         />
                       </Box>
                       <IconChevronRight size={16} color={palette.blue700} />
+                    </Group>
+                      </Box>
                     </Group>
                   </Paper>
                 </UnstyledButton>

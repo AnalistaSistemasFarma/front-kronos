@@ -15,6 +15,6 @@ export function useDashboardTickets() {
     setSelectedMonthDate: ctx.setSelectedMonthDate,
     fetchTickets: () => ctx.fetchTickets(),
     activeDateRange: ctx.activeDateRange,
-    appliedRange: ctx.appliedRange,
+    appliedRange: ctx.ticketsAppliedRange ?? ctx.appliedRange,
   };
 }

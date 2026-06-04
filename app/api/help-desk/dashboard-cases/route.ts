@@ -28,9 +28,9 @@ export async function GET(req: Request) {
         c.id_case,
         c.priority,
         c.subject_case,
-        cg.category,
-        sg.subcategory,
-        a.activity,
+        cat.category,
+        cat.subcategory,
+        cat.activity,
         sc.status,
         sc.id_status_case,
         u.name AS nombreTecnico,
@@ -38,10 +38,18 @@ export async function GET(req: Request) {
         c.resolution,
         co.company
       FROM [case] c
-      LEFT JOIN category_case cc ON cc.id_case = c.id_case
-      LEFT JOIN category cg ON cg.id_category = cc.id_category
-      LEFT JOIN subcategory sg ON sg.id_subcategory = cc.id_subcategory
-      LEFT JOIN activity a ON a.id_activity = cc.id_activity
+      OUTER APPLY (
+        SELECT TOP 1
+          cg.category,
+          sg.subcategory,
+          a.activity
+        FROM category_case cc
+        INNER JOIN category cg ON cg.id_category = cc.id_category
+        INNER JOIN subcategory sg ON sg.id_subcategory = cc.id_subcategory
+        INNER JOIN activity a ON a.id_activity = cc.id_activity
+        WHERE cc.id_case = c.id_case
+        ORDER BY cc.id_category_case DESC
+      ) cat
       INNER JOIN status_case sc ON sc.id_status_case = c.id_status_case
       INNER JOIN department d ON d.id_department = c.id_department
       LEFT JOIN subprocess_user_company suc ON suc.id_subprocess_user_company = c.id_technical
@@ -53,8 +61,8 @@ export async function GET(req: Request) {
 
     if (date_from && date_to) {
       query += `
-        AND c.creation_date >= CAST(@date_from AS DATE)
-        AND c.creation_date < DATEADD(day, 1, CAST(@date_to AS DATE))`;
+        AND CAST(c.creation_date AS DATE) >= CAST(@date_from AS DATE)
+        AND CAST(c.creation_date AS DATE) <= CAST(@date_to AS DATE)`;
     }
 
     query += ` ORDER BY c.id_case DESC`;
@@ -66,12 +74,25 @@ export async function GET(req: Request) {
     }
 
     const result = await request.query(query);
+    const raw = result.recordset as { id_case?: number }[];
+    const seen = new Set<number>();
+    const data = raw.filter((row) => {
+      const id = row.id_case;
+      if (id == null || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
 
     return NextResponse.json(
       {
         success: true,
-        data: result.recordset,
-        count: result.recordset.length,
+        data,
+        count: data.length,
+        metrics_definition: {
+          grain: 'case',
+          unique_key: 'id_case',
+          date_field: 'case.creation_date',
+        },
         filters_applied: date_from && date_to ? { date_from, date_to } : null,
       },
       { status: 200 }

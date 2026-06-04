@@ -2,6 +2,7 @@ import type { TicketStackedRow } from '../charts/builders';
 import {
   formatDateLocal,
   getDashboardDateRange,
+  parseCalendarDate,
   type DashboardDateFilter,
 } from './dateRange';
 import {
@@ -57,6 +58,17 @@ export interface TeamSummary {
 const ALL_TECHNICIANS = '__all__';
 export const ALL_TECHNICIANS_VALUE = ALL_TECHNICIANS;
 
+/** Una fila por caso; evita duplicados si category_case tiene más de un registro. */
+export function dedupeHelpDeskCases(cases: HelpDeskCase[]): HelpDeskCase[] {
+  const map = new Map<number, HelpDeskCase>();
+  for (const c of cases) {
+    const id = c.id_case;
+    if (id == null || Number.isNaN(Number(id))) continue;
+    if (!map.has(id)) map.set(id, c);
+  }
+  return [...map.values()];
+}
+
 export function normalizeTicketStatus(
   status?: string,
   idStatus?: number
@@ -72,12 +84,7 @@ export function normalizeTicketStatus(
 }
 
 function parseCaseDate(value: string | Date | null | undefined): Date | null {
-  if (!value) return null;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
-  const trimmed = String(value).trim();
-  if (!trimmed) return null;
-  const parsed = new Date(trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  return parseCalendarDate(value);
 }
 
 export function getTechnicianLabel(c: HelpDeskCase): string {
@@ -295,6 +302,10 @@ function getCaseDateKey(date: Date, filter: DashboardDateFilter): string {
     case 'semester':
     case 'year':
       return `${year}-${String(month + 1).padStart(2, '0')}`;
+    case 'all': {
+      const q = Math.floor(month / 3) + 1;
+      return `${year}-Q${q}`;
+    }
     default:
       return formatDateLocal(date);
   }
@@ -368,6 +379,25 @@ export function buildCompleteCaseTimeSeries(
       }
       return result;
     }
+    case 'all': {
+      if (cases.length === 0) return [];
+      const now = new Date();
+      let minDate: Date | null = null;
+      for (const c of cases) {
+        const d = parseCaseDate(c.creation_date);
+        if (d && (!minDate || d < minDate)) minDate = d;
+      }
+      if (!minDate) return [];
+      const result: [string, number][] = [];
+      const cur = new Date(minDate.getFullYear(), Math.floor(minDate.getMonth() / 3) * 3, 1);
+      while (cur <= now) {
+        const q = Math.floor(cur.getMonth() / 3) + 1;
+        const key = `${cur.getFullYear()}-Q${q}`;
+        result.push([key, timeSeriesData[key] || 0]);
+        cur.setMonth(cur.getMonth() + 3);
+      }
+      return result;
+    }
     default:
       return Object.entries(timeSeriesData).sort(([a], [b]) => a.localeCompare(b));
   }
@@ -377,6 +407,10 @@ export function formatCaseTimeSeriesLabel(
   key: string,
   dateFilter: DashboardDateFilter
 ): string {
+  if (dateFilter === 'all') {
+    const [year, q] = key.split('-');
+    return `${q} ${year}`;
+  }
   if (dateFilter === 'month') {
     const d = new Date(`${key}T00:00:00`);
     return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });

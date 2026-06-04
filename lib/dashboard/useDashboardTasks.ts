@@ -21,7 +21,5 @@ export function useDashboardTasks() {
     loadingAdmin: ctx.loadingAdmin,
     appliedRange: ctx.appliedRange,
     activeDateRange: ctx.activeDateRange,
-    exportDashboardToExcel: ctx.exportDashboardToExcel,
-    exportingExcel: ctx.exportingExcel,
   };
 }
