@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Badge,
   Box,
@@ -31,21 +31,9 @@ import {
   type ResolutionTrend,
   type TaskForResolutionTime,
 } from '../../lib/dashboard/resolutionTimeSeries';
-import { chartAxisTickStyle, dashboardChartTheme } from './chartTheme';
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Line,
-  Tooltip as RechartsTooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-
-const chartLabelColor = '#334155';
-const trendUpColor = '#16a34a';
-const trendDownColor = '#dc2626';
-const trendFlatColor = '#64748b';
+import { dashboardChartTheme } from './chartTheme';
+import { buildTrendTimeChart } from '../../lib/charts/builders';
+import { chartLabelColor, trendDownColor, trendUpColor, trendFlatColor } from '../../lib/charts/defaults';
 
 const chartScrollStyle = {
   overflowX: 'auto' as const,
@@ -103,34 +91,15 @@ function TrendBadge({
   );
 }
 
-function ResolutionTooltip({
-  active,
-  payload,
-}: {
-  active?: boolean;
-  payload?: readonly {
-    payload?: {
-      period?: string;
-      tiempo?: number;
-      tareas?: number;
-      changePct?: number | null;
-      trend?: ResolutionTrend | null;
-      totalHours?: number;
-    };
-  }[];
-}) {
-  if (!active || !payload?.length) return null;
-  const row = payload[0]?.payload;
-  if (!row) return null;
-
+function TrendPointDetail({ row }: { row: ReturnType<typeof toChartRows>[number] }) {
   return (
     <Paper
       shadow='lg'
       p='sm'
       radius='md'
       withBorder
+      mt='sm'
       style={{
-        minWidth: 200,
         borderColor: dashboardChartTheme.blue100,
         background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
       }}
@@ -168,237 +137,6 @@ function ResolutionTooltip({
   );
 }
 
-type ChartRow = ReturnType<typeof toChartRows>[number] & {
-  segUp: number | null;
-  segDown: number | null;
-};
-
-function buildSegmentChartData(rows: ReturnType<typeof toChartRows>): ChartRow[] {
-  const data: ChartRow[] = rows.map((row) => ({
-    ...row,
-    segUp: null,
-    segDown: null,
-  }));
-
-  for (let i = 1; i < data.length; i += 1) {
-    const key: 'segUp' | 'segDown' =
-      data[i].tiempo >= data[i - 1].tiempo ? 'segUp' : 'segDown';
-    data[i - 1][key] = data[i - 1].tiempo;
-    data[i][key] = data[i].tiempo;
-  }
-
-  return data;
-}
-
-function BitcoinStyleTimeChart({
-  width: widthProp,
-  height: heightProp,
-  w,
-  h,
-  data,
-  isMobile,
-}: {
-  width?: number;
-  height?: number;
-  w?: number;
-  h?: number;
-  data: ChartRow[];
-  isMobile: boolean;
-}) {
-  const gradientId = useId().replace(/:/g, '');
-  const [pinnedIndex, setPinnedIndex] = useState<number | null>(null);
-  const width = (widthProp != null && widthProp > 0 ? widthProp : w) ?? 0;
-  const height = (heightProp != null && heightProp > 0 ? heightProp : h) ?? 0;
-
-  useEffect(() => {
-    setPinnedIndex(null);
-  }, [data]);
-
-  const handleChartClick = useCallback(
-    (state: { activeTooltipIndex?: unknown }) => {
-      if (!isMobile) return;
-      const index = state?.activeTooltipIndex;
-      if (typeof index === 'number') {
-        setPinnedIndex((prev) => (prev === index ? null : index));
-      } else {
-        setPinnedIndex(null);
-      }
-    },
-    [isMobile]
-  );
-
-  if (width <= 0 || height <= 0) {
-    return null;
-  }
-
-  const maxTiempo = Math.max(...data.map((d) => d.tiempo), 0.05);
-  const yMax = maxTiempo < 1 ? Math.max(maxTiempo * 1.4, 0.08) : maxTiempo * 1.2;
-
-  return (
-    <AreaChart
-      width={width}
-      height={height}
-      data={data}
-      onClick={handleChartClick}
-      margin={{
-        top: 12,
-        right: isMobile ? 8 : 16,
-        left: isMobile ? 0 : 4,
-        bottom: isMobile ? 4 : 8,
-      }}
-    >
-      <defs>
-        <linearGradient id={gradientId} x1='0' y1='0' x2='0' y2='1'>
-          <stop offset='0%' stopColor={dashboardChartTheme.secondary} stopOpacity={0.38} />
-          <stop offset='55%' stopColor={dashboardChartTheme.blue400} stopOpacity={0.12} />
-          <stop offset='100%' stopColor={dashboardChartTheme.blue50} stopOpacity={0.02} />
-        </linearGradient>
-      </defs>
-      <CartesianGrid stroke='#dce8f2' strokeDasharray='4 4' vertical={false} />
-      <XAxis
-        dataKey='period'
-        tick={isMobile ? { ...chartAxisTickStyle, fontSize: 10 } : chartAxisTickStyle}
-        angle={isMobile ? -40 : -28}
-        textAnchor='end'
-        height={isMobile ? 64 : 56}
-        interval={0}
-        axisLine={{ stroke: '#94a3b8' }}
-        tickLine={false}
-      />
-      <YAxis
-        tick={chartAxisTickStyle}
-        axisLine={{ stroke: '#94a3b8' }}
-        tickLine={false}
-        tickFormatter={(v: number) => formatResolutionDuration(v)}
-        width={isMobile ? 52 : 64}
-        domain={[0, yMax]}
-      />
-      <RechartsTooltip
-        cursor={isMobile ? undefined : { stroke: dashboardChartTheme.blue200, strokeWidth: 1 }}
-        active={isMobile ? pinnedIndex !== null : undefined}
-        content={({ active, payload }) => {
-          if (isMobile) {
-            if (pinnedIndex === null || !data[pinnedIndex]) return null;
-            const row = data[pinnedIndex];
-            return (
-              <ResolutionTooltip
-                active
-                payload={[
-                  {
-                    payload: row,
-                  },
-                ]}
-              />
-            );
-          }
-          return <ResolutionTooltip active={active} payload={payload} />;
-        }}
-      />
-      <Area
-        type='monotone'
-        dataKey='tiempo'
-        stroke='transparent'
-        fill={`url(#${gradientId})`}
-        fillOpacity={1}
-        isAnimationActive
-        animationDuration={650}
-      />
-      <Line
-        type='monotone'
-        dataKey='tiempo'
-        stroke={dashboardChartTheme.secondary}
-        strokeWidth={2.5}
-        dot={(props) => {
-          const { cx, cy, index } = props as {
-            cx?: number;
-            cy?: number;
-            index?: number;
-          };
-          if (cx == null || cy == null || index == null) {
-            return <g key='dot-empty' />;
-          }
-          const isPinned = isMobile && pinnedIndex === index;
-          const radius = isPinned ? 8 : isMobile ? 5 : 6;
-          return (
-            <circle
-              key={`dot-${index}`}
-              cx={cx}
-              cy={cy}
-              r={radius}
-              fill={isPinned ? dashboardChartTheme.primary : '#fff'}
-              stroke={dashboardChartTheme.secondary}
-              strokeWidth={2}
-              style={{ cursor: isMobile ? 'pointer' : 'default' }}
-            />
-          );
-        }}
-        activeDot={
-          isMobile
-            ? undefined
-            : {
-                r: 8,
-                fill: dashboardChartTheme.primary,
-                stroke: '#fff',
-                strokeWidth: 2,
-              }
-        }
-        isAnimationActive
-        animationDuration={650}
-      />
-      <Line
-        type='monotone'
-        dataKey='segUp'
-        stroke={trendUpColor}
-        strokeWidth={2.75}
-        dot={isMobile ? false : {
-          r: 4.5,
-          fill: '#fff',
-          stroke: trendUpColor,
-          strokeWidth: 2,
-        }}
-        activeDot={
-          isMobile
-            ? undefined
-            : {
-                r: 6.5,
-                fill: trendUpColor,
-                stroke: '#fff',
-                strokeWidth: 2,
-              }
-        }
-        connectNulls={false}
-        isAnimationActive
-        animationDuration={650}
-      />
-      <Line
-        type='monotone'
-        dataKey='segDown'
-        stroke={trendDownColor}
-        strokeWidth={2.75}
-        dot={isMobile ? false : {
-          r: 4.5,
-          fill: '#fff',
-          stroke: trendDownColor,
-          strokeWidth: 2,
-        }}
-        activeDot={
-          isMobile
-            ? undefined
-            : {
-                r: 6.5,
-                fill: trendDownColor,
-                stroke: '#fff',
-                strokeWidth: 2,
-              }
-        }
-        connectNulls={false}
-        isAnimationActive
-        animationDuration={650}
-      />
-    </AreaChart>
-  );
-}
-
 export interface ResolutionTimeTrendChartProps {
   tasks: TaskForResolutionTime[];
   /** Si se define, solo tareas de esa persona */
@@ -411,7 +149,7 @@ function TrendChartBody({
   title,
   subtitle,
   summary,
-  segmentChartData,
+  trendPoints,
   chartHeight,
   isMobile,
   isCompact,
@@ -419,11 +157,38 @@ function TrendChartBody({
   title: string;
   subtitle: string;
   summary: ReturnType<typeof buildResolutionTimeSeries>;
-  segmentChartData: ChartRow[];
+  trendPoints: ReturnType<typeof toChartRows>;
   chartHeight: number;
   isMobile: boolean;
   isCompact: boolean;
 }) {
+  const [pinnedIndex, setPinnedIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    setPinnedIndex(null);
+  }, [trendPoints]);
+
+  const maxTiempo = Math.max(...trendPoints.map((d) => d.tiempo), 0.05);
+  const yMax = maxTiempo < 1 ? Math.max(maxTiempo * 1.4, 0.08) : maxTiempo * 1.2;
+  const { data: chartData, options: chartOptions } = buildTrendTimeChart(
+    trendPoints,
+    yMax,
+    isMobile
+  );
+
+  const mergedOptions = useMemo(
+    () => ({
+      ...chartOptions,
+      plugins: {
+        ...chartOptions.plugins,
+        tooltip: {
+          ...chartOptions.plugins?.tooltip,
+          enabled: !isMobile,
+        },
+      },
+    }),
+    [chartOptions, isMobile]
+  );
   if (summary.completedTasks === 0) {
     return (
       <Text size='sm' c='dimmed' ta='center' py='lg'>
@@ -537,16 +302,32 @@ function TrendChartBody({
         }}
       >
         <ChartContainer
+          type='line'
+          data={chartData}
+          options={mergedOptions}
           height={chartHeight}
           minWidth={getTrendChartScrollMinWidth(
             summary.points.length,
             isMobile,
             isCompact
           )}
-        >
-          <BitcoinStyleTimeChart data={segmentChartData} isMobile={isMobile} />
-        </ChartContainer>
+          onChartClick={
+            isMobile
+              ? (index) => {
+                  if (index == null) {
+                    setPinnedIndex(null);
+                    return;
+                  }
+                  setPinnedIndex((prev) => (prev === index ? null : index));
+                }
+              : undefined
+          }
+        />
       </Box>
+
+      {isMobile && pinnedIndex !== null && trendPoints[pinnedIndex] && (
+        <TrendPointDetail row={trendPoints[pinnedIndex]} />
+      )}
 
       {summary.points.length > 1 && (
         <Box mt='md' style={chartScrollStyle}>
@@ -621,7 +402,7 @@ export function ResolutionTimeTrendChart({
   );
 
   const chartData = useMemo(() => toChartRows(summary.points), [summary.points]);
-  const segmentChartData = useMemo(() => buildSegmentChartData(chartData), [chartData]);
+  const trendPoints = chartData;
 
   const headerLabel = title.replace(/^Tendencia de tiempos\s*·?\s*/i, '') || title;
 
@@ -704,7 +485,7 @@ export function ResolutionTimeTrendChart({
             title={title}
             subtitle={subtitle}
             summary={summary}
-            segmentChartData={segmentChartData}
+            trendPoints={trendPoints}
             chartHeight={chartHeight}
             isMobile={isMobile}
             isCompact={isCompact}

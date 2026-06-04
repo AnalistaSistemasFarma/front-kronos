@@ -20,8 +20,13 @@ import {
   ThemeIcon,
   UnstyledButton,
 } from '@mantine/core';
-import { BarChart, PieChart } from '@mantine/charts';
 import { ChartContainer } from './ChartContainer';
+import {
+  buildHorizontalMultiColorBarChart,
+  buildHorizontalStackedBarChart,
+  buildPieChart,
+  buildSinglePersonBarChart,
+} from '../../lib/charts/builders';
 import {
   IconChevronLeft,
   IconChevronDown,
@@ -40,11 +45,7 @@ import {
   encargadoBarPalette,
   encargadoBarPaletteMantine,
   getStatusBadgeStyle,
-  buildCategoryYAxisProps,
-  buildValueXAxisProps,
-  executiveBarChartProps,
   getResponsiveChartHeight,
-  getResponsiveYAxisWidth,
   statusChartColors,
   statusSeries,
 } from './chartTheme';
@@ -215,43 +216,6 @@ function StatusDistributionBar({
   );
 }
 
-function ChartTooltip({
-  label,
-  value,
-  color,
-  suffix = 'tareas',
-}: {
-  label: string;
-  value: number;
-  color: string;
-  suffix?: string;
-}) {
-  return (
-    <Paper shadow='md' p='sm' radius='md' withBorder style={{ minWidth: 160, borderColor: '#e9ecef' }}>
-      <Text size='xs' c='dimmed' mb={6} lineClamp={2}>
-        {label}
-      </Text>
-      <Group gap='xs' align='baseline'>
-        <Box
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            backgroundColor: color,
-            flexShrink: 0,
-          }}
-        />
-        <Text fw={700} size='xl' style={{ color: dashboardChartTheme.primary, lineHeight: 1 }}>
-          {value}
-        </Text>
-        <Text size='xs' c='dimmed'>
-          {suffix}
-        </Text>
-      </Group>
-    </Paper>
-  );
-}
-
 function PersonCardsGrid({ people }: { people: AssigneeRow[] }) {
   const maxTeam = Math.max(...people.map((p) => p.total), 1);
 
@@ -312,56 +276,6 @@ function PersonCardsGrid({ people }: { people: AssigneeRow[] }) {
         );
       })}
     </SimpleGrid>
-  );
-}
-
-function TeamExecutiveTooltip({
-  active,
-  payload,
-  label,
-}: {
-  active?: boolean;
-  payload?: readonly { name?: string; value?: number; color?: string }[];
-  label?: string | number;
-}) {
-  if (!active || !payload?.length) return null;
-  const name = label != null ? String(label) : '';
-
-  const person = payload.reduce((sum, p) => sum + (Number(p.value) || 0), 0);
-  const completadas = Number(payload.find((p) => p.name === 'Completada')?.value) || 0;
-  const pct = person > 0 ? Math.round((completadas / person) * 100) : 0;
-
-  return (
-    <Paper shadow='sm' p='sm' radius='md' withBorder style={{ borderColor: '#e2e8f0', minWidth: 200 }}>
-      <Text size='xs' fw={700} mb={8} style={{ color: dashboardChartTheme.primary }}>
-        {name}
-      </Text>
-      {payload
-        .filter((p) => Number(p.value) > 0)
-        .map((p) => (
-          <Group key={p.name} justify='space-between' gap='md' mb={4}>
-            <Group gap={6}>
-              <Box w={8} h={8} style={{ borderRadius: 2, backgroundColor: p.color }} />
-              <Text size='xs' style={{ color: chartLabelColor }}>
-                {p.name}
-              </Text>
-            </Group>
-            <Text size='xs' fw={700}>
-              {p.value}
-            </Text>
-          </Group>
-        ))}
-      <Box pt={6} mt={4} style={{ borderTop: '1px solid #e2e8f0' }}>
-        <Group justify='space-between'>
-          <Text size='xs' fw={600} style={{ color: chartLabelColor }}>
-            Total · Cumplimiento
-          </Text>
-          <Text size='xs' fw={700} style={{ color: dashboardChartTheme.primary }}>
-            {person} tareas · {pct}%
-          </Text>
-        </Group>
-      </Box>
-    </Paper>
   );
 }
 
@@ -519,11 +433,10 @@ function TeamPerformanceCharts({
   const { isMobile, isCompact } = useChartViewport();
   const names = people.map((p) => p.asignado);
   const chartHeight = getResponsiveChartHeight(people.length, isCompact);
-  const yAxisWidth = getResponsiveYAxisWidth(names, isMobile);
-  const maxTotal = Math.max(...people.map((p) => p.total), 0);
-  const chartMargin = isMobile
-    ? { top: 8, right: 12, left: 0, bottom: 4 }
-    : { top: 12, right: 24, left: 4, bottom: 8 };
+  const stackedChart = useMemo(() => buildHorizontalStackedBarChart(people), [people]);
+  const scrollMinWidth = isCompact
+    ? Math.max(people.length * (isMobile ? 92 : 72) + 140, 320)
+    : 0;
 
   return (
     <Paper
@@ -547,24 +460,13 @@ function TeamPerformanceCharts({
       </Stack>
 
       <Box w='100%' style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        <ChartContainer height={chartHeight} minWidth={0}>
-          <BarChart
-            data={people}
-            dataKey='asignado'
-            orientation='vertical'
-            type='stacked'
-            series={[...statusSeries]}
-            withTooltip
-            withLegend={false}
-            {...executiveBarChartProps}
-            maxBarWidth={isMobile ? 28 : 36}
-            barProps={{ radius: 0, strokeWidth: 0 }}
-            barChartProps={{ margin: chartMargin }}
-            xAxisProps={buildValueXAxisProps(maxTotal, isMobile)}
-            yAxisProps={buildCategoryYAxisProps(yAxisWidth, isMobile)}
-            tooltipProps={{ cursor: false, content: TeamExecutiveTooltip }}
-          />
-        </ChartContainer>
+        <ChartContainer
+          type='bar'
+          data={stackedChart.data}
+          options={stackedChart.options}
+          height={chartHeight}
+          minWidth={scrollMinWidth}
+        />
       </Box>
 
       <TeamSummaryTable people={people} />
@@ -596,23 +498,19 @@ function IndividualPerformanceView({
   const pieSize = isMobile ? 160 : isCompact ? 180 : 220;
   const barChartHeight = isMobile ? 100 : 120;
 
-  /** Colores Mantine (hex en PieChart a veces no pinta el arco y queda blanco) */
-  const pieData = [
-    { name: 'Completadas', value: person.Completada, color: 'blue.9' },
-    { name: 'Pendientes', value: person.Pendiente, color: 'blue.5' },
-    { name: 'En proceso', value: person['En Proceso'], color: 'cyan.5' },
-  ].filter((d) => d.value > 0);
+  const pieSlices = useMemo(
+    () =>
+      [
+        { name: 'Completadas', value: person.Completada, color: statusChartColors.completada },
+        { name: 'Pendientes', value: person.Pendiente, color: statusChartColors.pendiente },
+        { name: 'En proceso', value: person['En Proceso'], color: statusChartColors.enProceso },
+      ].filter((d) => d.value > 0),
+    [person]
+  );
 
+  const pieChart = useMemo(() => buildPieChart(pieSlices, { showLegend: false }), [pieSlices]);
+  const personBarChart = useMemo(() => buildSinglePersonBarChart(person), [person]);
   const pieChartHeight = pieSize + 24;
-
-  const barData = [
-    {
-      asignado: person.asignado,
-      Completada: person.Completada,
-      Pendiente: person.Pendiente,
-      'En Proceso': person['En Proceso'],
-    },
-  ];
 
   return (
     <Stack gap='md' mt='md'>
@@ -669,22 +567,16 @@ function IndividualPerformanceView({
             <Text size='xs' mb='sm' style={{ color: chartLabelColor }}>
               Completadas, pendientes y en proceso de esta persona
             </Text>
-            {person.total > 0 && pieData.length > 0 ? (
+            {person.total > 0 && pieSlices.length > 0 ? (
               <Box w='100%' style={{ maxWidth: pieChartHeight, margin: '0 auto' }}>
-                <ChartContainer height={pieChartHeight} minWidth={0}>
-                  <PieChart
-                    data={pieData}
-                    size={pieSize}
-                    withTooltip
-                    tooltipDataSource='segment'
-                    withLabels
-                    labelsType='percent'
-                    labelsPosition='inside'
-                    strokeWidth={1}
-                  />
-                </ChartContainer>
+                <ChartContainer
+                  type='pie'
+                  data={pieChart.data}
+                  options={pieChart.options}
+                  height={pieChartHeight}
+                />
                 <Group justify='center' gap='md' mt='xs' wrap='wrap'>
-                  {pieData.map((slice) => (
+                  {pieSlices.map((slice) => (
                     <Group key={slice.name} gap={6}>
                       <Box
                         w={10}
@@ -761,25 +653,12 @@ function IndividualPerformanceView({
           <Text size='sm' fw={700} mb='sm' style={{ color: dashboardChartTheme.primary }}>
             Barras por estado
           </Text>
-          <ChartContainer height={barChartHeight} minWidth={0}>
-            <BarChart
-              data={barData}
-              dataKey='asignado'
-              orientation='vertical'
-              type='default'
-              series={[...statusSeries]}
-              withTooltip
-              withLegend={false}
-              {...executiveBarChartProps}
-              maxBarWidth={32}
-              barChartProps={{ margin: { top: 8, right: 16, left: 4, bottom: 8 } }}
-              xAxisProps={buildValueXAxisProps(person.total, isCompact)}
-              yAxisProps={buildCategoryYAxisProps(
-                getResponsiveYAxisWidth([person.asignado], isMobile),
-                isMobile
-              )}
-            />
-          </ChartContainer>
+          <ChartContainer
+            type='bar'
+            data={personBarChart.data}
+            options={personBarChart.options}
+            height={barChartHeight}
+          />
         </Box>
       </Paper>
 
@@ -976,11 +855,6 @@ export default function EncargadoActivitiesChart({
       .sort((a, b) => b.tareas - a.tareas);
   }, [tasks]);
 
-  const maxEncargadoTareas = useMemo(
-    () => Math.max(...encargadoChartData.map((d) => d.tareas), 0),
-    [encargadoChartData]
-  );
-
   const { isMobile, isCompact } = useChartViewport();
 
   const overviewChartHeight = useMemo(
@@ -988,8 +862,16 @@ export default function EncargadoActivitiesChart({
     [encargadoChartData.length, isCompact]
   );
 
-  const overviewYAxisWidth = useMemo(
-    () => getResponsiveYAxisWidth(encargadoChartData.map((d) => d.encargado), isMobile),
+  const overviewBarChart = useMemo(
+    () =>
+      buildHorizontalMultiColorBarChart(
+        encargadoChartData.map((d) => ({
+          label: d.encargado,
+          value: d.tareas,
+          color: d.barHex,
+        })),
+        isMobile
+      ),
     [encargadoChartData, isMobile]
   );
 
@@ -1373,41 +1255,12 @@ export default function EncargadoActivitiesChart({
               Tareas por encargado — haga clic en una fila para ver el detalle del equipo
             </Text>
             <Box w='100%' style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            <ChartContainer height={overviewChartHeight} minWidth={0}>
-              <BarChart
-                data={encargadoChartData}
-                dataKey='encargado'
-                orientation='vertical'
-                series={[{ name: 'tareas', color: 'blue.8', label: 'Tareas' }]}
-                withTooltip
-                withBarValueLabel
-                valueFormatter={(v) => `${v}`}
-                {...executiveBarChartProps}
-                tooltipProps={{
-                  cursor: false,
-                  content: ({ active, payload, label }) => {
-                    if (!active || !payload?.length) return null;
-                    const row = encargadoChartData.find((d) => d.encargado === label);
-                    return (
-                      <ChartTooltip
-                        label={String(label)}
-                        value={Number(payload[0].value)}
-                        color={row?.barHex ?? dashboardChartTheme.primary}
-                      />
-                    );
-                  },
-                }}
-                maxBarWidth={isMobile ? 24 : encargadoChartData.length <= 3 ? 40 : 28}
-                minBarSize={12}
-                barChartProps={{
-                  margin: isMobile
-                    ? { top: 8, right: 12, left: 0, bottom: 4 }
-                    : { top: 8, right: 28, left: 4, bottom: 8 },
-                }}
-                xAxisProps={buildValueXAxisProps(maxEncargadoTareas, isMobile)}
-                yAxisProps={buildCategoryYAxisProps(overviewYAxisWidth, isMobile)}
+              <ChartContainer
+                type='bar'
+                data={overviewBarChart.data}
+                options={overviewBarChart.options}
+                height={overviewChartHeight}
               />
-            </ChartContainer>
             </Box>
           </Paper>
 

@@ -27,8 +27,12 @@ import {
   Divider,
   Loader,
 } from '@mantine/core';
-import { BarChart, PieChart, AreaChart } from '@mantine/charts';
 import EncargadoActivitiesChart from '../../components/dashboard/EncargadoActivitiesChart';
+import {
+  buildAreaLineChart,
+  buildPieChart,
+  buildVerticalBarChart,
+} from '../../lib/charts/builders';
 import {
   formatDateLocal,
   getDashboardDateRange,
@@ -41,8 +45,6 @@ import {
   type DashboardDateFilter,
 } from '../../lib/dashboard/dateRange';
 import {
-  chartAxisTickStyle,
-  chartYAxisProps,
   dashboardChartTheme,
   statusChartColors,
 } from '../../components/dashboard/chartTheme';
@@ -519,6 +521,52 @@ export default function Dashboard() {
     return new Intl.NumberFormat('es-CO').format(value);
   };
 
+  const statusPieChart = buildPieChart(statusData);
+  const trendAreaChart = buildAreaLineChart(
+    timeSeriesChartData.map((d) => ({ label: d.date, value: d.Tareas })),
+    projectColors.secondary
+  );
+  const processBarChart = buildVerticalBarChart(
+    processChartData.map((d) => ({ name: d.name, value: d.value })),
+    projectColors.primary,
+    { datasetLabel: 'Cantidad', showLegend: true, rotateLabels: true }
+  );
+  const categoryBarChart = buildVerticalBarChart(
+    categoryChartData.map((d) => ({ name: d.name, value: d.value })),
+    projectColors.success,
+    { datasetLabel: 'Cantidad', showLegend: true, rotateLabels: true }
+  );
+  const costPieChart = buildPieChart(costDistributionData);
+  const costActivityBarChart = buildVerticalBarChart(
+    costByActivityChartData.map((d) => ({ name: d.name, value: d.cost })),
+    dashboardChartTheme.blue500,
+    {
+      datasetLabel: 'Costo',
+      rotateLabels: true,
+      formatValue: formatCurrency,
+    }
+  );
+  const costProcessBarChart = buildVerticalBarChart(
+    costByProcessChartData.map((d) => ({ name: d.name, value: d.cost })),
+    dashboardChartTheme.blue600,
+    {
+      datasetLabel: 'Costo',
+      rotateLabels: true,
+      formatValue: formatCurrency,
+      showLegend: true,
+    }
+  );
+  const costCenterBarChart = buildVerticalBarChart(
+    costByCenterChartData.map((d) => ({ name: d.name, value: d.cost })),
+    dashboardChartTheme.blue400,
+    {
+      datasetLabel: 'Costo',
+      rotateLabels: true,
+      formatValue: formatCurrency,
+      showLegend: true,
+    }
+  );
+
   if (status === 'loading') {
     return (
       <div className='min-h-screen flex items-center justify-center'>
@@ -743,18 +791,12 @@ export default function Dashboard() {
                       Distribución por Estado
                     </Title>
                     {statusData.length > 0 ? (
-                      <ChartContainer height={300} minWidth={0}>
-                        <Flex justify='center' align='center' w='100%' mih={300}>
-                          <PieChart
-                            data={statusData}
-                            withLabels
-                            labelsType='percent'
-                            withTooltip
-                            tooltipDataSource='segment'
-                            size={240}
-                          />
-                        </Flex>
-                      </ChartContainer>
+                      <ChartContainer
+                        type='pie'
+                        data={statusPieChart.data}
+                        options={statusPieChart.options}
+                        height={300}
+                      />
                     ) : (
                       <Flex h={300} align='center' justify='center'>
                         <Text size='sm' c='dimmed' ta='center'>
@@ -792,84 +834,12 @@ export default function Dashboard() {
                       />
                     </Group>
                     {timeSeriesChartData.length > 0 ? (
-                      <ChartContainer height={300}>
-                      <AreaChart
-                        w='100%'
-                        h={300}
-                        data={timeSeriesChartData}
-                        dataKey='date'
-                        series={[
-                          {
-                            name: 'Tareas',
-                            label: 'Tareas',
-                            color: projectColors.secondary,
-                          },
-                        ]}
-                        curveType='monotone'
-                        withDots
-                        dotProps={{
-                          r: 4,
-                          strokeWidth: 2,
-                          fill: 'white',
-                          stroke: projectColors.secondary,
-                        }}
-                        activeDotProps={{
-                          r: 6,
-                          strokeWidth: 2,
-                          fill: projectColors.secondary,
-                          stroke: 'white',
-                        }}
-                        withTooltip
-                        tooltipProps={{
-                          content: ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string | number }) => {
-                            if (!active || !payload?.length) return null;
-                            return (
-                              <Paper
-                                shadow='md'
-                                p='sm'
-                                radius='md'
-                                withBorder
-                                style={{ minWidth: 130, borderColor: '#e9ecef' }}
-                              >
-                                <Text size='xs' c='dimmed' mb={6} tt='capitalize'>
-                                  {label}
-                                </Text>
-                                <Group gap='xs' align='baseline'>
-                                  <Box
-                                    style={{
-                                      width: 8,
-                                      height: 8,
-                                      borderRadius: '50%',
-                                      backgroundColor: projectColors.secondary,
-                                      flexShrink: 0,
-                                    }}
-                                  />
-                                  <Text
-                                    fw={700}
-                                    size='xl'
-                                    style={{ color: projectColors.primary, lineHeight: 1 }}
-                                  >
-                                    {payload[0].value}
-                                  </Text>
-                                  <Text size='xs' c='dimmed'>
-                                    tareas
-                                  </Text>
-                                </Group>
-                              </Paper>
-                            );
-                          },
-                        }}
-                        gridProps={{
-                          stroke: '#cbd5e1',
-                          strokeDasharray: '4 4',
-                          vertical: false,
-                        }}
-                        xAxisProps={{ tick: chartAxisTickStyle }}
-                        yAxisProps={chartYAxisProps}
-                        withPointLabels={timeSeriesChartData.length <= 15}
-                        fillOpacity={0.15}
+                      <ChartContainer
+                        type='line'
+                        data={trendAreaChart.data}
+                        options={trendAreaChart.options}
+                        height={300}
                       />
-                      </ChartContainer>
                     ) : (
                       <Flex h={300} align='center' justify='center'>
                         <Stack align='center' gap='sm'>
@@ -913,37 +883,12 @@ export default function Dashboard() {
                 <Title order={4} mb='md'>
                   Tareas por Proceso (Top 10)
                 </Title>
-                <ChartContainer height={400}>
-                <BarChart
-                  w='100%'
-                  h={400}
-                  data={processChartData}
-                  dataKey='name'
-                  series={[{ name: 'value', label: 'Cantidad', color: 'blue.6' }]}
-                  withTooltip
-                  tooltipProps={{
-                    content: ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string | number }) => {
-                      if (!active || !payload?.length) return null;
-                      return (
-                        <Paper shadow='md' p='sm' radius='md' withBorder style={{ minWidth: 160, borderColor: '#e9ecef' }}>
-                          <Text size='xs' c='dimmed' mb={6}>{label}</Text>
-                          <Group gap='xs' align='baseline'>
-                            <Box style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: projectColors.primary, flexShrink: 0 }} />
-                            <Text fw={700} size='xl' style={{ color: projectColors.primary, lineHeight: 1 }}>{payload[0].value}</Text>
-                            <Text size='xs' c='dimmed'>tareas</Text>
-                          </Group>
-                        </Paper>
-                      );
-                    },
-                  }}
-                  withLegend
-                  xAxisProps={{
-                    angle: -45,
-                    textAnchor: 'end',
-                    height: 100,
-                  }}
+                <ChartContainer
+                  type='bar'
+                  data={processBarChart.data}
+                  options={processBarChart.options}
+                  height={400}
                 />
-                </ChartContainer>
               </Card>
 
               <Card shadow='sm' padding='lg' radius='md' withBorder>
@@ -971,37 +916,12 @@ export default function Dashboard() {
                 <Title order={4} mb='md'>
                   Tareas por Categoría (Top 10)
                 </Title>
-                <ChartContainer height={400}>
-                <BarChart
-                  w='100%'
-                  h={400}
-                  data={categoryChartData}
-                  dataKey='name'
-                  series={[{ name: 'value', label: 'Cantidad', color: 'blue.5' }]}
-                  withTooltip
-                  tooltipProps={{
-                    content: ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string | number }) => {
-                      if (!active || !payload?.length) return null;
-                      return (
-                        <Paper shadow='md' p='sm' radius='md' withBorder style={{ minWidth: 160, borderColor: '#e9ecef' }}>
-                          <Text size='xs' c='dimmed' mb={6}>{label}</Text>
-                          <Group gap='xs' align='baseline'>
-                            <Box style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: projectColors.success, flexShrink: 0 }} />
-                            <Text fw={700} size='xl' style={{ color: projectColors.primary, lineHeight: 1 }}>{payload[0].value}</Text>
-                            <Text size='xs' c='dimmed'>tareas</Text>
-                          </Group>
-                        </Paper>
-                      );
-                    },
-                  }}
-                  withLegend
-                  xAxisProps={{
-                    angle: -45,
-                    textAnchor: 'end',
-                    height: 100,
-                  }}
+                <ChartContainer
+                  type='bar'
+                  data={categoryBarChart.data}
+                  options={categoryBarChart.options}
+                  height={400}
                 />
-                </ChartContainer>
               </Card>
 
               <Card shadow='sm' padding='lg' radius='md' withBorder>
@@ -1098,18 +1018,13 @@ export default function Dashboard() {
                       Distribución de Costos por Proceso
                     </Title>
                     {costDistributionData.length > 0 ? (
-                      <ChartContainer height={320} minWidth={280}>
-                        <Flex justify='center' w='100%'>
-                          <PieChart
-                            data={costDistributionData}
-                            withLabels
-                            labelsType='percent'
-                            withTooltip
-                            tooltipDataSource='segment'
-                            size={300}
-                          />
-                        </Flex>
-                      </ChartContainer>
+                      <ChartContainer
+                        type='pie'
+                        data={costPieChart.data}
+                        options={costPieChart.options}
+                        height={320}
+                        minWidth={280}
+                      />
                     ) : (
                       <Text c='dimmed' ta='center' py='xl'>
                         No hay datos de costos disponibles
@@ -1124,21 +1039,12 @@ export default function Dashboard() {
                       Costo por Actividad (Top 10)
                     </Title>
                     {costByActivityChartData.length > 0 ? (
-                      <ChartContainer height={300}>
-                      <BarChart
-                        w='100%'
-                        h={300}
-                        data={costByActivityChartData}
-                        dataKey='name'
-                        series={[{ name: 'cost', label: 'Costo', color: 'blue.5' }]}
-                        withTooltip
-                        xAxisProps={{
-                          angle: -45,
-                          textAnchor: 'end',
-                          height: 100,
-                        }}
+                      <ChartContainer
+                        type='bar'
+                        data={costActivityBarChart.data}
+                        options={costActivityBarChart.options}
+                        height={300}
                       />
-                      </ChartContainer>
                     ) : (
                       <Text c='dimmed' ta='center' py='xl'>
                         No hay datos de costos disponibles
@@ -1154,22 +1060,12 @@ export default function Dashboard() {
                   Costo por Proceso (Top 10)
                 </Title>
                 {costByProcessChartData.length > 0 ? (
-                  <ChartContainer height={400}>
-                  <BarChart
-                    w='100%'
-                    h={400}
-                    data={costByProcessChartData}
-                    dataKey='name'
-                    series={[{ name: 'cost', label: 'Costo', color: 'blue.6' }]}
-                    withTooltip
-                    withLegend
-                    xAxisProps={{
-                      angle: -45,
-                      textAnchor: 'end',
-                      height: 100,
-                    }}
+                  <ChartContainer
+                    type='bar'
+                    data={costProcessBarChart.data}
+                    options={costProcessBarChart.options}
+                    height={400}
                   />
-                  </ChartContainer>
                 ) : (
                   <Text c='dimmed' ta='center' py='xl'>
                     No hay datos de costos disponibles
@@ -1183,22 +1079,12 @@ export default function Dashboard() {
                   <Title order={4} mb='md'>
                     Costo por Centro de Costo (Top 10)
                   </Title>
-                  <ChartContainer height={400}>
-                  <BarChart
-                    w='100%'
-                    h={400}
-                    data={costByCenterChartData}
-                    dataKey='name'
-                    series={[{ name: 'cost', label: 'Costo', color: 'blue.4' }]}
-                    withTooltip
-                    withLegend
-                    xAxisProps={{
-                      angle: -45,
-                      textAnchor: 'end',
-                      height: 100,
-                    }}
+                  <ChartContainer
+                    type='bar'
+                    data={costCenterBarChart.data}
+                    options={costCenterBarChart.options}
+                    height={400}
                   />
-                  </ChartContainer>
                 </Card>
               )}
 
