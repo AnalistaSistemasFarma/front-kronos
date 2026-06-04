@@ -28,7 +28,12 @@ function injectChartDimensions(
   if (!isValidElement(child)) return child;
 
   const props = child.props as Record<string, unknown>;
-  const nextProps: Record<string, unknown> = { w: width, h: height };
+  const nextProps: Record<string, unknown> = {
+    w: width,
+    h: height,
+    width,
+    height,
+  };
 
   if (props.style && typeof props.style === 'object') {
     nextProps.style = { ...props.style, minWidth: 0 };

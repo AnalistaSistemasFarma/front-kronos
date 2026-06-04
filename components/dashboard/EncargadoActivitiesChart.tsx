@@ -49,6 +49,7 @@ import {
   statusSeries,
 } from './chartTheme';
 import { useChartViewport } from './useChartViewport';
+import { ResolutionTimeTrendChart } from './ResolutionTimeTrendChart';
 
 const chartLabelColor = '#334155';
 const TASKS_PER_PAGE = 10;
@@ -73,6 +74,8 @@ export interface TaskWithEncargado {
   tarea: string;
   estado_tarea: string;
   asignado_tarea: string;
+  hora_inicio_tarea?: string | null;
+  fecha_fin_tarea?: string | null;
   encargado_proceso?: string | null;
   id_solicitud: number;
   asunto_solicitud: string;
@@ -504,7 +507,15 @@ function TeamSummaryTable({ people }: { people: AssigneeRow[] }) {
   );
 }
 
-function TeamPerformanceCharts({ people }: { people: AssigneeRow[] }) {
+function TeamPerformanceCharts({
+  people,
+  tasks,
+  encargadoName,
+}: {
+  people: AssigneeRow[];
+  tasks: TaskWithEncargado[];
+  encargadoName: string;
+}) {
   const { isMobile, isCompact } = useChartViewport();
   const names = people.map((p) => p.asignado);
   const chartHeight = getResponsiveChartHeight(people.length, isCompact);
@@ -557,16 +568,24 @@ function TeamPerformanceCharts({ people }: { people: AssigneeRow[] }) {
       </Box>
 
       <TeamSummaryTable people={people} />
+
+      <ResolutionTimeTrendChart
+        tasks={tasks}
+        title='Tendencia de tiempos del equipo'
+        subtitle={`Promedio de tiempo de trabajo · suma de ${people.length} colaboradores bajo ${encargadoName}`}
+      />
     </Paper>
   );
 }
 
 function IndividualPerformanceView({
   people,
+  tasks,
   selectedAsignado,
   onSelectAsignado,
 }: {
   people: AssigneeRow[];
+  tasks: TaskWithEncargado[];
   selectedAsignado: string | null;
   onSelectAsignado: (name: string) => void;
 }) {
@@ -763,6 +782,13 @@ function IndividualPerformanceView({
           </ChartContainer>
         </Box>
       </Paper>
+
+      <ResolutionTimeTrendChart
+        tasks={tasks}
+        assigneeFilter={person.asignado}
+        title={`Tendencia de tiempos · ${person.asignado}`}
+        subtitle='Desde que empieza a trabajarla hasta que la finaliza · solo tareas con ambas fechas'
+      />
     </Stack>
   );
 }
@@ -1248,10 +1274,17 @@ export default function EncargadoActivitiesChart({
 
             {assigneeChartData.length > 0 ? (
               <>
-                {personViewMode === 'team' && <TeamPerformanceCharts people={assigneeChartData} />}
+                {personViewMode === 'team' && (
+                  <TeamPerformanceCharts
+                    people={assigneeChartData}
+                    tasks={detailRows}
+                    encargadoName={selectedEncargado}
+                  />
+                )}
                 {personViewMode === 'individual' && (
                   <IndividualPerformanceView
                     people={assigneeChartData}
+                    tasks={detailRows}
                     selectedAsignado={selectedAsignado}
                     onSelectAsignado={setSelectedAsignado}
                   />
