@@ -3,7 +3,6 @@ import {
   buildCompleteRequestTimeSeries,
   buildRequestTimeSeries,
   formatRequestTimeSeriesLabel,
-  uniqueRequestsFromTasks,
 } from '../requestAnalytics';
 import {
   ALL_COMPANIES_VALUE,
@@ -12,7 +11,7 @@ import {
   formatHoursLabel,
 } from '../requestResolution';
 import { countRequestsByDashboardStatus, normalizeRequestStatus } from '../requestStatus';
-import type { DashboardTask } from '../types';
+import type { DashboardTask, DashboardRequest } from '../types';
 import type { DashboardDateFilter } from '../dateRange';
 import {
   addDataSheet,
@@ -28,6 +27,7 @@ import {
 
 export type ExportSolicitudesParams = {
   tasks: DashboardTask[];
+  requests: DashboardRequest[];
   dateFilter: DashboardDateFilter;
   selectedMonthDate: Date;
   appliedRange?: string | null;
@@ -35,16 +35,19 @@ export type ExportSolicitudesParams = {
 };
 
 export async function exportSolicitudesExcel(params: ExportSolicitudesParams): Promise<void> {
-  const { tasks, dateFilter, selectedMonthDate, appliedRange, companyFilter } = params;
+  const { tasks, requests, dateFilter, selectedMonthDate, appliedRange, companyFilter } = params;
   const isCompanyView = companyFilter !== ALL_COMPANIES_VALUE;
 
   const filteredTasks =
     isCompanyView ? tasks.filter((t) => t.empresa_solicitud === companyFilter) : tasks;
 
-  const requests = uniqueRequestsFromTasks(filteredTasks);
-  const allRequests = uniqueRequestsFromTasks(tasks);
-  const stats = countRequestsByDashboardStatus(requests);
-  const enriched = enrichRequestsWithResolution(requests, filteredTasks);
+  const filteredRequests =
+    isCompanyView ? requests.filter((r) => r.empresa_solicitud === companyFilter) : requests;
+
+  const allRequests = requests;
+  const requestList = filteredRequests;
+  const stats = countRequestsByDashboardStatus(requestList);
+  const enriched = enrichRequestsWithResolution(requestList, filteredTasks);
   const resolutionSummary = computeResolutionSummary(enriched);
 
   const workbook = new ExcelJS.Workbook();
@@ -99,7 +102,7 @@ export async function exportSolicitudesExcel(params: ExportSolicitudesParams): P
     stats.total
   );
 
-  const processCounts = requests.reduce(
+  const processCounts = requestList.reduce(
     (acc, r) => {
       const p = r.proceso_solicitud || 'Sin proceso';
       acc[p] = (acc[p] || 0) + 1;
@@ -129,8 +132,8 @@ export async function exportSolicitudesExcel(params: ExportSolicitudesParams): P
     writeRankingTable(resumen, row, 'Solicitudes por empresa (Top 8)', topCompanies, 'Solicitudes');
   }
 
-  const rawSeries = buildRequestTimeSeries(requests, dateFilter, selectedMonthDate);
-  const trend = buildCompleteRequestTimeSeries(requests, rawSeries, dateFilter, selectedMonthDate).map(
+  const rawSeries = buildRequestTimeSeries(requestList, dateFilter, selectedMonthDate);
+  const trend = buildCompleteRequestTimeSeries(requestList, rawSeries, dateFilter, selectedMonthDate).map(
     ([key, count]) => ({
       label: formatRequestTimeSeriesLabel(key, dateFilter),
       value: count,
@@ -161,7 +164,7 @@ export async function exportSolicitudesExcel(params: ExportSolicitudesParams): P
       { header: 'Fecha creación', key: 'fecha_creacion', width: 14 },
       { header: 'Fecha resolución', key: 'fecha_resolucion', width: 14 },
     ],
-    requests.map((r) => ({
+    requestList.map((r) => ({
       id: r.id_solicitud,
       asunto: r.asunto_solicitud,
       empresa: r.empresa_solicitud,

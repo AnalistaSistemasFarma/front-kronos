@@ -120,6 +120,14 @@ body {
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
 }
 
+.dashboard-subnav-sticky {
+  position: sticky;
+  top: calc(var(--app-header-height) + 4.5rem);
+  z-index: 35;
+  background-color: var(--app-bg, var(--background));
+  padding-bottom: 0.35rem;
+}
+
 .dark .dashboard-nav-sticky {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
@@ -145,6 +153,11 @@ body {
   overflow-x: clip;
 }
 
+.dashboard-analytics-root .mantine-Card-root,
+.dashboard-analytics-root .mantine-Paper-root {
+  min-width: 0;
+}
+
 .chart-scroll-x {
   overflow-x: auto;
   overflow-y: hidden;
@@ -152,6 +165,35 @@ body {
   width: 100%;
   max-width: 100%;
   overscroll-behavior-x: contain;
+}
+
+.chart-scroll-y {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+  max-width: 100%;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+}
+
+.dashboard-chart-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dashboard-chart-slot {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.dashboard-chart-slot > *,
+.dashboard-chart-card .chart-scroll-x,
+.dashboard-chart-card .chart-scroll-y {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .dashboard-toolbar-slot {
@@ -167,6 +209,10 @@ body {
 
   .dashboard-nav-item {
     flex: 1 1 140px !important;
+  }
+
+  .dashboard-subnav-item {
+    flex: 1 1 120px !important;
   }
 }
 

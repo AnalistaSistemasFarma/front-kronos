@@ -1,28 +1,23 @@
 import type { DashboardTask } from './types';
+import { resolveSolicitudId } from './viewTasksQuery';
 
-/** Estados mostrados en gráficas de actividades (estado real de la tarea). */
+/** Estados mostrados en gráficas de actividades. */
 export type ActivityChartStatus = 'Completada' | 'Pendiente' | 'En Proceso';
 
-/** Filas con tarea real asignada (excluye solicitudes sin tareas en el periodo). */
-export function getTaskRows(tasks: DashboardTask[]): DashboardTask[] {
-  return tasks.filter((t) => t.id_tarea != null && Number(t.id_tarea) > 0);
-}
-
 /**
- * Todas las filas de actividades del dashboard (una por tarea en task_request_general).
- * Incluye repetidas si la solicitud tiene varias tareas o varias áreas.
+ * Filas de actividades desde vw_tareas_solicitudes (misma base que main).
+ * Cada fila de la vista = una tarea con su solicitud asociada.
  */
 export function allActivityRowsFromTasks(tasks: DashboardTask[]): DashboardTask[] {
-  return getTaskRows(tasks);
+  return tasks;
 }
 
-/** @deprecated Usar allActivityRowsFromTasks — mantiene compatibilidad con exportaciones. */
+/** @deprecated Alias de allActivityRowsFromTasks. */
 export function uniqueActivityRowsFromTasks(tasks: DashboardTask[]): DashboardTask[] {
   return allActivityRowsFromTasks(tasks);
 }
 
 export interface ActivityStats {
-  /** Total de tareas asignadas en el periodo */
   total: number;
   completed: number;
   pending: number;
@@ -30,13 +25,12 @@ export interface ActivityStats {
   abierto: number;
   other: number;
   active: number;
-  /** Solicitudes distintas con al menos una tarea */
   solicitudesConTareas: number;
 }
 
-/** Conteos por estado de tarea (cada fila = una actividad asignada). */
+/** Conteos por estado_tarea tal como vienen de vw_tareas_solicitudes. */
 export function computeActivityStats(tasks: DashboardTask[]): ActivityStats {
-  const rows = getTaskRows(tasks);
+  const rows = allActivityRowsFromTasks(tasks);
 
   let completed = 0;
   let pending = 0;
@@ -51,7 +45,9 @@ export function computeActivityStats(tasks: DashboardTask[]): ActivityStats {
     else other += 1;
   }
 
-  const solicitudesConTareas = new Set(rows.map((r) => r.id_solicitud)).size;
+  const solicitudesConTareas = new Set(
+    rows.map((r) => resolveSolicitudId(r)).filter((id) => id != null)
+  ).size;
 
   return {
     total: rows.length,
@@ -67,8 +63,8 @@ export function computeActivityStats(tasks: DashboardTask[]): ActivityStats {
 
 export function sumCostBySolicitud(tasks: DashboardTask[]): Map<number, number> {
   const costs = new Map<number, number>();
-  for (const t of getTaskRows(tasks)) {
-    const id = t.id_solicitud;
+  for (const t of tasks) {
+    const id = resolveSolicitudId(t);
     if (id == null) continue;
     const c = Number(t.costo_tarea) || 0;
     if (c <= 0) continue;

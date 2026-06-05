@@ -16,9 +16,9 @@ export function shouldUseClickOnlyTooltip(
   return tooltipEnabled !== false;
 }
 
-export function getChartEventPosition(
+export function getChartEventPosition<T extends ChartType>(
   event: ChartEvent,
-  chart: ChartJS
+  chart: ChartJS<T>
 ): { x: number; y: number } {
   if (typeof event.x === 'number' && typeof event.y === 'number') {
     return { x: event.x, y: event.y };
@@ -46,8 +46,8 @@ function sameActiveSet(a: ActiveElement[], b: ActiveElement[]): boolean {
 }
 
 /** Replica modo "index" en el clic: todos los datasets del mismo índice X. */
-export function buildIndexModeActiveElements(
-  chart: ChartJS,
+export function buildIndexModeActiveElements<T extends ChartType>(
+  chart: ChartJS<T>,
   hit: ActiveElement
 ): ActiveElement[] {
   const index = hit.index;
@@ -64,8 +64,8 @@ export function buildIndexModeActiveElements(
   return active.length > 0 ? active : [hit];
 }
 
-export function applyClickOnlyTooltipToChart(
-  chart: ChartJS,
+export function applyClickOnlyTooltipToChart<T extends ChartType>(
+  chart: ChartJS<T>,
   event: ChartEvent,
   elements: ActiveElement[],
   currentActive: ActiveElement[] | null,

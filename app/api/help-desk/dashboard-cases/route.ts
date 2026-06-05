@@ -1,4 +1,3 @@
-import sql from 'mssql';
 import { NextResponse } from 'next/server';
 import { getPool } from '../../../../lib/mssqlPool';
 import { requireDashboardAdminApi } from '../../../../lib/dashboard/dashboardAccess';
@@ -67,8 +66,8 @@ export async function GET(req: Request) {
 
     const request = pool.request();
     if (date_from && date_to) {
-      request.input('date_from', sql.Date, date_from);
-      request.input('date_to', sql.Date, date_to);
+      request.input('date_from', date_from);
+      request.input('date_to', date_to);
     }
 
     const result = await request.query(query);

@@ -192,13 +192,99 @@ export function getEncargadoOverviewHeight(count: number): number {
   return getResponsiveChartHeight(count, false);
 }
 
+/** Altura para gráfica multi-línea de técnicos (plot + leyenda inferior). */
+export function getTechnicianPerformanceChartHeight(
+  technicianCount: number,
+  compact: boolean
+): number {
+  const plotArea = compact ? 200 : 260;
+  const cols = compact ? 2 : 4;
+  const legendRows = Math.max(1, Math.ceil(Math.max(technicianCount, 1) / cols));
+  const legendArea = legendRows * (compact ? 24 : 28) + 12;
+  return plotArea + legendArea;
+}
+
+/** Altura máxima visible antes de activar scroll vertical en barras horizontales */
+export function getChartScrollMaxHeight(compact: boolean): number {
+  return compact ? 300 : 440;
+}
+
+export interface ScrollableBarChartLayout {
+  /** Altura real del canvas (sin tope) */
+  height: number;
+  /** Altura visible del contenedor; si es menor que height → scroll vertical */
+  maxHeight?: number;
+  /** Scroll horizontal cuando hay muchas filas/categorías */
+  scrollHorizontal: boolean;
+}
+
+/** Layout ranking horizontal de procesos (hasta 12 filas sin scroll vertical). */
+export function resolveProcessRankingChartLayout(
+  rowCount: number,
+  compact: boolean
+): ScrollableBarChartLayout {
+  const rows = Math.min(Math.max(rowCount, 1), 12);
+  const perRow = compact ? 44 : 52;
+  const padding = compact ? 32 : 44;
+  const height = Math.max(compact ? 160 : 200, rows * perRow + padding);
+  const maxHeight = getChartScrollMaxHeight(compact);
+  const needsVerticalScroll = rowCount > 12 && height > maxHeight;
+
+  return {
+    height,
+    maxHeight: needsVerticalScroll ? maxHeight : undefined,
+    scrollHorizontal: false,
+  };
+}
+
+/** Layout para gráfica apilada de procesos (Top 10): filas + leyenda, scroll solo si excede. */
+export function resolveProcessStackedChartLayout(
+  rowCount: number,
+  compact: boolean
+): ScrollableBarChartLayout {
+  const perRow = compact ? 46 : 54;
+  const legendBlock = 48;
+  const padding = compact ? 40 : 56;
+  const height = Math.max(compact ? 180 : 220, rowCount * perRow + legendBlock + padding);
+  const maxHeight = getChartScrollMaxHeight(compact);
+  const needsVerticalScroll = rowCount > 10 && height > maxHeight;
+
+  return {
+    height,
+    maxHeight: needsVerticalScroll ? maxHeight : undefined,
+    scrollHorizontal: rowCount > (compact ? 4 : 6),
+  };
+}
+
+/** Layout para barras horizontales con muchas filas (encargados, procesos, equipo). */
+export function resolveScrollableBarChartLayout(
+  count: number,
+  compact: boolean
+): ScrollableBarChartLayout {
+  const height = getResponsiveChartHeight(count, compact, { uncapped: true });
+  const maxHeight = getChartScrollMaxHeight(compact);
+  const scrollHorizontal = count > (compact ? 4 : 6);
+
+  return {
+    height,
+    maxHeight: height > maxHeight ? maxHeight : undefined,
+    scrollHorizontal,
+  };
+}
+
 /** Altura del área del gráfico según cantidad de filas y viewport */
-export function getResponsiveChartHeight(count: number, compact: boolean): number {
+export function getResponsiveChartHeight(
+  count: number,
+  compact: boolean,
+  options?: { uncapped?: boolean }
+): number {
   const perRow = compact ? 42 : 56;
   const padding = compact ? 52 : 72;
   const min = compact ? 120 : 160;
-  const max = compact ? 280 : 420;
-  return Math.min(Math.max(min, count * perRow + padding), max);
+  const max = getChartScrollMaxHeight(compact);
+  const calculated = Math.max(min, count * perRow + padding);
+  if (options?.uncapped) return calculated;
+  return Math.min(calculated, max);
 }
 
 export function getEncargadoYAxisWidth(names: string[]): number {

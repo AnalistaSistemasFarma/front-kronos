@@ -8,7 +8,6 @@ import type {
   ChartEvent,
   ChartOptions,
   ChartType,
-  ChartTypeRegistry,
 } from 'chart.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Chart } from 'react-chartjs-2';
@@ -30,6 +29,8 @@ type ChartBoxProps<T extends ChartType = ChartType> = {
   minWidth?: number;
   onChartClick?: (index: number | null) => void;
   pinnedIndex?: number | null;
+  /** Sincroniza resize cuando cambia el contenedor padre (scroll, breakpoint) */
+  layoutRevision?: number | string;
 };
 
 export function ChartBox<T extends ChartType = ChartType>({
@@ -40,16 +41,18 @@ export function ChartBox<T extends ChartType = ChartType>({
   minWidth = 0,
   onChartClick,
   pinnedIndex,
+  layoutRevision = 0,
 }: ChartBoxProps<T>) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { isCompact } = useChartViewport();
+  const { isCompact, layoutEpoch, resizeTick } = useChartViewport();
   const [ready, setReady] = useState(false);
   const [clickTooltipActive, setClickTooltipActive] = useState<ActiveElement[] | null>(
     null
   );
   const clickTooltipActiveRef = useRef<ActiveElement[] | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<ChartJS<T> | null>(null);
 
   clickTooltipActiveRef.current = clickTooltipActive;
 
@@ -66,19 +69,43 @@ export function ChartBox<T extends ChartType = ChartType>({
     setClickTooltipActive(null);
   }, [data, type]);
 
+  const resizeChart = useCallback(() => {
+    requestAnimationFrame(() => {
+      chartRef.current?.resize();
+    });
+  }, []);
+
   useEffect(() => {
     const node = containerRef.current;
     if (!node) return;
-    const observer = new ResizeObserver(() => {
-      if (node.getBoundingClientRect().width > 0) setReady(true);
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry || entry.contentRect.width <= 0) return;
+      setReady(true);
+      resizeChart();
     });
+
     observer.observe(node);
     if (node.getBoundingClientRect().width > 0) setReady(true);
+
     return () => observer.disconnect();
-  }, []);
+  }, [resizeChart, height, minWidth, layoutRevision]);
+
+  useEffect(() => {
+    resizeChart();
+  }, [
+    height,
+    minWidth,
+    layoutEpoch,
+    resizeTick,
+    layoutRevision,
+    isCompact,
+    resizeChart,
+  ]);
 
   const handleClick = useCallback(
-    (event: ChartEvent, elements: ActiveElement[], chart: ChartJS<keyof ChartTypeRegistry>) => {
+    (event: ChartEvent, elements: ActiveElement[], chart: ChartJS<T>) => {
       if (useClickOnlyTooltip) {
         applyClickOnlyTooltipToChart(
           chart,
@@ -97,7 +124,10 @@ export function ChartBox<T extends ChartType = ChartType>({
         onChartClick(typeof index === 'number' ? index : null);
       }
 
-      options?.onClick?.(event, elements, chart);
+      const userOnClick = options?.onClick as
+        | ((event: ChartEvent, elements: ActiveElement[], chart: ChartJS<T>) => void)
+        | undefined;
+      userOnClick?.(event, elements, chart);
     },
     [useClickOnlyTooltip, onChartClick, options]
   );
@@ -139,6 +169,8 @@ export function ChartBox<T extends ChartType = ChartType>({
 
   const mergedOptions = mergeChartOptionsForTheme(baseOptions, isDark);
 
+  const useExpandedWidth = minWidth <= 0;
+
   return (
     <Box
       ref={containerRef}
@@ -146,19 +178,28 @@ export function ChartBox<T extends ChartType = ChartType>({
       style={{
         height,
         minHeight: height,
+        width: '100%',
+        maxWidth: '100%',
         minWidth: minWidth > 0 ? minWidth : undefined,
         position: 'relative',
       }}
     >
       {ready ? (
         <Chart
+          ref={(instance) => {
+            chartRef.current = instance ?? null;
+          }}
           type={type}
           data={data}
           options={mergedOptions as ChartOptions<T>}
-          style={{ width: '100%', height: '100%' }}
+          style={{
+            width: useExpandedWidth ? '100%' : minWidth,
+            height: '100%',
+            maxWidth: '100%',
+          }}
         />
       ) : (
-        <Skeleton height={height} radius='md' />
+        <Skeleton height={height} radius='md' w='100%' />
       )}
     </Box>
   );

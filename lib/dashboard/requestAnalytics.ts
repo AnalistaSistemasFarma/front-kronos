@@ -1,4 +1,5 @@
 import type { DashboardRequest, DashboardTask } from './types';
+import { resolveSolicitudId } from './viewTasksQuery';
 import {
   formatDateLocal,
   getDashboardDateRange,
@@ -8,7 +9,7 @@ import {
 export function uniqueRequestsFromTasks(tasks: DashboardTask[]): DashboardRequest[] {
   const map = new Map<number, DashboardRequest>();
   for (const task of tasks) {
-    const id = task.id_solicitud;
+    const id = resolveSolicitudId(task);
     if (id == null) continue;
 
     const candidate: DashboardRequest = {
@@ -180,11 +181,11 @@ export type EncargadoRequestStat = {
   procesos: string[];
 };
 
-/** Solicitudes únicas agrupadas por líder de área (encargado de proceso). */
-export function buildRequestsByEncargado(tasks: DashboardTask[]): EncargadoRequestStat[] {
+/** Solicitudes agrupadas por líder de área (encargado). */
+export function buildRequestsByEncargado(requests: DashboardRequest[]): EncargadoRequestStat[] {
   const byEncargado = new Map<string, { count: number; procesos: Set<string> }>();
 
-  for (const req of uniqueRequestsFromTasks(tasks)) {
+  for (const req of requests) {
     const encargadoRaw = req.encargado_proceso?.trim();
     const encargados = encargadoRaw
       ? encargadoRaw.split(',').map((s) => s.trim()).filter(Boolean)

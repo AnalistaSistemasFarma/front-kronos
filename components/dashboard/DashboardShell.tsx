@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation';
 import { DashboardDataProvider } from '../../lib/dashboard/DashboardDataContext';
 import { DashboardTabProvider, useDashboardTab } from '../../lib/dashboard/DashboardTabContext';
 import DashboardNav from './DashboardNav';
-import SolicitudesAnalyticsView from './SolicitudesAnalyticsView';
+import SolicitudesHubView from './SolicitudesHubView';
 import ActividadesAnalyticsView from './ActividadesAnalyticsView';
 import TicketsAnalyticsView from './TicketsAnalyticsView';
 import DashboardAdminGate from './DashboardAdminGate';
 
-const MemoSolicitudes = memo(SolicitudesAnalyticsView);
+const MemoSolicitudesHub = memo(SolicitudesHubView);
 const MemoActividades = memo(ActividadesAnalyticsView);
 const MemoTickets = memo(TicketsAnalyticsView);
 
@@ -29,7 +29,7 @@ function DashboardViews() {
   return (
     <div className='dashboard-panels'>
       <div className={panelClass(activeTab === 'solicitudes')} aria-hidden={activeTab !== 'solicitudes'}>
-        <MemoSolicitudes />
+        <MemoSolicitudesHub />
       </div>
       <div className={panelClass(activeTab === 'actividades')} aria-hidden={activeTab !== 'actividades'}>
         <MemoActividades />

@@ -112,7 +112,7 @@ export function ActividadesSection({
   );
 }
 
-export function MetricInsightCard({
+export function MetricInsightCard<T extends ChartType = ChartType>({
   label,
   value,
   hint,
@@ -142,9 +142,9 @@ export function MetricInsightCard({
   refreshing?: boolean;
   chartTitle: string;
   chartDescription: string;
-  chartType: ChartType;
-  chartData?: ChartData<ChartType>;
-  chartOptions?: ChartOptions<ChartType>;
+  chartType: T;
+  chartData?: ChartData<T>;
+  chartOptions?: ChartOptions<T>;
   emptyMessage?: string;
   /** surface = fondo del tema; gradient = tarjeta con degradé (Tickets / encargado) */
   variant?: 'surface' | 'gradient';
@@ -283,7 +283,7 @@ export function MetricInsightCard({
             {chartDescription}
           </Text>
           {hasChart && chartData && chartOptions ? (
-            <ChartContainer
+            <ChartContainer<T>
               type={chartType}
               data={chartData}
               options={chartOptions}
@@ -311,7 +311,7 @@ export function MetricInsightCard({
             {chartDescription}
           </Text>
           {hasChart && chartData && chartOptions ? (
-            <ChartContainer
+            <ChartContainer<T>
               type={chartType}
               data={chartData}
               options={chartOptions}
@@ -534,18 +534,20 @@ export function ChartCard({
       radius='md'
       withBorder
       h={height}
-      style={{ minWidth: 0, position: 'relative' }}
+      style={{ minWidth: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}
     >
       {refreshing ? <DataRefreshOverlay /> : null}
-      <Title order={5} mb={description ? 4 : 'md'}>
+      <Title order={5} mb={description ? 4 : 'md'} style={{ flexShrink: 0 }}>
         {title}
       </Title>
       {description && (
-        <Text size='xs' c='dimmed' mb='md'>
+        <Text size='xs' c='dimmed' mb='md' style={{ flexShrink: 0 }}>
           {description}
         </Text>
       )}
-      {children}
+      <Box className='dashboard-chart-slot' style={{ flex: 1, minHeight: 0, width: '100%' }}>
+        {children}
+      </Box>
     </Card>
   );
 }

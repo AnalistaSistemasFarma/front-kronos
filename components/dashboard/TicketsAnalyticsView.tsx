@@ -75,7 +75,7 @@ import DashboardPageShell from './DashboardPageShell';
 import { useChartViewport } from './useChartViewport';
 import { useProjectColors } from './useProjectColors';
 import { getDashboardCardPadding, resolveChartHeight } from '../../lib/dashboard/responsive';
-import { dashboardChartTheme } from './chartTheme';
+import { dashboardChartTheme, getTechnicianPerformanceChartHeight } from './chartTheme';
 
 function ScoreBadge({ score, size = 'lg' }: { score: number; size?: 'sm' | 'lg' }) {
   const color =
@@ -277,9 +277,14 @@ export default function TicketsAnalyticsView() {
   const techPerformanceLine = useMemo(() => {
     if (!technicianPerformanceSeries) return null;
     return buildTechnicianPerformanceLineChart(technicianPerformanceSeries, {
-      legendOnRight: !chartViewport.isMobile,
+      compact: chartViewport.isCompact,
     });
-  }, [technicianPerformanceSeries, chartViewport.isMobile]);
+  }, [technicianPerformanceSeries, chartViewport.isCompact]);
+
+  const techPerformanceChartHeight = useMemo(() => {
+    const count = technicianPerformanceSeries?.technicians.length ?? 0;
+    return getTechnicianPerformanceChartHeight(count, chartViewport.isCompact);
+  }, [technicianPerformanceSeries, chartViewport.isCompact]);
 
   const formatNumber = (n: number) => new Intl.NumberFormat('es-CO').format(n);
   const avgHours =
@@ -476,7 +481,7 @@ export default function TicketsAnalyticsView() {
             loading={loading}
             chartTitle='Composición de estados'
             chartDescription='Abiertos, en progreso, resueltos y cerrados'
-            chartType='doughnut'
+            chartType='pie'
             chartData={volumeDoughnut.data}
             chartOptions={volumeDoughnut.options}
           />
@@ -551,16 +556,20 @@ export default function TicketsAnalyticsView() {
                 }`}
               >
                 {loading ? (
-                  <Skeleton height={chartHeights.bar} />
+                  <Skeleton height={techPerformanceChartHeight} />
                 ) : techPerformanceLine ? (
                   <ChartContainer
                     type='line'
                     data={techPerformanceLine.data}
                     options={techPerformanceLine.options}
-                    height={chartHeights.bar}
+                    height={techPerformanceChartHeight}
+                    scrollable={
+                      (technicianPerformanceSeries?.periodLabels.length ?? 0) >
+                      (chartViewport.isCompact ? 5 : 8)
+                    }
                   />
                 ) : (
-                  <Flex h={chartHeights.bar} align='center' justify='center'>
+                  <Flex h={techPerformanceChartHeight} align='center' justify='center'>
                     <Text c='dimmed' size='sm'>
                       Sin datos de técnicos
                     </Text>

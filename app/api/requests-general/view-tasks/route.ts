@@ -4,15 +4,18 @@ import { getPool } from '../../../../lib/mssqlPool';
 import {
   buildSummary,
   parseViewTasksFilters,
+  queryCategoryMembersByNames,
   queryDashboardTasks,
+  queryTasksBySolicitudIds,
+  resolveSolicitudId,
   validateDateRange,
 } from '../../../../lib/dashboard/viewTasksQuery';
 
 /**
  * GET /api/requests-general/view-tasks
  *
- * Actividades desde task_request_general. Filtro de periodo por fecha de creación
- * de la solicitud (rg.created_at), inclusive en date_to.
+ * Misma lógica que main: datos desde la vista vw_tareas_solicitudes.
+ * Filtro de periodo: fecha_creacion_solicitud BETWEEN date_from AND date_to.
  */
 export async function GET(req: Request) {
   try {
@@ -41,21 +44,34 @@ export async function GET(req: Request) {
     const data = await queryDashboardTasks(pool, filters);
     const summary = buildSummary(data);
 
+    const solicitudIds = [
+      ...new Set(
+        data
+          .map((row) => resolveSolicitudId(row))
+          .filter((id): id is number => id != null && id > 0)
+      ),
+    ];
+
+    const [teamRoster, categoryMembers] = await Promise.all([
+      solicitudIds.length > 0 ? queryTasksBySolicitudIds(pool, solicitudIds) : Promise.resolve([]),
+      queryCategoryMembersByNames(
+        pool,
+        data.map((row) => row.categoria_solicitud).filter(Boolean) as string[]
+      ),
+    ]);
+
     return NextResponse.json(
       {
         success: true,
         data,
+        team_roster: teamRoster,
+        category_members: categoryMembers,
         count: data.length,
+        team_roster_count: teamRoster.length,
         summary,
-        metrics_definition: {
-          grain: 'task',
-          solicitud_key: 'id_solicitud',
-          task_key: 'id_tarea',
-          date_field: 'requests_general.created_at',
-          note: 'Todas las solicitudes del periodo y cada tarea asignada (task_request_general). El líder de área viene de user_process_category_request_general.',
-        },
+        source: 'vw_tareas_solicitudes',
         filters_applied: {
-          date_field: 'requests_general.created_at',
+          date_field: 'fecha_creacion_solicitud',
           date_from: filters.date_from ?? null,
           date_to: filters.date_to ?? null,
           task_date_from: filters.task_date_from ?? null,
@@ -65,13 +81,14 @@ export async function GET(req: Request) {
       { status: 200 }
     );
   } catch (error) {
-    console.error('Error en view-tasks:', error);
+    console.error('Error executing vw_tareas_solicitudes query:', error);
 
     return NextResponse.json(
       {
         success: false,
-        error: 'Error al obtener las actividades de solicitudes',
-        message: 'No se pudieron recuperar las tareas. Por favor intente nuevamente.',
+        error: 'Error al obtener las tareas y solicitudes de la vista vw_tareas_solicitudes',
+        message: 'No se pudieron recuperar las tareas y solicitudes. Por favor intente nuevamente.',
+        details: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 }
     );
@@ -98,4 +115,3 @@ export async function DELETE() {
     { status: 405 }
   );
 }
-

@@ -2,6 +2,7 @@ import type { DashboardRequest, DashboardTask } from './types';
 import { formatDateLocal } from './dateRange';
 import { formatResolutionDuration } from './resolutionTimeSeries';
 import { isRequestClosedStatus } from './requestStatus';
+import { resolveSolicitudId } from './viewTasksQuery';
 
 export interface RequestWithResolution extends DashboardRequest {
   resolutionHours: number | null;
@@ -35,9 +36,11 @@ export function enrichRequestsWithResolution(
 ): RequestWithResolution[] {
   const tasksByRequest = new Map<number, DashboardTask[]>();
   for (const task of tasks) {
-    const list = tasksByRequest.get(task.id_solicitud) ?? [];
+    const sid = resolveSolicitudId(task);
+    if (sid == null) continue;
+    const list = tasksByRequest.get(sid) ?? [];
     list.push(task);
-    tasksByRequest.set(task.id_solicitud, list);
+    tasksByRequest.set(sid, list);
   }
 
   return requests.map((req) => {

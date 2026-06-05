@@ -19,7 +19,8 @@ import {
   getDashboardDateRange,
   type DashboardDateFilter,
 } from './dateRange';
-import type { DashboardTask } from './types';
+import type { DashboardTask, DashboardRequest } from './types';
+import { enrichTasksWithEncargadoFromRequests } from './enrichTasksWithEncargado';
 
 export interface DashboardCaseRow {
   id_case?: number;
@@ -43,6 +44,9 @@ interface DashboardDataContextValue {
   session: ReturnType<typeof useSession>['data'];
   status: ReturnType<typeof useSession>['status'];
   tasks: DashboardTask[];
+  teamRosterTasks: DashboardTask[];
+  categoryMembers: Record<string, string[]>;
+  requests: DashboardRequest[];
   tasksLoading: boolean;
   tasksRefreshing: boolean;
   tasksError: string | null;
@@ -65,17 +69,22 @@ interface DashboardDataContextValue {
 
 const DashboardDataContext = createContext<DashboardDataContextValue | null>(null);
 
-function buildTasksUrl(dateFilter: DashboardDateFilter, selectedMonthDate: Date): string {
+function buildPeriodUrl(base: string, dateFilter: DashboardDateFilter, selectedMonthDate: Date): string {
   const dateRange = getDashboardDateRange(dateFilter, selectedMonthDate);
-  let url = '/api/requests-general/view-tasks';
-  if (dateRange) {
-    const params = new URLSearchParams({
-      date_from: dateRange.startDate,
-      date_to: dateRange.endDate,
-    });
-    url = `${url}?${params}`;
-  }
-  return url;
+  if (!dateRange) return base;
+  const params = new URLSearchParams({
+    date_from: dateRange.startDate,
+    date_to: dateRange.endDate,
+  });
+  return `${base}?${params}`;
+}
+
+function buildTasksUrl(dateFilter: DashboardDateFilter, selectedMonthDate: Date): string {
+  return buildPeriodUrl('/api/requests-general/view-tasks', dateFilter, selectedMonthDate);
+}
+
+function buildRequestsUrl(dateFilter: DashboardDateFilter, selectedMonthDate: Date): string {
+  return buildPeriodUrl('/api/requests-general/view-requests', dateFilter, selectedMonthDate);
 }
 
 function periodCacheKey(dateFilter: DashboardDateFilter, selectedMonthDate: Date): string {
@@ -91,6 +100,9 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
   const { isDashboardAdmin, loadingDashboardAdmin } = useDashboardAdmin();
 
   const [tasks, setTasks] = useState<DashboardTask[]>([]);
+  const [teamRosterTasks, setTeamRosterTasks] = useState<DashboardTask[]>([]);
+  const [categoryMembers, setCategoryMembers] = useState<Record<string, string[]>>({});
+  const [requests, setRequests] = useState<DashboardRequest[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [tasksRefreshing, setTasksRefreshing] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
@@ -155,24 +167,45 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
         }
         setTasksError(null);
 
-        const response = await fetch(buildTasksUrl(dateFilter, selectedMonthDate), {
-          credentials: 'same-origin',
-        });
-        if (response.status === 401) {
+        const [tasksResponse, requestsResponse] = await Promise.all([
+          fetch(buildTasksUrl(dateFilter, selectedMonthDate), { credentials: 'same-origin' }),
+          fetch(buildRequestsUrl(dateFilter, selectedMonthDate), { credentials: 'same-origin' }),
+        ]);
+
+        if (tasksResponse.status === 401 || requestsResponse.status === 401) {
           throw new Error('Sesión no válida. Recarga la página o vuelve a iniciar sesión.');
         }
-        if (!response.ok) {
-          const errBody = await response.json().catch(() => ({}));
+        if (!tasksResponse.ok) {
+          const errBody = await tasksResponse.json().catch(() => ({}));
           throw new Error(
-            (errBody as { error?: string }).error || 'Error al cargar los datos del dashboard'
+            (errBody as { error?: string }).error || 'Error al cargar las actividades del dashboard'
+          );
+        }
+        if (!requestsResponse.ok) {
+          const errBody = await requestsResponse.json().catch(() => ({}));
+          throw new Error(
+            (errBody as { error?: string }).error || 'Error al cargar las solicitudes del dashboard'
           );
         }
 
-        const result = await response.json();
-        setTasks(result.data || []);
+        const [tasksResult, requestsResult] = await Promise.all([
+          tasksResponse.json(),
+          requestsResponse.json(),
+        ]);
+
+        const requestsData = requestsResult.data || [];
+        const tasksData = tasksResult.data || [];
+        const rosterData = tasksResult.team_roster || tasksData;
+        const membersByCategory = (tasksResult.category_members || {}) as Record<string, string[]>;
+
+        setRequests(requestsData);
+        setCategoryMembers(membersByCategory);
+        setTasks(enrichTasksWithEncargadoFromRequests(tasksData, requestsData));
+        setTeamRosterTasks(enrichTasksWithEncargadoFromRequests(rosterData, requestsData));
         tasksCacheKey.current = key;
 
-        const applied = result.filters_applied as
+        const applied = (tasksResult.filters_applied ??
+          requestsResult.filters_applied) as
           | { date_from?: string | null; date_to?: string | null }
           | undefined;
         if (applied?.date_from && applied?.date_to) {
@@ -272,6 +305,9 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
       session,
       status,
       tasks,
+      teamRosterTasks,
+      categoryMembers,
+      requests,
       tasksLoading,
       tasksRefreshing,
       tasksError,
@@ -295,6 +331,9 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
       session,
       status,
       tasks,
+      teamRosterTasks,
+      categoryMembers,
+      requests,
       tasksLoading,
       tasksRefreshing,
       tasksError,

@@ -42,7 +42,7 @@ import {
 } from '@tabler/icons-react';
 import {
   getStatusBadgeStyle,
-  getResponsiveChartHeight,
+  resolveScrollableBarChartLayout,
 } from './chartTheme';
 import { useChartViewport } from './useChartViewport';
 import { useDashboardChartPalette } from './useDashboardChartPalette';
@@ -442,8 +442,10 @@ function TeamPerformanceCharts({
 }) {
   const { palette } = useDashboardChartPalette();
   const { isCompact } = useChartViewport();
-  const names = people.map((p) => p.asignado);
-  const chartHeight = getResponsiveChartHeight(people.length, isCompact);
+  const chartLayout = useMemo(
+    () => resolveScrollableBarChartLayout(people.length, isCompact),
+    [people.length, isCompact]
+  );
   const stackedChart = useMemo(() => buildHorizontalStackedBarChart(people), [people]);
   return (
     <Paper
@@ -468,8 +470,9 @@ function TeamPerformanceCharts({
         type='bar'
         data={stackedChart.data}
         options={stackedChart.options}
-        height={chartHeight}
-        scrollable={people.length > 4}
+        height={chartLayout.height}
+        maxHeight={chartLayout.maxHeight}
+        scrollable={chartLayout.scrollHorizontal}
       />
 
       <TeamSummaryTable people={people} />
@@ -818,11 +821,43 @@ function TaskDetailTable({
 
 interface EncargadoActivitiesChartProps {
   tasks: TaskWithEncargado[];
+  teamTasks?: TaskWithEncargado[];
+  categoryMembers?: Record<string, string[]>;
   periodLabel: string;
+}
+
+function categoriesForLeaderTasks(
+  rows: TaskWithEncargado[],
+  selectedEncargado: string
+): Set<string> {
+  const categories = new Set<string>();
+  for (const task of rows) {
+    if (!taskBelongsToEncargado(task.encargado_proceso, selectedEncargado)) continue;
+    const category = task.categoria_solicitud?.replace(/\r?\n/g, ' ').trim();
+    if (category) categories.add(category);
+  }
+  return categories;
+}
+
+function mergeCategoryMembersIntoCounts(
+  counts: Record<string, { Completada: number; Pendiente: number; 'En Proceso': number }>,
+  categories: Set<string>,
+  categoryMembers: Record<string, string[]>
+): void {
+  for (const category of categories) {
+    for (const member of categoryMembers[category] || []) {
+      const name = normalizeAsignado(member);
+      if (!counts[name]) {
+        counts[name] = { Completada: 0, Pendiente: 0, 'En Proceso': 0 };
+      }
+    }
+  }
 }
 
 export default function EncargadoActivitiesChart({
   tasks,
+  teamTasks,
+  categoryMembers = {},
   periodLabel,
 }: EncargadoActivitiesChartProps) {
   const { palette, statusColors, barPalette, barPaletteMantine } =
@@ -839,16 +874,36 @@ export default function EncargadoActivitiesChart({
     setTaskPage(1);
   }, [selectedEncargado]);
 
+  const teamSourceTasks = teamTasks && teamTasks.length > 0 ? teamTasks : tasks;
+
   const encargadoChartData = useMemo(() => {
-    const counts = tasks.reduce(
-      (acc, task) => {
-        for (const key of encargadoNames(task.encargado_proceso)) {
-          acc[key] = (acc[key] || 0) + 1;
+    const counts: Record<string, number> = {};
+    const teamMembers: Record<string, Set<string>> = {};
+
+    for (const task of tasks) {
+      for (const key of encargadoNames(task.encargado_proceso)) {
+        counts[key] = (counts[key] || 0) + 1;
+      }
+    }
+
+    for (const task of teamSourceTasks) {
+      for (const key of encargadoNames(task.encargado_proceso)) {
+        if (!teamMembers[key]) teamMembers[key] = new Set();
+        teamMembers[key].add(normalizeAsignado(task.asignado_tarea));
+      }
+    }
+
+    for (const [encargado, members] of Object.entries(teamMembers)) {
+      const categories = categoriesForLeaderTasks(
+        teamSourceTasks.filter((t) => taskBelongsToEncargado(t.encargado_proceso, encargado)),
+        encargado
+      );
+      for (const category of categories) {
+        for (const member of categoryMembers[category] || []) {
+          members.add(normalizeAsignado(member));
         }
-        return acc;
-      },
-      {} as Record<string, number>
-    );
+      }
+    }
 
     const max = Math.max(...Object.values(counts), 1);
 
@@ -858,18 +913,19 @@ export default function EncargadoActivitiesChart({
         return {
           encargado,
           tareas,
+          colaboradores: teamMembers[encargado]?.size ?? 0,
           color: barPaletteMantine[paletteIndex % barPaletteMantine.length],
           barHex: barPalette[paletteIndex],
           pct: Math.round((tareas / max) * 100),
         };
       })
       .sort((a, b) => b.tareas - a.tareas);
-  }, [tasks, barPalette, barPaletteMantine]);
+  }, [tasks, teamSourceTasks, categoryMembers, barPalette, barPaletteMantine]);
 
   const { isMobile, isCompact } = useChartViewport();
 
-  const overviewChartHeight = useMemo(
-    () => getResponsiveChartHeight(encargadoChartData.length, isCompact),
+  const overviewChartLayout = useMemo(
+    () => resolveScrollableBarChartLayout(encargadoChartData.length, isCompact),
     [encargadoChartData.length, isCompact]
   );
 
@@ -889,7 +945,7 @@ export default function EncargadoActivitiesChart({
   const assigneeChartData = useMemo(() => {
     if (!selectedEncargado) return [];
 
-    const filtered = tasks.filter((t) =>
+    const filtered = teamSourceTasks.filter((t) =>
       taskBelongsToEncargado(t.encargado_proceso, selectedEncargado)
     );
 
@@ -910,14 +966,20 @@ export default function EncargadoActivitiesChart({
       {} as Record<string, { Completada: number; Pendiente: number; 'En Proceso': number }>
     );
 
+    mergeCategoryMembersIntoCounts(
+      byAssignee,
+      categoriesForLeaderTasks(filtered, selectedEncargado),
+      categoryMembers
+    );
+
     return Object.entries(byAssignee)
       .map(([asignado, counts]) => ({
         asignado,
         ...counts,
         total: counts.Completada + counts.Pendiente + counts['En Proceso'],
       }))
-      .sort((a, b) => b.total - a.total);
-  }, [tasks, selectedEncargado]);
+      .sort((a, b) => b.total - a.total || a.asignado.localeCompare(b.asignado, 'es'));
+  }, [teamSourceTasks, selectedEncargado, categoryMembers]);
 
   useEffect(() => {
     if (assigneeChartData.length === 0) {
@@ -1036,8 +1098,9 @@ export default function EncargadoActivitiesChart({
                     {selectedEncargado}
                   </Text>
                   <Text size='xs' c='dimmed'>
-                    Equipo a cargo · {detailRows.length} tareas · {assigneeChartData.length}{' '}
-                    personas
+                    Equipo a cargo · {detailRows.length} tareas en periodo ·{' '}
+                    {assigneeChartData.length}{' '}
+                    {assigneeChartData.length === 1 ? 'colaborador' : 'colaboradores'}
                   </Text>
                 </Box>
               </Group>
@@ -1214,13 +1277,15 @@ export default function EncargadoActivitiesChart({
             }}
           >
             <Text size='xs' fw={600} mb='sm' style={{ color: chartLabelColor }}>
-              Actividades por encargado — haga clic en una fila para ver el detalle del equipo
+              Actividades por encargado — cada líder distribuye tareas a su equipo
             </Text>
             <ChartContainer
               type='bar'
               data={overviewBarChart.data}
               options={overviewBarChart.options}
-              height={overviewChartHeight}
+              height={overviewChartLayout.height}
+              maxHeight={overviewChartLayout.maxHeight}
+              scrollable={overviewChartLayout.scrollHorizontal}
             />
           </Paper>
 
@@ -1230,38 +1295,23 @@ export default function EncargadoActivitiesChart({
 
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
             {encargadoChartData.map((item) => (
-                <UnstyledButton
-                  key={item.encargado}
-                  onClick={() => setSelectedEncargado(item.encargado)}
-                  w='100%'
-                >
-                  <Paper
-                    p={0}
-                    radius='md'
-                    style={{
-                      overflow: 'hidden',
-                      background: palette.chartPanelBg,
-                      border: `1px solid ${palette.chartPanelBorder}`,
-                      transition: 'box-shadow 0.15s ease, transform 0.15s ease',
-                    }}
-                    styles={{
-                      root: {
-                        '&:hover': {
-                          boxShadow: `0 4px 14px ${palette.blue800}22`,
-                          transform: 'translateY(-1px)',
-                          borderColor: palette.borderAccent,
-                          backgroundColor: palette.blue50,
-                        },
-                      },
-                    }}
-                  >
-                    <Group wrap='nowrap' gap={0} align='stretch'>
-                      <Box
-                        w={4}
-                        style={{ flexShrink: 0, backgroundColor: item.barHex }}
-                        aria-hidden
-                      />
-                      <Box p='md' style={{ flex: 1, minWidth: 0 }}>
+              <Paper
+                key={item.encargado}
+                p={0}
+                radius='md'
+                style={{
+                  overflow: 'hidden',
+                  background: palette.chartPanelBg,
+                  border: `1px solid ${palette.chartPanelBorder}`,
+                }}
+              >
+                <Group wrap='nowrap' gap={0} align='stretch'>
+                  <Box
+                    w={4}
+                    style={{ flexShrink: 0, backgroundColor: item.barHex }}
+                    aria-hidden
+                  />
+                  <Box p='md' style={{ flex: 1, minWidth: 0 }}>
                     <Group wrap='nowrap' gap='sm' align='flex-start'>
                       <ThemeIcon size={36} radius='md' color={item.color}>
                         <Text size='xs' fw={700} c='white'>
@@ -1272,12 +1322,20 @@ export default function EncargadoActivitiesChart({
                         <Text size='sm' fw={700} lineClamp={2} style={{ color: palette.primary }}>
                           {item.encargado}
                         </Text>
-                        <Group gap='xs' mt={4}>
-                          <IconUser size={12} color={palette.blue700} />
-                          <Text size='xs' fw={500} style={{ color: chartLabelColor }}>
-                            {item.tareas} {item.tareas === 1 ? 'actividad' : 'actividades'}
-                            {encargadoChartData.length > 1 ? ` · ${item.pct}% del máximo` : ''}
-                          </Text>
+                        <Group gap='xs' mt={4} wrap='wrap'>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconUser size={12} color={palette.blue700} />
+                            <Text size='xs' fw={500} style={{ color: chartLabelColor }}>
+                              {item.tareas} {item.tareas === 1 ? 'actividad' : 'actividades'}
+                            </Text>
+                          </Group>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconUsers size={12} color={palette.blue700} />
+                            <Text size='xs' fw={500} style={{ color: chartLabelColor }}>
+                              {item.colaboradores}{' '}
+                              {item.colaboradores === 1 ? 'colaborador' : 'colaboradores'}
+                            </Text>
+                          </Group>
                         </Group>
                         <Progress
                           value={item.pct}
@@ -1290,13 +1348,21 @@ export default function EncargadoActivitiesChart({
                             section: { backgroundColor: item.barHex },
                           }}
                         />
+                        <Button
+                          variant='light'
+                          color='blue'
+                          size='compact-sm'
+                          mt='sm'
+                          leftSection={<IconUsers size={14} />}
+                          onClick={() => setSelectedEncargado(item.encargado)}
+                        >
+                          Ver equipo
+                        </Button>
                       </Box>
-                      <IconChevronRight size={16} color={palette.blue700} />
                     </Group>
-                      </Box>
-                    </Group>
-                  </Paper>
-                </UnstyledButton>
+                  </Box>
+                </Group>
+              </Paper>
             ))}
           </SimpleGrid>
         </>

@@ -101,6 +101,8 @@ export default function ActividadesAnalyticsView() {
 
   const {
     tasks: tasksFromCtx,
+    teamRosterTasks,
+    categoryMembers,
     loading,
     refreshing,
     error,
@@ -121,6 +123,10 @@ export default function ActividadesAnalyticsView() {
 
   /** Cada fila = una tarea asignada a un colaborador bajo el líder de área. */
   const activities = useMemo(() => allActivityRowsFromTasks(rawTasks), [rawTasks]);
+  const teamActivities = useMemo(
+    () => allActivityRowsFromTasks(teamRosterTasks as TaskData[]),
+    [teamRosterTasks]
+  );
 
   const activitiesWithCost = activities;
   const [activeTab, setActiveTab] = useState<string>('overview');
@@ -632,6 +638,8 @@ export default function ActividadesAnalyticsView() {
                           `${dateFilter}-${selectedMonthDate.getFullYear()}-${selectedMonthDate.getMonth()}`
                         }
                         tasks={activities}
+                        teamTasks={teamActivities}
+                        categoryMembers={categoryMembers}
                         periodLabel={getFilterLabel(dateFilter)}
                       />
                     </Card>

@@ -39,30 +39,25 @@ import {
   buildRequestTimeSeries,
   buildRequestsByEncargado,
   formatRequestTimeSeriesLabel,
-  uniqueRequestsFromTasks,
 } from '../../lib/dashboard/requestAnalytics';
-import {
-  getFilterLabel,
-  getPeriodRangeLabel,
-  type DashboardDateFilter,
-} from '../../lib/dashboard/dateRange';
+import { getPeriodRangeLabel } from '../../lib/dashboard/dateRange';
 import {
   ALL_COMPANIES_VALUE,
   buildAvgResolutionTimeSeries,
   computeResolutionSummary,
   enrichRequestsWithResolution,
   formatHoursLabel,
-  listCompaniesFromTasks,
 } from '../../lib/dashboard/requestResolution';
+import { listCompaniesFromRequests } from '../../lib/dashboard/viewRequestsQuery';
 import { useDashboardTasks } from '../../lib/dashboard/useDashboardTasks';
 import { ChartContainer } from './ChartContainer';
+import { useScrollableBarChartLayout } from './useScrollableBarChartLayout';
 import DashboardDateToolbar, { DashboardPeriodHint } from './DashboardDateToolbar';
 import DashboardPageShell from './DashboardPageShell';
 import SolicitudesResolutionTable from './SolicitudesResolutionTable';
 import { useChartViewport } from './useChartViewport';
 import { useProjectColors } from './useProjectColors';
 import { getDashboardCardPadding, resolveChartHeight } from '../../lib/dashboard/responsive';
-import { getResponsiveChartHeight } from './chartTheme';
 import { useDashboardChartPalette } from './useDashboardChartPalette';
 import {
   countRequestsByDashboardStatus,
@@ -76,6 +71,7 @@ export default function SolicitudesAnalyticsView() {
   const {
     status,
     tasks,
+    requests: requestsFromCtx,
     loading,
     error,
     dateFilter,
@@ -95,6 +91,7 @@ export default function SolicitudesAnalyticsView() {
       setExportingExcel(true);
       await exportSolicitudesExcel({
         tasks,
+        requests: requestsFromCtx,
         dateFilter,
         selectedMonthDate,
         appliedRange,
@@ -105,17 +102,20 @@ export default function SolicitudesAnalyticsView() {
     } finally {
       setExportingExcel(false);
     }
-  }, [tasks, dateFilter, selectedMonthDate, appliedRange, companyFilter]);
+  }, [tasks, requestsFromCtx, dateFilter, selectedMonthDate, appliedRange, companyFilter]);
 
-  const allRequests = useMemo(() => uniqueRequestsFromTasks(tasks), [tasks]);
-  const companies = useMemo(() => listCompaniesFromTasks(tasks), [tasks]);
+  const allRequests = requestsFromCtx;
+  const companies = useMemo(() => listCompaniesFromRequests(allRequests), [allRequests]);
 
   const filteredTasks = useMemo(() => {
     if (companyFilter === ALL_COMPANIES_VALUE) return tasks;
     return tasks.filter((t) => t.empresa_solicitud === companyFilter);
   }, [tasks, companyFilter]);
 
-  const requests = useMemo(() => uniqueRequestsFromTasks(filteredTasks), [filteredTasks]);
+  const requests = useMemo(() => {
+    if (companyFilter === ALL_COMPANIES_VALUE) return allRequests;
+    return allRequests.filter((r) => r.empresa_solicitud === companyFilter);
+  }, [allRequests, companyFilter]);
 
   const enrichedRequests = useMemo(
     () => enrichRequestsWithResolution(requests, filteredTasks),
@@ -146,21 +146,6 @@ export default function SolicitudesAnalyticsView() {
     [stats, projectColors]
   );
 
-  const processChartData = useMemo(() => {
-    const data = requests.reduce(
-      (acc, r) => {
-        const p = r.proceso_solicitud || 'Sin Proceso';
-        acc[p] = (acc[p] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>
-    );
-    return Object.entries(data)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
-  }, [requests]);
-
   const companyChartData = useMemo(() => {
     const data = allRequests.reduce(
       (acc, r) => {
@@ -177,8 +162,8 @@ export default function SolicitudesAnalyticsView() {
   }, [allRequests]);
 
   const encargadoRequestStats = useMemo(
-    () => buildRequestsByEncargado(filteredTasks),
-    [filteredTasks]
+    () => buildRequestsByEncargado(requests),
+    [requests]
   );
 
   const encargadoChartItems = useMemo(
@@ -219,11 +204,6 @@ export default function SolicitudesAnalyticsView() {
     projectColors.primary,
     formatHoursLabel
   );
-  const processBarChart = buildVerticalBarChart(
-    processChartData.map((d) => ({ name: d.name, value: d.value })),
-    projectColors.primary,
-    { datasetLabel: 'Solicitudes', showLegend: true, rotateLabels: true }
-  );
   const companyBarChart = buildVerticalBarChart(
     companyChartData.map((d) => ({ name: d.name, value: d.value })),
     projectColors.success,
@@ -232,10 +212,7 @@ export default function SolicitudesAnalyticsView() {
 
   const chartViewport = useChartViewport();
   const isMobile = chartViewport.isMobile;
-  const encargadoChartHeight = useMemo(
-    () => getResponsiveChartHeight(encargadoChartItems.length, chartViewport.isCompact),
-    [encargadoChartItems.length, chartViewport.isCompact]
-  );
+  const encargadoChartLayout = useScrollableBarChartLayout(encargadoChartItems.length);
   const encargadoBarChart = useMemo(
     () =>
       buildHorizontalMultiColorBarChart(encargadoChartItems, isMobile, {
@@ -278,7 +255,7 @@ export default function SolicitudesAnalyticsView() {
           <Text size='sm' c='dimmed' component='span' display='block'>
             {isCompanyView
               ? `Analítica de ${companyFilter} · creación y tiempo de cierre por solicitud`
-              : 'Vista general · compare empresas y estados del periodo'}
+              : 'Estados, empresas y tiempos de cierre de solicitudes en el periodo'}
           </Text>
           {activeDateRange ? (
             <DashboardPeriodHint
@@ -345,7 +322,7 @@ export default function SolicitudesAnalyticsView() {
               {formatNumber(stats.total)}
             </Title>
             <Text size='xs' c='dimmed'>
-              Solicitudes únicas (sin repetir por tarea) · {appliedRange ?? getPeriodRangeLabel(dateFilter, selectedMonthDate)}
+              Una fila por solicitud (vw_requests_general) · {appliedRange ?? getPeriodRangeLabel(dateFilter, selectedMonthDate)}
               {isCompanyView && ` · ${companyFilter}`}
             </Text>
           </Card>
@@ -527,9 +504,9 @@ export default function SolicitudesAnalyticsView() {
           </Card>
         )}
 
-        <Grid gutter='lg'>
-          {!isCompanyView && (
-            <Grid.Col span={{ base: 12, md: 6 }}>
+        {!isCompanyView && (
+          <Grid gutter='lg'>
+            <Grid.Col span={12}>
               <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
                 <Title order={4} mb='md'>
                   Solicitudes por empresa
@@ -548,27 +525,8 @@ export default function SolicitudesAnalyticsView() {
                 )}
               </Card>
             </Grid.Col>
-          )}
-          <Grid.Col span={{ base: 12, md: isCompanyView ? 12 : 6 }}>
-            <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
-              <Title order={4} mb='md'>
-                Solicitudes por proceso (Top 10)
-              </Title>
-              {!loading && processChartData.length > 0 ? (
-                <ChartContainer
-                  type='bar'
-                  data={processBarChart.data}
-                  options={processBarChart.options}
-                  height={chartHeights.large}
-                />
-              ) : (
-                <Text c='dimmed' ta='center' py='xl'>
-                  Sin datos
-                </Text>
-              )}
-            </Card>
-          </Grid.Col>
-        </Grid>
+          </Grid>
+        )}
 
         <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
           <Group gap='xs' mb={4}>
@@ -577,18 +535,20 @@ export default function SolicitudesAnalyticsView() {
           </Group>
           <Text size='xs' c='dimmed' mb='md'>
             {isCompanyView
-              ? `Solicitudes de ${companyFilter} agrupadas por líder de área y procesos a su cargo`
-              : 'Evalúe la carga de solicitudes de cada líder y las áreas (procesos) que administra'}
+              ? `Carga de solicitudes de ${companyFilter} por líder de área`
+              : 'Volumen de solicitudes gestionadas por cada líder de área'}
           </Text>
           {loading ? (
-            <Skeleton height={encargadoChartHeight} radius='md' />
+            <Skeleton height={encargadoChartLayout.maxHeight ?? encargadoChartLayout.height} radius='md' />
           ) : encargadoChartItems.length > 0 ? (
             <>
               <ChartContainer
                 type='bar'
                 data={encargadoBarChart.data}
                 options={encargadoBarChart.options}
-                height={encargadoChartHeight}
+                height={encargadoChartLayout.height}
+                maxHeight={encargadoChartLayout.maxHeight}
+                scrollable={encargadoChartLayout.scrollHorizontal}
               />
               <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing='sm' mt='lg'>
                 {encargadoRequestStats.map((item, index) => (
@@ -607,7 +567,9 @@ export default function SolicitudesAnalyticsView() {
                       </Badge>
                     </Group>
                     <Text size='xs' c='dimmed' lineClamp={2}>
-                      Área{item.procesos.length === 1 ? '' : 's'}: {item.procesos.join(' · ')}
+                      {item.procesos.length > 0
+                        ? `Áreas: ${item.procesos.join(' · ')}`
+                        : 'Sin área asignada'}
                     </Text>
                   </Paper>
                 ))}
@@ -665,7 +627,7 @@ export default function SolicitudesAnalyticsView() {
                           #{r.id_solicitud} · {r.asunto_solicitud}
                         </Text>
                         <Text size='xs' c='dimmed'>
-                          {r.empresa_solicitud} · {r.proceso_solicitud} · {r.creador_solicitud}
+                          {r.empresa_solicitud} · {r.creador_solicitud}
                         </Text>
                       </div>
                       <Badge variant='light'>{normalizeRequestStatus(r.estado_solicitud)}</Badge>
