@@ -40,4 +40,5 @@ export type DashboardRequest = Pick<
   | 'ejecutor_final_solicitud'
   | 'proceso_solicitud'
   | 'categoria_solicitud'
+  | 'encargado_proceso'
 >;

@@ -18,7 +18,7 @@ import {
   Badge,
   Tabs,
   Paper,
-  Flex,
+  Box,
   Loader,
 } from '@mantine/core';
 import EncargadoActivitiesChart from './EncargadoActivitiesChart';
@@ -35,7 +35,6 @@ import { getDashboardCardPadding } from '../../lib/dashboard/responsive';
 import { useChartViewport } from './useChartViewport';
 import { dashboardTabsStyles, resolveChartHeight } from '../../lib/dashboard/responsive';
 import {
-  buildAreaLineChart,
   buildHorizontalMultiColorBarChart,
   buildPieChart,
   buildShareDoughnut,
@@ -46,11 +45,8 @@ import {
   uniqueActivityRowsFromTasks,
 } from '../../lib/dashboard/activityMetrics';
 import {
-  formatDateLocal,
-  getDashboardDateRange,
   getFilterLabel,
   getPeriodRangeLabel,
-  parseCalendarDate,
   type DashboardDateFilter,
 } from '../../lib/dashboard/dateRange';
 import { dashboardChartTheme } from './chartTheme';
@@ -98,8 +94,6 @@ interface TaskData {
   encargado_proceso?: string | null;
 }
 
-type DateFilter = DashboardDateFilter;
-
 export default function ActividadesAnalyticsView() {
   const projectColors = useProjectColors();
   const { data: session, status } = useSession();
@@ -108,6 +102,7 @@ export default function ActividadesAnalyticsView() {
   const {
     tasks: tasksFromCtx,
     loading,
+    refreshing,
     error,
     dateFilter,
     setDateFilter,
@@ -120,6 +115,9 @@ export default function ActividadesAnalyticsView() {
   } = useDashboardTasks();
 
   const rawTasks = tasksFromCtx as TaskData[];
+
+  const isInitialLoad = loading && rawTasks.length === 0;
+  const isRefreshing = refreshing || (loading && rawTasks.length > 0);
 
   /** 1 solicitud = 1 actividad (misma cantidad que Solicitudes). */
   const activities = useMemo(
@@ -176,133 +174,6 @@ export default function ActividadesAnalyticsView() {
     .map(([name, value]) => ({ name, value }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10);
-
-  // Sortable keys per filter:
-  //   month    → YYYY-MM-DD  (daily)
-  //   quarter  → YYYY-MM-DD of week's Sunday (weekly)
-  //   semester → YYYY-MM     (monthly)
-  //   year     → YYYY-MM     (monthly)
-  //   all      → YYYY-Qn     (quarterly, e.g. "2025-Q1")
-  const getDateKey = (date: Date, filter: DateFilter): string => {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-
-    switch (filter) {
-      case 'month':
-        return formatDateLocal(date);
-      case 'quarter': {
-        const weekStart = new Date(date);
-        weekStart.setDate(date.getDate() - date.getDay()); // rewind to Sunday
-        return formatDateLocal(weekStart);
-      }
-      case 'semester':
-      case 'year':
-        return `${year}-${String(month + 1).padStart(2, '0')}`;
-      case 'all': {
-        const q = Math.floor(month / 3) + 1;
-        return `${year}-Q${q}`;
-      }
-      default:
-        return formatDateLocal(date);
-    }
-  };
-
-  // Time series data with dynamic grouping based on dateFilter (independent of global dateFilter)
-  const timeSeriesData = activities.reduce((acc, task) => {
-    const date = parseCalendarDate(task.fecha_creacion_solicitud);
-    if (!date) return acc;
-    const key = getDateKey(date, dateFilter);
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const formatTimeSeriesLabel = (key: string): string => {
-    if (dateFilter === 'year' || dateFilter === 'semester') {
-      const [y, m] = key.split('-').map(Number);
-      return new Date(y, m - 1, 1).toLocaleDateString('es-CO', { month: 'short', year: '2-digit' });
-    }
-    if (dateFilter === 'month' || dateFilter === 'quarter') {
-      const [y, m, d] = key.split('-').map(Number);
-      return new Date(y, m - 1, d).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
-    }
-    if (dateFilter === 'all') {
-      // "2025-Q1" → "Q1 2025"
-      const [year, q] = key.split('-');
-      return `${q} ${year}`;
-    }
-    return key;
-  };
-
-  // Build complete time series for dateFilter, filling missing periods with 0
-  const buildCompleteTimeSeries = (): [string, number][] => {
-    const now = new Date();
-    switch (dateFilter) {
-      case 'month': {
-        const range = getDashboardDateRange('month', selectedMonthDate)!;
-        const result: [string, number][] = [];
-        const cur = new Date(range.startDate + 'T00:00:00');
-        const end = new Date(range.endDate + 'T00:00:00');
-        while (cur <= end) {
-          const key = formatDateLocal(cur);
-          result.push([key, timeSeriesData[key] || 0]);
-          cur.setDate(cur.getDate() + 1);
-        }
-        return result;
-      }
-      case 'quarter': {
-        const range = getDashboardDateRange('quarter', selectedMonthDate)!;
-        const start = new Date(range.startDate + 'T00:00:00');
-        const end = new Date(range.endDate + 'T00:00:00');
-        const cur = new Date(start);
-        cur.setDate(start.getDate() - start.getDay()); // rewind to Sunday
-        const result: [string, number][] = [];
-        while (cur <= end) {
-          const key = formatDateLocal(cur);
-          result.push([key, timeSeriesData[key] || 0]);
-          cur.setDate(cur.getDate() + 7);
-        }
-        return result;
-      }
-      case 'semester':
-      case 'year': {
-        const range = getDashboardDateRange(dateFilter, selectedMonthDate)!;
-        const start = new Date(range.startDate + 'T00:00:00');
-        const end = new Date(range.endDate + 'T00:00:00');
-        const result: [string, number][] = [];
-        const cur = new Date(start.getFullYear(), start.getMonth(), 1);
-        while (cur <= end) {
-          const key = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`;
-          result.push([key, timeSeriesData[key] || 0]);
-          cur.setMonth(cur.getMonth() + 1);
-        }
-        return result;
-      }
-      case 'all': {
-        if (activities.length === 0) return [];
-        const minDate = activities.reduce((min, t) => {
-          const d = parseCalendarDate(t.fecha_creacion_solicitud);
-          if (!d) return min;
-          return d < min ? d : min;
-        }, new Date());
-        const result: [string, number][] = [];
-        const cur = new Date(minDate.getFullYear(), Math.floor(minDate.getMonth() / 3) * 3, 1);
-        while (cur <= now) {
-          const q = Math.floor(cur.getMonth() / 3) + 1;
-          const key = `${cur.getFullYear()}-Q${q}`;
-          result.push([key, timeSeriesData[key] || 0]);
-          cur.setMonth(cur.getMonth() + 3);
-        }
-        return result;
-      }
-      default:
-        return Object.entries(timeSeriesData).sort((a, b) => a[0].localeCompare(b[0]));
-    }
-  };
-
-  const timeSeriesChartData = buildCompleteTimeSeries().map(([key, count]) => ({
-    date: formatTimeSeriesLabel(key),
-    Actividades: count,
-  }));
 
   // Cost per solicitud (actividad)
   const costStats = {
@@ -511,10 +382,6 @@ export default function ActividadesAnalyticsView() {
     [stats.inProgress, stats.abierto, stats.total, enProceso, doughnutRestColor]
   );
 
-  const trendAreaChart = buildAreaLineChart(
-    timeSeriesChartData.map((d) => ({ label: d.date, value: d.Actividades })),
-    projectColors.secondary
-  );
   const processBarChart = buildVerticalBarChart(
     processChartData.map((d) => ({ name: d.name, value: d.value })),
     projectColors.primary,
@@ -558,7 +425,6 @@ export default function ActividadesAnalyticsView() {
 
   const chartViewport = useChartViewport();
   const chartHeights = {
-    trend: resolveChartHeight('standard', chartViewport),
     bar: resolveChartHeight('hero', chartViewport),
     pie: resolveChartHeight('medium', chartViewport),
   };
@@ -578,7 +444,7 @@ export default function ActividadesAnalyticsView() {
           selectedMonthDate={selectedMonthDate}
           onSelectedMonthDateChange={setSelectedMonthDate}
           onRefresh={fetchTasks}
-          loading={loading}
+          loading={isInitialLoad || isRefreshing}
           onExport={handleExportExcel}
           exportingExcel={exportingExcel}
         />
@@ -631,35 +497,8 @@ export default function ActividadesAnalyticsView() {
 
           <Tabs.Panel value='overview'>
             <Stack gap='xl' mt='md'>
-              {(loadingAdmin || isAdmin) && (
-                <ActividadesSection
-                  priority={1}
-                  title='Desempeño por encargado'
-                  description='Líderes de área y carga de actividades (una actividad = una solicitud en el periodo).'
-                >
-                  {loadingAdmin ? (
-                    <Group justify='center' py='xl'>
-                      <Loader size='sm' />
-                    </Group>
-                  ) : (
-                    <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
-                      <Group gap='xs' mb='md'>
-                        <IconUsers size={18} color={projectColors.primary} />
-                        <Text size='sm' fw={600}>
-                          Actividades por encargado de área
-                        </Text>
-                      </Group>
-                      <EncargadoActivitiesChart
-                        tasks={activities}
-                        periodLabel={getFilterLabel(dateFilter)}
-                      />
-                    </Card>
-                  )}
-                </ActividadesSection>
-              )}
-
               <ActividadesSection
-                priority={loadingAdmin || isAdmin ? 2 : 1}
+                priority={1}
                 title='Panorama del periodo'
                 description='Mismos totales que Solicitudes: cada actividad es un pedido único en el rango de fechas.'
               >
@@ -671,7 +510,8 @@ export default function ActividadesAnalyticsView() {
                     hint={`Igual que solicitudes · ${appliedRange ?? getPeriodRangeLabel(dateFilter, selectedMonthDate)}`}
                     color={projectColors.primary}
                     icon={IconChartBar}
-                    loading={loading}
+                    loading={isInitialLoad}
+                    refreshing={isRefreshing}
                     chartTitle='Composición del total'
                     chartDescription='Actividades (solicitudes) por estado'
                     chartType='bar'
@@ -687,7 +527,8 @@ export default function ActividadesAnalyticsView() {
                     sharePercent={pct(stats.completed)}
                     color={completada}
                     icon={IconCheck}
-                    loading={loading}
+                    loading={isInitialLoad}
+                    refreshing={isRefreshing}
                     chartTitle='Participación completadas'
                     chartDescription='Porción del total ya finalizada'
                     chartType='pie'
@@ -702,7 +543,8 @@ export default function ActividadesAnalyticsView() {
                     sharePercent={pct(stats.pending)}
                     color={pendiente}
                     icon={IconClock}
-                    loading={loading}
+                    loading={isInitialLoad}
+                    refreshing={isRefreshing}
                     chartTitle='Participación pendientes'
                     chartDescription='Porción del total aún sin iniciar o en espera'
                     chartType='pie'
@@ -721,7 +563,8 @@ export default function ActividadesAnalyticsView() {
                     sharePercent={pct(stats.inProgress + stats.abierto)}
                     color={enProceso}
                     icon={IconTrendingUp}
-                    loading={loading}
+                    loading={isInitialLoad}
+                    refreshing={isRefreshing}
                     chartTitle='Participación en curso'
                     chartDescription='Porción del total con ejecución activa'
                     chartType='pie'
@@ -740,36 +583,61 @@ export default function ActividadesAnalyticsView() {
                 )}
               </ActividadesSection>
 
-              <ActividadesSection
-                priority={loadingAdmin || isAdmin ? 3 : 2}
-                title='Evolución en el tiempo'
-                description='Volumen de actividades (solicitudes) según el periodo elegido en la barra superior.'
-              >
-                <ChartCard
-                  title='Tendencia de actividades'
-                  description='Cantidad de solicitudes creadas por intervalo en el rango filtrado'
+              {(loadingAdmin || isAdmin) && (
+                <ActividadesSection
+                  priority={2}
+                  title='Desempeño por encargado'
+                  description='Líderes de área y carga de actividades (una actividad = una solicitud en el periodo).'
                 >
-                  {loading ? (
-                    <Skeleton height={chartHeights.trend} radius='md' />
-                  ) : timeSeriesChartData.length > 0 ? (
-                    <ChartContainer
-                      type='line'
-                      data={trendAreaChart.data}
-                      options={trendAreaChart.options}
-                      height={chartHeights.trend}
-                    />
+                  {loadingAdmin ? (
+                    <Group justify='center' py='xl'>
+                      <Loader size='sm' />
+                    </Group>
                   ) : (
-                    <Flex h={chartHeights.trend} align='center' justify='center'>
-                      <Stack align='center' gap='sm'>
-                        <IconChartLine size={48} color={projectColors.primary} opacity={0.3} />
-                        <Text c='dimmed' size='sm' ta='center'>
-                          No hay datos para graficar la tendencia en este periodo
+                    <Card
+                      shadow='sm'
+                      padding={getDashboardCardPadding()}
+                      radius='md'
+                      withBorder
+                      style={{ position: 'relative' }}
+                    >
+                      {isRefreshing ? (
+                        <Box
+                          aria-hidden
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            zIndex: 5,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: 'inherit',
+                            background:
+                              'color-mix(in srgb, var(--app-surface, #fff) 72%, transparent)',
+                            backdropFilter: 'blur(1px)',
+                          }}
+                        >
+                          <Loader size='sm' color='blue' />
+                        </Box>
+                      ) : null}
+                      <Group gap='xs' mb='md'>
+                        <IconUsers size={18} color={projectColors.primary} />
+                        <Text size='sm' fw={600}>
+                          Actividades por encargado de área
                         </Text>
-                      </Stack>
-                    </Flex>
+                      </Group>
+                      <EncargadoActivitiesChart
+                        key={
+                          appliedRange ??
+                          `${dateFilter}-${selectedMonthDate.getFullYear()}-${selectedMonthDate.getMonth()}`
+                        }
+                        tasks={activities}
+                        periodLabel={getFilterLabel(dateFilter)}
+                      />
+                    </Card>
                   )}
-                </ChartCard>
-              </ActividadesSection>
+                </ActividadesSection>
+              )}
             </Stack>
           </Tabs.Panel>
 
@@ -785,8 +653,9 @@ export default function ActividadesAnalyticsView() {
                     <ChartCard
                       title='Top 10 procesos'
                       description='Barras ordenadas por volumen de tareas'
+                      refreshing={isRefreshing}
                     >
-                      {loading ? (
+                      {isInitialLoad ? (
                         <Skeleton height={chartHeights.bar} radius='md' />
                       ) : (
                         <ChartContainer
@@ -824,8 +693,9 @@ export default function ActividadesAnalyticsView() {
                     <ChartCard
                       title='Top 10 categorías'
                       description='Barras ordenadas por volumen de tareas'
+                      refreshing={isRefreshing}
                     >
-                      {loading ? (
+                      {isInitialLoad ? (
                         <Skeleton height={chartHeights.bar} radius='md' />
                       ) : (
                         <ChartContainer
@@ -865,7 +735,8 @@ export default function ActividadesAnalyticsView() {
                     hint={`Periodo ${getFilterLabel(dateFilter)}`}
                     color='#059669'
                     icon={IconCoin}
-                    loading={loading}
+                    loading={isInitialLoad}
+                    refreshing={isRefreshing}
                   />
                   <KpiStatCard
                     label='Tareas con costo'
@@ -876,7 +747,8 @@ export default function ActividadesAnalyticsView() {
                     }
                     color={projectColors.primary}
                     icon={IconChartBar}
-                    loading={loading}
+                    loading={isInitialLoad}
+                    refreshing={isRefreshing}
                   />
                   <KpiStatCard
                     label='Costo promedio'
@@ -884,7 +756,8 @@ export default function ActividadesAnalyticsView() {
                     hint='Por actividad que registra costo'
                     color='#ea580c'
                     icon={IconTrendingUp}
-                    loading={loading}
+                    loading={isInitialLoad}
+                    refreshing={isRefreshing}
                   />
                   <KpiStatCard
                     label='Costo máximo'
@@ -892,7 +765,8 @@ export default function ActividadesAnalyticsView() {
                     hint='Mayor valor registrado en una tarea'
                     color='#dc2626'
                     icon={IconTrendingDown}
-                    loading={loading}
+                    loading={isInitialLoad}
+                    refreshing={isRefreshing}
                   />
                 </SimpleGrid>
               </ActividadesSection>
@@ -907,6 +781,7 @@ export default function ActividadesAnalyticsView() {
                     <ChartCard
                       title='Costo por proceso'
                       description='Participación de los 5 procesos con mayor gasto'
+                      refreshing={isRefreshing}
                     >
                       {costDistributionData.length > 0 ? (
                         <ChartContainer
@@ -927,6 +802,7 @@ export default function ActividadesAnalyticsView() {
                     <ChartCard
                       title='Costo por actividad'
                       description='Top 10 actividades con mayor gasto acumulado'
+                      refreshing={isRefreshing}
                     >
                       {costByActivityChartData.length > 0 ? (
                         <ChartContainer
@@ -954,6 +830,7 @@ export default function ActividadesAnalyticsView() {
                   <ChartCard
                     title='Costo por proceso (Top 10)'
                     description='Barras ordenadas por gasto total'
+                    refreshing={isRefreshing}
                   >
                     {costByProcessChartData.length > 0 ? (
                       <ChartContainer

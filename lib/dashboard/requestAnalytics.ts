@@ -22,6 +22,7 @@ export function uniqueRequestsFromTasks(tasks: DashboardTask[]): DashboardReques
         ejecutor_final_solicitud: task.ejecutor_final_solicitud,
         proceso_solicitud: task.proceso_solicitud,
         categoria_solicitud: task.categoria_solicitud,
+        encargado_proceso: task.encargado_proceso ?? null,
       });
     }
   }
@@ -155,4 +156,41 @@ export function formatRequestTimeSeriesLabel(
     return `${q} ${year}`;
   }
   return key;
+}
+
+export function normalizeEncargadoProceso(name?: string | null): string {
+  const trimmed = name?.trim();
+  return trimmed ? trimmed : 'Sin encargado';
+}
+
+export type EncargadoRequestStat = {
+  encargado: string;
+  count: number;
+  procesos: string[];
+};
+
+/** Solicitudes únicas agrupadas por líder de área (encargado de proceso). */
+export function buildRequestsByEncargado(tasks: DashboardTask[]): EncargadoRequestStat[] {
+  const byEncargado = new Map<string, { count: number; procesos: Set<string> }>();
+  const seen = new Set<number>();
+
+  for (const task of tasks) {
+    if (seen.has(task.id_solicitud)) continue;
+    seen.add(task.id_solicitud);
+
+    const encargado = normalizeEncargadoProceso(task.encargado_proceso);
+    const proceso = task.proceso_solicitud?.trim() || 'Sin proceso';
+    const entry = byEncargado.get(encargado) ?? { count: 0, procesos: new Set<string>() };
+    entry.count += 1;
+    entry.procesos.add(proceso);
+    byEncargado.set(encargado, entry);
+  }
+
+  return Array.from(byEncargado.entries())
+    .map(([encargado, { count, procesos }]) => ({
+      encargado,
+      count,
+      procesos: Array.from(procesos).sort((a, b) => a.localeCompare(b, 'es')),
+    }))
+    .sort((a, b) => b.count - a.count);
 }

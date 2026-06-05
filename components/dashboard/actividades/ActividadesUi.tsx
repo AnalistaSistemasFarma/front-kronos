@@ -3,10 +3,12 @@
 import type { ComponentType, ReactNode } from 'react';
 import {
   Badge,
+  Box,
   Card,
   Divider,
   Flex,
   Group,
+  Loader,
   Paper,
   Progress,
   Skeleton,
@@ -30,32 +32,70 @@ import { useChartViewport } from '../useChartViewport';
 
 type IconComponent = ComponentType<{ size?: number; color?: string; stroke?: number }>;
 
+export function DataRefreshOverlay() {
+  return (
+    <Box
+      aria-hidden
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 5,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 'inherit',
+        background: 'color-mix(in srgb, var(--app-surface, #fff) 72%, transparent)',
+        backdropFilter: 'blur(1px)',
+      }}
+    >
+      <Loader size='sm' color='blue' />
+    </Box>
+  );
+}
+
 export function ActividadesSection({
   priority,
   title,
   description,
   children,
 }: {
-  priority: 1 | 2 | 3 | 4;
+  priority: 1 | 2 | 3 | 4 | 5 | 6;
   title: string;
   description: string;
   children: ReactNode;
 }) {
   const priorityColor =
-    priority === 1 ? 'blue' : priority === 2 ? 'cyan' : priority === 3 ? 'grape' : 'gray';
+    priority === 1
+      ? 'blue'
+      : priority === 2
+        ? 'cyan'
+        : priority === 3
+          ? 'grape'
+          : priority === 4
+            ? 'gray'
+            : priority === 5
+              ? 'indigo'
+              : 'dimmed';
+
+  const priorityLabel =
+    priority === 1
+      ? 'Lo esencial'
+      : priority === 2
+        ? 'Estado actual'
+        : priority === 3
+          ? 'Desempeño'
+          : priority === 4
+            ? 'Demanda'
+            : priority === 5
+              ? 'Evolución'
+              : 'Detalle operativo';
 
   return (
     <Stack gap='md' style={{ minWidth: 0 }}>
       <Paper p={{ base: 'xs', sm: 'sm' }} radius='md' withBorder>
         <Group gap='sm' wrap='wrap' align='flex-start'>
           <Badge variant='light' color={priorityColor} size='sm' style={{ flexShrink: 0 }}>
-            {priority === 1
-              ? 'Lo esencial'
-              : priority === 2
-                ? 'Estado actual'
-                : priority === 3
-                  ? 'Evolución'
-                  : 'Detalle operativo'}
+            {priorityLabel}
           </Badge>
           <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
             <Title order={4} style={{ fontSize: 'clamp(1rem, 3vw, 1.15rem)' }}>
@@ -80,6 +120,7 @@ export function MetricInsightCard({
   color,
   icon: Icon,
   loading,
+  refreshing,
   chartTitle,
   chartDescription,
   chartType,
@@ -98,6 +139,7 @@ export function MetricInsightCard({
   color: string;
   icon: IconComponent;
   loading?: boolean;
+  refreshing?: boolean;
   chartTitle: string;
   chartDescription: string;
   chartType: ChartType;
@@ -156,6 +198,7 @@ export function MetricInsightCard({
       }
       style={{
         minWidth: 0,
+        position: 'relative',
         ...(onGradient
           ? {
               background: gradient,
@@ -165,6 +208,7 @@ export function MetricInsightCard({
           : {}),
       }}
     >
+      {refreshing ? <DataRefreshOverlay /> : null}
       <Group justify='space-between' mb={compact ? 4 : 'xs'} wrap='nowrap'>
         <Text
           size='xs'
@@ -371,6 +415,7 @@ export function KpiStatCard({
   color,
   icon: Icon,
   loading,
+  refreshing,
 }: {
   label: string;
   value: string;
@@ -379,6 +424,7 @@ export function KpiStatCard({
   color: string;
   icon: IconComponent;
   loading?: boolean;
+  refreshing?: boolean;
 }) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
@@ -402,16 +448,18 @@ export function KpiStatCard({
       radius='md'
       withBorder={!onGradient}
       className={onGradient ? 'dashboard-kpi-gradient' : undefined}
-      style={
-        onGradient
+      style={{
+        position: 'relative',
+        ...(onGradient
           ? {
               background: gradient,
               border: 'none',
               boxShadow: 'var(--app-card-shadow)',
             }
-          : undefined
-      }
+          : undefined),
+      }}
     >
+      {refreshing ? <DataRefreshOverlay /> : null}
       <Group justify='space-between' mb='xs' wrap='nowrap'>
         <Text
           size='xs'
@@ -470,11 +518,13 @@ export function ChartCard({
   description,
   children,
   height = '100%',
+  refreshing,
 }: {
   title: string;
   description?: string;
   children: ReactNode;
   height?: string | number;
+  refreshing?: boolean;
 }) {
   return (
     <Card
@@ -484,8 +534,9 @@ export function ChartCard({
       radius='md'
       withBorder
       h={height}
-      style={{ minWidth: 0 }}
+      style={{ minWidth: 0, position: 'relative' }}
     >
+      {refreshing ? <DataRefreshOverlay /> : null}
       <Title order={5} mb={description ? 4 : 'md'}>
         {title}
       </Title>

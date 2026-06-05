@@ -460,6 +460,7 @@ function TeamPerformanceCharts({
         data={stackedChart.data}
         options={stackedChart.options}
         height={chartHeight}
+        scrollable={people.length > 4}
       />
 
       <TeamSummaryTable people={people} />
@@ -489,7 +490,7 @@ function IndividualPerformanceView({
   const person = people.find((p) => p.asignado === selectedAsignado) ?? people[0];
 
   const pieSize = isMobile ? 160 : isCompact ? 180 : 220;
-  const barChartHeight = isMobile ? 100 : 120;
+  const barChartHeight = isMobile ? 140 : isCompact ? 160 : 180;
 
   const pieSlices = useMemo(
     () =>
@@ -651,15 +652,19 @@ function IndividualPerformanceView({
           </Box>
         </SimpleGrid>
 
-        <Box mt='lg' visibleFrom='sm'>
+        <Box mt='lg'>
           <Text size='sm' fw={700} mb='sm' style={{ color: palette.primary }}>
-            Barras por estado
+            Barras de estado individual
+          </Text>
+          <Text size='xs' mb='sm' style={{ color: chartLabelColor }}>
+            Composición por estado de {person.asignado}
           </Text>
           <ChartContainer
             type='bar'
             data={personBarChart.data}
             options={personBarChart.options}
             height={barChartHeight}
+            scrollable={false}
           />
         </Box>
       </Paper>
@@ -818,14 +823,6 @@ export default function EncargadoActivitiesChart({
   const [taskPage, setTaskPage] = useState(1);
   const [personViewMode, setPersonViewMode] = useState<PersonViewMode>('team');
   const [selectedAsignado, setSelectedAsignado] = useState<string | null>(null);
-
-  useEffect(() => {
-    setSelectedEncargado(null);
-    setTableOpen(false);
-    setTaskPage(1);
-    setPersonViewMode('team');
-    setSelectedAsignado(null);
-  }, [tasks, periodLabel]);
 
   useEffect(() => {
     setSelectedAsignado(null);

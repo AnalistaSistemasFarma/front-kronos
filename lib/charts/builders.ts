@@ -168,14 +168,18 @@ export function buildVerticalBarChart(
 
 export function buildHorizontalMultiColorBarChart(
   items: { label: string; value: number; color: string }[],
-  isMobile: boolean
+  isMobile: boolean,
+  opts?: { valueLabel?: string; datasetLabel?: string }
 ): { data: ChartData<'bar'>; options: ChartOptions<'bar'> } {
+  const valueLabel = opts?.valueLabel ?? 'tareas';
+  const datasetLabel = opts?.datasetLabel ?? 'Tareas';
+
   return {
     data: {
       labels: items.map((i) => i.label),
       datasets: [
         {
-          label: 'Tareas',
+          label: datasetLabel,
           data: items.map((i) => i.value),
           backgroundColor: items.map((i) => i.color),
           hoverBackgroundColor: items.map((i) => i.color),
@@ -195,7 +199,7 @@ export function buildHorizontalMultiColorBarChart(
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (ctx) => `${ctx.parsed.x ?? 0} tareas`,
+            label: (ctx) => `${ctx.parsed.x ?? 0} ${valueLabel}`,
           },
         },
       },
@@ -695,7 +699,7 @@ export function buildSinglePersonBarChart(
         'En Proceso': person['En Proceso'],
       },
     ],
-    false
+    true
   );
 }
 

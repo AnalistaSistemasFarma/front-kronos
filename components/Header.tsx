@@ -106,7 +106,6 @@ export default function Header() {
                     width={1980}
                     height={100}
                     className='h-12 w-auto'
-                    priority
                   />
                 </UnstyledButton>
               ) : (
@@ -120,7 +119,6 @@ export default function Header() {
                     width={1980}
                     height={100}
                     className='h-12 w-auto'
-                    priority
                   />
                 </Link>
               )}

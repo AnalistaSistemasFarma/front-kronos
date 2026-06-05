@@ -1,21 +1,10 @@
 import type { Metadata, Viewport } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import '@mantine/core/styles.css';
 import { Providers } from '../components/providers';
 import { ThemeInitScript } from '../components/theme/ThemeInitScript';
 import { Toaster } from 'react-hot-toast';
 import ServiceWorkerRegistrar from '../components/ServiceWorkerRegistrar';
-
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-});
 
 export const metadata: Metadata = {
   title: 'SynerLink',
@@ -46,7 +35,7 @@ export default function RootLayout({
         <ThemeInitScript />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
+        className='antialiased min-h-screen'
         style={{ background: 'var(--background)', color: 'var(--foreground)' }}
       >
         <Providers>{children}</Providers>

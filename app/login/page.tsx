@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import Image from 'next/image';
 import { Paper, Title, TextInput, Button, Stack, Group, Text, Divider } from '@mantine/core';
 import { IconEye, IconEyeOff, IconLock, IconAt, IconArrowRight } from '@tabler/icons-react';
 import Link from 'next/link';
@@ -245,14 +244,13 @@ export default function Login() {
         }}
         className='form-container'
       >
-        <Image
+        <img
           src='/Logo_Principal.svg'
           alt='Logo'
           width={1000}
           height={100}
-          priority
-          className='h-28'
-          style={{ objectFit: 'contain' }}
+          className='h-28 w-full object-contain'
+          decoding='async'
         />
         <Title
           order={2}

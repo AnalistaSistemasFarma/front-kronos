@@ -65,7 +65,7 @@ function ThemeProvider({ children }: { children: ReactNode }) {
 
 export function Providers({ children }: { children: ReactNode }) {
   return (
-    <SessionProvider>
+    <SessionProvider refetchOnWindowFocus={false}>
       <ThemeProvider>{children}</ThemeProvider>
     </SessionProvider>
   );

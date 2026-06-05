@@ -129,7 +129,7 @@ function ProcessViewInner() {
 
   if (loading && processes.length === 0) {
     return (
-      <div className='app-page-shell min-h-screen'>
+      <div className='app-page-shell app-page-shell--fill min-h-screen'>
         <div className='max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8'>
           <div className='mb-8'>
             <Title
@@ -153,7 +153,7 @@ function ProcessViewInner() {
   }
 
   return (
-    <div className='app-page-shell min-h-screen'>
+    <div className='app-page-shell app-page-shell--fill min-h-screen'>
       <div className='max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8'>
         <div className='mb-8'>
           <Title

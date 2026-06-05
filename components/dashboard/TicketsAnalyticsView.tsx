@@ -25,7 +25,6 @@ import {
   IconChartLine,
   IconCheck,
   IconClock,
-  IconLock,
   IconTicket,
   IconTrendingUp,
   IconUser,
@@ -211,7 +210,10 @@ export default function TicketsAnalyticsView() {
     [statusInsightItems]
   );
 
-  const companyChartData = useMemo(() => aggregateByCompany(cases, 10), [cases]);
+  const companyChartData = useMemo(
+    () => aggregateByCompany(isIndividualView ? scopedCases : cases, 10),
+    [cases, scopedCases, isIndividualView]
+  );
   const topTechnicians = useMemo(
     () =>
       teamSummary.technicians.slice(0, 8).map((t) => ({
@@ -257,9 +259,6 @@ export default function TicketsAnalyticsView() {
     kpi: resolveChartHeight('kpi', chartViewport),
   };
 
-  const statusPie = buildPieChart(statusPieData, {
-    showLegend: !chartViewport.isMobile,
-  });
   const volumeDoughnut = buildPieChart(statusPieData, {
     showLegend: !chartViewport.isMobile,
     cutout: '62%',
@@ -353,10 +352,11 @@ export default function TicketsAnalyticsView() {
         </Alert>
       )}
 
+      {/* 1 · Salud operativa: volumen, estados y puntaje del periodo */}
       <ActividadesSection
         priority={1}
         title={isIndividualView ? 'Indicadores del analista' : 'Indicadores del equipo'}
-        description='Casos del periodo, estados y puntaje de desempeño (resolución, cierre y tiempo).'
+        description='Lo primero a revisar: cuántos casos hay, en qué estado están y qué tan bien responde el soporte.'
       >
         <SimpleGrid cols={{ base: 1, xs: 2, lg: 3, xl: 6 }} spacing={{ base: 'sm', sm: 'md' }}>
           <KpiStatCard
@@ -370,7 +370,7 @@ export default function TicketsAnalyticsView() {
           <KpiStatCard
             label='Abiertos'
             value={loading ? '—' : formatNumber(scopedCounts.abierto)}
-            hint='Sin cerrar ni resolver'
+            hint='Requieren atención inmediata'
             sharePercent={
               scopedCounts.total > 0
                 ? (scopedCounts.abierto / scopedCounts.total) * 100
@@ -381,9 +381,22 @@ export default function TicketsAnalyticsView() {
             loading={loading}
           />
           <KpiStatCard
+            label='En progreso'
+            value={loading ? '—' : formatNumber(scopedCounts.enProgreso)}
+            hint='Casos siendo atendidos ahora'
+            sharePercent={
+              scopedCounts.total > 0
+                ? (scopedCounts.enProgreso / scopedCounts.total) * 100
+                : 0
+            }
+            color={ticketStatusChartColors.enProgreso}
+            icon={IconTrendingUp}
+            loading={loading}
+          />
+          <KpiStatCard
             label='Resueltos'
             value={loading ? '—' : formatNumber(scopedCounts.resuelto)}
-            hint='Caso atendido y cerrado con solución'
+            hint='Atendidos con solución'
             sharePercent={
               scopedCounts.total > 0
                 ? (scopedCounts.resuelto / scopedCounts.total) * 100
@@ -394,24 +407,11 @@ export default function TicketsAnalyticsView() {
             loading={loading}
           />
           <KpiStatCard
-            label='Cerrados'
-            value={loading ? '—' : formatNumber(scopedCounts.cerrado)}
-            hint='Cancelados o cerrados sin resolución'
-            sharePercent={
-              scopedCounts.total > 0
-                ? (scopedCounts.cerrado / scopedCounts.total) * 100
-                : 0
-            }
-            color={projectColors.muted}
-            icon={IconLock}
-            loading={loading}
-          />
-          <KpiStatCard
             label='Tiempo prom. resolución'
             value={loading ? '—' : avgHours != null ? formatResolutionDuration(avgHours) : '—'}
-            hint='Desde creación hasta cierre (casos resueltos)'
+            hint='Creación → cierre (casos resueltos)'
             color={projectColors.primary}
-            icon={IconTrendingUp}
+            icon={IconClock}
             loading={loading}
           />
           <Card shadow='sm' padding='lg' radius='md' withBorder>
@@ -438,7 +438,7 @@ export default function TicketsAnalyticsView() {
                   styles={{ section: { backgroundColor: projectColors.primary } }}
                 />
                 <Text size='xs' c='dimmed' mt='xs'>
-                  Combina tasa de resolución, cierres y tiempo medio de atención
+                  Resolución, cierres y tiempo medio de atención
                 </Text>
               </>
             )}
@@ -446,11 +446,92 @@ export default function TicketsAnalyticsView() {
         </SimpleGrid>
       </ActividadesSection>
 
-      {!isIndividualView && (
+      {/* 2 · Backlog y composición de estados */}
+      <ActividadesSection
+        priority={2}
+        title='Panorama de estados'
+        description='Backlog activo vs. casos cerrados: entienda la carga pendiente antes de evaluar desempeño.'
+      >
+        <SimpleGrid cols={{ base: 1, md: 2 }} spacing='lg'>
+          <StatusInsightPanel
+            items={statusInsightItems}
+            total={scopedCounts.total}
+            loading={loading}
+          />
+          <MetricInsightCard
+            label='Backlog activo'
+            value={
+              loading
+                ? '—'
+                : formatNumber(scopedCounts.abierto + scopedCounts.enProgreso)
+            }
+            hint={`${formatNumber(scopedCounts.cerrado)} cerrados/cancelados en el periodo`}
+            sharePercent={
+              scopedCounts.total > 0
+                ? ((scopedCounts.abierto + scopedCounts.enProgreso) / scopedCounts.total) * 100
+                : 0
+            }
+            color={ticketStatusChartColors.enProgreso}
+            icon={IconChartLine}
+            loading={loading}
+            chartTitle='Composición de estados'
+            chartDescription='Abiertos, en progreso, resueltos y cerrados'
+            chartType='doughnut'
+            chartData={volumeDoughnut.data}
+            chartOptions={volumeDoughnut.options}
+          />
+        </SimpleGrid>
+      </ActividadesSection>
+
+      {/* 3 · Desempeño: equipo o analista seleccionado */}
+      {isIndividualView && selectedTechMetrics ? (
         <ActividadesSection
-          priority={2}
+          priority={3}
+          title='Desempeño del analista'
+          description='Comparación con el equipo y desglose de carga individual.'
+        >
+          <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing='md'>
+            <Card withBorder padding='md'>
+              <Text size='xs' c='dimmed'>
+                Total casos asignados
+              </Text>
+              <Title order={4}>{formatNumber(selectedTechMetrics.total)}</Title>
+            </Card>
+            <Card withBorder padding='md'>
+              <Text size='xs' c='dimmed'>
+                Backlog (abierto + progreso)
+              </Text>
+              <Title order={4}>{formatNumber(selectedTechMetrics.openBacklog)}</Title>
+            </Card>
+            <Card withBorder padding='md'>
+              <Text size='xs' c='dimmed'>
+                Puntaje del equipo
+              </Text>
+              <Group gap='xs' mt={4}>
+                <Title order={4}>{teamSummary.teamScore}</Title>
+                <ScoreBadge score={teamSummary.teamScore} size='sm' />
+              </Group>
+            </Card>
+            <Card withBorder padding='md'>
+              <Text size='xs' c='dimmed'>
+                vs. promedio del equipo
+              </Text>
+              <Title
+                order={4}
+                c={
+                  selectedTechMetrics.score >= teamSummary.teamScore ? 'green' : 'orange'
+                }
+              >
+                {selectedTechMetrics.score >= teamSummary.teamScore ? 'Por encima' : 'Por debajo'}
+              </Title>
+            </Card>
+          </SimpleGrid>
+        </ActividadesSection>
+      ) : (
+        <ActividadesSection
+          priority={3}
           title='Desempeño por responsable'
-          description='Quién concentra más casos y cómo distribuye abiertos, en progreso, resueltos y cerrados.'
+          description='Quién concentra más casos, cómo evoluciona su carga y ranking del equipo.'
         >
           <Grid gutter='lg'>
             <Grid.Col span={{ base: 12, lg: 5 }}>
@@ -465,7 +546,7 @@ export default function TicketsAnalyticsView() {
             <Grid.Col span={{ base: 12, lg: 7 }}>
               <ChartCard
                 title='Rendimiento por técnico'
-                description={`Casos por periodo según filtro · ${getFilterLabel(dateFilter)} (máx. 12)${
+                description={`Evolución de casos · ${getFilterLabel(dateFilter)} (máx. 12)${
                   chartViewport.isCompact ? ' · Toca un punto para ver el detalle' : ''
                 }`}
               >
@@ -489,7 +570,7 @@ export default function TicketsAnalyticsView() {
             </Grid.Col>
           </Grid>
 
-          <ChartCard title='Tabla de rendimiento' description='Puntaje y tiempos por analista'>
+          <ChartCard title='Ranking del equipo' description='Puntaje, tiempos y estados por analista'>
             {loading ? (
               <Skeleton height={200} />
             ) : teamSummary.technicians.length > 0 ? (
@@ -515,7 +596,9 @@ export default function TicketsAnalyticsView() {
                           </Text>
                         </Table.Td>
                         <Table.Td ta='right'>{formatNumber(t.total)}</Table.Td>
-                        <Table.Td ta='right'>{formatNumber(t.counts.abierto + t.counts.enProgreso)}</Table.Td>
+                        <Table.Td ta='right'>
+                          {formatNumber(t.counts.abierto + t.counts.enProgreso)}
+                        </Table.Td>
                         <Table.Td ta='right'>{formatNumber(t.counts.resuelto)}</Table.Td>
                         <Table.Td ta='right'>{formatNumber(t.counts.cerrado)}</Table.Td>
                         <Table.Td ta='right'>
@@ -540,96 +623,47 @@ export default function TicketsAnalyticsView() {
         </ActividadesSection>
       )}
 
-      <ActividadesSection
-        priority={isIndividualView ? 2 : 3}
-        title='Panorama de estados'
-        description='Abiertos, en progreso, resueltos y cerrados en la vista seleccionada.'
-      >
-        <SimpleGrid cols={{ base: 1, md: 2 }} spacing='lg'>
-          <StatusInsightPanel
-            items={statusInsightItems}
-            total={scopedCounts.total}
-            loading={loading}
-          />
-          <MetricInsightCard
-            label='Participación'
-            value={loading ? '—' : formatNumber(scopedCounts.total)}
-            hint='Distribución por estado del periodo'
-            color={projectColors.primary}
-            icon={IconChartLine}
-            loading={loading}
-            chartTitle='Composición de estados'
-            chartDescription='Proporción de cada estado'
-            chartType='doughnut'
-            chartData={volumeDoughnut.data}
-            chartOptions={volumeDoughnut.options}
-          />
-        </SimpleGrid>
-      </ActividadesSection>
-
-      <ActividadesSection
-        priority={isIndividualView ? 3 : 4}
-        title='Demanda por empresa'
-        description='Organizaciones que más solicitan soporte en el periodo.'
-      >
-        <Grid gutter='lg'>
-          <Grid.Col span={{ base: 12, md: 7 }}>
-            <ChartCard title='Top empresas' description='Hasta 10 empresas con más casos'>
-              {loading ? (
-                <Skeleton height={chartHeights.medium} />
-              ) : companyChartData.length > 0 ? (
-                <ChartContainer
-                  type='bar'
-                  data={companyBar.data}
-                  options={companyBar.options}
-                  height={chartHeights.medium}
-                />
-              ) : (
-                <Flex h={chartHeights.medium} align='center' justify='center'>
-                  <Text c='dimmed' size='sm'>
-                    Sin datos por empresa
-                  </Text>
-                </Flex>
-              )}
-            </ChartCard>
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, md: 5 }}>
-            <ChartCard
-              title='Distribución por estado'
-              description='Vista general del periodo (todas las empresas)'
-            >
-              {loading ? (
-                <Skeleton height={chartHeights.medium} />
-              ) : statusPieData.length > 0 ? (
-                <ChartContainer
-                  type='pie'
-                  data={statusPie.data}
-                  options={statusPie.options}
-                  height={chartHeights.medium}
-                  scrollable={false}
-                />
-              ) : (
-                <Flex h={chartHeights.medium} align='center' justify='center'>
-                  <Text c='dimmed' size='sm'>
-                    Sin datos de estado
-                  </Text>
-                </Flex>
-              )}
-            </ChartCard>
-          </Grid.Col>
-        </Grid>
-      </ActividadesSection>
-
+      {/* 4 · Demanda: qué empresas generan más soporte */}
       <ActividadesSection
         priority={4}
+        title='Demanda por empresa'
+        description={
+          isIndividualView
+            ? 'Empresas que más casos generan para el analista seleccionado'
+            : 'Organizaciones con mayor volumen de tickets en el periodo.'
+        }
+      >
+        <ChartCard title='Top empresas' description='Hasta 10 empresas con más casos'>
+          {loading ? (
+            <Skeleton height={chartHeights.medium} />
+          ) : companyChartData.length > 0 ? (
+            <ChartContainer
+              type='bar'
+              data={companyBar.data}
+              options={companyBar.options}
+              height={chartHeights.medium}
+            />
+          ) : (
+            <Flex h={chartHeights.medium} align='center' justify='center'>
+              <Text c='dimmed' size='sm'>
+                Sin datos por empresa
+              </Text>
+            </Flex>
+          )}
+        </ChartCard>
+      </ActividadesSection>
+
+      {/* 5 · Evolución temporal: tendencias de volumen y tiempos */}
+      <ActividadesSection
+        priority={5}
         title='Evolución en el tiempo'
-        description='Casos creados y tiempo promedio de resolución del soporte.'
+        description='Tendencias históricas del periodo: volumen de entrada y eficiencia de resolución.'
       >
         <Grid gutter='lg'>
           <Grid.Col span={{ base: 12, md: 6 }}>
             <ChartCard
               title='Casos creados'
-              description={`Tendencia · ${getFilterLabel(dateFilter)}`}
+              description={`Entrada de tickets · ${getFilterLabel(dateFilter)}`}
             >
               {loading ? (
                 <Skeleton height={chartHeights.standard} />
@@ -690,106 +724,62 @@ export default function TicketsAnalyticsView() {
         />
       </ActividadesSection>
 
-      {isIndividualView && selectedTechMetrics && (
-        <ActividadesSection
-          priority={4}
-          title='Detalle individual'
-          description='Desglose de estados y comparación con el puntaje del equipo.'
-        >
-          <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing='md'>
-            <Card withBorder padding='md'>
-              <Text size='xs' c='dimmed'>
-                En progreso
-              </Text>
-              <Title order={4}>{formatNumber(selectedTechMetrics.counts.enProgreso)}</Title>
-            </Card>
-            <Card withBorder padding='md'>
-              <Text size='xs' c='dimmed'>
-                Backlog (abierto + progreso)
-              </Text>
-              <Title order={4}>{formatNumber(selectedTechMetrics.openBacklog)}</Title>
-            </Card>
-            <Card withBorder padding='md'>
-              <Text size='xs' c='dimmed'>
-                Puntaje equipo
-              </Text>
-              <Group gap='xs' mt={4}>
-                <Title order={4}>{teamSummary.teamScore}</Title>
-                <ScoreBadge score={teamSummary.teamScore} size='sm' />
-              </Group>
-            </Card>
-            <Card withBorder padding='md'>
-              <Text size='xs' c='dimmed'>
-                vs. promedio equipo
-              </Text>
-              <Title
-                order={4}
-                c={
-                  selectedTechMetrics.score >= teamSummary.teamScore ? 'green' : 'orange'
-                }
-              >
-                {selectedTechMetrics.score >= teamSummary.teamScore ? 'Por encima' : 'Por debajo'}
-              </Title>
-            </Card>
-          </SimpleGrid>
-        </ActividadesSection>
-      )}
-
-      <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
-        <Group justify='space-between' mb='md' wrap='wrap'>
-          <div>
-            <Title order={4}>Casos recientes</Title>
-            <Text size='sm' c='dimmed'>
-              Últimos registros {isIndividualView ? `de ${technicianFilter}` : 'del periodo'}
-            </Text>
-          </div>
-          <Badge
-            variant='light'
-            leftSection={<IconBuilding size={12} />}
-            styles={{
-              root: {
-                backgroundColor: dashboardChartTheme.blue50,
-                color: dashboardChartTheme.primary,
-              },
-            }}
-          >
-            {formatNumber(scopedCases.length)} en vista
-          </Badge>
-        </Group>
-        <Stack gap='sm'>
-          {loading ? (
-            <Skeleton height={120} />
-          ) : scopedCases.length > 0 ? (
-            scopedCases.slice(0, 15).map((c, i) => (
-              <Paper key={c.id_case ?? i} p='sm' withBorder>
-                <Group justify='space-between' wrap='wrap' gap='xs'>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <Text size='sm' fw={600} lineClamp={2}>
-                      {c.id_case ? `#${c.id_case} · ` : ''}
-                      {String(c.subject_case ?? 'Sin asunto')}
-                    </Text>
-                    <Text size='xs' c='dimmed' lineClamp={1}>
-                      {String(c.company ?? 'Sin empresa')} · {String(c.nombreTecnico ?? 'Sin asignar')}
-                    </Text>
-                  </div>
-                  <Group gap='xs' wrap='wrap' style={{ flexShrink: 0 }}>
-                    <Badge variant='light'>{String(c.status ?? '—')}</Badge>
-                    {c.priority && (
-                      <Badge color='orange' variant='outline'>
-                        {String(c.priority)}
-                      </Badge>
-                    )}
+      {/* 6 · Detalle operativo: últimos casos */}
+      <ActividadesSection
+        priority={6}
+        title='Casos recientes'
+        description='Listado de los últimos registros para seguimiento puntual.'
+      >
+        <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+          <Group justify='space-between' mb='md' wrap='wrap'>
+            <Badge
+              variant='light'
+              leftSection={<IconBuilding size={12} />}
+              styles={{
+                root: {
+                  backgroundColor: dashboardChartTheme.blue50,
+                  color: dashboardChartTheme.primary,
+                },
+              }}
+            >
+              {formatNumber(scopedCases.length)} en vista
+            </Badge>
+          </Group>
+          <Stack gap='sm'>
+            {loading ? (
+              <Skeleton height={120} />
+            ) : scopedCases.length > 0 ? (
+              scopedCases.slice(0, 15).map((c, i) => (
+                <Paper key={c.id_case ?? i} p='sm' withBorder>
+                  <Group justify='space-between' wrap='wrap' gap='xs'>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Text size='sm' fw={600} lineClamp={2}>
+                        {c.id_case ? `#${c.id_case} · ` : ''}
+                        {String(c.subject_case ?? 'Sin asunto')}
+                      </Text>
+                      <Text size='xs' c='dimmed' lineClamp={1}>
+                        {String(c.company ?? 'Sin empresa')} · {String(c.nombreTecnico ?? 'Sin asignar')}
+                      </Text>
+                    </div>
+                    <Group gap='xs' wrap='wrap' style={{ flexShrink: 0 }}>
+                      <Badge variant='light'>{String(c.status ?? '—')}</Badge>
+                      {c.priority && (
+                        <Badge color='orange' variant='outline'>
+                          {String(c.priority)}
+                        </Badge>
+                      )}
+                    </Group>
                   </Group>
-                </Group>
-              </Paper>
-            ))
-          ) : (
-            <Text c='dimmed' ta='center' py='md'>
-              No hay casos en la vista seleccionada
-            </Text>
-          )}
-        </Stack>
-      </Card>
+                </Paper>
+              ))
+            ) : (
+              <Text c='dimmed' ta='center' py='md'>
+                No hay casos en la vista seleccionada
+              </Text>
+            )}
+          </Stack>
+        </Card>
+      </ActividadesSection>
     </DashboardPageShell>
   );
 }

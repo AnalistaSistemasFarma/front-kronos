@@ -25,9 +25,11 @@ import {
   IconClockHour4,
   IconTrendingUp,
   IconCircleDot,
+  IconUsers,
 } from '@tabler/icons-react';
 import {
   buildAreaLineChart,
+  buildHorizontalMultiColorBarChart,
   buildHoursLineChart,
   buildPieChart,
   buildVerticalBarChart,
@@ -35,6 +37,7 @@ import {
 import {
   buildCompleteRequestTimeSeries,
   buildRequestTimeSeries,
+  buildRequestsByEncargado,
   formatRequestTimeSeriesLabel,
   uniqueRequestsFromTasks,
 } from '../../lib/dashboard/requestAnalytics';
@@ -59,6 +62,8 @@ import SolicitudesResolutionTable from './SolicitudesResolutionTable';
 import { useChartViewport } from './useChartViewport';
 import { useProjectColors } from './useProjectColors';
 import { getDashboardCardPadding, resolveChartHeight } from '../../lib/dashboard/responsive';
+import { getResponsiveChartHeight } from './chartTheme';
+import { useDashboardChartPalette } from './useDashboardChartPalette';
 import {
   countRequestsByDashboardStatus,
   normalizeRequestStatus,
@@ -67,6 +72,7 @@ import { exportSolicitudesExcel } from '../../lib/dashboard/excel';
 
 export default function SolicitudesAnalyticsView() {
   const projectColors = useProjectColors();
+  const { barPalette } = useDashboardChartPalette();
   const {
     status,
     tasks,
@@ -170,6 +176,22 @@ export default function SolicitudesAnalyticsView() {
       .slice(0, 8);
   }, [allRequests]);
 
+  const encargadoRequestStats = useMemo(
+    () => buildRequestsByEncargado(filteredTasks),
+    [filteredTasks]
+  );
+
+  const encargadoChartItems = useMemo(
+    () =>
+      encargadoRequestStats.map((item, index) => ({
+        label: item.encargado,
+        value: item.count,
+        color: barPalette[index % barPalette.length],
+        procesos: item.procesos,
+      })),
+    [encargadoRequestStats, barPalette]
+  );
+
   const timeSeriesChartData = useMemo(() => {
     const raw = buildRequestTimeSeries(requests, dateFilter, selectedMonthDate);
     return buildCompleteRequestTimeSeries(requests, raw, dateFilter, selectedMonthDate).map(
@@ -208,6 +230,21 @@ export default function SolicitudesAnalyticsView() {
     { datasetLabel: 'Solicitudes', showLegend: true, rotateLabels: true }
   );
 
+  const chartViewport = useChartViewport();
+  const isMobile = chartViewport.isMobile;
+  const encargadoChartHeight = useMemo(
+    () => getResponsiveChartHeight(encargadoChartItems.length, chartViewport.isCompact),
+    [encargadoChartItems.length, chartViewport.isCompact]
+  );
+  const encargadoBarChart = useMemo(
+    () =>
+      buildHorizontalMultiColorBarChart(encargadoChartItems, isMobile, {
+        valueLabel: 'solicitudes',
+        datasetLabel: 'Solicitudes',
+      }),
+    [encargadoChartItems, isMobile]
+  );
+
   const formatNumber = (n: number) => new Intl.NumberFormat('es-CO').format(n);
 
   const companySelectData = useMemo(
@@ -218,7 +255,6 @@ export default function SolicitudesAnalyticsView() {
     [companies]
   );
 
-  const chartViewport = useChartViewport();
   const chartHeights = {
     standard: resolveChartHeight('standard', chartViewport),
     medium: resolveChartHeight('medium', chartViewport),
@@ -492,25 +528,6 @@ export default function SolicitudesAnalyticsView() {
         )}
 
         <Grid gutter='lg'>
-          <Grid.Col span={{ base: 12, md: isCompanyView ? 12 : 6 }}>
-            <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
-              <Title order={4} mb='md'>
-                Solicitudes por proceso (Top 10)
-              </Title>
-              {!loading && processChartData.length > 0 ? (
-                <ChartContainer
-                  type='bar'
-                  data={processBarChart.data}
-                  options={processBarChart.options}
-                  height={chartHeights.large}
-                />
-              ) : (
-                <Text c='dimmed' ta='center' py='xl'>
-                  Sin datos
-                </Text>
-              )}
-            </Card>
-          </Grid.Col>
           {!isCompanyView && (
             <Grid.Col span={{ base: 12, md: 6 }}>
               <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
@@ -532,7 +549,76 @@ export default function SolicitudesAnalyticsView() {
               </Card>
             </Grid.Col>
           )}
+          <Grid.Col span={{ base: 12, md: isCompanyView ? 12 : 6 }}>
+            <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+              <Title order={4} mb='md'>
+                Solicitudes por proceso (Top 10)
+              </Title>
+              {!loading && processChartData.length > 0 ? (
+                <ChartContainer
+                  type='bar'
+                  data={processBarChart.data}
+                  options={processBarChart.options}
+                  height={chartHeights.large}
+                />
+              ) : (
+                <Text c='dimmed' ta='center' py='xl'>
+                  Sin datos
+                </Text>
+              )}
+            </Card>
+          </Grid.Col>
         </Grid>
+
+        <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+          <Group gap='xs' mb={4}>
+            <IconUsers size={20} color={projectColors.primary} />
+            <Title order={4}>Solicitudes por encargado de área</Title>
+          </Group>
+          <Text size='xs' c='dimmed' mb='md'>
+            {isCompanyView
+              ? `Solicitudes de ${companyFilter} agrupadas por líder de área y procesos a su cargo`
+              : 'Evalúe la carga de solicitudes de cada líder y las áreas (procesos) que administra'}
+          </Text>
+          {loading ? (
+            <Skeleton height={encargadoChartHeight} radius='md' />
+          ) : encargadoChartItems.length > 0 ? (
+            <>
+              <ChartContainer
+                type='bar'
+                data={encargadoBarChart.data}
+                options={encargadoBarChart.options}
+                height={encargadoChartHeight}
+              />
+              <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing='sm' mt='lg'>
+                {encargadoRequestStats.map((item, index) => (
+                  <Paper key={item.encargado} p='sm' withBorder radius='md'>
+                    <Group justify='space-between' wrap='nowrap' gap='xs' mb={6}>
+                      <Group gap='xs' wrap='nowrap' style={{ flex: 1, minWidth: 0 }}>
+                        <Badge variant='filled' color='blue' size='sm' circle>
+                          {index + 1}
+                        </Badge>
+                        <Text size='sm' fw={600} lineClamp={2}>
+                          {item.encargado}
+                        </Text>
+                      </Group>
+                      <Badge variant='light' color='blue'>
+                        {formatNumber(item.count)} solic.
+                      </Badge>
+                    </Group>
+                    <Text size='xs' c='dimmed' lineClamp={2}>
+                      Área{item.procesos.length === 1 ? '' : 's'}: {item.procesos.join(' · ')}
+                    </Text>
+                  </Paper>
+                ))}
+              </SimpleGrid>
+            </>
+          ) : (
+            <Text c='dimmed' ta='center' py='xl'>
+              No hay solicitudes con encargado de área en este periodo
+            </Text>
+          )}
+        </Card>
 
         <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
           <Group justify='space-between' mb='md' wrap='wrap'>
