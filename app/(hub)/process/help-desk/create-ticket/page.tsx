@@ -33,6 +33,7 @@ import {
   Flex,
 } from '@mantine/core';
 import { ReportsChart } from '../../../../../components/help-desk/ReportsChart';
+import { HelpDeskDashboardLinkButton } from '../../../../../components/help-desk/HelpDeskDashboardLinkButton';
 import { useHelpDeskAccess } from '../../../../../components/help-desk/hooks/useHelpDeskAccess';
 import {
   IconAlertCircle,
@@ -547,7 +548,7 @@ function TicketsBoard() {
             {breadcrumbItems}
           </Breadcrumbs>
 
-          <Flex justify='space-between' align='center' mb='4'>
+          <Flex justify='space-between' align='center' mb='4' wrap='wrap' gap='md'>
             <div>
               <Title
                 order={1}
@@ -561,14 +562,17 @@ function TicketsBoard() {
               </Text>
             </div>
 
-            <Button
-              onClick={() => setModalOpened(true)}
-              size='lg'
-              leftSection={<IconPlus size={18} />}
-              className='bg-blue-600 hover:bg-blue-700'
-            >
-              Crear Nuevo Caso
-            </Button>
+            <Group wrap='nowrap'>
+              <HelpDeskDashboardLinkButton />
+              <Button
+                onClick={() => setModalOpened(true)}
+                size='lg'
+                leftSection={<IconPlus size={18} />}
+                className='bg-blue-600 hover:bg-blue-700'
+              >
+                Crear Nuevo Caso
+              </Button>
+            </Group>
           </Flex>
 
           {/* Stats Cards */}

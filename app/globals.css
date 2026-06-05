@@ -196,6 +196,10 @@ body {
   min-width: 0;
 }
 
+.dashboard-chart-slot canvas {
+  display: block;
+}
+
 .dashboard-toolbar-slot {
   width: 100%;
 }

@@ -86,7 +86,7 @@ export const statusChartColors = {
 
 /** Texto de ejes y valores */
 export const chartAxisTickStyle = {
-  fontSize: 12,
+  fontSize: 13,
   fontWeight: 600 as const,
   fill: dashboardChartTheme.chartAxisColor,
 };
@@ -117,6 +117,36 @@ export const encargadoBarPalette = [
   '#2d6a9f',
   '#3d6ea8',
 ];
+
+/**
+ * Paleta categórica para donas/pastel: colores claramente distinguibles
+ * (evita confundir segmentos cuando hay muchas categorías).
+ */
+export const categoricalChartPalette = [
+  '#113562',
+  '#0d9488',
+  '#d97706',
+  '#7c3aed',
+  '#db2777',
+  '#059669',
+  '#2563eb',
+  '#ca8a04',
+  '#0891b2',
+  '#dc2626',
+] as const;
+
+export const categoricalChartPaletteDark = [
+  '#5b9cff',
+  '#3dd6c8',
+  '#fbbf24',
+  '#c084fc',
+  '#f472b6',
+  '#4ade80',
+  '#fb7185',
+  '#38bdf8',
+  '#a3e635',
+  '#f97316',
+] as const;
 
 /** Colores Mantine para celdas del BarChart (entry.color) */
 export const encargadoBarPaletteMantine = [
@@ -300,7 +330,7 @@ export function getResponsiveYAxisWidth(names: string[], compact: boolean): numb
 }
 
 export const compactAxisTickStyle = {
-  fontSize: 10,
+  fontSize: 11,
   fontWeight: 600 as const,
   fill: '#1e293b',
 };

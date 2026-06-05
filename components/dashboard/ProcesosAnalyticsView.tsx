@@ -58,7 +58,7 @@ import { useDashboardChartPalette } from './useDashboardChartPalette';
 
 export default function ProcesosAnalyticsView() {
   const projectColors = useProjectColors();
-  const { barPalette } = useDashboardChartPalette();
+  const { categoricalPalette } = useDashboardChartPalette();
   const {
     status,
     tasks,
@@ -122,9 +122,9 @@ export default function ProcesosAnalyticsView() {
       processStats.slice(0, 8).map((p, index) => ({
         name: p.proceso,
         value: p.solicitudes,
-        color: barPalette[index % barPalette.length],
+        color: categoricalPalette[index % categoricalPalette.length],
       })),
-    [processStats, barPalette]
+    [processStats, categoricalPalette]
   );
 
   const distributionPie = useMemo(
@@ -187,10 +187,10 @@ export default function ProcesosAnalyticsView() {
       processStats.map((item, index) => ({
         label: item.proceso,
         value: item.solicitudes,
-        color: barPalette[index % barPalette.length],
+        color: categoricalPalette[index % categoricalPalette.length],
         procesos: [item.proceso],
       })),
-    [processStats, barPalette]
+    [processStats, categoricalPalette]
   );
 
   const chartViewport = useChartViewport();

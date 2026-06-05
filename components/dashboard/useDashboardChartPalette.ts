@@ -5,6 +5,8 @@ import { darkChartSeriesColors, statusChartVibrantColors } from '../../lib/theme
 import {
   dashboardChartTheme,
   dashboardChartThemeDark,
+  categoricalChartPalette,
+  categoricalChartPaletteDark,
   encargadoBarPalette,
   encargadoBarPaletteDark,
   encargadoBarPaletteMantine,
@@ -31,6 +33,7 @@ export function useDashboardChartPalette() {
     ] as const,
     barPalette: isDark ? encargadoBarPaletteDark : encargadoBarPalette,
     barPaletteMantine: encargadoBarPaletteMantine,
+    categoricalPalette: isDark ? categoricalChartPaletteDark : categoricalChartPalette,
     seriesColors: isDark ? darkChartSeriesColors : encargadoBarPalette,
     labelColor: isDark ? dashboardChartThemeDark.chartAxisColor : dashboardChartTheme.chartAxisColor,
   };
