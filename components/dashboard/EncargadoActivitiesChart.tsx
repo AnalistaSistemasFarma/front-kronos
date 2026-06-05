@@ -81,9 +81,18 @@ export interface TaskWithEncargado {
   categoria_solicitud: string;
 }
 
-function normalizeEncargado(name: string | null | undefined): string {
-  const trimmed = name?.trim();
-  return trimmed ? trimmed : 'Sin encargado';
+function encargadoNames(raw: string | null | undefined): string[] {
+  const trimmed = raw?.trim();
+  if (!trimmed) return ['Sin encargado'];
+  const parts = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+  return parts.length > 0 ? parts : ['Sin encargado'];
+}
+
+function taskBelongsToEncargado(
+  encargadoProceso: string | null | undefined,
+  selectedEncargado: string
+): boolean {
+  return encargadoNames(encargadoProceso).includes(selectedEncargado);
 }
 
 function normalizeAsignado(name: string | null | undefined): string {
@@ -833,8 +842,9 @@ export default function EncargadoActivitiesChart({
   const encargadoChartData = useMemo(() => {
     const counts = tasks.reduce(
       (acc, task) => {
-        const key = normalizeEncargado(task.encargado_proceso);
-        acc[key] = (acc[key] || 0) + 1;
+        for (const key of encargadoNames(task.encargado_proceso)) {
+          acc[key] = (acc[key] || 0) + 1;
+        }
         return acc;
       },
       {} as Record<string, number>
@@ -879,8 +889,8 @@ export default function EncargadoActivitiesChart({
   const assigneeChartData = useMemo(() => {
     if (!selectedEncargado) return [];
 
-    const filtered = tasks.filter(
-      (t) => normalizeEncargado(t.encargado_proceso) === selectedEncargado
+    const filtered = tasks.filter((t) =>
+      taskBelongsToEncargado(t.encargado_proceso, selectedEncargado)
     );
 
     const byAssignee = filtered.reduce(
@@ -922,7 +932,7 @@ export default function EncargadoActivitiesChart({
   const detailRows = useMemo(() => {
     if (!selectedEncargado) return [];
     return tasks
-      .filter((t) => normalizeEncargado(t.encargado_proceso) === selectedEncargado)
+      .filter((t) => taskBelongsToEncargado(t.encargado_proceso, selectedEncargado))
       .sort((a, b) => a.asignado_tarea.localeCompare(b.asignado_tarea));
   }, [tasks, selectedEncargado]);
 

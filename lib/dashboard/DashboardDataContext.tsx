@@ -255,13 +255,15 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (status !== 'authenticated' || !session?.user?.email) return;
+    if (loadingAdmin || !isAdmin) return;
     void fetchTickets();
-  }, [status, session?.user?.email, dateFilter, selectedMonthDate, fetchTickets]);
+  }, [status, session?.user?.email, dateFilter, selectedMonthDate, fetchTickets, loadingAdmin, isAdmin]);
 
   useEffect(() => {
     if (status !== 'authenticated' || !session?.user?.email) return;
+    if (loadingAdmin || !isAdmin) return;
     void fetchTasks();
-  }, [status, session?.user?.email, dateFilter, selectedMonthDate, fetchTasks]);
+  }, [status, session?.user?.email, dateFilter, selectedMonthDate, fetchTasks, loadingAdmin, isAdmin]);
 
   const activeDateRange = getDashboardDateRange(dateFilter, selectedMonthDate);
 

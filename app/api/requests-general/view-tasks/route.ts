@@ -48,10 +48,11 @@ export async function GET(req: Request) {
         count: data.length,
         summary,
         metrics_definition: {
-          grain: 'request',
-          unique_key: 'id_solicitud',
+          grain: 'task',
+          solicitud_key: 'id_solicitud',
+          task_key: 'id_tarea',
           date_field: 'requests_general.created_at',
-          note: 'Todas las solicitudes del periodo, con o sin tarea asignada (1 solicitud = 1 actividad).',
+          note: 'Todas las solicitudes del periodo y cada tarea asignada (task_request_general). El líder de área viene de user_process_category_request_general.',
         },
         filters_applied: {
           date_field: 'requests_general.created_at',

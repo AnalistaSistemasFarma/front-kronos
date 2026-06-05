@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../app/api/auth/[...nextauth]/route';
-import { PrismaClient } from '../../app/generated/prisma';
+import { checkAdminPrivileges } from '../access-control';
+import { prisma } from '@/lib/prisma';
 
-const prisma = new PrismaClient();
-
-/** Mismo criterio que GET /api/requests-general/verify-permissions */
+/** Rol global admin/super_user (p. ej. verificación de edición de solicitudes). */
 export function isDashboardAdminRole(role?: string | null): boolean {
   return role === 'admin' || role === 'super_user';
+}
+
+/**
+ * Acceso al dashboard analítico: admins globales o quienes administran usuarios.
+ */
+export async function canAccessDashboard(email: string): Promise<boolean> {
+  return checkAdminPrivileges(email);
 }
 
 export async function getDashboardAdminForSession(): Promise<{
@@ -20,12 +26,8 @@ export async function getDashboardAdminForSession(): Promise<{
     return { allowed: false, email: null };
   }
 
-  const user = await prisma.user.findUnique({
-    where: { email },
-    select: { role: true },
-  });
-
-  return { allowed: isDashboardAdminRole(user?.role), email };
+  const allowed = await canAccessDashboard(email);
+  return { allowed, email };
 }
 
 export async function requireDashboardAdminApi(): Promise<
@@ -39,9 +41,21 @@ export async function requireDashboardAdminApi(): Promise<
     };
   }
   if (!allowed) {
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { role: true },
+    });
     return {
       ok: false,
-      response: NextResponse.json({ success: false, error: 'Sin permiso' }, { status: 403 }),
+      response: NextResponse.json(
+        {
+          success: false,
+          error: 'Sin permiso',
+          role: user?.role ?? null,
+          hint: 'Se requiere rol admin/super_user o acceso al subproceso de administración de usuarios.',
+        },
+        { status: 403 }
+      ),
     };
   }
   return { ok: true, email };

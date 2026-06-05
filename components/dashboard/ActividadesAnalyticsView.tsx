@@ -42,7 +42,7 @@ import {
 } from '../../lib/charts/builders';
 import {
   computeActivityStats,
-  uniqueActivityRowsFromTasks,
+  allActivityRowsFromTasks,
 } from '../../lib/dashboard/activityMetrics';
 import {
   getFilterLabel,
@@ -119,11 +119,8 @@ export default function ActividadesAnalyticsView() {
   const isInitialLoad = loading && rawTasks.length === 0;
   const isRefreshing = refreshing || (loading && rawTasks.length > 0);
 
-  /** 1 solicitud = 1 actividad (misma cantidad que Solicitudes). */
-  const activities = useMemo(
-    () => uniqueActivityRowsFromTasks(rawTasks),
-    [rawTasks]
-  );
+  /** Cada fila = una tarea asignada a un colaborador bajo el líder de área. */
+  const activities = useMemo(() => allActivityRowsFromTasks(rawTasks), [rawTasks]);
 
   const activitiesWithCost = activities;
   const [activeTab, setActiveTab] = useState<string>('overview');
@@ -150,9 +147,12 @@ export default function ActividadesAnalyticsView() {
     }
   }, [activities, dateFilter, selectedMonthDate, appliedRange]);
 
-  const stats = useMemo(() => computeActivityStats(rawTasks), [rawTasks]);
+  const solicitudesUnicas = useMemo(
+    () => new Set(rawTasks.map((t) => t.id_solicitud)).size,
+    [rawTasks]
+  );
 
-  // Prepare data for charts with project colors
+  const stats = useMemo(() => computeActivityStats(rawTasks), [rawTasks]);
   const processData = activities.reduce((acc, task) => {
     const process = task.proceso_solicitud || 'Sin Proceso';
     acc[process] = (acc[process] || 0) + 1;
@@ -436,7 +436,7 @@ export default function ActividadesAnalyticsView() {
   return (
     <DashboardPageShell
       title='Actividades'
-      description='Misma base que Solicitudes: cada actividad es un pedido. Aquí ves desempeño por encargado, estado y costos.'
+      description='Tareas asignadas por área: cada actividad es una tarea con su responsable y el líder del proceso.'
       toolbar={
         <DashboardDateToolbar
           dateFilter={dateFilter}
@@ -500,20 +500,20 @@ export default function ActividadesAnalyticsView() {
               <ActividadesSection
                 priority={1}
                 title='Panorama del periodo'
-                description='Mismos totales que Solicitudes: cada actividad es un pedido único en el rango de fechas.'
+                description='Tareas asignadas en el periodo: cada fila es una actividad con responsable y líder de área.'
               >
                 <SimpleGrid cols={{ base: 1, xs: 2, lg: 4 }} spacing={{ base: 'sm', sm: 'md' }}>
                   <MetricInsightCard
                     compact
                     label='Total actividades'
                     value={formatNumber(stats.total)}
-                    hint={`Igual que solicitudes · ${appliedRange ?? getPeriodRangeLabel(dateFilter, selectedMonthDate)}`}
+                    hint={`${formatNumber(solicitudesUnicas)} solicitudes · ${appliedRange ?? getPeriodRangeLabel(dateFilter, selectedMonthDate)}`}
                     color={projectColors.primary}
                     icon={IconChartBar}
                     loading={isInitialLoad}
                     refreshing={isRefreshing}
                     chartTitle='Composición del total'
-                    chartDescription='Actividades (solicitudes) por estado'
+                    chartDescription='Tareas por estado'
                     chartType='bar'
                     chartData={totalBreakdownChart.data}
                     chartOptions={totalBreakdownChart.options}
@@ -587,7 +587,7 @@ export default function ActividadesAnalyticsView() {
                 <ActividadesSection
                   priority={2}
                   title='Desempeño por encargado'
-                  description='Líderes de área y carga de actividades (una actividad = una solicitud en el periodo).'
+                  description='Líderes de área y tareas asignadas a su equipo en el periodo.'
                 >
                   {loadingAdmin ? (
                     <Group justify='center' py='xl'>

@@ -62,14 +62,28 @@ export const authOptions: AuthOptions = {
   },
   callbacks: {
     async jwt({ token, user }: { token: JWT; user?: User }) {
-      if (user) {
-        token.image = user.image;
+      const email = (user?.email ?? token.email) as string | undefined;
+
+      if (email) {
+        const dbUser = await prisma.user.findUnique({
+          where: { email },
+          select: { role: true, image: true },
+        });
+        token.email = email;
+        token.role = dbUser?.role;
+        if (dbUser?.image) {
+          token.image = dbUser.image;
+        } else if (user?.image) {
+          token.image = user.image;
+        }
       }
+
       return token;
     },
     async session({ session, token }: { session: Session; token: JWT }) {
       if (token && session.user) {
         session.user.image = token.image as string;
+        session.user.role = token.role as string | undefined;
       }
       return session;
     },

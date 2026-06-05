@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs';
 import type { DashboardDateFilter } from '../dateRange';
-import { computeActivityStats, uniqueActivityRowsFromTasks } from '../activityMetrics';
+import { computeActivityStats, allActivityRowsFromTasks } from '../activityMetrics';
 import type { DashboardTask } from '../types';
 import {
   addDataSheet,
@@ -23,8 +23,8 @@ export type ExportActividadesParams = {
 export async function exportActividadesExcel(params: ExportActividadesParams): Promise<void> {
   const { tasks, dateFilter, selectedMonthDate, appliedRange } = params;
 
-  const rows = uniqueActivityRowsFromTasks(tasks);
-  const stats = computeActivityStats(rows);
+  const rows = allActivityRowsFromTasks(tasks);
+  const stats = computeActivityStats(tasks);
 
   const totalCost = rows.reduce((sum, t) => sum + (Number(t.costo_tarea) || 0), 0);
   const withCost = rows.filter((t) => t.costo_tarea != null && Number(t.costo_tarea) > 0).length;

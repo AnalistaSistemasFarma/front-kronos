@@ -8,22 +8,33 @@ import {
 export function uniqueRequestsFromTasks(tasks: DashboardTask[]): DashboardRequest[] {
   const map = new Map<number, DashboardRequest>();
   for (const task of tasks) {
-    if (!map.has(task.id_solicitud)) {
-      map.set(task.id_solicitud, {
-        id_solicitud: task.id_solicitud,
-        asunto_solicitud: task.asunto_solicitud,
-        descripcion_solicitud: task.descripcion_solicitud,
-        fecha_creacion_solicitud: task.fecha_creacion_solicitud,
-        empresa_solicitud: task.empresa_solicitud,
-        creador_solicitud: task.creador_solicitud,
-        estado_solicitud: task.estado_solicitud,
-        resolucion_solicitud: task.resolucion_solicitud,
-        fecha_resolucion_solicitud: task.fecha_resolucion_solicitud,
-        ejecutor_final_solicitud: task.ejecutor_final_solicitud,
-        proceso_solicitud: task.proceso_solicitud,
-        categoria_solicitud: task.categoria_solicitud,
-        encargado_proceso: task.encargado_proceso ?? null,
-      });
+    const id = task.id_solicitud;
+    if (id == null) continue;
+
+    const candidate: DashboardRequest = {
+      id_solicitud: id,
+      asunto_solicitud: task.asunto_solicitud,
+      descripcion_solicitud: task.descripcion_solicitud,
+      fecha_creacion_solicitud: task.fecha_creacion_solicitud,
+      empresa_solicitud: task.empresa_solicitud,
+      creador_solicitud: task.creador_solicitud,
+      estado_solicitud: task.estado_solicitud,
+      resolucion_solicitud: task.resolucion_solicitud,
+      fecha_resolucion_solicitud: task.fecha_resolucion_solicitud,
+      ejecutor_final_solicitud: task.ejecutor_final_solicitud,
+      proceso_solicitud: task.proceso_solicitud,
+      categoria_solicitud: task.categoria_solicitud,
+      encargado_proceso: task.encargado_proceso ?? null,
+    };
+
+    const existing = map.get(id);
+    if (!existing) {
+      map.set(id, candidate);
+      continue;
+    }
+
+    if (!existing.encargado_proceso?.trim() && candidate.encargado_proceso?.trim()) {
+      map.set(id, candidate);
     }
   }
   return Array.from(map.values());
@@ -172,18 +183,22 @@ export type EncargadoRequestStat = {
 /** Solicitudes únicas agrupadas por líder de área (encargado de proceso). */
 export function buildRequestsByEncargado(tasks: DashboardTask[]): EncargadoRequestStat[] {
   const byEncargado = new Map<string, { count: number; procesos: Set<string> }>();
-  const seen = new Set<number>();
 
-  for (const task of tasks) {
-    if (seen.has(task.id_solicitud)) continue;
-    seen.add(task.id_solicitud);
+  for (const req of uniqueRequestsFromTasks(tasks)) {
+    const encargadoRaw = req.encargado_proceso?.trim();
+    const encargados = encargadoRaw
+      ? encargadoRaw.split(',').map((s) => s.trim()).filter(Boolean)
+      : [];
+    const leaders = encargados.length > 0 ? encargados : [normalizeEncargadoProceso(req.encargado_proceso)];
+    const proceso = req.proceso_solicitud?.trim() || 'Sin proceso';
 
-    const encargado = normalizeEncargadoProceso(task.encargado_proceso);
-    const proceso = task.proceso_solicitud?.trim() || 'Sin proceso';
-    const entry = byEncargado.get(encargado) ?? { count: 0, procesos: new Set<string>() };
-    entry.count += 1;
-    entry.procesos.add(proceso);
-    byEncargado.set(encargado, entry);
+    for (const encargado of leaders) {
+      const key = encargado || 'Sin encargado';
+      const entry = byEncargado.get(key) ?? { count: 0, procesos: new Set<string>() };
+      entry.count += 1;
+      entry.procesos.add(proceso);
+      byEncargado.set(key, entry);
+    }
   }
 
   return Array.from(byEncargado.entries())

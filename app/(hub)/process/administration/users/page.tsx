@@ -140,7 +140,8 @@ function UserManagement() {
         if (response.status === 403) {
           throw new Error('No tienes permisos para acceder a esta página');
         }
-        throw new Error('Failed to fetch users');
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || 'No se pudieron cargar los usuarios');
       }
       const data = await response.json();
       setUsers(data.users);

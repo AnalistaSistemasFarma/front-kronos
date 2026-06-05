@@ -1,6 +1,6 @@
 import sql from 'mssql';
 import { NextResponse } from 'next/server';
-import sqlConfig from '../../../../dbconfig';
+import { getPool } from '../../../../lib/mssqlPool';
 import { requireDashboardAdminApi } from '../../../../lib/dashboard/dashboardAccess';
 
 /**
@@ -8,13 +8,11 @@ import { requireDashboardAdminApi } from '../../../../lib/dashboard/dashboardAcc
  * GET ?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
  */
 export async function GET(req: Request) {
-  let pool: sql.ConnectionPool | null = null;
-
   try {
     const auth = await requireDashboardAdminApi();
     if (!auth.ok) return auth.response;
 
-    pool = await sql.connect(sqlConfig);
+    const pool = await getPool();
     const { searchParams } = new URL(req.url);
     const date_from = searchParams.get('date_from');
     const date_to = searchParams.get('date_to');
@@ -107,13 +105,5 @@ export async function GET(req: Request) {
       },
       { status: 500 }
     );
-  } finally {
-    if (pool?.connected) {
-      try {
-        await pool.close();
-      } catch (closeError) {
-        console.error('Error closing pool:', closeError);
-      }
-    }
   }
 }

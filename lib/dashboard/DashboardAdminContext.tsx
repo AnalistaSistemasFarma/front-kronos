@@ -17,15 +17,12 @@ export interface DashboardAdminContextValue {
 
 const DashboardAdminContext = createContext<DashboardAdminContextValue | null>(null);
 
-async function fetchDashboardAdminFlag(email: string): Promise<boolean> {
-  const res = await fetch(
-    `/api/requests-general/verify-permissions?email=${encodeURIComponent(email)}`,
-    { credentials: 'same-origin' }
-  );
+async function fetchDashboardAccess(): Promise<boolean> {
+  const res = await fetch('/api/dashboard/access', { credentials: 'same-origin' });
   if (res.status === 401) return false;
   if (!res.ok) return false;
   const data = await res.json();
-  return Boolean(data.user?.isAdmin);
+  return Boolean(data.allowed);
 }
 
 export function DashboardAdminProvider({ children }: { children: ReactNode }) {
@@ -45,7 +42,7 @@ export function DashboardAdminProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     setLoadingDashboardAdmin(true);
 
-    void fetchDashboardAdminFlag(session.user.email).then((allowed) => {
+    void fetchDashboardAccess().then((allowed) => {
       if (cancelled) return;
       setIsDashboardAdmin(allowed);
       setLoadingDashboardAdmin(false);
