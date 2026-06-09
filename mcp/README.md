@@ -20,20 +20,24 @@ Agente IA ──HTTP Bearer──▶ /mcp (Streamable HTTP)
                        └──────┬───────┘
                               │ Prisma (mismo schema del repo)
                        ┌──────┴───────┐
-                       │  SQL Server  │  ← usuario de SOLO LECTURA en producción
+                       │  SQL Server  │  ← se reutiliza el usuario de la app Kronos
                        └──────────────┘
 ```
 
 Decisiones clave:
 
 - **Servidor único.** Autenticación por **API key por agente** (Bearer token en `Authorization`). No hay login de usuario humano.
-- **Alcance por empresa.** Cada API key se mapea a una lista de empresas (`companyIds`) y un rol. **Toda** consulta se filtra siempre por esas empresas. Un agente con alcance a la empresa A **nunca** ve datos de la empresa B, ni siquiera pasando `companyId: B` como parámetro de una tool — el filtro del servidor manda sobre cualquier parámetro del cliente (ver `src/scope.ts`).
-- **Acceso propio.** El servidor se conecta a los datos con **su propio** acceso (el cliente Prisma del repo), nunca con la identidad del agente. En producción ese acceso debe ser un **usuario SQL de solo lectura / mínimo privilegio** (ver §6).
-- **Solo lectura.** No se registra ninguna tool de escritura/mutación.
+- **Alcance por empresa.** Cada API key se mapea a un alcance de empresas (`companyIds`) y un rol. El alcance puede ser una **lista cerrada** de empresas o el **comodín `"*"`** (admin = TODAS las empresas y procesos).
+  - Para keys con **lista**: **toda** consulta se filtra siempre por esas empresas. Un agente con alcance a la empresa A **nunca** ve datos de la empresa B, ni siquiera pasando `companyId: B` como parámetro de una tool — el filtro del servidor manda sobre cualquier parámetro del cliente (ver `src/scope.ts`).
+  - Para keys **`"*"` (admin)**: NO se aplica filtro de empresa (ve todo). Si el cliente envía un `companyId`, se respeta como filtro **de conveniencia** (acotar lo que ya puede ver); no hay nada que ampliar.
+- **Acceso propio.** El servidor se conecta a los datos con **su propio** acceso (el cliente Prisma del repo), nunca con la identidad del agente. **Por defecto se reutiliza el `DATABASE_URL` del usuario de la app Kronos** (que tiene permisos de escritura), por lo que el solo-lectura se garantiza **por código** (ver §6).
+- **Solo lectura garantizado por código.** Dos capas:
+  1. **No se registra ninguna tool de escritura/mutación.** Las tools de modelo (`prisma.model.findMany`, etc.) son de lectura **por construcción**.
+  2. **`assertReadOnlySql` (`src/readonly.ts`).** TODA consulta cruda pasa por `queryReadOnly` (`src/db.ts`), que valida que la plantilla SQL empiece por `SELECT` o `WITH...SELECT` y **rechaza** `INSERT`/`UPDATE`/`DELETE`/`MERGE`/`DROP`/`ALTER`/`TRUNCATE`/`CREATE`/`GRANT`/`EXEC`, comentarios que oculten escrituras y sentencias encadenadas. Los valores siguen viajando **parametrizados** (no se concatenan).
 
 ### Reutilización del esquema Prisma
 
-El servidor **no duplica** el schema: importa el cliente generado en `../app/generated/prisma` (el mismo `prisma/schema.prisma` del repo). El modelo Prisma del repo es **parcial** frente a la base real (la tabla `requests_general` no está modelada, y columnas como `case.company` o `notes.created_by` existen en la DB pero no en el schema). Por eso las consultas con alcance de empresa usan `$queryRaw` con `Prisma.sql` **parametrizado** (mismo cliente, parametrización segura), y los catálogos bien modelados (procesos, categorías, departamentos, actividades, usuarios) usan la API de modelos de Prisma.
+El servidor **no duplica** el schema: importa el cliente generado en `../app/generated/prisma` (el mismo `prisma/schema.prisma` del repo). El modelo Prisma del repo es **parcial** frente a la base real (la tabla `requests_general` no está modelada, y columnas como `case.company` o `notes.created_by` existen en la DB pero no en el schema). Por eso las consultas con alcance de empresa usan `$queryRaw` con `Prisma.sql` **parametrizado** (mismo cliente, parametrización segura) — siempre a través de `queryReadOnly` —, y los catálogos bien modelados (procesos, categorías, departamentos, actividades, usuarios) usan la API de modelos de Prisma.
 
 ### Columna de empresa por entidad (verificado en el código del repo)
 
@@ -78,15 +82,21 @@ Formato JSON:
 
 ```json
 [
-  { "key": "<token-aleatorio-largo>", "agent": "horus",         "companyIds": [1, 2], "role": "reader" },
+  { "key": "<token-aleatorio-largo>", "agent": "horus-admin",   "companyIds": "*",    "role": "admin"  },
   { "key": "<otro-token>",            "agent": "bot-tesoreria", "companyIds": [3],    "role": "reader" }
 ]
 ```
 
+`companyIds` admite dos formas:
+
+- **`"*"`** (comodín, admin): la key ve **todas las empresas y procesos**; no se aplica filtro de empresa.
+- **arreglo no vacío de enteros positivos** (p.ej. `[1, 2]`): lista cerrada de empresas; el filtro es obligatorio y no se puede ampliar.
+
 Reglas validadas al arrancar (`src/config.ts`):
 
 - Cada `key` debe tener al menos 16 caracteres. Genere tokens fuertes: `openssl rand -hex 32`.
-- `companyIds` no puede estar vacío.
+- `companyIds` debe ser `"*"` **o** un arreglo **no vacío** de enteros positivos (se rechazan arreglos vacíos, `0`, negativos y decimales).
+- `role` es informativo (`"admin"` o `"reader"`).
 - No se permiten keys duplicadas.
 
 La comparación de keys es **timing-safe** (`src/auth.ts`, SHA-256 + `timingSafeEqual`), y se recorren todas las keys sin cortocircuito para no filtrar por tiempo cuál existe.
@@ -98,7 +108,7 @@ La comparación de keys es **timing-safe** (`src/auth.ts`, SHA-256 + `timingSafe
 | Variable | Default | Descripción |
 |---|---|---|
 | `MCP_PORT` | `3020` | Puerto HTTP (ruta `/mcp`). |
-| `DATABASE_URL` | — | Conexión SQL Server. **En producción: usuario de solo lectura.** |
+| `DATABASE_URL` | — | Conexión SQL Server. **Por defecto se reutiliza el usuario de la app Kronos**; el solo-lectura lo garantiza el código (ver §6). Opcional: usuario de solo lectura para defensa en profundidad. |
 | `MCP_API_KEYS` | — | JSON con las keys y su alcance (inline). |
 | `MCP_API_KEYS_FILE` | — | Alternativa: ruta a un `.json` con el mismo formato. |
 | `MCP_DEFAULT_PAGE_SIZE` | `50` | Tamaño de página por defecto. |
@@ -156,9 +166,16 @@ curl -s -X POST http://localhost:3020/mcp \
 
 ---
 
-## 6. Producción: usuario SQL de SOLO LECTURA (obligatorio)
+## 6. Solo lectura: garantizado por código (y opcional usuario SQL de solo lectura)
 
-El servidor MCP debe conectarse con un usuario SQL que **solo pueda leer**. Ejemplo en SQL Server:
+**Por defecto, el MCP reutiliza el `DATABASE_URL` del usuario de la app Kronos**, que tiene permisos de escritura. El solo-lectura **no** depende de los permisos de la base: está **garantizado por código** con dos capas:
+
+1. **Sin tools de escritura.** El servidor no registra ninguna tool de mutación. Las tools de catálogo/usuarios usan `prisma.model.findMany` (lectura por construcción).
+2. **`assertReadOnlySql` (`src/readonly.ts`).** Toda consulta cruda se ejecuta a través de `queryReadOnly` (`src/db.ts`), que antes de tocar la base valida que la plantilla SQL empiece por `SELECT`/`WITH...SELECT` y **rechaza** cualquier `INSERT`/`UPDATE`/`DELETE`/`MERGE`/`DROP`/`ALTER`/`TRUNCATE`/`CREATE`/`GRANT`/`REVOKE`/`EXEC`/`EXECUTE`/`BACKUP`/`RESTORE` (también si vienen ocultas tras comentarios o como sentencias encadenadas). Los valores siguen viajando **parametrizados**.
+
+### Recomendación OPCIONAL (defensa en profundidad)
+
+Para una capa adicional a nivel de base de datos, puede crear un usuario SQL de solo lectura y apuntar el MCP a ese usuario en vez del de la app:
 
 ```sql
 -- En la base Kronos_db
@@ -168,13 +185,11 @@ ALTER ROLE   db_datareader ADD MEMBER mcp_readonly;   -- solo SELECT
 -- NO otorgar db_datawriter, db_owner, ni EXECUTE sobre procedimientos de escritura.
 ```
 
-Luego, en el `.env` del MCP:
-
 ```
 DATABASE_URL="sqlserver://SERVIDOR:1433;database=Kronos_db;user=mcp_readonly;password=<fuerte>;encrypt=true;trustServerCertificate=true"
 ```
 
-Aunque el código no expone mutaciones, el usuario de solo lectura es la **segunda capa de defensa**: garantiza a nivel de base de datos que ni un bug ni una inyección puedan escribir.
+Esto es **opcional**: la garantía principal es el código. El usuario de solo lectura sería una tercera capa de defensa.
 
 ---
 
@@ -195,9 +210,10 @@ npm test
 
 Cubre (vitest, Prisma mockeado — no requiere DB real):
 
-- **Auth:** petición sin `Authorization` → 401; key inválida → 401; header malformado → 401; key válida no da 401.
-- **Alcance:** `effectiveCompanyIds` nunca amplía el alcance; una key `[1]` que pide `companyId: 2` produce filtro `1 = 0` (ninguna fila) y nunca emite la empresa 2; el filtro de empresa va siempre en el SQL.
-- **Solo lectura:** la lista de tools no contiene verbos de mutación; todas empiezan por `kronos_`.
+- **Auth:** petición sin `Authorization` → 401; key inválida → 401; header malformado → 401; key válida no da 401; una key `"*"` resuelve a alcance admin (`allCompanies=true`).
+- **Alcance (lista):** `effectiveCompanyIds` nunca amplía el alcance; una key `[1]` que pide `companyId: 2` produce filtro `1 = 0` (ninguna fila) y nunca emite la empresa 2; el filtro de empresa va siempre en el SQL.
+- **Alcance admin (`"*"`):** `effectiveCompanyFilter` no aplica filtro (ve todas las empresas); una key `"*"` ve registros de múltiples empresas; con un `companyId` del cliente acota por conveniencia sin fallar.
+- **Solo lectura:** la lista de tools no contiene verbos de mutación; todas empiezan por `kronos_`; todo el SQL crudo emitido empieza por `SELECT`; `assertReadOnlySql` acepta `SELECT`/`WITH...SELECT` y rechaza `INSERT`/`UPDATE`/`DELETE`/`DROP`/`EXEC` y variantes con comentarios, espacios y mayúsculas/minúsculas; `queryReadOnly` lanza ante una mutación.
 - **Sanitización:** `kronos_list_users` nunca devuelve `password`/tokens.
 - **Inyección:** un texto malicioso viaja como **valor parametrizado** (no como SQL crudo) y el filtro de empresa permanece intacto; `companyId` no numérico es rechazado por el esquema.
-- **Config:** validación de keys (longitud, duplicados, companyIds, presencia).
+- **Config:** validación de keys (longitud, duplicados, `companyIds` lista/`"*"`, rechazo de arreglos vacíos y valores inválidos, presencia).
