@@ -1,12 +1,16 @@
 import {
   ArcElement,
+  BarController,
   BarElement,
   CategoryScale,
   Chart as ChartJS,
+  DoughnutController,
   Filler,
   Legend,
   LinearScale,
+  LineController,
   LineElement,
+  PieController,
   PointElement,
   Tooltip,
 } from 'chart.js';
@@ -23,6 +27,12 @@ let registered = false;
 export function registerCharts(): void {
   if (registered) return;
   ChartJS.register(
+    // Controladores (necesarios para el componente genérico <Chart type="line|bar|pie">)
+    LineController,
+    BarController,
+    PieController,
+    DoughnutController,
+    // Escalas y elementos
     CategoryScale,
     LinearScale,
     PointElement,
