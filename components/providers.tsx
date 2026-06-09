@@ -9,6 +9,8 @@ import {
   readStoredAppTheme,
   type AppTheme,
 } from '../lib/theme/constants';
+import { UserProvider } from '../lib/user-context';
+import { SapProvider } from '../lib/sap-context';
 import {
   appCssVariablesResolver,
   darkMantineTheme,
@@ -66,7 +68,11 @@ function ThemeProvider({ children }: { children: ReactNode }) {
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <SessionProvider refetchOnWindowFocus={false}>
-      <ThemeProvider>{children}</ThemeProvider>
+      <ThemeProvider>
+        <UserProvider>
+          <SapProvider>{children}</SapProvider>
+        </UserProvider>
+      </ThemeProvider>
     </SessionProvider>
   );
 }
