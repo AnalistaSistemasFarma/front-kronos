@@ -5,6 +5,28 @@ export interface DateRangeStrings {
   endDate: string;
 }
 
+/**
+ * Interpreta fechas del API/SQL como día de calendario local (sin desfase UTC).
+ * Acepta ISO con hora, solo YYYY-MM-DD u objetos Date.
+ */
+export function parseCalendarDate(value: string | Date | null | undefined): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const datePart = trimmed.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    const [y, m, d] = datePart.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  const parsed = new Date(trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
 /** YYYY-MM-DD en hora local (sin desfase UTC) */
 export function formatDateLocal(date: Date): string {
   const year = date.getFullYear();
@@ -27,6 +49,47 @@ function lastDayOfMonth(year: number, month: number): Date {
   return new Date(year, month + 1, 0);
 }
 
+/** Primer día del periodo (mes / trimestre / semestre / año) según el mes de referencia. */
+function getPeriodStart(filter: DashboardDateFilter, referenceMonth: Date): Date {
+  const ref = startOfDay(referenceMonth);
+  const year = ref.getFullYear();
+  const month = ref.getMonth();
+
+  switch (filter) {
+    case 'month':
+      return new Date(year, month, 1);
+    case 'quarter':
+      return new Date(year, Math.floor(month / 3) * 3, 1);
+    case 'semester':
+      return new Date(year, month < 6 ? 0 : 6, 1);
+    case 'year':
+      return new Date(year, 0, 1);
+    default:
+      return ref;
+  }
+}
+
+/** Garantiza startDate <= endDate y que el rango no quede vacío por periodos futuros. */
+function finalizeRange(start: Date, end: Date): DateRangeStrings {
+  const today = startOfDay(new Date());
+  const startDay = startOfDay(start);
+  let endDay = startOfDay(capEndToToday(end));
+
+  if (startDay > today) {
+    return {
+      startDate: formatDateLocal(today),
+      endDate: formatDateLocal(today),
+    };
+  }
+  if (endDay < startDay) {
+    endDay = startDay;
+  }
+  return {
+    startDate: formatDateLocal(startDay),
+    endDate: formatDateLocal(endDay),
+  };
+}
+
 /**
  * Rangos de periodo del dashboard (calendario real, no ventanas arbitrarias).
  * @param referenceMonth — primer día del mes de referencia (navegación mensual)
@@ -42,31 +105,53 @@ export function getDashboardDateRange(
   const month = ref.getMonth();
 
   switch (filter) {
-    case 'month': {
-      const start = new Date(year, month, 1);
-      const end = capEndToToday(lastDayOfMonth(year, month));
-      return { startDate: formatDateLocal(start), endDate: formatDateLocal(end) };
-    }
+    case 'month':
+      return finalizeRange(
+        new Date(year, month, 1),
+        lastDayOfMonth(year, month)
+      );
     case 'quarter': {
       const quarterIndex = Math.floor(month / 3);
-      const start = new Date(year, quarterIndex * 3, 1);
-      const end = capEndToToday(lastDayOfMonth(year, quarterIndex * 3 + 2));
-      return { startDate: formatDateLocal(start), endDate: formatDateLocal(end) };
+      return finalizeRange(
+        new Date(year, quarterIndex * 3, 1),
+        lastDayOfMonth(year, quarterIndex * 3 + 2)
+      );
     }
     case 'semester': {
       const semesterStartMonth = month < 6 ? 0 : 6;
-      const start = new Date(year, semesterStartMonth, 1);
-      const end = capEndToToday(lastDayOfMonth(year, semesterStartMonth + 5));
-      return { startDate: formatDateLocal(start), endDate: formatDateLocal(end) };
+      return finalizeRange(
+        new Date(year, semesterStartMonth, 1),
+        lastDayOfMonth(year, semesterStartMonth + 5)
+      );
     }
-    case 'year': {
-      const start = new Date(year, 0, 1);
-      const end = capEndToToday(lastDayOfMonth(year, 11));
-      return { startDate: formatDateLocal(start), endDate: formatDateLocal(end) };
-    }
+    case 'year':
+      return finalizeRange(new Date(year, 0, 1), lastDayOfMonth(year, 11));
     default:
       return null;
   }
+}
+
+/** Ajusta el mes de referencia si apunta a un periodo que aún no ha comenzado. */
+export function clampReferenceToPresent(
+  referenceMonth: Date,
+  filter: DashboardDateFilter
+): Date {
+  if (filter === 'all') return referenceMonth;
+  const start = getPeriodStart(filter, referenceMonth);
+  const today = startOfDay(new Date());
+  if (start <= today) return startOfDay(referenceMonth);
+  return new Date(today.getFullYear(), today.getMonth(), 1);
+}
+
+/** true si aún se puede avanzar a un periodo que ya haya comenzado (inicio <= hoy). */
+export function canShiftReferenceForward(
+  referenceMonth: Date,
+  filter: DashboardDateFilter
+): boolean {
+  if (filter === 'all') return false;
+  const nextRef = shiftReferenceMonth(referenceMonth, filter, 1);
+  const nextStart = getPeriodStart(filter, nextRef);
+  return nextStart <= startOfDay(new Date());
 }
 
 const FILTER_LABELS: Record<DashboardDateFilter, string> = {
@@ -130,21 +215,5 @@ export function isReferenceAtCurrentPeriod(
   referenceMonth: Date,
   filter: DashboardDateFilter
 ): boolean {
-  const now = new Date();
-  const y = referenceMonth.getFullYear();
-  const m = referenceMonth.getMonth();
-  const ny = now.getFullYear();
-  const nm = now.getMonth();
-
-  switch (filter) {
-    case 'year':
-      return y >= ny;
-    case 'semester':
-      return y > ny || (y === ny && (m < 6 ? 0 : 1) >= (nm < 6 ? 0 : 1));
-    case 'quarter':
-      return y > ny || (y === ny && Math.floor(m / 3) >= Math.floor(nm / 3));
-    case 'month':
-    default:
-      return y === ny && m === nm;
-  }
+  return !canShiftReferenceForward(referenceMonth, filter);
 }

@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
-    "@mantine/charts": "^8.3.6",
     "@mantine/core": "^8.3.3",
     "@mantine/hooks": "^8.3.3",
     "@mantine/next": "^6.0.22",
@@ -20,6 +19,7 @@
     "@types/bcryptjs": "^3.0.0",
     "axios": "^1.13.2",
     "bcryptjs": "^3.0.2",
+    "chart.js": "^4.5.1",
     "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
     "jszip": "^3.10.1",
@@ -28,6 +28,7 @@
     "next-auth": "^4.24.11",
     "prisma": "^6.17.0",
     "react": "19.1.0",
+    "react-chartjs-2": "^5.3.1",
     "react-dom": "19.1.0",
     "react-hot-toast": "^2.6.0",
     "web-push": "^3.6.7"

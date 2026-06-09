@@ -6,8 +6,17 @@ import AzureADProvider from 'next-auth/providers/azure-ad';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { prisma } from '../../../../lib/prisma';
 
+const azureConfigured =
+  Boolean(process.env.AZURE_AD_CLIENT_ID) &&
+  process.env.AZURE_AD_CLIENT_ID !== 'your-client-id' &&
+  Boolean(process.env.AZURE_AD_CLIENT_SECRET) &&
+  process.env.AZURE_AD_CLIENT_SECRET !== 'your-client-secret' &&
+  Boolean(process.env.AZURE_AD_TENANT_ID) &&
+  process.env.AZURE_AD_TENANT_ID !== 'your-tenant-id';
+
 export const authOptions: AuthOptions = {
   adapter: PrismaAdapter(prisma),
+  secret: process.env.NEXTAUTH_SECRET,
   debug: process.env.NODE_ENV === 'development',
   providers: [
     CredentialsProvider({
@@ -38,25 +47,43 @@ export const authOptions: AuthOptions = {
         };
       },
     }),
-    AzureADProvider({
-      clientId: process.env.AZURE_AD_CLIENT_ID!,
-      clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
-      tenantId: process.env.AZURE_AD_TENANT_ID!,
-    }),
+    ...(azureConfigured
+      ? [
+          AzureADProvider({
+            clientId: process.env.AZURE_AD_CLIENT_ID!,
+            clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
+            tenantId: process.env.AZURE_AD_TENANT_ID!,
+          }),
+        ]
+      : []),
   ],
   session: {
     strategy: 'jwt' as const,
   },
   callbacks: {
     async jwt({ token, user }: { token: JWT; user?: User }) {
-      if (user) {
-        token.image = user.image;
+      const email = (user?.email ?? token.email) as string | undefined;
+
+      if (email) {
+        const dbUser = await prisma.user.findUnique({
+          where: { email },
+          select: { role: true, image: true },
+        });
+        token.email = email;
+        token.role = dbUser?.role;
+        if (dbUser?.image) {
+          token.image = dbUser.image;
+        } else if (user?.image) {
+          token.image = user.image;
+        }
       }
+
       return token;
     },
     async session({ session, token }: { session: Session; token: JWT }) {
       if (token && session.user) {
         session.user.image = token.image as string;
+        session.user.role = token.role as string | undefined;
       }
       return session;
     },

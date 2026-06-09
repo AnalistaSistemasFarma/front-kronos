@@ -1,8 +1,6 @@
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../app/api/auth/[...nextauth]/route';
-import { PrismaClient } from '../app/generated/prisma';
-
-const prisma = new PrismaClient();
+import { prisma } from './prisma';
 
 /**
  * Check if user has admin privileges based on role or subprocess access

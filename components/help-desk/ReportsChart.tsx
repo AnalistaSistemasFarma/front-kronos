@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { Card, Title, Text, Alert, Skeleton, Group, ActionIcon, Box } from '@mantine/core';
-import { LineChart } from '@mantine/charts';
+import { ChartContainer } from '../dashboard/ChartContainer';
+import { buildSimpleLineChart } from '../../lib/charts/builders';
 import { IconAlertCircle, IconRefresh, IconChartLine } from '@tabler/icons-react';
 
 interface TimeSeriesData {
@@ -51,14 +52,19 @@ export const ReportsChart: React.FC<ReportsChartProps> = ({ className = '' }) =>
     });
   };
 
-  const chartData = data.map((item) => ({
-    date: formatDate(item.date),
-    'Casos Nuevos': item.count,
+  const linePoints = data.map((item) => ({
+    label: formatDate(item.date),
+    value: item.count,
   }));
+
+  const lineChart =
+    linePoints.length > 0
+      ? buildSimpleLineChart(linePoints, '#2563eb', 'Casos nuevos')
+      : null;
 
   if (loading) {
     return (
-      <Card shadow='sm' p='lg' radius='md' withBorder className={`bg-white ${className}`}>
+      <Card shadow='sm' p='lg' radius='md' withBorder className={className}>
         <Group justify='space-between' mb='md'>
           <Group>
             <IconChartLine size={24} className='text-blue-600' />
@@ -82,7 +88,7 @@ export const ReportsChart: React.FC<ReportsChartProps> = ({ className = '' }) =>
 
   if (error) {
     return (
-      <Card shadow='sm' p='lg' radius='md' withBorder className={`bg-white ${className}`}>
+      <Card shadow='sm' p='lg' radius='md' withBorder className={className}>
         <Group justify='space-between' mb='md'>
           <Group>
             <IconChartLine size={24} className='text-blue-600' />
@@ -119,7 +125,7 @@ export const ReportsChart: React.FC<ReportsChartProps> = ({ className = '' }) =>
   }
 
   return (
-    <Card shadow='sm' p='lg' radius='md' withBorder className={`bg-white ${className}`}>
+    <Card shadow='sm' p='lg' radius='md' withBorder className={className}>
       <Group justify='space-between' mb='md'>
         <Group>
           <IconChartLine size={24} className='text-blue-600' />
@@ -144,49 +150,18 @@ export const ReportsChart: React.FC<ReportsChartProps> = ({ className = '' }) =>
       </Group>
 
       <Box mt='md'>
-        <LineChart
-          h={300}
-          data={chartData}
-          dataKey='date'
-          series={[
-            {
-              name: 'Casos Nuevos',
-              color: 'blue.6',
-            },
-          ]}
-          curveType='monotone'
-          gridAxis='xy'
-          withDots={false}
-          withTooltip
-          tooltipAnimationDuration={200}
-          xAxisProps={{
-            angle: -45,
-            textAnchor: 'end',
-            height: 60,
-            interval: 'preserveStartEnd',
-          }}
-          yAxisProps={{
-            domain: ['dataMin', 'dataMax'],
-          }}
-          tooltipProps={{
-            content: ({ active, payload, label }) => {
-              if (active && payload && payload.length) {
-                const data = payload[0].payload;
-                return (
-                  <div className='bg-white border border-gray-200 rounded-md shadow-lg p-3'>
-                    <Text size='sm' fw={600} className='text-gray-900'>
-                      {label}
-                    </Text>
-                    <Text size='sm' color='blue.6'>
-                      Casos nuevos: {data['Casos Nuevos']}
-                    </Text>
-                  </div>
-                );
-              }
-              return null;
-            },
-          }}
-        />
+        {lineChart ? (
+          <ChartContainer
+            type='line'
+            data={lineChart.data}
+            options={lineChart.options}
+            height={300}
+          />
+        ) : (
+          <Text size='sm' c='dimmed' ta='center' py='xl'>
+            No hay datos para mostrar
+          </Text>
+        )}
       </Box>
 
       <Group justify='center' mt='md'>

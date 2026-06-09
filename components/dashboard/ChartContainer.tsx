@@ -1,104 +1,145 @@
 'use client';
 
-import { Box, Skeleton } from '@mantine/core';
-import {
-  Children,
-  cloneElement,
-  isValidElement,
-  useEffect,
-  useRef,
-  useState,
-  type ReactElement,
-  type ReactNode,
-} from 'react';
+import { Box } from '@mantine/core';
+import type { ChartData, ChartOptions, ChartType } from 'chart.js';
+import { useMemo } from 'react';
+import { getChartScrollMinWidth } from '../../lib/charts/chartScroll';
+import { ChartBox } from '../charts/ChartBox';
+import { useChartViewport } from './useChartViewport';
 
-interface ChartContainerProps {
-  /** Altura fija del área del gráfico */
+interface ChartContainerProps<T extends ChartType = ChartType> {
   height: number;
-  /** Ancho mínimo del contenedor; use 0 en columnas flex/grid estrechas */
+  /** Tope visible; si height es mayor, el contenedor hace scroll vertical */
+  maxHeight?: number;
+  /** Ancho mínimo explícito; si no se pasa, se calcula según cantidad de datos */
   minWidth?: number;
-  children: ReactNode;
-}
-
-function injectChartDimensions(
-  child: ReactNode,
-  width: number,
-  height: number
-): ReactNode {
-  if (!isValidElement(child)) return child;
-
-  const props = child.props as Record<string, unknown>;
-  const nextProps: Record<string, unknown> = { w: width, h: height };
-
-  if (props.style && typeof props.style === 'object') {
-    nextProps.style = { ...props.style, minWidth: 0 };
-  } else {
-    nextProps.style = { minWidth: 0 };
-  }
-
-  return cloneElement(child as ReactElement<Record<string, unknown>>, nextProps);
+  /** false desactiva scroll horizontal y cálculo automático */
+  scrollable?: boolean;
+  type: T;
+  data: ChartData<T>;
+  options?: ChartOptions<T>;
+  onChartClick?: (index: number | null) => void;
+  pinnedIndex?: number | null;
 }
 
 /**
- * Monta Mantine/Recharts solo cuando el contenedor tiene tamaño medible
- * y pasa width/height en píxeles (evita width(0) height(0) y width(-1)).
+ * Contenedor para Chart.js: ocupa el 100% del ancho del card y se redimensiona
+ * al cambiar breakpoint. Scroll horizontal/vertical solo cuando hay muchos datos.
  */
-export function ChartContainer({ height, minWidth = 0, children }: ChartContainerProps) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [dims, setDims] = useState<{ width: number; height: number } | null>(null);
+export function ChartContainer<T extends ChartType = ChartType>({
+  height,
+  maxHeight,
+  minWidth: minWidthProp,
+  scrollable = true,
+  type,
+  data,
+  options,
+  onChartClick,
+  pinnedIndex,
+}: ChartContainerProps<T>) {
+  const viewport = useChartViewport();
 
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
+  const scrollMinWidth = useMemo(() => {
+    if (!scrollable) return 0;
+    return getChartScrollMinWidth(
+      type,
+      data,
+      viewport,
+      options,
+      minWidthProp
+    );
+  }, [scrollable, type, data, options, minWidthProp, viewport]);
 
-    let rafId = 0;
+  const needsVerticalScroll =
+    maxHeight != null && maxHeight > 0 && height > maxHeight + 1;
 
-    const measure = () => {
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        const rect = node.getBoundingClientRect();
-        const width = Math.floor(rect.width);
-        const measuredHeight = Math.floor(rect.height) || height;
+  const layoutRevision = useMemo(
+    () =>
+      [
+        viewport.layoutEpoch,
+        viewport.resizeTick,
+        height,
+        maxHeight ?? 0,
+        scrollMinWidth,
+        needsVerticalScroll ? 1 : 0,
+      ].join('-'),
+    [
+      viewport.layoutEpoch,
+      viewport.resizeTick,
+      height,
+      maxHeight,
+      scrollMinWidth,
+      needsVerticalScroll,
+    ]
+  );
 
-        if (width > 0 && measuredHeight > 0) {
-          setDims((prev) =>
-            prev?.width === width && prev?.height === measuredHeight
-              ? prev
-              : { width, height: measuredHeight }
-          );
-        } else {
-          setDims(null);
-        }
-      });
-    };
+  const chartNode = (
+    <ChartBox
+      type={type}
+      data={data}
+      options={options}
+      height={height}
+      minWidth={scrollMinWidth}
+      onChartClick={onChartClick}
+      pinnedIndex={pinnedIndex}
+      layoutRevision={layoutRevision}
+    />
+  );
 
-    measure();
-
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-
-    return () => {
-      cancelAnimationFrame(rafId);
-      observer.disconnect();
-    };
-  }, [height, minWidth]);
-
-  const chartChild = dims ? injectChartDimensions(Children.only(children), dims.width, dims.height) : null;
-
-  return (
+  const canvas = (
     <Box
-      ref={ref}
       w='100%'
       style={{
         height,
         minHeight: height,
-        minWidth: minWidth > 0 ? minWidth : 0,
-        width: '100%',
+        width: scrollMinWidth > 0 ? scrollMinWidth : '100%',
+        maxWidth: scrollMinWidth > 0 ? undefined : '100%',
+        minWidth: scrollMinWidth > 0 ? scrollMinWidth : undefined,
         position: 'relative',
-        overflow: 'hidden',
       }}
     >
-      {chartChild ?? <Skeleton height={height} radius='md' />}
+      {chartNode}
+    </Box>
+  );
+
+  const withHorizontalScroll =
+    scrollMinWidth > 0 ? (
+      <Box className='chart-scroll-x' w='100%' style={{ maxWidth: '100%' }}>
+        {canvas}
+      </Box>
+    ) : (
+      canvas
+    );
+
+  if (needsVerticalScroll) {
+    return (
+      <Box
+        className='chart-scroll-y'
+        w='100%'
+        style={{
+          maxHeight,
+          minHeight: Math.min(height, maxHeight!),
+          width: '100%',
+          maxWidth: '100%',
+        }}
+      >
+        {withHorizontalScroll}
+      </Box>
+    );
+  }
+
+  return (
+    <Box
+      w='100%'
+      style={{
+        height,
+        minHeight: height,
+        width: '100%',
+        maxWidth: '100%',
+        position: 'relative',
+      }}
+    >
+      {withHorizontalScroll}
     </Box>
   );
 }

@@ -20,8 +20,13 @@ import {
   ThemeIcon,
   UnstyledButton,
 } from '@mantine/core';
-import { BarChart, PieChart } from '@mantine/charts';
 import { ChartContainer } from './ChartContainer';
+import {
+  buildHorizontalMultiColorBarChart,
+  buildHorizontalStackedBarChart,
+  buildPieChart,
+  buildSinglePersonBarChart,
+} from '../../lib/charts/builders';
 import {
   IconChevronLeft,
   IconChevronDown,
@@ -36,21 +41,15 @@ import {
   IconLayoutGrid,
 } from '@tabler/icons-react';
 import {
-  dashboardChartTheme,
-  encargadoBarPalette,
-  encargadoBarPaletteMantine,
   getStatusBadgeStyle,
-  buildCategoryYAxisProps,
-  buildValueXAxisProps,
-  executiveBarChartProps,
-  getResponsiveChartHeight,
-  getResponsiveYAxisWidth,
-  statusChartColors,
-  statusSeries,
+  resolveScrollableBarChartLayout,
 } from './chartTheme';
 import { useChartViewport } from './useChartViewport';
+import { useDashboardChartPalette } from './useDashboardChartPalette';
+import { StatusMetricGradientCard } from './actividades/ActividadesUi';
+import { ResolutionTimeTrendChart } from './ResolutionTimeTrendChart';
 
-const chartLabelColor = '#334155';
+const chartLabelColor = 'var(--chart-text)';
 const TASKS_PER_PAGE = 10;
 
 type PersonViewMode = 'team' | 'individual' | 'cards';
@@ -73,6 +72,8 @@ export interface TaskWithEncargado {
   tarea: string;
   estado_tarea: string;
   asignado_tarea: string;
+  hora_inicio_tarea?: string | null;
+  fecha_fin_tarea?: string | null;
   encargado_proceso?: string | null;
   id_solicitud: number;
   asunto_solicitud: string;
@@ -80,9 +81,18 @@ export interface TaskWithEncargado {
   categoria_solicitud: string;
 }
 
-function normalizeEncargado(name: string | null | undefined): string {
-  const trimmed = name?.trim();
-  return trimmed ? trimmed : 'Sin encargado';
+function encargadoNames(raw: string | null | undefined): string[] {
+  const trimmed = raw?.trim();
+  if (!trimmed) return ['Sin encargado'];
+  const parts = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+  return parts.length > 0 ? parts : ['Sin encargado'];
+}
+
+function taskBelongsToEncargado(
+  encargadoProceso: string | null | undefined,
+  selectedEncargado: string
+): boolean {
+  return encargadoNames(encargadoProceso).includes(selectedEncargado);
 }
 
 function normalizeAsignado(name: string | null | undefined): string {
@@ -100,13 +110,16 @@ function getInitials(name: string): string {
 }
 
 function ChartStatusLegend({ fullWidth = false }: { fullWidth?: boolean }) {
+  const { palette, statusSeries } = useDashboardChartPalette();
   return (
     <Paper
       p='sm'
       radius='md'
-      withBorder
       w={fullWidth ? '100%' : undefined}
-      style={{ background: '#fff', borderColor: dashboardChartTheme.blue100 }}
+      style={{
+        background: 'var(--chart-panel)',
+        border: `1px solid ${palette.blue100}`,
+      }}
     >
       <Group gap='md' justify='center' wrap='wrap'>
         {statusSeries.map((s) => (
@@ -139,10 +152,11 @@ function PersonStatusCounts({
   pendiente: number;
   enProceso: number;
 }) {
+  const { statusColors } = useDashboardChartPalette();
   const items = [
-    { label: 'Completadas', value: completada, color: statusChartColors.completada },
-    { label: 'Pendientes', value: pendiente, color: statusChartColors.pendiente },
-    { label: 'En proceso', value: enProceso, color: statusChartColors.enProceso },
+    { label: 'Completadas', value: completada, color: statusColors.completada },
+    { label: 'Pendientes', value: pendiente, color: statusColors.pendiente },
+    { label: 'En proceso', value: enProceso, color: statusColors.enProceso },
   ];
 
   return (
@@ -153,9 +167,9 @@ function PersonStatusCounts({
           ta='center'
           p='xs'
           style={{
-            background: '#f8fafc',
+            background: 'var(--app-surface-raised)',
             borderRadius: 8,
-            border: '1px solid #e2e8f0',
+            border: '1px solid var(--app-border-subtle)',
           }}
         >
           <Text size='xs' fw={600} style={{ color: chartLabelColor }}>
@@ -179,13 +193,14 @@ function StatusDistributionBar({
   pendiente: number;
   enProceso: number;
 }) {
+  const { palette, statusColors } = useDashboardChartPalette();
   const total = completada + pendiente + enProceso;
   if (total === 0) return null;
 
   const segments = [
-    { value: completada, color: statusChartColors.completada },
-    { value: enProceso, color: statusChartColors.enProceso },
-    { value: pendiente, color: statusChartColors.pendiente },
+    { value: completada, color: statusColors.completada },
+    { value: enProceso, color: statusColors.enProceso },
+    { value: pendiente, color: statusColors.pendiente },
   ].filter((s) => s.value > 0);
 
   return (
@@ -195,7 +210,7 @@ function StatusDistributionBar({
         height: 8,
         borderRadius: 999,
         overflow: 'hidden',
-        background: dashboardChartTheme.blue50,
+        background: palette.blue50,
       }}
     >
       {segments.map((seg) => (
@@ -212,44 +227,8 @@ function StatusDistributionBar({
   );
 }
 
-function ChartTooltip({
-  label,
-  value,
-  color,
-  suffix = 'tareas',
-}: {
-  label: string;
-  value: number;
-  color: string;
-  suffix?: string;
-}) {
-  return (
-    <Paper shadow='md' p='sm' radius='md' withBorder style={{ minWidth: 160, borderColor: '#e9ecef' }}>
-      <Text size='xs' c='dimmed' mb={6} lineClamp={2}>
-        {label}
-      </Text>
-      <Group gap='xs' align='baseline'>
-        <Box
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            backgroundColor: color,
-            flexShrink: 0,
-          }}
-        />
-        <Text fw={700} size='xl' style={{ color: dashboardChartTheme.primary, lineHeight: 1 }}>
-          {value}
-        </Text>
-        <Text size='xs' c='dimmed'>
-          {suffix}
-        </Text>
-      </Group>
-    </Paper>
-  );
-}
-
 function PersonCardsGrid({ people }: { people: AssigneeRow[] }) {
+  const { palette } = useDashboardChartPalette();
   const maxTeam = Math.max(...people.map((p) => p.total), 1);
 
   return (
@@ -261,19 +240,17 @@ function PersonCardsGrid({ people }: { people: AssigneeRow[] }) {
             key={person.asignado}
             p={{ base: 'sm', sm: 'md' }}
             radius='md'
-            withBorder
-            bg='white'
-            style={{ borderColor: dashboardChartTheme.blue100 }}
+            style={{ border: `1px solid ${palette.blue100}` }}
           >
             <Group wrap='nowrap' gap='sm' align='flex-start' mb='xs'>
-              <ThemeIcon size={40} radius='md' variant='gradient' gradient={dashboardChartTheme.gradient}>
+              <ThemeIcon size={40} radius='md' variant='gradient' gradient={palette.gradient}>
                 <Text size='xs' fw={700} c='white'>
                   {getInitials(person.asignado)}
                 </Text>
               </ThemeIcon>
               <Box style={{ flex: 1, minWidth: 0 }}>
                 <Group justify='space-between' wrap='nowrap' gap='xs'>
-                  <Text size='sm' fw={700} lineClamp={2} style={{ color: dashboardChartTheme.primary }}>
+                  <Text size='sm' fw={700} lineClamp={2} style={{ color: palette.primary }}>
                     {person.asignado}
                   </Text>
                   <Badge
@@ -281,7 +258,7 @@ function PersonCardsGrid({ people }: { people: AssigneeRow[] }) {
                     size='sm'
                     styles={{
                       root: {
-                        backgroundColor: dashboardChartTheme.primary,
+                        backgroundColor: palette.primary,
                         color: '#fff',
                         flexShrink: 0,
                       },
@@ -312,60 +289,25 @@ function PersonCardsGrid({ people }: { people: AssigneeRow[] }) {
   );
 }
 
-function TeamExecutiveTooltip({
-  active,
-  payload,
-  label,
-}: {
-  active?: boolean;
-  payload?: readonly { name?: string; value?: number; color?: string }[];
-  label?: string | number;
-}) {
-  if (!active || !payload?.length) return null;
-  const name = label != null ? String(label) : '';
-
-  const person = payload.reduce((sum, p) => sum + (Number(p.value) || 0), 0);
-  const completadas = Number(payload.find((p) => p.name === 'Completada')?.value) || 0;
-  const pct = person > 0 ? Math.round((completadas / person) * 100) : 0;
-
-  return (
-    <Paper shadow='sm' p='sm' radius='md' withBorder style={{ borderColor: '#e2e8f0', minWidth: 200 }}>
-      <Text size='xs' fw={700} mb={8} style={{ color: dashboardChartTheme.primary }}>
-        {name}
-      </Text>
-      {payload
-        .filter((p) => Number(p.value) > 0)
-        .map((p) => (
-          <Group key={p.name} justify='space-between' gap='md' mb={4}>
-            <Group gap={6}>
-              <Box w={8} h={8} style={{ borderRadius: 2, backgroundColor: p.color }} />
-              <Text size='xs' style={{ color: chartLabelColor }}>
-                {p.name}
-              </Text>
-            </Group>
-            <Text size='xs' fw={700}>
-              {p.value}
-            </Text>
-          </Group>
-        ))}
-      <Box pt={6} mt={4} style={{ borderTop: '1px solid #e2e8f0' }}>
-        <Group justify='space-between'>
-          <Text size='xs' fw={600} style={{ color: chartLabelColor }}>
-            Total · Cumplimiento
-          </Text>
-          <Text size='xs' fw={700} style={{ color: dashboardChartTheme.primary }}>
-            {person} tareas · {pct}%
-          </Text>
-        </Group>
-      </Box>
-    </Paper>
-  );
+function complianceBadgeStyles(isDark: boolean, palette: ReturnType<typeof useDashboardChartPalette>['palette']) {
+  return {
+    root: {
+      backgroundColor: isDark ? 'rgba(91, 155, 255, 0.28)' : palette.blue50,
+      color: isDark ? '#f0f4ff' : palette.primary,
+      fontWeight: 700,
+      border: isDark
+        ? '1px solid rgba(91, 155, 255, 0.5)'
+        : `1px solid ${palette.blue100}`,
+    },
+  };
 }
 
 function TeamSummaryTable({ people }: { people: AssigneeRow[] }) {
+  const { palette, statusColors, isDark } = useDashboardChartPalette();
+  const badgeStyles = complianceBadgeStyles(isDark, palette);
   return (
     <Box mt='lg'>
-      <Text size='sm' fw={700} mb='sm' style={{ color: dashboardChartTheme.primary }}>
+      <Text size='sm' fw={700} mb='sm' style={{ color: palette.primary }}>
         Resumen del equipo
       </Text>
 
@@ -375,39 +317,33 @@ function TeamSummaryTable({ people }: { people: AssigneeRow[] }) {
             key={person.asignado}
             p='sm'
             radius='md'
-            withBorder
-            style={{ borderColor: dashboardChartTheme.blue100 }}
+            style={{
+              background: palette.chartPanelBg,
+              border: `1px solid ${palette.chartPanelBorder}`,
+            }}
           >
             <Group justify='space-between' mb='xs' wrap='wrap' gap='xs'>
-              <Text size='sm' fw={700} style={{ color: dashboardChartTheme.primary }}>
+              <Text size='sm' fw={700} style={{ color: palette.primary }}>
                 {person.asignado}
               </Text>
-              <Badge
-                variant='light'
-                size='sm'
-                styles={{
-                  root: {
-                    backgroundColor: '#f1f5f9',
-                    color: dashboardChartTheme.primary,
-                    fontWeight: 700,
-                  },
-                }}
-              >
+              <Badge variant='outline' size='sm' styles={badgeStyles}>
                 {completionRate(person)}% cumpl.
               </Badge>
             </Group>
-            <SimpleGrid cols={4} spacing={6}>
+            <SimpleGrid cols={{ base: 2, xs: 4 }} spacing={6}>
               <Box ta='center'>
                 <Text size='xs' c='dimmed'>
                   Total
                 </Text>
-                <Text fw={700}>{person.total}</Text>
+                <Text fw={700} style={{ color: chartLabelColor }}>
+                  {person.total}
+                </Text>
               </Box>
               <Box ta='center'>
                 <Text size='xs' c='dimmed'>
                   Compl.
                 </Text>
-                <Text fw={700} style={{ color: statusChartColors.completada }}>
+                <Text fw={700} style={{ color: statusColors.completada }}>
                   {person.Completada}
                 </Text>
               </Box>
@@ -415,7 +351,7 @@ function TeamSummaryTable({ people }: { people: AssigneeRow[] }) {
                 <Text size='xs' c='dimmed'>
                   Pend.
                 </Text>
-                <Text fw={700} style={{ color: statusChartColors.pendiente }}>
+                <Text fw={700} style={{ color: statusColors.pendiente }}>
                   {person.Pendiente}
                 </Text>
               </Box>
@@ -423,7 +359,7 @@ function TeamSummaryTable({ people }: { people: AssigneeRow[] }) {
                 <Text size='xs' c='dimmed'>
                   Proc.
                 </Text>
-                <Text fw={700} style={{ color: statusChartColors.enProceso }}>
+                <Text fw={700} style={{ color: statusColors.enProceso }}>
                   {person['En Proceso']}
                 </Text>
               </Box>
@@ -439,7 +375,7 @@ function TeamSummaryTable({ people }: { people: AssigneeRow[] }) {
           striped
           highlightOnHover
           styles={{
-            thead: { backgroundColor: '#f8fafc' },
+            thead: { backgroundColor: palette.blue100 },
             th: {
               color: chartLabelColor,
               fontWeight: 600,
@@ -448,6 +384,7 @@ function TeamSummaryTable({ people }: { people: AssigneeRow[] }) {
               letterSpacing: '0.04em',
               whiteSpace: 'nowrap',
             },
+            td: { color: chartLabelColor },
           }}
         >
           <Table.Thead>
@@ -464,34 +401,24 @@ function TeamSummaryTable({ people }: { people: AssigneeRow[] }) {
             {people.map((person) => (
               <Table.Tr key={person.asignado}>
                 <Table.Td>
-                  <Text size='sm' fw={600} lineClamp={2} style={{ color: dashboardChartTheme.primary }}>
+                  <Text size='sm' fw={600} lineClamp={2} style={{ color: palette.primary }}>
                     {person.asignado}
                   </Text>
                 </Table.Td>
-                <Table.Td ta='center' fw={600}>
+                <Table.Td ta='center' fw={600} style={{ color: chartLabelColor }}>
                   {person.total}
                 </Table.Td>
-                <Table.Td ta='center' style={{ color: statusChartColors.completada }}>
+                <Table.Td ta='center' style={{ color: statusColors.completada }}>
                   {person.Completada}
                 </Table.Td>
-                <Table.Td ta='center' style={{ color: statusChartColors.pendiente }}>
+                <Table.Td ta='center' style={{ color: statusColors.pendiente }}>
                   {person.Pendiente}
                 </Table.Td>
-                <Table.Td ta='center' style={{ color: statusChartColors.enProceso }}>
+                <Table.Td ta='center' style={{ color: statusColors.enProceso }}>
                   {person['En Proceso']}
                 </Table.Td>
                 <Table.Td ta='right'>
-                  <Badge
-                    variant='light'
-                    size='sm'
-                    styles={{
-                      root: {
-                        backgroundColor: '#f1f5f9',
-                        color: dashboardChartTheme.primary,
-                        fontWeight: 700,
-                      },
-                    }}
-                  >
+                  <Badge variant='outline' size='sm' styles={badgeStyles}>
                     {completionRate(person)}%
                   </Badge>
                 </Table.Td>
@@ -504,28 +431,32 @@ function TeamSummaryTable({ people }: { people: AssigneeRow[] }) {
   );
 }
 
-function TeamPerformanceCharts({ people }: { people: AssigneeRow[] }) {
-  const { isMobile, isCompact } = useChartViewport();
-  const names = people.map((p) => p.asignado);
-  const chartHeight = getResponsiveChartHeight(people.length, isCompact);
-  const yAxisWidth = getResponsiveYAxisWidth(names, isMobile);
-  const maxTotal = Math.max(...people.map((p) => p.total), 0);
-  const chartMargin = isMobile
-    ? { top: 8, right: 12, left: 0, bottom: 4 }
-    : { top: 12, right: 24, left: 4, bottom: 8 };
-
+function TeamPerformanceCharts({
+  people,
+  tasks,
+  encargadoName,
+}: {
+  people: AssigneeRow[];
+  tasks: TaskWithEncargado[];
+  encargadoName: string;
+}) {
+  const { palette } = useDashboardChartPalette();
+  const { isCompact } = useChartViewport();
+  const chartLayout = useMemo(
+    () => resolveScrollableBarChartLayout(people.length, isCompact),
+    [people.length, isCompact]
+  );
+  const stackedChart = useMemo(() => buildHorizontalStackedBarChart(people), [people]);
   return (
     <Paper
       p={{ base: 'sm', sm: 'md', lg: 'lg' }}
       radius='md'
-      withBorder
-      bg='white'
       mt='md'
-      style={{ borderColor: dashboardChartTheme.chartPanelBorder }}
+      style={{ border: `1px solid ${palette.chartPanelBorder}` }}
     >
       <Stack gap='sm' mb='md'>
         <Box>
-          <Text size='sm' fw={700} style={{ color: dashboardChartTheme.primary }}>
+          <Text size='sm' fw={700} style={{ color: palette.primary }}>
             Panorama del equipo
           </Text>
           <Text size='xs' mt={2} style={{ color: chartLabelColor }}>
@@ -535,65 +466,68 @@ function TeamPerformanceCharts({ people }: { people: AssigneeRow[] }) {
         <ChartStatusLegend fullWidth />
       </Stack>
 
-      <Box w='100%' style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        <ChartContainer height={chartHeight} minWidth={0}>
-          <BarChart
-            data={people}
-            dataKey='asignado'
-            orientation='vertical'
-            type='stacked'
-            series={[...statusSeries]}
-            withTooltip
-            withLegend={false}
-            {...executiveBarChartProps}
-            maxBarWidth={isMobile ? 28 : 36}
-            barProps={{ radius: 0, strokeWidth: 0 }}
-            barChartProps={{ margin: chartMargin }}
-            xAxisProps={buildValueXAxisProps(maxTotal, isMobile)}
-            yAxisProps={buildCategoryYAxisProps(yAxisWidth, isMobile)}
-            tooltipProps={{ cursor: false, content: TeamExecutiveTooltip }}
-          />
-        </ChartContainer>
-      </Box>
+      <ChartContainer
+        type='bar'
+        data={stackedChart.data}
+        options={stackedChart.options}
+        height={chartLayout.height}
+        maxHeight={chartLayout.maxHeight}
+        scrollable={chartLayout.scrollHorizontal}
+      />
 
       <TeamSummaryTable people={people} />
+
+      <ResolutionTimeTrendChart
+        tasks={tasks}
+        title='Tendencia de tiempos del equipo'
+        subtitle={`Promedio de tiempo de trabajo · suma de ${people.length} colaboradores bajo ${encargadoName}`}
+      />
     </Paper>
   );
 }
 
 function IndividualPerformanceView({
   people,
+  tasks,
   selectedAsignado,
   onSelectAsignado,
 }: {
   people: AssigneeRow[];
+  tasks: TaskWithEncargado[];
   selectedAsignado: string | null;
   onSelectAsignado: (name: string) => void;
 }) {
+  const { palette, statusColors } = useDashboardChartPalette();
   const { isMobile, isCompact } = useChartViewport();
   const person = people.find((p) => p.asignado === selectedAsignado) ?? people[0];
-  if (!person) return null;
 
   const pieSize = isMobile ? 160 : isCompact ? 180 : 220;
-  const barChartHeight = isMobile ? 100 : 120;
+  const barChartHeight = isMobile ? 140 : isCompact ? 160 : 180;
 
-  /** Colores Mantine (hex en PieChart a veces no pinta el arco y queda blanco) */
-  const pieData = [
-    { name: 'Completadas', value: person.Completada, color: 'blue.9' },
-    { name: 'Pendientes', value: person.Pendiente, color: 'blue.5' },
-    { name: 'En proceso', value: person['En Proceso'], color: 'cyan.5' },
-  ].filter((d) => d.value > 0);
+  const pieSlices = useMemo(
+    () =>
+      person
+        ? [
+            { name: 'Completadas', value: person.Completada, color: statusColors.completada },
+            { name: 'Pendientes', value: person.Pendiente, color: statusColors.pendiente },
+            {
+              name: 'En proceso',
+              value: person['En Proceso'],
+              color: statusColors.enProceso,
+            },
+          ].filter((d) => d.value > 0)
+        : [],
+    [person, statusColors]
+  );
 
+  const pieChart = useMemo(() => buildPieChart(pieSlices, { showLegend: false }), [pieSlices]);
+  const personBarChart = useMemo(
+    () => (person ? buildSinglePersonBarChart(person) : undefined),
+    [person]
+  );
   const pieChartHeight = pieSize + 24;
 
-  const barData = [
-    {
-      asignado: person.asignado,
-      Completada: person.Completada,
-      Pendiente: person.Pendiente,
-      'En Proceso': person['En Proceso'],
-    },
-  ];
+  if (!person || !personBarChart) return null;
 
   return (
     <Stack gap='md' mt='md'>
@@ -614,23 +548,21 @@ function IndividualPerformanceView({
       <Paper
         p={{ base: 'sm', sm: 'md', lg: 'lg' }}
         radius='md'
-        withBorder
-        bg='white'
-        style={{ borderColor: dashboardChartTheme.blue100 }}
+        style={{ border: `1px solid ${palette.blue100}` }}
       >
         <Group wrap='wrap' gap='md' mb='lg' align='flex-start'>
           <ThemeIcon
             size={isMobile ? 44 : 52}
             radius='md'
             variant='gradient'
-            gradient={dashboardChartTheme.gradient}
+            gradient={palette.gradient}
           >
             <Text fw={700} c='white'>
               {getInitials(person.asignado)}
             </Text>
           </ThemeIcon>
           <Box style={{ flex: 1, minWidth: 160 }}>
-            <Text fw={700} size={isMobile ? 'md' : 'lg'} style={{ color: dashboardChartTheme.primary }}>
+            <Text fw={700} size={isMobile ? 'md' : 'lg'} style={{ color: palette.primary }}>
               {person.asignado}
             </Text>
             <Text size='sm' style={{ color: chartLabelColor }}>
@@ -644,28 +576,22 @@ function IndividualPerformanceView({
 
         <SimpleGrid cols={{ base: 1, sm: 2 }} spacing={{ base: 'md', sm: 'lg' }}>
           <Box>
-            <Text size='sm' fw={700} mb={4} style={{ color: dashboardChartTheme.primary }}>
+            <Text size='sm' fw={700} mb={4} style={{ color: palette.primary }}>
               Estado de las tareas asignadas
             </Text>
             <Text size='xs' mb='sm' style={{ color: chartLabelColor }}>
               Completadas, pendientes y en proceso de esta persona
             </Text>
-            {person.total > 0 && pieData.length > 0 ? (
+            {person.total > 0 && pieSlices.length > 0 ? (
               <Box w='100%' style={{ maxWidth: pieChartHeight, margin: '0 auto' }}>
-                <ChartContainer height={pieChartHeight} minWidth={0}>
-                  <PieChart
-                    data={pieData}
-                    size={pieSize}
-                    withTooltip
-                    tooltipDataSource='segment'
-                    withLabels
-                    labelsType='percent'
-                    labelsPosition='inside'
-                    strokeWidth={1}
-                  />
-                </ChartContainer>
+                <ChartContainer
+                  type='pie'
+                  data={pieChart.data}
+                  options={pieChart.options}
+                  height={pieChartHeight}
+                />
                 <Group justify='center' gap='md' mt='xs' wrap='wrap'>
-                  {pieData.map((slice) => (
+                  {pieSlices.map((slice) => (
                     <Group key={slice.name} gap={6}>
                       <Box
                         w={10}
@@ -674,10 +600,10 @@ function IndividualPerformanceView({
                           borderRadius: 2,
                           backgroundColor:
                             slice.name === 'Completadas'
-                              ? statusChartColors.completada
+                              ? statusColors.completada
                               : slice.name === 'Pendientes'
-                                ? statusChartColors.pendiente
-                                : statusChartColors.enProceso,
+                                ? statusColors.pendiente
+                                : statusColors.enProceso,
                         }}
                       />
                       <Text size='xs' style={{ color: chartLabelColor }}>
@@ -705,7 +631,7 @@ function IndividualPerformanceView({
             )}
           </Box>
           <Box>
-            <Text size='sm' fw={700} mb='xs' style={{ color: dashboardChartTheme.primary }}>
+            <Text size='sm' fw={700} mb='xs' style={{ color: palette.primary }}>
               Detalle numérico
             </Text>
             <PersonStatusCounts
@@ -723,10 +649,10 @@ function IndividualPerformanceView({
                 radius='xl'
                 styles={{
                   root: { backgroundColor: '#e2e8f0' },
-                  section: { backgroundColor: statusChartColors.completada },
+                  section: { backgroundColor: statusColors.completada },
                 }}
               />
-              <Text size='xs' ta='center' mt={4} fw={700} style={{ color: statusChartColors.completada }}>
+              <Text size='xs' ta='center' mt={4} fw={700} style={{ color: statusColors.completada }}>
                 {completionRate(person)}% completadas
               </Text>
             </Box>
@@ -738,31 +664,29 @@ function IndividualPerformanceView({
           </Box>
         </SimpleGrid>
 
-        <Box mt='lg' visibleFrom='sm'>
-          <Text size='sm' fw={700} mb='sm' style={{ color: dashboardChartTheme.primary }}>
-            Barras por estado
+        <Box mt='lg'>
+          <Text size='sm' fw={700} mb='sm' style={{ color: palette.primary }}>
+            Barras de estado individual
           </Text>
-          <ChartContainer height={barChartHeight} minWidth={0}>
-            <BarChart
-              data={barData}
-              dataKey='asignado'
-              orientation='vertical'
-              type='default'
-              series={[...statusSeries]}
-              withTooltip
-              withLegend={false}
-              {...executiveBarChartProps}
-              maxBarWidth={32}
-              barChartProps={{ margin: { top: 8, right: 16, left: 4, bottom: 8 } }}
-              xAxisProps={buildValueXAxisProps(person.total, isCompact)}
-              yAxisProps={buildCategoryYAxisProps(
-                getResponsiveYAxisWidth([person.asignado], isMobile),
-                isMobile
-              )}
-            />
-          </ChartContainer>
+          <Text size='xs' mb='sm' style={{ color: chartLabelColor }}>
+            Composición por estado de {person.asignado}
+          </Text>
+          <ChartContainer
+            type='bar'
+            data={personBarChart.data}
+            options={personBarChart.options}
+            height={barChartHeight}
+            scrollable={false}
+          />
         </Box>
       </Paper>
+
+      <ResolutionTimeTrendChart
+        tasks={tasks}
+        assigneeFilter={person.asignado}
+        title={`Tendencia de tiempos · ${person.asignado}`}
+        subtitle='Desde que empieza a trabajarla hasta que la finaliza · solo tareas con ambas fechas'
+      />
     </Stack>
   );
 }
@@ -776,6 +700,7 @@ function TaskDetailTable({
   page: number;
   onPageChange: (page: number) => void;
 }) {
+  const { palette } = useDashboardChartPalette();
   const { isMobile } = useChartViewport();
   const totalPages = Math.max(1, Math.ceil(rows.length / TASKS_PER_PAGE));
   const safePage = Math.min(page, totalPages);
@@ -793,11 +718,10 @@ function TaskDetailTable({
             key={row.id_tarea}
             p='sm'
             radius='md'
-            withBorder
-            style={{ borderColor: dashboardChartTheme.blue100 }}
+            style={{ border: `1px solid ${palette.blue100}` }}
           >
             <Group justify='space-between' align='flex-start' wrap='nowrap' gap='xs' mb={6}>
-              <Text size='sm' fw={600} lineClamp={1} style={{ color: dashboardChartTheme.primary, flex: 1 }}>
+              <Text size='sm' fw={600} lineClamp={1} style={{ color: palette.primary, flex: 1 }}>
                 {normalizeAsignado(row.asignado_tarea)}
               </Text>
               <Badge size='sm' {...getStatusBadgeStyle(row.estado_tarea)} style={{ flexShrink: 0 }}>
@@ -859,7 +783,7 @@ function TaskDetailTable({
                 </Table.Td>
                 <Table.Td>
                   <Text size='xs' lineClamp={2} title={`#${row.id_solicitud} — ${row.asunto_solicitud}`}>
-                    <Text span fw={600} c={dashboardChartTheme.primary}>
+                    <Text span fw={600} c={palette.primary}>
                       #{row.id_solicitud}
                     </Text>{' '}
                     {row.asunto_solicitud}
@@ -897,13 +821,47 @@ function TaskDetailTable({
 
 interface EncargadoActivitiesChartProps {
   tasks: TaskWithEncargado[];
+  teamTasks?: TaskWithEncargado[];
+  categoryMembers?: Record<string, string[]>;
   periodLabel: string;
+}
+
+function categoriesForLeaderTasks(
+  rows: TaskWithEncargado[],
+  selectedEncargado: string
+): Set<string> {
+  const categories = new Set<string>();
+  for (const task of rows) {
+    if (!taskBelongsToEncargado(task.encargado_proceso, selectedEncargado)) continue;
+    const category = task.categoria_solicitud?.replace(/\r?\n/g, ' ').trim();
+    if (category) categories.add(category);
+  }
+  return categories;
+}
+
+function mergeCategoryMembersIntoCounts(
+  counts: Record<string, { Completada: number; Pendiente: number; 'En Proceso': number }>,
+  categories: Set<string>,
+  categoryMembers: Record<string, string[]>
+): void {
+  for (const category of categories) {
+    for (const member of categoryMembers[category] || []) {
+      const name = normalizeAsignado(member);
+      if (!counts[name]) {
+        counts[name] = { Completada: 0, Pendiente: 0, 'En Proceso': 0 };
+      }
+    }
+  }
 }
 
 export default function EncargadoActivitiesChart({
   tasks,
+  teamTasks,
+  categoryMembers = {},
   periodLabel,
 }: EncargadoActivitiesChartProps) {
+  const { palette, statusColors, barPalette, barPaletteMantine } =
+    useDashboardChartPalette();
   const [selectedEncargado, setSelectedEncargado] = useState<string | null>(null);
   const [tableOpen, setTableOpen] = useState(false);
   const [taskPage, setTaskPage] = useState(1);
@@ -911,67 +869,84 @@ export default function EncargadoActivitiesChart({
   const [selectedAsignado, setSelectedAsignado] = useState<string | null>(null);
 
   useEffect(() => {
-    setSelectedEncargado(null);
-    setTableOpen(false);
-    setTaskPage(1);
-    setPersonViewMode('team');
-    setSelectedAsignado(null);
-  }, [tasks, periodLabel]);
-
-  useEffect(() => {
     setSelectedAsignado(null);
     setPersonViewMode('team');
     setTaskPage(1);
   }, [selectedEncargado]);
 
+  const teamSourceTasks = teamTasks && teamTasks.length > 0 ? teamTasks : tasks;
+
   const encargadoChartData = useMemo(() => {
-    const counts = tasks.reduce(
-      (acc, task) => {
-        const key = normalizeEncargado(task.encargado_proceso);
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>
-    );
+    const counts: Record<string, number> = {};
+    const teamMembers: Record<string, Set<string>> = {};
+
+    for (const task of tasks) {
+      for (const key of encargadoNames(task.encargado_proceso)) {
+        counts[key] = (counts[key] || 0) + 1;
+      }
+    }
+
+    for (const task of teamSourceTasks) {
+      for (const key of encargadoNames(task.encargado_proceso)) {
+        if (!teamMembers[key]) teamMembers[key] = new Set();
+        teamMembers[key].add(normalizeAsignado(task.asignado_tarea));
+      }
+    }
+
+    for (const [encargado, members] of Object.entries(teamMembers)) {
+      const categories = categoriesForLeaderTasks(
+        teamSourceTasks.filter((t) => taskBelongsToEncargado(t.encargado_proceso, encargado)),
+        encargado
+      );
+      for (const category of categories) {
+        for (const member of categoryMembers[category] || []) {
+          members.add(normalizeAsignado(member));
+        }
+      }
+    }
 
     const max = Math.max(...Object.values(counts), 1);
 
     return Object.entries(counts)
       .map(([encargado, tareas], index) => {
-        const paletteIndex = index % encargadoBarPalette.length;
+        const paletteIndex = index % barPalette.length;
         return {
           encargado,
           tareas,
-          color: encargadoBarPaletteMantine[paletteIndex % encargadoBarPaletteMantine.length],
-          barHex: encargadoBarPalette[paletteIndex],
+          colaboradores: teamMembers[encargado]?.size ?? 0,
+          color: barPaletteMantine[paletteIndex % barPaletteMantine.length],
+          barHex: barPalette[paletteIndex],
           pct: Math.round((tareas / max) * 100),
         };
       })
       .sort((a, b) => b.tareas - a.tareas);
-  }, [tasks]);
-
-  const maxEncargadoTareas = useMemo(
-    () => Math.max(...encargadoChartData.map((d) => d.tareas), 0),
-    [encargadoChartData]
-  );
+  }, [tasks, teamSourceTasks, categoryMembers, barPalette, barPaletteMantine]);
 
   const { isMobile, isCompact } = useChartViewport();
 
-  const overviewChartHeight = useMemo(
-    () => getResponsiveChartHeight(encargadoChartData.length, isCompact),
+  const overviewChartLayout = useMemo(
+    () => resolveScrollableBarChartLayout(encargadoChartData.length, isCompact),
     [encargadoChartData.length, isCompact]
   );
 
-  const overviewYAxisWidth = useMemo(
-    () => getResponsiveYAxisWidth(encargadoChartData.map((d) => d.encargado), isMobile),
+  const overviewBarChart = useMemo(
+    () =>
+      buildHorizontalMultiColorBarChart(
+        encargadoChartData.map((d) => ({
+          label: d.encargado,
+          value: d.tareas,
+          color: d.barHex,
+        })),
+        isMobile
+      ),
     [encargadoChartData, isMobile]
   );
 
   const assigneeChartData = useMemo(() => {
     if (!selectedEncargado) return [];
 
-    const filtered = tasks.filter(
-      (t) => normalizeEncargado(t.encargado_proceso) === selectedEncargado
+    const filtered = teamSourceTasks.filter((t) =>
+      taskBelongsToEncargado(t.encargado_proceso, selectedEncargado)
     );
 
     const byAssignee = filtered.reduce(
@@ -991,14 +966,20 @@ export default function EncargadoActivitiesChart({
       {} as Record<string, { Completada: number; Pendiente: number; 'En Proceso': number }>
     );
 
+    mergeCategoryMembersIntoCounts(
+      byAssignee,
+      categoriesForLeaderTasks(filtered, selectedEncargado),
+      categoryMembers
+    );
+
     return Object.entries(byAssignee)
       .map(([asignado, counts]) => ({
         asignado,
         ...counts,
         total: counts.Completada + counts.Pendiente + counts['En Proceso'],
       }))
-      .sort((a, b) => b.total - a.total);
-  }, [tasks, selectedEncargado]);
+      .sort((a, b) => b.total - a.total || a.asignado.localeCompare(b.asignado, 'es'));
+  }, [teamSourceTasks, selectedEncargado, categoryMembers]);
 
   useEffect(() => {
     if (assigneeChartData.length === 0) {
@@ -1013,7 +994,7 @@ export default function EncargadoActivitiesChart({
   const detailRows = useMemo(() => {
     if (!selectedEncargado) return [];
     return tasks
-      .filter((t) => normalizeEncargado(t.encargado_proceso) === selectedEncargado)
+      .filter((t) => taskBelongsToEncargado(t.encargado_proceso, selectedEncargado))
       .sort((a, b) => a.asignado_tarea.localeCompare(b.asignado_tarea));
   }, [tasks, selectedEncargado]);
 
@@ -1038,7 +1019,7 @@ export default function EncargadoActivitiesChart({
 
   if (tasks.length === 0) {
     return (
-      <Paper p='xl' radius='md' style={{ background: dashboardChartTheme.chartSurface }}>
+      <Paper p='xl' radius='md' style={{ background: palette.chartSurface }}>
         <Stack align='center' gap='sm'>
           <ThemeIcon size={48} radius='xl' variant='light' color='blue'>
             <IconUsers size={24} />
@@ -1055,11 +1036,11 @@ export default function EncargadoActivitiesChart({
     <Stack gap='lg'>
       <Group justify='space-between' align='flex-start' wrap='wrap'>
         <Box>
-          <Text size='sm' fw={600} style={{ color: dashboardChartTheme.primary }}>
+          <Text size='sm' fw={600} style={{ color: palette.primary }}>
             Actividades por encargado de área
           </Text>
           <Text size='xs' fw={500} style={{ color: chartLabelColor }}>
-            Periodo {periodLabel} · {totalTasks} tareas en total
+            Periodo {periodLabel} · {totalTasks} actividades en total
           </Text>
         </Box>
         {!selectedEncargado && (
@@ -1068,8 +1049,8 @@ export default function EncargadoActivitiesChart({
             size='lg'
             styles={{
               root: {
-                backgroundColor: dashboardChartTheme.blue50,
-                color: dashboardChartTheme.primary,
+                backgroundColor: palette.blue50,
+                color: palette.primary,
                 fontWeight: 700,
                 textTransform: 'none',
               },
@@ -1086,10 +1067,9 @@ export default function EncargadoActivitiesChart({
           <Paper
             p={{ base: 'sm', sm: 'md', lg: 'lg' }}
             radius='lg'
-            withBorder
             style={{
-              background: dashboardChartTheme.chartSurface,
-              borderColor: dashboardChartTheme.borderAccent,
+              background: palette.chartSurface,
+              border: `1px solid ${palette.borderAccent}`,
             }}
           >
             <Group justify='space-between' mb='lg' wrap='wrap' gap='sm'>
@@ -1107,25 +1087,26 @@ export default function EncargadoActivitiesChart({
                   size={44}
                   radius='md'
                   variant='gradient'
-                  gradient={dashboardChartTheme.gradient}
+                  gradient={palette.gradient}
                 >
                   <Text fw={700} size='sm' c='white'>
                     {getInitials(selectedEncargado)}
                   </Text>
                 </ThemeIcon>
                 <Box>
-                  <Text fw={600} size='md' style={{ color: dashboardChartTheme.primary }}>
+                  <Text fw={600} size='md' style={{ color: palette.primary }}>
                     {selectedEncargado}
                   </Text>
                   <Text size='xs' c='dimmed'>
-                    Equipo a cargo · {detailRows.length} tareas · {assigneeChartData.length}{' '}
-                    personas
+                    Equipo a cargo · {detailRows.length} tareas en periodo ·{' '}
+                    {assigneeChartData.length}{' '}
+                    {assigneeChartData.length === 1 ? 'colaborador' : 'colaboradores'}
                   </Text>
                 </Box>
               </Group>
               <Badge
                 variant='gradient'
-                gradient={dashboardChartTheme.gradient}
+                gradient={palette.gradient}
                 size='lg'
               >
                 Periodo {periodLabel}
@@ -1133,77 +1114,32 @@ export default function EncargadoActivitiesChart({
             </Group>
 
             <SimpleGrid cols={{ base: 1, xs: 3 }} spacing='sm' mb='lg'>
-              <Paper
-                p='sm'
-                radius='md'
-                withBorder
-                style={{ background: dashboardChartTheme.blue50, borderColor: dashboardChartTheme.blue100 }}
-              >
-                <Group gap='xs' mb={4}>
-                  <ThemeIcon
-                    size='sm'
-                    variant='light'
-                    style={{ background: '#fff', color: statusChartColors.completada }}
-                  >
-                    <IconCheck size={14} />
-                  </ThemeIcon>
-                  <Text size='xs' fw={600} style={{ color: chartLabelColor }}>
-                    Completadas
-                  </Text>
-                </Group>
-                <Text fw={800} size='xl' style={{ color: statusChartColors.completada }}>
-                  {detailStatusSummary.Completada}
-                </Text>
-              </Paper>
-              <Paper
-                p='sm'
-                radius='md'
-                withBorder
-                style={{ background: dashboardChartTheme.blue50, borderColor: dashboardChartTheme.blue100 }}
-              >
-                <Group gap='xs' mb={4}>
-                  <ThemeIcon
-                    size='sm'
-                    variant='light'
-                    style={{ background: '#fff', color: statusChartColors.pendiente }}
-                  >
-                    <IconClock size={14} />
-                  </ThemeIcon>
-                  <Text size='xs' fw={600} style={{ color: chartLabelColor }}>
-                    Pendientes
-                  </Text>
-                </Group>
-                <Text fw={800} size='xl' style={{ color: statusChartColors.pendiente }}>
-                  {detailStatusSummary.Pendiente}
-                </Text>
-              </Paper>
-              <Paper
-                p='sm'
-                radius='md'
-                withBorder
-                style={{ background: dashboardChartTheme.blue50, borderColor: dashboardChartTheme.blue100 }}
-              >
-                <Group gap='xs' mb={4}>
-                  <ThemeIcon
-                    size='sm'
-                    variant='light'
-                    style={{ background: '#fff', color: statusChartColors.enProceso }}
-                  >
-                    <IconProgress size={14} />
-                  </ThemeIcon>
-                  <Text size='xs' fw={600} style={{ color: chartLabelColor }}>
-                    En proceso
-                  </Text>
-                </Group>
-                <Text fw={700} size='xl' style={{ color: statusChartColors.enProceso }}>
-                  {detailStatusSummary['En Proceso']}
-                </Text>
-              </Paper>
+              <StatusMetricGradientCard
+                label='Completadas'
+                value={detailStatusSummary.Completada}
+                icon={IconCheck}
+                kind='completada'
+                accentColor={statusColors.completada}
+              />
+              <StatusMetricGradientCard
+                label='Pendientes'
+                value={detailStatusSummary.Pendiente}
+                icon={IconClock}
+                kind='pendiente'
+                accentColor={statusColors.pendiente}
+              />
+              <StatusMetricGradientCard
+                label='En proceso'
+                value={detailStatusSummary['En Proceso']}
+                icon={IconProgress}
+                kind='enProceso'
+                accentColor={statusColors.enProceso}
+              />
             </SimpleGrid>
 
             <Stack gap='sm' mb='xs'>
               <Box>
-                <Text size='sm' fw={700} style={{ color: dashboardChartTheme.primary }}>
+                <Text size='sm' fw={700} style={{ color: palette.primary }}>
                   Rendimiento del equipo
                 </Text>
                 <Text size='xs' style={{ color: chartLabelColor }}>
@@ -1248,10 +1184,17 @@ export default function EncargadoActivitiesChart({
 
             {assigneeChartData.length > 0 ? (
               <>
-                {personViewMode === 'team' && <TeamPerformanceCharts people={assigneeChartData} />}
+                {personViewMode === 'team' && (
+                  <TeamPerformanceCharts
+                    people={assigneeChartData}
+                    tasks={detailRows}
+                    encargadoName={selectedEncargado}
+                  />
+                )}
                 {personViewMode === 'individual' && (
                   <IndividualPerformanceView
                     people={assigneeChartData}
+                    tasks={detailRows}
                     selectedAsignado={selectedAsignado}
                     onSelectAsignado={setSelectedAsignado}
                   />
@@ -1272,12 +1215,11 @@ export default function EncargadoActivitiesChart({
 
           <UnstyledButton onClick={() => setTableOpen((o) => !o)} w='100%'>
             <Paper
-              withBorder
               p='md'
               radius='md'
               style={{
-                borderColor: tableOpen ? dashboardChartTheme.borderAccentStrong : undefined,
-                background: tableOpen ? dashboardChartTheme.blue50 : 'white',
+                background: tableOpen ? palette.blue50 : palette.chartPanelBg,
+                border: `1px solid ${tableOpen ? palette.borderAccentStrong : palette.chartPanelBorder}`,
               }}
             >
               <Group justify='space-between'>
@@ -1285,7 +1227,7 @@ export default function EncargadoActivitiesChart({
                   <ThemeIcon
                     size='sm'
                     variant='gradient'
-                    gradient={dashboardChartTheme.gradient}
+                    gradient={palette.gradient}
                   >
                     <IconUsers size={14} />
                   </ThemeIcon>
@@ -1297,8 +1239,8 @@ export default function EncargadoActivitiesChart({
                     size='sm'
                     styles={{
                       root: {
-                        backgroundColor: dashboardChartTheme.blue100,
-                        color: dashboardChartTheme.blue800,
+                        backgroundColor: palette.blue100,
+                        color: palette.blue800,
                       },
                     }}
                   >
@@ -1312,10 +1254,9 @@ export default function EncargadoActivitiesChart({
 
           <Collapse in={tableOpen}>
             <Paper
-              withBorder
               radius='md'
               p={{ base: 'sm', sm: 'md' }}
-              style={{ borderColor: dashboardChartTheme.blue100 }}
+              style={{ border: `1px solid ${palette.blue100}` }}
             >
               <TaskDetailTable
                 rows={detailRows}
@@ -1330,84 +1271,47 @@ export default function EncargadoActivitiesChart({
           <Paper
             p={{ base: 'sm', sm: 'md', lg: 'lg' }}
             radius='lg'
-            withBorder
             style={{
-              background: dashboardChartTheme.chartPanelBg,
-              borderColor: dashboardChartTheme.chartPanelBorder,
+              background: palette.chartPanelBg,
+              border: `1px solid ${palette.chartPanelBorder}`,
             }}
           >
             <Text size='xs' fw={600} mb='sm' style={{ color: chartLabelColor }}>
-              Tareas por encargado — haga clic en una fila para ver el detalle del equipo
+              Actividades por encargado — cada líder distribuye tareas a su equipo
             </Text>
-            <Box w='100%' style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            <ChartContainer height={overviewChartHeight} minWidth={0}>
-              <BarChart
-                data={encargadoChartData}
-                dataKey='encargado'
-                orientation='vertical'
-                series={[{ name: 'tareas', color: 'blue.8', label: 'Tareas' }]}
-                withTooltip
-                withBarValueLabel
-                valueFormatter={(v) => `${v}`}
-                {...executiveBarChartProps}
-                tooltipProps={{
-                  cursor: false,
-                  content: ({ active, payload, label }) => {
-                    if (!active || !payload?.length) return null;
-                    const row = encargadoChartData.find((d) => d.encargado === label);
-                    return (
-                      <ChartTooltip
-                        label={String(label)}
-                        value={Number(payload[0].value)}
-                        color={row?.barHex ?? dashboardChartTheme.primary}
-                      />
-                    );
-                  },
-                }}
-                maxBarWidth={isMobile ? 24 : encargadoChartData.length <= 3 ? 40 : 28}
-                minBarSize={12}
-                barChartProps={{
-                  margin: isMobile
-                    ? { top: 8, right: 12, left: 0, bottom: 4 }
-                    : { top: 8, right: 28, left: 4, bottom: 8 },
-                }}
-                xAxisProps={buildValueXAxisProps(maxEncargadoTareas, isMobile)}
-                yAxisProps={buildCategoryYAxisProps(overviewYAxisWidth, isMobile)}
-              />
-            </ChartContainer>
-            </Box>
+            <ChartContainer
+              type='bar'
+              data={overviewBarChart.data}
+              options={overviewBarChart.options}
+              height={overviewChartLayout.height}
+              maxHeight={overviewChartLayout.maxHeight}
+              scrollable={overviewChartLayout.scrollHorizontal}
+            />
           </Paper>
 
-          <Text size='sm' fw={600} style={{ color: dashboardChartTheme.primary }}>
+          <Text size='sm' fw={600} style={{ color: palette.primary }}>
             Seleccione un encargado
           </Text>
 
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
             {encargadoChartData.map((item) => (
-                <UnstyledButton
-                  key={item.encargado}
-                  onClick={() => setSelectedEncargado(item.encargado)}
-                  w='100%'
-                >
-                  <Paper
-                    p='md'
-                    radius='md'
-                    withBorder
-                    style={{
-                      borderLeft: `4px solid ${item.barHex}`,
-                      background: 'white',
-                      transition: 'box-shadow 0.15s ease, transform 0.15s ease',
-                    }}
-                    styles={{
-                      root: {
-                        '&:hover': {
-                          boxShadow: `0 4px 14px ${dashboardChartTheme.blue800}22`,
-                          transform: 'translateY(-1px)',
-                          borderColor: dashboardChartTheme.blue200,
-                        },
-                      },
-                    }}
-                  >
+              <Paper
+                key={item.encargado}
+                p={0}
+                radius='md'
+                style={{
+                  overflow: 'hidden',
+                  background: palette.chartPanelBg,
+                  border: `1px solid ${palette.chartPanelBorder}`,
+                }}
+              >
+                <Group wrap='nowrap' gap={0} align='stretch'>
+                  <Box
+                    w={4}
+                    style={{ flexShrink: 0, backgroundColor: item.barHex }}
+                    aria-hidden
+                  />
+                  <Box p='md' style={{ flex: 1, minWidth: 0 }}>
                     <Group wrap='nowrap' gap='sm' align='flex-start'>
                       <ThemeIcon size={36} radius='md' color={item.color}>
                         <Text size='xs' fw={700} c='white'>
@@ -1415,15 +1319,23 @@ export default function EncargadoActivitiesChart({
                         </Text>
                       </ThemeIcon>
                       <Box style={{ flex: 1, minWidth: 0 }}>
-                        <Text size='sm' fw={700} lineClamp={2} style={{ color: dashboardChartTheme.primary }}>
+                        <Text size='sm' fw={700} lineClamp={2} style={{ color: palette.primary }}>
                           {item.encargado}
                         </Text>
-                        <Group gap='xs' mt={4}>
-                          <IconUser size={12} color={dashboardChartTheme.blue700} />
-                          <Text size='xs' fw={500} style={{ color: chartLabelColor }}>
-                            {item.tareas} {item.tareas === 1 ? 'tarea' : 'tareas'}
-                            {encargadoChartData.length > 1 ? ` · ${item.pct}% del máximo` : ''}
-                          </Text>
+                        <Group gap='xs' mt={4} wrap='wrap'>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconUser size={12} color={palette.blue700} />
+                            <Text size='xs' fw={500} style={{ color: chartLabelColor }}>
+                              {item.tareas} {item.tareas === 1 ? 'actividad' : 'actividades'}
+                            </Text>
+                          </Group>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconUsers size={12} color={palette.blue700} />
+                            <Text size='xs' fw={500} style={{ color: chartLabelColor }}>
+                              {item.colaboradores}{' '}
+                              {item.colaboradores === 1 ? 'colaborador' : 'colaboradores'}
+                            </Text>
+                          </Group>
                         </Group>
                         <Progress
                           value={item.pct}
@@ -1432,15 +1344,25 @@ export default function EncargadoActivitiesChart({
                           mt='sm'
                           color={item.color}
                           styles={{
-                            root: { backgroundColor: '#e2e8f0' },
+                            root: { backgroundColor: palette.blue100 },
                             section: { backgroundColor: item.barHex },
                           }}
                         />
+                        <Button
+                          variant='light'
+                          color='blue'
+                          size='compact-sm'
+                          mt='sm'
+                          leftSection={<IconUsers size={14} />}
+                          onClick={() => setSelectedEncargado(item.encargado)}
+                        >
+                          Ver equipo
+                        </Button>
                       </Box>
-                      <IconChevronRight size={16} color={dashboardChartTheme.blue700} />
                     </Group>
-                  </Paper>
-                </UnstyledButton>
+                  </Box>
+                </Group>
+              </Paper>
             ))}
           </SimpleGrid>
         </>
