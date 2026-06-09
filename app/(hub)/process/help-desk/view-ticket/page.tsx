@@ -488,8 +488,11 @@ function ViewTicketPage() {
         (item: Record<string, unknown>) => 'file' in item && !!item.file
       );
       setFolderContents(files);
-      console.log('Archivos existentes listados exitosamente:', files);
     } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        setFolderContents([]);
+        return;
+      }
       console.error('Error al listar los archivos de la carpeta:', error);
       setFolderContents([]);
     }
