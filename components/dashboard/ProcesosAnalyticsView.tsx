@@ -455,152 +455,52 @@ export default function ProcesosAnalyticsView() {
         </Paper>
       ) : null}
 
-      <Grid gutter='lg' align='stretch'>
-        {!isProcessView && (
-          <Grid.Col span={{ base: 12, md: 6 }}>
-            <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder h='100%'>
-              <Title order={4} mb='xs'>
-                Procesos con actividad
-              </Title>
-              <Text size='xs' c='dimmed' mb='md'>
-                Cuántas áreas recibieron demanda en cada tramo del periodo
-              </Text>
-              {loading ? (
-                <Skeleton height={chartHeights.standard} />
-              ) : activityTimeSeries.some((d) => d.Procesos > 0) ? (
-                <ChartContainer
-                  type='line'
-                  data={activityLineChart.data}
-                  options={activityLineChart.options}
-                  height={chartHeights.standard}
-                />
-              ) : (
-                <Flex h={chartHeights.standard} align='center' justify='center'>
-                  <Stack align='center' gap='sm'>
-                    <IconChartLine size={48} color={projectColors.primary} opacity={0.3} />
-                    <Text c='dimmed' size='sm'>
-                      No hay procesos activos en este periodo
-                    </Text>
-                  </Stack>
-                </Flex>
-              )}
-            </Card>
-          </Grid.Col>
-        )}
-        <Grid.Col span={{ base: 12, md: isProcessView ? 12 : 6 }}>
-          <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder h='100%'>
-            <Title order={4} mb='xs'>
-              {isProcessView ? 'Categorías del proceso' : 'Participación por proceso'}
-            </Title>
-            <Text size='xs' c='dimmed' mb='md'>
-              {isProcessView
-                ? `Distribución de categorías en ${processFilter}`
-                : 'Top 8 procesos por volumen relativo'}
-            </Text>
-            {loading ? (
-              <Skeleton height={chartHeights.standard} />
-            ) : isProcessView ? (
-              categoryChartData.length > 0 ? (
-                <ChartContainer
-                  type='bar'
-                  data={categoryBarChart.data}
-                  options={categoryBarChart.options}
-                  height={chartHeights.standard}
-                />
-              ) : (
-                <Text c='dimmed' ta='center' py='xl'>
-                  Sin categorías en este proceso
-                </Text>
-              )
-            ) : distributionChartData.length > 0 ? (
-              <ChartContainer
-                type='pie'
-                data={distributionPie.data}
-                options={distributionPie.options}
-                height={chartHeights.standard}
-              />
-            ) : (
-              <Text c='dimmed' ta='center' py='xl'>
-                Sin datos de procesos
-              </Text>
-            )}
-          </Card>
-        </Grid.Col>
-      </Grid>
-
       {!isProcessView && (
         <>
-          <Card
-            shadow='sm'
-            padding={getDashboardCardPadding()}
-            radius='md'
-            withBorder
-            className='dashboard-chart-card'
-          >
-            <Title order={4} mb='xs'>
-              Carga por proceso (Top 10)
-            </Title>
-            <Text size='xs' c='dimmed' mb='md'>
-              Volumen acumulado y composición de estados por área
-            </Text>
-            <Box className='dashboard-chart-slot'>
-            {loading ? (
-              <Skeleton
-                height={statusStackedLayout.maxHeight ?? statusStackedLayout.height}
-              />
-            ) : statusStackedRows.length > 0 ? (
-              <ChartContainer
-                type='bar'
-                data={statusStackedChart.data}
-                options={statusStackedChart.options}
-                height={statusStackedLayout.height}
-                maxHeight={statusStackedLayout.maxHeight}
-                scrollable={statusStackedLayout.scrollHorizontal}
-              />
-            ) : (
-              <Text c='dimmed' ta='center' py='xl'>
-                Sin datos
-              </Text>
-            )}
-            </Box>
-          </Card>
-
-          <Grid gutter='lg'>
+          <Grid gutter='lg' align='stretch'>
             <Grid.Col span={{ base: 12, md: 6 }}>
-              <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
-                <Title order={4} mb='md'>
-                  Top procesos por volumen
+              <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder h='100%'>
+                <Title order={4} mb='xs'>
+                  Procesos con actividad
                 </Title>
+                <Text size='xs' c='dimmed' mb='md'>
+                  Cuántas áreas recibieron demanda en cada tramo del periodo
+                </Text>
                 {loading ? (
-                  <Skeleton height={chartHeights.large} />
-                ) : processStats.length > 0 ? (
+                  <Skeleton height={chartHeights.standard} />
+                ) : activityTimeSeries.some((d) => d.Procesos > 0) ? (
                   <ChartContainer
-                    type='bar'
-                    data={topProcessBar.data}
-                    options={topProcessBar.options}
-                    height={chartHeights.large}
+                    type='line'
+                    data={activityLineChart.data}
+                    options={activityLineChart.options}
+                    height={chartHeights.standard}
                   />
                 ) : (
-                  <Text c='dimmed' ta='center' py='xl'>
-                    Sin datos
-                  </Text>
+                  <Flex h={chartHeights.standard} align='center' justify='center'>
+                    <Stack align='center' gap='sm'>
+                      <IconChartLine size={48} color={projectColors.primary} opacity={0.3} />
+                      <Text c='dimmed' size='sm'>
+                        No hay procesos activos en este periodo
+                      </Text>
+                    </Stack>
+                  </Flex>
                 )}
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, md: 6 }}>
-              <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+              <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder h='100%'>
                 <Group gap='xs' mb={4}>
                   <IconList size={20} color={projectColors.primary} />
                   <Title order={4}>Categorías por proceso</Title>
                 </Group>
                 {loading ? (
-                  <Skeleton height={chartHeights.large} />
+                  <Skeleton height={chartHeights.standard} />
                 ) : categoryChartData.length > 0 ? (
                   <ChartContainer
                     type='bar'
                     data={categoryBarChart.data}
                     options={categoryBarChart.options}
-                    height={chartHeights.large}
+                    height={chartHeights.standard}
                   />
                 ) : (
                   <Text c='dimmed' ta='center' py='xl'>

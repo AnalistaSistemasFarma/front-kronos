@@ -322,7 +322,7 @@ export default function SolicitudesAnalyticsView() {
               {formatNumber(stats.total)}
             </Title>
             <Text size='xs' c='dimmed'>
-              Una fila por solicitud (vw_requests_general) · {appliedRange ?? getPeriodRangeLabel(dateFilter, selectedMonthDate)}
+              Una fila por solicitud () · {appliedRange ?? getPeriodRangeLabel(dateFilter, selectedMonthDate)}
               {isCompanyView && ` · ${companyFilter}`}
             </Text>
           </Card>

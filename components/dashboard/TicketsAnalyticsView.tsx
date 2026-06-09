@@ -692,29 +692,7 @@ export default function TicketsAnalyticsView() {
               )}
             </ChartCard>
           </Grid.Col>
-          <Grid.Col span={{ base: 12, md: 6 }}>
-            <ChartCard
-              title='Tiempo de resolución'
-              description='Promedio por periodo (creación → cierre)'
-            >
-              {loading ? (
-                <Skeleton height={chartHeights.standard} />
-              ) : resolutionChartPoints.length > 0 ? (
-                <ChartContainer
-                  type='line'
-                  data={resolutionLine.data}
-                  options={resolutionLine.options}
-                  height={chartHeights.standard}
-                />
-              ) : (
-                <Flex h={chartHeights.standard} align='center' justify='center'>
-                  <Text c='dimmed' size='sm'>
-                    Sin casos resueltos con fecha de cierre
-                  </Text>
-                </Flex>
-              )}
-            </ChartCard>
-          </Grid.Col>
+          
         </Grid>
 
         <ResolutionTimeTrendChart
