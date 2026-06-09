@@ -19,6 +19,32 @@ describe('loadConfig — validación de keys y alcance', () => {
     expect(() => loadConfig(base([{ key: 'a'.repeat(20), agent: 'x', companyIds: [] }]))).toThrow();
   });
 
+  it('acepta companyIds "*" para una key admin', () => {
+    const cfg = loadConfig(
+      base([{ key: 'a'.repeat(20), agent: 'admin', companyIds: '*', role: 'admin' }])
+    );
+    expect(cfg.apiKeys[0]!.companyIds).toBe('*');
+    expect(cfg.apiKeys[0]!.role).toBe('admin');
+  });
+
+  it('rechaza un comodín distinto de "*"', () => {
+    expect(() =>
+      loadConfig(base([{ key: 'a'.repeat(20), agent: 'x', companyIds: 'all' }]))
+    ).toThrow();
+  });
+
+  it('rechaza companyIds con valores no enteros o no positivos', () => {
+    expect(() =>
+      loadConfig(base([{ key: 'a'.repeat(20), agent: 'x', companyIds: [0] }]))
+    ).toThrow();
+    expect(() =>
+      loadConfig(base([{ key: 'a'.repeat(20), agent: 'x', companyIds: [-1] }]))
+    ).toThrow();
+    expect(() =>
+      loadConfig(base([{ key: 'a'.repeat(20), agent: 'x', companyIds: [1.5] }]))
+    ).toThrow();
+  });
+
   it('rechaza keys demasiado cortas', () => {
     expect(() => loadConfig(base([{ key: 'corta', agent: 'x', companyIds: [1] }]))).toThrow();
   });

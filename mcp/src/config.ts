@@ -14,9 +14,18 @@ const apiKeySchema = z.object({
   key: z.string().min(16, 'Cada API key debe tener al menos 16 caracteres'),
   /** Nombre del agente, usado solo para auditoría (nunca se registra la key). */
   agent: z.string().min(1),
-  /** Empresas (id_company) que esta key puede consultar. Filtro obligatorio. */
-  companyIds: z.array(z.number().int().positive()).min(1),
-  /** Rol/nivel informativo. En esta versión todo es solo lectura. */
+  /**
+   * Alcance de empresas que esta key puede consultar.
+   * - `"*"` (comodín): TODAS las empresas. Reservado a agentes admin; no
+   *   aplica filtro de empresa en las consultas (ve todo).
+   * - arreglo no vacío de enteros positivos: lista cerrada de empresas. El
+   *   filtro de empresa es OBLIGATORIO y nunca se puede ampliar desde el cliente.
+   */
+  companyIds: z.union([
+    z.literal('*'),
+    z.array(z.number().int().positive()).min(1),
+  ]),
+  /** Rol/nivel informativo: "admin" o "reader". En esta versión todo es solo lectura. */
   role: z.string().default('reader'),
 });
 

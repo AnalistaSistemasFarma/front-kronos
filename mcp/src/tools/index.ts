@@ -7,8 +7,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { AuthScope } from '../auth.js';
-import { effectiveCompanyIds } from '../scope.js';
-import { getPrisma, Prisma } from '../db.js';
+import { effectiveCompanyFilter, type CompanyFilter } from '../scope.js';
+import { getPrisma, Prisma, queryReadOnly } from '../db.js';
 import type { AuditLogger } from '../audit.js';
 
 interface ToolContext {
@@ -87,14 +87,22 @@ async function withAudit<T>(
 }
 
 /**
- * Construye un fragmento SQL `IN (...)` seguro a partir de una lista de ids.
- * Si la lista está vacía, devuelve `1 = 0` (ninguna fila) — nunca abre el filtro.
+ * Construye el fragmento SQL del filtro de empresa a partir de un CompanyFilter.
+ *
+ * - Admin sin acotar (`applyFilter: false`): devuelve `1 = 1` (ve TODO, sin
+ *   restricción de empresa).
+ * - Lista vacía (`applyFilter: true`, ids `[]`): devuelve `1 = 0` (ninguna
+ *   fila) — nunca abre el filtro al pedir empresas fuera del alcance.
+ * - Lista con ids: devuelve `<column> IN (...)`.
  */
-function companyInClause(column: string, ids: number[]): Prisma.Sql {
-  if (ids.length === 0) {
+function companyClause(column: string, filter: CompanyFilter): Prisma.Sql {
+  if (!filter.applyFilter) {
+    return Prisma.sql`1 = 1`;
+  }
+  if (filter.companyIds.length === 0) {
     return Prisma.sql`1 = 0`;
   }
-  return Prisma.sql`${Prisma.raw(column)} IN (${Prisma.join(ids)})`;
+  return Prisma.sql`${Prisma.raw(column)} IN (${Prisma.join(filter.companyIds)})`;
 }
 
 export const ENTITY_METADATA = {
@@ -184,7 +192,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         result: {
           agent: ctx.scope.agent,
           role: ctx.scope.role,
-          allowedCompanyIds: ctx.scope.companyIds,
+          allCompanies: ctx.scope.allCompanies,
+          allowedCompanyIds: ctx.scope.allCompanies ? '*' : ctx.scope.companyIds,
           readOnly: true,
           paging: { defaultPageSize: ctx.defaultPageSize, maxPageSize: ctx.maxPageSize },
           entities: ENTITY_METADATA,
@@ -210,17 +219,17 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     async (args) =>
       withAudit(ctx, 'kronos_list_requests', args, async () => {
-        const companies = effectiveCompanyIds(ctx.scope, args.companyId ?? null);
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
         const limit = clampLimit(ctx, args.limit);
         const offset = clampOffset(args.offset);
 
-        const where: Prisma.Sql[] = [companyInClause('rg.id_company', companies)];
+        const where: Prisma.Sql[] = [companyClause('rg.id_company', filter)];
         if (args.status !== undefined) {
           where.push(Prisma.sql`rg.status_req = ${args.status}`);
         }
         const whereSql = Prisma.join(where, ' AND ');
 
-        const rows = await prisma.$queryRaw<unknown[]>(Prisma.sql`
+        const rows = await queryReadOnly<unknown>(Prisma.sql`
           SELECT rg.id, rg.subject_request AS subject, rg.[description],
                  rg.status_req AS id_status, sc.status AS status,
                  rg.id_company, c.company, u.name AS requester,
@@ -247,8 +256,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     { id: z.number().int().describe('id de la solicitud (requests_general.id).') },
     async (args) =>
       withAudit(ctx, 'kronos_get_request', args, async () => {
-        const companies = effectiveCompanyIds(ctx.scope, null);
-        const rows = await prisma.$queryRaw<unknown[]>(Prisma.sql`
+        const filter = effectiveCompanyFilter(ctx.scope, null);
+        const rows = await queryReadOnly<unknown>(Prisma.sql`
           SELECT rg.id, rg.subject_request AS subject, rg.[description],
                  rg.status_req AS id_status, sc.status AS status,
                  rg.id_company, c.company, u.name AS requester,
@@ -257,7 +266,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           INNER JOIN company c ON c.id_company = rg.id_company
           LEFT JOIN status_case sc ON sc.id_status_case = rg.status_req
           LEFT JOIN [user] u ON u.id = rg.id_requester
-          WHERE rg.id = ${args.id} AND ${companyInClause('rg.id_company', companies)}
+          WHERE rg.id = ${args.id} AND ${companyClause('rg.id_company', filter)}
         `);
         return { result: rows[0] ?? null, rows: rows.length };
       })
@@ -278,16 +287,16 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     async (args) =>
       withAudit(ctx, 'kronos_list_tickets', args, async () => {
-        const companies = effectiveCompanyIds(ctx.scope, args.companyId ?? null);
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
         const limit = clampLimit(ctx, args.limit);
         const offset = clampOffset(args.offset);
 
-        const where: Prisma.Sql[] = [companyInClause('c.company', companies)];
+        const where: Prisma.Sql[] = [companyClause('c.company', filter)];
         if (args.status !== undefined) where.push(Prisma.sql`c.id_status_case = ${args.status}`);
         if (args.priority !== undefined) where.push(Prisma.sql`c.priority = ${args.priority}`);
         const whereSql = Prisma.join(where, ' AND ');
 
-        const rows = await prisma.$queryRaw<unknown[]>(Prisma.sql`
+        const rows = await queryReadOnly<unknown>(Prisma.sql`
           SELECT c.id_case, c.subject_case, c.[description], c.priority, c.case_type,
                  sc.status, d.department, c.requester, co.id_company, co.company,
                  c.creation_date, c.end_date, c.resolution, c.place
@@ -312,8 +321,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     { id: z.number().int().describe('id_case') },
     async (args) =>
       withAudit(ctx, 'kronos_get_ticket', args, async () => {
-        const companies = effectiveCompanyIds(ctx.scope, null);
-        const rows = await prisma.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
+        const filter = effectiveCompanyFilter(ctx.scope, null);
+        const rows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
           SELECT c.id_case, c.subject_case, c.[description], c.priority, c.case_type,
                  sc.status, d.department, c.requester, co.id_company, co.company,
                  c.creation_date, c.end_date, c.resolution, c.place
@@ -321,14 +330,14 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           INNER JOIN status_case sc ON sc.id_status_case = c.id_status_case
           INNER JOIN department d ON d.id_department = c.id_department
           LEFT JOIN company co ON co.id_company = c.company
-          WHERE c.id_case = ${args.id} AND ${companyInClause('c.company', companies)}
+          WHERE c.id_case = ${args.id} AND ${companyClause('c.company', filter)}
         `);
 
         const ticket = rows[0] ?? null;
         if (!ticket) return { result: null, rows: 0 };
 
         // Notas asociadas (solo tras confirmar el alcance del caso).
-        const notes = await prisma.$queryRaw<unknown[]>(Prisma.sql`
+        const notes = await queryReadOnly<unknown>(Prisma.sql`
           SELECT n.id_note, n.note FROM notes n WHERE n.id_case = ${args.id} ORDER BY n.id_note DESC
         `);
         return { result: { ...ticket, notes }, rows: 1 };
@@ -437,15 +446,19 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     async (args) =>
       withAudit(ctx, 'kronos_list_users', args, async () => {
-        const companies = effectiveCompanyIds(ctx.scope, args.companyId ?? null);
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
         const take = clampLimit(ctx, args.limit);
         const skip = clampOffset(args.offset);
 
-        // Filtro de empresa vía relación companyUsers -> id_company.
+        // Filtro de empresa vía relación companyUsers -> id_company. Para keys
+        // admin sin acotar (applyFilter=false) NO se restringe por empresa.
+        const where = filter.applyFilter
+          ? { companyUsers: { some: { id_company: { in: filter.companyIds } } } }
+          : {};
         const data = await prisma.user.findMany({
           take,
           skip,
-          where: { companyUsers: { some: { id_company: { in: companies } } } },
+          where,
           select: USER_SAFE_SELECT,
           orderBy: { name: 'asc' },
         });
@@ -474,7 +487,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     async (args) =>
       withAudit(ctx, 'kronos_search', args, async () => {
-        const companies = effectiveCompanyIds(ctx.scope, args.companyId ?? null);
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
         const limit = clampLimit(ctx, args.limit);
         const offset = clampOffset(args.offset);
         const text = args.text ? `%${args.text}%` : null;
@@ -484,7 +497,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         const out: Record<string, unknown> = {};
 
         if (args.entity === 'requests' || args.entity === 'all') {
-          const where: Prisma.Sql[] = [companyInClause('rg.id_company', companies)];
+          const where: Prisma.Sql[] = [companyClause('rg.id_company', filter)];
           if (args.status !== undefined) where.push(Prisma.sql`rg.status_req = ${args.status}`);
           if (text)
             where.push(
@@ -493,7 +506,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           if (dateFrom) where.push(Prisma.sql`rg.created_at >= ${dateFrom}`);
           if (dateTo) where.push(Prisma.sql`rg.created_at <= ${dateTo}`);
           const whereSql = Prisma.join(where, ' AND ');
-          out.requests = await prisma.$queryRaw<unknown[]>(Prisma.sql`
+          out.requests = await queryReadOnly<unknown>(Prisma.sql`
             SELECT rg.id, rg.subject_request AS subject, rg.status_req AS id_status,
                    rg.id_company, rg.created_at
             FROM requests_general rg
@@ -504,14 +517,14 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         }
 
         if (args.entity === 'tickets' || args.entity === 'all') {
-          const where: Prisma.Sql[] = [companyInClause('c.company', companies)];
+          const where: Prisma.Sql[] = [companyClause('c.company', filter)];
           if (args.status !== undefined) where.push(Prisma.sql`c.id_status_case = ${args.status}`);
           if (text)
             where.push(Prisma.sql`(c.subject_case LIKE ${text} OR c.[description] LIKE ${text})`);
           if (dateFrom) where.push(Prisma.sql`c.creation_date >= ${dateFrom}`);
           if (dateTo) where.push(Prisma.sql`c.creation_date <= ${dateTo}`);
           const whereSql = Prisma.join(where, ' AND ');
-          out.tickets = await prisma.$queryRaw<unknown[]>(Prisma.sql`
+          out.tickets = await queryReadOnly<unknown>(Prisma.sql`
             SELECT c.id_case, c.subject_case AS subject, c.id_status_case AS id_status,
                    c.company AS id_company, c.creation_date
             FROM [case] c

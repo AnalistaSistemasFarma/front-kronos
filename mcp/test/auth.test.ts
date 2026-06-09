@@ -105,7 +105,18 @@ describe('resolveScope (unidad)', () => {
   it('token correcto resuelve el alcance de la key', () => {
     const scope = resolveScope(VALID_KEY, testConfig.apiKeys);
     expect(scope?.agent).toBe('horus');
+    expect(scope?.allCompanies).toBe(false);
     expect(scope?.companyIds).toEqual([1]);
+  });
+
+  it('una key "*" resuelve a un alcance admin (allCompanies=true, lista vacía)', () => {
+    const adminKey = 'A'.repeat(40);
+    const scope = resolveScope(adminKey, [
+      { key: adminKey, agent: 'admin', companyIds: '*', role: 'admin' },
+    ]);
+    expect(scope?.allCompanies).toBe(true);
+    expect(scope?.companyIds).toEqual([]);
+    expect(scope?.role).toBe('admin');
   });
 
   it('extractBearer parsea correctamente', () => {

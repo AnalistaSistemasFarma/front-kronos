@@ -9,7 +9,9 @@ import { createMockPrisma, connectClient, callJson, type MockPrisma } from './he
 const noopAudit = { log: async () => {} };
 
 // Alcance: la key solo puede ver la empresa 1.
-const scopeA: AuthScope = { agent: 'horus', role: 'reader', companyIds: [1] };
+const scopeA: AuthScope = { agent: 'horus', role: 'reader', allCompanies: false, companyIds: [1] };
+// Alcance admin: comodín "*", ve TODAS las empresas, sin filtro de empresa.
+const scopeAdmin: AuthScope = { agent: 'admin', role: 'admin', allCompanies: true, companyIds: [] };
 
 let mock: MockPrisma;
 
@@ -110,6 +112,58 @@ describe('enforcement de empresa en las tools', () => {
   });
 });
 
+describe('alcance admin "*" — ve todas las empresas', () => {
+  it('una key "*" NO emite filtro de empresa (1 = 1) y ve múltiples empresas', async () => {
+    // Sembramos registros de empresas distintas; el SQL admin no filtra empresa.
+    mock.rawRows.requests_general = [
+      { id: 1, id_company: 1, subject: 'A' },
+      { id: 2, id_company: 2, subject: 'B' },
+    ];
+    const server = buildServer(scopeAdmin);
+    const client = await connectClient(server);
+    const { data } = await callJson(client, 'kronos_list_requests', {});
+
+    const reqQuery = mock.capturedRaw.find((q) => q.text.includes('requests_general'));
+    expect(reqQuery).toBeDefined();
+    // Admin: sin restricción de empresa -> el filtro es 1 = 1, nunca un IN.
+    expect(reqQuery!.text).toContain('1 = 1');
+    expect(reqQuery!.text).not.toContain('id_company IN');
+    const payload = data as { data: { id_company: number }[] };
+    const companies = payload.data.map((r) => r.id_company);
+    expect(companies).toContain(1);
+    expect(companies).toContain(2);
+  });
+
+  it('una key "*" con companyId del cliente acota por conveniencia (filtra, no falla)', async () => {
+    const server = buildServer(scopeAdmin);
+    const client = await connectClient(server);
+    const { isError } = await callJson(client, 'kronos_list_requests', { companyId: 2 });
+
+    expect(isError ?? false).toBe(false);
+    const reqQuery = mock.capturedRaw.find((q) => q.text.includes('requests_general'));
+    // El admin SÍ puede acotar a la empresa 2 (no hay nada que ampliar).
+    expect(reqQuery!.text).toContain('rg.id_company IN');
+    expect(reqQuery!.values).toContain(2);
+  });
+
+  it('kronos_metadata de un admin reporta allCompanies y allowedCompanyIds "*"', async () => {
+    const server = buildServer(scopeAdmin);
+    const client = await connectClient(server);
+    const { data } = await callJson(client, 'kronos_metadata', {});
+    const meta = data as { allCompanies: boolean; allowedCompanyIds: unknown };
+    expect(meta.allCompanies).toBe(true);
+    expect(meta.allowedCompanyIds).toBe('*');
+  });
+
+  it('kronos_list_users de un admin no restringe por empresa', async () => {
+    const server = buildServer(scopeAdmin);
+    const client = await connectClient(server);
+    await callJson(client, 'kronos_list_users', {});
+    // where vacío -> sin filtro companyUsers.
+    expect(mock.lastUserWhere).toEqual({});
+  });
+});
+
 describe('solo lectura — no hay tools de escritura', () => {
   it('la lista de tools registradas no contiene mutaciones', async () => {
     const server = buildServer();
@@ -128,6 +182,31 @@ describe('solo lectura — no hay tools de escritura', () => {
     expect(names).toContain('kronos_list_requests');
     expect(names).toContain('kronos_get_ticket');
     expect(names).toContain('kronos_search');
+  });
+});
+
+describe('candado de solo lectura — el SQL crudo pasa por la guarda', () => {
+  it('todo el SQL crudo emitido por las tools empieza por SELECT', async () => {
+    const server = buildServer();
+    const client = await connectClient(server);
+    // Ejecuta las tools que usan $queryRaw (vía queryReadOnly).
+    await callJson(client, 'kronos_list_requests', {});
+    await callJson(client, 'kronos_list_tickets', {});
+    await callJson(client, 'kronos_get_request', { id: 1 });
+    await callJson(client, 'kronos_search', { entity: 'all', text: 'x' });
+
+    expect(mock.capturedRaw.length).toBeGreaterThan(0);
+    for (const q of mock.capturedRaw) {
+      const cleaned = q.text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n\r]*/g, ' ').trim();
+      expect(/^select\b/i.test(cleaned)).toBe(true);
+    }
+  });
+
+  it('si queryReadOnly recibiera una mutación, lanzaría (defensa de la guarda)', async () => {
+    const { queryReadOnly, Prisma } = await import('../src/db.js');
+    await expect(
+      queryReadOnly(Prisma.sql`DELETE FROM requests_general WHERE id = ${1}`)
+    ).rejects.toThrow(/solo lectura/i);
   });
 });
 

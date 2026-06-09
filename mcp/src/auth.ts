@@ -11,7 +11,15 @@ import type { ApiKeyEntry } from './config.js';
 export interface AuthScope {
   agent: string;
   role: string;
-  /** Empresas que la key puede consultar. Filtro obligatorio en toda query. */
+  /**
+   * `true` para keys admin con alcance comodín `"*"`: ven TODAS las empresas y
+   * no se les aplica filtro de empresa. En ese caso `companyIds` queda vacío.
+   */
+  allCompanies: boolean;
+  /**
+   * Empresas que la key puede consultar cuando NO es admin. Filtro obligatorio
+   * en toda query. Vacío cuando `allCompanies` es `true`.
+   */
   companyIds: number[];
 }
 
@@ -50,9 +58,12 @@ export function resolveScope(token: string | null, apiKeys: ApiKeyEntry[]): Auth
   }
 
   if (!matched) return null;
+
+  const allCompanies = matched.companyIds === '*';
   return {
     agent: matched.agent,
     role: matched.role,
-    companyIds: [...matched.companyIds],
+    allCompanies,
+    companyIds: allCompanies ? [] : [...(matched.companyIds as number[])],
   };
 }
