@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+kronos-mcp-audit.log
+kronos-mcp-keys.json
