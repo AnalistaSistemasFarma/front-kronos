@@ -1,5 +1,9 @@
 import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig.js';
+import {
+  fireAndForgetNotification,
+  notifyActivityAssigned,
+} from '../../../../lib/notificationEvents.js';
 
 export async function POST(req) {
   try {
@@ -40,11 +44,31 @@ export async function POST(req) {
       );
     }
 
+    const taskInfo = await pool
+      .request()
+      .input('id', sql.Int, id)
+      .query(`
+        SELECT trg.id_request_general, rg.subject_request
+        FROM task_request_general trg
+        INNER JOIN requests_general rg ON rg.id = trg.id_request_general
+        WHERE trg.id = @id
+      `);
+
     await pool
       .request()
       .input('id', sql.Int, id)
       .input('id_assigned', sql.NVarChar(255), String(id_assigned))
       .query(`UPDATE task_request_general SET id_assigned = @id_assigned WHERE id = @id`);
+
+    const row = taskInfo.recordset[0];
+    fireAndForgetNotification(
+      notifyActivityAssigned({
+        taskId: id,
+        userId: id_assigned,
+        requestId: row?.id_request_general,
+        subject: row?.subject_request,
+      })
+    );
 
     return new Response(
       JSON.stringify({ success: true, message: 'Asignado actualizado correctamente' }),

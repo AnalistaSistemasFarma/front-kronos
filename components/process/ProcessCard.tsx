@@ -327,8 +327,8 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
           align-items: center;
           gap: 12px;
           padding: 14px 16px;
-          background: rgba(102, 126, 234, 0.05);
-          border: 1px solid rgba(102, 126, 234, 0.1);
+          background: rgba(17, 53, 98, 0.05);
+          border: 1px solid rgba(17, 53, 98, 0.12);
           border-radius: 10px;
           cursor: pointer;
           transition: all 0.3s ease;
@@ -336,27 +336,52 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
           overflow: hidden;
         }
 
+        :global(.dark) .subprocess-card {
+          background: rgba(94, 179, 232, 0.08);
+          border-color: rgba(94, 179, 232, 0.2);
+        }
+
         .subprocess-card:hover {
-          background: rgba(102, 126, 234, 0.1);
-          border-color: rgba(102, 126, 234, 0.3);
+          background: rgba(17, 53, 98, 0.1);
+          border-color: rgba(17, 53, 98, 0.28);
           transform: translateY(-2px);
-          box-shadow: 0 6px 16px rgba(102, 126, 234, 0.15);
+          box-shadow: 0 6px 16px rgba(17, 53, 98, 0.12);
+        }
+
+        :global(.dark) .subprocess-card:hover {
+          background: rgba(94, 179, 232, 0.14);
+          border-color: rgba(94, 179, 232, 0.38);
+          box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
         }
 
         .subprocess-card:active {
           transform: translateY(-1px);
-          box-shadow: 0 3px 8px rgba(102, 126, 234, 0.2);
+          box-shadow: 0 3px 8px rgba(17, 53, 98, 0.16);
+        }
+
+        :global(.dark) .subprocess-card:active {
+          box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
         }
 
         .subprocess-card--more {
-          background: rgba(102, 126, 234, 0.02);
-          border: 1px dashed rgba(102, 126, 234, 0.2);
+          background: rgba(17, 53, 98, 0.03);
+          border: 1px dashed rgba(17, 53, 98, 0.2);
           justify-content: center;
         }
 
+        :global(.dark) .subprocess-card--more {
+          background: rgba(94, 179, 232, 0.05);
+          border-color: rgba(94, 179, 232, 0.22);
+        }
+
         .subprocess-card--more:hover {
-          background: rgba(102, 126, 234, 0.05);
-          border-color: rgba(102, 126, 234, 0.3);
+          background: rgba(17, 53, 98, 0.06);
+          border-color: rgba(17, 53, 98, 0.28);
+        }
+
+        :global(.dark) .subprocess-card--more:hover {
+          background: rgba(94, 179, 232, 0.1);
+          border-color: rgba(94, 179, 232, 0.35);
         }
 
         .subprocess-icon {
@@ -365,14 +390,24 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
           justify-content: center;
           width: 36px;
           height: 36px;
-          background: rgba(102, 126, 234, 0.1);
+          background: rgba(17, 53, 98, 0.1);
           border-radius: 8px;
           color: #113562;
           flex-shrink: 0;
         }
 
+        :global(.dark) .subprocess-icon {
+          background: rgba(94, 179, 232, 0.18);
+          color: #7ec8ef;
+        }
+
         .subprocess-card--more .subprocess-icon {
-          background: rgba(102, 126, 234, 0.05);
+          background: rgba(17, 53, 98, 0.06);
+        }
+
+        :global(.dark) .subprocess-card--more .subprocess-icon {
+          background: rgba(94, 179, 232, 0.12);
+          color: #9dd4f5;
         }
 
         .subprocess-name {
@@ -390,6 +425,12 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
           color: #113562;
           opacity: 0.7;
           transition: all 0.2s ease;
+          flex-shrink: 0;
+        }
+
+        :global(.dark) .subprocess-arrow {
+          color: #7ec8ef;
+          opacity: 0.85;
         }
 
         .subprocess-card:hover .subprocess-arrow {

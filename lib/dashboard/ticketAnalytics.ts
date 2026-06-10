@@ -8,7 +8,7 @@ import {
 import {
   buildResolutionTimeSeries,
   formatResolutionDuration,
-  getTaskResolutionHours,
+  MAX_TICKET_RESOLUTION_HOURS,
   type TaskForResolutionTime,
 } from './resolutionTimeSeries';
 
@@ -23,8 +23,14 @@ export interface HelpDeskCase {
   department?: string;
   case_type?: string;
   category?: string;
+  subcategory?: string;
+  activity?: string;
   creation_date?: string | Date;
   end_date?: string | Date | null;
+  /** Cierre efectivo: end_date o última nota en casos cerrados sin end_date */
+  closed_at?: string | Date | null;
+  /** Horas desde creation_date hasta closed_at (solo casos cerrados medibles) */
+  resolution_hours?: number | null;
   nombreTecnico?: string;
   company?: string;
   resolution?: string;
@@ -97,24 +103,80 @@ export function getCompanyLabel(c: HelpDeskCase): string {
   return name && name.length > 0 ? name : 'Sin empresa';
 }
 
-export function caseToResolutionTask(c: HelpDeskCase): TaskForResolutionTime {
-  const creation = c.creation_date;
-  const startStr =
-    creation instanceof Date
-      ? formatDateLocal(creation)
-      : String(creation ?? '').split('T')[0] || null;
-  const end = c.end_date;
-  const endStr =
-    end instanceof Date ? formatDateLocal(end) : end ? String(end).split('T')[0] : null;
+function parseCaseDateTime(value: string | Date | null | undefined): Date | null {
+  if (value == null) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const parsed = new Date(trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
 
+function caseDateTimeStr(value: string | Date | null | undefined): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  const trimmed = String(value).trim();
+  return trimmed || null;
+}
+
+/** Caso cerrado (resuelto o cancelado) — válido para medir tiempo de cierre. */
+export function isClosedCase(c: HelpDeskCase): boolean {
+  const bucket = normalizeTicketStatus(c.status, c.id_status_case);
+  return bucket === 'Resuelto' || bucket === 'Cerrado';
+}
+
+/** @deprecated Use isClosedCase for time metrics */
+export function isResolvedCase(c: HelpDeskCase): boolean {
+  return normalizeTicketStatus(c.status, c.id_status_case) === 'Resuelto';
+}
+
+export function getCaseClosedAt(c: HelpDeskCase): string | Date | null | undefined {
+  return c.closed_at ?? c.end_date;
+}
+
+export function caseToResolutionTask(c: HelpDeskCase): TaskForResolutionTime {
+  const closedAt = getCaseClosedAt(c);
   return {
     id_tarea: c.id_case,
     tarea: c.subject_case,
     estado_tarea: c.status ?? '',
     asignado_tarea: getTechnicianLabel(c),
-    hora_inicio_tarea: startStr,
-    fecha_fin_tarea: endStr,
+    hora_inicio_tarea: caseDateTimeStr(c.creation_date),
+    fecha_fin_tarea: caseDateTimeStr(closedAt),
+    fecha_resolucion_tarea: caseDateTimeStr(closedAt),
   };
+}
+
+export function getCaseResolutionHours(c: HelpDeskCase): number | null {
+  if (!isClosedCase(c)) return null;
+
+  const fromApi = c.resolution_hours;
+  if (fromApi != null && Number.isFinite(fromApi) && fromApi >= 0) {
+    return fromApi <= MAX_TICKET_RESOLUTION_HOURS ? fromApi : null;
+  }
+
+  const start = parseCaseDateTime(c.creation_date);
+  const end = parseCaseDateTime(getCaseClosedAt(c));
+  if (!start || !end) return null;
+
+  const ms = end.getTime() - start.getTime();
+  if (ms < 0) return null;
+
+  const hours = ms / 3_600_000;
+  if (hours > MAX_TICKET_RESOLUTION_HOURS) return null;
+  return hours;
+}
+
+export function casesToResolutionTasks(cases: HelpDeskCase[]): TaskForResolutionTime[] {
+  return cases.filter((c) => getCaseResolutionHours(c) != null).map(caseToResolutionTask);
+}
+
+export function countCasesWithResolutionTime(cases: HelpDeskCase[]): number {
+  return cases.filter((c) => getCaseResolutionHours(c) != null).length;
 }
 
 export function countByStatus(cases: HelpDeskCase[]): TicketStatusCounts {
@@ -169,7 +231,7 @@ export function computeTicketPerformanceScore(params: {
 
 function avgResolutionHoursForCases(cases: HelpDeskCase[]): number | null {
   const hours = cases
-    .map((c) => getTaskResolutionHours(caseToResolutionTask(c)))
+    .map((c) => getCaseResolutionHours(c))
     .filter((h): h is number => h != null);
   if (hours.length === 0) return null;
   return hours.reduce((a, b) => a + b, 0) / hours.length;
@@ -189,7 +251,7 @@ export function buildTechnicianMetrics(cases: HelpDeskCase[]): TechnicianMetrics
     .map(([name, list]) => {
       const counts = countByStatus(list);
       const avgResolutionHours = avgResolutionHoursForCases(
-        list.filter((c) => normalizeTicketStatus(c.status, c.id_status_case) === 'Resuelto')
+        list.filter((c) => getCaseResolutionHours(c) != null)
       );
       const openBacklog = counts.abierto + counts.enProgreso;
       const score = computeTicketPerformanceScore({
@@ -215,10 +277,8 @@ export function buildTechnicianMetrics(cases: HelpDeskCase[]): TechnicianMetrics
 
 export function buildTeamSummary(cases: HelpDeskCase[]): TeamSummary {
   const counts = countByStatus(cases);
-  const resolvedCases = cases.filter(
-    (c) => normalizeTicketStatus(c.status, c.id_status_case) === 'Resuelto'
-  );
-  const avgResolutionHours = avgResolutionHoursForCases(resolvedCases);
+  const closedWithTime = cases.filter((c) => getCaseResolutionHours(c) != null);
+  const avgResolutionHours = avgResolutionHoursForCases(closedWithTime);
   const openBacklog = counts.abierto + counts.enProgreso;
 
   const teamScore = computeTicketPerformanceScore({
@@ -281,8 +341,10 @@ export function buildCaseResolutionSeries(
   cases: HelpDeskCase[],
   technicianFilter?: string | null
 ) {
-  const tasks = cases.map(caseToResolutionTask);
-  return buildResolutionTimeSeries(tasks, technicianFilter ?? null);
+  const tasks = casesToResolutionTasks(cases);
+  return buildResolutionTimeSeries(tasks, technicianFilter ?? null, {
+    maxHours: MAX_TICKET_RESOLUTION_HOURS,
+  });
 }
 
 export { formatResolutionDuration };

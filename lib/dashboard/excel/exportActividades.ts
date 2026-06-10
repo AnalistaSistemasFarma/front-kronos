@@ -1,7 +1,6 @@
 import ExcelJS from 'exceljs';
 import type { DashboardDateFilter } from '../dateRange';
 import { computeActivityStats, allActivityRowsFromTasks } from '../activityMetrics';
-import type { DashboardTask } from '../types';
 import {
   addDataSheet,
   buildResumenSheet,
@@ -12,17 +11,18 @@ import {
   writeRankingTable,
   type ExportMeta,
 } from './excelHelpers';
+import { fetchTasksAndRequestsForExport } from './fetchExportData';
 
 export type ExportActividadesParams = {
-  tasks: DashboardTask[];
   dateFilter: DashboardDateFilter;
   selectedMonthDate: Date;
   appliedRange?: string | null;
 };
 
 export async function exportActividadesExcel(params: ExportActividadesParams): Promise<void> {
-  const { tasks, dateFilter, selectedMonthDate, appliedRange } = params;
+  const { dateFilter, selectedMonthDate, appliedRange } = params;
 
+  const { tasks } = await fetchTasksAndRequestsForExport();
   const rows = allActivityRowsFromTasks(tasks);
   const stats = computeActivityStats(tasks);
 
@@ -38,11 +38,13 @@ export async function exportActividadesExcel(params: ExportActividadesParams): P
     dateFilter,
     selectedMonthDate,
     appliedRange,
-    extra: [{ label: 'Alcance', value: 'Actividades = solicitudes únicas en el periodo' }],
+    exportScope: 'global',
+    recordCount: rows.length,
+    extra: [{ label: 'Alcance', value: 'Actividades = solicitudes únicas (histórico completo)' }],
   };
 
-  const resumen = buildResumenSheet(workbook, meta);
-  let row = 8;
+  const { sheet: resumen, contentStartRow } = buildResumenSheet(workbook, meta);
+  let row = contentStartRow;
 
   row = writeIndicatorTable(resumen, row, 'Indicadores de actividades', [
     { label: 'Total actividades', value: stats.total },
@@ -176,5 +178,5 @@ export async function exportActividadesExcel(params: ExportActividadesParams): P
     }))
   );
 
-  await downloadWorkbook(workbook, stampFilename('Kronos-Actividades', dateFilter));
+  await downloadWorkbook(workbook, stampFilename('Kronos-Actividades', 'global'));
 }

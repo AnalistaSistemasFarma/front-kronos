@@ -15,14 +15,14 @@ const nextConfig: NextConfig = {
     },
     viewTransition: true,
   },
+  // Solo variables que el cliente necesita (sin prefijo NEXT_PUBLIC_).
+  // Los secretos (p. ej. MICROSOFTCLIENTSECRET) deben quedar solo en .env y usarse en servidor.
   env: {
     API_EMAIL: process.env.API_EMAIL,
     MICROSOFTCLIENTID: process.env.MICROSOFTCLIENTID,
-    MICROSOFTCLIENTSECRET: process.env.MICROSOFTCLIENTSECRET,
     MICROSOFTTENANTID: process.env.MICROSOFTTENANTID,
     MICROSOFTGRAPHUSERROUTE: process.env.MICROSOFTGRAPHUSERROUTE,
     MSCALLBACKURI: process.env.MSCALLBACKURI,
-    NEXT_PUBLIC_VAPID_PUBLIC_KEY: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
   },
 };
 

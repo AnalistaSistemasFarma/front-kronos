@@ -1,8 +1,9 @@
 'use client';
 
-import { Box } from '@mantine/core';
+import { Box, Skeleton } from '@mantine/core';
 import type { ChartData, ChartOptions, ChartType } from 'chart.js';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { scheduleLayoutUpdate } from '../../lib/dom/scheduleLayoutUpdate';
 import { getChartScrollMinWidth } from '../../lib/charts/chartScroll';
 import { ChartBox } from '../charts/ChartBox';
 import { useChartViewport } from './useChartViewport';
@@ -140,6 +141,49 @@ export function ChartContainer<T extends ChartType = ChartType>({
       }}
     >
       {withHorizontalScroll}
+    </Box>
+  );
+}
+
+type FillHeightChartContainerProps<T extends ChartType = ChartType> = Omit<
+  ChartContainerProps<T>,
+  'height'
+>;
+
+/** Gráfica que crece para igualar la altura del contenedor flex padre. */
+export function FillHeightChartContainer<T extends ChartType = ChartType>(
+  props: FillHeightChartContainerProps<T>
+) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+
+    const update = () => {
+      const next = Math.floor(node.getBoundingClientRect().height);
+      if (next > 0) setHeight(next);
+    };
+
+    scheduleLayoutUpdate(update);
+    const observer = new ResizeObserver(() => scheduleLayoutUpdate(update));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <Box
+      ref={ref}
+      w='100%'
+      h='100%'
+      style={{ flex: 1, minHeight: 160, display: 'flex', flexDirection: 'column' }}
+    >
+      {height > 0 ? (
+        <ChartContainer {...props} height={height} />
+      ) : (
+        <Skeleton radius='md' style={{ flex: 1, minHeight: 160 }} />
+      )}
     </Box>
   );
 }

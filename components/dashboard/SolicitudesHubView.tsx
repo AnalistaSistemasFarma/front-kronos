@@ -1,8 +1,7 @@
 'use client';
 
 import { memo, useEffect } from 'react';
-import { SolicitudesSubProvider, useSolicitudesSub } from '../../lib/dashboard/SolicitudesSubContext';
-import SolicitudesSubNav from './SolicitudesSubNav';
+import { useSolicitudesSub } from '../../lib/dashboard/SolicitudesSubContext';
 import SolicitudesAnalyticsView from './SolicitudesAnalyticsView';
 import ProcesosAnalyticsView from './ProcesosAnalyticsView';
 
@@ -22,26 +21,17 @@ function SolicitudesPanels() {
   }, [subView]);
 
   return (
-    <>
-      <div className='dashboard-subnav-sticky max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 min-w-0'>
-        <SolicitudesSubNav />
+    <div className='dashboard-panels'>
+      <div className={panelClass(subView === 'solicitudes')} aria-hidden={subView !== 'solicitudes'}>
+        <MemoSolicitudes />
       </div>
-      <div className='dashboard-panels'>
-        <div className={panelClass(subView === 'solicitudes')} aria-hidden={subView !== 'solicitudes'}>
-          <MemoSolicitudes />
-        </div>
-        <div className={panelClass(subView === 'procesos')} aria-hidden={subView !== 'procesos'}>
-          <MemoProcesos />
-        </div>
+      <div className={panelClass(subView === 'procesos')} aria-hidden={subView !== 'procesos'}>
+        <MemoProcesos />
       </div>
-    </>
+    </div>
   );
 }
 
 export default function SolicitudesHubView() {
-  return (
-    <SolicitudesSubProvider>
-      <SolicitudesPanels />
-    </SolicitudesSubProvider>
-  );
+  return <SolicitudesPanels />;
 }

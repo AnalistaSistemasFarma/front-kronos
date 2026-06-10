@@ -90,19 +90,16 @@ export default function SolicitudesAnalyticsView() {
     try {
       setExportingExcel(true);
       await exportSolicitudesExcel({
-        tasks,
-        requests: requestsFromCtx,
         dateFilter,
         selectedMonthDate,
         appliedRange,
-        companyFilter,
       });
     } catch (err) {
       console.error('Error exportando solicitudes:', err);
     } finally {
       setExportingExcel(false);
     }
-  }, [tasks, requestsFromCtx, dateFilter, selectedMonthDate, appliedRange, companyFilter]);
+  }, [dateFilter, selectedMonthDate, appliedRange]);
 
   const allRequests = requestsFromCtx;
   const companies = useMemo(() => listCompaniesFromRequests(allRequests), [allRequests]);

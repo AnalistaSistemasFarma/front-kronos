@@ -73,7 +73,8 @@ export function usePushNotifications(userEmail: string | null | undefined): UseP
       const res = await fetch('/api/push/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: userEmail, subscription }),
+        credentials: 'same-origin',
+        body: JSON.stringify({ subscription }),
       });
 
       if (!res.ok) throw new Error(`POST /api/push/subscribe falló (${res.status})`);
@@ -99,6 +100,7 @@ export function usePushNotifications(userEmail: string | null | undefined): UseP
       await fetch('/api/push/subscribe', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ endpoint: sub.endpoint }),
       });
       await sub.unsubscribe();

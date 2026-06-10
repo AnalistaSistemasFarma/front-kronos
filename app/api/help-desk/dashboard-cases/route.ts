@@ -22,6 +22,24 @@ export async function GET(req: Request) {
         c.creation_date,
         c.description,
         c.end_date,
+        COALESCE(
+          c.end_date,
+          CASE WHEN c.id_status_case IN (2, 3) THEN notes_agg.last_note_date END
+        ) AS closed_at,
+        CASE
+          WHEN c.id_status_case IN (2, 3)
+            AND c.creation_date IS NOT NULL
+            AND COALESCE(c.end_date, notes_agg.last_note_date) IS NOT NULL
+            AND COALESCE(c.end_date, notes_agg.last_note_date) >= c.creation_date
+          THEN CAST(
+            DATEDIFF(
+              MINUTE,
+              c.creation_date,
+              COALESCE(c.end_date, notes_agg.last_note_date)
+            ) AS FLOAT
+          ) / 60.0
+          ELSE NULL
+        END AS resolution_hours,
         c.id_case,
         c.priority,
         c.subject_case,
@@ -35,6 +53,11 @@ export async function GET(req: Request) {
         c.resolution,
         co.company
       FROM [case] c
+      OUTER APPLY (
+        SELECT MAX(n.creation_date) AS last_note_date
+        FROM notes n
+        WHERE n.id_case = c.id_case
+      ) notes_agg
       OUTER APPLY (
         SELECT TOP 1
           cg.category,
@@ -89,6 +112,9 @@ export async function GET(req: Request) {
           grain: 'case',
           unique_key: 'id_case',
           date_field: 'case.creation_date',
+          resolution_start_field: 'case.creation_date',
+          resolution_end_field: 'COALESCE(case.end_date, last_note_date)',
+          resolution_status_ids: [2, 3],
         },
         filters_applied: date_from && date_to ? { date_from, date_to } : null,
       },

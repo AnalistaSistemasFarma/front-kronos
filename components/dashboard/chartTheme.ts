@@ -227,10 +227,10 @@ export function getTechnicianPerformanceChartHeight(
   technicianCount: number,
   compact: boolean
 ): number {
-  const plotArea = compact ? 200 : 260;
-  const cols = compact ? 2 : 4;
+  const plotArea = compact ? 220 : 320;
+  const cols = compact ? 2 : Math.min(4, Math.max(3, Math.ceil(technicianCount / 2)));
   const legendRows = Math.max(1, Math.ceil(Math.max(technicianCount, 1) / cols));
-  const legendArea = legendRows * (compact ? 24 : 28) + 12;
+  const legendArea = legendRows * (compact ? 26 : 30) + 16;
   return plotArea + legendArea;
 }
 

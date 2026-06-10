@@ -141,7 +141,6 @@ export default function ActividadesAnalyticsView() {
     try {
       setExportingExcel(true);
       await exportActividadesExcel({
-        tasks: activitiesWithCost,
         dateFilter,
         selectedMonthDate,
         appliedRange,
@@ -151,7 +150,7 @@ export default function ActividadesAnalyticsView() {
     } finally {
       setExportingExcel(false);
     }
-  }, [activities, dateFilter, selectedMonthDate, appliedRange]);
+  }, [dateFilter, selectedMonthDate, appliedRange]);
 
   const solicitudesUnicas = useMemo(
     () => new Set(rawTasks.map((t) => t.id_solicitud)).size,
@@ -629,14 +628,10 @@ export default function ActividadesAnalyticsView() {
                       <Group gap='xs' mb='md'>
                         <IconUsers size={18} color={projectColors.primary} />
                         <Text size='sm' fw={600}>
-                          Actividades por encargado de área
+                          Rendimiento por líder de área
                         </Text>
                       </Group>
                       <EncargadoActivitiesChart
-                        key={
-                          appliedRange ??
-                          `${dateFilter}-${selectedMonthDate.getFullYear()}-${selectedMonthDate.getMonth()}`
-                        }
                         tasks={activities}
                         teamTasks={teamActivities}
                         categoryMembers={categoryMembers}

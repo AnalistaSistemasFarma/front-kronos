@@ -10,10 +10,6 @@ const tenantId = `${process.env.MICROSOFTTENANTID}`;
 // URL del endpoint de token
 const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
 
-console.log(`clientId: ${clientId}`);
-console.log(`clientId: ${clientSecret}`);
-console.log(`clientId: ${tenantId}`);
-
 // Función para obtener el token de acceso
 export const useGetMicrosoftToken = async () => {
   try {

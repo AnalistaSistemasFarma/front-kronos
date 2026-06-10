@@ -526,6 +526,8 @@ export function ChartCard({
   height?: string | number;
   refreshing?: boolean;
 }) {
+  const autoHeight = height === 'auto';
+
   return (
     <Card
       className='dashboard-chart-card'
@@ -533,8 +535,15 @@ export function ChartCard({
       padding={getDashboardCardPadding()}
       radius='md'
       withBorder
-      h={height}
-      style={{ minWidth: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}
+      h={autoHeight ? undefined : height}
+      style={{
+        minWidth: 0,
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        flex: autoHeight ? undefined : 1,
+        minHeight: autoHeight ? undefined : 0,
+      }}
     >
       {refreshing ? <DataRefreshOverlay /> : null}
       <Title order={5} mb={description ? 4 : 'md'} style={{ flexShrink: 0 }}>
@@ -545,7 +554,16 @@ export function ChartCard({
           {description}
         </Text>
       )}
-      <Box className='dashboard-chart-slot' style={{ flex: 1, minHeight: 0, width: '100%' }}>
+      <Box
+        className='dashboard-chart-slot'
+        style={{
+          flex: autoHeight ? undefined : 1,
+          minHeight: autoHeight ? undefined : 0,
+          width: '100%',
+          display: autoHeight ? undefined : 'flex',
+          flexDirection: autoHeight ? undefined : 'column',
+        }}
+      >
         {children}
       </Box>
     </Card>
@@ -636,23 +654,26 @@ export function RankedListCard({
   items,
   formatValue,
   emptyMessage,
+  fillHeight = false,
 }: {
   title: string;
   description: string;
   items: { name: string; value: number }[];
   formatValue: (n: number) => string;
   emptyMessage: string;
+  /** Iguala altura con una tarjeta vecina en layout de dos columnas */
+  fillHeight?: boolean;
 }) {
   const max = Math.max(...items.map((i) => i.value), 1);
 
   return (
-    <ChartCard title={title} description={description}>
+    <ChartCard title={title} description={description} height={fillHeight ? '100%' : 'auto'}>
       {items.length === 0 ? (
         <Text size='sm' c='dimmed' ta='center' py='xl'>
           {emptyMessage}
         </Text>
       ) : (
-        <Stack gap='sm'>
+        <Stack gap='sm' style={fillHeight ? { flex: 1, minHeight: 0 } : undefined}>
           {items.map((item, index) => (
             <Paper key={item.name} p='sm' withBorder radius='md'>
               <Group justify='space-between' mb={6} wrap='nowrap'>

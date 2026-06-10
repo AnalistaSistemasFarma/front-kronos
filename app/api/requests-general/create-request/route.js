@@ -1,5 +1,9 @@
 import sql from "mssql";
 import sqlConfig from "../../../../dbconfig.js";
+import {
+  fireAndForgetNotification,
+  notifyNewRequest,
+} from "../../../../lib/notificationEvents.js";
 
 export async function POST(req) {
   try {
@@ -121,6 +125,16 @@ export async function POST(req) {
       ];
 
       await transaction.commit();
+
+      fireAndForgetNotification(
+        notifyNewRequest({
+          requestId: newRequestId,
+          subject,
+          processEmail,
+          taskEmails,
+          requestUrl: url,
+        })
+      );
 
       return new Response(
         JSON.stringify({

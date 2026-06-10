@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Badge,
@@ -46,6 +46,7 @@ import {
   listProcessesFromRequests,
 } from '../../lib/dashboard/processAnalytics';
 import { formatHoursLabel } from '../../lib/dashboard/requestResolution';
+import { exportProcesosExcel } from '../../lib/dashboard/excel';
 import { useDashboardTasks } from '../../lib/dashboard/useDashboardTasks';
 import { ChartContainer } from './ChartContainer';
 import { resolveProcessRankingChartLayout, resolveProcessStackedChartLayout } from './chartTheme';
@@ -75,6 +76,22 @@ export default function ProcesosAnalyticsView() {
   } = useDashboardTasks();
 
   const [processFilter, setProcessFilter] = useState<string>(ALL_PROCESSES_VALUE);
+  const [exportingExcel, setExportingExcel] = useState(false);
+
+  const handleExportExcel = useCallback(async () => {
+    try {
+      setExportingExcel(true);
+      await exportProcesosExcel({
+        dateFilter,
+        selectedMonthDate,
+        appliedRange,
+      });
+    } catch (err) {
+      console.error('Error exportando procesos:', err);
+    } finally {
+      setExportingExcel(false);
+    }
+  }, [dateFilter, selectedMonthDate, appliedRange]);
 
   const allRequests = requestsFromCtx;
   const processes = useMemo(() => listProcessesFromRequests(allRequests), [allRequests]);
@@ -279,7 +296,8 @@ export default function ProcesosAnalyticsView() {
           onSelectedMonthDateChange={setSelectedMonthDate}
           onRefresh={fetchTasks}
           loading={loading}
-          showExport={false}
+          onExport={handleExportExcel}
+          exportingExcel={exportingExcel}
         />
       }
     >

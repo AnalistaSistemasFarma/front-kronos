@@ -1,15 +1,13 @@
 import ExcelJS from 'exceljs';
 import {
-  ALL_TECHNICIANS_VALUE,
   aggregateByCompany,
   buildTeamSummary,
   countByStatus,
-  filterCasesByTechnician,
   formatResolutionDuration,
+  getCaseResolutionHours,
   getCompanyLabel,
   getTechnicianLabel,
   normalizeTicketStatus,
-  type HelpDeskCase,
 } from '../ticketAnalytics';
 import type { DashboardDateFilter } from '../dateRange';
 import {
@@ -22,30 +20,28 @@ import {
   writeRankingTable,
   type ExportMeta,
 } from './excelHelpers';
+import { fetchAllTicketsForExport } from './fetchExportData';
 
 export type ExportTicketsParams = {
-  cases: HelpDeskCase[];
   dateFilter: DashboardDateFilter;
   selectedMonthDate: Date;
   appliedRange?: string | null;
-  technicianFilter: string;
 };
 
+function formatCaseDate(value: string | Date | null | undefined): string {
+  if (value == null || value === '') return '';
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
 export async function exportTicketsExcel(params: ExportTicketsParams): Promise<void> {
-  const { cases, dateFilter, selectedMonthDate, appliedRange, technicianFilter } = params;
-  const isIndividual = technicianFilter !== ALL_TECHNICIANS_VALUE;
-  const scoped = filterCasesByTechnician(cases, technicianFilter);
-  const counts = countByStatus(scoped);
+  const { dateFilter, selectedMonthDate, appliedRange } = params;
+
+  const cases = await fetchAllTicketsForExport();
+  const counts = countByStatus(cases);
   const teamSummary = buildTeamSummary(cases);
-  const selectedTech = isIndividual
-    ? teamSummary.technicians.find((t) => t.name === technicianFilter)
-    : null;
-
-  const avgHours = isIndividual
-    ? selectedTech?.avgResolutionHours ?? null
-    : teamSummary.avgResolutionHours;
-
-  const score = isIndividual ? selectedTech?.score ?? 0 : teamSummary.teamScore;
+  const avgHours = teamSummary.avgResolutionHours;
+  const score = teamSummary.teamScore;
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Kronos Dashboard';
@@ -56,16 +52,13 @@ export async function exportTicketsExcel(params: ExportTicketsParams): Promise<v
     dateFilter,
     selectedMonthDate,
     appliedRange,
-    extra: [
-      {
-        label: 'Vista',
-        value: isIndividual ? `Analista: ${technicianFilter}` : 'Equipo completo',
-      },
-    ],
+    exportScope: 'global',
+    recordCount: cases.length,
+    extra: [{ label: 'Vista', value: 'Equipo completo (histórico)' }],
   };
 
-  const resumen = buildResumenSheet(workbook, meta);
-  let row = 8;
+  const { sheet: resumen, contentStartRow } = buildResumenSheet(workbook, meta);
+  let row = contentStartRow;
 
   row = writeIndicatorTable(resumen, row, 'Indicadores de casos', [
     { label: 'Total casos', value: counts.total },
@@ -93,7 +86,7 @@ export async function exportTicketsExcel(params: ExportTicketsParams): Promise<v
     counts.total
   );
 
-  if (!isIndividual && teamSummary.technicians.length > 0) {
+  if (teamSummary.technicians.length > 0) {
     const techRows = teamSummary.technicians
       .slice()
       .sort((a, b) => b.total - a.total)
@@ -138,7 +131,7 @@ export async function exportTicketsExcel(params: ExportTicketsParams): Promise<v
     );
   }
 
-  const byCompany = aggregateByCompany(scoped)
+  const byCompany = aggregateByCompany(cases)
     .slice(0, 10)
     .map((c) => ({ name: c.name, value: c.value }));
   writeRankingTable(resumen, row, 'Top empresas', byCompany, 'Casos');
@@ -158,26 +151,33 @@ export async function exportTicketsExcel(params: ExportTicketsParams): Promise<v
       { header: 'Categoría', key: 'categoria', width: 18 },
       { header: 'Creación', key: 'creacion', width: 14 },
       { header: 'Cierre', key: 'cierre', width: 14 },
+      { header: 'Cierre (sistema)', key: 'closed_at', width: 14 },
+      { header: 'Horas resolución', key: 'resolution_hours', width: 16 },
+      { header: 'Tiempo resolución', key: 'tiempo_resolucion', width: 18 },
       { header: 'Resolución', key: 'resolucion', width: 28 },
     ],
-    scoped.map((c) => ({
-      id: c.id_case ?? '',
-      asunto: c.subject_case ?? '',
-      estado: normalizeTicketStatus(c.status, c.id_status_case),
-      prioridad: c.priority ?? '',
-      tecnico: getTechnicianLabel(c),
-      empresa: getCompanyLabel(c),
-      departamento: c.department ?? '',
-      tipo: c.case_type ?? '',
-      categoria: c.category ?? '',
-      creacion: c.creation_date instanceof Date ? c.creation_date.toISOString() : c.creation_date ?? '',
-      cierre: c.end_date instanceof Date ? c.end_date.toISOString() : c.end_date ?? '',
-      resolucion: c.resolution ?? '',
-    }))
+    cases.map((c) => {
+      const resolutionHours = getCaseResolutionHours(c);
+      return {
+        id: c.id_case ?? '',
+        asunto: c.subject_case ?? '',
+        estado: normalizeTicketStatus(c.status, c.id_status_case),
+        prioridad: c.priority ?? '',
+        tecnico: getTechnicianLabel(c),
+        empresa: getCompanyLabel(c),
+        departamento: c.department ?? '',
+        tipo: c.case_type ?? '',
+        categoria: c.category ?? '',
+        creacion: formatCaseDate(c.creation_date),
+        cierre: formatCaseDate(c.end_date),
+        closed_at: formatCaseDate(c.closed_at),
+        resolution_hours: resolutionHours ?? '',
+        tiempo_resolucion:
+          resolutionHours != null ? formatResolutionDuration(resolutionHours) : '',
+        resolucion: c.resolution ?? '',
+      };
+    })
   );
 
-  const suffix = isIndividual
-    ? technicianFilter.replace(/[^\w\-]+/g, '_').slice(0, 24)
-    : 'equipo';
-  await downloadWorkbook(workbook, stampFilename(`Kronos-Tickets-${suffix}`, dateFilter));
+  await downloadWorkbook(workbook, stampFilename('Kronos-Tickets-equipo', 'global'));
 }
