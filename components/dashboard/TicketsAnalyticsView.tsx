@@ -116,18 +116,16 @@ export default function TicketsAnalyticsView() {
     try {
       setExportingExcel(true);
       await exportTicketsExcel({
-        cases,
         dateFilter,
         selectedMonthDate,
         appliedRange,
-        technicianFilter,
       });
     } catch (err) {
       console.error('Error exportando tickets:', err);
     } finally {
       setExportingExcel(false);
     }
-  }, [cases, dateFilter, selectedMonthDate, appliedRange, technicianFilter]);
+  }, [dateFilter, selectedMonthDate, appliedRange]);
 
   const teamSummary = useMemo(() => buildTeamSummary(cases), [cases]);
   const scopedCases = useMemo(

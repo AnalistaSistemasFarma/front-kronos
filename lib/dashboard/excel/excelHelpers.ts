@@ -12,6 +12,9 @@ export type ExportMeta = {
   dateFilter: DashboardDateFilter;
   selectedMonthDate: Date;
   appliedRange?: string | null;
+  /** Cuando es global, el Excel incluye todo el histórico sin filtro de fechas del dashboard. */
+  exportScope?: 'global' | 'screen';
+  recordCount?: number;
   extra?: { label: string; value: string }[];
 };
 
@@ -25,9 +28,16 @@ export async function downloadWorkbook(workbook: ExcelJS.Workbook, filename: str
   );
 }
 
-export function stampFilename(prefix: string, dateFilter: DashboardDateFilter): string {
+export function stampFilename(
+  prefix: string,
+  dateFilterOrScope: DashboardDateFilter | 'global'
+): string {
   const stamp = new Date().toISOString().slice(0, 10);
-  return `${prefix}-${getFilterLabel(dateFilter)}-${stamp}.xlsx`;
+  const suffix =
+    dateFilterOrScope === 'global'
+      ? 'historico-completo'
+      : getFilterLabel(dateFilterOrScope);
+  return `${prefix}-${suffix}-${stamp}.xlsx`;
 }
 
 export function styleHeaderRow(row: ExcelJS.Row): void {
@@ -42,7 +52,16 @@ export function styleHeaderRow(row: ExcelJS.Row): void {
   row.height = 24;
 }
 
-export function buildResumenSheet(workbook: ExcelJS.Workbook, meta: ExportMeta): ExcelJS.Worksheet {
+export type ResumenSheetResult = {
+  sheet: ExcelJS.Worksheet;
+  /** Primera fila libre tras el bloque de metadatos (incluye una fila en blanco). */
+  contentStartRow: number;
+};
+
+export function buildResumenSheet(
+  workbook: ExcelJS.Workbook,
+  meta: ExportMeta
+): ResumenSheetResult {
   const ws = workbook.addWorksheet('Resumen', {
     views: [{ showGridLines: true }],
     properties: { defaultRowHeight: 18 },
@@ -56,13 +75,39 @@ export function buildResumenSheet(workbook: ExcelJS.Workbook, meta: ExportMeta):
   ws.getRow(1).height = 28;
 
   let row = 3;
-  const metaLines = [
-    { label: 'Módulo', value: meta.module },
-    { label: 'Periodo', value: getFilterLabel(meta.dateFilter) },
-    { label: 'Rango', value: meta.appliedRange ?? getPeriodRangeLabel(meta.dateFilter, meta.selectedMonthDate) },
-    { label: 'Generado', value: new Date().toLocaleString('es-CO') },
-    ...(meta.extra ?? []),
-  ];
+  const isGlobal = meta.exportScope === 'global';
+  const metaLines = isGlobal
+    ? [
+        { label: 'Módulo', value: meta.module },
+        { label: 'Alcance exportación', value: 'Histórico completo (todos los registros)' },
+        {
+          label: 'Registros exportados',
+          value: meta.recordCount != null ? meta.recordCount.toLocaleString('es-CO') : '—',
+        },
+        {
+          label: 'Filtro en pantalla',
+          value: `${getFilterLabel(meta.dateFilter)}${
+            meta.appliedRange ? ` (${meta.appliedRange})` : ''
+          }`,
+        },
+        {
+          label: 'Nota',
+          value:
+            'Este archivo incluye todos los años disponibles; el periodo del dashboard no limita los datos exportados.',
+        },
+        { label: 'Generado', value: new Date().toLocaleString('es-CO') },
+        ...(meta.extra ?? []),
+      ]
+    : [
+        { label: 'Módulo', value: meta.module },
+        { label: 'Periodo', value: getFilterLabel(meta.dateFilter) },
+        {
+          label: 'Rango',
+          value: meta.appliedRange ?? getPeriodRangeLabel(meta.dateFilter, meta.selectedMonthDate),
+        },
+        { label: 'Generado', value: new Date().toLocaleString('es-CO') },
+        ...(meta.extra ?? []),
+      ];
 
   metaLines.forEach(({ label, value }) => {
     ws.getCell(`A${row}`).value = label;
@@ -74,7 +119,7 @@ export function buildResumenSheet(workbook: ExcelJS.Workbook, meta: ExportMeta):
 
   ws.getColumn(1).width = 22;
   ws.getColumn(2).width = 36;
-  return ws;
+  return { sheet: ws, contentStartRow: row + 1 };
 }
 
 export function writeSectionTitle(ws: ExcelJS.Worksheet, row: number, title: string): number {

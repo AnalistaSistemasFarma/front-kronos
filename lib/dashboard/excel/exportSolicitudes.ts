@@ -5,13 +5,11 @@ import {
   formatRequestTimeSeriesLabel,
 } from '../requestAnalytics';
 import {
-  ALL_COMPANIES_VALUE,
   computeResolutionSummary,
   enrichRequestsWithResolution,
   formatHoursLabel,
 } from '../requestResolution';
 import { countRequestsByDashboardStatus, normalizeRequestStatus } from '../requestStatus';
-import type { DashboardTask, DashboardRequest } from '../types';
 import type { DashboardDateFilter } from '../dateRange';
 import {
   addDataSheet,
@@ -24,30 +22,23 @@ import {
   writeRankingTable,
   type ExportMeta,
 } from './excelHelpers';
+import { fetchTasksAndRequestsForExport } from './fetchExportData';
 
 export type ExportSolicitudesParams = {
-  tasks: DashboardTask[];
-  requests: DashboardRequest[];
   dateFilter: DashboardDateFilter;
   selectedMonthDate: Date;
   appliedRange?: string | null;
-  companyFilter: string;
 };
 
+const GLOBAL_TREND_FILTER: DashboardDateFilter = 'all';
+
 export async function exportSolicitudesExcel(params: ExportSolicitudesParams): Promise<void> {
-  const { tasks, requests, dateFilter, selectedMonthDate, appliedRange, companyFilter } = params;
-  const isCompanyView = companyFilter !== ALL_COMPANIES_VALUE;
+  const { dateFilter, selectedMonthDate, appliedRange } = params;
 
-  const filteredTasks =
-    isCompanyView ? tasks.filter((t) => t.empresa_solicitud === companyFilter) : tasks;
-
-  const filteredRequests =
-    isCompanyView ? requests.filter((r) => r.empresa_solicitud === companyFilter) : requests;
-
-  const allRequests = requests;
-  const requestList = filteredRequests;
+  const { tasks, requests } = await fetchTasksAndRequestsForExport();
+  const requestList = requests;
   const stats = countRequestsByDashboardStatus(requestList);
-  const enriched = enrichRequestsWithResolution(requestList, filteredTasks);
+  const enriched = enrichRequestsWithResolution(requestList, tasks);
   const resolutionSummary = computeResolutionSummary(enriched);
 
   const workbook = new ExcelJS.Workbook();
@@ -59,16 +50,13 @@ export async function exportSolicitudesExcel(params: ExportSolicitudesParams): P
     dateFilter,
     selectedMonthDate,
     appliedRange,
-    extra: [
-      {
-        label: 'Empresa',
-        value: isCompanyView ? companyFilter : 'General (todas las empresas)',
-      },
-    ],
+    exportScope: 'global',
+    recordCount: requestList.length,
+    extra: [{ label: 'Empresa', value: 'General (todas las empresas)' }],
   };
 
-  const resumen = buildResumenSheet(workbook, meta);
-  let row = 8;
+  const { sheet: resumen, contentStartRow } = buildResumenSheet(workbook, meta);
+  let row = contentStartRow;
 
   row = writeIndicatorTable(resumen, row, 'Indicadores principales', [
     { label: 'Total solicitudes', value: stats.total },
@@ -78,16 +66,14 @@ export async function exportSolicitudesExcel(params: ExportSolicitudesParams): P
     { label: 'Pendientes', value: stats.pendiente },
   ]);
 
-  if (isCompanyView) {
-    row = writeIndicatorTable(resumen, row, 'Tiempos de cierre (empresa)', [
-      { label: 'Tiempo promedio', value: formatHoursLabel(resolutionSummary.avgHours) },
-      { label: 'Mediana', value: formatHoursLabel(resolutionSummary.medianHours) },
-      { label: 'Más rápida', value: formatHoursLabel(resolutionSummary.minHours) },
-      { label: 'Más lenta', value: formatHoursLabel(resolutionSummary.maxHours) },
-      { label: 'Con fecha de cierre', value: resolutionSummary.closedWithTime },
-      { label: 'Sin cierre registrado', value: resolutionSummary.openCount },
-    ]);
-  }
+  row = writeIndicatorTable(resumen, row, 'Tiempos de cierre (histórico)', [
+    { label: 'Tiempo promedio', value: formatHoursLabel(resolutionSummary.avgHours) },
+    { label: 'Mediana', value: formatHoursLabel(resolutionSummary.medianHours) },
+    { label: 'Más rápida', value: formatHoursLabel(resolutionSummary.minHours) },
+    { label: 'Más lenta', value: formatHoursLabel(resolutionSummary.maxHours) },
+    { label: 'Con fecha de cierre', value: resolutionSummary.closedWithTime },
+    { label: 'Sin cierre registrado', value: resolutionSummary.openCount },
+  ]);
 
   row = writeDistributionTable(
     resumen,
@@ -116,29 +102,30 @@ export async function exportSolicitudesExcel(params: ExportSolicitudesParams): P
     .slice(0, 10);
   row = writeRankingTable(resumen, row, 'Top 10 procesos', topProcess, 'Solicitudes');
 
-  if (!isCompanyView) {
-    const companyCounts = allRequests.reduce(
-      (acc, r) => {
-        const c = r.empresa_solicitud || 'Sin empresa';
-        acc[c] = (acc[c] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>
-    );
-    const topCompanies = Object.entries(companyCounts)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 8);
-    writeRankingTable(resumen, row, 'Solicitudes por empresa (Top 8)', topCompanies, 'Solicitudes');
-  }
-
-  const rawSeries = buildRequestTimeSeries(requestList, dateFilter, selectedMonthDate);
-  const trend = buildCompleteRequestTimeSeries(requestList, rawSeries, dateFilter, selectedMonthDate).map(
-    ([key, count]) => ({
-      label: formatRequestTimeSeriesLabel(key, dateFilter),
-      value: count,
-    })
+  const companyCounts = requestList.reduce(
+    (acc, r) => {
+      const c = r.empresa_solicitud || 'Sin empresa';
+      acc[c] = (acc[c] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
   );
+  const topCompanies = Object.entries(companyCounts)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+  writeRankingTable(resumen, row, 'Solicitudes por empresa (Top 8)', topCompanies, 'Solicitudes');
+
+  const rawSeries = buildRequestTimeSeries(requestList, GLOBAL_TREND_FILTER, selectedMonthDate);
+  const trend = buildCompleteRequestTimeSeries(
+    requestList,
+    rawSeries,
+    GLOBAL_TREND_FILTER,
+    selectedMonthDate
+  ).map(([key, count]) => ({
+    label: formatRequestTimeSeriesLabel(key, GLOBAL_TREND_FILTER),
+    value: count,
+  }));
 
   if (trend.length > 0) {
     const trendSheet = workbook.addWorksheet('Tendencia');
@@ -177,36 +164,32 @@ export async function exportSolicitudesExcel(params: ExportSolicitudesParams): P
     }))
   );
 
-  if (isCompanyView) {
-    addDataSheet(
-      workbook,
-      'Tiempos por solicitud',
-      [
-        { header: 'ID', key: 'id', width: 10 },
-        { header: 'Asunto', key: 'asunto', width: 32 },
-        { header: 'Proceso', key: 'proceso', width: 22 },
-        { header: 'Estado', key: 'estado', width: 14 },
-        { header: 'Creación', key: 'creacion', width: 14 },
-        { header: 'Cierre', key: 'cierre', width: 14 },
-        { header: 'Tiempo total', key: 'tiempo', width: 16 },
-        { header: 'Origen cierre', key: 'origen', width: 14 },
-      ],
-      enriched.map((r) => ({
-        id: r.id_solicitud,
-        asunto: r.asunto_solicitud,
-        proceso: r.proceso_solicitud,
-        estado: normalizeRequestStatus(r.estado_solicitud),
-        creacion: r.fecha_creacion_solicitud,
-        cierre: r.resolutionEndDate ?? r.fecha_resolucion_solicitud ?? '',
-        tiempo:
-          r.resolutionHours != null ? formatHoursLabel(r.resolutionHours) : 'En curso',
-        origen: r.resolutionSource ?? '',
-      }))
-    );
-  }
+  addDataSheet(
+    workbook,
+    'Tiempos por solicitud',
+    [
+      { header: 'ID', key: 'id', width: 10 },
+      { header: 'Asunto', key: 'asunto', width: 32 },
+      { header: 'Empresa', key: 'empresa', width: 22 },
+      { header: 'Proceso', key: 'proceso', width: 22 },
+      { header: 'Estado', key: 'estado', width: 14 },
+      { header: 'Creación', key: 'creacion', width: 14 },
+      { header: 'Cierre', key: 'cierre', width: 14 },
+      { header: 'Tiempo total', key: 'tiempo', width: 16 },
+      { header: 'Origen cierre', key: 'origen', width: 14 },
+    ],
+    enriched.map((r) => ({
+      id: r.id_solicitud,
+      asunto: r.asunto_solicitud,
+      empresa: r.empresa_solicitud,
+      proceso: r.proceso_solicitud,
+      estado: normalizeRequestStatus(r.estado_solicitud),
+      creacion: r.fecha_creacion_solicitud,
+      cierre: r.resolutionEndDate ?? r.fecha_resolucion_solicitud ?? '',
+      tiempo: r.resolutionHours != null ? formatHoursLabel(r.resolutionHours) : 'En curso',
+      origen: r.resolutionSource ?? '',
+    }))
+  );
 
-  const suffix = isCompanyView
-    ? companyFilter.replace(/[^\w\-]+/g, '_').slice(0, 24)
-    : 'general';
-  await downloadWorkbook(workbook, stampFilename(`Kronos-Solicitudes-${suffix}`, dateFilter));
+  await downloadWorkbook(workbook, stampFilename('Kronos-Solicitudes-general', 'global'));
 }

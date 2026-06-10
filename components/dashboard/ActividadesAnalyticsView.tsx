@@ -141,7 +141,6 @@ export default function ActividadesAnalyticsView() {
     try {
       setExportingExcel(true);
       await exportActividadesExcel({
-        tasks: activitiesWithCost,
         dateFilter,
         selectedMonthDate,
         appliedRange,
@@ -151,7 +150,7 @@ export default function ActividadesAnalyticsView() {
     } finally {
       setExportingExcel(false);
     }
-  }, [activities, dateFilter, selectedMonthDate, appliedRange]);
+  }, [dateFilter, selectedMonthDate, appliedRange]);
 
   const solicitudesUnicas = useMemo(
     () => new Set(rawTasks.map((t) => t.id_solicitud)).size,
