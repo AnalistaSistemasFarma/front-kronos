@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { AuthScope } from '../auth.js';
 import { effectiveCompanyFilter, type CompanyFilter } from '../scope.js';
 import { getPrisma, Prisma, queryReadOnly } from '../db.js';
+import { executeWrite, type TxClient } from '../write.js';
 import type { AuditLogger } from '../audit.js';
 
 interface ToolContext {
@@ -177,6 +178,34 @@ export const ENTITY_METADATA = {
   },
 } as const;
 
+/**
+ * Capacidades del servidor: 13 tools en total = 11 de LECTURA + 2 de ESCRITURA.
+ *
+ * Las de escritura están acotadas exclusivamente a CATEGORIZACIÓN (asignar la
+ * categoría de un caso o el proceso de una solicitud), son transaccionales,
+ * parametrizadas, validan alcance/coherencia y se auditan. NO debilitan el
+ * candado de solo lectura del resto del servidor.
+ */
+export const TOOL_CAPABILITIES = {
+  totalTools: 13,
+  readOnly: [
+    'kronos_metadata',
+    'kronos_list_requests',
+    'kronos_get_request',
+    'kronos_list_tickets',
+    'kronos_get_ticket',
+    'kronos_list_processes',
+    'kronos_list_activities',
+    'kronos_list_departments',
+    'kronos_list_categories',
+    'kronos_list_users',
+    'kronos_search',
+  ],
+  write: ['kronos_categorize_case', 'kronos_categorize_request'],
+  writeNote:
+    'El servidor YA NO es 100% solo lectura: existe una única ruta de escritura, acotada a categorización (caso: tabla puente category_case; solicitud: tabla puente process_category_request_general), transaccional, parametrizada y auditada. El candado assertReadOnlySql sigue intacto para las 11 tools de lectura.',
+} as const;
+
 export function registerTools(server: McpServer, ctx: ToolContext): void {
   const prisma = getPrisma();
 
@@ -185,7 +214,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_metadata',
-    'Describe las entidades y campos disponibles, y el alcance (empresas) de la API key actual. Solo lectura.',
+    'Describe las entidades y campos disponibles, el alcance (empresas) de la API key actual, y las capacidades del servidor (11 tools de lectura + 2 de escritura para categorizar).',
     {},
     async () =>
       withAudit(ctx, 'kronos_metadata', {}, async () => ({
@@ -194,7 +223,10 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           role: ctx.scope.role,
           allCompanies: ctx.scope.allCompanies,
           allowedCompanyIds: ctx.scope.allCompanies ? '*' : ctx.scope.companyIds,
-          readOnly: true,
+          // El servidor ya no es 100% solo lectura: una sola ruta de escritura
+          // acotada a categorización (ver capabilities.write).
+          readOnly: false,
+          capabilities: TOOL_CAPABILITIES,
           paging: { defaultPageSize: ctx.defaultPageSize, maxPageSize: ctx.maxPageSize },
           entities: ENTITY_METADATA,
         },
@@ -538,6 +570,204 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           ((out.requests as unknown[] | undefined)?.length ?? 0) +
           ((out.tickets as unknown[] | undefined)?.length ?? 0);
         return { result: { limit, offset, ...out }, rows };
+      })
+  );
+
+  // ===========================================================================
+  // TOOLS DE ESCRITURA (categorización) — camino separado, transaccional y
+  // parametrizado. NO pasan por el candado de solo lectura (queryReadOnly):
+  // usan executeWrite (src/write.ts), exclusivo de estas dos tools. El resto
+  // del servidor sigue en solo lectura.
+  // ===========================================================================
+
+  // ---------------------------------------------------------------------------
+  // kronos_categorize_case  (ESCRITURA) — tabla puente category_case
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_categorize_case',
+    'ESCRITURA. Asigna/recategoriza la terna (categoría, subcategoría, actividad) de un caso de mesa de ayuda en la tabla puente category_case. Solo afecta casos del alcance de empresa de la key. Valida que la terna sea jerárquicamente coherente. Transaccional y auditada.',
+    {
+      id_case: z.number().int().describe('id_case del caso a categorizar.'),
+      id_category: z.number().int().describe('id_category (raíz de la terna).'),
+      id_subcategory: z.number().int().describe('id_subcategory (debe colgar de id_category).'),
+      id_activity: z.number().int().describe('id_activity (debe colgar de id_subcategory).'),
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a acotar; se interseca con el alcance de la key.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_categorize_case', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const scopeClause = companyClause('c.company', filter);
+
+        const result = await executeWrite(async (tx: TxClient) => {
+          // a. El caso existe y pertenece al alcance. Si no, error genérico
+          //    (no se confirma existencia fuera de alcance — regla de oro).
+          const inScope = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok
+            FROM [case] c
+            WHERE c.id_case = ${args.id_case} AND ${scopeClause}
+          `);
+          if (inScope.length === 0) {
+            throw new Error('caso inexistente o fuera de alcance');
+          }
+
+          // b. La terna categoría/subcategoría/actividad es coherente.
+          const coherent = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok
+            FROM activity a
+            INNER JOIN subcategory s ON s.id_subcategory = a.id_subcategory
+            WHERE a.id_activity = ${args.id_activity}
+              AND a.id_subcategory = ${args.id_subcategory}
+              AND s.id_category = ${args.id_category}
+          `);
+          if (coherent.length === 0) {
+            throw new Error('terna categoría/subcategoría/actividad inconsistente');
+          }
+
+          // c. UPSERT en la tabla puente (1:1 con el caso).
+          const updated = await tx.$executeRaw(Prisma.sql`
+            UPDATE category_case
+            SET id_category = ${args.id_category},
+                id_subcategory = ${args.id_subcategory},
+                id_activity = ${args.id_activity}
+            WHERE id_case = ${args.id_case}
+          `);
+          let action: 'updated' | 'inserted' = 'updated';
+          if (updated === 0) {
+            await tx.$executeRaw(Prisma.sql`
+              INSERT INTO category_case (id_case, id_category, id_subcategory, id_activity)
+              VALUES (${args.id_case}, ${args.id_category}, ${args.id_subcategory}, ${args.id_activity})
+            `);
+            action = 'inserted';
+          }
+
+          // d. Resolver nombres (barato) para una respuesta clara.
+          const names = await tx.$queryRaw<
+            { category: string | null; subcategory: string | null; activity: string | null }[]
+          >(Prisma.sql`
+            SELECT cat.category, s.subcategory, a.activity
+            FROM activity a
+            INNER JOIN subcategory s ON s.id_subcategory = a.id_subcategory
+            INNER JOIN category cat ON cat.id_category = s.id_category
+            WHERE a.id_activity = ${args.id_activity}
+              AND a.id_subcategory = ${args.id_subcategory}
+              AND cat.id_category = ${args.id_category}
+          `);
+
+          return {
+            id_case: args.id_case,
+            action,
+            rowsAffected: action === 'updated' ? updated : 1,
+            category: { id_category: args.id_category, name: names[0]?.category ?? null },
+            subcategory: {
+              id_subcategory: args.id_subcategory,
+              name: names[0]?.subcategory ?? null,
+            },
+            activity: { id_activity: args.id_activity, name: names[0]?.activity ?? null },
+          };
+        });
+
+        return { result, rows: 1 };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_categorize_request  (ESCRITURA) — process_category_request_general
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_categorize_request',
+    'ESCRITURA. Asigna/recategoriza el PROCESO (process_category) de una solicitud general en la tabla puente process_category_request_general. Solo afecta solicitudes del alcance de empresa de la key. Valida que el proceso esté activo y habilitado para la empresa de la solicitud. Transaccional y auditada.',
+    {
+      id_request: z.number().int().describe('requests_general.id de la solicitud a categorizar.'),
+      id_process_category: z
+        .number()
+        .int()
+        .describe('process_category.id del proceso a asignar (debe estar activo y habilitado para la empresa).'),
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a acotar; se interseca con el alcance de la key.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_categorize_request', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const scopeClause = companyClause('rg.id_company', filter);
+
+        const result = await executeWrite(async (tx: TxClient) => {
+          // a. La solicitud existe y pertenece al alcance. Resolvemos su empresa
+          //    para validar la habilitación del proceso contra esa empresa.
+          const reqRow = await tx.$queryRaw<{ id_company: number }[]>(Prisma.sql`
+            SELECT TOP 1 rg.id_company
+            FROM requests_general rg
+            WHERE rg.id = ${args.id_request} AND ${scopeClause}
+          `);
+          const idCompany = reqRow[0]?.id_company;
+          if (idCompany === undefined) {
+            throw new Error('solicitud inexistente o fuera de alcance');
+          }
+
+          // b. El proceso existe, está activo y su category_request está
+          //    habilitada para la empresa de la solicitud.
+          const okProcess = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok
+            FROM process_category pc
+            INNER JOIN company_category_request ccr
+              ON ccr.id_category_request = pc.id_category_request
+            WHERE pc.id = ${args.id_process_category}
+              AND pc.active = 1
+              AND ccr.id_company = ${idCompany}
+          `);
+          if (okProcess.length === 0) {
+            throw new Error('proceso inexistente, inactivo o no habilitado para la empresa');
+          }
+
+          // c. UPSERT en la tabla puente (1:1 con la solicitud).
+          const updated = await tx.$executeRaw(Prisma.sql`
+            UPDATE process_category_request_general
+            SET id_process_category = ${args.id_process_category}
+            WHERE id_request_general = ${args.id_request}
+          `);
+          let action: 'updated' | 'inserted' = 'updated';
+          if (updated === 0) {
+            await tx.$executeRaw(Prisma.sql`
+              INSERT INTO process_category_request_general (id_request_general, id_process_category)
+              VALUES (${args.id_request}, ${args.id_process_category})
+            `);
+            action = 'inserted';
+          }
+
+          // Sincronización opcional de la columna legacy del row (best-effort,
+          // dentro de la misma transacción), igual que hace parcialmente la app.
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE requests_general
+            SET id_process_category = ${args.id_process_category}
+            WHERE id = ${args.id_request}
+          `);
+
+          // d. Nombre del proceso para una respuesta clara.
+          const names = await tx.$queryRaw<{ process_category: string | null }[]>(Prisma.sql`
+            SELECT pc.process_category
+            FROM process_category pc
+            WHERE pc.id = ${args.id_process_category}
+          `);
+
+          return {
+            id_request: args.id_request,
+            id_company: idCompany,
+            action,
+            rowsAffected: action === 'updated' ? updated : 1,
+            process: {
+              id_process_category: args.id_process_category,
+              name: names[0]?.process_category ?? null,
+            },
+          };
+        });
+
+        return { result, rows: 1 };
       })
   );
 }

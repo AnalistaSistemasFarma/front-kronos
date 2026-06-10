@@ -18,10 +18,24 @@ export interface CapturedRawQuery {
 
 export interface MockPrisma {
   capturedRaw: CapturedRawQuery[];
+  /** SQL capturado por la vía de ESCRITURA (executeRaw dentro de transacción). */
+  capturedWrite: CapturedRawQuery[];
   // Datos simulados por modelo.
   rawRows: Record<string, unknown[]>;
+  /**
+   * Resolutores opcionales para $queryRaw que dependen del SQL (p.ej. validar
+   * existencia/coherencia en las tools de escritura). Si una función devuelve
+   * `undefined`, se cae al comportamiento por defecto (lookup por FROM).
+   */
+  rawResolvers?: ((q: CapturedRawQuery) => unknown[] | undefined)[];
+  /** Filas afectadas que devuelve cada $executeRaw, en orden de llamada. */
+  executeRawResults?: number[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   $queryRaw: (...args: any[]) => Promise<unknown[]>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  $executeRaw: (...args: any[]) => Promise<number>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  $transaction: (fn: (tx: any) => Promise<unknown>) => Promise<unknown>;
   user: { findMany: (args: unknown) => Promise<unknown[]> };
   process: { findMany: (args: unknown) => Promise<unknown[]> };
   activity: { findMany: (args: unknown) => Promise<unknown[]> };
@@ -56,8 +70,27 @@ function unwrapSql(sql: SqlLike): CapturedRawQuery {
 }
 
 export function createMockPrisma(seed: Partial<MockPrisma['rawRows']> = {}): MockPrisma {
+  function capture(strings: unknown, rest: unknown[]): CapturedRawQuery {
+    if (isSqlLike(strings)) return unwrapSql(strings);
+    return { text: String(strings), values: rest };
+  }
+
+  function resolveQuery(captured: CapturedRawQuery): unknown[] {
+    // Resolutores explícitos (para escenarios de escritura) primero.
+    for (const r of mock.rawResolvers ?? []) {
+      const out = r(captured);
+      if (out !== undefined) return out;
+    }
+    const t = captured.text.toLowerCase();
+    if (t.includes('from requests_general')) return mock.rawRows.requests_general ?? [];
+    if (t.includes('from notes')) return mock.rawRows.notes ?? [];
+    if (t.includes('from [case]') || t.includes('from case')) return mock.rawRows.case ?? [];
+    return [];
+  }
+
   const mock: MockPrisma = {
     capturedRaw: [],
+    capturedWrite: [],
     rawRows: {
       requests_general: [],
       case: [],
@@ -67,19 +100,21 @@ export function createMockPrisma(seed: Partial<MockPrisma['rawRows']> = {}): Moc
     async $queryRaw(strings: unknown, ...rest: unknown[]) {
       // Prisma.sql`...` se pasa como un único objeto Prisma.Sql cuando se invoca
       // como prisma.$queryRaw(Prisma.sql`...`).
-      let captured: CapturedRawQuery;
-      if (isSqlLike(strings)) {
-        captured = unwrapSql(strings);
-      } else {
-        captured = { text: String(strings), values: rest };
-      }
+      const captured = capture(strings, rest);
       mock.capturedRaw.push(captured);
-
-      const t = captured.text.toLowerCase();
-      if (t.includes('from requests_general')) return mock.rawRows.requests_general ?? [];
-      if (t.includes('from notes')) return mock.rawRows.notes ?? [];
-      if (t.includes('from [case]') || t.includes('from case')) return mock.rawRows.case ?? [];
-      return [];
+      return resolveQuery(captured);
+    },
+    async $executeRaw(strings: unknown, ...rest: unknown[]) {
+      const captured = capture(strings, rest);
+      mock.capturedWrite.push(captured);
+      const seq = mock.executeRawResults ?? [];
+      const idx = mock.capturedWrite.length - 1;
+      return idx < seq.length ? seq[idx] : 1;
+    },
+    async $transaction(fn: (tx: unknown) => Promise<unknown>) {
+      // El tx expone los mismos $queryRaw/$executeRaw del mock (misma captura).
+      const tx = { $queryRaw: mock.$queryRaw, $executeRaw: mock.$executeRaw };
+      return fn(tx);
     },
     user: {
       async findMany(args: unknown) {

@@ -106,9 +106,16 @@ describe('enforcement de empresa en las tools', () => {
     const server = buildServer();
     const client = await connectClient(server);
     const { data } = await callJson(client, 'kronos_metadata', {});
-    const meta = data as { allowedCompanyIds: number[]; readOnly: boolean };
+    const meta = data as {
+      allowedCompanyIds: number[];
+      readOnly: boolean;
+      capabilities: { totalTools: number; write: string[] };
+    };
     expect(meta.allowedCompanyIds).toEqual([1]);
-    expect(meta.readOnly).toBe(true);
+    // Ya no es 100% solo lectura: hay una ruta de escritura acotada.
+    expect(meta.readOnly).toBe(false);
+    expect(meta.capabilities.totalTools).toBe(13);
+    expect(meta.capabilities.write).toContain('kronos_categorize_case');
   });
 });
 
@@ -164,19 +171,24 @@ describe('alcance admin "*" — ve todas las empresas', () => {
   });
 });
 
-describe('solo lectura — no hay tools de escritura', () => {
-  it('la lista de tools registradas no contiene mutaciones', async () => {
+describe('superficie de tools — 11 de lectura + 2 de escritura (categorización)', () => {
+  it('todas empiezan por kronos_; las únicas de escritura son las 2 de categorización', async () => {
     const server = buildServer();
     const client = await connectClient(server);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
 
-    // Todas las tools deben empezar por kronos_ y ser de lectura.
-    expect(names.length).toBeGreaterThan(0);
+    expect(names.length).toBe(13);
+    // Las únicas tools que mutan datos son las dos de categorización.
+    const writeTools = names.filter((n) => n.startsWith('kronos_categorize_'));
+    expect(writeTools.sort()).toEqual(['kronos_categorize_case', 'kronos_categorize_request']);
+    // Las demás (lectura) no usan verbos de mutación generales.
     const writeVerbs = /(create|update|delete|insert|remove|write|set_|authorize|assign|mutat)/i;
     for (const n of names) {
       expect(n.startsWith('kronos_')).toBe(true);
-      expect(writeVerbs.test(n)).toBe(false);
+      if (!n.startsWith('kronos_categorize_')) {
+        expect(writeVerbs.test(n)).toBe(false);
+      }
     }
     // Confirmamos el set esperado de lectura.
     expect(names).toContain('kronos_list_requests');

@@ -1,10 +1,12 @@
 /**
- * Servidor MCP HTTP de SOLO LECTURA para front-kronos (SynerLink).
+ * Servidor MCP HTTP para front-kronos (SynerLink).
  *
  * - Transporte: Streamable HTTP en la ruta /mcp (patrón del MCP de SAP).
  * - Autenticación: API key por agente (Bearer). Sin login humano.
  * - Alcance: cada key se filtra SIEMPRE por sus empresas permitidas.
- * - Solo lectura: no se registra ninguna tool de escritura.
+ * - 13 tools: 11 de LECTURA (candado assertReadOnlySql intacto) + 2 de
+ *   ESCRITURA acotadas a categorización, por una ruta de escritura separada
+ *   (src/write.ts), transaccional, parametrizada y auditada.
  */
 import express, { type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
@@ -25,7 +27,7 @@ export function buildMcpServer(
     { name: 'kronos-mcp', version: '1.0.0' },
     {
       instructions:
-        'Servidor de SOLO LECTURA de SynerLink/Kronos. Todas las consultas están limitadas a las empresas del alcance de la API key. No hay herramientas de escritura.',
+        'Servidor de SynerLink/Kronos. Todas las consultas/escrituras están limitadas a las empresas del alcance de la API key. 11 herramientas de lectura y 2 de escritura acotadas a categorización (kronos_categorize_case, kronos_categorize_request); el resto es solo lectura.',
     }
   );
   registerTools(server, { scope, audit, ...opts });
@@ -41,7 +43,7 @@ export function createApp(
 
   // Healthcheck SIN auth (no expone datos).
   app.get('/health', (_req: Request, res: Response) => {
-    res.json({ status: 'ok', readOnly: true });
+    res.json({ status: 'ok', readOnly: false, writeTools: ['kronos_categorize_case', 'kronos_categorize_request'] });
   });
 
   // Endpoint MCP. En modo stateless: una transport+server por petición.
@@ -108,7 +110,7 @@ if (isMain) {
   const app = createApp(config);
   app.listen(config.port, () => {
     console.log(
-      `[kronos-mcp] escuchando en http://0.0.0.0:${config.port}/mcp (solo lectura, ${config.apiKeys.length} agente(s) configurado(s))`
+      `[kronos-mcp] escuchando en http://0.0.0.0:${config.port}/mcp (11 lectura + 2 escritura/categorización, ${config.apiKeys.length} agente(s) configurado(s))`
     );
   });
 }

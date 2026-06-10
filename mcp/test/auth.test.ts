@@ -92,8 +92,10 @@ describe('autenticación por API key (Bearer)', () => {
   it('healthcheck no requiere auth', async () => {
     const res = await fetch(`${baseUrl}/health`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { readOnly: boolean };
-    expect(body.readOnly).toBe(true);
+    const body = (await res.json()) as { readOnly: boolean; writeTools: string[] };
+    // El servidor ya no es 100% solo lectura: expone las 2 tools de escritura.
+    expect(body.readOnly).toBe(false);
+    expect(body.writeTools).toContain('kronos_categorize_case');
   });
 });
 
