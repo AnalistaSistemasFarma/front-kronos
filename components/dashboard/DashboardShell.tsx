@@ -5,16 +5,18 @@ import { useRouter } from 'next/navigation';
 import { DashboardDataProvider } from '../../lib/dashboard/DashboardDataContext';
 import { DashboardTabProvider, useDashboardTab } from '../../lib/dashboard/DashboardTabContext';
 import { SolicitudesSubProvider } from '../../lib/dashboard/SolicitudesSubContext';
+import { TicketsSubProvider } from '../../lib/dashboard/TicketsSubContext';
 import DashboardNav from './DashboardNav';
 import SolicitudesHubView from './SolicitudesHubView';
 import ActividadesAnalyticsView from './ActividadesAnalyticsView';
-import TicketsAnalyticsView from './TicketsAnalyticsView';
+import TicketsHubView from './TicketsHubView';
 import SolicitudesSubNav from './SolicitudesSubNav';
+import TicketsSubNav from './TicketsSubNav';
 import DashboardAdminGate from './DashboardAdminGate';
 
 const MemoSolicitudesHub = memo(SolicitudesHubView);
 const MemoActividades = memo(ActividadesAnalyticsView);
-const MemoTickets = memo(TicketsAnalyticsView);
+const MemoTickets = memo(TicketsHubView);
 
 const panelClass = (active: boolean) =>
   active ? 'dashboard-panel dashboard-panel--active' : 'dashboard-panel';
@@ -28,6 +30,11 @@ function DashboardStickyChrome() {
       {activeTab === 'solicitudes' ? (
         <div className='dashboard-subnav-slot min-w-0'>
           <SolicitudesSubNav />
+        </div>
+      ) : null}
+      {activeTab === 'tickets' ? (
+        <div className='dashboard-subnav-slot min-w-0'>
+          <TicketsSubNav />
         </div>
       ) : null}
     </div>
@@ -74,9 +81,11 @@ export default function DashboardShell() {
       <DashboardDataProvider>
         <DashboardTabProvider>
           <SolicitudesSubProvider>
-            <RoutePrefetcher />
-            <DashboardStickyChrome />
-            <DashboardViews />
+            <TicketsSubProvider>
+              <RoutePrefetcher />
+              <DashboardStickyChrome />
+              <DashboardViews />
+            </TicketsSubProvider>
           </SolicitudesSubProvider>
         </DashboardTabProvider>
       </DashboardDataProvider>

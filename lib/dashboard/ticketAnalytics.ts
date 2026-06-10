@@ -23,6 +23,8 @@ export interface HelpDeskCase {
   department?: string;
   case_type?: string;
   category?: string;
+  subcategory?: string;
+  activity?: string;
   creation_date?: string | Date;
   end_date?: string | Date | null;
   /** Cierre efectivo: end_date o última nota en casos cerrados sin end_date */
