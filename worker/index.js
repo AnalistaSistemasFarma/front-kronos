@@ -18,7 +18,9 @@ self.addEventListener('push', (event) => {
     badge: '/iconocel.png',
     data: { url: data.url || '/' },
     requireInteraction: false,
-    tag: data.tag,
+    tag: data.tag || 'synerlink',
+    renotify: true,
+    vibrate: [120, 60, 120],
   };
 
   event.waitUntil(self.registration.showNotification(data.title, options));

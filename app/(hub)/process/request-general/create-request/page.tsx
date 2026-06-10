@@ -646,61 +646,8 @@ function RequestBoard() {
     }
   };
 
-  async function NotifySuccess(newTicket: any, formData: any) {
-    const notifications = newTicket.notifications;
-    if (!notifications) return;
-
-    const requestId = newTicket.id_request;
-    const subject = formData.subject;
-
-    const processEmails = [notifications.processEmail].filter(Boolean) as string[];
-    const taskEmails = ((notifications.taskEmails || []) as string[]).filter(
-      (e) => e && !processEmails.includes(e)
-    );
-
-    const calls: Promise<Response>[] = [];
-
-    if (processEmails.length > 0) {
-      calls.push(
-        fetch('/api/push/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            emails: processEmails,
-            payload: {
-              title: '📌 Solicitud asignada',
-              body: `#${requestId} - ${subject}`,
-              url: `https://groupsharedservices.farmalogica.com:8445/process/request-general/view-request?id=${requestId}&from=general-requests`,
-              tag: `request-assigned-${requestId}`,
-            },
-          }),
-        })
-      );
-    }
-
-    if (taskEmails.length > 0) {
-      calls.push(
-        fetch('/api/push/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            emails: taskEmails,
-            payload: {
-              title: '✅ Tarea asignada',
-              body: `Tienes una tarea en la solicitud #${requestId} - ${subject}`,
-              url: `https://groupsharedservices.farmalogica.com:8445/process/request-general/view-activities?id=${requestId}&from=assigned-activities`,
-              tag: `task-assigned-${requestId}`,
-            },
-          }),
-        })
-      );
-    }
-
-    try {
-      await Promise.all(calls);
-    } catch (err) {
-      console.error('[NotifySuccess] Error enviando push:', err);
-    }
+  async function NotifySuccess(_newTicket: unknown, _formData: unknown) {
+    // Push + campanita: el servidor envía en POST /api/requests-general/create-request
   }
 
   async function CheckOrCreateFolderAndUpload(

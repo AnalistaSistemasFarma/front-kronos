@@ -1,12 +1,21 @@
 import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig.js';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../auth/[...nextauth]/route';
 
 export async function POST(req) {
   try {
-    const body = await req.json();
-    const { email, subscription } = body;
+    const session = await getServerSession(authOptions);
+    const sessionEmail = session?.user?.email;
+    if (!sessionEmail) {
+      return new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401 });
+    }
 
-    if (!email || !subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+    const body = await req.json();
+    const { subscription } = body;
+    const email = sessionEmail;
+
+    if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
       return new Response(JSON.stringify({ error: 'Payload inválido' }), { status: 400 });
     }
 
@@ -51,6 +60,11 @@ export async function POST(req) {
 
 export async function DELETE(req) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
+      return new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401 });
+    }
+
     const body = await req.json();
     const { endpoint } = body;
     if (!endpoint) {
@@ -61,7 +75,12 @@ export async function DELETE(req) {
     await pool
       .request()
       .input('endpoint', sql.NVarChar(sql.MAX), endpoint)
-      .query(`DELETE FROM push_subscriptions WHERE CAST(endpoint AS NVARCHAR(450)) = CAST(@endpoint AS NVARCHAR(450))`);
+      .input('email', sql.NVarChar(255), session.user.email)
+      .query(`
+        DELETE FROM push_subscriptions
+        WHERE CAST(endpoint AS NVARCHAR(450)) = CAST(@endpoint AS NVARCHAR(450))
+          AND email = @email
+      `);
 
     return new Response(JSON.stringify({ success: true }), { status: 200 });
   } catch (err) {

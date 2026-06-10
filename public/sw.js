@@ -15,7 +15,9 @@ self.addEventListener('push', (event) => {
       icon: '/iconocel.png',
       badge: '/iconocel.png',
       data: { url: data.url || '/' },
-      tag: data.tag,
+      tag: data.tag || 'synerlink',
+      renotify: true,
+      vibrate: [120, 60, 120],
     })
   );
 });
