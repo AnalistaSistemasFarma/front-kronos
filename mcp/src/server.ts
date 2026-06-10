@@ -10,6 +10,7 @@
  */
 import express, { type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { loadConfig } from './config.js';
@@ -104,7 +105,7 @@ export function createApp(
 }
 
 // Arranque directo (no en tests).
-const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const config = loadConfig();
   const app = createApp(config);
