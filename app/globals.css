@@ -40,6 +40,7 @@ body {
 .app-page-shell {
   background-color: var(--app-bg, var(--background));
   color: var(--app-text, var(--foreground));
+  padding-top: var(--app-header-height);
 }
 
 .app-page-shell--fill {
@@ -109,7 +110,35 @@ body {
   color: var(--app-text);
 }
 
+/* Header fijo: evita efectos scroll-linked de sticky + header apilados */
+.app-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+}
+
 /* ─── Dashboard ─── */
+.dashboard-sticky-chrome {
+  position: sticky;
+  top: var(--app-header-height);
+  z-index: 40;
+  background-color: var(--app-bg, var(--background));
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+}
+
+.dashboard-subnav-slot {
+  padding-top: 0.35rem;
+}
+
+.dark .dashboard-sticky-chrome {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* @deprecated — usar dashboard-sticky-chrome */
 .dashboard-nav-sticky {
   position: sticky;
   top: var(--app-header-height);
@@ -121,15 +150,8 @@ body {
 }
 
 .dashboard-subnav-sticky {
-  position: sticky;
-  top: calc(var(--app-header-height) + 4.5rem);
-  z-index: 35;
-  background-color: var(--app-bg, var(--background));
+  /* Sin sticky propio: vive dentro de dashboard-sticky-chrome */
   padding-bottom: 0.35rem;
-}
-
-.dark .dashboard-nav-sticky {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 .dashboard-panels {

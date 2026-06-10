@@ -80,6 +80,10 @@ const ProcessSearch: React.FC<ProcessSearchProps> = ({
           flex-shrink: 0;
         }
 
+        :global(.dark) .search-icon {
+          color: #7ec8ef;
+        }
+
         .search-input {
           flex: 1;
           font-size: 16px;

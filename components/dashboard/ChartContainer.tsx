@@ -3,6 +3,7 @@
 import { Box, Skeleton } from '@mantine/core';
 import type { ChartData, ChartOptions, ChartType } from 'chart.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { scheduleLayoutUpdate } from '../../lib/dom/scheduleLayoutUpdate';
 import { getChartScrollMinWidth } from '../../lib/charts/chartScroll';
 import { ChartBox } from '../charts/ChartBox';
 import { useChartViewport } from './useChartViewport';
@@ -165,8 +166,8 @@ export function FillHeightChartContainer<T extends ChartType = ChartType>(
       if (next > 0) setHeight(next);
     };
 
-    update();
-    const observer = new ResizeObserver(update);
+    scheduleLayoutUpdate(update);
+    const observer = new ResizeObserver(() => scheduleLayoutUpdate(update));
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
