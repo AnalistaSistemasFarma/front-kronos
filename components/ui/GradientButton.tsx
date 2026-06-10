@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Button, ButtonProps } from '@mantine/core';
+import { useTheme } from '../providers';
 
 interface GradientButtonProps extends Omit<ButtonProps, 'variant'> {
   variant?: 'primary' | 'outline' | 'ghost';
@@ -18,28 +19,43 @@ const GradientButton: React.FC<GradientButtonProps> = ({
   className = '',
   ...props
 }) => {
-  const getVariantStyles = () => {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
+  const getVariantStyles = (): React.CSSProperties => {
     switch (variant) {
       case 'primary':
         return {
           background: 'linear-gradient(135deg, #113562 0%, #3db6e0 100%)',
           border: 'none',
           color: 'white',
-          position: 'relative' as const,
-          overflow: 'hidden' as const,
+          position: 'relative',
+          overflow: 'hidden',
         };
       case 'outline':
-        return {
-          background: 'transparent',
-          border: '1px solid #113562',
-          color: '#113562',
-        };
+        return isDark
+          ? {
+              background: 'rgba(94, 179, 232, 0.08)',
+              border: '1px solid rgba(126, 200, 239, 0.45)',
+              color: '#9dd4f5',
+            }
+          : {
+              background: 'transparent',
+              border: '1px solid #113562',
+              color: '#113562',
+            };
       case 'ghost':
-        return {
-          background: 'transparent',
-          border: 'none',
-          color: '#113562',
-        };
+        return isDark
+          ? {
+              background: 'transparent',
+              border: 'none',
+              color: '#9dd4f5',
+            }
+          : {
+              background: 'transparent',
+              border: 'none',
+              color: '#113562',
+            };
       default:
         return {};
     }
@@ -49,7 +65,9 @@ const GradientButton: React.FC<GradientButtonProps> = ({
     <>
       <Button
         {...props}
-        className={`gradient-button gradient-button--${variant} ${className}`}
+        className={`gradient-button gradient-button--${variant} ${
+          isDark ? 'gradient-button--dark' : ''
+        } ${className}`}
         style={{
           ...getVariantStyles(),
           transition: 'all 0.3s ease',
@@ -86,14 +104,24 @@ const GradientButton: React.FC<GradientButtonProps> = ({
         }
 
         .gradient-button--outline:hover {
-          background: 'rgba(102, 126, 234, 0.1)';
+          background: rgba(17, 53, 98, 0.08);
           transform: translateY(-2px);
-          box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+          box-shadow: 0 8px 20px rgba(17, 53, 98, 0.15);
+        }
+
+        .gradient-button--outline.gradient-button--dark:hover {
+          background: rgba(94, 179, 232, 0.16);
+          border-color: rgba(126, 200, 239, 0.65);
+          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
         }
 
         .gradient-button--ghost:hover {
-          background: 'rgba(102, 126, 234, 0.1)';
+          background: rgba(17, 53, 98, 0.08);
           transform: translateY(-1px);
+        }
+
+        .gradient-button--ghost.gradient-button--dark:hover {
+          background: rgba(94, 179, 232, 0.12);
         }
 
         .gradient-button:active {

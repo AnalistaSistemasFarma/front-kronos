@@ -62,6 +62,11 @@ const ProcessSearch: React.FC<ProcessSearchProps> = ({
           border: 1px solid rgba(75, 85, 99, 0.3);
         }
 
+        :global(.dark) .process-search:focus-within {
+          border-color: rgba(126, 200, 239, 0.45);
+          box-shadow: 0 0 0 3px rgba(94, 179, 232, 0.12);
+        }
+
         .process-search:focus-within {
           border-color: #113562;
           box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
