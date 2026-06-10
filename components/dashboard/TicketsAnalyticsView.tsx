@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import {
   Alert,
   Badge,
+  Box,
   Card,
   Flex,
   Grid,
@@ -32,12 +33,13 @@ import {
 } from '@tabler/icons-react';
 import {
   buildAreaLineChart,
-  buildHoursLineChart,
   buildPieChart,
   buildTechnicianPerformanceLineChart,
+  buildTrendTimeChart,
   buildVerticalBarChart,
   ticketStatusChartColors,
 } from '../../lib/charts/builders';
+import { trendDownColor, trendUpColor } from '../../lib/charts/defaults';
 import { getFilterLabel } from '../../lib/dashboard/dateRange';
 import {
   ALL_TECHNICIANS_VALUE,
@@ -47,11 +49,9 @@ import {
   buildCompleteCaseTimeSeries,
   buildTeamSummary,
   buildTechnicianPerformanceTimeSeries,
-  caseToResolutionTask,
   countByStatus,
   filterCasesByTechnician,
   formatCaseTimeSeriesLabel,
-  formatHoursLabel,
   formatResolutionDuration,
   listTechnicians,
   dedupeHelpDeskCases,
@@ -59,7 +59,7 @@ import {
 } from '../../lib/dashboard/ticketAnalytics';
 import { exportTicketsExcel } from '../../lib/dashboard/excel';
 import { useDashboardTickets } from '../../lib/dashboard/useDashboardTickets';
-import { ResolutionTimeTrendChart } from './ResolutionTimeTrendChart';
+import { toChartRows } from '../../lib/dashboard/resolutionTimeSeries';
 import {
   ActividadesSection,
   ChartCard,
@@ -69,7 +69,7 @@ import {
   StatusInsightPanel,
   type StatusInsightItem,
 } from './actividades/ActividadesUi';
-import { ChartContainer } from './ChartContainer';
+import { ChartContainer, FillHeightChartContainer } from './ChartContainer';
 import DashboardDateToolbar, { DashboardPeriodHint } from './DashboardDateToolbar';
 import DashboardPageShell from './DashboardPageShell';
 import { useChartViewport } from './useChartViewport';
@@ -238,15 +238,6 @@ export default function TicketsAnalyticsView() {
     [scopedCases, isIndividualView, technicianFilter]
   );
 
-  const resolutionChartPoints = useMemo(
-    () =>
-      resolutionSeries.points.map((p) => ({
-        label: p.label,
-        value: p.avgHours,
-      })),
-    [resolutionSeries.points]
-  );
-
   const technicianPerformanceSeries = useMemo(
     () => buildTechnicianPerformanceTimeSeries(cases, dateFilter, selectedMonthDate),
     [cases, dateFilter, selectedMonthDate]
@@ -264,11 +255,48 @@ export default function TicketsAnalyticsView() {
     cutout: '62%',
   });
   const creationLine = buildAreaLineChart(creationTimeSeries, projectColors.secondary);
-  const resolutionLine = buildHoursLineChart(
-    resolutionChartPoints,
-    projectColors.primary,
-    formatHoursLabel
+
+  const creationLineOptions = useMemo(
+    () => ({
+      ...creationLine.options,
+      plugins: {
+        ...creationLine.options.plugins,
+        tooltip: {
+          ...creationLine.options.plugins?.tooltip,
+          callbacks: {
+            title: (items: { label?: string }[]) => `Periodo: ${items[0]?.label ?? ''}`,
+            label: (ctx: { parsed: { y: number | null } }) =>
+              `${ctx.parsed.y ?? 0} ${ctx.parsed.y === 1 ? 'ticket nuevo' : 'tickets nuevos'}`,
+          },
+        },
+      },
+    }),
+    [creationLine.options]
   );
+
+  const creationStats = useMemo(() => {
+    const total = creationTimeSeries.reduce((sum, point) => sum + point.value, 0);
+    let peak = { label: '—', value: 0 };
+    for (const point of creationTimeSeries) {
+      if (point.value > peak.value) {
+        peak = { label: point.label, value: point.value };
+      }
+    }
+    return { total, peak };
+  }, [creationTimeSeries]);
+
+  const resolutionChartRows = useMemo(
+    () => toChartRows(resolutionSeries.points),
+    [resolutionSeries.points]
+  );
+
+  const resolutionTrendChart = useMemo(() => {
+    if (resolutionChartRows.length === 0) return null;
+    const maxTiempo = Math.max(...resolutionChartRows.map((d) => d.tiempo), 0.05);
+    const yMax = maxTiempo < 1 ? Math.max(maxTiempo * 1.4, 0.08) : maxTiempo * 1.2;
+    return buildTrendTimeChart(resolutionChartRows, yMax, chartViewport.isMobile);
+  }, [resolutionChartRows, chartViewport.isMobile]);
+
   const companyBar = buildVerticalBarChart(
     companyChartData.map((d) => ({ name: d.name, value: d.value })),
     projectColors.primary,
@@ -287,10 +315,37 @@ export default function TicketsAnalyticsView() {
   }, [technicianPerformanceSeries, chartViewport.isCompact]);
 
   const formatNumber = (n: number) => new Intl.NumberFormat('es-CO').format(n);
-  const avgHours =
-    (isIndividualView
+
+  const avgHours = useMemo(() => {
+    const fromTeam = isIndividualView
       ? selectedTechMetrics?.avgResolutionHours
-      : teamSummary.avgResolutionHours) ?? null;
+      : teamSummary.avgResolutionHours;
+    return fromTeam ?? resolutionSeries.overallAvgHours;
+  }, [
+    isIndividualView,
+    selectedTechMetrics?.avgResolutionHours,
+    teamSummary.avgResolutionHours,
+    resolutionSeries.overallAvgHours,
+  ]);
+
+  const resolutionKpiHint = useMemo(() => {
+    const measured = resolutionSeries.completedTasks;
+    if (avgHours != null) {
+      const base = `Creación → cierre · ${measured} ${measured === 1 ? 'caso medido' : 'casos medidos'}`;
+      return resolutionSeries.latestChangeLabel
+        ? `${base} · ${resolutionSeries.latestChangeLabel}`
+        : base;
+    }
+    if (scopedCounts.resuelto > 0) {
+      return `${scopedCounts.resuelto} resueltos sin fecha de cierre registrada`;
+    }
+    return 'Sin casos resueltos con fechas en el periodo';
+  }, [
+    avgHours,
+    resolutionSeries.completedTasks,
+    resolutionSeries.latestChangeLabel,
+    scopedCounts.resuelto,
+  ]);
 
   if (sessionStatus === 'loading' && cases.length === 0) {
     return (
@@ -300,6 +355,37 @@ export default function TicketsAnalyticsView() {
       </DashboardPageShell>
     );
   }
+
+  const pairedCreationChartCard = (
+    <ChartCard
+      height='100%'
+      title='Entrada de tickets'
+      description='Cuántos casos nuevos llegan en cada periodo. Una línea que sube indica más demanda de soporte.'
+    >
+      {loading ? (
+        <Skeleton style={{ flex: 1, minHeight: 160 }} radius='md' />
+      ) : creationTimeSeries.length > 0 ? (
+        <FillHeightChartContainer
+          type='line'
+          scrollable={false}
+          data={{
+            ...creationLine.data,
+            datasets: creationLine.data.datasets.map((ds) => ({
+              ...ds,
+              label: 'Tickets nuevos',
+            })),
+          }}
+          options={creationLineOptions}
+        />
+      ) : (
+        <Flex flex={1} align='center' justify='center' mih={160}>
+          <Text c='dimmed' size='sm' ta='center' maw={280}>
+            No hubo tickets creados en este periodo
+          </Text>
+        </Flex>
+      )}
+    </ChartCard>
+  );
 
   return (
     <DashboardPageShell
@@ -414,7 +500,7 @@ export default function TicketsAnalyticsView() {
           <KpiStatCard
             label='Tiempo prom. resolución'
             value={loading ? '—' : avgHours != null ? formatResolutionDuration(avgHours) : '—'}
-            hint='Creación → cierre (casos resueltos)'
+            hint={resolutionKpiHint}
             color={projectColors.primary}
             icon={IconClock}
             loading={loading}
@@ -488,10 +574,184 @@ export default function TicketsAnalyticsView() {
         </SimpleGrid>
       </ActividadesSection>
 
-      {/* 3 · Desempeño: equipo o analista seleccionado */}
+      {/* 3 · Evolución temporal: volumen y tiempos de resolución */}
+      <ActividadesSection
+        priority={3}
+        title='Evolución en el tiempo'
+        description={
+          isIndividualView
+            ? `Tiempos de cierre de ${technicianFilter} en ${getFilterLabel(dateFilter).toLowerCase()}.`
+            : `Resumen de demanda y velocidad de cierre del equipo en ${getFilterLabel(dateFilter).toLowerCase()}.`
+        }
+      >
+        <SimpleGrid cols={{ base: 1, sm: isIndividualView ? 2 : 3 }} spacing='sm' mb='lg'>
+          {!isIndividualView && (
+            <>
+              <Paper p='md' radius='md' withBorder>
+                <Text size='xs' c='dimmed' tt='uppercase' fw={600} mb={4}>
+                  Tickets creados
+                </Text>
+                <Text fw={800} size='xl' style={{ color: projectColors.primary }}>
+                  {loading ? '—' : formatNumber(creationStats.total)}
+                </Text>
+                <Text size='xs' c='dimmed' mt={4}>
+                  Entraron al soporte en el periodo
+                </Text>
+              </Paper>
+              <Paper p='md' radius='md' withBorder>
+                <Text size='xs' c='dimmed' tt='uppercase' fw={600} mb={4}>
+                  Mayor entrada
+                </Text>
+                <Text fw={800} size='xl' style={{ color: projectColors.secondary }}>
+                  {loading ? '—' : formatNumber(creationStats.peak.value)}
+                </Text>
+                <Text size='xs' c='dimmed' mt={4} lineClamp={1}>
+                  {loading ? '—' : creationStats.peak.label}
+                </Text>
+              </Paper>
+            </>
+          )}
+          {isIndividualView && (
+            <Paper p='md' radius='md' withBorder>
+              <Text size='xs' c='dimmed' tt='uppercase' fw={600} mb={4}>
+                Casos asignados
+              </Text>
+              <Text fw={800} size='xl' style={{ color: projectColors.primary }}>
+                {loading ? '—' : formatNumber(scopedCounts.total)}
+              </Text>
+              <Text size='xs' c='dimmed' mt={4}>
+                Del analista en el periodo
+              </Text>
+            </Paper>
+          )}
+          <Paper p='md' radius='md' withBorder>
+            <Text size='xs' c='dimmed' tt='uppercase' fw={600} mb={4}>
+              Tiempo prom. de cierre
+            </Text>
+            <Text fw={800} size='xl' style={{ color: projectColors.primary }}>
+              {loading ? '—' : avgHours != null ? formatResolutionDuration(avgHours) : '—'}
+            </Text>
+            <Text size='xs' c='dimmed' mt={4} lineClamp={2}>
+              {loading
+                ? '—'
+                : resolutionSeries.completedTasks > 0
+                  ? `${resolutionSeries.completedTasks} casos resueltos medidos`
+                  : 'Sin cierres con fecha en el periodo'}
+            </Text>
+          </Paper>
+        </SimpleGrid>
+
+        <ChartCard
+          height='auto'
+          title='Tiempo de resolución'
+          description='Tiempo desde que se crea el caso (creation_date) hasta que se cierra (end_date). Solo casos resueltos o cancelados con fecha de cierre.'
+        >
+          {loading ? (
+            <Skeleton height={chartHeights.standard} />
+          ) : resolutionTrendChart ? (
+            <Stack gap='sm'>
+              <Group justify='space-between' wrap='wrap' gap='xs'>
+                <Box>
+                  <Text size='xs' c='dimmed'>
+                    Promedio del periodo
+                  </Text>
+                  <Text fw={800} size='lg' style={{ color: projectColors.primary }}>
+                    {formatResolutionDuration(resolutionSeries.overallAvgHours ?? 0)}
+                  </Text>
+                </Box>
+                {resolutionSeries.latestChangeLabel && (
+                  <Paper px='sm' py={6} radius='md' withBorder>
+                    <Text size='xs' c='dimmed' mb={2}>
+                      Último periodo
+                    </Text>
+                    <Text
+                      size='xs'
+                      fw={700}
+                      style={{
+                        color:
+                          resolutionSeries.latestTrend === 'up'
+                            ? trendUpColor
+                            : resolutionSeries.latestTrend === 'down'
+                              ? trendDownColor
+                              : undefined,
+                      }}
+                    >
+                      {resolutionSeries.latestChangeLabel}
+                    </Text>
+                  </Paper>
+                )}
+              </Group>
+              <ChartContainer
+                type='line'
+                data={resolutionTrendChart.data}
+                options={resolutionTrendChart.options}
+                height={chartHeights.standard - 56}
+              />
+              {resolutionSeries.points.length > 1 && (
+                <Box className='chart-scroll-x'>
+                  <Group gap='xs' wrap='nowrap' pb={4} style={{ width: 'max-content', minWidth: '100%' }}>
+                    {resolutionSeries.points.slice(1).map((point) => (
+                      <Paper
+                        key={point.periodKey}
+                        px='sm'
+                        py={6}
+                        radius='xl'
+                        withBorder
+                        style={{ flexShrink: 0 }}
+                      >
+                        <Group gap={6} wrap='nowrap'>
+                          <Text size='xs' fw={600} c='dimmed'>
+                            {point.label}
+                          </Text>
+                          {point.changeLabel && (
+                            <Text
+                              size='xs'
+                              fw={700}
+                              style={{
+                                color:
+                                  point.trend === 'up'
+                                    ? trendUpColor
+                                    : point.trend === 'down'
+                                      ? trendDownColor
+                                      : undefined,
+                              }}
+                            >
+                              {point.changeLabel}
+                            </Text>
+                          )}
+                        </Group>
+                      </Paper>
+                    ))}
+                  </Group>
+                </Box>
+              )}
+              <Text size='xs' c='dimmed' ta='center'>
+                <Text span fw={700} style={{ color: trendUpColor }}>
+                  Verde
+                </Text>{' '}
+                = tardó más ·{' '}
+                <Text span fw={700} style={{ color: trendDownColor }}>
+                  Rojo
+                </Text>{' '}
+                = fue más rápido vs. periodo anterior
+              </Text>
+            </Stack>
+          ) : (
+            <Flex h={chartHeights.standard} align='center' justify='center'>
+              <Text c='dimmed' size='sm' ta='center' maw={300}>
+                {scopedCounts.resuelto + scopedCounts.cerrado > 0
+                  ? 'Hay casos cerrados, pero faltan fechas de cierre en BD para calcular tiempos'
+                  : 'No hay casos cerrados en este periodo'}
+              </Text>
+            </Flex>
+          )}
+        </ChartCard>
+        </ActividadesSection>
+
+      {/* 4 · Desempeño: equipo o analista seleccionado */}
       {isIndividualView && selectedTechMetrics ? (
         <ActividadesSection
-          priority={3}
+          priority={4}
           title='Desempeño del analista'
           description='Comparación con el equipo y desglose de carga individual.'
         >
@@ -534,52 +794,61 @@ export default function TicketsAnalyticsView() {
         </ActividadesSection>
       ) : (
         <ActividadesSection
-          priority={3}
+          priority={4}
           title='Desempeño por responsable'
-          description='Quién concentra más casos, cómo evoluciona su carga y ranking del equipo.'
+          description='Entrada de demanda, carga por analista y evolución de casos en el periodo.'
         >
-          <Grid gutter='lg'>
-            <Grid.Col span={{ base: 12, lg: 5 }}>
-              <RankedListCard
-                title='Mayor carga de casos'
-                description='Top técnicos por volumen en el periodo'
-                items={topTechnicians}
-                formatValue={(n) => `${formatNumber(n)} casos`}
-                emptyMessage='No hay casos asignados en este periodo'
-              />
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, lg: 7 }}>
-              <ChartCard
-                title='Rendimiento por técnico'
-                description={`Evolución de casos · ${getFilterLabel(dateFilter)} (máx. 12)${
-                  chartViewport.isCompact ? ' · Toca un punto para ver el detalle' : ''
-                }`}
-              >
-                {loading ? (
-                  <Skeleton height={techPerformanceChartHeight} />
-                ) : techPerformanceLine ? (
-                  <ChartContainer
-                    type='line'
-                    data={techPerformanceLine.data}
-                    options={techPerformanceLine.options}
-                    height={techPerformanceChartHeight}
-                    scrollable={
-                      (technicianPerformanceSeries?.periodLabels.length ?? 0) >
-                      (chartViewport.isCompact ? 5 : 8)
-                    }
+          <Stack gap='lg'>
+            <Grid gutter='lg' align='stretch'>
+              <Grid.Col span={{ base: 12, lg: 6 }} style={{ display: 'flex' }}>
+                <Box w='100%' style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  {pairedCreationChartCard}
+                </Box>
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, lg: 6 }} style={{ display: 'flex' }}>
+                <Box w='100%' style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <RankedListCard
+                    fillHeight
+                    title='Mayor carga de casos'
+                    description='Top técnicos por volumen en el periodo'
+                    items={topTechnicians}
+                    formatValue={(n) => `${formatNumber(n)} casos`}
+                    emptyMessage='No hay casos asignados en este periodo'
                   />
-                ) : (
-                  <Flex h={techPerformanceChartHeight} align='center' justify='center'>
-                    <Text c='dimmed' size='sm'>
-                      Sin datos de técnicos
-                    </Text>
-                  </Flex>
-                )}
-              </ChartCard>
-            </Grid.Col>
-          </Grid>
+                </Box>
+              </Grid.Col>
+            </Grid>
 
-          <ChartCard title='Ranking del equipo' description='Puntaje, tiempos y estados por analista'>
+            <ChartCard
+              height='auto'
+              title='Rendimiento por técnico'
+              description={`Casos atendidos por cada analista · ${getFilterLabel(dateFilter)} (máx. 12)${
+                chartViewport.isCompact ? ' · Toca un punto para ver el detalle' : ''
+              }`}
+            >
+              {loading ? (
+                <Skeleton height={techPerformanceChartHeight} />
+              ) : techPerformanceLine ? (
+                <ChartContainer
+                  type='line'
+                  data={techPerformanceLine.data}
+                  options={techPerformanceLine.options}
+                  height={techPerformanceChartHeight}
+                  scrollable={
+                    (technicianPerformanceSeries?.periodLabels.length ?? 0) >
+                    (chartViewport.isCompact ? 5 : 8)
+                  }
+                />
+              ) : (
+                <Flex h={techPerformanceChartHeight} align='center' justify='center'>
+                  <Text c='dimmed' size='sm'>
+                    Sin datos de técnicos
+                  </Text>
+                </Flex>
+              )}
+            </ChartCard>
+
+            <ChartCard height='auto' title='Ranking del equipo' description='Puntaje, tiempos y estados por analista'>
             {loading ? (
               <Skeleton height={200} />
             ) : teamSummary.technicians.length > 0 ? (
@@ -628,13 +897,14 @@ export default function TicketsAnalyticsView() {
                 Sin técnicos en el periodo
               </Text>
             )}
-          </ChartCard>
+            </ChartCard>
+          </Stack>
         </ActividadesSection>
       )}
 
-      {/* 4 · Demanda: qué empresas generan más soporte */}
+      {/* 5 · Demanda: qué empresas generan más soporte */}
       <ActividadesSection
-        priority={4}
+        priority={5}
         title='Demanda por empresa'
         description={
           isIndividualView
@@ -660,55 +930,6 @@ export default function TicketsAnalyticsView() {
             </Flex>
           )}
         </ChartCard>
-      </ActividadesSection>
-
-      {/* 5 · Evolución temporal: tendencias de volumen y tiempos */}
-      <ActividadesSection
-        priority={5}
-        title='Evolución en el tiempo'
-        description='Tendencias históricas del periodo: volumen de entrada y eficiencia de resolución.'
-      >
-        <Grid gutter='lg'>
-          <Grid.Col span={{ base: 12, md: 6 }}>
-            <ChartCard
-              title='Casos creados'
-              description={`Entrada de tickets · ${getFilterLabel(dateFilter)}`}
-            >
-              {loading ? (
-                <Skeleton height={chartHeights.standard} />
-              ) : creationTimeSeries.length > 0 ? (
-                <ChartContainer
-                  type='line'
-                  data={creationLine.data}
-                  options={creationLine.options}
-                  height={chartHeights.standard}
-                />
-              ) : (
-                <Flex h={chartHeights.standard} align='center' justify='center'>
-                  <Text c='dimmed' size='sm'>
-                    Sin casos en el periodo
-                  </Text>
-                </Flex>
-              )}
-            </ChartCard>
-          </Grid.Col>
-          
-        </Grid>
-
-        <ResolutionTimeTrendChart
-          tasks={scopedCases.map(caseToResolutionTask)}
-          assigneeFilter={isIndividualView ? technicianFilter : null}
-          title={
-            isIndividualView
-              ? 'Tendencia de tiempos de resolución'
-              : 'Tendencia de tiempos del equipo'
-          }
-          subtitle={
-            isIndividualView
-              ? `Promedio desde apertura hasta cierre · ${technicianFilter}`
-              : 'Promedio del grupo en cada periodo de cierre'
-          }
-        />
       </ActividadesSection>
 
       {/* 6 · Detalle operativo: últimos casos */}

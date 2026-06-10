@@ -7,7 +7,15 @@ export interface TaskForResolutionTime {
   hora_inicio_tarea?: string | null;
   /** end_date — cuando finaliza la tarea */
   fecha_fin_tarea?: string | null;
+  /** Resolución registrada (alternativa si end_date viene vacío en BD) */
+  fecha_resolucion_tarea?: string | null;
 }
+
+/** Máximo razonable para descartar registros inconsistentes en BD (30 días). */
+const MAX_RESOLUTION_HOURS = 30 * 24;
+
+/** Tickets pueden tardar más que actividades puntuales. */
+export const MAX_TICKET_RESOLUTION_HOURS = 365 * 24;
 
 export type ResolutionTrend = 'up' | 'down' | 'flat';
 
@@ -25,6 +33,9 @@ export interface ResolutionTimePoint {
   /** Variación porcentual vs periodo anterior */
   changePct: number | null;
   trend: ResolutionTrend | null;
+  /** Texto legible del cambio vs periodo anterior */
+  changeLabel: string | null;
+  prevAvgHours: number | null;
 }
 
 export interface ResolutionTimeSummary {
@@ -34,6 +45,7 @@ export interface ResolutionTimeSummary {
   latestAvgHours: number | null;
   latestChangePct: number | null;
   latestTrend: ResolutionTrend | null;
+  latestChangeLabel: string | null;
 }
 
 type BucketMode = 'day' | 'week' | 'month';
@@ -97,26 +109,48 @@ function formatBucketLabel(date: Date, mode: BucketMode): string {
   return date.toLocaleDateString('es-CO', { month: 'short', year: 'numeric' });
 }
 
-/** Duración en horas desde inicio de trabajo (start_date) hasta finalización (end_date). */
-export function getTaskResolutionHours(task: TaskForResolutionTime): number | null {
+/**
+ * Duración en horas desde inicio de trabajo hasta cierre.
+ * Usa fecha_fin_tarea y, si falta, fecha_resolucion_tarea.
+ */
+export function getTaskResolutionHours(
+  task: TaskForResolutionTime,
+  maxHours: number = MAX_RESOLUTION_HOURS
+): number | null {
   const start = parseTaskDate(task.hora_inicio_tarea);
-  const end = parseTaskDate(task.fecha_fin_tarea);
+  const end =
+    parseTaskDate(task.fecha_fin_tarea) ?? parseTaskDate(task.fecha_resolucion_tarea);
   if (!start || !end) return null;
 
   const ms = end.getTime() - start.getTime();
   if (ms < 0) return null;
 
-  return ms / 3_600_000;
+  const hours = ms / 3_600_000;
+  if (hours > maxHours) return null;
+
+  return hours;
+}
+
+function isTaskClosedForSeries(task: TaskForResolutionTime): boolean {
+  if (task.fecha_fin_tarea || task.fecha_resolucion_tarea) return true;
+  const s = (task.estado_tarea || '').toLowerCase();
+  return (
+    s.includes('completad') ||
+    s.includes('resuelt') ||
+    s.includes('cerrad') ||
+    s.includes('cancel')
+  );
 }
 
 export function formatResolutionDuration(hours: number): string {
   if (!Number.isFinite(hours) || hours < 0) return '—';
-  if (hours < 1) {
-    const mins = Math.max(1, Math.round(hours * 60));
-    return `${mins} min`;
-  }
+  const totalMinutes = Math.round(hours * 60);
+  if (totalMinutes < 1) return '< 1 min';
+  if (totalMinutes < 60) return `${totalMinutes} min`;
   if (hours < 24) {
-    return `${hours.toFixed(1).replace(/\.0$/, '')} h`;
+    const h = Math.floor(hours);
+    const m = Math.round((hours - h) * 60);
+    return m > 0 ? `${h} h ${m} min` : `${h} h`;
   }
   const days = hours / 24;
   if (days < 2) return `${days.toFixed(1)} día`;
@@ -128,6 +162,61 @@ function computeTrend(changePct: number | null): ResolutionTrend | null {
   if (changePct > 0.5) return 'up';
   if (changePct < -0.5) return 'down';
   return 'flat';
+}
+
+const MIN_PREV_HOURS_FOR_PCT = 5 / 60; // 5 min — por debajo, usar diferencia absoluta
+const MAX_DISPLAY_PCT = 300;
+
+/** Cambio entendible: minutos/horas concretos en lugar de % absurdos. */
+export function formatTrendChange(
+  currentHours: number,
+  prevHours: number | null
+): { changePct: number | null; changeLabel: string | null; trend: ResolutionTrend | null } {
+  if (prevHours == null) {
+    return { changePct: null, changeLabel: 'Primer periodo con datos', trend: null };
+  }
+
+  const deltaHours = currentHours - prevHours;
+  const deltaMinutes = Math.round(Math.abs(deltaHours) * 60);
+  const direction = deltaHours > 0 ? 'up' : deltaHours < 0 ? 'down' : 'flat';
+
+  if (Math.abs(deltaHours) < 1 / 120) {
+    return { changePct: 0, changeLabel: 'Sin cambio', trend: 'flat' };
+  }
+
+  if (prevHours < MIN_PREV_HOURS_FOR_PCT) {
+    const label =
+      direction === 'up'
+        ? `Tardó ${deltaMinutes} min más`
+        : direction === 'down'
+          ? `Fue ${deltaMinutes} min más rápido`
+          : 'Sin cambio';
+    return { changePct: null, changeLabel: label, trend: direction };
+  }
+
+  const changePct = (deltaHours / prevHours) * 100;
+  const trend = computeTrend(changePct);
+
+  if (Math.abs(changePct) > MAX_DISPLAY_PCT) {
+    const absLabel = formatResolutionDuration(Math.abs(deltaHours));
+    const label =
+      direction === 'up'
+        ? `Tardó ${absLabel} más`
+        : direction === 'down'
+          ? `Fue ${absLabel} más rápido`
+          : 'Sin cambio';
+    return { changePct, changeLabel: label, trend };
+  }
+
+  const pctRounded = Math.round(Math.abs(changePct));
+  const label =
+    direction === 'up'
+      ? `Tardó ${pctRounded}% más`
+      : direction === 'down'
+        ? `Fue ${pctRounded}% más rápido`
+        : 'Sin cambio';
+
+  return { changePct, changeLabel: label, trend };
 }
 
 function formatTaskPointLabel(task: TaskForResolutionTime, finishedAt: Date): string {
@@ -150,10 +239,7 @@ function buildPerTaskPoints(
   let prevAvg: number | null = null;
 
   return sorted.map((item, index) => {
-    const changePct =
-      prevAvg != null && prevAvg > 0
-        ? ((item.hours - prevAvg) / prevAvg) * 100
-        : null;
+    const { changePct, changeLabel, trend } = formatTrendChange(item.hours, prevAvg);
     const point: ResolutionTimePoint = {
       label: item.label,
       periodKey: `${formatDateKey(item.closedAt)}-${index}`,
@@ -161,7 +247,9 @@ function buildPerTaskPoints(
       totalHours: item.hours,
       taskCount: 1,
       changePct,
-      trend: computeTrend(changePct),
+      trend,
+      changeLabel,
+      prevAvgHours: prevAvg,
     };
     prevAvg = item.hours;
     return point;
@@ -191,8 +279,7 @@ function buildBucketPoints(
   return sorted.map(([key, bucket]) => {
     const totalHours = bucket.hours.reduce((sum, h) => sum + h, 0);
     const avgHours = totalHours / bucket.hours.length;
-    const changePct =
-      prevAvg != null && prevAvg > 0 ? ((avgHours - prevAvg) / prevAvg) * 100 : null;
+    const { changePct, changeLabel, trend } = formatTrendChange(avgHours, prevAvg);
     const point: ResolutionTimePoint = {
       label: formatBucketLabel(bucket.start, mode),
       periodKey: key,
@@ -200,7 +287,9 @@ function buildBucketPoints(
       totalHours,
       taskCount: bucket.hours.length,
       changePct,
-      trend: computeTrend(changePct),
+      trend,
+      changeLabel,
+      prevAvgHours: prevAvg,
     };
     prevAvg = avgHours;
     return point;
@@ -214,9 +303,11 @@ function buildBucketPoints(
  */
 export function buildResolutionTimeSeries(
   tasks: TaskForResolutionTime[],
-  assigneeFilter?: string | null
+  assigneeFilter?: string | null,
+  options?: { maxHours?: number }
 ): ResolutionTimeSummary {
   const normalizedFilter = assigneeFilter?.trim() || null;
+  const maxHours = options?.maxHours ?? MAX_RESOLUTION_HOURS;
 
   const completed = tasks
     .map((task) => {
@@ -224,9 +315,12 @@ export function buildResolutionTimeSeries(
         const assignee = task.asignado_tarea?.trim() || 'Sin asignar';
         if (assignee !== normalizedFilter) return null;
       }
-      const hours = getTaskResolutionHours(task);
-      const finishedAt = parseTaskDate(task.fecha_fin_tarea);
+      const hours = getTaskResolutionHours(task, maxHours);
+      const finishedAt =
+        parseTaskDate(task.fecha_fin_tarea) ??
+        parseTaskDate(task.fecha_resolucion_tarea);
       if (hours == null || !finishedAt) return null;
+      if (!isTaskClosedForSeries(task)) return null;
       return {
         task,
         hours,
@@ -253,6 +347,7 @@ export function buildResolutionTimeSeries(
       latestAvgHours: null,
       latestChangePct: null,
       latestTrend: null,
+      latestChangeLabel: null,
     };
   }
 
@@ -283,6 +378,7 @@ export function buildResolutionTimeSeries(
     latestAvgHours: latest?.avgHours ?? null,
     latestChangePct: latest?.changePct ?? null,
     latestTrend: latest?.trend ?? null,
+    latestChangeLabel: latest?.changeLabel ?? null,
   };
 }
 
@@ -295,6 +391,7 @@ export function toChartRows(points: ResolutionTimePoint[]) {
     tareas: p.taskCount,
     changePct: p.changePct,
     trend: p.trend,
+    changeLabel: p.changeLabel,
     totalHours: p.totalHours,
   }));
 }

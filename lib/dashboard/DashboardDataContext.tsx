@@ -34,6 +34,8 @@ export interface DashboardCaseRow {
   category?: string;
   creation_date?: string | Date;
   end_date?: string | Date | null;
+  closed_at?: string | Date | null;
+  resolution_hours?: number | null;
   nombreTecnico?: string;
   company?: string;
   resolution?: string;

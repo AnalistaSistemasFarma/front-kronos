@@ -40,6 +40,7 @@ export interface TrendPoint {
   tiempo: number;
   tareas: number;
   changePct: number | null;
+  changeLabel?: string | null;
 }
 
 const STATUS_KEYS = ['Completada', 'Pendiente', 'En Proceso'] as const;
@@ -610,7 +611,6 @@ export function buildTechnicianPerformanceLineChart(
     ...series.technicians.flatMap((t) => t.values),
     0
   );
-  const legendCols = compact ? 2 : Math.min(4, Math.max(2, Math.ceil(techCount / 2)));
 
   return {
     data: {
@@ -620,7 +620,7 @@ export function buildTechnicianPerformanceLineChart(
           technicianPerformanceLineColors[index % technicianPerformanceLineColors.length];
         const fullName = tech.name.trim();
         return {
-          label: truncateLegendLabel(fullName, compact ? 16 : 22),
+          label: truncateLegendLabel(fullName, compact ? 18 : 36),
           fullName,
           data: tech.values,
           borderColor: color,
@@ -673,18 +673,17 @@ export function buildTechnicianPerformanceLineChart(
         legend: {
           display: techCount > 0,
           position: 'bottom',
-          align: 'start',
-          fullSize: true,
+          align: 'center',
+          fullSize: false,
           labels: {
             usePointStyle: true,
             pointStyle: 'circle',
-            padding: compact ? 10 : 14,
+            padding: compact ? 12 : 16,
             boxWidth: 8,
             boxHeight: 8,
             font: chartLegendFont(compact),
             color: chartLabelColor,
           },
-          maxHeight: Math.ceil(techCount / legendCols) * (compact ? 28 : 32),
         },
         tooltip: {
           mode: 'index',
@@ -1007,7 +1006,9 @@ export function buildTrendTimeChart(
               const row = points[ctx.dataIndex];
               if (!row) return '';
               const lines = [`Tareas finalizadas: ${row.tareas}`];
-              if (row.changePct != null) {
+              if (row.changeLabel) {
+                lines.push(`vs anterior: ${row.changeLabel}`);
+              } else if (row.changePct != null) {
                 const sign = row.changePct > 0 ? '+' : '';
                 lines.push(`vs anterior: ${sign}${row.changePct.toFixed(1)}%`);
               }
@@ -1021,8 +1022,13 @@ export function buildTrendTimeChart(
 }
 
 function formatDurationTick(hours: number): string {
-  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))} min`;
-  if (hours < 24) return `${hours.toFixed(1).replace(/\.0$/, '')} h`;
+  const totalMinutes = Math.round(hours * 60);
+  if (totalMinutes < 60) return `${Math.max(1, totalMinutes)} min`;
+  if (hours < 24) {
+    const h = Math.floor(hours);
+    const m = Math.round((hours - h) * 60);
+    return m > 0 ? `${h}h ${m}m` : `${h} h`;
+  }
   return `${(hours / 24).toFixed(1)} días`;
 }
 

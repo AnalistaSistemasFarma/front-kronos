@@ -51,7 +51,12 @@ export async function POST(req) {
           id_department = @id_department,
           id_technical = @id_technical,
           place = @place,
-          resolution = @resolucion
+          resolution = @resolucion,
+          end_date = CASE
+            WHEN @status IN (2, 3) THEN COALESCE(end_date, SYSDATETIME())
+            WHEN @status IN (1, 4) THEN NULL
+            ELSE end_date
+          END
         WHERE id_case = @id_case;
       `;
 

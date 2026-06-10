@@ -871,7 +871,18 @@ function ViewTicketPage() {
           if (!prev) return null;
           const statusText = statusMap[resolutionData.estado] || prev.status;
           const statusId = parseInt(resolutionData.estado) || prev.id_status_case;
-          return { ...prev, status: statusText, id_status_case: statusId };
+          const isClosing = statusId === 2 || statusId === 3;
+          const isReopening = statusId === 1 || statusId === 4;
+          return {
+            ...prev,
+            status: statusText,
+            id_status_case: statusId,
+            end_date: isClosing
+              ? prev.end_date ?? new Date().toISOString()
+              : isReopening
+                ? undefined
+                : prev.end_date,
+          };
         });
       }
 

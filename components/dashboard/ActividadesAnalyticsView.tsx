@@ -629,14 +629,10 @@ export default function ActividadesAnalyticsView() {
                       <Group gap='xs' mb='md'>
                         <IconUsers size={18} color={projectColors.primary} />
                         <Text size='sm' fw={600}>
-                          Actividades por encargado de área
+                          Rendimiento por líder de área
                         </Text>
                       </Group>
                       <EncargadoActivitiesChart
-                        key={
-                          appliedRange ??
-                          `${dateFilter}-${selectedMonthDate.getFullYear()}-${selectedMonthDate.getMonth()}`
-                        }
                         tasks={activities}
                         teamTasks={teamActivities}
                         categoryMembers={categoryMembers}

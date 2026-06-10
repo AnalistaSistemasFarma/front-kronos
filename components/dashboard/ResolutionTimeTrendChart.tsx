@@ -37,19 +37,19 @@ import { useDashboardChartPalette } from './useDashboardChartPalette';
 
 function TrendBadge({
   trend,
-  changePct,
+  changeLabel,
   size = 'md',
 }: {
   trend: ResolutionTrend | null;
-  changePct: number | null;
+  changeLabel: string | null;
   size?: 'sm' | 'md' | 'lg';
 }) {
-  if (trend == null || changePct == null) {
+  if (!changeLabel) {
     return (
       <Group gap={4} wrap='nowrap'>
         <IconMinus size={size === 'sm' ? 12 : 14} color={trendFlatColor} />
         <Text size={size === 'lg' ? 'sm' : 'xs'} fw={700} style={{ color: trendFlatColor }}>
-          Inicio
+          Primer periodo
         </Text>
       </Group>
     );
@@ -57,14 +57,17 @@ function TrendBadge({
 
   const color = trend === 'up' ? trendUpColor : trend === 'down' ? trendDownColor : trendFlatColor;
   const Icon = trend === 'up' ? IconTrendingUp : trend === 'down' ? IconTrendingDown : IconMinus;
-  const sign = changePct > 0 ? '+' : '';
 
   return (
     <Group gap={4} wrap='nowrap'>
       <Icon size={size === 'lg' ? 20 : size === 'md' ? 16 : 14} color={color} stroke={2.5} />
-      <Text size={size === 'lg' ? 'lg' : size === 'md' ? 'sm' : 'xs'} fw={800} style={{ color }}>
-        {sign}
-        {Math.abs(changePct).toFixed(1)}%
+      <Text
+        size={size === 'lg' ? 'sm' : 'xs'}
+        fw={700}
+        style={{ color, maxWidth: size === 'sm' ? 140 : 200 }}
+        lineClamp={2}
+      >
+        {changeLabel}
       </Text>
     </Group>
   );
@@ -103,13 +106,13 @@ function TrendPointDetail({ row }: { row: ReturnType<typeof toChartRows>[number]
           {row.tareas ?? 0}
         </Text>
       </Group>
-      {row.changePct != null && (
+      {row.changeLabel && (
         <Box pt={6} style={{ borderTop: `1px solid ${palette.chartPanelBorder}` }}>
           <Group justify='space-between'>
             <Text size='xs' c='dimmed'>
               vs periodo anterior
             </Text>
-            <TrendBadge trend={row.trend ?? null} changePct={row.changePct} size='sm' />
+            <TrendBadge trend={row.trend ?? null} changeLabel={row.changeLabel ?? null} size='sm' />
           </Group>
         </Box>
       )}
@@ -123,6 +126,10 @@ export interface ResolutionTimeTrendChartProps {
   assigneeFilter?: string | null;
   title: string;
   subtitle?: string;
+  /** Si true, el gráfico se muestra expandido al cargar */
+  defaultExpanded?: boolean;
+  /** inline = siempre visible sin acordeón */
+  variant?: 'collapsible' | 'inline';
 }
 
 function TrendChartBody({
@@ -223,7 +230,7 @@ function TrendChartBody({
             </Text>
             <TrendBadge
               trend={summary.latestTrend}
-              changePct={summary.latestChangePct}
+              changeLabel={summary.latestChangeLabel}
               size='md'
             />
           </Group>
@@ -260,16 +267,9 @@ function TrendChartBody({
           <Group gap='xs' align='center'>
             <TrendBadge
               trend={summary.latestTrend}
-              changePct={summary.latestChangePct}
+              changeLabel={summary.latestChangeLabel}
               size='lg'
             />
-            <Text size='xs' c='dimmed'>
-              {summary.latestTrend === 'up'
-                ? 'Subió el tiempo'
-                : summary.latestTrend === 'down'
-                  ? 'Bajó el tiempo'
-                  : 'Sin cambio'}
-            </Text>
           </Group>
         </Paper>
       </SimpleGrid>
@@ -329,7 +329,7 @@ function TrendChartBody({
                   <Text size='xs' fw={600} c='dimmed'>
                     {point.label}
                   </Text>
-                  <TrendBadge trend={point.trend} changePct={point.changePct} size='sm' />
+                  <TrendBadge trend={point.trend} changeLabel={point.changeLabel ?? null} size='sm' />
                 </Group>
               </Paper>
             ))}
@@ -344,14 +344,15 @@ function TrendChartBody({
       )}
 
       <Text size='xs' ta='center' mt='sm' c='dimmed'>
+        Cada punto muestra el <strong>tiempo promedio</strong> de cierre en ese periodo.{' '}
         <Text span fw={700} style={{ color: trendUpColor }}>
-          ▲ Verde
+          Verde
         </Text>{' '}
-        = tiempo subió ·{' '}
+        = tardó más ·{' '}
         <Text span fw={700} style={{ color: trendDownColor }}>
-          ▼ Rojo
+          Rojo
         </Text>{' '}
-        = tiempo bajó (más rápido)
+        = fue más rápido
       </Text>
     </>
   );
@@ -361,16 +362,18 @@ export function ResolutionTimeTrendChart({
   tasks,
   assigneeFilter,
   title,
-  subtitle = 'Tiempo desde que empieza a trabajar la tarea hasta que la finaliza',
+  subtitle = 'Cuánto tarda el líder en cerrar actividades (desde inicio hasta finalización)',
+  defaultExpanded = false,
+  variant = 'collapsible',
 }: ResolutionTimeTrendChartProps) {
   const { palette } = useDashboardChartPalette();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultExpanded || variant === 'inline');
   const { isMobile, isCompact } = useChartViewport();
   const chartHeight = isMobile ? 220 : isCompact ? 260 : 300;
 
   useEffect(() => {
-    setOpen(false);
-  }, [tasks, assigneeFilter, title]);
+    setOpen(defaultExpanded || variant === 'inline');
+  }, [tasks, assigneeFilter, title, defaultExpanded, variant]);
 
   const summary = useMemo(
     () => buildResolutionTimeSeries(tasks, assigneeFilter),
@@ -381,6 +384,32 @@ export function ResolutionTimeTrendChart({
   const trendPoints = chartData;
 
   const headerLabel = title.replace(/^Tendencia de tiempos\s*·?\s*/i, '') || title;
+
+  if (variant === 'inline') {
+    return (
+      <Box mt='md'>
+        <Paper
+          withBorder
+          radius='md'
+          p={{ base: 'sm', sm: 'md', lg: 'lg' }}
+          style={{
+            borderColor: palette.blue100,
+            background: palette.chartSurface,
+          }}
+        >
+          <TrendChartBody
+            title={title}
+            subtitle={subtitle}
+            summary={summary}
+            trendPoints={trendPoints}
+            chartHeight={chartHeight}
+            isMobile={isMobile}
+            isCompact={isCompact}
+          />
+        </Paper>
+      </Box>
+    );
+  }
 
   return (
     <Box mt='md'>
