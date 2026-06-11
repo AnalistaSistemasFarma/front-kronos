@@ -1,5 +1,9 @@
 import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig.js';
+import {
+  fireAndForgetNotification,
+  notifyTicketToTechnicians,
+} from '../../../../lib/notificationEvents.js';
 
 export async function POST(req) {
   try {
@@ -99,6 +103,14 @@ export async function POST(req) {
 
       await categoryCaseRequest.query(insertCategoryCaseQuery);
       await transaction.commit();
+
+      fireAndForgetNotification(
+        notifyTicketToTechnicians({
+          caseId: newCaseId,
+          subject: asunto,
+          technicianId: technician || null,
+        })
+      );
 
       return new Response(
         JSON.stringify({

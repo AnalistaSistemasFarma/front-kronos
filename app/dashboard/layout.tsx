@@ -1,10 +1,8 @@
-import Header from '../../components/Header';
+/**
+ * @deprecated Usa `app/(hub)/dashboard/`. No añadas páginas en esta carpeta.
+ */
+import type { ReactNode } from 'react';
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className='min-h-screen bg-gray-50'>
-      <Header />
-      <main>{children}</main>
-    </div>
-  );
+export default function DeprecatedDashboardLayout({ children }: { children: ReactNode }) {
+  return children;
 }

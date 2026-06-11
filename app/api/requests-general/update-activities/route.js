@@ -1,5 +1,10 @@
 import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig.js';
+import {
+  fireAndForgetNotification,
+  isActivityResolvedStatus,
+  notifyActivityResolved,
+} from '../../../../lib/notificationEvents.js';
 
 export async function POST(req) {
   try {
@@ -28,6 +33,17 @@ export async function POST(req) {
 
     try {
       await transaction.begin();
+
+      const prevResult = await new sql.Request(transaction)
+        .input('id', sql.Int, id)
+        .query(`
+          SELECT trg.id_status, trg.id_request_general, rg.subject_request, tpc.task
+          FROM task_request_general trg
+          INNER JOIN requests_general rg ON rg.id = trg.id_request_general
+          LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task
+          WHERE trg.id = @id
+        `);
+      const prevRow = prevResult.recordset[0];
 
       const updateQuery = `
         UPDATE task_request_general
@@ -78,6 +94,21 @@ export async function POST(req) {
       await request.query(updateQuery);
 
       await transaction.commit();
+
+      const prevStatus = prevRow?.id_status ?? null;
+      const nextStatus = id_status ?? null;
+
+      if (isActivityResolvedStatus(nextStatus) && !isActivityResolvedStatus(prevStatus)) {
+        fireAndForgetNotification(
+          notifyActivityResolved({
+            taskId: id,
+            requestId: prevRow?.id_request_general,
+            subject: prevRow?.subject_request,
+            taskName: prevRow?.task,
+            executorUserId: id_assigned,
+          })
+        );
+      }
 
       return new Response(
         JSON.stringify({

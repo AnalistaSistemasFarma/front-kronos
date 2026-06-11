@@ -4,12 +4,23 @@ import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import Image from 'next/image';
-import { Paper, Title, TextInput, Button, Stack, Group, Text, Divider } from '@mantine/core';
-import { IconEye, IconEyeOff, IconLock, IconAt, IconArrowRight } from '@tabler/icons-react';
+import { Paper, Title, TextInput, Button, Stack, Group, Text, ActionIcon } from '@mantine/core';
+import {
+  IconEye,
+  IconEyeOff,
+  IconLock,
+  IconAt,
+  IconArrowRight,
+  IconMoon,
+  IconSun,
+} from '@tabler/icons-react';
 import Link from 'next/link';
+import { useTheme } from '../../components/providers';
+import LoginPharmacyBackground from '../../components/login/LoginPharmacyBackground';
 
 export default function Login() {
+  const { theme, toggleTheme } = useTheme();
+  const isDark = theme === 'dark';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -42,6 +53,7 @@ export default function Login() {
 
   return (
     <div
+      className='login-page'
       style={{
         minHeight: '100vh',
         display: 'flex',
@@ -55,50 +67,30 @@ export default function Login() {
       role='main'
       aria-labelledby='login-title'
     >
-      {/* Background with animated gradient and shapes */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'linear-gradient(135deg, #113562 0%, #3db6e0 50%, #3db6e0 100%)',
-          zIndex: -2,
-        }}
-      />
+      <LoginPharmacyBackground theme={theme} />
 
-      {/* Animated background shapes */}
-      <div
-        className='bg-shapes'
+      <ActionIcon
+        variant='subtle'
+        color={isDark ? 'gray' : 'blue'}
+        size='lg'
+        radius='xl'
+        onClick={toggleTheme}
+        aria-label={isDark ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'}
+        className='login-theme-toggle'
         style={{
           position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          zIndex: -1,
-          overflow: 'hidden',
+          top: 20,
+          right: 20,
+          zIndex: 2,
+          background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.65)',
+          backdropFilter: 'blur(8px)',
+          border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(17,53,98,0.12)',
         }}
       >
-        <div className='shape shape-1'></div>
-        <div className='shape shape-2'></div>
-        <div className='shape shape-3'></div>
-        <div className='shape shape-4'></div>
-      </div>
+        {isDark ? <IconSun size={18} /> : <IconMoon size={18} />}
+      </ActionIcon>
 
       <style jsx>{`
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(-20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
         @keyframes slideUp {
           from {
             opacity: 0;
@@ -110,125 +102,28 @@ export default function Login() {
           }
         }
 
-        @keyframes float {
-          0%,
-          100% {
-            transform: translateY(0) rotate(0deg);
-          }
-          50% {
-            transform: translateY(-20px) rotate(5deg);
-          }
-        }
-
-        @keyframes pulse {
-          0%,
-          100% {
-            opacity: 0.4;
-            transform: scale(1);
-          }
-          50% {
-            opacity: 0.2;
-            transform: scale(1.1);
-          }
-        }
-
         .form-container {
-          animation: slideUp 0.8s ease-out 0.2s both;
-        }
-
-        .logo {
-          transition: transform 0.3s ease;
-          animation: fadeIn 1s ease-in-out;
-        }
-
-        .logo:hover {
-          transform: scale(1.05);
-        }
-
-        .shape {
-          position: absolute;
-          border-radius: 50%;
-          background: rgba(255, 255, 255, 0.1);
-          backdrop-filter: blur(5px);
-        }
-
-        .shape-1 {
-          width: 300px;
-          height: 300px;
-          top: -150px;
-          right: -100px;
-          animation: float 15s infinite ease-in-out;
-        }
-
-        .shape-2 {
-          width: 200px;
-          height: 200px;
-          bottom: -100px;
-          left: -50px;
-          animation: float 12s infinite ease-in-out reverse;
-        }
-
-        .shape-3 {
-          width: 150px;
-          height: 150px;
-          top: 50%;
-          left: 10%;
-          animation: pulse 8s infinite ease-in-out;
-        }
-
-        .shape-4 {
-          width: 100px;
-          height: 100px;
-          top: 20%;
-          right: 15%;
-          animation: float 10s infinite ease-in-out 2s;
+          animation: slideUp 0.8s ease-out 0.15s both;
+          position: relative;
+          z-index: 1;
         }
 
         .input-focus {
           transform: translateY(-2px);
-          box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+          box-shadow: 0 4px 20px rgba(61, 182, 224, 0.35);
         }
 
         .btn-hover:hover {
           transform: translateY(-2px);
-          box-shadow: 0 10px 25px rgba(102, 126, 234, 0.5);
-        }
-
-        @media (max-width: 768px) {
-          .form-container {
-            margin: 0 16px;
-          }
-          .text-logo.logo {
-            width: 250px !important;
-            height: auto !important;
-            font-size: 22px !important;
-          }
-          .shape-1,
-          .shape-2 {
-            width: 200px;
-            height: 200px;
-          }
-          .shape-3,
-          .shape-4 {
-            width: 100px;
-            height: 100px;
-          }
+          box-shadow: 0 10px 25px rgba(17, 53, 98, 0.35);
         }
 
         @media (max-width: 480px) {
           .form-container {
-            margin: 0 8px;
             padding: 24px !important;
-          }
-          .text-logo.logo {
-            width: 200px !important;
-            height: auto !important;
-            font-size: 18px !important;
           }
         }
       `}</style>
-
-      <div className='mb-6 logo' style={{ filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.2))' }}></div>
 
       <Paper
         shadow='xl'
@@ -238,27 +133,34 @@ export default function Login() {
         style={{
           maxWidth: 450,
           width: '100%',
-          background: 'white',
-          backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
-          boxShadow: '0 20px 40px rgba(0, 0, 0, 0.1)',
+          background: isDark ? 'rgba(31, 40, 64, 0.92)' : 'rgba(255, 255, 255, 0.94)',
+          backdropFilter: 'blur(16px)',
+          border: isDark
+            ? '1px solid rgba(126, 200, 239, 0.18)'
+            : '1px solid rgba(255, 255, 255, 0.6)',
+          boxShadow: isDark
+            ? '0 24px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(94, 179, 232, 0.06)'
+            : '0 20px 40px rgba(17, 53, 98, 0.12)',
         }}
         className='form-container'
       >
-        <Image
-          src='/Logo_Principal.svg'
-          alt='Logo'
+        <img
+          src={isDark ? '/Logo_Principal_Blanco_Ancho.svg' : '/Logo_Principal.svg'}
+          alt='SynerLink'
           width={1000}
           height={100}
-          priority
-          className='h-28'
-          style={{ objectFit: 'contain' }}
+          className='h-28 w-full object-contain'
+          decoding='async'
         />
         <Title
           order={2}
           ta='center'
           mb='lg'
-          style={{ color: '#333', fontWeight: 600, paddingTop: '20px' }}
+          style={{
+            color: isDark ? '#f0f4ff' : '#1a2d42',
+            fontWeight: 600,
+            paddingTop: '20px',
+          }}
           id='login-title'
         >
           Bienvenido al Portal de servicios
@@ -283,7 +185,7 @@ export default function Login() {
                 transition: 'all 0.3s ease',
                 transform: focusedField === 'email' ? 'translateY(-2px)' : 'none',
                 boxShadow:
-                  focusedField === 'email' ? '0 4px 20px rgba(102, 126, 234, 0.4)' : 'none',
+                  focusedField === 'email' ? '0 4px 20px rgba(61, 182, 224, 0.35)' : 'none',
               }}
               aria-label='Correo electrónico'
               autoComplete='email'
@@ -305,7 +207,7 @@ export default function Login() {
                     border: 'none',
                     cursor: 'pointer',
                     transition: 'color 0.3s ease',
-                    color: visible ? '#113562' : '#999',
+                    color: visible ? (isDark ? '#7ec8ef' : '#113562') : isDark ? '#9ca8c7' : '#999',
                   }}
                   aria-label={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                 >
@@ -318,7 +220,7 @@ export default function Login() {
                 transition: 'all 0.3s ease',
                 transform: focusedField === 'password' ? 'translateY(-2px)' : 'none',
                 boxShadow:
-                  focusedField === 'password' ? '0 4px 20px rgba(102, 126, 234, 0.4)' : 'none',
+                  focusedField === 'password' ? '0 4px 20px rgba(61, 182, 224, 0.35)' : 'none',
               }}
               aria-label='Contraseña'
               autoComplete='current-password'
@@ -329,7 +231,7 @@ export default function Login() {
                 size='sm'
                 component={Link}
                 href='/forgot-password'
-                c='#113562'
+                c={isDark ? '#7ec8ef' : '#113562'}
                 style={{ textDecoration: 'none' }}
               >
                 ¿Olvidaste tu contraseña? Solicita una nueva.
@@ -356,7 +258,16 @@ export default function Login() {
         </form>
       </Paper>
 
-      <Text ta='center' size='xs' c='rgba(255, 255, 255, 0.8)' mt='md'>
+      <Text
+        ta='center'
+        size='xs'
+        mt='md'
+        style={{
+          position: 'relative',
+          zIndex: 1,
+          color: isDark ? 'rgba(201, 214, 240, 0.75)' : 'rgba(17, 53, 98, 0.72)',
+        }}
+      >
         © 2025 Portal de servicios. Todos los derechos reservados.
       </Text>
     </div>

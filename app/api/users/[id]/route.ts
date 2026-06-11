@@ -1,33 +1,9 @@
 import bcrypt from 'bcryptjs';
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '../../../../app/generated/prisma';
+import { checkAdminPrivileges } from '../../../../lib/access-control';
+import { prisma } from '../../../../lib/prisma';
 import { authOptions } from '../../auth/[...nextauth]/route';
-
-const prisma = new PrismaClient();
-
-// Helper function to check if user has admin permissions
-async function checkAdminPermission(userEmail: string): Promise<boolean> {
-  try {
-    // Check if user has access to the administration subprocess
-    const adminSubprocess = await prisma.subprocessUserCompany.findFirst({
-      where: {
-        companyUser: {
-          user: {
-            email: userEmail,
-          },
-        },
-        subprocess: {
-          subprocess_url: '/process/administration/users',
-        },
-      },
-    });
-    return !!adminSubprocess;
-  } catch (error) {
-    console.error('Error checking admin permission:', error);
-    return false;
-  }
-}
 
 // PUT /api/users/[id] - Update user
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -37,7 +13,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const isAdmin = await checkAdminPermission(session.user.email);
+    const isAdmin = await checkAdminPrivileges(session.user.email);
     if (!isAdmin) {
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }
@@ -144,7 +120,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const isAdmin = await checkAdminPermission(session.user.email);
+    const isAdmin = await checkAdminPrivileges(session.user.email);
     if (!isAdmin) {
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }

@@ -1,5 +1,11 @@
 import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig.js';
+import {
+  fireAndForgetNotification,
+  isTicketClosedStatus,
+  notifyTicketClosed,
+  notifyTicketToTechnicians,
+} from '../../../../lib/notificationEvents.js';
 
 export async function POST(req) {
   try {
@@ -42,6 +48,15 @@ export async function POST(req) {
     try {
       await transaction.begin();
 
+      const prevResult = await new sql.Request(transaction)
+        .input('id_case', sql.Int, id_case)
+        .query(`
+          SELECT c.id_technical, c.subject_case, c.id_status_case, c.requester
+          FROM [case] c
+          WHERE c.id_case = @id_case
+        `);
+      const prevRow = prevResult.recordset[0];
+
       const updateCaseQuery = `
         UPDATE [case]
         SET
@@ -51,7 +66,12 @@ export async function POST(req) {
           id_department = @id_department,
           id_technical = @id_technical,
           place = @place,
-          resolution = @resolucion
+          resolution = @resolucion,
+          end_date = CASE
+            WHEN @status IN (2, 3) THEN COALESCE(end_date, SYSDATETIME())
+            WHEN @status IN (1, 4) THEN NULL
+            ELSE end_date
+          END
         WHERE id_case = @id_case;
       `;
 
@@ -85,6 +105,36 @@ export async function POST(req) {
       await updateCategoryCaseRequest.query(updateCategoryCaseQuery);
 
       await transaction.commit();
+
+      const prevTechnical = prevRow?.id_technical ?? null;
+      const nextTechnical = id_technical || null;
+      const prevStatus = prevRow?.id_status_case ?? null;
+      const nextStatus = status ?? null;
+
+      if (nextTechnical && Number(nextTechnical) !== Number(prevTechnical)) {
+        fireAndForgetNotification(
+          notifyTicketToTechnicians({
+            caseId: id_case,
+            subject: prevRow?.subject_case,
+            technicianId: nextTechnical,
+            isReassignment: prevTechnical != null,
+          })
+        );
+      }
+
+      if (
+        isTicketClosedStatus(nextStatus) &&
+        !isTicketClosedStatus(prevStatus)
+      ) {
+        fireAndForgetNotification(
+          notifyTicketClosed({
+            caseId: id_case,
+            subject: prevRow?.subject_case,
+            requesterUserId: prevRow?.requester,
+            statusId: nextStatus,
+          })
+        );
+      }
 
       return new Response(
         JSON.stringify({

@@ -42,6 +42,11 @@ export default function NotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [fetching, setFetching] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const fetchNotifications = useCallback(async () => {
     if (!userEmail) return;
@@ -109,6 +114,14 @@ export default function NotificationBell() {
       }
     }
   };
+
+  if (!mounted) {
+    return (
+      <ActionIcon variant='subtle' color='gray' aria-label='Notificaciones' disabled>
+        <IconBell size={18} />
+      </ActionIcon>
+    );
+  }
 
   return (
     <Popover

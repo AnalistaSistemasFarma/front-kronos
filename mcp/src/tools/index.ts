@@ -1,0 +1,773 @@
+/**
+ * Registro de TODAS las tools de solo lectura del MCP de Kronos.
+ *
+ * Cada tool recibe el alcance (AuthScope) resuelto desde la API key y aplica
+ * SIEMPRE el filtro de empresa. No existe ninguna tool de escritura/mutación.
+ */
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import type { AuthScope } from '../auth.js';
+import { effectiveCompanyFilter, type CompanyFilter } from '../scope.js';
+import { getPrisma, Prisma, queryReadOnly } from '../db.js';
+import { executeWrite, type TxClient } from '../write.js';
+import type { AuditLogger } from '../audit.js';
+
+interface ToolContext {
+  scope: AuthScope;
+  audit: AuditLogger;
+  maxPageSize: number;
+  defaultPageSize: number;
+}
+
+/** Campos del usuario que NUNCA se exponen. */
+const USER_SAFE_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  isActive: true,
+  role: true,
+  phone: true,
+  identification: true,
+  createdAt: true,
+  // EXCLUIDOS a propósito: password, emailVerified, accounts (tokens), sessions.
+} as const;
+
+function clampLimit(ctx: ToolContext, limit?: number): number {
+  if (!limit || limit <= 0) return ctx.defaultPageSize;
+  return Math.min(limit, ctx.maxPageSize);
+}
+
+function clampOffset(offset?: number): number {
+  if (!offset || offset < 0) return 0;
+  return offset;
+}
+
+/** Empaqueta un resultado como contenido MCP (texto JSON). */
+function jsonResult(data: unknown) {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
+  };
+}
+
+/** Helper que envuelve la ejecución de una tool con auditoría. */
+async function withAudit<T>(
+  ctx: ToolContext,
+  tool: string,
+  params: unknown,
+  fn: () => Promise<{ result: unknown; rows?: number }>
+): Promise<T> {
+  try {
+    const { result, rows } = await fn();
+    await ctx.audit.log({
+      ts: new Date().toISOString(),
+      agent: ctx.scope.agent,
+      role: ctx.scope.role,
+      companyIds: ctx.scope.companyIds,
+      tool,
+      params,
+      outcome: 'ok',
+      rows,
+    });
+    return jsonResult(result) as T;
+  } catch (err) {
+    await ctx.audit.log({
+      ts: new Date().toISOString(),
+      agent: ctx.scope.agent,
+      role: ctx.scope.role,
+      companyIds: ctx.scope.companyIds,
+      tool,
+      params,
+      outcome: 'error',
+      error: (err as Error).message,
+    });
+    return {
+      isError: true,
+      content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+    } as T;
+  }
+}
+
+/**
+ * Construye el fragmento SQL del filtro de empresa a partir de un CompanyFilter.
+ *
+ * - Admin sin acotar (`applyFilter: false`): devuelve `1 = 1` (ve TODO, sin
+ *   restricción de empresa).
+ * - Lista vacía (`applyFilter: true`, ids `[]`): devuelve `1 = 0` (ninguna
+ *   fila) — nunca abre el filtro al pedir empresas fuera del alcance.
+ * - Lista con ids: devuelve `<column> IN (...)`.
+ */
+function companyClause(column: string, filter: CompanyFilter): Prisma.Sql {
+  if (!filter.applyFilter) {
+    return Prisma.sql`1 = 1`;
+  }
+  if (filter.companyIds.length === 0) {
+    return Prisma.sql`1 = 0`;
+  }
+  return Prisma.sql`${Prisma.raw(column)} IN (${Prisma.join(filter.companyIds)})`;
+}
+
+export const ENTITY_METADATA = {
+  requests: {
+    description:
+      'Solicitudes generales (workflows) de la tabla requests_general. Filtradas por id_company.',
+    companyColumn: 'requests_general.id_company',
+    fields: [
+      'id',
+      'subject',
+      'description',
+      'status',
+      'category',
+      'process',
+      'requester',
+      'company',
+      'id_company',
+      'created_at',
+      'date_resolution',
+      'resolution',
+      'url',
+    ],
+  },
+  tickets: {
+    description:
+      'Tickets / casos de mesa de ayuda (tabla case). Filtrados por case.company (id_company).',
+    companyColumn: 'case.company',
+    fields: [
+      'id_case',
+      'subject_case',
+      'description',
+      'status',
+      'priority',
+      'case_type',
+      'department',
+      'requester',
+      'technician',
+      'category',
+      'subcategory',
+      'activity',
+      'company',
+      'creation_date',
+      'end_date',
+      'resolution',
+    ],
+  },
+  processes: {
+    description: 'Catálogo de procesos y subprocesos (global, no segmentado por empresa).',
+    companyColumn: null,
+    fields: ['id_process', 'process', 'process_url', 'subprocesses'],
+  },
+  activities: {
+    description: 'Catálogo de actividades (global).',
+    companyColumn: null,
+    fields: ['id_activity', 'activity', 'id_subcategory'],
+  },
+  departments: {
+    description: 'Catálogo de departamentos (global).',
+    companyColumn: null,
+    fields: ['id_department', 'department'],
+  },
+  categories: {
+    description: 'Catálogo de categorías y subcategorías (global).',
+    companyColumn: null,
+    fields: ['id_category', 'category', 'subcategories'],
+  },
+  users: {
+    description:
+      'Usuarios. Solo se devuelven los pertenecientes a las empresas del alcance. Campos sensibles excluidos (password, tokens).',
+    companyColumn: 'company_user.id_company (vía relación)',
+    fields: Object.keys(USER_SAFE_SELECT),
+  },
+} as const;
+
+/**
+ * Capacidades del servidor: 13 tools en total = 11 de LECTURA + 2 de ESCRITURA.
+ *
+ * Las de escritura están acotadas exclusivamente a CATEGORIZACIÓN (asignar la
+ * categoría de un caso o el proceso de una solicitud), son transaccionales,
+ * parametrizadas, validan alcance/coherencia y se auditan. NO debilitan el
+ * candado de solo lectura del resto del servidor.
+ */
+export const TOOL_CAPABILITIES = {
+  totalTools: 13,
+  readOnly: [
+    'kronos_metadata',
+    'kronos_list_requests',
+    'kronos_get_request',
+    'kronos_list_tickets',
+    'kronos_get_ticket',
+    'kronos_list_processes',
+    'kronos_list_activities',
+    'kronos_list_departments',
+    'kronos_list_categories',
+    'kronos_list_users',
+    'kronos_search',
+  ],
+  write: ['kronos_categorize_case', 'kronos_categorize_request'],
+  writeNote:
+    'El servidor YA NO es 100% solo lectura: existe una única ruta de escritura, acotada a categorización (caso: tabla puente category_case; solicitud: tabla puente process_category_request_general), transaccional, parametrizada y auditada. El candado assertReadOnlySql sigue intacto para las 11 tools de lectura.',
+} as const;
+
+export function registerTools(server: McpServer, ctx: ToolContext): void {
+  const prisma = getPrisma();
+
+  // ---------------------------------------------------------------------------
+  // kronos_metadata
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_metadata',
+    'Describe las entidades y campos disponibles, el alcance (empresas) de la API key actual, y las capacidades del servidor (11 tools de lectura + 2 de escritura para categorizar).',
+    {},
+    async () =>
+      withAudit(ctx, 'kronos_metadata', {}, async () => ({
+        result: {
+          agent: ctx.scope.agent,
+          role: ctx.scope.role,
+          allCompanies: ctx.scope.allCompanies,
+          allowedCompanyIds: ctx.scope.allCompanies ? '*' : ctx.scope.companyIds,
+          // El servidor ya no es 100% solo lectura: una sola ruta de escritura
+          // acotada a categorización (ver capabilities.write).
+          readOnly: false,
+          capabilities: TOOL_CAPABILITIES,
+          paging: { defaultPageSize: ctx.defaultPageSize, maxPageSize: ctx.maxPageSize },
+          entities: ENTITY_METADATA,
+        },
+      }))
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_requests  (requests_general)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_requests',
+    'Lista solicitudes generales (workflows). Filtra SIEMPRE por las empresas del alcance. Paginada.',
+    {
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a consultar; se interseca con el alcance de la key.'),
+      status: z.number().int().optional().describe('Filtra por id de estado (status_req).'),
+      limit: z.number().int().optional(),
+      offset: z.number().int().optional(),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_requests', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const limit = clampLimit(ctx, args.limit);
+        const offset = clampOffset(args.offset);
+
+        const where: Prisma.Sql[] = [companyClause('rg.id_company', filter)];
+        if (args.status !== undefined) {
+          where.push(Prisma.sql`rg.status_req = ${args.status}`);
+        }
+        const whereSql = Prisma.join(where, ' AND ');
+
+        const rows = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT rg.id, rg.subject_request AS subject, rg.[description],
+                 rg.status_req AS id_status, sc.status AS status,
+                 rg.id_company, c.company, u.name AS requester,
+                 rg.created_at, rg.date_resolution, rg.resolution, rg.url
+          FROM requests_general rg
+          INNER JOIN company c ON c.id_company = rg.id_company
+          LEFT JOIN status_case sc ON sc.id_status_case = rg.status_req
+          LEFT JOIN [user] u ON u.id = rg.id_requester
+          WHERE ${whereSql}
+          ORDER BY rg.id DESC
+          OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+        `);
+
+        return { result: { count: rows.length, limit, offset, data: rows }, rows: rows.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_get_request
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_get_request',
+    'Obtiene una solicitud por id. Solo la devuelve si pertenece a una empresa del alcance.',
+    { id: z.number().int().describe('id de la solicitud (requests_general.id).') },
+    async (args) =>
+      withAudit(ctx, 'kronos_get_request', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, null);
+        const rows = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT rg.id, rg.subject_request AS subject, rg.[description],
+                 rg.status_req AS id_status, sc.status AS status,
+                 rg.id_company, c.company, u.name AS requester,
+                 rg.created_at, rg.date_resolution, rg.resolution, rg.url
+          FROM requests_general rg
+          INNER JOIN company c ON c.id_company = rg.id_company
+          LEFT JOIN status_case sc ON sc.id_status_case = rg.status_req
+          LEFT JOIN [user] u ON u.id = rg.id_requester
+          WHERE rg.id = ${args.id} AND ${companyClause('rg.id_company', filter)}
+        `);
+        return { result: rows[0] ?? null, rows: rows.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_tickets  (case)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_tickets',
+    'Lista tickets/casos de mesa de ayuda. Filtra SIEMPRE por las empresas del alcance. Paginada.',
+    {
+      companyId: z.number().int().optional(),
+      status: z.number().int().optional().describe('id_status_case'),
+      priority: z.string().optional(),
+      limit: z.number().int().optional(),
+      offset: z.number().int().optional(),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_tickets', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const limit = clampLimit(ctx, args.limit);
+        const offset = clampOffset(args.offset);
+
+        const where: Prisma.Sql[] = [companyClause('c.company', filter)];
+        if (args.status !== undefined) where.push(Prisma.sql`c.id_status_case = ${args.status}`);
+        if (args.priority !== undefined) where.push(Prisma.sql`c.priority = ${args.priority}`);
+        const whereSql = Prisma.join(where, ' AND ');
+
+        const rows = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT c.id_case, c.subject_case, c.[description], c.priority, c.case_type,
+                 sc.status, d.department, c.requester, co.id_company, co.company,
+                 c.creation_date, c.end_date, c.resolution, c.place
+          FROM [case] c
+          INNER JOIN status_case sc ON sc.id_status_case = c.id_status_case
+          INNER JOIN department d ON d.id_department = c.id_department
+          LEFT JOIN company co ON co.id_company = c.company
+          WHERE ${whereSql}
+          ORDER BY c.id_case DESC
+          OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+        `);
+        return { result: { count: rows.length, limit, offset, data: rows }, rows: rows.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_get_ticket
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_get_ticket',
+    'Obtiene un ticket/caso por id, con sus categorías y notas. Solo si pertenece al alcance.',
+    { id: z.number().int().describe('id_case') },
+    async (args) =>
+      withAudit(ctx, 'kronos_get_ticket', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, null);
+        const rows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+          SELECT c.id_case, c.subject_case, c.[description], c.priority, c.case_type,
+                 sc.status, d.department, c.requester, co.id_company, co.company,
+                 c.creation_date, c.end_date, c.resolution, c.place
+          FROM [case] c
+          INNER JOIN status_case sc ON sc.id_status_case = c.id_status_case
+          INNER JOIN department d ON d.id_department = c.id_department
+          LEFT JOIN company co ON co.id_company = c.company
+          WHERE c.id_case = ${args.id} AND ${companyClause('c.company', filter)}
+        `);
+
+        const ticket = rows[0] ?? null;
+        if (!ticket) return { result: null, rows: 0 };
+
+        // Notas asociadas (solo tras confirmar el alcance del caso).
+        const notes = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT n.id_note, n.note FROM notes n WHERE n.id_case = ${args.id} ORDER BY n.id_note DESC
+        `);
+        return { result: { ...ticket, notes }, rows: 1 };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_processes  (catálogo global, Prisma)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_processes',
+    'Lista procesos y sus subprocesos (catálogo global). Paginada.',
+    { limit: z.number().int().optional(), offset: z.number().int().optional() },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_processes', args, async () => {
+        const take = clampLimit(ctx, args.limit);
+        const skip = clampOffset(args.offset);
+        const data = await prisma.process.findMany({
+          take,
+          skip,
+          orderBy: { id_process: 'asc' },
+          include: {
+            subprocesses: {
+              select: { id_subprocess: true, subprocess: true, subprocess_url: true },
+            },
+          },
+        });
+        return { result: { count: data.length, limit: take, offset: skip, data }, rows: data.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_activities
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_activities',
+    'Lista actividades (catálogo global). Paginada.',
+    { limit: z.number().int().optional(), offset: z.number().int().optional() },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_activities', args, async () => {
+        const take = clampLimit(ctx, args.limit);
+        const skip = clampOffset(args.offset);
+        const data = await prisma.activity.findMany({
+          take,
+          skip,
+          orderBy: { id_activity: 'asc' },
+          select: { id_activity: true, activity: true, id_subcategory: true },
+        });
+        return { result: { count: data.length, limit: take, offset: skip, data }, rows: data.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_departments
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_departments',
+    'Lista departamentos (catálogo global).',
+    { limit: z.number().int().optional(), offset: z.number().int().optional() },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_departments', args, async () => {
+        const take = clampLimit(ctx, args.limit);
+        const skip = clampOffset(args.offset);
+        const data = await prisma.department.findMany({
+          take,
+          skip,
+          orderBy: { department: 'asc' },
+        });
+        return { result: { count: data.length, limit: take, offset: skip, data }, rows: data.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_categories
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_categories',
+    'Lista categorías y subcategorías (catálogo global).',
+    { limit: z.number().int().optional(), offset: z.number().int().optional() },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_categories', args, async () => {
+        const take = clampLimit(ctx, args.limit);
+        const skip = clampOffset(args.offset);
+        const data = await prisma.category.findMany({
+          take,
+          skip,
+          orderBy: { category: 'asc' },
+          include: {
+            subcategories: { select: { id_subcategory: true, subcategory: true } },
+          },
+        });
+        return { result: { count: data.length, limit: take, offset: skip, data }, rows: data.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_users  (filtrados por empresa, sin campos sensibles)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_users',
+    'Lista usuarios de las empresas del alcance. Excluye password y tokens. Paginada.',
+    {
+      companyId: z.number().int().optional(),
+      limit: z.number().int().optional(),
+      offset: z.number().int().optional(),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_users', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const take = clampLimit(ctx, args.limit);
+        const skip = clampOffset(args.offset);
+
+        // Filtro de empresa vía relación companyUsers -> id_company. Para keys
+        // admin sin acotar (applyFilter=false) NO se restringe por empresa.
+        const where = filter.applyFilter
+          ? { companyUsers: { some: { id_company: { in: filter.companyIds } } } }
+          : {};
+        const data = await prisma.user.findMany({
+          take,
+          skip,
+          where,
+          select: USER_SAFE_SELECT,
+          orderBy: { name: 'asc' },
+        });
+        return { result: { count: data.length, limit: take, offset: skip, data }, rows: data.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_search  (solicitudes + tickets, con texto/fechas/estado)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_search',
+    'Búsqueda paginada sobre solicitudes y/o tickets con filtros de texto, fechas y estado. Siempre dentro del alcance de empresa de la key.',
+    {
+      entity: z
+        .enum(['requests', 'tickets', 'all'])
+        .default('all')
+        .describe('Qué buscar: solicitudes, tickets o ambos.'),
+      text: z.string().optional().describe('Texto a buscar en asunto/descripción.'),
+      companyId: z.number().int().optional(),
+      status: z.number().int().optional(),
+      dateFrom: z.string().optional().describe('Fecha inicial YYYY-MM-DD (created_at/creation_date).'),
+      dateTo: z.string().optional().describe('Fecha final YYYY-MM-DD.'),
+      limit: z.number().int().optional(),
+      offset: z.number().int().optional(),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_search', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const limit = clampLimit(ctx, args.limit);
+        const offset = clampOffset(args.offset);
+        const text = args.text ? `%${args.text}%` : null;
+        const dateFrom = args.dateFrom ? new Date(args.dateFrom) : null;
+        const dateTo = args.dateTo ? new Date(`${args.dateTo}T23:59:59`) : null;
+
+        const out: Record<string, unknown> = {};
+
+        if (args.entity === 'requests' || args.entity === 'all') {
+          const where: Prisma.Sql[] = [companyClause('rg.id_company', filter)];
+          if (args.status !== undefined) where.push(Prisma.sql`rg.status_req = ${args.status}`);
+          if (text)
+            where.push(
+              Prisma.sql`(rg.subject_request LIKE ${text} OR rg.[description] LIKE ${text})`
+            );
+          if (dateFrom) where.push(Prisma.sql`rg.created_at >= ${dateFrom}`);
+          if (dateTo) where.push(Prisma.sql`rg.created_at <= ${dateTo}`);
+          const whereSql = Prisma.join(where, ' AND ');
+          out.requests = await queryReadOnly<unknown>(Prisma.sql`
+            SELECT rg.id, rg.subject_request AS subject, rg.status_req AS id_status,
+                   rg.id_company, rg.created_at
+            FROM requests_general rg
+            WHERE ${whereSql}
+            ORDER BY rg.id DESC
+            OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+          `);
+        }
+
+        if (args.entity === 'tickets' || args.entity === 'all') {
+          const where: Prisma.Sql[] = [companyClause('c.company', filter)];
+          if (args.status !== undefined) where.push(Prisma.sql`c.id_status_case = ${args.status}`);
+          if (text)
+            where.push(Prisma.sql`(c.subject_case LIKE ${text} OR c.[description] LIKE ${text})`);
+          if (dateFrom) where.push(Prisma.sql`c.creation_date >= ${dateFrom}`);
+          if (dateTo) where.push(Prisma.sql`c.creation_date <= ${dateTo}`);
+          const whereSql = Prisma.join(where, ' AND ');
+          out.tickets = await queryReadOnly<unknown>(Prisma.sql`
+            SELECT c.id_case, c.subject_case AS subject, c.id_status_case AS id_status,
+                   c.company AS id_company, c.creation_date
+            FROM [case] c
+            WHERE ${whereSql}
+            ORDER BY c.id_case DESC
+            OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+          `);
+        }
+
+        const rows =
+          ((out.requests as unknown[] | undefined)?.length ?? 0) +
+          ((out.tickets as unknown[] | undefined)?.length ?? 0);
+        return { result: { limit, offset, ...out }, rows };
+      })
+  );
+
+  // ===========================================================================
+  // TOOLS DE ESCRITURA (categorización) — camino separado, transaccional y
+  // parametrizado. NO pasan por el candado de solo lectura (queryReadOnly):
+  // usan executeWrite (src/write.ts), exclusivo de estas dos tools. El resto
+  // del servidor sigue en solo lectura.
+  // ===========================================================================
+
+  // ---------------------------------------------------------------------------
+  // kronos_categorize_case  (ESCRITURA) — tabla puente category_case
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_categorize_case',
+    'ESCRITURA. Asigna/recategoriza la terna (categoría, subcategoría, actividad) de un caso de mesa de ayuda en la tabla puente category_case. Solo afecta casos del alcance de empresa de la key. Valida que la terna sea jerárquicamente coherente. Transaccional y auditada.',
+    {
+      id_case: z.number().int().describe('id_case del caso a categorizar.'),
+      id_category: z.number().int().describe('id_category (raíz de la terna).'),
+      id_subcategory: z.number().int().describe('id_subcategory (debe colgar de id_category).'),
+      id_activity: z.number().int().describe('id_activity (debe colgar de id_subcategory).'),
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a acotar; se interseca con el alcance de la key.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_categorize_case', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const scopeClause = companyClause('c.company', filter);
+
+        const result = await executeWrite(async (tx: TxClient) => {
+          // a. El caso existe y pertenece al alcance. Si no, error genérico
+          //    (no se confirma existencia fuera de alcance — regla de oro).
+          const inScope = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok
+            FROM [case] c
+            WHERE c.id_case = ${args.id_case} AND ${scopeClause}
+          `);
+          if (inScope.length === 0) {
+            throw new Error('caso inexistente o fuera de alcance');
+          }
+
+          // b. La terna categoría/subcategoría/actividad es coherente.
+          const coherent = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok
+            FROM activity a
+            INNER JOIN subcategory s ON s.id_subcategory = a.id_subcategory
+            WHERE a.id_activity = ${args.id_activity}
+              AND a.id_subcategory = ${args.id_subcategory}
+              AND s.id_category = ${args.id_category}
+          `);
+          if (coherent.length === 0) {
+            throw new Error('terna categoría/subcategoría/actividad inconsistente');
+          }
+
+          // c. UPSERT en la tabla puente (1:1 con el caso).
+          const updated = await tx.$executeRaw(Prisma.sql`
+            UPDATE category_case
+            SET id_category = ${args.id_category},
+                id_subcategory = ${args.id_subcategory},
+                id_activity = ${args.id_activity}
+            WHERE id_case = ${args.id_case}
+          `);
+          let action: 'updated' | 'inserted' = 'updated';
+          if (updated === 0) {
+            await tx.$executeRaw(Prisma.sql`
+              INSERT INTO category_case (id_case, id_category, id_subcategory, id_activity)
+              VALUES (${args.id_case}, ${args.id_category}, ${args.id_subcategory}, ${args.id_activity})
+            `);
+            action = 'inserted';
+          }
+
+          // d. Resolver nombres (barato) para una respuesta clara.
+          const names = await tx.$queryRaw<
+            { category: string | null; subcategory: string | null; activity: string | null }[]
+          >(Prisma.sql`
+            SELECT cat.category, s.subcategory, a.activity
+            FROM activity a
+            INNER JOIN subcategory s ON s.id_subcategory = a.id_subcategory
+            INNER JOIN category cat ON cat.id_category = s.id_category
+            WHERE a.id_activity = ${args.id_activity}
+              AND a.id_subcategory = ${args.id_subcategory}
+              AND cat.id_category = ${args.id_category}
+          `);
+
+          return {
+            id_case: args.id_case,
+            action,
+            rowsAffected: action === 'updated' ? updated : 1,
+            category: { id_category: args.id_category, name: names[0]?.category ?? null },
+            subcategory: {
+              id_subcategory: args.id_subcategory,
+              name: names[0]?.subcategory ?? null,
+            },
+            activity: { id_activity: args.id_activity, name: names[0]?.activity ?? null },
+          };
+        });
+
+        return { result, rows: 1 };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_categorize_request  (ESCRITURA) — process_category_request_general
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_categorize_request',
+    'ESCRITURA. Asigna/recategoriza el PROCESO (process_category) de una solicitud general en la tabla puente process_category_request_general. Solo afecta solicitudes del alcance de empresa de la key. Valida que el proceso esté activo y habilitado para la empresa de la solicitud. Transaccional y auditada.',
+    {
+      id_request: z.number().int().describe('requests_general.id de la solicitud a categorizar.'),
+      id_process_category: z
+        .number()
+        .int()
+        .describe('process_category.id del proceso a asignar (debe estar activo y habilitado para la empresa).'),
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a acotar; se interseca con el alcance de la key.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_categorize_request', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const scopeClause = companyClause('rg.id_company', filter);
+
+        const result = await executeWrite(async (tx: TxClient) => {
+          // a. La solicitud existe y pertenece al alcance. Resolvemos su empresa
+          //    para validar la habilitación del proceso contra esa empresa.
+          const reqRow = await tx.$queryRaw<{ id_company: number }[]>(Prisma.sql`
+            SELECT TOP 1 rg.id_company
+            FROM requests_general rg
+            WHERE rg.id = ${args.id_request} AND ${scopeClause}
+          `);
+          const idCompany = reqRow[0]?.id_company;
+          if (idCompany === undefined) {
+            throw new Error('solicitud inexistente o fuera de alcance');
+          }
+
+          // b. El proceso existe, está activo y su category_request está
+          //    habilitada para la empresa de la solicitud.
+          const okProcess = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok
+            FROM process_category pc
+            INNER JOIN company_category_request ccr
+              ON ccr.id_category_request = pc.id_category_request
+            WHERE pc.id = ${args.id_process_category}
+              AND pc.active = 1
+              AND ccr.id_company = ${idCompany}
+          `);
+          if (okProcess.length === 0) {
+            throw new Error('proceso inexistente, inactivo o no habilitado para la empresa');
+          }
+
+          // c. UPSERT en la tabla puente (1:1 con la solicitud).
+          const updated = await tx.$executeRaw(Prisma.sql`
+            UPDATE process_category_request_general
+            SET id_process_category = ${args.id_process_category}
+            WHERE id_request_general = ${args.id_request}
+          `);
+          let action: 'updated' | 'inserted' = 'updated';
+          if (updated === 0) {
+            await tx.$executeRaw(Prisma.sql`
+              INSERT INTO process_category_request_general (id_request_general, id_process_category)
+              VALUES (${args.id_request}, ${args.id_process_category})
+            `);
+            action = 'inserted';
+          }
+
+          // Sincronización opcional de la columna legacy del row (best-effort,
+          // dentro de la misma transacción), igual que hace parcialmente la app.
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE requests_general
+            SET id_process_category = ${args.id_process_category}
+            WHERE id = ${args.id_request}
+          `);
+
+          // d. Nombre del proceso para una respuesta clara.
+          const names = await tx.$queryRaw<{ process_category: string | null }[]>(Prisma.sql`
+            SELECT pc.process_category
+            FROM process_category pc
+            WHERE pc.id = ${args.id_process_category}
+          `);
+
+          return {
+            id_request: args.id_request,
+            id_company: idCompany,
+            action,
+            rowsAffected: action === 'updated' ? updated : 1,
+            process: {
+              id_process_category: args.id_process_category,
+              name: names[0]?.process_category ?? null,
+            },
+          };
+        });
+
+        return { result, rows: 1 };
+      })
+  );
+}

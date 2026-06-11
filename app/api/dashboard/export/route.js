@@ -1,21 +1,42 @@
-import sql from 'mssql';
-import sqlConfig from '../../../../dbconfig.js';
+import { requireDashboardAdminApi } from '../../../../lib/dashboard/dashboardAccess';
+import { getPool } from '../../../../lib/mssqlPool';
+import {
+  queryVwRequestsGeneral,
+  queryVwTareasSolicitudesAll,
+} from '../../../../lib/dashboard/viewTasksQuery';
 
+/**
+ * GET /api/dashboard/export
+ * Misma lógica que main: vw_requests_general + vw_tareas_solicitudes (sin filtro de periodo).
+ */
 export async function GET() {
   try {
-    const pool = await sql.connect(sqlConfig);
+    const auth = await requireDashboardAdminApi();
+    if (!auth.ok) return auth.response;
+
+    const pool = await getPool();
 
     const [solicitudes, actividades] = await Promise.all([
-      pool.request().query('SELECT * FROM vw_requests_general'),
-      pool.request().query('SELECT * FROM vw_tareas_solicitudes'),
+      queryVwRequestsGeneral(pool),
+      queryVwTareasSolicitudesAll(pool),
     ]);
 
     return Response.json({
-      solicitudes: solicitudes.recordset,
-      actividades: actividades.recordset,
+      solicitudes,
+      actividades,
+      source: {
+        solicitudes: 'vw_requests_general',
+        actividades: 'vw_tareas_solicitudes',
+      },
     });
   } catch (err) {
     console.error('Error exportando dashboard:', err);
-    return Response.json({ error: 'Error al obtener datos', details: err.message }, { status: 500 });
+    return Response.json(
+      {
+        error: 'Error al obtener datos',
+        details: err instanceof Error ? err.message : 'Unknown error',
+      },
+      { status: 500 }
+    );
   }
 }

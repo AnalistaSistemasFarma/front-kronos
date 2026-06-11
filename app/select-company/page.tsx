@@ -29,7 +29,7 @@ export default function SelectCompany() {
       return;
     }
     if (selectedCompany) {
-      router.push('/dashboard');
+      router.push('/dashboard/solicitudes');
       return;
     }
     fetchCompanies();
@@ -63,7 +63,7 @@ export default function SelectCompany() {
     const company = companies.find((c) => c.id.toString() === selectedValue);
     if (company) {
       setSelectedCompany(company);
-      router.push('/dashboard');
+      router.push('/dashboard/solicitudes');
     }
   };
 

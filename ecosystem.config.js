@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'GSS-Front',
       exec_mode: 'cluster',
-      instances: '1', // Or a number of instances
+      instances: '2', // Or a number of instances
       script: 'node_modules/next/dist/bin/next',
       args: 'start',
       cron_restart: '2 0 * * *',

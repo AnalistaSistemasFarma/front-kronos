@@ -30,7 +30,7 @@ export async function GET(req: Request) {
     const token = tokenResponse.data.access_token;
 
     return NextResponse.redirect(
-      `http://localhost:3003/dashboard?token=${token}`
+      `http://localhost:3003/dashboard/solicitudes?token=${token}`
     );
   } catch (error) {
     console.error("Token exchange failed:", error);
