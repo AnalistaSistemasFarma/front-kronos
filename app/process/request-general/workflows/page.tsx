@@ -934,22 +934,6 @@ function RequestBoard() {
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <Select
-                    label='Categoria'
-                    placeholder='Todas las categorias'
-                    clearable
-                    data={categories}
-                    value={filters.category}
-                    onChange={(value) => handleFilterChange('category', value || '')}
-                    leftSection={<IconBuilding size={16} />}
-                    size='md'
-                    classNames={{
-                      label: 'text-sm font-medium text-gray-700 mb-2',
-                      input: 'min-h-[44px] text-base',
-                    }}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
                     label='Proceso'
                     placeholder='Todas los procesos'
                     clearable
