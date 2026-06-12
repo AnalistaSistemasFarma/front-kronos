@@ -5,37 +5,41 @@ on:
     branches:
       - main
 
+# El runner es self-hosted en el MISMO servidor de producción (serfarma05).
+# Por eso el deploy se construye directamente sobre el repositorio de prod
+# (C:\Users\administrador.DFARUNIADM\projects\front-kronos), que SÍ contiene los
+# archivos git-ignored necesarios para compilar: dbconfig.js (credenciales SQL)
+# y app/generated/prisma (cliente Prisma generado).
+#
+# El esquema anterior (checkout limpio -> npm run build) fallaba siempre con 102
+# errores "Module not found: ../dbconfig" y "../app/generated/prisma" porque esos
+# archivos no existen en un checkout limpio. Además hacia `pm2 restart all` (que
+# reinicia las ~25 apps de la flota) y `xcopy` sobre el repo de prod (que pisaba
+# cambios locales no commiteados). Este esquema corrige ambos.
+
 jobs:
   deploy:
-    runs-on: self-hosted # Runner instalado en tu servidor
+    runs-on: self-hosted
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-        continue-on-error: false
-
-      - name: Stop PM2 apps
-        run: pm2 stop all
-        continue-on-error: true
-
-      - name: Copy files to production
-        run: |
-          xcopy /E /I /Y * "C:\Users\administrador.DFARUNIADM\projects\front-kronos"
+      - name: Deploy on production repository
         shell: cmd
-
-      - name: Install production dependencies
         run: |
-          cd C:\Users\administrador.DFARUNIADM\projects\front-kronos
-          npm install --production
+          cd /d C:\Users\administrador.DFARUNIADM\projects\front-kronos
 
-      - name: Restart PM2 apps
-        run: |
-          cd C:\Users\administrador.DFARUNIADM\projects\front-kronos
-          pm2 restart all
-          pm2 save
+          echo === Actualizando codigo (git pull origin main) ===
+          git fetch origin || exit /b 1
+          git pull origin main || exit /b 1
+
+          echo === Generando cliente Prisma ===
+          call npx prisma generate || exit /b 1
+
+          echo === Instalando dependencias ===
+          call npm install || exit /b 1
+
+          echo === Compilando (next build) ===
+          call npm run build || exit /b 1
+
+          echo === Recargando GSS-Front (reload, cero downtime) ===
+          call pm2 reload GSS-Front || exit /b 1
+          call pm2 save
