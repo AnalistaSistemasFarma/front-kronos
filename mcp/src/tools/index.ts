@@ -57,19 +57,6 @@ function requestResponsibleExists(userId: string): Prisma.Sql {
   )`;
 }
 
-/**
- * Columna correlacionada con los nombres de los responsables (encargados del
- * proceso) de la solicitud `rg`, separados por coma. Devuelve NULL si no hay.
- */
-const REQUEST_RESPONSIBLES_COLUMN = Prisma.sql`(
-  SELECT STRING_AGG(ru.name, ', ')
-  FROM process_category_request_general pcrg2
-  INNER JOIN user_process_category_request_general upcrg2
-    ON upcrg2.id_process_category = pcrg2.id_process_category
-  INNER JOIN [user] ru ON ru.id = upcrg2.id_user
-  WHERE pcrg2.id_request_general = rg.id
-) AS responsibles`;
-
 /** Empaqueta un resultado como contenido MCP (texto JSON). */
 function jsonResult(data: unknown) {
   return {
@@ -147,7 +134,6 @@ export const ENTITY_METADATA = {
       'category',
       'process',
       'requester',
-      'responsibles',
       'company',
       'id_company',
       'created_at',
@@ -268,7 +254,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_list_requests',
-    'Lista solicitudes generales (workflows). Filtra SIEMPRE por las empresas del alcance. Permite filtrar por responsable (encargado del proceso) con responsibleUserId y expone la columna "responsibles". Paginada.',
+    'Lista solicitudes generales (workflows). Filtra SIEMPRE por las empresas del alcance. Permite filtrar por responsable (encargado del proceso) con responsibleUserId (user.id). Paginada.',
     {
       companyId: z
         .number()
@@ -304,7 +290,6 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           SELECT rg.id, rg.subject_request AS subject, rg.[description],
                  rg.status_req AS id_status, sc.status AS status,
                  rg.id_company, c.company, u.name AS requester,
-                 ${REQUEST_RESPONSIBLES_COLUMN},
                  rg.created_at, rg.date_resolution, rg.resolution, rg.url
           FROM requests_general rg
           INNER JOIN company c ON c.id_company = rg.id_company
@@ -333,7 +318,6 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           SELECT rg.id, rg.subject_request AS subject, rg.[description],
                  rg.status_req AS id_status, sc.status AS status,
                  rg.id_company, c.company, u.name AS requester,
-                 ${REQUEST_RESPONSIBLES_COLUMN},
                  rg.created_at, rg.date_resolution, rg.resolution, rg.url
           FROM requests_general rg
           INNER JOIN company c ON c.id_company = rg.id_company
@@ -382,8 +366,9 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           FROM [case] c
           INNER JOIN status_case sc ON sc.id_status_case = c.id_status_case
           INNER JOIN department d ON d.id_department = c.id_department
-          LEFT JOIN account ac ON ac.id = c.id_technical
-          LEFT JOIN [user] ut ON ut.id = ac.userId
+          LEFT JOIN subprocess_user_company suc ON suc.id_subprocess_user_company = c.id_technical
+          LEFT JOIN company_user cu ON cu.id_company_user = suc.id_company_user
+          LEFT JOIN [user] ut ON ut.id = cu.id_user
           LEFT JOIN company co ON co.id_company = c.company
           WHERE ${whereSql}
           ORDER BY c.id_case DESC
@@ -411,8 +396,9 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           FROM [case] c
           INNER JOIN status_case sc ON sc.id_status_case = c.id_status_case
           INNER JOIN department d ON d.id_department = c.id_department
-          LEFT JOIN account ac ON ac.id = c.id_technical
-          LEFT JOIN [user] ut ON ut.id = ac.userId
+          LEFT JOIN subprocess_user_company suc ON suc.id_subprocess_user_company = c.id_technical
+          LEFT JOIN company_user cu ON cu.id_company_user = suc.id_company_user
+          LEFT JOIN [user] ut ON ut.id = cu.id_user
           LEFT JOIN company co ON co.id_company = c.company
           WHERE c.id_case = ${args.id} AND ${companyClause('c.company', filter)}
         `);
