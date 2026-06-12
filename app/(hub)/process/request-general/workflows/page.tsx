@@ -934,12 +934,12 @@ function RequestBoard() {
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <Select
-                    label='Categoria'
-                    placeholder='Todas las categorias'
+                    label='Empresa'
+                    placeholder='Todas las empresas'
                     clearable
-                    data={categories}
-                    value={filters.category}
-                    onChange={(value) => handleFilterChange('category', value || '')}
+                    data={companies}
+                    value={filters.company}
+                    onChange={(value) => handleFilterChange('company', value || '')}
                     leftSection={<IconBuilding size={16} />}
                     size='md'
                     classNames={{
