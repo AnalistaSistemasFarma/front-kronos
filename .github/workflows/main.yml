@@ -5,17 +5,24 @@ on:
     branches:
       - main
 
-# El runner es self-hosted en el MISMO servidor de producción (serfarma05).
-# Por eso el deploy se construye directamente sobre el repositorio de prod
-# (C:\Users\administrador.DFARUNIADM\projects\front-kronos), que SÍ contiene los
-# archivos git-ignored necesarios para compilar: dbconfig.js (credenciales SQL)
-# y app/generated/prisma (cliente Prisma generado).
+# El runner es self-hosted en el MISMO servidor de producción (serfarma05) y corre
+# como DFARUNIADM\nicolas.rivera, la cuenta dueña del código y del daemon pm2 que
+# ejecuta GSS-Front. Por eso el deploy se construye directamente sobre el
+# repositorio de prod (C:\Users\administrador.DFARUNIADM\projects\front-kronos),
+# que SÍ contiene los archivos git-ignored necesarios para compilar: dbconfig.js
+# (credenciales SQL) y app/generated/prisma (cliente Prisma generado).
 #
 # El esquema anterior (checkout limpio -> npm run build) fallaba siempre con 102
 # errores "Module not found: ../dbconfig" y "../app/generated/prisma" porque esos
 # archivos no existen en un checkout limpio. Además hacia `pm2 restart all` (que
 # reinicia las ~25 apps de la flota) y `xcopy` sobre el repo de prod (que pisaba
 # cambios locales no commiteados). Este esquema corrige ambos.
+#
+# NO se ejecuta `prisma generate` en el deploy: el cliente ya está generado en
+# disco y la app en ejecución mantiene bloqueado query_engine-windows.dll.node,
+# lo que hace fallar el rename con EPERM. Si alguna vez cambia prisma/schema.prisma
+# hay que regenerarlo manualmente (detener GSS-Front, `npx prisma generate`,
+# reiniciar).
 
 jobs:
   deploy:
@@ -25,14 +32,11 @@ jobs:
       - name: Deploy on production repository
         shell: cmd
         run: |
-          cd /d C:\Users\administrador.DFARUNIADM\projects\front-kronos
+          cd /d C:\Users\administrador.DFARUNIADM\projects\front-kronos || exit /b 1
 
           echo === Actualizando codigo (git pull origin main) ===
           git fetch origin || exit /b 1
           git pull origin main || exit /b 1
-
-          echo === Generando cliente Prisma ===
-          call npx prisma generate || exit /b 1
 
           echo === Instalando dependencias ===
           call npm install || exit /b 1
