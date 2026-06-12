@@ -203,7 +203,7 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 13,
+  totalTools: 15,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
@@ -211,15 +211,16 @@ export const TOOL_CAPABILITIES = {
     'kronos_list_tickets',
     'kronos_get_ticket',
     'kronos_list_processes',
+    'kronos_list_process_categories',
     'kronos_list_activities',
     'kronos_list_departments',
     'kronos_list_categories',
     'kronos_list_users',
     'kronos_search',
   ],
-  write: ['kronos_categorize_case', 'kronos_categorize_request'],
+  write: ['kronos_categorize_case', 'kronos_categorize_request', 'kronos_create_request'],
   writeNote:
-    'El servidor YA NO es 100% solo lectura: existe una única ruta de escritura, acotada a categorización (caso: tabla puente category_case; solicitud: tabla puente process_category_request_general), transaccional, parametrizada y auditada. El candado assertReadOnlySql sigue intacto para las 11 tools de lectura.',
+    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general) y creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones). Todas transaccionales, parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las 12 tools de lectura.',
 } as const;
 
 export function registerTools(server: McpServer, ctx: ToolContext): void {
@@ -230,7 +231,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_metadata',
-    'Describe las entidades y campos disponibles, el alcance (empresas) de la API key actual, y las capacidades del servidor (11 tools de lectura + 2 de escritura para categorizar).',
+    'Describe las entidades y campos disponibles, el alcance (empresas) de la API key actual, y las capacidades del servidor (12 tools de lectura + 3 de escritura: 2 de categorización y 1 de creación de solicitudes).',
     {},
     async () =>
       withAudit(ctx, 'kronos_metadata', {}, async () => ({
@@ -524,6 +525,38 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
             subcategories: { select: { id_subcategory: true, subcategory: true } },
           },
         });
+        return { result: { count: data.length, limit: take, offset: skip, data }, rows: data.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_process_categories  (catálogo de workflows de solicitudes)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_process_categories',
+    'Lista las CATEGORÍAS DE PROCESO (workflows) de solicitudes, con su descripción de qué hace cada una. Filtra por las empresas del alcance. Úsala para ASESORAR sobre qué proceso elegir y para obtener el id_process_category válido al crear una solicitud con kronos_create_request.',
+    {
+      companyId: z.number().int().optional().describe('Empresa a acotar; se interseca con el alcance de la key.'),
+      onlyActive: z.boolean().optional().describe('Si es true, solo procesos activos (pc.active = 1).'),
+      limit: z.number().int().optional(),
+      offset: z.number().int().optional(),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_process_categories', args, async () => {
+        const take = clampLimit(ctx, args.limit);
+        const skip = clampOffset(args.offset);
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const activeClause = args.onlyActive ? Prisma.sql`AND pc.active = 1` : Prisma.empty;
+        const data = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT pc.id AS id_process_category, pc.process AS name, pc.description,
+                 pc.active, ccr.id_company, co.company
+          FROM process_category pc
+          INNER JOIN company_category_request ccr ON ccr.id_category_request = pc.id_category_request
+          INNER JOIN company co ON co.id_company = ccr.id_company
+          WHERE ${companyClause('ccr.id_company', filter)} ${activeClause}
+          ORDER BY co.company, pc.process
+          OFFSET ${skip} ROWS FETCH NEXT ${take} ROWS ONLY
+        `);
         return { result: { count: data.length, limit: take, offset: skip, data }, rows: data.length };
       })
   );
@@ -830,6 +863,138 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           };
         });
 
+        return { result, rows: 1 };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_create_request  (ESCRITURA) — crea una solicitud + workflow + notifs
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_create_request',
+    'ESCRITURA. Crea una nueva solicitud en SynerLink: inserta en requests_general, la vincula a su categoría de proceso, instancia automáticamente las tareas del workflow y registra notificaciones (en la app) para el responsable del proceso y los asignados. Acotada a las empresas del alcance de la key. Valida empresa, proceso (activo y habilitado para la empresa) y solicitante. Transaccional y auditada. Use kronos_list_process_categories para el id_process_category y kronos_list_users para el solicitante.',
+    {
+      companyId: z.number().int().describe('id_company de la empresa de la solicitud (debe estar en el alcance de la key).'),
+      subject: z.string().min(1).describe('Asunto de la solicitud (subject_request).'),
+      description: z.string().min(1).describe('Descripción de la solicitud.'),
+      requesterUserId: z.string().min(1).describe('id del usuario solicitante (user.id). Resuélvalo con kronos_list_users.'),
+      id_process_category: z.number().int().describe('process_category.id del proceso al que pertenece (kronos_list_process_categories).'),
+      url: z.string().optional().describe('URL opcional asociada a la solicitud.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_create_request', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId);
+        const result = await executeWrite(async (tx: TxClient) => {
+          // 1. La empresa existe y está en el alcance de la key.
+          const okCompany = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok
+            FROM company c
+            WHERE c.id_company = ${args.companyId} AND ${companyClause('c.id_company', filter)}
+          `);
+          if (okCompany.length === 0) {
+            throw new Error('empresa inexistente o fuera de alcance');
+          }
+
+          // 2. El proceso existe, está activo y está habilitado para la empresa.
+          const okProcess = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok
+            FROM process_category pc
+            INNER JOIN company_category_request ccr
+              ON ccr.id_category_request = pc.id_category_request
+            WHERE pc.id = ${args.id_process_category}
+              AND pc.active = 1
+              AND ccr.id_company = ${args.companyId}
+          `);
+          if (okProcess.length === 0) {
+            throw new Error('proceso inexistente, inactivo o no habilitado para la empresa');
+          }
+
+          // 3. El solicitante existe.
+          const okUser = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok FROM [user] u WHERE u.id = ${args.requesterUserId}
+          `);
+          if (okUser.length === 0) {
+            throw new Error('usuario solicitante inexistente');
+          }
+
+          // 4. Insertar la solicitud (status_req = 1 = Abierto).
+          const inserted = await tx.$queryRaw<{ id: number }[]>(Prisma.sql`
+            INSERT INTO requests_general (description, subject_request, id_company, id_requester, status_req, url)
+            OUTPUT INSERTED.id
+            VALUES (${args.description}, ${args.subject}, ${args.companyId}, ${args.requesterUserId}, 1, ${args.url ?? null})
+          `);
+          const newRow = inserted[0];
+          if (!newRow) {
+            throw new Error('no se pudo crear la solicitud');
+          }
+          const newId = newRow.id;
+
+          // 5. Vincular la solicitud a su categoría de proceso.
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO process_category_request_general (id_request_general, id_process_category)
+            VALUES (${newId}, ${args.id_process_category})
+          `);
+
+          // 6. Instanciar las tareas del workflow (id_status = 4 = Sin Empezar).
+          const tasks = await tx.$queryRaw<{ id_task: number; id_user: string; email: string | null }[]>(Prisma.sql`
+            SELECT tpc.id AS id_task, utrg.id_user, u.email
+            FROM user_task_request_general utrg
+            INNER JOIN task_process_category tpc ON tpc.id = utrg.id_task
+            INNER JOIN [user] u ON u.id = utrg.id_user
+            WHERE tpc.id_process_category = ${args.id_process_category}
+          `);
+          for (const t of tasks) {
+            await tx.$executeRaw(Prisma.sql`
+              INSERT INTO task_request_general (id_request_general, id_task, id_status, id_assigned)
+              VALUES (${newId}, ${t.id_task}, 4, ${t.id_user})
+            `);
+          }
+
+          // 7. Correos: responsable del proceso + asignados de las tareas.
+          const procUsers = await tx.$queryRaw<{ email: string | null }[]>(Prisma.sql`
+            SELECT u.email
+            FROM user_process_category_request_general upcrg
+            INNER JOIN [user] u ON u.id = upcrg.id_user
+            WHERE upcrg.id_process_category = ${args.id_process_category}
+          `);
+          const processEmail = procUsers[0]?.email ?? null;
+          const taskEmails = Array.from(
+            new Set(tasks.map((t) => t.email).filter((e): e is string => Boolean(e)))
+          );
+
+          // 8. Notificaciones en la app (tabla notifications), igual que notifyNewRequest.
+          //    Nota: el push del navegador (web-push) lo envía la SPA; aquí se
+          //    persiste la notificación en BD (campana), que es la parte durable.
+          const viewUrl =
+            args.url && args.url.trim()
+              ? args.url.trim()
+              : `/process/request-general/view-request?id=${newId}&from=general-requests`;
+          const activitiesUrl = `/process/request-general/view-activities?id=${newId}&from=assigned-activities`;
+          const processList = processEmail ? [processEmail] : [];
+          const taskList = taskEmails.filter((e) => !processList.includes(e));
+
+          for (const email of processList) {
+            await tx.$executeRaw(Prisma.sql`
+              INSERT INTO notifications (email, title, body, url)
+              VALUES (${email}, ${'Nueva solicitud · SynerLink'}, ${`#${newId} — ${args.subject}`}, ${viewUrl})
+            `);
+          }
+          for (const email of taskList) {
+            await tx.$executeRaw(Prisma.sql`
+              INSERT INTO notifications (email, title, body, url)
+              VALUES (${email}, ${'Actividad asignada · SynerLink'}, ${`Tienes una actividad en la solicitud #${newId} — ${args.subject}`}, ${activitiesUrl})
+            `);
+          }
+
+          return {
+            id_request: newId,
+            id_company: args.companyId,
+            id_process_category: args.id_process_category,
+            requester: args.requesterUserId,
+            tasksCreated: tasks.length,
+            notified: { processEmail, taskEmails },
+          };
+        });
         return { result, rows: 1 };
       })
   );

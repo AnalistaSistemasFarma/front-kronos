@@ -316,7 +316,7 @@ describe('el candado read-only sigue intacto pese a las tools de escritura', () 
     const client = await connectClient(server);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names.length).toBe(13);
+    expect(names.length).toBe(15);
     expect(names).toContain('kronos_categorize_case');
     expect(names).toContain('kronos_categorize_request');
     const writeTools = names.filter((n) => n.startsWith('kronos_categorize_'));

@@ -114,7 +114,7 @@ describe('enforcement de empresa en las tools', () => {
     expect(meta.allowedCompanyIds).toEqual([1]);
     // Ya no es 100% solo lectura: hay una ruta de escritura acotada.
     expect(meta.readOnly).toBe(false);
-    expect(meta.capabilities.totalTools).toBe(13);
+    expect(meta.capabilities.totalTools).toBe(15);
     expect(meta.capabilities.write).toContain('kronos_categorize_case');
   });
 });
@@ -178,15 +178,22 @@ describe('superficie de tools — 11 de lectura + 2 de escritura (categorizació
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
 
-    expect(names.length).toBe(13);
+    expect(names.length).toBe(15);
     // Las únicas tools que mutan datos son las dos de categorización.
     const writeTools = names.filter((n) => n.startsWith('kronos_categorize_'));
     expect(writeTools.sort()).toEqual(['kronos_categorize_case', 'kronos_categorize_request']);
+    // La tool de creación de solicitudes también es de escritura.
+    expect(names).toContain('kronos_create_request');
     // Las demás (lectura) no usan verbos de mutación generales.
     const writeVerbs = /(create|update|delete|insert|remove|write|set_|authorize|assign|mutat)/i;
+    const writeToolNames = new Set([
+      'kronos_categorize_case',
+      'kronos_categorize_request',
+      'kronos_create_request',
+    ]);
     for (const n of names) {
       expect(n.startsWith('kronos_')).toBe(true);
-      if (!n.startsWith('kronos_categorize_')) {
+      if (!writeToolNames.has(n)) {
         expect(writeVerbs.test(n)).toBe(false);
       }
     }
