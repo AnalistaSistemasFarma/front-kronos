@@ -4,7 +4,10 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 
+export const dynamic = 'force-dynamic';
+
 export async function PATCH(req) {
+  let pool;
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
@@ -14,7 +17,7 @@ export async function PATCH(req) {
     const body = await req.json().catch(() => ({}));
     const { id, all } = body;
 
-    const pool = await sql.connect(sqlConfig);
+    pool = await sql.connect(sqlConfig);
 
     if (all === true) {
       await pool
@@ -39,5 +42,9 @@ export async function PATCH(req) {
   } catch (err) {
     console.error('[PATCH /api/notifications/read] Error:', err);
     return NextResponse.json({ error: 'Error al marcar como leída' }, { status: 500 });
+  } finally {
+    if (pool?.connected) {
+      await pool.close().catch(() => {});
+    }
   }
 }

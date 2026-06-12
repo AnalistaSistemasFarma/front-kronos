@@ -24,15 +24,17 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = event.notification.data?.url || '/';
+  const raw = event.notification.data?.url || '/';
+  const targetUrl = new URL(raw, self.location.origin).href;
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if ('focus' in client) {
           client.focus();
-          if ('navigate' in client) client.navigate(targetUrl);
-          return;
+          if ('navigate' in client) {
+            return client.navigate(targetUrl);
+          }
         }
       }
       if (self.clients.openWindow) {
