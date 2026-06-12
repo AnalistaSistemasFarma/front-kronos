@@ -309,12 +309,12 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_get_request',
-    'Obtiene una solicitud por id. Solo la devuelve si pertenece a una empresa del alcance.',
+    'Obtiene una solicitud por id, con sus notas/seguimientos. Solo la devuelve si pertenece a una empresa del alcance.',
     { id: z.number().int().describe('id de la solicitud (requests_general.id).') },
     async (args) =>
       withAudit(ctx, 'kronos_get_request', args, async () => {
         const filter = effectiveCompanyFilter(ctx.scope, null);
-        const rows = await queryReadOnly<unknown>(Prisma.sql`
+        const rows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
           SELECT rg.id, rg.subject_request AS subject, rg.[description],
                  rg.status_req AS id_status, sc.status AS status,
                  rg.id_company, c.company, u.name AS requester,
@@ -325,7 +325,19 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           LEFT JOIN [user] u ON u.id = rg.id_requester
           WHERE rg.id = ${args.id} AND ${companyClause('rg.id_company', filter)}
         `);
-        return { result: rows[0] ?? null, rows: rows.length };
+
+        const request = rows[0] ?? null;
+        if (!request) return { result: null, rows: 0 };
+
+        // Notas/seguimientos de la solicitud (solo tras confirmar el alcance).
+        const notes = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT n.id_note, n.note, u.name AS createdBy, n.creation_date
+          FROM notes n
+          LEFT JOIN [user] u ON u.id = n.created_by
+          WHERE n.id_request = ${args.id}
+          ORDER BY n.id_note DESC
+        `);
+        return { result: { ...request, notes }, rows: 1 };
       })
   );
 
