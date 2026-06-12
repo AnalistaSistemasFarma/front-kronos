@@ -1,12 +1,38 @@
 'use client';
 
-import { ActionIcon, Indicator, Popover, ScrollArea, Switch, Tooltip, Loader } from '@mantine/core';
-import { IconBell, IconBellRinging, IconCheck } from '@tabler/icons-react';
+import {
+  ActionIcon,
+  Badge,
+  Group,
+  Indicator,
+  Popover,
+  ScrollArea,
+  Switch,
+  Text,
+  ThemeIcon,
+  Tooltip,
+  UnstyledButton,
+  Loader,
+} from '@mantine/core';
+import {
+  IconBell,
+  IconBellRinging,
+  IconCheck,
+  IconChevronRight,
+  IconClipboardList,
+  IconListCheck,
+  IconTicket,
+} from '@tabler/icons-react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import {
+  getNotificationActionLabel,
+  inferNotificationPath,
+  isExternalNotificationPath,
+} from '../lib/notifications/resolveNotificationTarget';
 
 interface Notification {
   id: number;
@@ -31,10 +57,38 @@ function formatRelative(date: string) {
   return new Date(date).toLocaleDateString('es-CO');
 }
 
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError';
+}
+
+async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  return fetch(input, {
+    ...init,
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: {
+      Accept: 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  });
+}
+
+function pickNotificationIcon(path: string | null, title: string) {
+  const text = `${path ?? ''} ${title}`.toLowerCase();
+  if (text.includes('ticket') || text.includes('view-ticket') || text.includes('mesa de ayuda')) {
+    return IconTicket;
+  }
+  if (text.includes('actividad') || text.includes('view-activities')) {
+    return IconListCheck;
+  }
+  return IconClipboardList;
+}
+
 export default function NotificationBell() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const userEmail = session?.user?.email;
+  const isAuthenticated = status === 'authenticated' && Boolean(userEmail);
   const { isSupported, isSubscribed, permission, loading: pushLoading, subscribe, unsubscribe } =
     usePushNotifications(userEmail);
 
@@ -43,56 +97,148 @@ export default function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [fetching, setFetching] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const fetchInFlightRef = useRef(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
   const fetchNotifications = useCallback(async () => {
-    if (!userEmail) return;
+    if (!isAuthenticated || typeof document === 'undefined') return;
+    if (document.visibilityState === 'hidden') return;
+    if (fetchInFlightRef.current) return;
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    fetchInFlightRef.current = true;
     setFetching(true);
+
     try {
-      const res = await fetch('/api/notifications');
+      const res = await apiFetch('/api/notifications', { signal: controller.signal });
+      if (controller.signal.aborted) return;
       if (!res.ok) return;
+
       const data = await res.json();
+      if (controller.signal.aborted) return;
+
       setNotifications(data.notifications || []);
       setUnreadCount(data.unreadCount || 0);
     } catch (err) {
-      console.error('[NotificationBell] Error fetch:', err);
+      if (isAbortError(err) || controller.signal.aborted) return;
     } finally {
-      setFetching(false);
+      fetchInFlightRef.current = false;
+      if (!controller.signal.aborted) {
+        setFetching(false);
+      }
     }
-  }, [userEmail]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
-    if (!userEmail) return;
-    fetchNotifications();
-    const interval = setInterval(fetchNotifications, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [userEmail, fetchNotifications]);
+    if (!isAuthenticated) return;
+
+    const run = () => {
+      void fetchNotifications();
+    };
+
+    const initialTimer = window.setTimeout(run, 800);
+    const interval = window.setInterval(run, POLL_INTERVAL_MS);
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchNotifications();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+      abortRef.current?.abort();
+    };
+  }, [isAuthenticated, fetchNotifications]);
+
+  useEffect(() => {
+    if (opened && isAuthenticated) {
+      void fetchNotifications();
+    }
+  }, [opened, isAuthenticated, fetchNotifications]);
+
+  const navigateToDetail = useCallback(
+    (path: string) => {
+      if (isExternalNotificationPath(path)) {
+        window.location.assign(path);
+        return;
+      }
+
+      // Evitar que view-ticket reutilice otro caso guardado en sessionStorage
+      if (path.includes('/process/help-desk/view-ticket')) {
+        const match = path.match(/[?&]id=(\d+)/);
+        if (match?.[1]) {
+          const targetId = Number(match[1]);
+          try {
+            const stored = sessionStorage.getItem('selectedTicket');
+            if (stored) {
+              const parsed = JSON.parse(stored) as { id_case?: number };
+              if (parsed.id_case !== targetId) {
+                sessionStorage.removeItem('selectedTicket');
+                sessionStorage.removeItem('ticketsList');
+              }
+            }
+          } catch {
+            sessionStorage.removeItem('selectedTicket');
+            sessionStorage.removeItem('ticketsList');
+          }
+        }
+      }
+
+      router.push(path);
+    },
+    [router]
+  );
 
   const handleClick = async (n: Notification) => {
+    const detailPath = inferNotificationPath(n);
+
+    if (!detailPath) {
+      toast.error('No hay enlace de detalle para esta notificación.');
+      return;
+    }
+
     if (!n.read_at) {
-      await fetch('/api/notifications/read', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: n.id }),
-      });
+      try {
+        await apiFetch('/api/notifications/read', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: n.id }),
+        });
+      } catch {
+        /* no bloquear navegación */
+      }
       setNotifications((prev) =>
         prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x))
       );
       setUnreadCount((c) => Math.max(0, c - 1));
     }
+
     setOpened(false);
-    if (n.url) router.push(n.url);
+    navigateToDetail(detailPath);
   };
 
   const markAllRead = async () => {
-    await fetch('/api/notifications/read', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ all: true }),
-    });
+    try {
+      const res = await apiFetch('/api/notifications/read', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      });
+      if (!res.ok) throw new Error('request failed');
+    } catch {
+      toast.error('No se pudieron marcar las notificaciones. Intenta de nuevo.');
+      return;
+    }
     setNotifications((prev) =>
       prev.map((n) => (n.read_at ? n : { ...n, read_at: new Date().toISOString() }))
     );
@@ -115,7 +261,7 @@ export default function NotificationBell() {
     }
   };
 
-  if (!mounted) {
+  if (!mounted || status === 'loading' || !isAuthenticated) {
     return (
       <ActionIcon variant='subtle' color='gray' aria-label='Notificaciones' disabled>
         <IconBell size={18} />
@@ -128,7 +274,7 @@ export default function NotificationBell() {
       opened={opened}
       onChange={setOpened}
       position='bottom-end'
-      width={380}
+      width={400}
       withArrow
       shadow='md'
     >
@@ -153,63 +299,149 @@ export default function NotificationBell() {
         </Indicator>
       </Popover.Target>
       <Popover.Dropdown p={0}>
-        <div className='flex items-center justify-between px-4 py-2 border-b'>
-          <span className='font-semibold text-sm'>Notificaciones</span>
+        <Group justify='space-between' px='md' py='sm' className='border-b border-[var(--app-border)]'>
+          <Text size='sm' fw={600}>
+            Notificaciones
+          </Text>
           {unreadCount > 0 && (
-            <button
-              onClick={markAllRead}
-              className='flex items-center gap-1 text-xs text-blue-600 hover:underline'
-            >
-              <IconCheck size={14} /> Marcar todas
-            </button>
+            <UnstyledButton onClick={markAllRead}>
+              <Group gap={4}>
+                <IconCheck size={14} />
+                <Text size='xs' c='blue'>
+                  Marcar todas
+                </Text>
+              </Group>
+            </UnstyledButton>
           )}
-        </div>
+        </Group>
 
-        <ScrollArea.Autosize mah={400}>
+        <ScrollArea.Autosize mah={420}>
           {fetching && notifications.length === 0 ? (
-            <div className='flex justify-center py-6'>
+            <Group justify='center' py='xl'>
               <Loader size='sm' />
-            </div>
+            </Group>
           ) : notifications.length === 0 ? (
-            <div className='py-6 text-center text-sm text-gray-500'>No tienes notificaciones</div>
+            <Text size='sm' c='dimmed' ta='center' py='xl'>
+              No tienes notificaciones
+            </Text>
           ) : (
-            <ul>
+            <ul className='list-none m-0 p-0'>
               {notifications.map((n) => (
-                <li
-                  key={n.id}
-                  onClick={() => handleClick(n)}
-                  className={`px-4 py-3 border-b cursor-pointer hover:bg-gray-50 ${
-                    !n.read_at ? 'bg-blue-50' : ''
-                  }`}
-                >
-                  <div className='flex items-start gap-2'>
-                    {!n.read_at && (
-                      <span className='mt-1.5 w-2 h-2 rounded-full bg-blue-500 flex-shrink-0' />
-                    )}
-                    <div className='flex-1 min-w-0'>
-                      <p className='text-sm font-medium truncate'>{n.title}</p>
-                      <p className='text-xs text-gray-600 line-clamp-2'>{n.body}</p>
-                      <p className='text-xs text-gray-400 mt-1'>{formatRelative(n.created_at)}</p>
-                    </div>
-                  </div>
-                </li>
+                <NotificationRow key={n.id} notification={n} onOpen={handleClick} />
               ))}
             </ul>
           )}
         </ScrollArea.Autosize>
 
         {isSupported && (
-          <div className='px-4 py-2 border-t flex items-center justify-between bg-gray-50'>
-            <span className='text-xs text-gray-700'>Notificaciones push</span>
+          <Group
+            justify='space-between'
+            px='md'
+            py='sm'
+            className='border-t border-[var(--app-border)]'
+            style={{ background: 'var(--app-surface-muted, var(--mantine-color-gray-0))' }}
+          >
+            <Text size='xs'>Notificaciones push</Text>
             <Switch
               size='sm'
               checked={isSubscribed}
               onChange={togglePush}
               disabled={pushLoading || permission === 'denied'}
             />
-          </div>
+          </Group>
         )}
       </Popover.Dropdown>
     </Popover>
+  );
+}
+
+function NotificationRow({
+  notification: n,
+  onOpen,
+}: {
+  notification: Notification;
+  onOpen: (n: Notification) => void;
+}) {
+  const detailPath = inferNotificationPath(n);
+  const actionLabel = getNotificationActionLabel(detailPath, n.title);
+  const Icon = pickNotificationIcon(detailPath, n.title);
+  const isUnread = !n.read_at;
+  const hasLink = Boolean(detailPath);
+
+  return (
+    <li>
+      <UnstyledButton
+        onClick={() => onOpen(n)}
+        disabled={!hasLink}
+        w='100%'
+        aria-label={hasLink ? `${actionLabel}: ${n.title}` : n.title}
+        style={{
+          display: 'block',
+          opacity: hasLink ? 1 : 0.72,
+          cursor: hasLink ? 'pointer' : 'default',
+        }}
+      >
+        <Group
+          gap='sm'
+          wrap='nowrap'
+          align='flex-start'
+          px='md'
+          py='sm'
+          className={`border-b border-[var(--app-border)] transition-colors ${
+            hasLink ? 'hover:bg-[var(--mantine-color-gray-0)]' : ''
+          }`}
+          style={{
+            background: isUnread ? 'var(--mantine-color-blue-0)' : undefined,
+          }}
+        >
+          <ThemeIcon
+            size={36}
+            radius='md'
+            variant={isUnread ? 'light' : 'default'}
+            color={isUnread ? 'blue' : 'gray'}
+            style={{ flexShrink: 0 }}
+          >
+            <Icon size={18} />
+          </ThemeIcon>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Group gap={6} wrap='nowrap' mb={2}>
+              {isUnread ? (
+                <Badge size='xs' variant='dot' color='blue'>
+                  Nueva
+                </Badge>
+              ) : null}
+              <Text size='sm' fw={600} lineClamp={1} style={{ flex: 1 }}>
+                {n.title}
+              </Text>
+            </Group>
+            <Text size='xs' c='dimmed' lineClamp={2}>
+              {n.body}
+            </Text>
+            <Group gap={6} mt={6} wrap='nowrap'>
+              <Text size='xs' c='dimmed'>
+                {formatRelative(n.created_at)}
+              </Text>
+              {hasLink ? (
+                <>
+                  <Text size='xs' c='dimmed'>
+                    ·
+                  </Text>
+                  <Text size='xs' c='blue' fw={600} lineClamp={1}>
+                    {actionLabel}
+                  </Text>
+                </>
+              ) : null}
+            </Group>
+          </div>
+
+          {hasLink ? (
+            <ThemeIcon size='sm' variant='transparent' color='gray' style={{ flexShrink: 0, marginTop: 4 }}>
+              <IconChevronRight size={16} />
+            </ThemeIcon>
+          ) : null}
+        </Group>
+      </UnstyledButton>
+    </li>
   );
 }

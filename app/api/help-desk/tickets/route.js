@@ -7,6 +7,7 @@ export async function GET(req) {
     const pool = await sql.connect(sqlConfig);
 
     const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
     const priority = searchParams.get('priority');
     const status = searchParams.get('status');
     const assigned_user = searchParams.get('assigned_user');
@@ -37,10 +38,11 @@ export async function GET(req) {
       WHERE 1=1
     `;
 
+    if (id) query += ` AND c.id_case = @id`;
     if (priority) query += ` AND c.priority = @priority`;
     if (company) query += ` AND co.id_company = @company`;
     if (status && status !== '0') query += ` AND sc.id_status_case = @status`;
-    else if (!status) query += ` AND sc.id_status_case = 1`;
+    else if (!status && !id) query += ` AND sc.id_status_case = 1`;
     if (assigned_user) query += ` AND u.name LIKE '%' + @assigned_user + '%'`;
     if (technician) query += ` AND c.id_technical = @technician`;
     if (date_from && date_to) query += ` AND c.creation_date BETWEEN @date_from AND @date_to`;
@@ -48,6 +50,7 @@ export async function GET(req) {
     query += ` ORDER BY c.id_case DESC`;
 
     const request = pool.request();
+    if (id) request.input('id', sql.Int, Number(id));
     if (priority) request.input('priority', sql.NVarChar, priority);
     if (status) request.input('status', sql.Int, status);
     if (company) request.input('company', sql.Int, company);
@@ -59,6 +62,14 @@ export async function GET(req) {
     }
 
     const result = await request.query(query);
+
+    if (id) {
+      const ticket = result.recordset[0] ?? null;
+      if (!ticket) {
+        return NextResponse.json({ error: 'Caso no encontrado' }, { status: 404 });
+      }
+      return NextResponse.json(ticket, { status: 200 });
+    }
 
     return NextResponse.json(result.recordset, { status: 200 });
   } catch (err) {

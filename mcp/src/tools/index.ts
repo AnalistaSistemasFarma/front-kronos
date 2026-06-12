@@ -42,6 +42,21 @@ function clampOffset(offset?: number): number {
   return offset;
 }
 
+/**
+ * Cláusula EXISTS: la solicitud `rg` tiene al usuario dado como
+ * ENCARGADO/responsable del proceso asignado (bridge
+ * process_category_request_general -> user_process_category_request_general).
+ */
+function requestResponsibleExists(userId: string): Prisma.Sql {
+  return Prisma.sql`EXISTS (
+    SELECT 1
+    FROM process_category_request_general pcrg
+    INNER JOIN user_process_category_request_general upcrg
+      ON upcrg.id_process_category = pcrg.id_process_category
+    WHERE pcrg.id_request_general = rg.id AND upcrg.id_user = ${userId}
+  )`;
+}
+
 /** Empaqueta un resultado como contenido MCP (texto JSON). */
 function jsonResult(data: unknown) {
   return {
@@ -141,6 +156,7 @@ export const ENTITY_METADATA = {
       'department',
       'requester',
       'technician',
+      'technician_id',
       'category',
       'subcategory',
       'activity',
@@ -238,7 +254,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_list_requests',
-    'Lista solicitudes generales (workflows). Filtra SIEMPRE por las empresas del alcance. Paginada.',
+    'Lista solicitudes generales (workflows). Filtra SIEMPRE por las empresas del alcance. Permite filtrar por responsable (encargado del proceso) con responsibleUserId (user.id). Paginada.',
     {
       companyId: z
         .number()
@@ -246,6 +262,12 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         .optional()
         .describe('Empresa a consultar; se interseca con el alcance de la key.'),
       status: z.number().int().optional().describe('Filtra por id de estado (status_req).'),
+      responsibleUserId: z
+        .string()
+        .optional()
+        .describe(
+          'Filtra solicitudes donde este usuario (user.id) es ENCARGADO/responsable del proceso asignado a la solicitud.'
+        ),
       limit: z.number().int().optional(),
       offset: z.number().int().optional(),
     },
@@ -258,6 +280,9 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         const where: Prisma.Sql[] = [companyClause('rg.id_company', filter)];
         if (args.status !== undefined) {
           where.push(Prisma.sql`rg.status_req = ${args.status}`);
+        }
+        if (args.responsibleUserId !== undefined) {
+          where.push(requestResponsibleExists(args.responsibleUserId));
         }
         const whereSql = Prisma.join(where, ' AND ');
 
@@ -309,11 +334,15 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_list_tickets',
-    'Lista tickets/casos de mesa de ayuda. Filtra SIEMPRE por las empresas del alcance. Paginada.',
+    'Lista tickets/casos de mesa de ayuda. Filtra SIEMPRE por las empresas del alcance. Permite filtrar por técnico/responsable asignado con technicianId y expone las columnas "technician"/"technician_id". Paginada.',
     {
       companyId: z.number().int().optional(),
       status: z.number().int().optional().describe('id_status_case'),
       priority: z.string().optional(),
+      technicianId: z
+        .string()
+        .optional()
+        .describe('Filtra casos donde este usuario (user.id) es el TÉCNICO/responsable asignado.'),
       limit: z.number().int().optional(),
       offset: z.number().int().optional(),
     },
@@ -326,15 +355,20 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         const where: Prisma.Sql[] = [companyClause('c.company', filter)];
         if (args.status !== undefined) where.push(Prisma.sql`c.id_status_case = ${args.status}`);
         if (args.priority !== undefined) where.push(Prisma.sql`c.priority = ${args.priority}`);
+        if (args.technicianId !== undefined) where.push(Prisma.sql`ut.id = ${args.technicianId}`);
         const whereSql = Prisma.join(where, ' AND ');
 
         const rows = await queryReadOnly<unknown>(Prisma.sql`
           SELECT c.id_case, c.subject_case, c.[description], c.priority, c.case_type,
-                 sc.status, d.department, c.requester, co.id_company, co.company,
+                 sc.status, d.department, c.requester, ut.name AS technician, ut.id AS technician_id,
+                 co.id_company, co.company,
                  c.creation_date, c.end_date, c.resolution, c.place
           FROM [case] c
           INNER JOIN status_case sc ON sc.id_status_case = c.id_status_case
           INNER JOIN department d ON d.id_department = c.id_department
+          LEFT JOIN subprocess_user_company suc ON suc.id_subprocess_user_company = c.id_technical
+          LEFT JOIN company_user cu ON cu.id_company_user = suc.id_company_user
+          LEFT JOIN [user] ut ON ut.id = cu.id_user
           LEFT JOIN company co ON co.id_company = c.company
           WHERE ${whereSql}
           ORDER BY c.id_case DESC
@@ -356,11 +390,15 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         const filter = effectiveCompanyFilter(ctx.scope, null);
         const rows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
           SELECT c.id_case, c.subject_case, c.[description], c.priority, c.case_type,
-                 sc.status, d.department, c.requester, co.id_company, co.company,
+                 sc.status, d.department, c.requester, ut.name AS technician, ut.id AS technician_id,
+                 co.id_company, co.company,
                  c.creation_date, c.end_date, c.resolution, c.place
           FROM [case] c
           INNER JOIN status_case sc ON sc.id_status_case = c.id_status_case
           INNER JOIN department d ON d.id_department = c.id_department
+          LEFT JOIN subprocess_user_company suc ON suc.id_subprocess_user_company = c.id_technical
+          LEFT JOIN company_user cu ON cu.id_company_user = suc.id_company_user
+          LEFT JOIN [user] ut ON ut.id = cu.id_user
           LEFT JOIN company co ON co.id_company = c.company
           WHERE c.id_case = ${args.id} AND ${companyClause('c.company', filter)}
         `);

@@ -112,6 +112,49 @@ interface FolderFile {
   '@microsoft.graph.downloadUrl'?: string;
 }
 
+function parseTicketDate(value: string | Date | null | undefined): Date | null {
+  if (value == null) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const parsed = new Date(trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatTicketDateIso(
+  value: string | Date | null | undefined,
+  fallback = '—'
+): string {
+  const parsed = parseTicketDate(value);
+  if (!parsed) return fallback;
+  return parsed.toISOString().split('T')[0];
+}
+
+function formatTicketDateLocale(
+  value: string | Date | null | undefined,
+  fallback = '—'
+): string {
+  const parsed = parseTicketDate(value);
+  if (!parsed) return fallback;
+  return parsed.toLocaleDateString('es-CO');
+}
+
+function normalizeTicketPayload(data: unknown, ticketId?: string): Ticket | null {
+  if (data && typeof data === 'object' && !Array.isArray(data) && 'id_case' in data) {
+    return data as Ticket;
+  }
+  if (Array.isArray(data)) {
+    const targetId = ticketId ? Number(ticketId) : NaN;
+    const match = Number.isNaN(targetId)
+      ? data[0]
+      : data.find((item) => item?.id_case === targetId) ?? data[0];
+    return match ?? null;
+  }
+  return null;
+}
+
 function ViewTicketPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -202,31 +245,50 @@ function ViewTicketPage() {
   };
 
   useEffect(() => {
-    const storedTicket = sessionStorage.getItem('selectedTicket');
-    const storedTicketsList = sessionStorage.getItem('ticketsList');
-     
-    if (storedTicket) {
-      const ticketData = JSON.parse(storedTicket);
+    const storedTicketRaw = sessionStorage.getItem('selectedTicket');
+    const storedTicketsListRaw = sessionStorage.getItem('ticketsList');
+    const urlTicketId = id ? Number(id) : null;
+
+    const applyTicketsList = (ticketData: Ticket) => {
+      if (!storedTicketsListRaw) {
+        setTicketsList([]);
+        setCurrentTicketIndex(null);
+        return;
+      }
+      const list: Ticket[] = JSON.parse(storedTicketsListRaw);
+      const currentIndex = list.findIndex((t) => t.id_case === ticketData.id_case);
+      if (currentIndex >= 0) {
+        setTicketsList(list);
+        setCurrentTicketIndex(currentIndex);
+      } else {
+        setTicketsList([]);
+        setCurrentTicketIndex(null);
+      }
+    };
+
+    const loadTicketFromStorage = (ticketData: Ticket) => {
       setTicket(ticketData);
       setOriginalTicket(ticketData);
-       
-      if (storedTicketsList) {
-        const ticketsList: Ticket[] = JSON.parse(storedTicketsList);
-        setTicketsList(ticketsList);
-        const currentIndex = ticketsList.findIndex((t: Ticket) => t.id_case === ticketData.id_case);
-        setCurrentTicketIndex(currentIndex);
-      }
-       
+      applyTicketsList(ticketData);
+      setError(null);
       setLoading(false);
-    } else if (id) {
-      fetch(`/api/help-desk/tickets?id=${id}`)
+    };
+
+    const fetchTicketById = (ticketId: string) => {
+      setLoading(true);
+      setError(null);
+      fetch(`/api/help-desk/tickets?id=${ticketId}`)
         .then((res) => {
           if (!res.ok) throw new Error('Error al cargar el caso');
           return res.json();
         })
-        .then((data) => {
-          setTicket(data);
-          setOriginalTicket(data);
+        .then((data: unknown) => {
+          const ticketData = normalizeTicketPayload(data, ticketId);
+          if (!ticketData) throw new Error('Caso no encontrado');
+          setTicket(ticketData);
+          setOriginalTicket(ticketData);
+          sessionStorage.setItem('selectedTicket', JSON.stringify(ticketData));
+          applyTicketsList(ticketData);
           setLoading(false);
         })
         .catch((err) => {
@@ -234,7 +296,28 @@ function ViewTicketPage() {
           setError('No se pudo cargar el caso. Por favor intente nuevamente.');
           setLoading(false);
         });
+    };
+
+    // El ?id= de la URL manda (p. ej. desde notificaciones). sessionStorage solo si coincide.
+    if (urlTicketId && !Number.isNaN(urlTicketId)) {
+      if (storedTicketRaw) {
+        const storedTicket = JSON.parse(storedTicketRaw) as Ticket;
+        if (storedTicket.id_case === urlTicketId) {
+          loadTicketFromStorage(storedTicket);
+          return;
+        }
+      }
+      fetchTicketById(String(urlTicketId));
+      return;
     }
+
+    if (storedTicketRaw) {
+      loadTicketFromStorage(JSON.parse(storedTicketRaw) as Ticket);
+      return;
+    }
+
+    setLoading(false);
+    setError('No se especificó un caso.');
   }, [id]);
 
   useEffect(() => {
@@ -700,9 +783,7 @@ function ViewTicketPage() {
           Articulo: ticket?.activity,
           Departamento: ticket?.department,
           Empresa: ticket?.company,
-          'Fecha de Creación': ticket?.creation_date
-            ? new Date(ticket.creation_date).toISOString().split('T')[0]
-            : 'N/A',
+          'Fecha de Creación': formatTicketDateIso(ticket?.creation_date, 'N/A'),
         },
       ];
 
@@ -751,9 +832,7 @@ function ViewTicketPage() {
           Asunto: ticket?.subject_case,
           Nota: newNote,
           'Creado por': userName,
-          'Fecha de Creación': ticket?.creation_date
-            ? new Date(ticket.creation_date).toISOString().split('T')[0]
-            : 'N/A',
+          'Fecha de Creación': formatTicketDateIso(ticket?.creation_date, 'N/A'),
         },
       ];
 
@@ -1157,7 +1236,7 @@ function ViewTicketPage() {
                               <Text size='xs' color='gray.6'>
                                 Creado por: {note.createdBy}
                               </Text>
-                              {note.creation_date && (
+                              {parseTicketDate(note.creation_date) && (
                                 <Text size='xs' color='gray.6'>
                                   {new Intl.DateTimeFormat('es-CO', {
                                     day: 'numeric',
@@ -1168,7 +1247,7 @@ function ViewTicketPage() {
                                     hour12: true,
                                   }).format(
                                     new Date(
-                                      new Date(note.creation_date).getTime() + 5 * 60 * 60 * 1000 // +5 horas
+                                      parseTicketDate(note.creation_date)!.getTime() + 5 * 60 * 60 * 1000 // +5 horas
                                     )
                                   )}
                                 </Text>
@@ -1271,7 +1350,7 @@ function ViewTicketPage() {
                         </Text>
                         {ticket.end_date && (
                           <Text size='xs'>
-                            Fecha de resolución: {new Date(ticket.end_date).toLocaleDateString()}
+                            Fecha de resolución: {formatTicketDateLocale(ticket.end_date)}
                           </Text>
                         )}
                       </Stack>
@@ -1366,7 +1445,7 @@ function ViewTicketPage() {
                       Fecha de Creación
                     </Text>
                     <Text fw={500}>
-                      {new Date(ticket.creation_date).toISOString().split('T')[0]}
+                      {formatTicketDateIso(ticket.creation_date)}
                     </Text>
                   </div>
 
