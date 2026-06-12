@@ -309,7 +309,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_get_request',
-    'Obtiene una solicitud por id, con sus notas/seguimientos. Solo la devuelve si pertenece a una empresa del alcance.',
+    'Obtiene una solicitud por id, con sus notas/seguimientos y las tareas del workflow (con tiempos). Solo la devuelve si pertenece a una empresa del alcance.',
     { id: z.number().int().describe('id de la solicitud (requests_general.id).') },
     async (args) =>
       withAudit(ctx, 'kronos_get_request', args, async () => {
@@ -337,7 +337,20 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           WHERE n.id_request = ${args.id}
           ORDER BY n.id_note DESC
         `);
-        return { result: { ...request, notes }, rows: 1 };
+
+        // Tareas del workflow de la solicitud, con sus tiempos.
+        const tasks = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT trg.id, trg.id_task, tpc.task AS task, trg.id_status,
+                 sc.status, trg.id_assigned, u.name AS assignedTo,
+                 trg.start_date, trg.end_date, trg.date_resolution, trg.resolution
+          FROM task_request_general trg
+          LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task
+          LEFT JOIN status_case sc ON sc.id_status_case = trg.id_status
+          LEFT JOIN [user] u ON u.id = trg.id_assigned
+          WHERE trg.id_request_general = ${args.id}
+          ORDER BY trg.id ASC
+        `);
+        return { result: { ...request, notes, tasks }, rows: 1 };
       })
   );
 
