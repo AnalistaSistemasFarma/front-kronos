@@ -121,6 +121,16 @@ function companyClause(column: string, filter: CompanyFilter): Prisma.Sql {
   return Prisma.sql`${Prisma.raw(column)} IN (${Prisma.join(filter.companyIds)})`;
 }
 
+/**
+ * Limpia espacios/saltos de línea sobrantes en las etiquetas de proceso y
+ * categoría de una solicitud (los valores del catálogo suelen traer `\r\n`).
+ */
+function trimRequestLabels(row: Record<string, unknown>): void {
+  for (const key of ['category', 'process'] as const) {
+    if (typeof row[key] === 'string') row[key] = (row[key] as string).trim();
+  }
+}
+
 export const ENTITY_METADATA = {
   requests: {
     description:
@@ -203,11 +213,12 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 15,
+  totalTools: 16,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
     'kronos_get_request',
+    'kronos_list_request_notes',
     'kronos_list_tickets',
     'kronos_get_ticket',
     'kronos_list_processes',
@@ -287,20 +298,25 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         }
         const whereSql = Prisma.join(where, ' AND ');
 
-        const rows = await queryReadOnly<unknown>(Prisma.sql`
+        const rows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
           SELECT rg.id, rg.subject_request AS subject, rg.[description],
                  rg.status_req AS id_status, sc.status AS status,
+                 cr.category AS category, pc.process AS process,
                  rg.id_company, c.company, u.name AS requester,
                  rg.created_at, rg.date_resolution, rg.resolution, rg.url
           FROM requests_general rg
           INNER JOIN company c ON c.id_company = rg.id_company
           LEFT JOIN status_case sc ON sc.id_status_case = rg.status_req
           LEFT JOIN [user] u ON u.id = rg.id_requester
+          LEFT JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+          LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+          LEFT JOIN category_request cr ON cr.id = pc.id_category_request
           WHERE ${whereSql}
           ORDER BY rg.id DESC
           OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
         `);
 
+        for (const r of rows) trimRequestLabels(r);
         return { result: { count: rows.length, limit, offset, data: rows }, rows: rows.length };
       })
   );
@@ -318,17 +334,22 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         const rows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
           SELECT rg.id, rg.subject_request AS subject, rg.[description],
                  rg.status_req AS id_status, sc.status AS status,
+                 cr.category AS category, pc.process AS process,
                  rg.id_company, c.company, u.name AS requester,
                  rg.created_at, rg.date_resolution, rg.resolution, rg.url
           FROM requests_general rg
           INNER JOIN company c ON c.id_company = rg.id_company
           LEFT JOIN status_case sc ON sc.id_status_case = rg.status_req
           LEFT JOIN [user] u ON u.id = rg.id_requester
+          LEFT JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+          LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+          LEFT JOIN category_request cr ON cr.id = pc.id_category_request
           WHERE rg.id = ${args.id} AND ${companyClause('rg.id_company', filter)}
         `);
 
         const request = rows[0] ?? null;
         if (!request) return { result: null, rows: 0 };
+        trimRequestLabels(request);
 
         // Notas/seguimientos de la solicitud (solo tras confirmar el alcance).
         const notes = await queryReadOnly<unknown>(Prisma.sql`
@@ -352,6 +373,55 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           ORDER BY trg.id ASC
         `);
         return { result: { ...request, notes, tasks }, rows: 1 };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_request_notes  (vista vw_notas_solicitudes)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_request_notes',
+    'Lista notas/seguimientos de solicitudes desde la vista vw_notas_solicitudes, de forma eficiente y paginada (pensada para consultar TODAS las notas sin pedir solicitud por solicitud). Filtra SIEMPRE por las empresas del alcance. Permite acotar por solicitud (requestId) y empresa (companyId).',
+    {
+      requestId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Acota a las notas de una solicitud (vw_notas_solicitudes.ID_Solicitud).'),
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a consultar; se interseca con el alcance de la key.'),
+      limit: z.number().int().optional(),
+      offset: z.number().int().optional(),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_request_notes', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const limit = clampLimit(ctx, args.limit);
+        const offset = clampOffset(args.offset);
+
+        // El alcance por empresa se aplica ligando la nota con su solicitud
+        // mediante la columna ID_Solicitud de la vista.
+        const where: Prisma.Sql[] = [companyClause('rg.id_company', filter)];
+        if (args.requestId !== undefined) {
+          where.push(Prisma.sql`vn.ID_Solicitud = ${args.requestId}`);
+        }
+        const whereSql = Prisma.join(where, ' AND ');
+
+        const rows = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT vn.id_note, vn.ID_Solicitud AS id_request, vn.Nota AS note,
+                 vn.Creador_Nota AS createdBy, vn.Fecha_Nota AS creationDate,
+                 rg.id_company, c.company
+          FROM vw_notas_solicitudes vn
+          INNER JOIN requests_general rg ON rg.id = vn.ID_Solicitud
+          INNER JOIN company c ON c.id_company = rg.id_company
+          WHERE ${whereSql}
+          ORDER BY vn.ID_Solicitud DESC, vn.id_note DESC
+          OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+        `);
+        return { result: { count: rows.length, limit, offset, data: rows }, rows: rows.length };
       })
   );
 
