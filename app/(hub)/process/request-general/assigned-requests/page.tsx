@@ -32,6 +32,8 @@ import {
   Modal,
   Collapse,
   Table,
+  Progress,
+  Tooltip,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -54,6 +56,9 @@ import {
   IconPhoto,
   IconRefresh,
   IconProgress,
+  IconCircleCheckFilled,
+  IconCircleDot,
+  IconCircle,
   IconUserCheck,
   IconTag,
   IconCalendarEvent,
@@ -80,6 +85,14 @@ interface Ticket {
   email: string;
   phone: string;
   identification: string;
+}
+
+interface RequestTask {
+  id: number;
+  id_request_general: number;
+  task: string;
+  id_status: number;
+  status_task: string;
 }
 
 interface Note {
@@ -121,6 +134,7 @@ function RequestBoard() {
   const subprocessId = searchParams.get('subprocess_id');
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -252,11 +266,32 @@ function RequestBoard() {
       const data = await response.json();
       console.log('fetchTicketsWithUserId: Tickets asignados recibidos:', data.length, 'tickets');
       setTickets(data);
+      fetchTasksForTickets(data);
     } catch (err) {
       console.error('Error fetching assigned tickets:', err);
       setError('Unable to load assigned tickets. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
+    try {
+      const response = await fetch('/api/requests-general/activities-requets');
+      if (!response.ok) throw new Error('Failed to fetch request tasks');
+
+      const data: RequestTask[] = await response.json();
+      const ticketIds = new Set(ticketsToUse.map((t) => t.id));
+      const grouped: Record<number, RequestTask[]> = {};
+
+      for (const task of data) {
+        if (!ticketIds.has(task.id_request_general)) continue;
+        (grouped[task.id_request_general] ||= []).push(task);
+      }
+
+      setTasksByRequest(grouped);
+    } catch (err) {
+      console.error('Error fetching request tasks:', err);
     }
   };
 
@@ -418,6 +453,26 @@ function RequestBoard() {
       default:
         return 'gray';
     }
+  };
+
+  const getTaskVisual = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'resuelto':
+        return { color: 'green', Icon: IconCircleCheckFilled };
+      case 'abierto':
+        return { color: 'orange', Icon: IconCircleDot };
+      case 'sin empezar':
+        return { color: 'gray', Icon: IconCircle };
+      default:
+        return { color: 'red', Icon: IconCircle };
+    }
+  };
+
+  const getTasksProgress = (tasks: RequestTask[]) => {
+    const total = tasks.length;
+    const done = tasks.filter((t) => t.status_task?.toLowerCase() === 'resuelto').length;
+    const percent = total === 0 ? 0 : Math.round((done / total) * 100);
+    return { total, done, percent };
   };
 
   const breadcrumbItems = [
@@ -749,6 +804,55 @@ function RequestBoard() {
                         <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
                           {ticket.subject}
                         </Text>
+                        {tasksByRequest[ticket.id]?.length ? (
+                          <Stack gap={6} mt={8}>
+                            {(() => {
+                              const { total, done, percent } = getTasksProgress(
+                                tasksByRequest[ticket.id]
+                              );
+                              return (
+                                <Group gap={8} wrap='nowrap'>
+                                  <Progress
+                                    value={percent}
+                                    color={percent === 100 ? 'green' : 'blue'}
+                                    size='sm'
+                                    radius='xl'
+                                    style={{ flex: 1, maxWidth: 120 }}
+                                  />
+                                  <Text size='xs' c='dimmed' fw={500} style={{ whiteSpace: 'nowrap' }}>
+                                    {done}/{total}
+                                  </Text>
+                                </Group>
+                              );
+                            })()}
+                            <Group gap={6} wrap='wrap'>
+                              {tasksByRequest[ticket.id].map((task) => {
+                                const { color, Icon } = getTaskVisual(task.status_task);
+                                return (
+                                  <Tooltip
+                                    key={task.id}
+                                    label={`${task.task} · ${task.status_task}`}
+                                    withArrow
+                                  >
+                                    <Badge
+                                      variant='light'
+                                      color={color}
+                                      size='sm'
+                                      radius='sm'
+                                      styles={{
+                                        root: { textTransform: 'none', fontWeight: 500, cursor: 'default' },
+                                        label: { overflow: 'hidden', textOverflow: 'ellipsis' },
+                                      }}
+                                      leftSection={<Icon size={13} />}
+                                    >
+                                      {task.task}
+                                    </Badge>
+                                  </Tooltip>
+                                );
+                              })}
+                            </Group>
+                          </Stack>
+                        ) : null}
                       </Table.Td>
                       <Table.Td>
                         <Text size='sm' className='max-w-xs truncate'>
