@@ -198,6 +198,7 @@ function ViewRequestPage() {
     text: string;
   } | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
+  const hasNotedUpload = useRef(false);
   const [folderContents, setFolderContents] = useState<FolderFile[]>([]);
   const [showResolution, setShowResolution] = useState(false);
   const [resolutionData, setResolutionData] = useState({
@@ -971,6 +972,14 @@ function ViewRequestPage() {
     }
   };
 
+  const handleFilesChange = (files: UploadedFile[]) => {
+    setAttachedFiles(files);
+    if (!hasNotedUpload.current && files.some((f) => f.status === 'success')) {
+      hasNotedUpload.current = true;
+      addSystemNote('Se cargaron archivos a la solicitud.');
+    }
+  };
+
   const addSystemNote = async (text: string) => {
     if (!request?.id || !userId) return;
 
@@ -1713,7 +1722,7 @@ function ViewRequestPage() {
 
           <FileUpload
             ticketId={request.id}
-            onFilesChange={setAttachedFiles}
+            onFilesChange={handleFilesChange}
             disabled={isRequestResolved()}
             storagePath='SG'
             entityType='Request'
