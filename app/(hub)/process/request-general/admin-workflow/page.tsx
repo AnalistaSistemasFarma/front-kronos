@@ -51,7 +51,7 @@ import {
   IconListCheck,
 } from '@tabler/icons-react';
 import Link from 'next/link';
-import { sendMessage } from '../../../../components/email/utils/sendMessage';
+import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 
 interface WorkFlow {
   id: number;

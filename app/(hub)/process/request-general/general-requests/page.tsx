@@ -29,6 +29,9 @@ import {
   Collapse,
   Box,
   Flex,
+  Progress,
+  RingProgress,
+  Loader,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -46,11 +49,22 @@ import {
   IconClock,
   IconBuilding,
   IconProgress,
+  IconCircleCheckFilled,
+  IconCircleDot,
+  IconCircle,
   IconUserCheck,
   IconTag,
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+
+interface RequestTask {
+  id: number;
+  id_request_general: number;
+  task: string;
+  id_status: number;
+  status_task: string;
+}
 
 interface Ticket {
   id: number;
@@ -102,6 +116,7 @@ function RequestGeneralPage() {
   const subprocessId = searchParams.get('subprocess_id');
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpened, setModalOpened] = useState(false);
@@ -211,18 +226,41 @@ function RequestGeneralPage() {
     await fetchTicketsWithUserId(userId);
   };
 
-  const fetchTicketsWithUserId = async (userIdToUse: number) => {
+  const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
+    try {
+      const response = await fetch('/api/requests-general/activities-requets');
+      if (!response.ok) throw new Error('Failed to fetch request tasks');
+
+      const data: RequestTask[] = await response.json();
+      const ticketIds = new Set(ticketsToUse.map((t) => t.id));
+      const grouped: Record<number, RequestTask[]> = {};
+
+      for (const task of data) {
+        if (!ticketIds.has(task.id_request_general)) continue;
+        (grouped[task.id_request_general] ||= []).push(task);
+      }
+
+      setTasksByRequest(grouped);
+    } catch (err) {
+      console.error('Error fetching request tasks:', err);
+    }
+  };
+
+  const fetchTicketsWithUserId = async (
+    userIdToUse: number,
+    filtersToUse: typeof filters = filters
+  ) => {
     try {
       setLoading(true);
 
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
 
-      if (filters.status) params.append('status', filters.status);
-      if (filters.company) params.append('company', filters.company);
-      if (filters.date_from) params.append('date_from', filters.date_from);
-      if (filters.date_to) params.append('date_to', filters.date_to);
-      if (filters.assigned_to) params.append('assigned_to', filters.assigned_to);
+      if (filtersToUse.status) params.append('status', filtersToUse.status);
+      if (filtersToUse.company) params.append('company', filtersToUse.company);
+      if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
+      if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
+      if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
 
       const url = `/api/requests-general/general-requests?${params.toString()}`;
 
@@ -233,6 +271,7 @@ function RequestGeneralPage() {
       const data = await response.json();
       console.log('fetchTicketsWithUserId: Tickets recibidos:', data.length, 'tickets');
       setTickets(data);
+      fetchTasksForTickets(data);
     } catch (err) {
       console.error('Error fetching tickets:', err);
       setError('Unable to load tickets. Please try again.');
@@ -382,8 +421,14 @@ function RequestGeneralPage() {
 
   if (status === 'loading' || loading) {
     return (
-      <div className='min-h-screen flex items-center justify-center'>
-        <div>Cargando...</div>
+      <div
+        style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}
+        className='flex items-center justify-center'
+      >
+        <Group gap='sm'>
+          <Loader size='sm' />
+          <Text c='dimmed'>Cargando...</Text>
+        </Group>
       </div>
     );
   }
@@ -405,6 +450,52 @@ function RequestGeneralPage() {
     }
   };
 
+  const getStatusIcon = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'abierto':
+        return IconProgress;
+      case 'cancelado':
+        return IconX;
+      case 'resuelto':
+        return IconCircleCheckFilled;
+      default:
+        return IconClock;
+    }
+  };
+
+  const getTaskVisual = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'resuelto':
+        return { color: 'green', Icon: IconCircleCheckFilled };
+      case 'abierto':
+        return { color: 'orange', Icon: IconCircleDot };
+      case 'sin empezar':
+        return { color: 'gray', Icon: IconCircle };
+      default:
+        return { color: 'red', Icon: IconCircle };
+    }
+  };
+
+  const getTasksProgress = (tasks: RequestTask[]) => {
+    const total = tasks.length;
+    const done = tasks.filter((t) => t.status_task?.toLowerCase() === 'resuelto').length;
+    const percent = total === 0 ? 0 : Math.round((done / total) * 100);
+    return { total, done, percent };
+  };
+
+  const getGlobalTasksProgress = () => {
+    const allTasks = Object.values(tasksByRequest).flat();
+    return getTasksProgress(allTasks);
+  };
+
+  const filterByStatus = (value: string) => {
+    const nf = { ...filters, status: value };
+    setFilters(nf);
+    if (userId) {
+      fetchTicketsWithUserId(userId, nf);
+    }
+  };
+
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
     { title: 'Solicitudes Generales', href: '#' },
@@ -417,17 +508,17 @@ function RequestGeneralPage() {
         </Anchor>
       </Link>
     ) : (
-      <span key={index} className='text-gray-500'>
+      <Text key={index} component='span' c='dimmed'>
         {item.title}
-      </span>
+      </Text>
     )
   );
 
   return (
-    <div className='min-h-screen bg-gray-50'>
+    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
         {/* Header Section */}
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -436,12 +527,12 @@ function RequestGeneralPage() {
             <div>
               <Title
                 order={1}
-                className='text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3'
+                className='text-3xl font-bold mb-2 flex items-center gap-3'
               >
                 <IconFileDescription size={32} className='text-blue-600' />
                 Solicitudes Generales
               </Title>
-              <Text size='lg' c='gray.6'>
+              <Text size='lg' c='dimmed'>
                 Gestión y seguimiento de solicitudes generales
               </Text>
             </div>
@@ -450,11 +541,28 @@ function RequestGeneralPage() {
 
           <Grid>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
+              <Card
+                p='md'
+                radius='md'
+                withBorder
+                role='button'
+                aria-label='Mostrar todas las solicitudes'
+                onClick={() => filterByStatus('')}
+                style={{
+                  cursor: 'pointer',
+                  backgroundColor: 'var(--mantine-color-blue-light)',
+                  borderColor:
+                    filters.status === ''
+                      ? 'var(--mantine-color-blue-filled)'
+                      : 'transparent',
+                  borderWidth: 2,
+                  transition: 'border-color 150ms ease',
+                }}
+              >
                 <Group>
-                  <IconFileDescription size={24} className='text-blue-600' />
+                  <IconFileDescription size={24} color='var(--mantine-color-blue-light-color)' />
                   <div>
-                    <Text size='xs' c='blue.6'>
+                    <Text size='xs' c='var(--mantine-color-blue-light-color)'>
                       Total de Solicitudes
                     </Text>
                     <Text size='lg' fw={600}>
@@ -465,11 +573,28 @@ function RequestGeneralPage() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
+              <Card
+                p='md'
+                radius='md'
+                withBorder
+                role='button'
+                aria-label='Filtrar solicitudes pendientes'
+                onClick={() => filterByStatus('1')}
+                style={{
+                  cursor: 'pointer',
+                  backgroundColor: 'var(--mantine-color-orange-light)',
+                  borderColor:
+                    filters.status === '1'
+                      ? 'var(--mantine-color-orange-filled)'
+                      : 'transparent',
+                  borderWidth: 2,
+                  transition: 'border-color 150ms ease',
+                }}
+              >
                 <Group>
-                  <IconProgress size={24} className='text-blue-600' />
+                  <IconProgress size={24} color='var(--mantine-color-orange-light-color)' />
                   <div>
-                    <Text size='xs' c='blue.6'>
+                    <Text size='xs' c='var(--mantine-color-orange-light-color)'>
                       Pendientes
                     </Text>
                     <Text size='lg' fw={600}>
@@ -480,11 +605,28 @@ function RequestGeneralPage() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
+              <Card
+                p='md'
+                radius='md'
+                withBorder
+                role='button'
+                aria-label='Filtrar solicitudes completadas'
+                onClick={() => filterByStatus('2')}
+                style={{
+                  cursor: 'pointer',
+                  backgroundColor: 'var(--mantine-color-green-light)',
+                  borderColor:
+                    filters.status === '2'
+                      ? 'var(--mantine-color-green-filled)'
+                      : 'transparent',
+                  borderWidth: 2,
+                  transition: 'border-color 150ms ease',
+                }}
+              >
                 <Group>
-                  <IconCheck size={24} className='text-green-600' />
+                  <IconCheck size={24} color='var(--mantine-color-green-light-color)' />
                   <div>
-                    <Text size='xs' c='green.6'>
+                    <Text size='xs' c='var(--mantine-color-green-light-color)'>
                       Completadas
                     </Text>
                     <Text size='lg' fw={600}>
@@ -492,6 +634,38 @@ function RequestGeneralPage() {
                     </Text>
                   </div>
                 </Group>
+              </Card>
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card p='md' radius='md' withBorder>
+                {(() => {
+                  const { total, done, percent } = getGlobalTasksProgress();
+                  return (
+                    <Group wrap='nowrap'>
+                      <RingProgress
+                        size={56}
+                        thickness={6}
+                        roundCaps
+                        sections={[
+                          { value: percent, color: percent === 100 ? 'green' : 'blue' },
+                        ]}
+                        label={
+                          <Text size='xs' ta='center' fw={700}>
+                            {percent}%
+                          </Text>
+                        }
+                      />
+                      <div>
+                        <Text size='xs' c='dimmed'>
+                          Avance de tareas
+                        </Text>
+                        <Text size='lg' fw={600}>
+                          {done}/{total}
+                        </Text>
+                      </div>
+                    </Group>
+                  );
+                })()}
               </Card>
             </Grid.Col>
           </Grid>
@@ -509,7 +683,7 @@ function RequestGeneralPage() {
           </Alert>
         )}
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mb='6'>
           <Group justify='space-between' mb='md'>
             <Title order={3} className='flex items-center gap-2'>
               <IconFilter size={20} />
@@ -630,7 +804,7 @@ function RequestGeneralPage() {
         </Card>
 
         {/* Enhanced Table */}
-        <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden'>
+        <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
           <Title order={3} mb='md' className='flex items-center gap-2'>
@@ -643,21 +817,17 @@ function RequestGeneralPage() {
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>ID</Table.Th>
-
                   <Table.Th>Asunto</Table.Th>
-                  <Table.Th>Compañia</Table.Th>
-
+                  <Table.Th>Compañía / Categoría</Table.Th>
                   <Table.Th>Estado</Table.Th>
-                  <Table.Th>Fecha de Solicitud</Table.Th>
-                  <Table.Th>Categoría</Table.Th>
-                  <Table.Th>Solicitado por</Table.Th>
-                  <Table.Th>Asignado a</Table.Th>
+                  <Table.Th>Fecha</Table.Th>
+                  <Table.Th>Solicitante / Asignado</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {tickets.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={8} className='text-center py-12 text-gray-500'>
+                    <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
                         <IconFileDescription size={48} className='text-gray-300' />
                         <Text size='lg' fw={500}>
@@ -673,7 +843,7 @@ function RequestGeneralPage() {
                   tickets.map((ticket) => (
                     <Table.Tr
                       key={ticket.id}
-                      className='cursor-pointer hover:bg-gray-50 transition-colors'
+                      className='cursor-pointer transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
                         window.open(
@@ -682,31 +852,95 @@ function RequestGeneralPage() {
                       }}
                     >
                       <Table.Td>
-                        <Text size='xs' color='blue'className='max-w-xs truncate' lineClamp={2}>
+                        <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
                           {ticket.id}
                         </Text>
                       </Table.Td>
-                      <Table.Td>
-                        <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
+                      <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+                        <Text size='sm' fw={500} lineClamp={2}>
                           {ticket.subject}
                         </Text>
+                        {tasksByRequest[ticket.id]?.length ? (
+                          <Stack gap={6} mt={8}>
+                            {(() => {
+                              const { total, done, percent } = getTasksProgress(
+                                tasksByRequest[ticket.id]
+                              );
+                              return (
+                                <Group gap={8} wrap='nowrap'>
+                                  <Progress
+                                    value={percent}
+                                    color={percent === 100 ? 'green' : 'blue'}
+                                    size='sm'
+                                    radius='xl'
+                                    style={{ flex: 1, maxWidth: 120 }}
+                                  />
+                                  <Text size='xs' c='dimmed' fw={500} style={{ whiteSpace: 'nowrap' }}>
+                                    {done}/{total}
+                                  </Text>
+                                </Group>
+                              );
+                            })()}
+                            <Group gap={6} wrap='wrap'>
+                              {tasksByRequest[ticket.id].map((task) => {
+                                const { color, Icon } = getTaskVisual(task.status_task);
+                                return (
+                                  <Tooltip
+                                    key={task.id}
+                                    label={`${task.task} · ${task.status_task}`}
+                                    withArrow
+                                  >
+                                    <Badge
+                                      variant='light'
+                                      color={color}
+                                      size='sm'
+                                      radius='sm'
+                                      styles={{
+                                        root: { textTransform: 'none', fontWeight: 500, cursor: 'default' },
+                                        label: { overflow: 'hidden', textOverflow: 'ellipsis' },
+                                      }}
+                                      leftSection={<Icon size={13} />}
+                                    >
+                                      {task.task}
+                                    </Badge>
+                                  </Tooltip>
+                                );
+                              })}
+                            </Group>
+                          </Stack>
+                        ) : null}
                       </Table.Td>
                       <Table.Td>
-                        <Group gap={4}>
-                          <IconBuilding size={14} className='text-gray-400' />
-
-                          <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
-                            {ticket.company}
+                        <Stack gap={2}>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconBuilding size={14} className='text-gray-400' />
+                            <Text size='sm' fw={500}>
+                              {ticket.company}
+                            </Text>
+                          </Group>
+                          <Text size='xs' c='dimmed'>
+                            {ticket.category}
                           </Text>
-                        </Group>
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                        {(() => {
+                          const StatusIcon = getStatusIcon(ticket.status);
+                          return (
+                            <Badge
+                              color={getStatusColor(ticket.status)}
+                              variant='light'
+                              size='sm'
+                              leftSection={<StatusIcon size={12} />}
+                              styles={{ label: { overflow: 'visible' } }}
+                            >
+                              {ticket.status}
+                            </Badge>
+                          );
+                        })()}
                       </Table.Td>
                       <Table.Td>
-                        <Badge color={getStatusColor(ticket.status)} variant='light' size='sm'>
-                          {ticket.status}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="sm" c="gray.7">
+                        <Text size="sm" c="dimmed">
                           {
                             (() => {
                               const raw = ticket.created_at;
@@ -730,21 +964,18 @@ function RequestGeneralPage() {
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text fw={500} className='max-w-xs truncate' size='sm'>
-                          {ticket.category}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={4}>
-                          <IconUser size={14} className='text-gray-400' />
-                          <Text size='sm'>{ticket.requester}</Text>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={4}>
-                          <IconUserCheck size={14} className='text-gray-400' />
-                          <Text size='sm'>{ticket.user}</Text>
-                        </Group>
+                        <Stack gap={4}>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconUser size={14} className='text-gray-400' />
+                            <Text size='sm'>{ticket.requester}</Text>
+                          </Group>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconUserCheck size={14} className='text-gray-400' />
+                            <Text size='sm' c='dimmed'>
+                              {ticket.user}
+                            </Text>
+                          </Group>
+                        </Stack>
                       </Table.Td>
                     </Table.Tr>
                   ))

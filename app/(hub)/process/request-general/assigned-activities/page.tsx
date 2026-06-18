@@ -22,6 +22,8 @@ import {
   Box,
   Collapse,
   Table,
+  Stack,
+  Loader,
 } from '@mantine/core';
 import {
   IconUser,
@@ -37,6 +39,8 @@ import {
   IconProgress,
   IconUserCheck,
   IconCalendarEvent,
+  IconClock,
+  IconCircleCheckFilled,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 
@@ -287,8 +291,14 @@ function RequestBoard() {
 
   if (status === 'loading' || loading) {
     return (
-      <div className='min-h-screen flex items-center justify-center'>
-        <div>Cargando...</div>
+      <div
+        style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}
+        className='flex items-center justify-center'
+      >
+        <Group gap='sm'>
+          <Loader size='sm' />
+          <Text c='dimmed'>Cargando...</Text>
+        </Group>
       </div>
     );
   }
@@ -310,6 +320,19 @@ function RequestBoard() {
     }
   };
 
+  const getStatusIcon = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'sin empezar':
+        return IconClock;
+      case 'abierto':
+        return IconProgress;
+      case 'resuelto':
+        return IconCircleCheckFilled;
+      default:
+        return IconX;
+    }
+  };
+
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
     { title: 'Tareas Asignadas', href: '#' },
@@ -322,16 +345,16 @@ function RequestBoard() {
         </Anchor>
       </Link>
     ) : (
-      <span key={index} className='text-gray-500'>
+      <Text key={index} component='span' c='dimmed'>
         {item.title}
-      </span>
+      </Text>
     )
   );
 
   return (
-    <div className='min-h-screen bg-gray-50'>
+    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -340,12 +363,12 @@ function RequestBoard() {
             <div>
               <Title
                 order={1}
-                className='text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3'
+                className='text-3xl font-bold mb-2 flex items-center gap-3'
               >
                 <IconTicket size={32} className='text-blue-600' />
                 Tareas Asignadas
               </Title>
-              <Text size='lg' c='gray.6'>
+              <Text size='lg' c='dimmed'>
                 Gestión de Tareas asignadas a ti
               </Text>
             </div>
@@ -353,11 +376,16 @@ function RequestBoard() {
 
           <Grid>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
+              <Card
+                p='md'
+                radius='md'
+                withBorder
+                style={{ backgroundColor: 'var(--mantine-color-blue-light)' }}
+              >
                 <Group>
-                  <IconTicket size={24} className='text-blue-600' />
+                  <IconTicket size={24} color='var(--mantine-color-blue-light-color)' />
                   <div>
-                    <Text size='xs' c='blue.6'>
+                    <Text size='xs' c='var(--mantine-color-blue-light-color)'>
                       Total de Tareas
                     </Text>
                     <Text size='lg' fw={600}>
@@ -368,11 +396,16 @@ function RequestBoard() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
+              <Card
+                p='md'
+                radius='md'
+                withBorder
+                style={{ backgroundColor: 'var(--mantine-color-gray-light)' }}
+              >
                 <Group>
-                  <IconProgress size={24} className='text-blue-600' />
+                  <IconClock size={24} color='var(--mantine-color-gray-light-color)' />
                   <div>
-                    <Text size='xs' c='blue.6'>
+                    <Text size='xs' c='var(--mantine-color-gray-light-color)'>
                       Sin Empezar
                     </Text>
                     <Text size='lg' fw={600}>
@@ -383,11 +416,16 @@ function RequestBoard() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
+              <Card
+                p='md'
+                radius='md'
+                withBorder
+                style={{ backgroundColor: 'var(--mantine-color-blue-light)' }}
+              >
                 <Group>
-                  <IconProgress size={24} className='text-blue-600' />
+                  <IconProgress size={24} color='var(--mantine-color-blue-light-color)' />
                   <div>
-                    <Text size='xs' c='blue.6'>
+                    <Text size='xs' c='var(--mantine-color-blue-light-color)'>
                       En Ejecución
                     </Text>
                     <Text size='lg' fw={600}>
@@ -398,11 +436,16 @@ function RequestBoard() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
+              <Card
+                p='md'
+                radius='md'
+                withBorder
+                style={{ backgroundColor: 'var(--mantine-color-green-light)' }}
+              >
                 <Group>
-                  <IconCheck size={24} className='text-green-600' />
+                  <IconCheck size={24} color='var(--mantine-color-green-light-color)' />
                   <div>
-                    <Text size='xs' c='green.6'>
+                    <Text size='xs' c='var(--mantine-color-green-light-color)'>
                       Completadas
                     </Text>
                     <Text size='lg' fw={600}>
@@ -427,7 +470,7 @@ function RequestBoard() {
           </Alert>
         )}
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mb='6'>
           <Group justify='space-between' mb='md'>
             <Title order={3} className='flex items-center gap-2'>
               <IconFilter size={20} />
@@ -532,7 +575,7 @@ function RequestBoard() {
           </Collapse>
         </Card>
 
-        <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden'>
+        <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
           <Title order={3} mb='md' className='flex items-center gap-2'>
@@ -548,16 +591,15 @@ function RequestBoard() {
                   <Table.Th>Tarea</Table.Th>
                   <Table.Th>Asunto</Table.Th>
                   <Table.Th>Empresa</Table.Th>
-                  <Table.Th>Fecha de Solicitud</Table.Th>
-                  <Table.Th>Solicitado por</Table.Th>
-                  <Table.Th>Asignado a</Table.Th>
                   <Table.Th>Estado</Table.Th>
+                  <Table.Th>Fecha</Table.Th>
+                  <Table.Th>Solicitante / Asignado</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {tasks.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={8} className='text-center py-12 text-gray-500'>
+                    <Table.Td colSpan={7} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
                         <IconTicket size={48} className='text-gray-300' />
                         <Text size='lg' fw={500}>
@@ -573,7 +615,7 @@ function RequestBoard() {
                   tasks.map((task) => (
                     <Table.Tr
                       key={task.id}
-                      className='cursor-pointer hover:bg-gray-50 transition-colors'
+                      className='cursor-pointer transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(task));
                         window.open(
@@ -582,17 +624,17 @@ function RequestBoard() {
                       }}
                     >
                       <Table.Td>
-                        <Text size='xs' color='blue'className='max-w-xs truncate' lineClamp={2}>
+                        <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
                           {task.id_request_general}
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
+                        <Text size='sm' fw={500} lineClamp={2}>
                           {task.task}
                         </Text>
                       </Table.Td>
-                      <Table.Td>
-                        <Text size='sm' className='max-w-xs truncate'>
+                      <Table.Td style={{ minWidth: 220, maxWidth: 320 }}>
+                        <Text size='sm' lineClamp={2}>
                           {task.subject_request}
                         </Text>
                       </Table.Td>
@@ -605,27 +647,60 @@ function RequestBoard() {
                           </Text>
                         </Group>
                       </Table.Td>
-                      <Table.Td>
-                        <Text size='sm' c='gray.7'>
-                          {new Date(task.created_at).toISOString().split('T')[0]}
-                        </Text>
+                      <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                        {(() => {
+                          const StatusIcon = getStatusIcon(task.status_task);
+                          return (
+                            <Badge
+                              color={getStatusColor(task.status_task)}
+                              variant='light'
+                              size='sm'
+                              leftSection={<StatusIcon size={12} />}
+                              styles={{ label: { overflow: 'visible' } }}
+                            >
+                              {task.status_task}
+                            </Badge>
+                          );
+                        })()}
                       </Table.Td>
                       <Table.Td>
-                        <Group gap={4}>
-                          <IconUser size={14} className='text-gray-400' />
-                          <Text size='sm'>{task.name_requester}</Text>
+                        <Group gap={4} wrap='nowrap' align='flex-start'>
+                          <IconCalendarEvent size={14} className='text-gray-400' style={{ marginTop: 2 }} />
+                          <Text size='sm' c='dimmed'>
+                            {(() => {
+                              const raw = task.created_at;
+                              if (!raw) return 'Sin fecha';
+
+                              const date = new Date(raw);
+                              if (isNaN(date.getTime())) return 'Fecha inválida';
+
+                              const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
+
+                              return new Intl.DateTimeFormat('es-CO', {
+                                day: 'numeric',
+                                month: 'long',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: true,
+                              }).format(adjusted);
+                            })()}
+                          </Text>
                         </Group>
                       </Table.Td>
                       <Table.Td>
-                        <Group gap={4}>
-                          <IconUserCheck size={14} className='text-gray-400' />
-                          <Text size='sm'>{task.assigned}</Text>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge color={getStatusColor(task.status_task)} variant='light' size='sm'>
-                          {task.status_task}
-                        </Badge>
+                        <Stack gap={4}>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconUser size={14} className='text-gray-400' />
+                            <Text size='sm'>{task.name_requester}</Text>
+                          </Group>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconUserCheck size={14} className='text-gray-400' />
+                            <Text size='sm' c='dimmed'>
+                              {task.assigned}
+                            </Text>
+                          </Group>
+                        </Stack>
                       </Table.Td>
                     </Table.Tr>
                   ))
