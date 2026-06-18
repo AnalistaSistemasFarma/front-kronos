@@ -54,7 +54,7 @@ export async function POST(req) {
 
       const reqInsert = new sql.Request(transaction);
 
-      reqInsert.input("descripcion", sql.NVarChar(255), descripcion);
+      reqInsert.input("descripcion", sql.NVarChar(1000), descripcion);
       reqInsert.input("subject", sql.NVarChar(255), subject);
       reqInsert.input("company", sql.Int, company);
       reqInsert.input("createdby", sql.NVarChar(255), createdby);

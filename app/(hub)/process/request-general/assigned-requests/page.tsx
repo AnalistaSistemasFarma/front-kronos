@@ -34,6 +34,8 @@ import {
   Table,
   Progress,
   Tooltip,
+  RingProgress,
+  Loader,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -432,8 +434,14 @@ function RequestBoard() {
 
   if (status === 'loading' || loading) {
     return (
-      <div className='min-h-screen flex items-center justify-center'>
-        <div>Cargando...</div>
+      <div
+        style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}
+        className='flex items-center justify-center'
+      >
+        <Group gap='sm'>
+          <Loader size='sm' />
+          <Text c='dimmed'>Cargando...</Text>
+        </Group>
       </div>
     );
   }
@@ -452,6 +460,19 @@ function RequestBoard() {
         return 'green';
       default:
         return 'gray';
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'abierto':
+        return IconProgress;
+      case 'cancelado':
+        return IconX;
+      case 'resuelto':
+        return IconCircleCheckFilled;
+      default:
+        return IconClock;
     }
   };
 
@@ -475,6 +496,19 @@ function RequestBoard() {
     return { total, done, percent };
   };
 
+  const getGlobalTasksProgress = () => {
+    const allTasks = Object.values(tasksByRequest).flat();
+    return getTasksProgress(allTasks);
+  };
+
+  const filterByStatus = (value: string) => {
+    const nf = { ...filters, status: value };
+    setFilters(nf);
+    if (userId) {
+      fetchTicketsWithUserId(userId, nf);
+    }
+  };
+
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
     { title: 'Solicitudes Generales', href: '#' },
@@ -487,9 +521,9 @@ function RequestBoard() {
         </Anchor>
       </Link>
     ) : (
-      <span key={index} className='text-gray-500'>
+      <Text key={index} component='span' c='dimmed'>
         {item.title}
-      </span>
+      </Text>
     )
   );
 
@@ -531,9 +565,9 @@ function RequestBoard() {
   }
 
   return (
-    <div className='min-h-screen bg-gray-50'>
+    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -542,12 +576,12 @@ function RequestBoard() {
             <div>
               <Title
                 order={1}
-                className='text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3'
+                className='text-3xl font-bold mb-2 flex items-center gap-3'
               >
                 <IconTicket size={32} className='text-blue-600' />
                 Solicitudes Asignadas
               </Title>
-              <Text size='lg' c='gray.6'>
+              <Text size='lg' c='dimmed'>
                 Gestión de solicitudes asignadas a ti
               </Text>
             </div>
@@ -555,11 +589,28 @@ function RequestBoard() {
 
           <Grid>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
+              <Card
+                p='md'
+                radius='md'
+                withBorder
+                role='button'
+                aria-label='Mostrar todas las solicitudes'
+                onClick={() => filterByStatus('')}
+                style={{
+                  cursor: 'pointer',
+                  backgroundColor: 'var(--mantine-color-blue-light)',
+                  borderColor:
+                    filters.status === ''
+                      ? 'var(--mantine-color-blue-filled)'
+                      : 'transparent',
+                  borderWidth: 2,
+                  transition: 'border-color 150ms ease',
+                }}
+              >
                 <Group>
-                  <IconTicket size={24} className='text-blue-600' />
+                  <IconTicket size={24} color='var(--mantine-color-blue-light-color)' />
                   <div>
-                    <Text size='xs' c='blue.6'>
+                    <Text size='xs' c='var(--mantine-color-blue-light-color)'>
                       Total de Solicitudes
                     </Text>
                     <Text size='lg' fw={600}>
@@ -570,11 +621,28 @@ function RequestBoard() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
+              <Card
+                p='md'
+                radius='md'
+                withBorder
+                role='button'
+                aria-label='Filtrar solicitudes pendientes'
+                onClick={() => filterByStatus('1')}
+                style={{
+                  cursor: 'pointer',
+                  backgroundColor: 'var(--mantine-color-orange-light)',
+                  borderColor:
+                    filters.status === '1'
+                      ? 'var(--mantine-color-orange-filled)'
+                      : 'transparent',
+                  borderWidth: 2,
+                  transition: 'border-color 150ms ease',
+                }}
+              >
                 <Group>
-                  <IconProgress size={24} className='text-blue-600' />
+                  <IconProgress size={24} color='var(--mantine-color-orange-light-color)' />
                   <div>
-                    <Text size='xs' c='blue.6'>
+                    <Text size='xs' c='var(--mantine-color-orange-light-color)'>
                       Pendiente
                     </Text>
                     <Text size='lg' fw={600}>
@@ -585,11 +653,28 @@ function RequestBoard() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
+              <Card
+                p='md'
+                radius='md'
+                withBorder
+                role='button'
+                aria-label='Filtrar solicitudes completadas'
+                onClick={() => filterByStatus('2')}
+                style={{
+                  cursor: 'pointer',
+                  backgroundColor: 'var(--mantine-color-green-light)',
+                  borderColor:
+                    filters.status === '2'
+                      ? 'var(--mantine-color-green-filled)'
+                      : 'transparent',
+                  borderWidth: 2,
+                  transition: 'border-color 150ms ease',
+                }}
+              >
                 <Group>
-                  <IconCheck size={24} className='text-green-600' />
+                  <IconCheck size={24} color='var(--mantine-color-green-light-color)' />
                   <div>
-                    <Text size='xs' c='green.6'>
+                    <Text size='xs' c='var(--mantine-color-green-light-color)'>
                       Completadas
                     </Text>
                     <Text size='lg' fw={600}>
@@ -597,6 +682,38 @@ function RequestBoard() {
                     </Text>
                   </div>
                 </Group>
+              </Card>
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card p='md' radius='md' withBorder>
+                {(() => {
+                  const { total, done, percent } = getGlobalTasksProgress();
+                  return (
+                    <Group wrap='nowrap'>
+                      <RingProgress
+                        size={56}
+                        thickness={6}
+                        roundCaps
+                        sections={[
+                          { value: percent, color: percent === 100 ? 'green' : 'blue' },
+                        ]}
+                        label={
+                          <Text size='xs' ta='center' fw={700}>
+                            {percent}%
+                          </Text>
+                        }
+                      />
+                      <div>
+                        <Text size='xs' c='dimmed'>
+                          Avance de tareas
+                        </Text>
+                        <Text size='lg' fw={600}>
+                          {done}/{total}
+                        </Text>
+                      </div>
+                    </Group>
+                  );
+                })()}
               </Card>
             </Grid.Col>
             {filters.process == '4' && (
@@ -630,7 +747,7 @@ function RequestBoard() {
           </Alert>
         )}
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mb='6'>
           <Group justify='space-between' mb='md'>
             <Title order={3} className='flex items-center gap-2'>
               <IconFilter size={20} />
@@ -746,7 +863,7 @@ function RequestBoard() {
           </Collapse>
         </Card>
 
-        <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden'>
+        <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
           <Title order={3} mb='md' className='flex items-center gap-2'>
@@ -760,18 +877,16 @@ function RequestBoard() {
                 <Table.Tr>
                   <Table.Th>ID</Table.Th>
                   <Table.Th>Asunto</Table.Th>
-                  <Table.Th>Proceso</Table.Th>
-                  <Table.Th>Empresa</Table.Th>
-                  <Table.Th>Fecha de Solicitud</Table.Th>
-                  <Table.Th>Solicitado por</Table.Th>
-                  <Table.Th>Asignado a</Table.Th>
+                  <Table.Th>Proceso / Empresa</Table.Th>
                   <Table.Th>Estado</Table.Th>
+                  <Table.Th>Fecha</Table.Th>
+                  <Table.Th>Solicitante / Asignado</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {tickets.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={8} className='text-center py-12 text-gray-500'>
+                    <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
                         <IconTicket size={48} className='text-gray-300' />
                         <Text size='lg' fw={500}>
@@ -787,7 +902,7 @@ function RequestBoard() {
                   tickets.map((ticket) => (
                     <Table.Tr
                       key={ticket.id}
-                      className='cursor-pointer hover:bg-gray-50 transition-colors'
+                      className='cursor-pointer transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
                         window.open(
@@ -796,12 +911,12 @@ function RequestBoard() {
                       }}
                     >
                       <Table.Td>
-                        <Text size='xs' color='blue'className='max-w-xs truncate' lineClamp={2}>
+                        <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
                           {ticket.id}
                         </Text>
                       </Table.Td>
-                      <Table.Td>
-                        <Text size='sm' className='max-w-xs truncate' lineClamp={2}>
+                      <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+                        <Text size='sm' fw={500} lineClamp={2}>
                           {ticket.subject}
                         </Text>
                         {tasksByRequest[ticket.id]?.length ? (
@@ -855,40 +970,72 @@ function RequestBoard() {
                         ) : null}
                       </Table.Td>
                       <Table.Td>
-                        <Text size='sm' className='max-w-xs truncate'>
-                          {ticket.process}
-                        </Text>
+                        <Stack gap={2}>
+                          <Text size='sm' fw={500}>
+                            {ticket.process}
+                          </Text>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconBuilding size={13} className='text-gray-400' />
+                            <Text size='xs' c='dimmed'>
+                              {ticket.company}
+                            </Text>
+                          </Group>
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                        {(() => {
+                          const StatusIcon = getStatusIcon(ticket.status);
+                          return (
+                            <Badge
+                              color={getStatusColor(ticket.status)}
+                              variant='light'
+                              size='sm'
+                              leftSection={<StatusIcon size={12} />}
+                              styles={{ label: { overflow: 'visible' } }}
+                            >
+                              {ticket.status}
+                            </Badge>
+                          );
+                        })()}
                       </Table.Td>
                       <Table.Td>
-                        <Group gap={4} className='flex'>
-                          <IconBuilding size={12} className='text-gray-400' />
+                        <Group gap={4} wrap='nowrap' align='flex-start'>
+                          <IconCalendarEvent size={14} className='text-gray-400' style={{ marginTop: 2 }} />
+                          <Text size='sm' c='dimmed'>
+                            {(() => {
+                              const raw = ticket.created_at;
+                              if (!raw) return 'Sin fecha';
 
-                          <Text size='sm' className='max-w-xs truncate'>
-                            {ticket.company}
+                              const date = new Date(raw);
+                              if (isNaN(date.getTime())) return 'Fecha inválida';
+
+                              const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
+
+                              return new Intl.DateTimeFormat('es-CO', {
+                                day: 'numeric',
+                                month: 'long',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: true,
+                              }).format(adjusted);
+                            })()}
                           </Text>
                         </Group>
                       </Table.Td>
                       <Table.Td>
-                        <Text size='sm' c='gray.7'>
-                          {new Date(ticket.created_at).toISOString().split('T')[0]}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={4}>
-                          <IconUser size={14} className='text-gray-400' />
-                          <Text size='sm'>{ticket.requester}</Text>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={4}>
-                          <IconUserCheck size={14} className='text-gray-400' />
-                          <Text size='sm'>{ticket.user}</Text>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge color={getStatusColor(ticket.status)} variant='light' size='sm'>
-                          {ticket.status}
-                        </Badge>
+                        <Stack gap={4}>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconUser size={14} className='text-gray-400' />
+                            <Text size='sm'>{ticket.requester}</Text>
+                          </Group>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconUserCheck size={14} className='text-gray-400' />
+                            <Text size='sm' c='dimmed'>
+                              {ticket.user}
+                            </Text>
+                          </Group>
+                        </Stack>
                       </Table.Td>
                     </Table.Tr>
                   ))
