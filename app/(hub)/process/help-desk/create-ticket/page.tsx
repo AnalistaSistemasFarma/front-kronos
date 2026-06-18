@@ -13,12 +13,10 @@ import {
   Alert,
   Breadcrumbs,
   Anchor,
-  Table,
   TextInput,
   Select,
   Button,
   Group,
-  Badge,
   Modal,
   Textarea,
   Grid,
@@ -34,11 +32,13 @@ import {
 } from '@mantine/core';
 import { ReportsChart } from '../../../../../components/help-desk/ReportsChart';
 import { HelpDeskDashboardLinkButton } from '../../../../../components/help-desk/HelpDeskDashboardLinkButton';
+import { HelpDeskSubNav } from '../../../../../components/help-desk/HelpDeskSubNav';
+import { HelpDeskCasesTable } from '../../../../../components/help-desk/HelpDeskCasesTable';
 import { useHelpDeskAccess } from '../../../../../components/help-desk/hooks/useHelpDeskAccess';
+import type { HelpDeskCaseListItem } from '../../../../../lib/help-desk/types';
 import {
   IconAlertCircle,
   IconChevronRight,
-  IconSearch,
   IconPlus,
   IconFilter,
   IconX,
@@ -53,16 +53,7 @@ import {
   IconDownload,
 } from '@tabler/icons-react';
 
-interface Ticket {
-  id_case: number;
-  subject_case: string;
-  priority: string;
-  status: string;
-  creation_date: string;
-  nombreTecnico: string;
-  subprocess_id: number;
-  company: string;
-}
+interface Ticket extends HelpDeskCaseListItem {}
 
 interface CompanyData {
   id_company: number;
@@ -419,7 +410,7 @@ function TicketsBoard() {
 
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
-    { title: 'Mesa de Ayuda', href: '#' },
+    { title: 'Mesa de Ayuda', href: '/process/help-desk/create-ticket' },
     { title: 'Panel de Casos', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (
@@ -434,45 +425,6 @@ function TicketsBoard() {
       </span>
     )
   );
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority?.toLowerCase()) {
-      case 'alta':
-        return 'red';
-      case 'media':
-        return 'yellow';
-      case 'baja':
-        return 'green';
-      default:
-        return 'gray';
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'abierto':
-        return 'green';
-      case 'cancelado':
-        return 'gray';
-      case 'resuelto':
-        return 'blue';
-      default:
-        return 'gray';
-    }
-  };
-
-  const getPriorityIcon = (priority: string) => {
-    switch (priority?.toLowerCase()) {
-      case 'alta':
-        return <IconFlag size={14} color='red' />;
-      case 'media':
-        return <IconFlag size={14} color='yellow' />;
-      case 'baja':
-        return <IconFlag size={14} color='green' />;
-      default:
-        return <IconFlag size={14} />;
-    }
-  };
 
   const validateForm = () => {
     const errors: Record<string, string> = {};
@@ -645,6 +597,8 @@ function TicketsBoard() {
           </Grid>
         </Card>
 
+        <HelpDeskSubNav />
+
         {hasHelpDeskAccess && <ReportsChart className='mb-6' />}
 
         {error && (
@@ -780,7 +734,7 @@ function TicketsBoard() {
           </Collapse>
         </Card>
 
-        <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden'>
+        <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden' p='lg'>
           <LoadingOverlay visible={loading} />
 
           <Title order={3} mb='md' className='flex items-center gap-2'>
@@ -788,94 +742,7 @@ function TicketsBoard() {
             Lista de Casos
           </Title>
 
-          <div className='overflow-x-auto'>
-            <Table striped highlightOnHover>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>ID</Table.Th>
-                  <Table.Th>Asunto</Table.Th>
-                  <Table.Th>Empresa</Table.Th>
-                  <Table.Th>Prioridad</Table.Th>
-                  <Table.Th>Estado</Table.Th>
-                  <Table.Th>Fecha de Creación</Table.Th>
-                  <Table.Th>Técnico Asignado</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {tickets.length === 0 ? (
-                  <Table.Tr>
-                    <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
-                      <div className='flex flex-col items-center gap-3'>
-                        <IconTicket size={48} className='text-gray-300' />
-                        <Text size='lg' fw={500}>
-                          No se encontraron casos
-                        </Text>
-                        <Text size='sm'>
-                          Intenta ajustar los filtros o crea un nuevo caso
-                        </Text>
-                      </div>
-                    </Table.Td>
-                  </Table.Tr>
-                ) : (
-                  tickets.map((ticket) => (
-                    <Table.Tr
-                      key={ticket.id_case}
-                      className='cursor-pointer hover:bg-gray-50 transition-colors'
-                      onClick={() => {
-                        sessionStorage.setItem('selectedTicket', JSON.stringify(ticket));
-                        sessionStorage.setItem('ticketsList', JSON.stringify(tickets));
-                        router.push(`/process/help-desk/view-ticket?id=${ticket.id_case}`);
-                      }}
-                    >
-                      <Table.Td>
-                        <Badge variant='light' color='blue' size='sm'>
-                          #{ticket.id_case}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text fw={500} className='max-w-xs truncate'>
-                          {ticket.subject_case}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size='sm'>
-                          {ticket.company}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={4}>
-                          {getPriorityIcon(ticket.priority)}
-                          <Badge
-                            color={getPriorityColor(ticket.priority)}
-                            variant='light'
-                            size='sm'
-                          >
-                            {ticket.priority}
-                          </Badge>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge color={getStatusColor(ticket.status)} variant='light' size='sm'>
-                          {ticket.status}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size='sm'>
-                          {new Date(ticket.creation_date).toISOString().split('T')[0]}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={4}>
-                          <IconUser size={14} className='text-gray-400' />
-                          <Text size='sm'>{ticket.nombreTecnico || 'Sin asignar'}</Text>
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))
-                )}
-              </Table.Tbody>
-            </Table>
-          </div>
+          <HelpDeskCasesTable tickets={tickets} />
         </Card>
 
         <Modal
