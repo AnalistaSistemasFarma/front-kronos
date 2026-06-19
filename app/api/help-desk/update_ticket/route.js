@@ -1,5 +1,8 @@
 import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig.js';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../auth/[...nextauth]/route';
+import { checkAdminPrivileges } from '../../../../lib/access-control';
 import {
   fireAndForgetNotification,
   isTicketClosedStatus,
@@ -9,6 +12,19 @@ import {
 
 export async function POST(req) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
+      return new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401 });
+    }
+
+    const isAdmin = await checkAdminPrivileges(session.user.email);
+    if (!isAdmin) {
+      return new Response(
+        JSON.stringify({ error: 'Solo los administradores pueden editar casos' }),
+        { status: 403 }
+      );
+    }
+
     const body = await req.json();
     const {
       id_case,
@@ -22,6 +38,7 @@ export async function POST(req) {
       id_department,
       id_technical,
       resolucion,
+      email,
     } = body;
 
     if (
@@ -66,6 +83,7 @@ export async function POST(req) {
           id_department = @id_department,
           id_technical = @id_technical,
           place = @place,
+          email = @email,
           resolution = @resolucion,
           end_date = CASE
             WHEN @status IN (2, 3) THEN COALESCE(end_date, SYSDATETIME())
@@ -82,6 +100,7 @@ export async function POST(req) {
       updateCaseRequest.input('id_department', sql.Int, id_department);
       updateCaseRequest.input('id_technical', sql.Int, id_technical || null);
       updateCaseRequest.input('place', sql.NVarChar(1000), place);
+      updateCaseRequest.input('email', sql.NVarChar(255), email?.trim() || null);
       updateCaseRequest.input('resolucion', sql.Text, resolucion || null);
       updateCaseRequest.input('id_case', sql.Int, id_case);
 

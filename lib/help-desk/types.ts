@@ -11,6 +11,7 @@
   requester?: number | string;
   requester_name?: string;
   requester_email?: string;
+  email?: string;
   case_type?: string;
   description?: string;
   category?: string;

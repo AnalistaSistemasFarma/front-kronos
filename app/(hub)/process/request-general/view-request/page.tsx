@@ -9,6 +9,10 @@ import { saveAs } from 'file-saver';
 import { useSession } from 'next-auth/react';
 import toast from 'react-hot-toast';
 import {
+  isClosedStatusId,
+  showClosureNotification,
+} from '../../../../../lib/notifications/showClosureNotification';
+import {
   Title,
   Paper,
   Text,
@@ -900,6 +904,16 @@ function ViewRequestPage() {
       }
 
       if (resolutionData.estado) {
+        const closedStatus = Number(resolutionData.estado);
+        if (isClosedStatusId(closedStatus)) {
+          showClosureNotification({
+            type: 'request',
+            id: request?.id,
+            subject: request?.subject,
+            status: closedStatus === 3 ? 'cancelled' : 'resolved',
+          });
+        }
+
         setResolutionData({
           ...resolutionData,
           estado: '',

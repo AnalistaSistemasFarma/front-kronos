@@ -32,9 +32,9 @@ import {
 } from '@mantine/core';
 import { ReportsChart } from '../../../../../components/help-desk/ReportsChart';
 import { HelpDeskDashboardLinkButton } from '../../../../../components/help-desk/HelpDeskDashboardLinkButton';
-import { HelpDeskSubNav } from '../../../../../components/help-desk/HelpDeskSubNav';
 import { HelpDeskCasesTable } from '../../../../../components/help-desk/HelpDeskCasesTable';
 import { useHelpDeskAccess } from '../../../../../components/help-desk/hooks/useHelpDeskAccess';
+import { hasAdminRole } from '../../../../../lib/access-control';
 import type { HelpDeskCaseListItem } from '../../../../../lib/help-desk/types';
 import {
   IconAlertCircle,
@@ -70,6 +70,18 @@ function TicketsBoard() {
   const searchParams = useSearchParams();
   const subprocessId = searchParams.get('subprocess_id');
   const { hasAccess: hasHelpDeskAccess } = useHelpDeskAccess();
+  const isAdmin = hasAdminRole(session?.user?.role);
+
+  useEffect(() => {
+    if (status === 'loading') return;
+    if (!session) {
+      router.push('/login');
+      return;
+    }
+    if (!isAdmin) {
+      router.replace('/process/help-desk/my-tickets');
+    }
+  }, [session, status, router, isAdmin]);
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
@@ -408,10 +420,13 @@ function TicketsBoard() {
     return null;
   }
 
+  if (!isAdmin) {
+    return null;
+  }
+
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
-    { title: 'Mesa de Ayuda', href: '/process/help-desk/create-ticket' },
-    { title: 'Panel de Casos', href: '#' },
+    { title: 'Tickets', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (
       <Link key={index} href={item.href} passHref>
@@ -507,7 +522,7 @@ function TicketsBoard() {
                 className='text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3'
               >
                 <IconTicket size={32} className='text-blue-600' />
-                Mesa de Ayuda
+                Tickets
               </Title>
               <Text size='lg' color='gray.6'>
                 Gestión y seguimiento de casos de soporte técnico
@@ -596,8 +611,6 @@ function TicketsBoard() {
             </Grid.Col>
           </Grid>
         </Card>
-
-        <HelpDeskSubNav />
 
         {hasHelpDeskAccess && <ReportsChart className='mb-6' />}
 

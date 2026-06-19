@@ -8,6 +8,9 @@ import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { useSession } from 'next-auth/react';
 import {
+  showClosureNotification,
+} from '../../../../../lib/notifications/showClosureNotification';
+import {
   Title,
   Paper,
   Text,
@@ -708,6 +711,16 @@ function ViewRequestPage() {
       }
 
       if (resolutionData.estado) {
+        const closedStatus = Number(resolutionData.estado);
+        if (closedStatus === 2) {
+          showClosureNotification({
+            type: 'activity',
+            id: request?.id_request_general,
+            subject: request?.task ?? request?.subject_request,
+            status: 'resolved',
+          });
+        }
+
         setResolutionData({
           ...resolutionData,
           estado: '',
