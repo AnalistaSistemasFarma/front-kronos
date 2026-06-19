@@ -1,6 +1,8 @@
 import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig.js';
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../auth/[...nextauth]/route';
 
 // GET - Obtener notas de un caso
 export async function GET(req) {
@@ -47,6 +49,11 @@ export async function GET(req) {
 // POST - Agregar una nueva nota a un caso
 export async function POST(req) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+
     const body = await req.json();
     const { id_case, note, created_by } = body;
 

@@ -39,7 +39,17 @@ export default function RootLayout({
         style={{ background: 'var(--background)', color: 'var(--foreground)' }}
       >
         <Providers>{children}</Providers>
-        <Toaster />
+        <Toaster
+          position='top-right'
+          gutter={12}
+          toastOptions={{
+            style: {
+              background: 'transparent',
+              boxShadow: 'none',
+              padding: 0,
+            },
+          }}
+        />
         <ServiceWorkerRegistrar />
       </body>
     </html>

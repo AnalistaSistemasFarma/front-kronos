@@ -5,8 +5,6 @@ import { Title, Text, Group, ActionIcon } from '@mantine/core';
 import {
   IconChevronDown,
   IconChevronUp,
-  IconClock,
-  IconBuilding,
   IconArrowRight,
   IconFileText,
   IconSettings,
@@ -14,10 +12,9 @@ import {
   IconShoppingCart,
   IconUsers,
   IconChartBar,
+  IconInbox,
 } from '@tabler/icons-react';
 import GlassCard from '../ui/GlassCard';
-import StatusBadge from '../ui/StatusBadge';
-import GradientButton from '../ui/GradientButton';
 
 interface Company {
   id_company: number;
@@ -93,6 +90,12 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
   const getSubprocessIcon = (subprocessName: string) => {
     const name = subprocessName.toLowerCase();
 
+    if (name.includes('mis ticket')) {
+      return <IconInbox size={18} />;
+    }
+    if (name === 'tickets' || name === 'ticket' || (name.includes('panel') && name.includes('caso'))) {
+      return <IconTicket size={18} />;
+    }
     if (name.includes('ticket') || name.includes('help') || name.includes('soporte')) {
       return <IconTicket size={18} />;
     }
