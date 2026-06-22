@@ -10,6 +10,8 @@ export async function POST(req) {
       id_category,
       process,
       task,
+      files,
+      formFields,
       cost_center_pc,
       cost_center_t,
       cost,
@@ -151,6 +153,92 @@ export async function POST(req) {
               .query(insertUserTaskQuery);
           }
 
+        }
+
+      /* =========================
+        6️⃣ INSERT CAMPOS CONDICIONALES (LOOP)
+        Construye un mapa tempId(opción) -> id real para resolver la condición
+        de los archivos más abajo.
+        ========================= */
+
+        const optionTempToId = {};
+
+        if (Array.isArray(formFields)) {
+          let fieldOrder = 0;
+          for (const field of formFields) {
+            if (!field.field_label || !field.field_label.trim()) continue;
+
+            const insertFieldQuery = `
+              INSERT INTO process_form_field
+              (id_process_category, field_label, field_type, required, active, display_order)
+              OUTPUT INSERTED.id
+              VALUES (@id_process, @field_label, @field_type, @required, 1, @display_order);
+            `;
+
+            const fieldResult = await new sql.Request(transaction)
+              .input("id_process", sql.Int, processId)
+              .input("field_label", sql.NVarChar(255), field.field_label)
+              .input("field_type", sql.NVarChar(30), field.field_type || "select")
+              .input("required", sql.Bit, field.required ? 1 : 0)
+              .input("display_order", sql.Int, fieldOrder++)
+              .query(insertFieldQuery);
+
+            const fieldId = fieldResult.recordset[0].id;
+
+            if (Array.isArray(field.options)) {
+              let optionOrder = 0;
+              for (const opt of field.options) {
+                if (!opt.option_label || !opt.option_label.trim()) continue;
+
+                const insertOptionQuery = `
+                  INSERT INTO process_form_field_option
+                  (id_form_field, option_label, active, display_order)
+                  OUTPUT INSERTED.id
+                  VALUES (@id_form_field, @option_label, 1, @display_order);
+                `;
+
+                const optionResult = await new sql.Request(transaction)
+                  .input("id_form_field", sql.Int, fieldId)
+                  .input("option_label", sql.NVarChar(255), opt.option_label)
+                  .input("display_order", sql.Int, optionOrder++)
+                  .query(insertOptionQuery);
+
+                if (opt.tempId !== undefined && opt.tempId !== null) {
+                  optionTempToId[opt.tempId] = optionResult.recordset[0].id;
+                }
+              }
+            }
+          }
+        }
+
+      /* =========================
+        7️⃣ INSERT ARCHIVOS REQUERIDOS (LOOP)
+        ========================= */
+
+        if (Array.isArray(files)) {
+          let order = 0;
+          for (const f of files) {
+            if (!f.file_label || !f.file_label.trim()) continue;
+
+            const conditionOptionId =
+              f.condition_option_temp !== undefined && f.condition_option_temp !== null
+                ? optionTempToId[f.condition_option_temp] ?? null
+                : null;
+
+            const insertFileQuery = `
+              INSERT INTO file_process_category
+              (id_process_category, file_label, required, active, display_order, id_condition_option)
+              VALUES (@id_process, @file_label, @required, 1, @display_order, @id_condition_option);
+            `;
+
+            await new sql.Request(transaction)
+              .input("id_process", sql.Int, processId)
+              .input("file_label", sql.NVarChar(255), f.file_label)
+              .input("required", sql.Bit, f.required ? 1 : 0)
+              .input("display_order", sql.Int, order++)
+              .input("id_condition_option", sql.Int, conditionOptionId)
+              .query(insertFileQuery);
+          }
         }
 
       /* =========================

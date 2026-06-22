@@ -220,6 +220,10 @@ function ViewRequestPage() {
   const [selectedNoteEmails, setSelectedNoteEmails] = useState<string[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
 
+  const [requestFormValues, setRequestFormValues] = useState<
+    { id: number; field_label: string; option_label: string | null; value_text: string | null }[]
+  >([]);
+
   useEffect(() => {
     const storedRequest = sessionStorage.getItem('selectedRequest');
     if (storedRequest) {
@@ -257,8 +261,24 @@ function ViewRequestPage() {
       fetchNotes();
       fetchTasksRG();
       fetchFolderContents();
+      fetchFormValues();
     }
   }, [request]);
+
+  const fetchFormValues = async () => {
+    if (!request?.id) return;
+    try {
+      const response = await fetch(
+        `/api/requests-general/request-form-values?id_request=${request.id}`
+      );
+      if (!response.ok) throw new Error('Error al cargar las respuestas del formulario');
+      const data = await response.json();
+      setRequestFormValues(data);
+    } catch (err) {
+      console.error('Error fetching form values:', err);
+      setRequestFormValues([]);
+    }
+  };
 
   useEffect(() => {
     if (chatEndRef.current) {
@@ -1642,6 +1662,29 @@ function ViewRequestPage() {
             </Card>
           </div>
         </div>
+
+        {requestFormValues.length > 0 && (
+          <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
+            <Title order={3} mb='md' className='flex items-center gap-2'>
+              <IconTag size={20} />
+              Información adicional
+            </Title>
+            <Grid>
+              {requestFormValues.map((fv) => (
+                <Grid.Col span={{ base: 12, md: 6 }} key={fv.id}>
+                  <Card withBorder radius='md' p='md'>
+                    <Text size='xs' c='dimmed' fw={500} className='uppercase'>
+                      {fv.field_label}
+                    </Text>
+                    <Text size='md' fw={600} mt={4}>
+                      {fv.option_label || fv.value_text || '—'}
+                    </Text>
+                  </Card>
+                </Grid.Col>
+              ))}
+            </Grid>
+          </Card>
+        )}
 
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
           <Title order={3} mb='md' className='flex items-center gap-2'>

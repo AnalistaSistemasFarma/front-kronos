@@ -28,6 +28,7 @@ import {
   Switch,
   Modal,
   ActionIcon,
+  Checkbox,
 } from '@mantine/core';
 import {
   IconBuilding,
@@ -46,6 +47,8 @@ import {
   IconPlus,
   IconTrash,
   IconUser,
+  IconFileDescription,
+  IconTag,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 
@@ -81,6 +84,25 @@ interface Note {
   creation_date?: string;
 }
 
+interface FileDef {
+  id: number;
+  file_label: string;
+  required: boolean;
+  id_condition_option: number | null;
+}
+
+interface FieldOptionDef {
+  id: number;
+  option_label: string;
+}
+
+interface FormFieldDef {
+  id: number;
+  field_label: string;
+  required: boolean;
+  options: FieldOptionDef[];
+}
+
 function ViewWorkFlowPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -93,8 +115,20 @@ function ViewWorkFlowPage() {
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [files, setFiles] = useState<FileDef[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+
   const [originalRequest, setOriginalRequest] = useState<WorkFlow | null>(null);
   const [originalTasks, setOriginalTasks] = useState<Task[]>([]);
+  const [originalFiles, setOriginalFiles] = useState<FileDef[]>([]);
+  const [editedFiles, setEditedFiles] = useState<FileDef[]>([]);
+
+  const [formFields, setFormFields] = useState<FormFieldDef[]>([]);
+  const [loadingFields, setLoadingFields] = useState(false);
+  const [originalFormFields, setOriginalFormFields] = useState<FormFieldDef[]>([]);
+  const [editedFormFields, setEditedFormFields] = useState<FormFieldDef[]>([]);
+  const [optionInputs, setOptionInputs] = useState<Record<number, string>>({});
+
   const [isEditing, setIsEditing] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<{
     type: 'success' | 'error';
@@ -143,6 +177,8 @@ function ViewWorkFlowPage() {
   useEffect(() => {
     if (workflow?.id) {
       fetchTasks(workflow.id);
+      fetchFiles(workflow.id);
+      fetchFields(workflow.id);
     }
   }, [workflow?.id]);
 
@@ -217,6 +253,76 @@ function ViewWorkFlowPage() {
       setTasks([]);
     } finally {
       setLoadingTasks(false);
+    }
+  };
+
+  const fetchFiles = async (processId: number) => {
+    try {
+      setLoadingFiles(true);
+      const response = await fetch(
+        `/api/requests-general/process-files?id_process=${processId}`
+      );
+
+      if (!response.ok) {
+        throw new Error('Error al cargar los archivos requeridos');
+      }
+
+      const data = await response.json();
+      setFiles(
+        data.map(
+          (f: {
+            id: number;
+            file_label: string;
+            required: boolean | number;
+            id_condition_option: number | null;
+          }) => ({
+            id: f.id,
+            file_label: f.file_label,
+            required: Boolean(f.required),
+            id_condition_option: f.id_condition_option ?? null,
+          })
+        )
+      );
+    } catch (err) {
+      console.error('Error fetching files:', err);
+      setFiles([]);
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  const fetchFields = async (processId: number) => {
+    try {
+      setLoadingFields(true);
+      const response = await fetch(
+        `/api/requests-general/process-fields?id_process=${processId}`
+      );
+
+      if (!response.ok) {
+        throw new Error('Error al cargar los campos condicionales');
+      }
+
+      const data = await response.json();
+      setFormFields(
+        data.map(
+          (f: {
+            id: number;
+            field_label: string;
+            required: boolean | number;
+            options: { id: number; option_label: string }[];
+          }) => ({
+            id: f.id,
+            field_label: f.field_label,
+            required: Boolean(f.required),
+            options: f.options || [],
+          })
+        )
+      );
+    } catch (err) {
+      console.error('Error fetching fields:', err);
+      setFormFields([]);
+    } finally {
+      setLoadingFields(false);
     }
   };
 
@@ -321,13 +427,103 @@ function ViewWorkFlowPage() {
     setEditedTasks(editedTasks.filter(t => t.id !== taskId));
   };
 
+  // Funciones para manejar archivos requeridos
+  const handleAddFile = () => {
+    const newFile: FileDef = {
+      id: Date.now() * -1, // ID negativo = nuevo
+      file_label: '',
+      required: true,
+      id_condition_option: null,
+    };
+    setEditedFiles([...editedFiles, newFile]);
+  };
+
+  const handleRemoveFile = (fileId: number) => {
+    setEditedFiles(editedFiles.filter((f) => f.id !== fileId));
+  };
+
+  // Funciones para manejar campos condicionales
+  const handleAddFormField = () => {
+    const newField: FormFieldDef = {
+      id: Date.now() * -1,
+      field_label: '',
+      required: true,
+      options: [],
+    };
+    setEditedFormFields([...editedFormFields, newField]);
+  };
+
+  const handleRemoveFormField = (fieldId: number) => {
+    const field = editedFormFields.find((f) => f.id === fieldId);
+    const optionIds = field ? field.options.map((o) => o.id) : [];
+    setEditedFormFields(editedFormFields.filter((f) => f.id !== fieldId));
+    // Limpiar condiciones de archivos que apuntaban a opciones de este campo
+    setEditedFiles((prev) =>
+      prev.map((f) =>
+        f.id_condition_option != null && optionIds.includes(f.id_condition_option)
+          ? { ...f, id_condition_option: null }
+          : f
+      )
+    );
+  };
+
+  const handleAddOption = (fieldId: number) => {
+    const label = (optionInputs[fieldId] || '').trim();
+    if (!label) return;
+    setEditedFormFields(
+      editedFormFields.map((f) =>
+        f.id === fieldId
+          ? { ...f, options: [...f.options, { id: Date.now() * -1, option_label: label }] }
+          : f
+      )
+    );
+    setOptionInputs((prev) => ({ ...prev, [fieldId]: '' }));
+  };
+
+  const handleRemoveOption = (fieldId: number, optionId: number) => {
+    setEditedFormFields(
+      editedFormFields.map((f) =>
+        f.id === fieldId ? { ...f, options: f.options.filter((o) => o.id !== optionId) } : f
+      )
+    );
+    setEditedFiles((prev) =>
+      prev.map((f) =>
+        f.id_condition_option === optionId ? { ...f, id_condition_option: null } : f
+      )
+    );
+  };
+
+  // Opciones planas (de editedFormFields) para el selector de condición de archivos
+  const conditionSelectData = [
+    { value: '', label: 'Siempre' },
+    ...editedFormFields.flatMap((f) =>
+      f.options.map((o) => ({
+        value: o.id.toString(),
+        label: `${f.field_label}: ${o.option_label}`,
+      }))
+    ),
+  ];
+
+  const conditionLabelFor = (optionId: number | null) => {
+    if (optionId == null) return 'Siempre';
+    for (const f of formFields) {
+      const opt = f.options.find((o) => o.id === optionId);
+      if (opt) return `${f.field_label}: ${opt.option_label}`;
+    }
+    return 'Siempre';
+  };
+
   const handleStartEditing = () => {
     setOriginalRequest(workflow);
     setOriginalTasks([...tasks]);
+    setOriginalFiles([...files]);
+    setOriginalFormFields(formFields.map((f) => ({ ...f, options: f.options.map((o) => ({ ...o })) })));
     if (workflow) {
       setEditedWorkflow({ ...workflow });
     }
     setEditedTasks([...tasks]);
+    setEditedFiles([...files]);
+    setEditedFormFields(formFields.map((f) => ({ ...f, options: f.options.map((o) => ({ ...o })) })));
     setIsEditing(true);
     setUpdateMessage(null);
   };
@@ -341,6 +537,9 @@ function ViewWorkFlowPage() {
     }
     setEditedWorkflow(null);
     setEditedTasks([]);
+    setEditedFiles([]);
+    setEditedFormFields([]);
+    setOptionInputs({});
     setIsEditing(false);
     setFormErrors({});
     setUpdateMessage(null);
@@ -379,6 +578,91 @@ function ViewWorkFlowPage() {
 
       const tasksChanged = newTasks.length > 0 || deletedTaskIds.length > 0 || updatedTasks.length > 0;
 
+      const newFiles = editedFiles.filter((f) => f.id < 0 && f.file_label.trim());
+
+      const deletedFileIds = originalFiles
+        .filter((origFile) => !editedFiles.find((ef) => ef.id === origFile.id))
+        .map((f) => f.id);
+
+      const updatedFiles = editedFiles.filter((f) => {
+        if (f.id < 0) return false;
+        const originalFile = originalFiles.find((of) => of.id === f.id);
+        if (!originalFile) return false;
+        return (
+          originalFile.file_label !== f.file_label ||
+          Boolean(originalFile.required) !== Boolean(f.required) ||
+          (originalFile.id_condition_option ?? null) !== (f.id_condition_option ?? null)
+        );
+      });
+
+      const filesChanged =
+        newFiles.length > 0 || deletedFileIds.length > 0 || updatedFiles.length > 0;
+
+      // Diff de campos condicionales (con opciones anidadas)
+      const newFormFields = editedFormFields.filter(
+        (f) => f.id < 0 && f.field_label.trim()
+      );
+
+      const deletedFieldIds = originalFormFields
+        .filter((orig) => !editedFormFields.find((ef) => ef.id === orig.id))
+        .map((f) => f.id);
+
+      const updatedFormFields = editedFormFields.filter((f) => {
+        if (f.id < 0) return false;
+        const orig = originalFormFields.find((of) => of.id === f.id);
+        if (!orig) return false;
+        const labelChanged =
+          orig.field_label !== f.field_label || Boolean(orig.required) !== Boolean(f.required);
+        const newOpts = f.options.filter((o) => o.id < 0 && o.option_label.trim());
+        const deletedOpts = orig.options.filter((oo) => !f.options.find((o) => o.id === oo.id));
+        const updatedOpts = f.options.filter((o) => {
+          if (o.id < 0) return false;
+          const oo = orig.options.find((x) => x.id === o.id);
+          return oo && oo.option_label !== o.option_label;
+        });
+        return (
+          labelChanged || newOpts.length > 0 || deletedOpts.length > 0 || updatedOpts.length > 0
+        );
+      });
+
+      const formFieldsChanged =
+        newFormFields.length > 0 || deletedFieldIds.length > 0 || updatedFormFields.length > 0;
+
+      // Construye las opciones (create/update/delete) de un campo para el payload
+      const buildOptionActions = (field: FormFieldDef, orig?: FormFieldDef) => {
+        const actions: {
+          id?: number;
+          tempId?: number;
+          option_label?: string;
+          action: 'create' | 'update' | 'delete';
+        }[] = [];
+        for (const o of field.options) {
+          if (o.id < 0) {
+            actions.push({ tempId: o.id, option_label: o.option_label, action: 'create' });
+          } else if (orig) {
+            const oo = orig.options.find((x) => x.id === o.id);
+            if (oo && oo.option_label !== o.option_label) {
+              actions.push({ id: o.id, option_label: o.option_label, action: 'update' });
+            }
+          }
+        }
+        if (orig) {
+          for (const oo of orig.options) {
+            if (!field.options.find((o) => o.id === oo.id)) {
+              actions.push({ id: oo.id, action: 'delete' });
+            }
+          }
+        }
+        return actions;
+      };
+
+      // Resuelve la condición de un archivo para el payload (opción nueva = tempId negativo)
+      const fileCondition = (optionId: number | null) => {
+        if (optionId == null) return { id_condition_option: null };
+        if (optionId < 0) return { condition_option_temp: optionId };
+        return { id_condition_option: optionId };
+      };
+
       interface TaskToProcess {
         id?: number;
         task?: string;
@@ -386,6 +670,30 @@ function ViewWorkFlowPage() {
         cost?: number;
         cost_center?: string;
         id_user_assigned?: string;
+        action: 'create' | 'update' | 'delete';
+      }
+
+      interface FileToProcess {
+        id?: number;
+        file_label?: string;
+        required?: boolean;
+        id_condition_option?: number | null;
+        condition_option_temp?: number;
+        action: 'create' | 'update' | 'delete';
+      }
+
+      interface OptionToProcess {
+        id?: number;
+        tempId?: number;
+        option_label?: string;
+        action: 'create' | 'update' | 'delete';
+      }
+
+      interface FormFieldToProcess {
+        id?: number;
+        field_label?: string;
+        required?: boolean;
+        options?: OptionToProcess[];
         action: 'create' | 'update' | 'delete';
       }
 
@@ -398,13 +706,19 @@ function ViewWorkFlowPage() {
         id_user_assigned?: string;
         updateProcess: boolean;
         updateTasks: boolean;
+        updateFiles: boolean;
+        updateFormFields: boolean;
         tasks?: TaskToProcess[];
+        files?: FileToProcess[];
+        formFields?: FormFieldToProcess[];
       }
 
       const requestBody: RequestBody = {
         id_process: editedWorkflow.id,
         updateProcess: false,
         updateTasks: false,
+        updateFiles: false,
+        updateFormFields: false,
       };
 
       if (processChanged) {
@@ -449,11 +763,68 @@ function ViewWorkFlowPage() {
         requestBody.updateTasks = false;
       }
 
-      if (!processChanged && !tasksChanged) {
+      if (filesChanged) {
+        const filesToProcess: FileToProcess[] = [
+          ...newFiles.map((file) => ({
+            file_label: file.file_label,
+            required: file.required,
+            ...fileCondition(file.id_condition_option),
+            action: 'create' as const,
+          })),
+          ...updatedFiles.map((file) => ({
+            id: file.id,
+            file_label: file.file_label,
+            required: file.required,
+            ...fileCondition(file.id_condition_option),
+            action: 'update' as const,
+          })),
+          ...deletedFileIds.map((id) => ({
+            id,
+            action: 'delete' as const,
+          })),
+        ];
+        requestBody.files = filesToProcess;
+        requestBody.updateFiles = true;
+      } else {
+        requestBody.updateFiles = false;
+      }
+
+      if (formFieldsChanged) {
+        const fieldsToProcess: FormFieldToProcess[] = [
+          ...newFormFields.map((field) => ({
+            field_label: field.field_label,
+            required: field.required,
+            options: buildOptionActions(field),
+            action: 'create' as const,
+          })),
+          ...updatedFormFields.map((field) => {
+            const orig = originalFormFields.find((of) => of.id === field.id);
+            return {
+              id: field.id,
+              field_label: field.field_label,
+              required: field.required,
+              options: buildOptionActions(field, orig),
+              action: 'update' as const,
+            };
+          }),
+          ...deletedFieldIds.map((id) => ({
+            id,
+            action: 'delete' as const,
+          })),
+        ];
+        requestBody.formFields = fieldsToProcess;
+        requestBody.updateFormFields = true;
+      } else {
+        requestBody.updateFormFields = false;
+      }
+
+      if (!processChanged && !tasksChanged && !filesChanged && !formFieldsChanged) {
         setUpdateMessage({ type: 'success', text: 'No se detectaron cambios para guardar' });
         setIsEditing(false);
         setEditedWorkflow(null);
         setEditedTasks([]);
+        setEditedFiles([]);
+        setEditedFormFields([]);
         return;
       }
 
@@ -472,15 +843,21 @@ function ViewWorkFlowPage() {
 
       setWorkflow(editedWorkflow);
       setTasks(editedTasks);
-      
-      setUpdateMessage({ 
-        type: 'success', 
-        text: result.message || 'Cambios guardados correctamente' 
+      setFiles(editedFiles);
+
+      setUpdateMessage({
+        type: 'success',
+        text: result.message || 'Cambios guardados correctamente'
       });
       setIsEditing(false);
       setEditedWorkflow(null);
       setEditedTasks([]);
+      setEditedFiles([]);
+      setEditedFormFields([]);
+      setOptionInputs({});
       fetchTasks(editedWorkflow.id);
+      fetchFiles(editedWorkflow.id);
+      fetchFields(editedWorkflow.id);
     } catch (err: unknown) {
 
       console.error('Error saving changes:', err);
@@ -563,7 +940,7 @@ function ViewWorkFlowPage() {
         </Anchor>
       </Link>
     ) : (
-      <span key={index} className='text-gray-500'>
+      <span key={index} className='text-[var(--mantine-color-dimmed)]'>
         {item.title}
       </span>
     )
@@ -571,7 +948,7 @@ function ViewWorkFlowPage() {
 
   if (loading) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='flex items-center justify-center' style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
         <div className='text-center'>
           <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4'></div>
           <Text size='lg'>Cargando detalles del flujo de trabajo...</Text>
@@ -582,7 +959,7 @@ function ViewWorkFlowPage() {
 
   if (error) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='flex items-center justify-center' style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
         <Card shadow='sm' p='xl' radius='md' withBorder className='max-w-md'>
           <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' mb='md'>
             {error}
@@ -601,7 +978,7 @@ function ViewWorkFlowPage() {
 
   if (!workflow) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='flex items-center justify-center' style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
         <Card shadow='sm' p='xl' radius='md' withBorder className='max-w-md'>
           <Text size='lg' fw={500} mb='md' className='text-center'>
             Flujo de trabajo no encontrado
@@ -619,9 +996,9 @@ function ViewWorkFlowPage() {
   }
 
   return (
-    <div className='min-h-screen bg-gray-50'>
+    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -630,12 +1007,12 @@ function ViewWorkFlowPage() {
             <div>
               <Title
                 order={1}
-                className='text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3'
+                className='text-3xl font-bold mb-2 flex items-center gap-3'
               >
                 <IconProgress size={32} className='text-blue-6' />
                 Flujo de Trabajo #{workflow.id}
               </Title>
-              <Text size='lg' c='gray.7'>
+              <Text size='lg' c='dimmed'>
                 {workflow.process}
               </Text>
             </div>
@@ -656,7 +1033,7 @@ function ViewWorkFlowPage() {
                 p='xl'
                 radius='md'
                 withBorder
-                className='bg-gradient-to-r from-indigo-50 to-blue-50 border-indigo-200'
+                style={{ backgroundColor: 'var(--mantine-color-indigo-light)' }}
               >
                 <Group mb='md'>
                   <Box
@@ -671,29 +1048,29 @@ function ViewWorkFlowPage() {
                 </Group>
 
                 <Stack gap='md'>
-                  <Card withBorder radius='md' p='md' bg='white'>
+                  <Card withBorder radius='md' p='md'>
                     <Stack gap='sm'>
                       <Group>
-                        <IconBuilding size={18} className='text-gray-500' />
-                        <Text size='sm' c='gray.6' fw={500}>
+                        <IconBuilding size={18} style={{ color: 'var(--mantine-color-dimmed)' }} />
+                        <Text size='sm' c='dimmed' fw={500}>
                           Empresa
                         </Text>
                       </Group>
-                      <Text size='lg' fw={600} c='gray.8'>
+                      <Text size='lg' fw={600}>
                         {workflow.company}
                       </Text>
                     </Stack>
                   </Card>
 
-                  <Card withBorder radius='md' p='md' bg='white'>
+                  <Card withBorder radius='md' p='md'>
                     <Stack gap='sm'>
                       <Group>
-                        <IconCategory size={18} className='text-gray-500' />
-                        <Text size='sm' c='gray.6' fw={500}>
+                        <IconCategory size={18} style={{ color: 'var(--mantine-color-dimmed)' }} />
+                        <Text size='sm' c='dimmed' fw={500}>
                           Nombre de Categoría
                         </Text>
                       </Group>
-                      <Text size='lg' fw={600} c='gray.8'>
+                      <Text size='lg' fw={600}>
                         {workflow.category}
                       </Text>
                     </Stack>
@@ -710,7 +1087,7 @@ function ViewWorkFlowPage() {
                 p='xl'
                 radius='md'
                 withBorder
-                className='bg-gradient-to-r from-teal-50 to-green-50 border-teal-200'
+                style={{ backgroundColor: 'var(--mantine-color-teal-light)' }}
               >
                 <Group mb='md'>
                   <Box
@@ -725,25 +1102,25 @@ function ViewWorkFlowPage() {
                 </Group>
 
                 <Stack gap='md'>
-                  <Card withBorder radius='md' p='md' bg='white'>
+                  <Card withBorder radius='md' p='md'>
                     <Stack gap='sm'>
                       <Group>
-                        <IconProgress size={18} className='text-gray-500' />
-                        <Text size='sm' c='gray.6' fw={500}>
+                        <IconProgress size={18} style={{ color: 'var(--mantine-color-dimmed)' }} />
+                        <Text size='sm' c='dimmed' fw={500}>
                           Nombre del Proceso
                         </Text>
                       </Group>
-                      <Text size='lg' fw={600} c='gray.8'>
+                      <Text size='lg' fw={600}>
                         {workflow.process}
                       </Text>
                     </Stack>
                   </Card>
 
-                  <Card withBorder radius='md' p='md' bg='white'>
+                  <Card withBorder radius='md' p='md'>
                     <Stack gap='sm'>
                       <Group>
-                        <IconUserCheck size={18} className='text-gray-500' />
-                        <Text size='sm' c='gray.6' fw={500}>
+                        <IconUserCheck size={18} style={{ color: 'var(--mantine-color-dimmed)' }} />
+                        <Text size='sm' c='dimmed' fw={500}>
                           Usuario Asignado al Proceso
                         </Text>
                       </Group>
@@ -761,16 +1138,16 @@ function ViewWorkFlowPage() {
                           clearable
                         />
                       ) : (
-                        <Text size='lg' fw={600} c='gray.8'>
+                        <Text size='lg' fw={600}>
                           {workflow.assigned_process_category}
                         </Text>
                       )}
                     </Stack>
                   </Card>
 
-                  <Card withBorder radius='md' p='md' bg='white'>
+                  <Card withBorder radius='md' p='md'>
                     <Stack gap='sm'>
-                      <Text size='sm' c='gray.6' fw={500}>
+                      <Text size='sm' c='dimmed' fw={500}>
                         Descripción
                       </Text>
                       {isEditing ? (
@@ -786,16 +1163,16 @@ function ViewWorkFlowPage() {
                           autosize
                         />
                       ) : (
-                        <Text size='md' c='gray.8' className='whitespace-pre-line'>
+                        <Text size='md' className='whitespace-pre-line'>
                           {workflow.description || 'Sin descripción'}
                         </Text>
                       )}
                     </Stack>
                   </Card>
 
-                  <Card withBorder radius='md' p='md' bg='white'>
+                  <Card withBorder radius='md' p='md'>
                     <Stack gap='sm'>
-                      <Text size='sm' c='gray.6' fw={500}>
+                      <Text size='sm' c='dimmed' fw={500}>
                         Activo
                       </Text>
                       {isEditing ? (
@@ -820,7 +1197,7 @@ function ViewWorkFlowPage() {
                             </>
                           ) : (
                             <>
-                              <IconX size={18} className='text-gray-400' />
+                              <IconX size={18} style={{ color: 'var(--mantine-color-dimmed)' }} />
                               <Badge color='gray' size='lg' variant='light'>
                                 No
                               </Badge>
@@ -841,7 +1218,8 @@ function ViewWorkFlowPage() {
               p='xl'
               radius='md'
               withBorder
-              className='bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200 h-full'
+              className='h-full'
+              style={{ backgroundColor: 'var(--mantine-color-orange-light)' }}
             >
               <Group mb='md' justify='space-between'>
                 <Group>
@@ -914,8 +1292,8 @@ function ViewWorkFlowPage() {
                             transition-all duration-200 ease-in-out
                             ${
                               task.active === 1
-                                ? 'bg-white border-amber-300 hover:border-amber-400 hover:shadow-md'
-                                : 'bg-gray-50 border-gray-200 opacity-75'
+                                ? 'bg-[var(--mantine-color-body)] border-amber-300 hover:border-amber-400 hover:shadow-md'
+                                : 'bg-[var(--mantine-color-default)] border-[var(--mantine-color-default-border)] opacity-75'
                             }
                             ${task.id < 0 ? 'border-blue-400 border-dashed' : ''}
                           `}
@@ -954,7 +1332,7 @@ function ViewWorkFlowPage() {
                                         placeholder='Nombre de la tarea'
                                       />
                                     ) : (
-                                      <Text size='md' fw={600} c='gray.9' className='mb-1'>
+                                      <Text size='md' fw={600} className='mb-1'>
                                         {task.task}
                                       </Text>
                                     )}
@@ -974,10 +1352,10 @@ function ViewWorkFlowPage() {
 
                                 <Grid mt='sm'>
                                   <Grid.Col span={{ base: 12, sm: 4 }}>
-                                    <div className='bg-gray-50 rounded-lg p-3 transition-colors duration-200 hover:bg-gray-100'>
+                                    <div className='rounded-lg p-3 transition-colors duration-200' style={{ backgroundColor: 'var(--mantine-color-default)' }}>
                                       <Group gap='xs' mb='1'>
-                                        <IconUserCheck size={16} className='text-gray-500' />
-                                        <Text size='xs' c='gray.6' fw={500} className='uppercase'>
+                                        <IconUserCheck size={16} style={{ color: 'var(--mantine-color-dimmed)' }} />
+                                        <Text size='xs' c='dimmed' fw={500} className='uppercase'>
                                           Asignado a
                                         </Text>
                                       </Group>
@@ -996,7 +1374,7 @@ function ViewWorkFlowPage() {
                                           size='sm'
                                         />
                                       ) : (
-                                        <Text size='sm' fw={500} c='gray.8'>
+                                        <Text size='sm' fw={500}>
                                           {task.assigned_user || 'Sin asignar'}
                                         </Text>
                                       )}
@@ -1004,10 +1382,10 @@ function ViewWorkFlowPage() {
                                   </Grid.Col>
 
                                   <Grid.Col span={{ base: 12, sm: 4 }}>
-                                    <div className='bg-gray-50 rounded-lg p-3 transition-colors duration-200 hover:bg-gray-100'>
+                                    <div className='rounded-lg p-3 transition-colors duration-200' style={{ backgroundColor: 'var(--mantine-color-default)' }}>
                                       <Group gap='xs' mb='1'>
                                         <IconCoin size={16} className='text-green-600' />
-                                        <Text size='xs' c='gray.6' fw={500} className='uppercase'>
+                                        <Text size='xs' c='dimmed' fw={500} className='uppercase'>
                                           Costo
                                         </Text>
                                       </Group>
@@ -1027,7 +1405,7 @@ function ViewWorkFlowPage() {
                                           hideControls
                                         />
                                       ) : (
-                                        <Text size='sm' fw={600} c='green-700'>
+                                        <Text size='sm' fw={600} c='green.7'>
                                           {task.cost ? `$${task.cost.toLocaleString('es-CO')}` : '$0'}
                                         </Text>
                                       )}
@@ -1035,10 +1413,10 @@ function ViewWorkFlowPage() {
                                   </Grid.Col>
 
                                   <Grid.Col span={{ base: 12, sm: 4 }}>
-                                    <div className='bg-gray-50 rounded-lg p-3 transition-colors duration-200 hover:bg-gray-100'>
+                                    <div className='rounded-lg p-3 transition-colors duration-200' style={{ backgroundColor: 'var(--mantine-color-default)' }}>
                                       <Group gap='xs' mb='1'>
-                                        <IconMapPin size={16} className='text-gray-500' />
-                                        <Text size='xs' c='gray.6' fw={500} className='uppercase'>
+                                        <IconMapPin size={16} style={{ color: 'var(--mantine-color-dimmed)' }} />
+                                        <Text size='xs' c='dimmed' fw={500} className='uppercase'>
                                           Centro de Costo
                                         </Text>
                                       </Group>
@@ -1070,7 +1448,7 @@ function ViewWorkFlowPage() {
                                           size='sm'
                                         />
                                       ) : (
-                                        <Text size='sm' fw={500} c='gray.8'>
+                                        <Text size='sm' fw={500}>
                                           {getCostCenter(task.cost_center) || 'N/A'}
                                         </Text>
                                       )}
@@ -1105,7 +1483,374 @@ function ViewWorkFlowPage() {
           </Grid.Col>
         </Grid>
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+        <Card
+          shadow='sm'
+          p='xl'
+          radius='md'
+          withBorder
+          mt='6'
+          style={{ backgroundColor: 'var(--mantine-color-indigo-light)' }}
+        >
+          <Group mb='md' justify='space-between'>
+            <Group>
+              <Box
+                className='bg-indigo-500 p-2 rounded-lg'
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <IconTag size={24} color='white' />
+              </Box>
+              <div>
+                <Title order={2} className='text-indigo-700'>
+                  Campos condicionales
+                </Title>
+                <Text size='sm' c='dimmed'>
+                  Campos tipo lista cuyas opciones pueden condicionar qué archivos se piden.
+                </Text>
+              </div>
+            </Group>
+            <Group>
+              <Badge color='indigo' size='lg' variant='light'>
+                {(isEditing ? editedFormFields.length : formFields.length)}{' '}
+                {(isEditing ? editedFormFields.length : formFields.length) === 1 ? 'campo' : 'campos'}
+              </Badge>
+              {isEditing && (
+                <Button
+                  size='sm'
+                  leftSection={<IconPlus size={16} />}
+                  onClick={handleAddFormField}
+                  color='blue'
+                  variant='light'
+                >
+                  Agregar Campo
+                </Button>
+              )}
+            </Group>
+          </Group>
+
+          <LoadingOverlay
+            visible={loadingFields}
+            zIndex={1000}
+            overlayProps={{ radius: 'sm', blur: 2 }}
+          />
+
+          {(isEditing ? editedFormFields.length === 0 : formFields.length === 0) && !loadingFields ? (
+            <Alert
+              icon={<IconAlertCircle size={16} />}
+              title='Sin campos condicionales'
+              color='gray'
+              variant='light'
+            >
+              Este proceso no tiene campos condicionales.
+              {isEditing && (
+                <Button
+                  size='xs'
+                  mt='sm'
+                  leftSection={<IconPlus size={14} />}
+                  onClick={handleAddFormField}
+                  color='blue'
+                  variant='light'
+                >
+                  Agregar primer campo
+                </Button>
+              )}
+            </Alert>
+          ) : (
+            <Stack gap='sm'>
+              {(isEditing ? editedFormFields : formFields).map((field, fieldIndex) => (
+                <Card key={field.id} withBorder radius='md' p='md'>
+                  {isEditing ? (
+                    <Stack gap='sm'>
+                      <Group align='flex-end' wrap='nowrap'>
+                        <TextInput
+                          label='Nombre del campo'
+                          placeholder='Ej. Tipo de cliente'
+                          value={editedFormFields[fieldIndex]?.field_label || ''}
+                          onChange={(e) => {
+                            const next = [...editedFormFields];
+                            next[fieldIndex] = { ...next[fieldIndex], field_label: e.target.value };
+                            setEditedFormFields(next);
+                          }}
+                          style={{ flex: 1 }}
+                        />
+                        <Checkbox
+                          label='Obligatorio'
+                          checked={editedFormFields[fieldIndex]?.required || false}
+                          onChange={(e) => {
+                            const next = [...editedFormFields];
+                            next[fieldIndex] = {
+                              ...next[fieldIndex],
+                              required: e.currentTarget.checked,
+                            };
+                            setEditedFormFields(next);
+                          }}
+                          mb={8}
+                        />
+                        <ActionIcon
+                          color='red'
+                          variant='subtle'
+                          size='lg'
+                          onClick={() => handleRemoveFormField(field.id)}
+                          title='Eliminar campo'
+                          mb={4}
+                        >
+                          <IconTrash size={18} />
+                        </ActionIcon>
+                      </Group>
+
+                      <Group gap='xs'>
+                        {field.options.length === 0 ? (
+                          <Text size='sm' c='dimmed'>
+                            Sin opciones aún.
+                          </Text>
+                        ) : (
+                          field.options.map((o) => (
+                            <Badge
+                              key={o.id}
+                              variant='light'
+                              color='blue'
+                              size='lg'
+                              styles={{ root: { textTransform: 'none' } }}
+                              rightSection={
+                                <ActionIcon
+                                  size='xs'
+                                  variant='transparent'
+                                  color='red'
+                                  onClick={() => handleRemoveOption(field.id, o.id)}
+                                  title='Quitar opción'
+                                >
+                                  <IconX size={12} />
+                                </ActionIcon>
+                              }
+                            >
+                              {o.option_label}
+                            </Badge>
+                          ))
+                        )}
+                      </Group>
+
+                      <Group gap='xs'>
+                        <TextInput
+                          placeholder='Nueva opción (ej. Contado)'
+                          value={optionInputs[field.id] || ''}
+                          onChange={(e) =>
+                            setOptionInputs((prev) => ({ ...prev, [field.id]: e.target.value }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddOption(field.id);
+                            }
+                          }}
+                          style={{ flex: 1 }}
+                        />
+                        <Button
+                          variant='light'
+                          onClick={() => handleAddOption(field.id)}
+                          leftSection={<IconPlus size={16} />}
+                          disabled={!(optionInputs[field.id] || '').trim()}
+                        >
+                          Opción
+                        </Button>
+                      </Group>
+                    </Stack>
+                  ) : (
+                    <Stack gap='xs'>
+                      <Group justify='space-between'>
+                        <Group gap='sm'>
+                          <IconTag size={18} className='text-indigo-600' />
+                          <Text size='md' fw={500}>
+                            {field.field_label}
+                          </Text>
+                        </Group>
+                        <Badge color={field.required ? 'red' : 'gray'} variant='light' size='sm'>
+                          {field.required ? 'Obligatorio' : 'Opcional'}
+                        </Badge>
+                      </Group>
+                      <Group gap='xs'>
+                        {field.options.map((o) => (
+                          <Badge
+                            key={o.id}
+                            variant='light'
+                            color='blue'
+                            size='sm'
+                            styles={{ root: { textTransform: 'none' } }}
+                          >
+                            {o.option_label}
+                          </Badge>
+                        ))}
+                      </Group>
+                    </Stack>
+                  )}
+                </Card>
+              ))}
+            </Stack>
+          )}
+        </Card>
+
+        <Card
+          shadow='sm'
+          p='xl'
+          radius='md'
+          withBorder
+          mt='6'
+          style={{ backgroundColor: 'var(--mantine-color-cyan-light)' }}
+        >
+          <Group mb='md' justify='space-between'>
+            <Group>
+              <Box
+                className='bg-sky-500 p-2 rounded-lg'
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <IconFileDescription size={24} color='white' />
+              </Box>
+              <div>
+                <Title order={2} className='text-sky-700'>
+                  Archivos requeridos
+                </Title>
+                <Text size='sm' c='dimmed'>
+                  Documentos que el cliente deberá adjuntar al crear una solicitud con este proceso.
+                </Text>
+              </div>
+            </Group>
+            <Group>
+              <Badge color='sky' size='lg' variant='light'>
+                {(isEditing ? editedFiles.length : files.length)}{' '}
+                {(isEditing ? editedFiles.length : files.length) === 1 ? 'documento' : 'documentos'}
+              </Badge>
+              {isEditing && (
+                <Button
+                  size='sm'
+                  leftSection={<IconPlus size={16} />}
+                  onClick={handleAddFile}
+                  color='blue'
+                  variant='light'
+                >
+                  Agregar Documento
+                </Button>
+              )}
+            </Group>
+          </Group>
+
+          <LoadingOverlay
+            visible={loadingFiles}
+            zIndex={1000}
+            overlayProps={{ radius: 'sm', blur: 2 }}
+          />
+
+          {(isEditing ? editedFiles.length === 0 : files.length === 0) && !loadingFiles ? (
+            <Alert
+              icon={<IconAlertCircle size={16} />}
+              title='Sin archivos requeridos'
+              color='gray'
+              variant='light'
+            >
+              Este proceso no tiene documentos parametrizados. El cliente verá el campo de carga
+              genérico.
+              {isEditing && (
+                <Button
+                  size='xs'
+                  mt='sm'
+                  leftSection={<IconPlus size={14} />}
+                  onClick={handleAddFile}
+                  color='blue'
+                  variant='light'
+                >
+                  Agregar primer documento
+                </Button>
+              )}
+            </Alert>
+          ) : (
+            <Stack gap='sm'>
+              {(isEditing ? editedFiles : files).map((file, index) => (
+                <Card key={file.id} withBorder radius='md' p='md'>
+                  {isEditing ? (
+                    <Stack gap='sm'>
+                      <Group align='flex-end' wrap='nowrap'>
+                        <TextInput
+                          label='Nombre del documento'
+                          placeholder='Ej. Cédula, Contrato, RUT'
+                          value={editedFiles[index]?.file_label || ''}
+                          onChange={(e) => {
+                            const newFiles = [...editedFiles];
+                            newFiles[index] = { ...newFiles[index], file_label: e.target.value };
+                            setEditedFiles(newFiles);
+                          }}
+                          style={{ flex: 1 }}
+                        />
+                        <Checkbox
+                          label='Obligatorio'
+                          checked={editedFiles[index]?.required || false}
+                          onChange={(e) => {
+                            const newFiles = [...editedFiles];
+                            newFiles[index] = {
+                              ...newFiles[index],
+                              required: e.currentTarget.checked,
+                            };
+                            setEditedFiles(newFiles);
+                          }}
+                          mb={8}
+                        />
+                        <ActionIcon
+                          color='red'
+                          variant='subtle'
+                          size='lg'
+                          onClick={() => handleRemoveFile(file.id)}
+                          title='Eliminar documento'
+                          mb={4}
+                        >
+                          <IconTrash size={18} />
+                        </ActionIcon>
+                      </Group>
+                      <Select
+                        label='Condición (mostrar solo si...)'
+                        data={conditionSelectData}
+                        value={
+                          editedFiles[index]?.id_condition_option != null
+                            ? editedFiles[index].id_condition_option!.toString()
+                            : ''
+                        }
+                        onChange={(value) => {
+                          const newFiles = [...editedFiles];
+                          newFiles[index] = {
+                            ...newFiles[index],
+                            id_condition_option: value ? parseInt(value) : null,
+                          };
+                          setEditedFiles(newFiles);
+                        }}
+                        disabled={conditionSelectData.length <= 1}
+                        leftSection={<IconTag size={16} />}
+                      />
+                    </Stack>
+                  ) : (
+                    <Group justify='space-between'>
+                      <Group gap='sm'>
+                        <IconFileDescription size={18} className='text-sky-600' />
+                        <Text size='md' fw={500}>
+                          {file.file_label}
+                        </Text>
+                      </Group>
+                      <Group gap='xs'>
+                        <Badge
+                          color={file.id_condition_option != null ? 'grape' : 'gray'}
+                          variant='light'
+                          size='sm'
+                          styles={{ root: { textTransform: 'none' } }}
+                        >
+                          {conditionLabelFor(file.id_condition_option)}
+                        </Badge>
+                        <Badge color={file.required ? 'red' : 'gray'} variant='light' size='sm'>
+                          {file.required ? 'Obligatorio' : 'Opcional'}
+                        </Badge>
+                      </Group>
+                    </Group>
+                  )}
+                </Card>
+              ))}
+            </Stack>
+          )}
+        </Card>
+
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           {updateMessage && (
             <Alert
               color={updateMessage.type === 'success' ? 'green' : 'red'}
@@ -1175,10 +1920,10 @@ function ViewWorkFlowPage() {
                 <IconPlus size={20} className='text-blue-600' />
               </div>
               <div>
-                <Text size='lg' fw={600} className='text-gray-900'>
+                <Text size='lg' fw={600}>
                   Agregar Nueva Tarea
                 </Text>
-                <Text size='xs' c='gray.5'>
+                <Text size='xs' c='dimmed'>
                   Complete los campos para agregar una tarea
                 </Text>
               </div>
@@ -1205,7 +1950,7 @@ function ViewWorkFlowPage() {
                   leftSection={<IconListCheck size={16} />}
                   size='lg'
                   classNames={{
-                    label: 'text-sm font-medium text-gray-700 mb-2',
+                    label: 'text-sm font-medium mb-2',
                     input: 'min-h-[48px] text-base',
                   }}
                 />
@@ -1223,7 +1968,7 @@ function ViewWorkFlowPage() {
                   clearable
                   size='lg'
                   classNames={{
-                    label: 'text-sm font-medium text-gray-700 mb-2',
+                    label: 'text-sm font-medium mb-2',
                     input: 'min-h-[48px] text-base',
                   }}
                 />
@@ -1243,7 +1988,7 @@ function ViewWorkFlowPage() {
                   leftSection={<IconCoin size={16} />}
                   size='lg'
                   classNames={{
-                    label: 'text-sm font-medium text-gray-700 mb-2',
+                    label: 'text-sm font-medium mb-2',
                     input: 'min-h-[48px] text-base',
                   }}
                 />
@@ -1273,7 +2018,7 @@ function ViewWorkFlowPage() {
                   clearable
                   size='lg'
                   classNames={{
-                    label: 'text-sm font-medium text-gray-700 mb-2',
+                    label: 'text-sm font-medium mb-2',
                     input: 'min-h-[48px] text-base',
                   }}
                 />
@@ -1287,7 +2032,7 @@ function ViewWorkFlowPage() {
                   setAddTaskModalOpened(false);
                   setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '' });
                 }}
-                className='cursor-pointer hover:bg-gray-50 transition-colors duration-200'
+                className='cursor-pointer transition-colors duration-200'
               >
                 Cancelar
               </Button>

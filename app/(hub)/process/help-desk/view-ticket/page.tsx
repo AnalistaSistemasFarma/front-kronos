@@ -587,64 +587,6 @@ function ViewTicketPage() {
     }
   }, [ticket?.id_case]);
 
-  async function CheckOrCreateFolderAndUpload(
-    folderName: string,
-    files: { file: File }[],
-    token: string
-  ) {
-    let folderId: string;
-
-    try {
-      const getResponse = await axios.get(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (getResponse.status === 200) {
-        folderId = (getResponse.data as { id: string }).id;
-      } else {
-        throw new Error('Error al verificar la existencia de la carpeta.');
-      }
-    } catch (getError: unknown) {
-      if (getError instanceof Error) {
-        console.error(getError.message);
-      } else {
-        console.error(getError);
-      }
-    }
-
-    if (files && files.length > 0) {
-      const uploadPromises = files.map((file: { file: File }) =>
-        axios.put(
-          `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
-          file.file,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': file.file.type,
-            },
-          }
-        )
-      );
-
-      const results = await Promise.all(uploadPromises);
-
-      results.forEach((response, index) => {
-        if (response.status === 201 || response.status === 200) {
-          console.log(`Archivo subido: ${files[index].file.name}`, response.data);
-        } else {
-          console.log(`Error al subir el archivo: ${files[index].file.name}`);
-        }
-      });
-    } else {
-      console.log('No hay archivos seleccionados para subir.');
-    }
-  }
-
   const handleAddNote = async () => {
     if (!newNote.trim() || !ticket?.id_case || !userId) return;
 
@@ -886,22 +828,8 @@ function ViewTicketPage() {
     setUpdateMessage(null);
 
     try {
-      if (attachedFiles.length > 0) {
-        const token = await getMicrosoftToken();
-        if (!token) {
-          throw new Error('No se pudo obtener el token de acceso para subir archivos.');
-        }
-
-        const folderName = `Ticket-${ticket?.id_case}`;
-        const filesToUpload = attachedFiles
-          .filter((file) => file.status === 'success')
-          .map((file) => ({ file: file.file }));
-
-        if (filesToUpload.length > 0) {
-          await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
-        }
-      }
-
+      // Los archivos ya se suben a Graph directamente desde el componente FileUpload
+      // (autoUpload), por lo que aquí solo se actualiza el caso en la base de datos.
       const updateData = {
         id_case: ticket?.id_case,
         status: resolutionData.estado || ticket?.id_status_case,
