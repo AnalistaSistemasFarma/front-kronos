@@ -5,6 +5,11 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
 import { useSession } from 'next-auth/react';
+import toast from 'react-hot-toast';
+import {
+  isClosedStatusId,
+  showClosureNotification,
+} from '../../../../../lib/notifications/showClosureNotification';
 import {
   Title,
   Paper,
@@ -48,9 +53,11 @@ import {
   IconFileText,
   IconFileSpreadsheet,
   IconPhoto,
+  IconAt,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
+import { hasAdminRole } from '../../../../../lib/access-control';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 
 interface Ticket {
@@ -77,6 +84,8 @@ interface Ticket {
   resolution?: string;
   end_date?: string;
   company?: string;
+  email?: string;
+  requester_email?: string;
 }
 
 interface Note {
@@ -142,17 +151,29 @@ function formatTicketDateLocale(
 }
 
 function normalizeTicketPayload(data: unknown, ticketId?: string): Ticket | null {
+  let raw: Ticket | null = null;
   if (data && typeof data === 'object' && !Array.isArray(data) && 'id_case' in data) {
-    return data as Ticket;
-  }
-  if (Array.isArray(data)) {
+    raw = data as Ticket;
+  } else if (Array.isArray(data)) {
     const targetId = ticketId ? Number(ticketId) : NaN;
-    const match = Number.isNaN(targetId)
-      ? data[0]
-      : data.find((item) => item?.id_case === targetId) ?? data[0];
-    return match ?? null;
+    raw = Number.isNaN(targetId)
+      ? (data[0] ?? null)
+      : (data.find((item) => item?.id_case === targetId) ?? data[0] ?? null);
   }
-  return null;
+  if (!raw) return null;
+
+  const storedEmail = typeof raw.email === 'string' ? raw.email.trim() : '';
+  const inferredEmail =
+    typeof raw.requester_email === 'string' ? raw.requester_email.trim() : '';
+
+  return {
+    ...raw,
+    email: storedEmail || inferredEmail,
+  };
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
 function ViewTicketPage() {
@@ -185,7 +206,6 @@ function ViewTicketPage() {
   const [showResolution, setShowResolution] = useState(false);
   const [resolutionData, setResolutionData] = useState({
     estado: '',
-    correo: '',
     resolucion: '',
     notificarPorCorreo: false,
   });
@@ -199,14 +219,20 @@ function ViewTicketPage() {
   } | null>(null);
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
+  const isAdmin = hasAdminRole(session?.user?.role);
   const [userId, setUserId] = useState<number | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
 
   const [noteData, setNoteData] = useState({
-    correo: '',
     notificarPorCorreo: false,
   });
+
+  useEffect(() => {
+    if (!isAdmin && isEditing) {
+      setIsEditing(false);
+    }
+  }, [isAdmin, isEditing]);
 
   const navigateToPreviousTicket = () => {
     if (currentTicketIndex !== null && currentTicketIndex > 0) {
@@ -267,9 +293,10 @@ function ViewTicketPage() {
     };
 
     const loadTicketFromStorage = (ticketData: Ticket) => {
-      setTicket(ticketData);
-      setOriginalTicket(ticketData);
-      applyTicketsList(ticketData);
+      const normalized = normalizeTicketPayload(ticketData) ?? ticketData;
+      setTicket(normalized);
+      setOriginalTicket(normalized);
+      applyTicketsList(normalized);
       setError(null);
       setLoading(false);
     };
@@ -608,10 +635,15 @@ function ViewTicketPage() {
         await fetchNotes();
 
         if (noteData.notificarPorCorreo) {
-          await sendNoteEmailNotification();
+          const contactEmail = ticket.email?.trim() ?? '';
+          if (!contactEmail || !isValidEmail(contactEmail)) {
+            toast.error('Configure un correo válido en Contacto del solicitante antes de notificar.');
+          } else {
+            await sendNoteEmailNotification(contactEmail);
+          }
         }
 
-        setNoteData({ correo: '', notificarPorCorreo: false });
+        setNoteData({ notificarPorCorreo: false });
       } else {
         const errorData = await response.json();
         console.error('Error al agregar nota:', errorData.error);
@@ -651,6 +683,7 @@ function ViewTicketPage() {
   };
 
   const handleStartEditing = () => {
+    if (!isAdmin) return;
     setIsEditing(true);
     setUpdateMessage(null);
   };
@@ -686,6 +719,10 @@ function ViewTicketPage() {
       errors.id_department = 'El departamento es requerido';
     }
 
+    if (ticket?.email?.trim() && !isValidEmail(ticket.email)) {
+      errors.email = 'Ingrese un correo electrónico válido';
+    }
+
     if (resolutionData.estado) {
       if (!hasValidCriticalFields()) {
         errors.criticalFields =
@@ -694,9 +731,10 @@ function ViewTicketPage() {
     }
 
     if (resolutionData.notificarPorCorreo) {
-      if (!resolutionData.correo || resolutionData.correo.trim() === '') {
-        errors.correo =
-          'El correo electrónico es requerido cuando se selecciona notificar por correo';
+      const contactEmail = ticket?.email?.trim() ?? '';
+      if (!contactEmail || !isValidEmail(contactEmail)) {
+        errors.email =
+          'Configure un correo válido en Contacto del solicitante para enviar la notificación';
       }
     }
 
@@ -704,7 +742,7 @@ function ViewTicketPage() {
     return Object.keys(errors).length === 0;
   };
 
-  const sendEmailNotification = async (): Promise<boolean> => {
+  const sendEmailNotification = async (contactEmail: string): Promise<boolean> => {
     if (!process.env.API_EMAIL) {
       console.error('Error: La variable de entorno API_EMAIL no está configurada');
       setUpdateMessage({
@@ -716,7 +754,7 @@ function ViewTicketPage() {
 
     try {
       const message = `Actualización del Caso #${ticket?.id_case} - ${ticket?.subject_case}`;
-      const emails = resolutionData.correo;
+      const emails = contactEmail;
 
       const table: Array<Record<string, string | number | undefined>> = [
         {
@@ -758,7 +796,7 @@ function ViewTicketPage() {
     }
   };
 
-  const sendNoteEmailNotification = async (): Promise<boolean> => {
+  const sendNoteEmailNotification = async (contactEmail: string): Promise<boolean> => {
     if (!process.env.API_EMAIL) {
       console.error('Error: La variable de entorno API_EMAIL no está configurada');
       return false;
@@ -766,7 +804,7 @@ function ViewTicketPage() {
 
     try {
       const message = `Nueva Nota en Caso #${ticket?.id_case} - ${ticket?.subject_case}`;
-      const emails = noteData.correo;
+      const emails = contactEmail;
 
       const table: Array<Record<string, string | number | undefined>> = [
         {
@@ -820,6 +858,7 @@ function ViewTicketPage() {
   };
 
   const handleUpdateCase = async () => {
+    if (!isAdmin) return;
     if (!validateFields()) {
       return;
     }
@@ -842,6 +881,7 @@ function ViewTicketPage() {
         id_department: ticket?.id_department,
         id_technical: ticket?.id_technical,
         resolucion: resolutionData.resolucion,
+        email: ticket?.email?.trim() || null,
       };
 
       const response = await fetch('/api/help-desk/update_ticket', {
@@ -861,7 +901,7 @@ function ViewTicketPage() {
 
       let emailSent = true;
       if (resolutionData.notificarPorCorreo) {
-        emailSent = await sendEmailNotification();
+        emailSent = await sendEmailNotification(ticket?.email?.trim() ?? '');
       }
 
       if (emailSent) {
@@ -893,7 +933,7 @@ function ViewTicketPage() {
         });
       }
 
-      setOriginalTicket(ticket);
+      setOriginalTicket(ticket ? { ...ticket, email: ticket.email?.trim() || '' } : null);
       setIsEditing(false);
 
       if (attachedFiles.length > 0) {
@@ -901,6 +941,16 @@ function ViewTicketPage() {
       }
 
       if (resolutionData.estado) {
+        const closedStatus = parseInt(resolutionData.estado, 10);
+        if (isClosedStatusId(closedStatus)) {
+          showClosureNotification({
+            type: 'ticket',
+            id: ticket?.id_case,
+            subject: ticket?.subject_case,
+            status: closedStatus === 3 ? 'cancelled' : 'resolved',
+          });
+        }
+
         setResolutionData({
           ...resolutionData,
           estado: '',
@@ -1204,28 +1254,20 @@ function ViewTicketPage() {
                       checked={noteData.notificarPorCorreo}
                       onChange={(e) =>
                         setNoteData({
-                          ...noteData,
                           notificarPorCorreo: e.currentTarget.checked,
-                          correo: e.currentTarget.checked ? noteData.correo : '',
                         })
                       }
                       disabled={!userId || loadingUserId || isTicketResolved()}
                       mb='sm'
                     />
                     {noteData.notificarPorCorreo && (
-                      <TextInput
-                        label='Correo electrónico de contacto'
-                        placeholder='correo@empresa.com'
-                        value={noteData.correo}
-                        onChange={(e) =>
-                          setNoteData({
-                            ...noteData,
-                            correo: e.currentTarget.value,
-                          })
-                        }
-                        disabled={!userId || loadingUserId || isTicketResolved()}
-                        required
-                      />
+                      <Text size='sm' c={ticket.email?.trim() ? 'dimmed' : 'orange.7'}>
+                        {ticket.email?.trim()
+                          ? `Se enviará a: ${ticket.email.trim()}`
+                          : isAdmin
+                            ? 'Configure el correo en Contacto del solicitante antes de guardar la nota.'
+                            : 'El caso aún no tiene un correo de contacto configurado.'}
+                      </Text>
                     )}
                     <Group justify='flex-end'>
                       <ActionIcon
@@ -1261,7 +1303,7 @@ function ViewTicketPage() {
                       <IconCheck size={18} className='text-green-6' />
                       Resolución del Caso
                     </Title>
-                    {!isTicketResolved() && (
+                    {!isTicketResolved() && isAdmin && (
                       <ActionIcon variant='subtle' onClick={() => setShowResolution(!showResolution)}>
                         {showResolution ? <IconX size={16} /> : <IconCheck size={16} />}
                       </ActionIcon>
@@ -1285,7 +1327,7 @@ function ViewTicketPage() {
                     </Card>
                   )}
 
-                  {!isTicketResolved() && showResolution && (
+                  {!isTicketResolved() && isAdmin && showResolution && (
                     <Stack>
                       <Select
                         label='Estado del caso'
@@ -1313,27 +1355,17 @@ function ViewTicketPage() {
                           setResolutionData({
                             ...resolutionData,
                             notificarPorCorreo: e.currentTarget.checked,
-                            correo: e.currentTarget.checked ? resolutionData.correo : '',
                           })
                         }
                         disabled={!isEditing}
                         mb='sm'
                       />
                       {resolutionData.notificarPorCorreo && (
-                        <TextInput
-                          label='Correo electrónico de contacto'
-                          placeholder='correo@empresa.com'
-                          value={resolutionData.correo}
-                          onChange={(e) =>
-                            setResolutionData({
-                              ...resolutionData,
-                              correo: e.currentTarget.value,
-                            })
-                          }
-                          error={formErrors.correo}
-                          disabled={!isEditing}
-                          required
-                        />
+                        <Text size='sm' c={ticket.email?.trim() ? 'dimmed' : 'orange.7'} mb='sm'>
+                          {ticket.email?.trim()
+                            ? `Se enviará a: ${ticket.email.trim()}`
+                            : 'Configure el correo en Contacto del solicitante antes de guardar.'}
+                        </Text>
                       )}
                       <Textarea
                         label='Descripción de la resolución'
@@ -1478,6 +1510,29 @@ function ViewTicketPage() {
                   />
                 </Stack>
               </Card>
+
+              {/* Contacto del solicitante */}
+              <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+                <Title order={4} mb='md' className='flex items-center gap-2'>
+                  <IconAt size={18} />
+                  Contacto del solicitante
+                </Title>
+
+                <TextInput
+                  label='Correo electrónico'
+                  placeholder='correo@empresa.com'
+                  type='email'
+                  value={ticket.email ?? ''}
+                  onChange={(e) => {
+                    const nextEmail = e.target.value;
+                    setTicket((prev) => (prev ? { ...prev, email: nextEmail } : prev));
+                  }}
+                  leftSection={<IconAt size={16} />}
+                  disabled={!isEditing || isTicketResolved()}
+                  error={formErrors.email}
+                  description='Correo de la persona relacionada con el caso. Se usa para las notificaciones por email.'
+                />
+              </Card>
             </Stack>
           </Grid.Col>
         </Grid>
@@ -1552,7 +1607,7 @@ function ViewTicketPage() {
           <FileUpload
             ticketId={ticket.id_case}
             onFilesChange={setAttachedFiles}
-            disabled={isTicketResolved()}
+            disabled={!isAdmin || isTicketResolved()}
           />
         </Card>
 
@@ -1577,36 +1632,37 @@ function ViewTicketPage() {
 
           <Group justify='space-between'>
             <Group>
-              {!isEditing ? (
-                <Button
-                  color='blue'
-                  onClick={handleStartEditing}
-                  leftSection={<IconTicket size={16} />}
-                  disabled={isTicketResolved()}
-                >
-                  Editar Caso
-                </Button>
-              ) : (
-                <>
+              {isAdmin &&
+                (!isEditing ? (
                   <Button
-                    color='green'
-                    onClick={handleUpdateCase}
-                    leftSection={<IconCheck size={16} />}
-                    loading={isUpdating}
+                    color='blue'
+                    onClick={handleStartEditing}
+                    leftSection={<IconTicket size={16} />}
+                    disabled={isTicketResolved()}
                   >
-                    Guardar Cambios
+                    Editar Caso
                   </Button>
-                  <Button
-                    variant='outline'
-                    color='gray'
-                    onClick={handleCancelEditing}
-                    leftSection={<IconX size={16} />}
-                  >
-                    Cancelar
-                  </Button>
-                </>
-              )}
-              {isTicketResolved() && (
+                ) : (
+                  <>
+                    <Button
+                      color='green'
+                      onClick={handleUpdateCase}
+                      leftSection={<IconCheck size={16} />}
+                      loading={isUpdating}
+                    >
+                      Guardar Cambios
+                    </Button>
+                    <Button
+                      variant='outline'
+                      color='gray'
+                      onClick={handleCancelEditing}
+                      leftSection={<IconX size={16} />}
+                    >
+                      Cancelar
+                    </Button>
+                  </>
+                ))}
+              {isAdmin && isTicketResolved() && (
                 <Text size='sm' color='dimmed'>
                   Los casos resueltos no se pueden modificar.
                 </Text>
@@ -1615,10 +1671,14 @@ function ViewTicketPage() {
 
             <Button
               variant='outline'
-              onClick={() => router.push('/process/help-desk/create-ticket')}
+              onClick={() =>
+                router.push(
+                  isAdmin ? '/process/help-desk/create-ticket' : '/process/help-desk/my-tickets'
+                )
+              }
               leftSection={<IconArrowLeft size={16} />}
             >
-              Volver al Panel
+              {isAdmin ? 'Volver al Panel' : 'Volver a Mis tickets'}
             </Button>
           </Group>
         </Card>

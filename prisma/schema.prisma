@@ -199,6 +199,7 @@ model Case {
   id_department    Int
   case_type        String
   priority         String
+  email         String?           @db.NVarChar(255)
   active           Active?           @relation(fields: [id_active], references: [id_active], onDelete: NoAction)
   department       Department        @relation(fields: [id_department], references: [id_department])
   statusCase       StatusCase        @relation(fields: [id_status_case], references: [id_status_case])

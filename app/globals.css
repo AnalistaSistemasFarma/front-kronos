@@ -282,3 +282,18 @@ body {
   border-top: 1px solid var(--app-border);
   color: var(--app-text);
 }
+
+@keyframes closure-toast-progress {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
+}
+
+.closure-toast-progress {
+  animation-name: closure-toast-progress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
