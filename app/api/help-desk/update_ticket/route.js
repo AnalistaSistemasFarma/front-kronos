@@ -2,7 +2,7 @@ import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig.js';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
-import { checkAdminPrivileges } from '../../../../lib/access-control';
+import { checkHelpDeskOperatorAccess } from '../../../../lib/help-desk/access';
 import {
   fireAndForgetNotification,
   isTicketClosedStatus,
@@ -17,10 +17,10 @@ export async function POST(req) {
       return new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401 });
     }
 
-    const isAdmin = await checkAdminPrivileges(session.user.email);
-    if (!isAdmin) {
+    const hasOperatorAccess = await checkHelpDeskOperatorAccess(session.user.email);
+    if (!hasOperatorAccess) {
       return new Response(
-        JSON.stringify({ error: 'Solo los administradores pueden editar casos' }),
+        JSON.stringify({ error: 'No tienes permiso para gestionar casos de mesa de ayuda' }),
         { status: 403 }
       );
     }

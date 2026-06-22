@@ -4,13 +4,13 @@ export interface HelpDeskNavSubprocess {
   subprocess_url: string;
 }
 
-const PANEL_SUBPROCESS: HelpDeskNavSubprocess = {
+const OPERATOR_PANEL: HelpDeskNavSubprocess = {
   id_subprocess: -9101,
   subprocess: 'Tickets',
-  subprocess_url: '/process/help-desk/create-ticket',
+  subprocess_url: '/process/help-desk/assigned-tickets',
 };
 
-const MY_TICKETS_SUBPROCESS: HelpDeskNavSubprocess = {
+const REQUESTER_PANEL: HelpDeskNavSubprocess = {
   id_subprocess: -9102,
   subprocess: 'Mis tickets',
   subprocess_url: '/process/help-desk/my-tickets',
@@ -29,7 +29,7 @@ export function isHelpDeskProcess(processName: string) {
   );
 }
 
-/** Subprocesos legacy de tickets que se reemplazan por la navegación por rol */
+/** Subprocesos legacy reemplazados por navegación según rol de subproceso. */
 export function isLegacyTicketsSubprocess(subprocess: {
   subprocess: string;
   subprocess_url?: string | null;
@@ -53,16 +53,41 @@ export function isLegacyTicketsSubprocess(subprocess: {
   );
 }
 
-export function getHelpDeskNavSubprocesses(isAdmin: boolean): HelpDeskNavSubprocess[] {
-  if (isAdmin) {
-    return [PANEL_SUBPROCESS];
+export type HelpDeskNavRole = {
+  isOperator: boolean;
+  isRequester: boolean;
+};
+
+/** Navegación: técnicos → panel general; resto → mis tickets. */
+export function getHelpDeskNavSubprocesses(role: HelpDeskNavRole): HelpDeskNavSubprocess[] {
+  if (role.isOperator) {
+    return [OPERATOR_PANEL];
   }
-  return [MY_TICKETS_SUBPROCESS];
+  return [REQUESTER_PANEL];
+}
+
+type HelpDeskProcessShape = {
+  process: string;
+  subprocesses: Array<{ subprocess: string; subprocess_url?: string | null }>;
+};
+
+/** @deprecated Usar resolveHelpDeskRoleFromSubprocesses en subprocessRoles.ts */
+export function hasHelpDeskModuleAccess(processes: HelpDeskProcessShape[]): boolean {
+  return processes.some((process) => {
+    const subprocesses = process.subprocesses ?? [];
+    if (subprocesses.length === 0) return false;
+    if (isHelpDeskProcess(process.process)) return true;
+    return subprocesses.some(
+      (sub) =>
+        isLegacyTicketsSubprocess(sub) ||
+        (sub.subprocess_url ?? '').toLowerCase().includes('help-desk')
+    );
+  });
 }
 
 export function transformHelpDeskProcesses<T extends { process: string; subprocesses: unknown[] }>(
   processes: T[],
-  isAdmin: boolean
+  role: HelpDeskNavRole
 ): T[] {
   return processes.map((process) => {
     if (!isHelpDeskProcess(process.process)) {
@@ -73,9 +98,14 @@ export function transformHelpDeskProcesses<T extends { process: string; subproce
       (sub) => !isLegacyTicketsSubprocess(sub)
     );
 
+    const nav = getHelpDeskNavSubprocesses(role);
+    if (nav.length === 0) {
+      return { ...process, subprocesses: otherSubprocesses };
+    }
+
     return {
       ...process,
-      subprocesses: [...otherSubprocesses, ...getHelpDeskNavSubprocesses(isAdmin)],
+      subprocesses: [...otherSubprocesses, ...nav],
     };
   });
 }

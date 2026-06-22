@@ -5,24 +5,26 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { Stack, Text } from '@mantine/core';
 import { MyTicketsBoard } from '@/components/process/MyTicketsBoard';
-import { hasAdminRole } from '@/lib/access-control';
+import { useHelpDeskAccess } from '@/components/help-desk/hooks/useHelpDeskAccess';
+import { getOperatorPanelUrl } from '@/lib/help-desk/subprocessRoles';
 
 function MyTicketsPageContent() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { isOperator, loading } = useHelpDeskAccess();
 
   useEffect(() => {
-    if (status === 'loading') return;
+    if (status === 'loading' || loading) return;
     if (!session) {
       router.replace('/login');
       return;
     }
-    if (hasAdminRole(session.user?.role)) {
-      router.replace('/process/help-desk/create-ticket');
+    if (isOperator) {
+      router.replace(getOperatorPanelUrl());
     }
-  }, [session, status, router]);
+  }, [session, status, router, isOperator, loading]);
 
-  if (status === 'loading' || !session || hasAdminRole(session.user?.role)) {
+  if (status === 'loading' || loading || !session || isOperator) {
     return (
       <div className='min-h-screen flex items-center justify-center'>
         <Stack align='center' gap='sm'>

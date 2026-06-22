@@ -34,7 +34,6 @@ import { ReportsChart } from '../../../../../components/help-desk/ReportsChart';
 import { HelpDeskDashboardLinkButton } from '../../../../../components/help-desk/HelpDeskDashboardLinkButton';
 import { HelpDeskCasesTable } from '../../../../../components/help-desk/HelpDeskCasesTable';
 import { useHelpDeskAccess } from '../../../../../components/help-desk/hooks/useHelpDeskAccess';
-import { hasAdminRole } from '../../../../../lib/access-control';
 import type { HelpDeskCaseListItem } from '../../../../../lib/help-desk/types';
 import {
   IconAlertCircle,
@@ -53,7 +52,7 @@ import {
   IconDownload,
 } from '@tabler/icons-react';
 
-interface Ticket extends HelpDeskCaseListItem {}
+type Ticket = HelpDeskCaseListItem;
 
 interface CompanyData {
   id_company: number;
@@ -69,19 +68,18 @@ function TicketsBoard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const subprocessId = searchParams.get('subprocess_id');
-  const { hasAccess: hasHelpDeskAccess } = useHelpDeskAccess();
-  const isAdmin = hasAdminRole(session?.user?.role);
+  const { isOperator, loading: loadingHelpDeskAccess } = useHelpDeskAccess();
 
   useEffect(() => {
-    if (status === 'loading') return;
+    if (status === 'loading' || loadingHelpDeskAccess) return;
     if (!session) {
       router.push('/login');
       return;
     }
-    if (!isAdmin) {
+    if (!isOperator) {
       router.replace('/process/help-desk/my-tickets');
     }
-  }, [session, status, router, isAdmin]);
+  }, [session, status, router, isOperator, loadingHelpDeskAccess]);
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
@@ -408,7 +406,7 @@ function TicketsBoard() {
     }
   };
 
-  if (status === 'loading' || loading) {
+  if (status === 'loading' || loading || loadingHelpDeskAccess) {
     return (
       <div className='min-h-screen flex items-center justify-center'>
         <div>Cargando...</div>
@@ -416,11 +414,7 @@ function TicketsBoard() {
     );
   }
 
-  if (!session) {
-    return null;
-  }
-
-  if (!isAdmin) {
+  if (!session || !isOperator) {
     return null;
   }
 
@@ -612,7 +606,7 @@ function TicketsBoard() {
           </Grid>
         </Card>
 
-        {hasHelpDeskAccess && <ReportsChart className='mb-6' />}
+        {isOperator && <ReportsChart className='mb-6' />}
 
         {error && (
           <Alert

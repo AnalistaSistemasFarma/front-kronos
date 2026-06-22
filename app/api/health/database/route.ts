@@ -2,8 +2,16 @@ import sql from 'mssql';
 import { NextResponse } from 'next/server';
 import { requireDashboardAdminApi } from '../../../../lib/dashboard/dashboardAccess';
 import { getPool } from '../../../../lib/mssqlPool';
-import { resolveConnection } from '../../../../dbconfig';
+import dbconfig from '../../../../dbconfig';
 import { prisma } from '../../../../lib/prisma';
+
+const resolveConnection = dbconfig.resolveConnection as () => {
+  server: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+};
 
 /**
  * GET /api/health/database

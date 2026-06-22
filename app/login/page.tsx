@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { signIn } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Paper, Title, TextInput, Button, Stack, Group, Text, ActionIcon } from '@mantine/core';
 import {
@@ -17,8 +17,9 @@ import {
 import Link from 'next/link';
 import { useTheme } from '../../components/providers';
 import LoginPharmacyBackground from '../../components/login/LoginPharmacyBackground';
+import { getSafeCallbackUrl } from '../../lib/auth/logout';
 
-export default function Login() {
+function LoginForm() {
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === 'dark';
   const [email, setEmail] = useState('');
@@ -27,6 +28,7 @@ export default function Login() {
   const [visible, setVisible] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,7 +44,11 @@ export default function Login() {
       if (result?.error) {
         toast.error('Credenciales inválidas. Por favor, inténtalo de nuevo.');
       } else {
-        router.push('/process');
+        const callbackUrl = getSafeCallbackUrl(
+          searchParams.get('callbackUrl'),
+          typeof window !== 'undefined' ? window.location.origin : undefined
+        );
+        router.push(callbackUrl);
       }
     } catch {
       toast.error('Ocurrió un error. Por favor, inténtalo más tarde.');
@@ -271,5 +277,13 @@ export default function Login() {
         © 2025 Portal de servicios. Todos los derechos reservados.
       </Text>
     </div>
+  );
+}
+
+export default function Login() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

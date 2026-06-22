@@ -2,27 +2,15 @@
 
 import { useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
-
-interface Process {
-  id_process: number;
-  process: string;
-  subprocesses: Array<{
-    id_subprocess: number;
-    subprocess: string;
-    subprocessUserCompanies?: Array<{
-      id_subprocess_user_company: number;
-      companyUser: {
-        company: {
-          company: string;
-        };
-      };
-    }>;
-  }>;
-}
+import type { HelpDeskUserRole } from '../../../lib/help-desk/access';
 
 export const useHelpDeskAccess = () => {
   const { data: session, status } = useSession();
-  const [hasAccess, setHasAccess] = useState<boolean>(false);
+  const [role, setRole] = useState<HelpDeskUserRole>({
+    hasModuleAccess: false,
+    isOperator: false,
+    isRequester: false,
+  });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +18,7 @@ export const useHelpDeskAccess = () => {
     const checkAccess = async () => {
       if (status === 'loading') return;
       if (!session?.user?.email) {
-        setHasAccess(false);
+        setRole({ hasModuleAccess: false, isOperator: false, isRequester: false });
         setLoading(false);
         return;
       }
@@ -39,36 +27,38 @@ export const useHelpDeskAccess = () => {
         setLoading(true);
         setError(null);
 
-        const response = await fetch('/api/processes');
+        const response = await fetch('/api/help-desk/role', { credentials: 'same-origin' });
+        if (response.status === 401) {
+          setRole({ hasModuleAccess: false, isOperator: false, isRequester: false });
+          return;
+        }
         if (!response.ok) {
-          throw new Error('Failed to fetch user processes');
+          throw new Error('No se pudo verificar el rol en mesa de ayuda');
         }
 
-        const processes: Process[] = await response.json();
-
-        // Check if user has access to help-desk process
-        const hasHelpDeskAccess = processes.some(
-          (process) =>
-            process.process.toLowerCase().includes('help') &&
-            process.process.toLowerCase().includes('desk') &&
-            process.subprocesses.length > 0
-        );
-
-        setHasAccess(hasHelpDeskAccess);
+        const data = (await response.json()) as HelpDeskUserRole;
+        setRole({
+          hasModuleAccess: Boolean(data.hasModuleAccess),
+          isOperator: Boolean(data.isOperator),
+          isRequester: Boolean(data.isRequester),
+        });
       } catch (err) {
         console.error('Error checking help desk access:', err);
         setError(err instanceof Error ? err.message : 'Unknown error');
-        setHasAccess(false);
+        setRole({ hasModuleAccess: false, isOperator: false, isRequester: false });
       } finally {
         setLoading(false);
       }
     };
 
-    checkAccess();
+    void checkAccess();
   }, [session, status]);
 
   return {
-    hasAccess,
+    hasAccess: role.hasModuleAccess,
+    isOperator: role.isOperator,
+    isTechnician: role.isOperator,
+    isRequester: role.isRequester,
     loading,
     error,
     isAuthenticated: status === 'authenticated',

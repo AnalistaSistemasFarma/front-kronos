@@ -13,8 +13,8 @@ import ProcessFilters from './ProcessFilters';
 import ProcessSkeleton from './ProcessSkeleton';
 import GradientButton from '../ui/GradientButton';
 import { useProcessData, type ProcessRecord } from '../../lib/process/ProcessDataContext';
-import { hasAdminRole } from '../../lib/access-control';
 import { transformHelpDeskProcesses } from '../../lib/process/helpDeskNavigation';
+import { useHelpDeskAccess } from '../help-desk/hooks/useHelpDeskAccess';
 
 interface FilterOption {
   value: string;
@@ -34,10 +34,13 @@ function ProcessViewInner() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const isAdmin = hasAdminRole(session?.user?.role);
+  const { isOperator, isRequester } = useHelpDeskAccess();
 
   const enhancedProcesses = useMemo(() => {
-    const withHelpDeskNav = transformHelpDeskProcesses(processes, isAdmin);
+    const withHelpDeskNav = transformHelpDeskProcesses(processes, {
+      isOperator,
+      isRequester,
+    });
     return withHelpDeskNav.map((process) => ({
       ...process,
       lastAccessed: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
@@ -46,7 +49,7 @@ function ProcessViewInner() {
         'Oficina Principal',
       description: `Gestiona y rastrea las actividades, flujos de trabajo y tareas relacionadas de ${process.process.toLowerCase()} en todos los departamentos.`,
     }));
-  }, [processes, isAdmin]);
+  }, [processes, isOperator, isRequester]);
 
   const filteredProcesses = useMemo(() => {
     let filtered = enhancedProcesses;

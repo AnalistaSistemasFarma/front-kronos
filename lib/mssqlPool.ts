@@ -1,5 +1,8 @@
 import sql from 'mssql';
-import dbconfig, { buildMssqlConfig, getDatabaseConfigKey } from '../dbconfig';
+import dbconfig from '../dbconfig';
+
+const buildMssqlConfig = dbconfig.buildMssqlConfig as () => sql.config;
+const getDatabaseConfigKey = dbconfig.getDatabaseConfigKey as () => string;
 
 /**
  * Tipos .input() de la misma instancia de mssql que el pool activo.
@@ -9,11 +12,8 @@ import dbconfig, { buildMssqlConfig, getDatabaseConfigKey } from '../dbconfig';
 export { sql };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __kronosMssqlPool: sql.ConnectionPool | undefined;
-  // eslint-disable-next-line no-var
   var __kronosMssqlPoolConfigKey: string | undefined;
-  // eslint-disable-next-line no-var
   var __kronosMssqlModule: typeof sql | undefined;
 }
 
