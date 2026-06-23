@@ -21,6 +21,7 @@ import {
   isHubInstantSwapRoute,
 } from '../lib/navigation/AppSectionContext';
 import { useDashboardAdminOptional } from '../lib/dashboard/DashboardAdminContext';
+import { buildLogoutCallbackUrl } from '../lib/auth/logout';
 
 function useAppSectionOptional(): AppSectionContextValue | null {
   return useContext(AppSectionContext);
@@ -37,6 +38,13 @@ export default function Header() {
   const { theme, toggleTheme } = useTheme();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const showDashboardNav = !loadingDashboardAdmin && isDashboardAdmin;
+
+  const handleSignOut = () => {
+    const search = typeof window !== 'undefined' ? window.location.search : '';
+    void signOut({
+      callbackUrl: buildLogoutCallbackUrl(pathname, search),
+    });
+  };
 
   const activeSection: AppSection | null = sectionCtx
     ? sectionCtx.activeSection
@@ -202,7 +210,7 @@ export default function Header() {
                     <Menu.Item component={Link} href='/profile'>
                       Perfil
                     </Menu.Item>
-                    <Menu.Item onClick={() => signOut({ callbackUrl: '/login' })}>
+                    <Menu.Item onClick={handleSignOut}>
                       Cerrar sesión
                     </Menu.Item>
                   </Menu.Dropdown>
