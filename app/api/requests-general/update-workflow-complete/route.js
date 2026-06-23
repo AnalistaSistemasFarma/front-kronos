@@ -270,8 +270,10 @@ export async function POST(req) {
         }
       }
 
-      // Actualizar campos condicionales si es necesario (ANTES de los archivos,
-      // para poder resolver la condición de los archivos hacia opciones nuevas)
+      // Campos condicionales: se procesan ANTES de los archivos. Las condiciones (M:N) se
+      // aplican en una pasada posterior, cuando ya existen todas las opciones nuevas.
+      const fieldConditionSets = []; // { fieldId, condition_option_ids }
+
       if (shouldUpdateFormFields) {
         // Procesa las opciones (create/update/delete) de un campo dado
         const processOptions = async (fieldId, options) => {
@@ -299,12 +301,19 @@ export async function POST(req) {
               await new sql.Request(transaction)
                 .input('id', sql.Int, opt.id)
                 .query(`UPDATE process_form_field_option SET active = 0 WHERE id = @id`);
+              // Limpiar condiciones que dependían de esta opción
+              await new sql.Request(transaction)
+                .input('id', sql.Int, opt.id)
+                .query(`DELETE FROM field_condition_option WHERE id_option = @id`);
+              await new sql.Request(transaction)
+                .input('id', sql.Int, opt.id)
+                .query(`DELETE FROM file_condition_option WHERE id_option = @id`);
             }
           }
         };
 
         for (const field of formFields) {
-          const { id, field_label, field_type, required, action, options } = field;
+          const { id, field_label, field_type, required, action, options, condition_option_ids } = field;
 
           if (action === 'create') {
             if (!field_label || !field_label.trim()) continue;
@@ -323,6 +332,10 @@ export async function POST(req) {
 
             const newFieldId = fieldResult.recordset[0].id;
             await processOptions(newFieldId, options);
+            fieldConditionSets.push({
+              fieldId: newFieldId,
+              condition_option_ids: Array.isArray(condition_option_ids) ? condition_option_ids : [],
+            });
             results.formFields.push({ action: 'create', id: newFieldId, success: true });
 
           } else if (action === 'update' && id) {
@@ -333,9 +346,23 @@ export async function POST(req) {
               .query(`UPDATE process_form_field SET field_label = @field_label, required = @required WHERE id = @id`);
 
             await processOptions(id, options);
+            fieldConditionSets.push({
+              fieldId: id,
+              condition_option_ids: Array.isArray(condition_option_ids) ? condition_option_ids : [],
+            });
             results.formFields.push({ action: 'update', id, success: true });
 
           } else if (action === 'delete' && id) {
+            // Limpiar condiciones que dependían de este campo o de sus opciones
+            await new sql.Request(transaction)
+              .input('id', sql.Int, id)
+              .query(`DELETE FROM field_condition_option WHERE id_option IN (SELECT id FROM process_form_field_option WHERE id_form_field = @id)`);
+            await new sql.Request(transaction)
+              .input('id', sql.Int, id)
+              .query(`DELETE FROM file_condition_option WHERE id_option IN (SELECT id FROM process_form_field_option WHERE id_form_field = @id)`);
+            await new sql.Request(transaction)
+              .input('id', sql.Int, id)
+              .query(`DELETE FROM field_condition_option WHERE id_form_field = @id`);
             // Soft-delete del campo y de sus opciones
             await new sql.Request(transaction)
               .input('id', sql.Int, id)
@@ -348,71 +375,81 @@ export async function POST(req) {
         }
       }
 
-      // Resuelve la condición de un archivo: opción nueva (temp) o id real (o null para limpiar)
-      const resolveConditionOption = (file) => {
-        if (file.condition_option_temp !== undefined && file.condition_option_temp !== null) {
-          return optionTempToId[file.condition_option_temp] ?? null;
+      // Resuelve un id de opción del payload (negativo = opción nueva creada en esta petición)
+      const resolveOptionId = (val) => (val < 0 ? (optionTempToId[val] ?? null) : val);
+
+      // Aplica (reemplaza) el conjunto de condiciones de cada campo procesado
+      for (const fc of fieldConditionSets) {
+        await new sql.Request(transaction)
+          .input('id_form_field', sql.Int, fc.fieldId)
+          .query(`DELETE FROM field_condition_option WHERE id_form_field = @id_form_field`);
+        for (const raw of fc.condition_option_ids) {
+          const optId = resolveOptionId(raw);
+          if (!optId) continue;
+          await new sql.Request(transaction)
+            .input('id_form_field', sql.Int, fc.fieldId)
+            .input('id_option', sql.Int, optId)
+            .query(`INSERT INTO field_condition_option (id_form_field, id_option) VALUES (@id_form_field, @id_option)`);
         }
-        if (file.id_condition_option !== undefined) {
-          return file.id_condition_option;
+      }
+
+      // Aplica (reemplaza) el conjunto de condiciones de un archivo
+      const replaceFileConditions = async (fileId, conditionOptionIds) => {
+        await new sql.Request(transaction)
+          .input('id_file', sql.Int, fileId)
+          .query(`DELETE FROM file_condition_option WHERE id_file_process_category = @id_file`);
+        for (const raw of conditionOptionIds || []) {
+          const optId = resolveOptionId(raw);
+          if (!optId) continue;
+          await new sql.Request(transaction)
+            .input('id_file', sql.Int, fileId)
+            .input('id_option', sql.Int, optId)
+            .query(`INSERT INTO file_condition_option (id_file_process_category, id_option) VALUES (@id_file, @id_option)`);
         }
-        return null;
       };
 
       // Actualizar archivos requeridos si es necesario
       if (shouldUpdateFiles) {
         for (const file of files) {
-          const { id, file_label, required, action } = file;
-          const conditionOptionId = resolveConditionOption(file);
+          const { id, file_label, required, action, condition_option_ids } = file;
 
           if (action === 'create') {
             if (!file_label || !file_label.trim()) {
               continue; // Saltar archivos sin etiqueta
             }
 
-            const insertFileQuery = `
-              INSERT INTO file_process_category
-              (id_process_category, file_label, required, active, id_condition_option)
-              OUTPUT INSERTED.id
-              VALUES (@id_process, @file_label, @required, 1, @id_condition_option)
-            `;
-
             const fileResult = await new sql.Request(transaction)
               .input('id_process', sql.Int, id_process)
               .input('file_label', sql.NVarChar(255), file_label)
               .input('required', sql.Bit, required ? 1 : 0)
-              .input('id_condition_option', sql.Int, conditionOptionId)
-              .query(insertFileQuery);
+              .query(`
+                INSERT INTO file_process_category
+                (id_process_category, file_label, required, active)
+                OUTPUT INSERTED.id
+                VALUES (@id_process, @file_label, @required, 1)
+              `);
 
-            results.files.push({ action: 'create', id: fileResult.recordset[0].id, success: true });
+            const newFileId = fileResult.recordset[0].id;
+            await replaceFileConditions(newFileId, condition_option_ids);
+            results.files.push({ action: 'create', id: newFileId, success: true });
 
           } else if (action === 'update' && id) {
-            const updateFileQuery = `
-              UPDATE file_process_category
-              SET file_label = @file_label, required = @required, id_condition_option = @id_condition_option
-              WHERE id = @id
-            `;
-
             await new sql.Request(transaction)
               .input('id', sql.Int, id)
               .input('file_label', sql.NVarChar(255), file_label)
               .input('required', sql.Bit, required ? 1 : 0)
-              .input('id_condition_option', sql.Int, conditionOptionId)
-              .query(updateFileQuery);
+              .query(`UPDATE file_process_category SET file_label = @file_label, required = @required WHERE id = @id`);
 
+            await replaceFileConditions(id, condition_option_ids);
             results.files.push({ action: 'update', id, success: true });
 
           } else if (action === 'delete' && id) {
-            const deleteFileQuery = `
-              UPDATE file_process_category
-              SET active = 0
-              WHERE id = @id
-            `;
-
             await new sql.Request(transaction)
               .input('id', sql.Int, id)
-              .query(deleteFileQuery);
-
+              .query(`DELETE FROM file_condition_option WHERE id_file_process_category = @id`);
+            await new sql.Request(transaction)
+              .input('id', sql.Int, id)
+              .query(`UPDATE file_process_category SET active = 0 WHERE id = @id`);
             results.files.push({ action: 'delete', id, success: true });
           }
         }

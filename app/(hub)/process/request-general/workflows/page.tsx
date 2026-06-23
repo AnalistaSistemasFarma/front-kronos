@@ -30,6 +30,7 @@ import {
   ScrollArea,
   Tooltip,
   Checkbox,
+  MultiSelect,
 } from '@mantine/core';
 import {
   IconUser,
@@ -134,6 +135,9 @@ function RequestBoard() {
 
   const [taskFormKey, setTaskFormKey] = useState(0);
 
+  const newTempId = (prefix: string) =>
+    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
   // Campos condicionales parametrizados por proceso (solo Select por ahora)
   const [formFields, setFormFields] = useState<
     Array<{
@@ -141,6 +145,7 @@ function RequestBoard() {
       field_label: string;
       required: boolean;
       options: Array<{ tempId: string; option_label: string }>;
+      condition_option_temps: string[]; // opciones de campos anteriores que activan este campo
     }>
   >([]);
   const [fieldForm, setFieldForm] = useState({ field_label: '', required: true });
@@ -151,10 +156,11 @@ function RequestBoard() {
     setFormFields([
       ...formFields,
       {
-        tempId: `f-${Date.now()}`,
+        tempId: newTempId('f'),
         field_label: fieldForm.field_label.trim(),
         required: fieldForm.required,
         options: [],
+        condition_option_temps: [],
       },
     ]);
     setFieldForm({ field_label: '', required: true });
@@ -163,13 +169,27 @@ function RequestBoard() {
   const removeFormField = (fieldTempId: string) => {
     const field = formFields.find((f) => f.tempId === fieldTempId);
     const optionIds = field ? field.options.map((o) => o.tempId) : [];
-    setFormFields(formFields.filter((f) => f.tempId !== fieldTempId));
-    // Limpiar condiciones de archivos que apuntaban a opciones de este campo
+    setFormFields(
+      formFields
+        .filter((f) => f.tempId !== fieldTempId)
+        // Limpiar condiciones de otros campos que apuntaban a opciones de este campo
+        .map((f) => ({
+          ...f,
+          condition_option_temps: f.condition_option_temps.filter((t) => !optionIds.includes(t)),
+        }))
+    );
     setRequiredFiles((prev) =>
-      prev.map((f) =>
-        f.condition_option_temp && optionIds.includes(f.condition_option_temp)
-          ? { ...f, condition_option_temp: null }
-          : f
+      prev.map((f) => ({
+        ...f,
+        condition_option_temps: f.condition_option_temps.filter((t) => !optionIds.includes(t)),
+      }))
+    );
+  };
+
+  const setFieldConditions = (fieldTempId: string, temps: string[]) => {
+    setFormFields(
+      formFields.map((f) =>
+        f.tempId === fieldTempId ? { ...f, condition_option_temps: temps } : f
       )
     );
   };
@@ -182,7 +202,7 @@ function RequestBoard() {
         f.tempId === fieldTempId
           ? {
               ...f,
-              options: [...f.options, { tempId: `o-${Date.now()}`, option_label: label }],
+              options: [...f.options, { tempId: newTempId('o'), option_label: label }],
             }
           : f
       )
@@ -195,17 +215,21 @@ function RequestBoard() {
       formFields.map((f) =>
         f.tempId === fieldTempId
           ? { ...f, options: f.options.filter((o) => o.tempId !== optionTempId) }
-          : f
+          : {
+              ...f,
+              condition_option_temps: f.condition_option_temps.filter((t) => t !== optionTempId),
+            }
       )
     );
     setRequiredFiles((prev) =>
-      prev.map((f) =>
-        f.condition_option_temp === optionTempId ? { ...f, condition_option_temp: null } : f
-      )
+      prev.map((f) => ({
+        ...f,
+        condition_option_temps: f.condition_option_temps.filter((t) => t !== optionTempId),
+      }))
     );
   };
 
-  // Lista plana de opciones para el selector de condición de archivos
+  // Lista plana de TODAS las opciones (para condicionar archivos)
   const conditionOptions = formFields.flatMap((f) =>
     f.options.map((o) => ({
       value: o.tempId,
@@ -213,10 +237,23 @@ function RequestBoard() {
     }))
   );
 
-  const conditionLabel = (optionTempId: string | null) => {
-    if (!optionTempId) return 'Siempre';
-    const found = conditionOptions.find((c) => c.value === optionTempId);
-    return found ? found.label : 'Siempre';
+  // Opciones de campos ANTERIORES a uno dado (para condicionar campos, evita ciclos)
+  const optionsBeforeField = (fieldTempId: string) => {
+    const idx = formFields.findIndex((f) => f.tempId === fieldTempId);
+    return formFields.slice(0, idx).flatMap((f) =>
+      f.options.map((o) => ({
+        value: o.tempId,
+        label: `${f.field_label}: ${o.option_label}`,
+      }))
+    );
+  };
+
+  const conditionLabels = (temps: string[]) => {
+    if (!temps || temps.length === 0) return 'Siempre';
+    return temps
+      .map((t) => conditionOptions.find((c) => c.value === t)?.label || '')
+      .filter(Boolean)
+      .join(', ');
   };
 
   // Archivos requeridos parametrizados por proceso
@@ -226,14 +263,14 @@ function RequestBoard() {
       id: string;
       file_label: string;
       required: boolean;
-      condition_option_temp: string | null;
+      condition_option_temps: string[];
     }>
   >([]);
   const [fileForm, setFileForm] = useState<{
     file_label: string;
     required: boolean;
-    condition_option_temp: string | null;
-  }>({ file_label: '', required: true, condition_option_temp: null });
+    condition_option_temps: string[];
+  }>({ file_label: '', required: true, condition_option_temps: [] });
 
   const addRequiredFile = () => {
     if (!fileForm.file_label.trim()) return;
@@ -244,11 +281,11 @@ function RequestBoard() {
         id: Date.now().toString(),
         file_label: fileForm.file_label.trim(),
         required: fileForm.required,
-        condition_option_temp: fileForm.condition_option_temp,
+        condition_option_temps: fileForm.condition_option_temps,
       },
     ]);
 
-    setFileForm({ file_label: '', required: true, condition_option_temp: null });
+    setFileForm({ file_label: '', required: true, condition_option_temps: [] });
   };
 
   const removeRequiredFile = (id: string) => {
@@ -750,7 +787,7 @@ function RequestBoard() {
               ? requiredFiles.map((f) => ({
                   file_label: f.file_label,
                   required: f.required,
-                  condition_option_temp: f.condition_option_temp,
+                  condition_option_temps: f.condition_option_temps,
                 }))
               : [],
           formFields: formFields
@@ -763,6 +800,7 @@ function RequestBoard() {
                 tempId: o.tempId,
                 option_label: o.option_label,
               })),
+              condition_option_temps: f.condition_option_temps,
             })),
           cost_center_pc: formData.costCenter || null,
           id_user: formData.assignedProcess ? formData.assignedProcess : userId,
@@ -789,7 +827,7 @@ function RequestBoard() {
       setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
       setRequiresFiles(false);
       setRequiredFiles([]);
-      setFileForm({ file_label: '', required: true, condition_option_temp: null });
+      setFileForm({ file_label: '', required: true, condition_option_temps: [] });
       setFormFields([]);
       setFieldForm({ field_label: '', required: true });
       setOptionInputs({});
@@ -1259,7 +1297,7 @@ function RequestBoard() {
             setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
             setRequiresFiles(false);
             setRequiredFiles([]);
-            setFileForm({ file_label: '', required: true, condition_option_temp: null });
+            setFileForm({ file_label: '', required: true, condition_option_temps: [] });
             setFormFields([]);
             setFieldForm({ field_label: '', required: true });
             setOptionInputs({});
@@ -1962,6 +2000,20 @@ function RequestBoard() {
                               Opción
                             </Button>
                           </Group>
+
+                          {optionsBeforeField(field.tempId).length > 0 && (
+                            <MultiSelect
+                              mt='sm'
+                              label='Mostrar este campo solo si se elige'
+                              placeholder='Siempre visible'
+                              data={optionsBeforeField(field.tempId)}
+                              value={field.condition_option_temps}
+                              onChange={(value) => setFieldConditions(field.tempId, value)}
+                              clearable
+                              searchable
+                              leftSection={<IconTag size={16} />}
+                            />
+                          )}
                         </Card>
                       ))}
                     </Stack>
@@ -2046,15 +2098,19 @@ function RequestBoard() {
                           </Grid.Col>
 
                           <Grid.Col span={{ base: 12, md: 3 }}>
-                            <Select
+                            <MultiSelect
                               label='Condición'
-                              placeholder='Siempre'
-                              data={[{ value: '', label: 'Siempre' }, ...conditionOptions]}
-                              value={fileForm.condition_option_temp || ''}
+                              placeholder={
+                                fileForm.condition_option_temps.length ? '' : 'Siempre'
+                              }
+                              data={conditionOptions}
+                              value={fileForm.condition_option_temps}
                               onChange={(value) =>
-                                setFileForm({ ...fileForm, condition_option_temp: value || null })
+                                setFileForm({ ...fileForm, condition_option_temps: value })
                               }
                               disabled={conditionOptions.length === 0}
+                              clearable
+                              searchable
                               size='lg'
                               classNames={{
                                 label: 'text-sm font-medium mb-2',
@@ -2127,12 +2183,12 @@ function RequestBoard() {
                                   </Table.Td>
                                   <Table.Td className='py-4 px-5'>
                                     <Badge
-                                      color={f.condition_option_temp ? 'grape' : 'gray'}
+                                      color={f.condition_option_temps.length ? 'grape' : 'gray'}
                                       variant='light'
                                       size='sm'
                                       styles={{ root: { textTransform: 'none' } }}
                                     >
-                                      {conditionLabel(f.condition_option_temp)}
+                                      {conditionLabels(f.condition_option_temps)}
                                     </Badge>
                                   </Table.Td>
                                   <Table.Td className='py-4 px-5'>

@@ -200,7 +200,7 @@ function RequestBoard() {
 
   // Archivos requeridos parametrizados del proceso seleccionado
   const [requiredFiles, setRequiredFiles] = useState<
-    { id: number; file_label: string; required: boolean; id_condition_option: number | null }[]
+    { id: number; file_label: string; required: boolean; conditions: number[] }[]
   >([]);
   const [filesByDoc, setFilesByDoc] = useState<Record<number, UploadedFile[]>>({});
   const [loadingProcessFiles, setLoadingProcessFiles] = useState(false);
@@ -212,6 +212,7 @@ function RequestBoard() {
       field_label: string;
       required: boolean;
       options: { id: number; option_label: string }[];
+      conditions: number[];
     }[]
   >([]);
   const [fieldValues, setFieldValues] = useState<Record<number, number>>({});
@@ -357,12 +358,12 @@ function RequestBoard() {
             id: number;
             file_label: string;
             required: boolean | number;
-            id_condition_option: number | null;
+            conditions: number[];
           }) => ({
             id: f.id,
             file_label: f.file_label,
             required: Boolean(f.required),
-            id_condition_option: f.id_condition_option ?? null,
+            conditions: f.conditions || [],
           })
         )
       );
@@ -385,7 +386,23 @@ function RequestBoard() {
       if (!response.ok) throw new Error('Failed to fetch process fields');
 
       const data = await response.json();
-      setFormFields(data);
+      setFormFields(
+        data.map(
+          (f: {
+            id: number;
+            field_label: string;
+            required: boolean | number;
+            options: { id: number; option_label: string }[];
+            conditions: number[];
+          }) => ({
+            id: f.id,
+            field_label: f.field_label,
+            required: Boolean(f.required),
+            options: f.options || [],
+            conditions: f.conditions || [],
+          })
+        )
+      );
       setFieldValues({});
     } catch (err) {
       console.error('Error fetching process fields:', err);
@@ -394,14 +411,56 @@ function RequestBoard() {
     }
   };
 
-  // Conjunto de opciones actualmente seleccionadas por el cliente
-  const selectedOptionIds = new Set(Object.values(fieldValues));
+  // Visibilidad anidada: una sola pasada por orden. Un campo es visible si no tiene
+  // condiciones, o si alguna de sus opciones condicionantes ya está elegida en un campo
+  // visible anterior (DAG: las condiciones solo apuntan a campos previos).
+  const computeVisibility = () => {
+    const selected = new Set<number>();
+    const visibleFields: typeof formFields = [];
+    for (const field of formFields) {
+      const visible =
+        field.conditions.length === 0 || field.conditions.some((c) => selected.has(c));
+      if (visible) {
+        visibleFields.push(field);
+        const val = fieldValues[field.id];
+        if (val) selected.add(val);
+      }
+    }
+    return { visibleFields, selectedOptionIds: selected };
+  };
 
-  // Un documento se muestra/exige si no tiene condición, o si su opción está elegida
-  const isFileVisible = (doc: { id_condition_option: number | null }) =>
-    doc.id_condition_option == null || selectedOptionIds.has(doc.id_condition_option);
+  const { visibleFields, selectedOptionIds } = computeVisibility();
+
+  // Un documento se muestra/exige si no tiene condiciones, o si alguna está elegida (OR)
+  const isFileVisible = (doc: { conditions: number[] }) =>
+    doc.conditions.length === 0 || doc.conditions.some((c) => selectedOptionIds.has(c));
 
   const visibleRequiredFiles = requiredFiles.filter(isFileVisible);
+
+  // Limpia las respuestas de campos que quedaron ocultos (no enviar respuestas obsoletas)
+  useEffect(() => {
+    const selected = new Set<number>();
+    const visibleIds = new Set<number>();
+    for (const field of formFields) {
+      const visible =
+        field.conditions.length === 0 || field.conditions.some((c) => selected.has(c));
+      if (visible) {
+        visibleIds.add(field.id);
+        const val = fieldValues[field.id];
+        if (val) selected.add(val);
+      }
+    }
+    const toRemove = Object.keys(fieldValues)
+      .map(Number)
+      .filter((id) => !visibleIds.has(id));
+    if (toRemove.length > 0) {
+      setFieldValues((prev) => {
+        const next = { ...prev };
+        toRemove.forEach((id) => delete next[id]);
+        return next;
+      });
+    }
+  }, [formFields, fieldValues]);
 
   const handleActivitySelect = (result: (typeof searchResults)[0]) => {
     setFormData({
@@ -690,8 +749,8 @@ function RequestBoard() {
       errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
     }
 
-    // Validar campos condicionales obligatorios
-    for (const field of formFields) {
+    // Validar campos condicionales obligatorios (solo los VISIBLES)
+    for (const field of visibleFields) {
       if (field.required && !fieldValues[field.id]) {
         errors[`field_${field.id}`] = `Debe seleccionar: ${field.field_label}`;
       }
@@ -741,10 +800,9 @@ function RequestBoard() {
             process: parseInt(formData.process),
             createdby: userId,
             url: formData.url,
-            formValues: Object.entries(fieldValues).map(([id_field, id_option]) => ({
-              id_field: parseInt(id_field),
-              id_option,
-            })),
+            formValues: visibleFields
+              .filter((f) => fieldValues[f.id])
+              .map((f) => ({ id_field: f.id, id_option: fieldValues[f.id] })),
           }),
         });
       } catch (networkErr) {
@@ -775,12 +833,13 @@ function RequestBoard() {
       // se cierra al final.
 
       // --- Fase B: subir los archivos a la carpeta de la solicitud ya creada ---
-      const hasParametrizedFiles = requiredFiles.length > 0;
-      const filesToUpload: { file: File; label?: string }[] = hasParametrizedFiles
-        ? visibleRequiredFiles.flatMap((doc) =>
-            (filesByDoc[doc.id] || []).map((f) => ({ file: f.file, label: doc.file_label }))
-          )
-        : attachedFiles.map((file) => ({ file: file.file }));
+      // Documentos parametrizados visibles (con etiqueta) + archivos libres adicionales
+      const filesToUpload: { file: File; label?: string }[] = [
+        ...visibleRequiredFiles.flatMap((doc) =>
+          (filesByDoc[doc.id] || []).map((f) => ({ file: f.file, label: doc.file_label }))
+        ),
+        ...attachedFiles.map((file) => ({ file: file.file })),
+      ];
 
       let uploadOk = true;
       if (filesToUpload.length > 0) {
@@ -1850,11 +1909,11 @@ function RequestBoard() {
 
             <Divider />
 
-            {formFields.length > 0 && (
+            {visibleFields.length > 0 && (
               <Stack gap='md'>
                 <Text fw={600}>Información adicional</Text>
                 <Grid>
-                  {formFields.map((field) => (
+                  {visibleFields.map((field) => (
                     <Grid.Col span={{ base: 12, md: 6 }} key={field.id}>
                       <Select
                         label={field.field_label}
@@ -1887,7 +1946,7 @@ function RequestBoard() {
               </Stack>
             )}
 
-            {requiredFiles.length > 0 ? (
+            {visibleRequiredFiles.length > 0 && (
               <Stack gap='lg'>
                 <div>
                   <Text fw={600}>Documentos Requeridos</Text>
@@ -1896,12 +1955,6 @@ function RequestBoard() {
                     son necesarios para crear la solicitud.
                   </Text>
                 </div>
-
-                {visibleRequiredFiles.length === 0 && (
-                  <Text size='sm' c='dimmed'>
-                    Seleccione las opciones de arriba para ver los documentos requeridos.
-                  </Text>
-                )}
 
                 {visibleRequiredFiles.map((doc) => (
                   <div key={doc.id}>
@@ -1934,19 +1987,20 @@ function RequestBoard() {
                   </div>
                 ))}
               </Stack>
-            ) : (
-              <div>
-                <Text fw={600} mb='xs'>
-                  Archivos Adjuntos (Opcional)
-                </Text>
-                <FileUpload
-                  ticketId={0}
-                  onFilesChange={setAttachedFiles}
-                  autoUpload={false}
-                  disabled={formDataLoading}
-                />
-              </div>
             )}
+
+            {/* Subida libre: siempre disponible para adjuntar documentos adicionales */}
+            <div>
+              <Text fw={600} mb='xs'>
+                {requiredFiles.length > 0 ? 'Archivos adicionales (Opcional)' : 'Archivos Adjuntos (Opcional)'}
+              </Text>
+              <FileUpload
+                ticketId={0}
+                onFilesChange={setAttachedFiles}
+                autoUpload={false}
+                disabled={formDataLoading}
+              />
+            </div>
 
             <Divider />
 

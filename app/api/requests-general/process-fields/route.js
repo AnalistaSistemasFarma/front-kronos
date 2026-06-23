@@ -51,12 +51,29 @@ export async function GET(req) {
       });
     }
 
+    // Condiciones (M:N) de los campos: opciones de otros campos que los activan
+    const condResult = await pool
+      .request()
+      .input('idProcess', sql.Int, parseInt(idProcess))
+      .query(`
+        SELECT fco.id_form_field, fco.id_option
+        FROM field_condition_option fco
+        INNER JOIN process_form_field f ON f.id = fco.id_form_field
+        WHERE f.active = 1 AND f.id_process_category = @idProcess
+      `);
+
+    const condByField = {};
+    for (const c of condResult.recordset) {
+      (condByField[c.id_form_field] ||= []).push(c.id_option);
+    }
+
     const response = fields.map((f) => ({
       id: f.id,
       field_label: f.field_label,
       field_type: f.field_type,
       required: Boolean(f.required),
       options: optionsByField[f.id] || [],
+      conditions: condByField[f.id] || [],
     }));
 
     return NextResponse.json(response, { status: 200 });

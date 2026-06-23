@@ -29,6 +29,7 @@ import {
   Modal,
   ActionIcon,
   Checkbox,
+  MultiSelect,
 } from '@mantine/core';
 import {
   IconBuilding,
@@ -88,7 +89,7 @@ interface FileDef {
   id: number;
   file_label: string;
   required: boolean;
-  id_condition_option: number | null;
+  conditions: number[];
 }
 
 interface FieldOptionDef {
@@ -101,6 +102,7 @@ interface FormFieldDef {
   field_label: string;
   required: boolean;
   options: FieldOptionDef[];
+  conditions: number[];
 }
 
 function ViewWorkFlowPage() {
@@ -274,12 +276,12 @@ function ViewWorkFlowPage() {
             id: number;
             file_label: string;
             required: boolean | number;
-            id_condition_option: number | null;
+            conditions: number[];
           }) => ({
             id: f.id,
             file_label: f.file_label,
             required: Boolean(f.required),
-            id_condition_option: f.id_condition_option ?? null,
+            conditions: f.conditions || [],
           })
         )
       );
@@ -310,11 +312,13 @@ function ViewWorkFlowPage() {
             field_label: string;
             required: boolean | number;
             options: { id: number; option_label: string }[];
+            conditions: number[];
           }) => ({
             id: f.id,
             field_label: f.field_label,
             required: Boolean(f.required),
             options: f.options || [],
+            conditions: f.conditions || [],
           })
         )
       );
@@ -433,13 +437,19 @@ function ViewWorkFlowPage() {
       id: Date.now() * -1, // ID negativo = nuevo
       file_label: '',
       required: true,
-      id_condition_option: null,
+      conditions: [],
     };
     setEditedFiles([...editedFiles, newFile]);
   };
 
   const handleRemoveFile = (fileId: number) => {
     setEditedFiles(editedFiles.filter((f) => f.id !== fileId));
+  };
+
+  const setFileConditions = (index: number, ids: number[]) => {
+    const next = [...editedFiles];
+    next[index] = { ...next[index], conditions: ids };
+    setEditedFiles(next);
   };
 
   // Funciones para manejar campos condicionales
@@ -449,6 +459,7 @@ function ViewWorkFlowPage() {
       field_label: '',
       required: true,
       options: [],
+      conditions: [],
     };
     setEditedFormFields([...editedFormFields, newField]);
   };
@@ -456,14 +467,25 @@ function ViewWorkFlowPage() {
   const handleRemoveFormField = (fieldId: number) => {
     const field = editedFormFields.find((f) => f.id === fieldId);
     const optionIds = field ? field.options.map((o) => o.id) : [];
-    setEditedFormFields(editedFormFields.filter((f) => f.id !== fieldId));
-    // Limpiar condiciones de archivos que apuntaban a opciones de este campo
+    setEditedFormFields(
+      editedFormFields
+        .filter((f) => f.id !== fieldId)
+        .map((f) => ({
+          ...f,
+          conditions: f.conditions.filter((c) => !optionIds.includes(c)),
+        }))
+    );
     setEditedFiles((prev) =>
-      prev.map((f) =>
-        f.id_condition_option != null && optionIds.includes(f.id_condition_option)
-          ? { ...f, id_condition_option: null }
-          : f
-      )
+      prev.map((f) => ({
+        ...f,
+        conditions: f.conditions.filter((c) => !optionIds.includes(c)),
+      }))
+    );
+  };
+
+  const setFieldConditions = (fieldId: number, ids: number[]) => {
+    setEditedFormFields(
+      editedFormFields.map((f) => (f.id === fieldId ? { ...f, conditions: ids } : f))
     );
   };
 
@@ -483,34 +505,46 @@ function ViewWorkFlowPage() {
   const handleRemoveOption = (fieldId: number, optionId: number) => {
     setEditedFormFields(
       editedFormFields.map((f) =>
-        f.id === fieldId ? { ...f, options: f.options.filter((o) => o.id !== optionId) } : f
+        f.id === fieldId
+          ? { ...f, options: f.options.filter((o) => o.id !== optionId) }
+          : { ...f, conditions: f.conditions.filter((c) => c !== optionId) }
       )
     );
     setEditedFiles((prev) =>
-      prev.map((f) =>
-        f.id_condition_option === optionId ? { ...f, id_condition_option: null } : f
-      )
+      prev.map((f) => ({ ...f, conditions: f.conditions.filter((c) => c !== optionId) }))
     );
   };
 
-  // Opciones planas (de editedFormFields) para el selector de condición de archivos
-  const conditionSelectData = [
-    { value: '', label: 'Siempre' },
-    ...editedFormFields.flatMap((f) =>
+  // Todas las opciones (de editedFormFields) para condicionar archivos
+  const allOptionsData = editedFormFields.flatMap((f) =>
+    f.options.map((o) => ({
+      value: o.id.toString(),
+      label: `${f.field_label}: ${o.option_label}`,
+    }))
+  );
+
+  // Opciones de campos ANTERIORES (para condicionar un campo, evita ciclos)
+  const optionsBeforeFieldData = (fieldId: number) => {
+    const idx = editedFormFields.findIndex((f) => f.id === fieldId);
+    return editedFormFields.slice(0, idx).flatMap((f) =>
       f.options.map((o) => ({
         value: o.id.toString(),
         label: `${f.field_label}: ${o.option_label}`,
       }))
-    ),
-  ];
+    );
+  };
 
-  const conditionLabelFor = (optionId: number | null) => {
-    if (optionId == null) return 'Siempre';
-    for (const f of formFields) {
-      const opt = f.options.find((o) => o.id === optionId);
-      if (opt) return `${f.field_label}: ${opt.option_label}`;
+  // Etiqueta(s) de condición para modo vista (usa los campos guardados)
+  const conditionLabelsView = (optionIds: number[]) => {
+    if (!optionIds || optionIds.length === 0) return 'Siempre';
+    const labels = [];
+    for (const oid of optionIds) {
+      for (const f of formFields) {
+        const opt = f.options.find((o) => o.id === oid);
+        if (opt) labels.push(`${f.field_label}: ${opt.option_label}`);
+      }
     }
-    return 'Siempre';
+    return labels.length ? labels.join(', ') : 'Siempre';
   };
 
   const handleStartEditing = () => {
@@ -584,6 +618,10 @@ function ViewWorkFlowPage() {
         .filter((origFile) => !editedFiles.find((ef) => ef.id === origFile.id))
         .map((f) => f.id);
 
+      // Compara dos listas de ids como conjuntos (sin importar el orden)
+      const sameIdSet = (a: number[], b: number[]) =>
+        a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');
+
       const updatedFiles = editedFiles.filter((f) => {
         if (f.id < 0) return false;
         const originalFile = originalFiles.find((of) => of.id === f.id);
@@ -591,7 +629,7 @@ function ViewWorkFlowPage() {
         return (
           originalFile.file_label !== f.file_label ||
           Boolean(originalFile.required) !== Boolean(f.required) ||
-          (originalFile.id_condition_option ?? null) !== (f.id_condition_option ?? null)
+          !sameIdSet(originalFile.conditions, f.conditions)
         );
       });
 
@@ -620,8 +658,13 @@ function ViewWorkFlowPage() {
           const oo = orig.options.find((x) => x.id === o.id);
           return oo && oo.option_label !== o.option_label;
         });
+        const conditionsChanged = !sameIdSet(orig.conditions, f.conditions);
         return (
-          labelChanged || newOpts.length > 0 || deletedOpts.length > 0 || updatedOpts.length > 0
+          labelChanged ||
+          newOpts.length > 0 ||
+          deletedOpts.length > 0 ||
+          updatedOpts.length > 0 ||
+          conditionsChanged
         );
       });
 
@@ -656,13 +699,6 @@ function ViewWorkFlowPage() {
         return actions;
       };
 
-      // Resuelve la condición de un archivo para el payload (opción nueva = tempId negativo)
-      const fileCondition = (optionId: number | null) => {
-        if (optionId == null) return { id_condition_option: null };
-        if (optionId < 0) return { condition_option_temp: optionId };
-        return { id_condition_option: optionId };
-      };
-
       interface TaskToProcess {
         id?: number;
         task?: string;
@@ -677,8 +713,7 @@ function ViewWorkFlowPage() {
         id?: number;
         file_label?: string;
         required?: boolean;
-        id_condition_option?: number | null;
-        condition_option_temp?: number;
+        condition_option_ids?: number[];
         action: 'create' | 'update' | 'delete';
       }
 
@@ -693,6 +728,7 @@ function ViewWorkFlowPage() {
         id?: number;
         field_label?: string;
         required?: boolean;
+        condition_option_ids?: number[];
         options?: OptionToProcess[];
         action: 'create' | 'update' | 'delete';
       }
@@ -768,14 +804,14 @@ function ViewWorkFlowPage() {
           ...newFiles.map((file) => ({
             file_label: file.file_label,
             required: file.required,
-            ...fileCondition(file.id_condition_option),
+            condition_option_ids: file.conditions,
             action: 'create' as const,
           })),
           ...updatedFiles.map((file) => ({
             id: file.id,
             file_label: file.file_label,
             required: file.required,
-            ...fileCondition(file.id_condition_option),
+            condition_option_ids: file.conditions,
             action: 'update' as const,
           })),
           ...deletedFileIds.map((id) => ({
@@ -794,6 +830,7 @@ function ViewWorkFlowPage() {
           ...newFormFields.map((field) => ({
             field_label: field.field_label,
             required: field.required,
+            condition_option_ids: field.conditions,
             options: buildOptionActions(field),
             action: 'create' as const,
           })),
@@ -803,6 +840,7 @@ function ViewWorkFlowPage() {
               id: field.id,
               field_label: field.field_label,
               required: field.required,
+              condition_option_ids: field.conditions,
               options: buildOptionActions(field, orig),
               action: 'update' as const,
             };
@@ -1652,6 +1690,21 @@ function ViewWorkFlowPage() {
                           Opción
                         </Button>
                       </Group>
+
+                      {optionsBeforeFieldData(field.id).length > 0 && (
+                        <MultiSelect
+                          label='Mostrar este campo solo si se elige'
+                          placeholder='Siempre visible'
+                          data={optionsBeforeFieldData(field.id)}
+                          value={field.conditions.map((c) => c.toString())}
+                          onChange={(value) =>
+                            setFieldConditions(field.id, value.map((v) => parseInt(v)))
+                          }
+                          clearable
+                          searchable
+                          leftSection={<IconTag size={16} />}
+                        />
+                      )}
                     </Stack>
                   ) : (
                     <Stack gap='xs'>
@@ -1662,9 +1715,21 @@ function ViewWorkFlowPage() {
                             {field.field_label}
                           </Text>
                         </Group>
-                        <Badge color={field.required ? 'red' : 'gray'} variant='light' size='sm'>
-                          {field.required ? 'Obligatorio' : 'Opcional'}
-                        </Badge>
+                        <Group gap='xs'>
+                          {field.conditions.length > 0 && (
+                            <Badge
+                              color='grape'
+                              variant='light'
+                              size='sm'
+                              styles={{ root: { textTransform: 'none' } }}
+                            >
+                              Si: {conditionLabelsView(field.conditions)}
+                            </Badge>
+                          )}
+                          <Badge color={field.required ? 'red' : 'gray'} variant='light' size='sm'>
+                            {field.required ? 'Obligatorio' : 'Opcional'}
+                          </Badge>
+                        </Group>
                       </Group>
                       <Group gap='xs'>
                         {field.options.map((o) => (
@@ -1801,23 +1866,19 @@ function ViewWorkFlowPage() {
                           <IconTrash size={18} />
                         </ActionIcon>
                       </Group>
-                      <Select
-                        label='Condición (mostrar solo si...)'
-                        data={conditionSelectData}
-                        value={
-                          editedFiles[index]?.id_condition_option != null
-                            ? editedFiles[index].id_condition_option!.toString()
-                            : ''
+                      <MultiSelect
+                        label='Condición (mostrar solo si se elige)'
+                        placeholder={
+                          (editedFiles[index]?.conditions.length || 0) > 0 ? '' : 'Siempre'
                         }
-                        onChange={(value) => {
-                          const newFiles = [...editedFiles];
-                          newFiles[index] = {
-                            ...newFiles[index],
-                            id_condition_option: value ? parseInt(value) : null,
-                          };
-                          setEditedFiles(newFiles);
-                        }}
-                        disabled={conditionSelectData.length <= 1}
+                        data={allOptionsData}
+                        value={(editedFiles[index]?.conditions || []).map((c) => c.toString())}
+                        onChange={(value) =>
+                          setFileConditions(index, value.map((v) => parseInt(v)))
+                        }
+                        disabled={allOptionsData.length === 0}
+                        clearable
+                        searchable
                         leftSection={<IconTag size={16} />}
                       />
                     </Stack>
@@ -1831,12 +1892,12 @@ function ViewWorkFlowPage() {
                       </Group>
                       <Group gap='xs'>
                         <Badge
-                          color={file.id_condition_option != null ? 'grape' : 'gray'}
+                          color={file.conditions.length > 0 ? 'grape' : 'gray'}
                           variant='light'
                           size='sm'
                           styles={{ root: { textTransform: 'none' } }}
                         >
-                          {conditionLabelFor(file.id_condition_option)}
+                          {conditionLabelsView(file.conditions)}
                         </Badge>
                         <Badge color={file.required ? 'red' : 'gray'} variant='light' size='sm'>
                           {file.required ? 'Obligatorio' : 'Opcional'}
