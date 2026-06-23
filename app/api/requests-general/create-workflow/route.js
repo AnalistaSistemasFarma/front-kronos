@@ -10,6 +10,8 @@ export async function POST(req) {
       id_category,
       process,
       task,
+      files,
+      formFields,
       cost_center_pc,
       cost_center_t,
       cost,
@@ -151,6 +153,125 @@ export async function POST(req) {
               .query(insertUserTaskQuery);
           }
 
+        }
+
+      /* =========================
+        6️⃣ INSERT CAMPOS CONDICIONALES Y OPCIONES (PASADA 1)
+        Construye optionTempToId (tempId opción -> id real) y guarda los campos
+        con su lista de condiciones para insertarlas en la pasada 2.
+        ========================= */
+
+        const optionTempToId = {};
+        const insertedFields = []; // { fieldId, condition_option_temps }
+
+        if (Array.isArray(formFields)) {
+          let fieldOrder = 0;
+          for (const field of formFields) {
+            if (!field.field_label || !field.field_label.trim()) continue;
+
+            const insertFieldQuery = `
+              INSERT INTO process_form_field
+              (id_process_category, field_label, field_type, required, active, display_order)
+              OUTPUT INSERTED.id
+              VALUES (@id_process, @field_label, @field_type, @required, 1, @display_order);
+            `;
+
+            const fieldResult = await new sql.Request(transaction)
+              .input("id_process", sql.Int, processId)
+              .input("field_label", sql.NVarChar(255), field.field_label)
+              .input("field_type", sql.NVarChar(30), field.field_type || "select")
+              .input("required", sql.Bit, field.required ? 1 : 0)
+              .input("display_order", sql.Int, fieldOrder++)
+              .query(insertFieldQuery);
+
+            const fieldId = fieldResult.recordset[0].id;
+
+            if (Array.isArray(field.options)) {
+              let optionOrder = 0;
+              for (const opt of field.options) {
+                if (!opt.option_label || !opt.option_label.trim()) continue;
+
+                const optionResult = await new sql.Request(transaction)
+                  .input("id_form_field", sql.Int, fieldId)
+                  .input("option_label", sql.NVarChar(255), opt.option_label)
+                  .input("display_order", sql.Int, optionOrder++)
+                  .query(`
+                    INSERT INTO process_form_field_option
+                    (id_form_field, option_label, active, display_order)
+                    OUTPUT INSERTED.id
+                    VALUES (@id_form_field, @option_label, 1, @display_order);
+                  `);
+
+                if (opt.tempId !== undefined && opt.tempId !== null) {
+                  optionTempToId[opt.tempId] = optionResult.recordset[0].id;
+                }
+              }
+            }
+
+            insertedFields.push({
+              fieldId,
+              condition_option_temps: Array.isArray(field.condition_option_temps)
+                ? field.condition_option_temps
+                : [],
+            });
+          }
+        }
+
+      /* =========================
+        7️⃣ INSERT CONDICIONES DE CAMPOS (PASADA 2)
+        Las opciones de campos anteriores ya existen en optionTempToId.
+        ========================= */
+
+        for (const fld of insertedFields) {
+          for (const temp of fld.condition_option_temps) {
+            const optId = optionTempToId[temp] ?? null;
+            if (!optId) continue;
+            await new sql.Request(transaction)
+              .input("id_form_field", sql.Int, fld.fieldId)
+              .input("id_option", sql.Int, optId)
+              .query(`
+                INSERT INTO field_condition_option (id_form_field, id_option)
+                VALUES (@id_form_field, @id_option);
+              `);
+          }
+        }
+
+      /* =========================
+        8️⃣ INSERT ARCHIVOS REQUERIDOS Y SUS CONDICIONES (PASADA 3)
+        ========================= */
+
+        if (Array.isArray(files)) {
+          let order = 0;
+          for (const f of files) {
+            if (!f.file_label || !f.file_label.trim()) continue;
+
+            const fileResult = await new sql.Request(transaction)
+              .input("id_process", sql.Int, processId)
+              .input("file_label", sql.NVarChar(255), f.file_label)
+              .input("required", sql.Bit, f.required ? 1 : 0)
+              .input("display_order", sql.Int, order++)
+              .query(`
+                INSERT INTO file_process_category
+                (id_process_category, file_label, required, active, display_order)
+                OUTPUT INSERTED.id
+                VALUES (@id_process, @file_label, @required, 1, @display_order);
+              `);
+
+            const fileId = fileResult.recordset[0].id;
+
+            const temps = Array.isArray(f.condition_option_temps) ? f.condition_option_temps : [];
+            for (const temp of temps) {
+              const optId = optionTempToId[temp] ?? null;
+              if (!optId) continue;
+              await new sql.Request(transaction)
+                .input("id_file", sql.Int, fileId)
+                .input("id_option", sql.Int, optId)
+                .query(`
+                  INSERT INTO file_condition_option (id_file_process_category, id_option)
+                  VALUES (@id_file, @id_option);
+                `);
+            }
+          }
         }
 
       /* =========================

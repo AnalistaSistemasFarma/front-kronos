@@ -3,7 +3,9 @@
     "allow": [
       "Bash(xargs grep *)",
       "PowerShell(Copy-Item \"c:\\\\Users\\\\nicolas.rojas\\\\Projects\\\\front-kronos\\\\public\\\\logo.png\" \"c:\\\\Users\\\\nicolas.rojas\\\\Projects\\\\front-kronos\\\\public\\\\iconocel.png\")",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "PowerShell(npx eslint \"app/\\(hub\\)/process/request-general/create-request/page.tsx\" 2>&1)",
+      "Bash(npx eslint *)"
     ]
   }
 }
