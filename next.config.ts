@@ -12,6 +12,11 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  eslint: {
+    // No bloquear el build de producción por errores de ESLint.
+    // El lint se valida en revisión de PR, no en el deploy.
+    ignoreDuringBuilds: true,
+  },
   experimental: {
     serverActions: {
       allowedOrigins: [
