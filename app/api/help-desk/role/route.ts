@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/help-desk/role
- * Devuelve si el usuario es técnico (panel general) o solicitante (mis tickets).
+ * Devuelve si el usuario es técnico (panel general) y/o puede ver mis tickets.
  */
 export async function GET() {
   const session = await getServerSession(authOptions);

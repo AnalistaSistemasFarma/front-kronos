@@ -9,7 +9,7 @@ export type HelpDeskUserRole = {
   hasModuleAccess: boolean;
   /** Técnico del roster (subproceso 1): panel general de todos los casos. */
   isOperator: boolean;
-  /** No técnico: solo "Mis tickets". */
+  /** Puede ver "Mis tickets" (casos propios o asignados al usuario). */
   isRequester: boolean;
 };
 
@@ -32,8 +32,8 @@ async function hasHelpDeskSubprocessAssignment(userEmail: string): Promise<boole
 
 /**
  * Rol en mesa de ayuda:
- * - isOperator = está en el roster de técnicos (misma lógica que dashboard operativo).
- * - isRequester = no es técnico pero tiene acceso al proceso o puede usar mis tickets.
+ * - isOperator = está en el roster de técnicos (panel general de todos los casos).
+ * - isRequester = puede usar "Mis tickets" (técnicos y solicitantes con acceso al módulo).
  */
 export async function getHelpDeskUserRole(userEmail: string): Promise<HelpDeskUserRole> {
   if (!userEmail?.trim()) {
@@ -44,7 +44,7 @@ export async function getHelpDeskUserRole(userEmail: string): Promise<HelpDeskUs
     const isOperator = await isHelpDeskTechnician(userEmail);
     const hasSubprocess = await hasHelpDeskSubprocessAssignment(userEmail);
     const hasModuleAccess = isOperator || hasSubprocess;
-    const isRequester = !isOperator && hasModuleAccess;
+    const isRequester = hasModuleAccess;
 
     return { hasModuleAccess, isOperator, isRequester };
   } catch (error) {
