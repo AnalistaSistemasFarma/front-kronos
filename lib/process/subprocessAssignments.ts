@@ -130,8 +130,6 @@ export async function consolidateDuplicateCompanyUsers(userId: string): Promise<
 }
 
 export async function getUserCompanyUsersWithSubprocesses(userId: string) {
-  await consolidateDuplicateCompanyUsers(userId);
-
   return prisma.companyUser.findMany({
     where: { id_user: userId },
     include: {
@@ -147,17 +145,14 @@ export async function getUserCompanyUsersWithSubprocesses(userId: string) {
   });
 }
 
+/** Solo lectura: unión de subprocesos asignados (incluye filas duplicadas de company_user). */
 export async function getAssignedSubprocessIdsForUser(userId: string): Promise<number[]> {
-  const companyUsers = await getUserCompanyUsersWithSubprocesses(userId);
-  const ids = new Set<number>();
+  const assignments = await prisma.subprocessUserCompany.findMany({
+    where: { companyUser: { id_user: userId } },
+    select: { id_subprocess: true },
+  });
 
-  for (const cu of companyUsers) {
-    for (const suc of cu.subprocesses) {
-      ids.add(suc.id_subprocess);
-    }
-  }
-
-  return [...ids];
+  return [...new Set(assignments.map((a) => a.id_subprocess))];
 }
 
 export function normalizeSubprocessIds(raw: unknown): number[] {

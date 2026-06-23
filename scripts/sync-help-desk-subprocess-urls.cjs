@@ -2,6 +2,9 @@
  * Alinea subprocess_url en BD con las rutas que ya usa la aplicación
  * (lib/help-desk/subprocessRoles.ts). No cambia la lógica de la app.
  *
+ * ADVERTENCIA: escribe en la BD apuntada por DATABASE_URL (.env).
+ * Ejecutar manualmente; no está cableado a CI. Revisar entorno antes de correr.
+ *
  * Uso: node scripts/sync-help-desk-subprocess-urls.cjs
  */
 const fs = require('fs');
