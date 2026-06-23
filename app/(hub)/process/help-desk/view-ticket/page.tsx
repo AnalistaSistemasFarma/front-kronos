@@ -373,10 +373,12 @@ function ViewTicketPage() {
   useEffect(() => {
     if (ticket) {
       fetchOptions();
-      fetchSubprocessUsers();
+      if (canManageTickets) {
+        fetchSubprocessUsers();
+      }
       fetchNotes();
     }
-  }, [ticket]);
+  }, [ticket, canManageTickets]);
 
   useEffect(() => {
     if (ticket?.id_category && !isEditing) {
@@ -490,10 +492,8 @@ function ViewTicketPage() {
   };
 
   const fetchSubprocessUsers = async () => {
-    console.log('Frontend - fetchSubprocessUsers called');
     try {
       const response = await fetch('/api/help-desk/technical');
-      console.log('Frontend - fetchSubprocessUsers response status:', response.status);
 
       if (response.ok) {
         const data: {
@@ -503,18 +503,18 @@ function ViewTicketPage() {
           name: string;
         }[] = await response.json();
 
-        console.log('Frontend - fetchSubprocessUsers received data:', data);
-
         setTechnicals(
           data.map((item) => ({
             value: item.id_subprocess_user_company.toString(),
             label: item.name,
           }))
         );
-      } else {
-        console.error('Frontend - fetchSubprocessUsers failed with status:', response.status);
+      } else if (response.status !== 499) {
+        console.error('fetchSubprocessUsers failed:', response.status);
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      if (error instanceof Error && error.message === 'aborted') return;
       console.error('Error fetching subprocess users:', error);
     }
   };

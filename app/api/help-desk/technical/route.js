@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { listHelpDeskTechnicians } from '../../../../lib/help-desk/technicians';
 
+function isAbortedError(error) {
+  if (!error || typeof error !== 'object') return false;
+  return error.name === 'AbortError' || error.message === 'aborted';
+}
+
 export async function GET() {
   try {
     const technicians = await listHelpDeskTechnicians();
@@ -14,6 +19,9 @@ export async function GET() {
       { status: 200 }
     );
   } catch (error) {
+    if (isAbortedError(error)) {
+      return new NextResponse(null, { status: 499 });
+    }
     console.error('Error fetching subprocess users:', error);
     return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 });
   }

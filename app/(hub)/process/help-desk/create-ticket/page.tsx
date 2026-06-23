@@ -34,6 +34,7 @@ import { ReportsChart } from '../../../../../components/help-desk/ReportsChart';
 import { HelpDeskDashboardLinkButton } from '../../../../../components/help-desk/HelpDeskDashboardLinkButton';
 import { HelpDeskCasesTable } from '../../../../../components/help-desk/HelpDeskCasesTable';
 import { useHelpDeskAccess } from '../../../../../components/help-desk/hooks/useHelpDeskAccess';
+import { getRequesterPanelUrl } from '../../../../../lib/help-desk/subprocessRoles';
 import type { HelpDeskCaseListItem } from '../../../../../lib/help-desk/types';
 import {
   IconAlertCircle,
@@ -68,7 +69,7 @@ function TicketsBoard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const subprocessId = searchParams.get('subprocess_id');
-  const { isOperator, loading: loadingHelpDeskAccess } = useHelpDeskAccess();
+  const { isOperator, isRequester, loading: loadingHelpDeskAccess } = useHelpDeskAccess();
 
   useEffect(() => {
     if (status === 'loading' || loadingHelpDeskAccess) return;
@@ -77,9 +78,13 @@ function TicketsBoard() {
       return;
     }
     if (!isOperator) {
-      router.replace('/process/help-desk/my-tickets');
+      if (isRequester) {
+        router.replace(getRequesterPanelUrl());
+      } else {
+        router.replace('/process');
+      }
     }
-  }, [session, status, router, isOperator, loadingHelpDeskAccess]);
+  }, [session, status, router, isOperator, isRequester, loadingHelpDeskAccess]);
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
@@ -123,16 +128,18 @@ function TicketsBoard() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (status === 'loading') return;
+    if (status === 'loading' || loadingHelpDeskAccess) return;
     if (!session) {
       router.push('/login');
       return;
     }
+    if (!isOperator) return;
+
     fetchTickets();
     fetchOptions();
     fetchFormData();
     fetchSubprocessUsers();
-  }, [session, status, router, filters]);
+  }, [session, status, router, filters, isOperator, loadingHelpDeskAccess]);
 
   useEffect(() => {
     const globalStore = localStorage.getItem('global-store');
@@ -227,14 +234,12 @@ function TicketsBoard() {
     }
   };
 
-  const fetchSubprocessUsers = async () => {
-    console.log('Frontend - fetchSubprocessUsers called');
+  const fetchSubprocessUsers = async (signal?: AbortSignal) => {
     try {
       setLoadingTechnicals(true);
       setTechnicalsError(null);
-      
-      const response = await fetch('/api/help-desk/technical');
-      console.log('Frontend - fetchSubprocessUsers response status:', response.status);
+
+      const response = await fetch('/api/help-desk/technical', { signal });
 
       if (response.ok) {
         const data: {
@@ -243,8 +248,6 @@ function TicketsBoard() {
           id_company_user: number;
           name: string;
         }[] = await response.json();
-
-        console.log('Frontend - fetchSubprocessUsers received data:', data);
 
         if (Array.isArray(data) && data.length > 0) {
           setTechnicals(
@@ -255,14 +258,15 @@ function TicketsBoard() {
           );
         } else {
           setTechnicals([]);
-          console.log('No se encontraron técnicos disponibles');
         }
-      } else {
+      } else if (response.status !== 499) {
         const errorText = await response.text();
-        console.error('Frontend - fetchSubprocessUsers failed with status:', response.status, errorText);
+        console.error('fetchSubprocessUsers failed:', response.status, errorText);
         setTechnicalsError('No se pudieron cargar los técnicos. Intente nuevamente.');
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      if (error instanceof Error && error.message === 'aborted') return;
       console.error('Error fetching subprocess users:', error);
       setTechnicalsError('Error de conexión al cargar técnicos. Verifique su conexión e intente nuevamente.');
     } finally {

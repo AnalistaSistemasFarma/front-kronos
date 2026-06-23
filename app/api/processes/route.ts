@@ -1,81 +1,84 @@
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '../../../app/generated/prisma';
 import { authOptions } from '../auth/[...nextauth]/route';
+import { prisma } from '../../../lib/prisma';
+import {
+  getAssignedSubprocessIdsForUser,
+} from '../../../lib/process/subprocessAssignments';
 
-const prisma = new PrismaClient();
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
 
-    if (!session || !session.user?.email) {
+    if (!session?.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userEmail = session.user.email;
+    const user = await prisma.user.findUnique({
+      where: { email: session.user.email },
+      select: { id: true },
+    });
 
-    // Get processes for the authenticated user
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    const assignedSubprocessIds = await getAssignedSubprocessIdsForUser(user.id);
+
+    if (assignedSubprocessIds.length === 0) {
+      return NextResponse.json([], {
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
+
     const processes = await prisma.process.findMany({
       where: {
         subprocesses: {
           some: {
-            subprocessUserCompanies: {
-              some: {
-                companyUser: {
-                  user: {
-                    email: userEmail,
-                  },
-                },
-              },
-            },
+            id_subprocess: { in: assignedSubprocessIds },
           },
         },
       },
       include: {
         subprocesses: {
           where: {
-            subprocessUserCompanies: {
-              some: {
-                companyUser: {
-                  user: {
-                    email: userEmail,
-                  },
-                },
-              },
-            },
+            id_subprocess: { in: assignedSubprocessIds },
           },
           include: {
             subprocessUserCompanies: {
               where: {
-                companyUser: {
-                  user: {
-                    email: userEmail,
-                  },
-                },
+                id_subprocess: { in: assignedSubprocessIds },
+                companyUser: { id_user: user.id },
               },
               include: {
                 companyUser: {
-                  include: {
-                    company: true,
-                  },
+                  include: { company: true },
                 },
                 subprocess: {
-                  select: {
-                    subprocess_url: true,
-                  },
+                  select: { subprocess_url: true },
                 },
               },
             },
           },
         },
       },
-      orderBy: {
-        process: 'asc',
-      },
+      orderBy: { process: 'asc' },
     });
 
-    return NextResponse.json(processes);
+    const normalized = processes
+      .map((process) => ({
+        ...process,
+        subprocesses: process.subprocesses.filter(
+          (sub) => sub.subprocessUserCompanies.length > 0
+        ),
+      }))
+      .filter((process) => process.subprocesses.length > 0);
+
+    return NextResponse.json(normalized, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
   } catch (error) {
     console.error('Error fetching processes:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

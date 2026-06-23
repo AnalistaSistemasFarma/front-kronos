@@ -6,12 +6,11 @@ import { useRouter } from 'next/navigation';
 import { Stack, Text } from '@mantine/core';
 import { MyTicketsBoard } from '@/components/process/MyTicketsBoard';
 import { useHelpDeskAccess } from '@/components/help-desk/hooks/useHelpDeskAccess';
-import { getOperatorPanelUrl } from '@/lib/help-desk/subprocessRoles';
 
 function MyTicketsPageContent() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const { isOperator, loading } = useHelpDeskAccess();
+  const { isRequester, loading } = useHelpDeskAccess();
 
   useEffect(() => {
     if (status === 'loading' || loading) return;
@@ -19,12 +18,12 @@ function MyTicketsPageContent() {
       router.replace('/login');
       return;
     }
-    if (isOperator) {
-      router.replace(getOperatorPanelUrl());
+    if (!isRequester) {
+      router.replace('/process');
     }
-  }, [session, status, router, isOperator, loading]);
+  }, [session, status, router, isRequester, loading]);
 
-  if (status === 'loading' || loading || !session || isOperator) {
+  if (status === 'loading' || loading || !session || !isRequester) {
     return (
       <div className='min-h-screen flex items-center justify-center'>
         <Stack align='center' gap='sm'>
