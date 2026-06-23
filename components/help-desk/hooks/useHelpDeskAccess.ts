@@ -17,7 +17,7 @@ export const useHelpDeskAccess = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const refreshRole = useCallback(async () => {
+  const refreshRole = useCallback(async (opts?: { silent?: boolean }) => {
     if (status === 'loading') return;
     if (!session?.user?.email) {
       setRole(EMPTY_ROLE);
@@ -26,7 +26,9 @@ export const useHelpDeskAccess = () => {
     }
 
     try {
-      setLoading(true);
+      if (!opts?.silent) {
+        setLoading(true);
+      }
       setError(null);
 
       const response = await fetch('/api/help-desk/role', {
@@ -50,7 +52,9 @@ export const useHelpDeskAccess = () => {
     } catch (err) {
       console.error('Error checking help desk access:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
-      setRole(EMPTY_ROLE);
+      if (!opts?.silent) {
+        setRole(EMPTY_ROLE);
+      }
     } finally {
       setLoading(false);
     }
@@ -64,14 +68,11 @@ export const useHelpDeskAccess = () => {
     if (status !== 'authenticated') return;
 
     const onAssignmentsChanged = () => void refreshRole();
-    const onFocus = () => void refreshRole();
 
     window.addEventListener(SUBPROCESS_ASSIGNMENTS_CHANGED, onAssignmentsChanged);
-    window.addEventListener('focus', onFocus);
 
     return () => {
       window.removeEventListener(SUBPROCESS_ASSIGNMENTS_CHANGED, onAssignmentsChanged);
-      window.removeEventListener('focus', onFocus);
     };
   }, [status, refreshRole]);
 

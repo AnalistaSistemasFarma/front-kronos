@@ -92,20 +92,17 @@ export function ProcessDataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (status !== 'authenticated') return;
+    if (pathname !== '/process') return;
 
     const refresh = () => void fetchProcesses({ silent: true });
-
-    const onFocus = () => refresh();
     const onAssignmentsChanged = () => refresh();
 
-    window.addEventListener('focus', onFocus);
     window.addEventListener(SUBPROCESS_ASSIGNMENTS_CHANGED, onAssignmentsChanged);
 
     return () => {
-      window.removeEventListener('focus', onFocus);
       window.removeEventListener(SUBPROCESS_ASSIGNMENTS_CHANGED, onAssignmentsChanged);
     };
-  }, [status, fetchProcesses]);
+  }, [pathname, status, fetchProcesses]);
 
   const value = useMemo(
     () => ({ processes, loading, refreshing, error, fetchProcesses }),
