@@ -4,8 +4,6 @@ import { NextResponse } from 'next/server';
 
 export async function GET(req) {
   try {
-    const pool = await sql.connect(sqlConfig);
-
     const { searchParams } = new URL(req.url);
     const idProcess = searchParams.get('id_process');
 
@@ -16,32 +14,36 @@ export async function GET(req) {
       );
     }
 
-    const request = pool.request();
-    request.input('idProcess', sql.Int, parseInt(idProcess));
+    const pool = await sql.connect(sqlConfig);
+    const id = parseInt(idProcess);
 
-    const fieldsResult = await request.query(`
-      SELECT id, field_label, field_type, required, display_order
-      FROM process_form_field
-      WHERE active = 1 AND id_process_category = @idProcess
-      ORDER BY display_order, id
-    `);
+    const [fieldsResult, optionsResult, condResult] = await Promise.all([
+      pool.request().input('idProcess', sql.Int, id).query(`
+        SELECT id, field_label, field_type, required, display_order
+        FROM process_form_field
+        WHERE active = 1 AND id_process_category = @idProcess
+        ORDER BY display_order, id
+      `),
+      pool.request().input('idProcess', sql.Int, id).query(`
+        SELECT o.id, o.id_form_field, o.option_label, o.display_order
+        FROM process_form_field_option o
+        INNER JOIN process_form_field f ON f.id = o.id_form_field
+        WHERE o.active = 1 AND f.active = 1 AND f.id_process_category = @idProcess
+        ORDER BY o.display_order, o.id
+      `),
+      pool.request().input('idProcess', sql.Int, id).query(`
+        SELECT fco.id_form_field, fco.id_option
+        FROM field_condition_option fco
+        INNER JOIN process_form_field f ON f.id = fco.id_form_field
+        WHERE f.active = 1 AND f.id_process_category = @idProcess
+      `),
+    ]);
 
     const fields = fieldsResult.recordset;
 
     if (fields.length === 0) {
       return NextResponse.json([], { status: 200 });
     }
-
-    const optionsResult = await pool
-      .request()
-      .input('idProcess', sql.Int, parseInt(idProcess))
-      .query(`
-        SELECT o.id, o.id_form_field, o.option_label, o.display_order
-        FROM process_form_field_option o
-        INNER JOIN process_form_field f ON f.id = o.id_form_field
-        WHERE o.active = 1 AND f.active = 1 AND f.id_process_category = @idProcess
-        ORDER BY o.display_order, o.id
-      `);
 
     const optionsByField = {};
     for (const opt of optionsResult.recordset) {
@@ -50,17 +52,6 @@ export async function GET(req) {
         option_label: opt.option_label,
       });
     }
-
-    // Condiciones (M:N) de los campos: opciones de otros campos que los activan
-    const condResult = await pool
-      .request()
-      .input('idProcess', sql.Int, parseInt(idProcess))
-      .query(`
-        SELECT fco.id_form_field, fco.id_option
-        FROM field_condition_option fco
-        INNER JOIN process_form_field f ON f.id = fco.id_form_field
-        WHERE f.active = 1 AND f.id_process_category = @idProcess
-      `);
 
     const condByField = {};
     for (const c of condResult.recordset) {
