@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ExcelJS from 'exceljs';
@@ -34,7 +34,13 @@ import { ReportsChart } from '../../../../../components/help-desk/ReportsChart';
 import { HelpDeskDashboardLinkButton } from '../../../../../components/help-desk/HelpDeskDashboardLinkButton';
 import { HelpDeskCasesTable } from '../../../../../components/help-desk/HelpDeskCasesTable';
 import { useHelpDeskAccess } from '../../../../../components/help-desk/hooks/useHelpDeskAccess';
-import { hasAdminRole } from '../../../../../lib/access-control';
+import { getRequesterPanelUrl } from '../../../../../lib/help-desk/subprocessRoles';
+import {
+  DEFAULT_TICKETS_BOARD_FILTERS,
+  loadTicketsBoardState,
+  saveTicketsBoardState,
+  type TicketsBoardFilters,
+} from '../../../../../lib/help-desk/ticketsBoardStorage';
 import type { HelpDeskCaseListItem } from '../../../../../lib/help-desk/types';
 import {
   IconAlertCircle,
@@ -53,7 +59,7 @@ import {
   IconDownload,
 } from '@tabler/icons-react';
 
-interface Ticket extends HelpDeskCaseListItem {}
+type Ticket = HelpDeskCaseListItem;
 
 interface CompanyData {
   id_company: number;
@@ -69,33 +75,37 @@ function TicketsBoard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const subprocessId = searchParams.get('subprocess_id');
-  const { hasAccess: hasHelpDeskAccess } = useHelpDeskAccess();
-  const isAdmin = hasAdminRole(session?.user?.role);
+  const { isOperator, isRequester, loading: loadingHelpDeskAccess } = useHelpDeskAccess();
 
   useEffect(() => {
-    if (status === 'loading') return;
+    if (status === 'loading' || loadingHelpDeskAccess) return;
     if (!session) {
       router.push('/login');
       return;
     }
-    if (!isAdmin) {
-      router.replace('/process/help-desk/my-tickets');
+    if (!isOperator) {
+      if (isRequester) {
+        router.replace(getRequesterPanelUrl());
+      } else {
+        router.replace('/process');
+      }
     }
-  }, [session, status, router, isAdmin]);
+  }, [session, status, router, isOperator, isRequester, loadingHelpDeskAccess]);
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState({
-    priority: '',
-    status: '1',
-    assigned_user: '',
-    date_from: '',
-    date_to: '',
-    technician: '',
-    company: '',
-  });
+  const [filters, setFilters] = useState<TicketsBoardFilters>(DEFAULT_TICKETS_BOARD_FILTERS);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [boardHydrated, setBoardHydrated] = useState(false);
+  const scrollRestoredRef = useRef(false);
+  const initialDataLoadedRef = useRef(false);
+  const filtersRef = useRef(filters);
+
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
     requestType: '',
@@ -121,20 +131,82 @@ function TicketsBoard() {
   const [loadingTechnicals, setLoadingTechnicals] = useState(false);
   const [technicalsError, setTechnicalsError] = useState<string | null>(null);
   const [idUser, setIdUser] = useState('');
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (status === 'loading') return;
+    const saved = loadTicketsBoardState();
+    if (saved) {
+      setFilters(saved.filters);
+      setFiltersExpanded(saved.filtersExpanded);
+      if (saved.tickets?.length) {
+        setTickets(saved.tickets);
+        setLoading(false);
+      }
+    }
+    setBoardHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!boardHydrated || status === 'loading' || loadingHelpDeskAccess) return;
     if (!session) {
       router.push('/login');
       return;
     }
-    fetchTickets();
+    if (!isOperator) return;
+    if (initialDataLoadedRef.current) return;
+
+    initialDataLoadedRef.current = true;
+
     fetchOptions();
     fetchFormData();
     fetchSubprocessUsers();
-  }, [session, status, router, filters]);
+
+    const saved = loadTicketsBoardState();
+    if (saved?.tickets?.length) {
+      void fetchTickets({ silent: true });
+    } else {
+      void fetchTickets();
+    }
+  }, [boardHydrated, session, status, isOperator, loadingHelpDeskAccess]);
+
+  useEffect(() => {
+    if (!boardHydrated) return;
+
+    saveTicketsBoardState({
+      filters,
+      filtersExpanded,
+      scrollY: window.scrollY,
+      tickets,
+    });
+  }, [boardHydrated, filters, filtersExpanded, tickets]);
+
+  useEffect(() => {
+    if (!boardHydrated) return;
+
+    const persistScroll = () => {
+      saveTicketsBoardState({
+        filters: filtersRef.current,
+        filtersExpanded,
+        scrollY: window.scrollY,
+        tickets,
+      });
+    };
+
+    window.addEventListener('scroll', persistScroll, { passive: true });
+    return () => window.removeEventListener('scroll', persistScroll);
+  }, [boardHydrated, filtersExpanded, tickets]);
+
+  useEffect(() => {
+    if (!boardHydrated || loading || scrollRestoredRef.current) return;
+
+    const saved = loadTicketsBoardState();
+    if (saved?.scrollY && saved.scrollY > 0) {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: saved.scrollY, behavior: 'auto' });
+      });
+    }
+    scrollRestoredRef.current = true;
+  }, [boardHydrated, loading]);
 
   useEffect(() => {
     const globalStore = localStorage.getItem('global-store');
@@ -229,14 +301,12 @@ function TicketsBoard() {
     }
   };
 
-  const fetchSubprocessUsers = async () => {
-    console.log('Frontend - fetchSubprocessUsers called');
+  const fetchSubprocessUsers = async (signal?: AbortSignal) => {
     try {
       setLoadingTechnicals(true);
       setTechnicalsError(null);
-      
-      const response = await fetch('/api/help-desk/technical');
-      console.log('Frontend - fetchSubprocessUsers response status:', response.status);
+
+      const response = await fetch('/api/help-desk/technical', { signal });
 
       if (response.ok) {
         const data: {
@@ -245,8 +315,6 @@ function TicketsBoard() {
           id_company_user: number;
           name: string;
         }[] = await response.json();
-
-        console.log('Frontend - fetchSubprocessUsers received data:', data);
 
         if (Array.isArray(data) && data.length > 0) {
           setTechnicals(
@@ -257,14 +325,15 @@ function TicketsBoard() {
           );
         } else {
           setTechnicals([]);
-          console.log('No se encontraron técnicos disponibles');
         }
-      } else {
+      } else if (response.status !== 499) {
         const errorText = await response.text();
-        console.error('Frontend - fetchSubprocessUsers failed with status:', response.status, errorText);
+        console.error('fetchSubprocessUsers failed:', response.status, errorText);
         setTechnicalsError('No se pudieron cargar los técnicos. Intente nuevamente.');
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      if (error instanceof Error && error.message === 'aborted') return;
       console.error('Error fetching subprocess users:', error);
       setTechnicalsError('Error de conexión al cargar técnicos. Verifique su conexión e intente nuevamente.');
     } finally {
@@ -290,19 +359,20 @@ function TicketsBoard() {
     }
   };
 
-  const fetchTickets = async () => {
+  const fetchTickets = async (opts?: { silent?: boolean }) => {
     try {
-      setLoading(true);
+      if (!opts?.silent) setLoading(true);
 
+      const activeFilters = filtersRef.current;
       const params = new URLSearchParams();
       if (subprocessId) params.append('subprocess_id', subprocessId);
-      if (filters.priority) params.append('priority', filters.priority);
-      if (filters.status) params.append('status', filters.status);
-      if (filters.assigned_user) params.append('assigned_user', filters.assigned_user);
-      if (filters.date_from) params.append('date_from', filters.date_from);
-      if (filters.date_to) params.append('date_to', filters.date_to);
-      if (filters.technician) params.append('technician', filters.technician);
-      if (filters.company) params.append('company', filters.company);
+      if (activeFilters.priority) params.append('priority', activeFilters.priority);
+      if (activeFilters.status) params.append('status', activeFilters.status);
+      if (activeFilters.assigned_user) params.append('assigned_user', activeFilters.assigned_user);
+      if (activeFilters.date_from) params.append('date_from', activeFilters.date_from);
+      if (activeFilters.date_to) params.append('date_to', activeFilters.date_to);
+      if (activeFilters.technician) params.append('technician', activeFilters.technician);
+      if (activeFilters.company) params.append('company', activeFilters.company);
 
       const response = await fetch(`/api/help-desk/tickets?${params.toString()}`);
 
@@ -310,6 +380,16 @@ function TicketsBoard() {
 
       const data = await response.json();
       setTickets(data);
+      setError(null);
+
+      if (boardHydrated) {
+        saveTicketsBoardState({
+          filters: activeFilters,
+          filtersExpanded,
+          scrollY: window.scrollY,
+          tickets: data,
+        });
+      }
     } catch (err) {
       console.error('Error fetching tickets:', err);
       setError('No se pudieron cargar los casos. Por favor intente nuevamente.');
@@ -408,7 +488,7 @@ function TicketsBoard() {
     }
   };
 
-  if (status === 'loading' || loading) {
+  if (status === 'loading' || loading || loadingHelpDeskAccess) {
     return (
       <div className='min-h-screen flex items-center justify-center'>
         <div>Cargando...</div>
@@ -416,11 +496,7 @@ function TicketsBoard() {
     );
   }
 
-  if (!session) {
-    return null;
-  }
-
-  if (!isAdmin) {
+  if (!session || !isOperator) {
     return null;
   }
 
@@ -612,7 +688,7 @@ function TicketsBoard() {
           </Grid>
         </Card>
 
-        {hasHelpDeskAccess && <ReportsChart className='mb-6' />}
+        {isOperator && <ReportsChart className='mb-6' />}
 
         {error && (
           <Alert
@@ -725,21 +801,13 @@ function TicketsBoard() {
                 <Button
                   variant='outline'
                   onClick={() =>
-                    setFilters({
-                      priority: '',
-                      status: '',
-                      assigned_user: '',
-                      date_from: '',
-                      date_to: '',
-                      technician: '',
-                      company: '',
-                    })
+                    setFilters({ ...DEFAULT_TICKETS_BOARD_FILTERS })
                   }
                   leftSection={<IconX size={16} />}
                 >
                   Limpiar Filtros
                 </Button>
-                <Button onClick={fetchTickets} leftSection={<IconRefresh size={16} />}>
+                <Button onClick={() => void fetchTickets()} leftSection={<IconRefresh size={16} />}>
                   Aplicar Filtros
                 </Button>
               </Group>

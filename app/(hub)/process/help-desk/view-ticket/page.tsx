@@ -57,7 +57,8 @@ import {
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
-import { hasAdminRole } from '../../../../../lib/access-control';
+import { useHelpDeskAccess } from '../../../../../components/help-desk/hooks/useHelpDeskAccess';
+import { getOperatorPanelUrl, getRequesterPanelUrl } from '../../../../../lib/help-desk/subprocessRoles';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 
 interface Ticket {
@@ -219,7 +220,7 @@ function ViewTicketPage() {
   } | null>(null);
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
-  const isAdmin = hasAdminRole(session?.user?.role);
+  const { isOperator: canManageTickets } = useHelpDeskAccess();
   const [userId, setUserId] = useState<number | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
@@ -229,10 +230,10 @@ function ViewTicketPage() {
   });
 
   useEffect(() => {
-    if (!isAdmin && isEditing) {
+    if (!canManageTickets && isEditing) {
       setIsEditing(false);
     }
-  }, [isAdmin, isEditing]);
+  }, [canManageTickets, isEditing]);
 
   const navigateToPreviousTicket = () => {
     if (currentTicketIndex !== null && currentTicketIndex > 0) {
@@ -372,10 +373,12 @@ function ViewTicketPage() {
   useEffect(() => {
     if (ticket) {
       fetchOptions();
-      fetchSubprocessUsers();
+      if (canManageTickets) {
+        fetchSubprocessUsers();
+      }
       fetchNotes();
     }
-  }, [ticket]);
+  }, [ticket, canManageTickets]);
 
   useEffect(() => {
     if (ticket?.id_category && !isEditing) {
@@ -489,10 +492,8 @@ function ViewTicketPage() {
   };
 
   const fetchSubprocessUsers = async () => {
-    console.log('Frontend - fetchSubprocessUsers called');
     try {
       const response = await fetch('/api/help-desk/technical');
-      console.log('Frontend - fetchSubprocessUsers response status:', response.status);
 
       if (response.ok) {
         const data: {
@@ -502,18 +503,18 @@ function ViewTicketPage() {
           name: string;
         }[] = await response.json();
 
-        console.log('Frontend - fetchSubprocessUsers received data:', data);
-
         setTechnicals(
           data.map((item) => ({
             value: item.id_subprocess_user_company.toString(),
             label: item.name,
           }))
         );
-      } else {
-        console.error('Frontend - fetchSubprocessUsers failed with status:', response.status);
+      } else if (response.status !== 499) {
+        console.error('fetchSubprocessUsers failed:', response.status);
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      if (error instanceof Error && error.message === 'aborted') return;
       console.error('Error fetching subprocess users:', error);
     }
   };
@@ -683,7 +684,7 @@ function ViewTicketPage() {
   };
 
   const handleStartEditing = () => {
-    if (!isAdmin) return;
+    if (!canManageTickets) return;
     setIsEditing(true);
     setUpdateMessage(null);
   };
@@ -858,7 +859,7 @@ function ViewTicketPage() {
   };
 
   const handleUpdateCase = async () => {
-    if (!isAdmin) return;
+    if (!canManageTickets) return;
     if (!validateFields()) {
       return;
     }
@@ -1013,7 +1014,7 @@ function ViewTicketPage() {
 
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
-    { title: 'Mesa de Ayuda', href: '/process/help-desk/create-ticket' },
+    { title: 'Mesa de Ayuda', href: canManageTickets ? getOperatorPanelUrl() : getRequesterPanelUrl() },
     { title: 'Detalle del Caso', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (
@@ -1051,7 +1052,7 @@ function ViewTicketPage() {
           </Alert>
           <Button
             fullWidth
-            onClick={() => router.push('/process/help-desk/create-ticket')}
+            onClick={() => router.push(canManageTickets ? getOperatorPanelUrl() : getRequesterPanelUrl())}
             leftSection={<IconArrowLeft size={16} />}
           >
             Volver al Panel de Casos
@@ -1070,7 +1071,7 @@ function ViewTicketPage() {
           </Text>
           <Button
             fullWidth
-            onClick={() => router.push('/process/help-desk/create-ticket')}
+            onClick={() => router.push(canManageTickets ? getOperatorPanelUrl() : getRequesterPanelUrl())}
             leftSection={<IconArrowLeft size={16} />}
           >
             Volver al Panel de Casos
@@ -1264,9 +1265,7 @@ function ViewTicketPage() {
                       <Text size='sm' c={ticket.email?.trim() ? 'dimmed' : 'orange.7'}>
                         {ticket.email?.trim()
                           ? `Se enviará a: ${ticket.email.trim()}`
-                          : isAdmin
-                            ? 'Configure el correo en Contacto del solicitante antes de guardar la nota.'
-                            : 'El caso aún no tiene un correo de contacto configurado.'}
+                          : 'Configure el correo en Contacto del solicitante antes de guardar la nota.'}
                       </Text>
                     )}
                     <Group justify='flex-end'>
@@ -1303,7 +1302,7 @@ function ViewTicketPage() {
                       <IconCheck size={18} className='text-green-6' />
                       Resolución del Caso
                     </Title>
-                    {!isTicketResolved() && isAdmin && (
+                    {!isTicketResolved() && canManageTickets && (
                       <ActionIcon variant='subtle' onClick={() => setShowResolution(!showResolution)}>
                         {showResolution ? <IconX size={16} /> : <IconCheck size={16} />}
                       </ActionIcon>
@@ -1327,7 +1326,7 @@ function ViewTicketPage() {
                     </Card>
                   )}
 
-                  {!isTicketResolved() && isAdmin && showResolution && (
+                  {!isTicketResolved() && canManageTickets && showResolution && (
                     <Stack>
                       <Select
                         label='Estado del caso'
@@ -1607,7 +1606,7 @@ function ViewTicketPage() {
           <FileUpload
             ticketId={ticket.id_case}
             onFilesChange={setAttachedFiles}
-            disabled={!isAdmin || isTicketResolved()}
+            disabled={!canManageTickets || isTicketResolved()}
           />
         </Card>
 
@@ -1632,7 +1631,7 @@ function ViewTicketPage() {
 
           <Group justify='space-between'>
             <Group>
-              {isAdmin &&
+              {canManageTickets &&
                 (!isEditing ? (
                   <Button
                     color='blue'
@@ -1662,7 +1661,7 @@ function ViewTicketPage() {
                     </Button>
                   </>
                 ))}
-              {isAdmin && isTicketResolved() && (
+              {canManageTickets && isTicketResolved() && (
                 <Text size='sm' color='dimmed'>
                   Los casos resueltos no se pueden modificar.
                 </Text>
@@ -1672,13 +1671,11 @@ function ViewTicketPage() {
             <Button
               variant='outline'
               onClick={() =>
-                router.push(
-                  isAdmin ? '/process/help-desk/create-ticket' : '/process/help-desk/my-tickets'
-                )
+                router.push(canManageTickets ? getOperatorPanelUrl() : getRequesterPanelUrl())
               }
               leftSection={<IconArrowLeft size={16} />}
             >
-              {isAdmin ? 'Volver al Panel' : 'Volver a Mis tickets'}
+              {canManageTickets ? 'Volver al Panel' : 'Volver a Mis tickets'}
             </Button>
           </Group>
         </Card>

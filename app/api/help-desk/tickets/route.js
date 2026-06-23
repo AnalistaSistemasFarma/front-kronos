@@ -1,6 +1,12 @@
 import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig';
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../auth/[...nextauth]/route';
+import {
+  canViewHelpDeskCase,
+  checkHelpDeskOperatorAccess,
+} from '../../../../lib/help-desk/access';
 import {
   REQUESTER_EMAIL_FILTER_SQL,
   REQUESTER_EMAIL_SQL,
@@ -10,10 +16,16 @@ import {
   REQUESTER_SEARCH_FILTER_SQL,
 } from '../../../../lib/help-desk/requesterSql';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req) {
   try {
-    const pool = await sql.connect(sqlConfig);
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
 
+    const userEmail = session.user.email.trim();
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
     const priority = searchParams.get('priority');
@@ -26,6 +38,26 @@ export async function GET(req) {
     const requester_id = searchParams.get('requester_id');
     const requester_email = searchParams.get('requester_email');
     const requester_search = searchParams.get('requester_search');
+
+    const isOperator = await checkHelpDeskOperatorAccess(userEmail);
+
+    if (id) {
+      const caseId = Number(id);
+      if (!Number.isFinite(caseId)) {
+        return NextResponse.json({ error: 'ID de caso inválido' }, { status: 400 });
+      }
+      const allowed = await canViewHelpDeskCase(userEmail, caseId);
+      if (!allowed) {
+        return NextResponse.json({ error: 'Sin permiso para ver este caso' }, { status: 403 });
+      }
+    } else if (!isOperator) {
+      return NextResponse.json(
+        { error: 'Solo el equipo de mesa de ayuda puede listar todos los casos' },
+        { status: 403 }
+      );
+    }
+
+    const pool = await sql.connect(sqlConfig);
 
     const hasRequesterFilter = Boolean(requester_id || requester_email || requester_search);
 
