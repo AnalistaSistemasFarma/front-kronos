@@ -3,7 +3,6 @@ import sqlConfig from '../../../../dbconfig';
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
-import { checkHelpDeskRequesterAccess } from '../../../../lib/help-desk/access';
 import {
   MY_TICKETS_EMAIL_SEARCH_SQL,
   MY_TICKETS_SCOPE_SQL,
@@ -27,15 +26,6 @@ export async function GET(req) {
     }
 
     const userEmail = session.user.email.trim();
-
-    const canAccess = await checkHelpDeskRequesterAccess(userEmail);
-    if (!canAccess) {
-      return NextResponse.json(
-        { error: 'No tienes asignado el subproceso Mis tickets' },
-        { status: 403 }
-      );
-    }
-
     const { searchParams } = new URL(req.url);
     const priority = searchParams.get('priority');
     const status = searchParams.get('status');

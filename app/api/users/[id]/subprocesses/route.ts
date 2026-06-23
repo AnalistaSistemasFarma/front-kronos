@@ -2,12 +2,6 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { checkAdminPrivileges } from '../../../../../lib/access-control';
 import { prisma } from '../../../../../lib/prisma';
-import {
-  consolidateDuplicateCompanyUsers,
-  getUserCompanyUsersWithSubprocesses,
-  groupAssignmentsByCompany,
-  normalizeSubprocessIds,
-} from '../../../../../lib/process/subprocessAssignments';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 
 // GET /api/users/[id]/subprocesses - Fetch assigned subprocesses for a user
@@ -24,13 +18,42 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     const { id: userId } = await params;
-    const companyUsers = await getUserCompanyUsersWithSubprocesses(userId);
-    const assignedSubprocesses = groupAssignmentsByCompany(companyUsers);
 
-    return NextResponse.json(
-      { assignedSubprocesses },
-      { headers: { 'Cache-Control': 'no-store, max-age=0' } }
-    );
+    // Get all company users for this user
+    const companyUsers = await prisma.companyUser.findMany({
+      where: {
+        id_user: userId,
+      },
+      include: {
+        company: true,
+        subprocesses: {
+          include: {
+            subprocess: {
+              include: {
+                process: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Transform the data to group by company
+    const assignedSubprocesses = companyUsers.map((cu) => ({
+      companyId: cu.id_company,
+      companyName: cu.company.company,
+      companyUserId: cu.id_company_user,
+      subprocesses: cu.subprocesses.map((suc) => ({
+        id: suc.id_subprocess_user_company,
+        subprocessId: suc.id_subprocess,
+        subprocessName: suc.subprocess.subprocess,
+        subprocessUrl: suc.subprocess.subprocess_url,
+        processId: suc.subprocess.id_process,
+        processName: suc.subprocess.process.process,
+      })),
+    }));
+
+    return NextResponse.json({ assignedSubprocesses });
   } catch (error) {
     console.error('Error fetching user subprocesses:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -51,14 +74,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const { id: userId } = await params;
-    const body = await request.json();
-    const companyId = Number(body.companyId);
-    const desiredSubprocessIds = normalizeSubprocessIds(body.subprocessIds);
+    const { companyId, subprocessIds } = await request.json();
 
-    if (!Number.isFinite(companyId)) {
-      return NextResponse.json({ error: 'Company ID is required' }, { status: 400 });
+    if (!companyId || !Array.isArray(subprocessIds)) {
+      return NextResponse.json(
+        { error: 'Company ID and subprocess IDs array are required' },
+        { status: 400 }
+      );
     }
 
+    // Verify user exists
     const user = await prisma.user.findUnique({
       where: { id: userId },
     });
@@ -67,79 +92,72 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    await consolidateDuplicateCompanyUsers(userId);
-
-    let companyUsers = await prisma.companyUser.findMany({
+    // Get or create CompanyUser
+    let companyUser = await prisma.companyUser.findFirst({
       where: {
         id_user: userId,
         id_company: companyId,
       },
-      orderBy: { id_company_user: 'asc' },
     });
 
-    if (companyUsers.length === 0) {
-      const created = await prisma.companyUser.create({
+    if (!companyUser) {
+      companyUser = await prisma.companyUser.create({
         data: {
           id_user: userId,
           id_company: companyId,
         },
       });
-      companyUsers = [created];
     }
 
-    const primaryCompanyUser = companyUsers[0];
-    const allCompanyUserIds = companyUsers.map((cu) => cu.id_company_user);
-
+    // Get existing subprocess assignments for this company user
     const existingAssignments = await prisma.subprocessUserCompany.findMany({
       where: {
-        id_company_user: { in: allCompanyUserIds },
+        id_company_user: companyUser.id_company_user,
       },
-      select: { id_subprocess: true },
     });
 
-    const existingSubprocessIds = [...new Set(existingAssignments.map((a) => a.id_subprocess))];
-    const desiredSet = new Set(desiredSubprocessIds);
-    const removed = existingSubprocessIds.filter((id) => !desiredSet.has(id));
-    const added = desiredSubprocessIds.filter((id) => !existingSubprocessIds.includes(id));
+    const existingSubprocessIds = existingAssignments.map((a) => a.id_subprocess);
 
-    await prisma.$transaction(async (tx) => {
-      await tx.subprocessUserCompany.deleteMany({
+    // Determine which subprocesses to add and remove
+    const toAdd = subprocessIds.filter((id) => !existingSubprocessIds.includes(id));
+    const toRemove = existingSubprocessIds.filter((id) => !subprocessIds.includes(id));
+
+    // Remove unassigned subprocesses
+    if (toRemove.length > 0) {
+      await prisma.subprocessUserCompany.deleteMany({
         where: {
-          id_company_user: { in: allCompanyUserIds },
+          id_company_user: companyUser.id_company_user,
+          id_subprocess: {
+            in: toRemove,
+          },
         },
       });
+    }
 
-      if (desiredSubprocessIds.length > 0) {
-        await tx.subprocessUserCompany.createMany({
-          data: desiredSubprocessIds.map((subprocessId) => ({
-            id_company_user: primaryCompanyUser.id_company_user,
-            id_subprocess: subprocessId,
-          })),
-        });
-      }
+    // Add new subprocess assignments
+    if (toAdd.length > 0) {
+      await prisma.subprocessUserCompany.createMany({
+        data: toAdd.map((subprocessId) => ({
+          id_company_user: companyUser.id_company_user,
+          id_subprocess: subprocessId,
+        })),
+      });
+    }
 
-      if (allCompanyUserIds.length > 1) {
-        await tx.companyUser.deleteMany({
-          where: {
-            id_company_user: { in: allCompanyUserIds.slice(1) },
-          },
-        });
-      }
-    });
-
+    // Log the action
     await prisma.userAuditLog.create({
       data: {
         user_id: userId,
         action: 'UPDATE_SUBPROCESSES',
         performed_by: session.user.email,
-        details: `Company ${companyId}: assigned ${added.length}, removed ${removed.length}. Final: [${desiredSubprocessIds.join(', ')}]`,
+        details: `Assigned ${toAdd.length} subprocess(es), removed ${toRemove.length} subprocess(es) for company ${companyId}`,
       },
     });
 
     return NextResponse.json({
       message: 'Subprocesses updated successfully',
-      added: added.length,
-      removed: removed.length,
+      added: toAdd.length,
+      removed: toRemove.length,
     });
   } catch (error) {
     console.error('Error assigning subprocesses:', error);
@@ -165,31 +183,32 @@ export async function DELETE(
 
     const { id: userId } = await params;
     const { searchParams } = new URL(request.url);
-    const companyId = Number(searchParams.get('companyId'));
+    const companyId = searchParams.get('companyId');
 
-    if (!Number.isFinite(companyId)) {
+    if (!companyId) {
       return NextResponse.json({ error: 'Company ID is required' }, { status: 400 });
     }
 
-    await consolidateDuplicateCompanyUsers(userId);
-
-    const companyUsers = await prisma.companyUser.findMany({
+    // Find the company user
+    const companyUser = await prisma.companyUser.findFirst({
       where: {
         id_user: userId,
-        id_company: companyId,
+        id_company: parseInt(companyId),
       },
     });
 
-    if (companyUsers.length === 0) {
+    if (!companyUser) {
       return NextResponse.json({ error: 'Company user not found' }, { status: 404 });
     }
 
+    // Delete all subprocess assignments
     const result = await prisma.subprocessUserCompany.deleteMany({
       where: {
-        id_company_user: { in: companyUsers.map((cu) => cu.id_company_user) },
+        id_company_user: companyUser.id_company_user,
       },
     });
 
+    // Log the action
     await prisma.userAuditLog.create({
       data: {
         user_id: userId,

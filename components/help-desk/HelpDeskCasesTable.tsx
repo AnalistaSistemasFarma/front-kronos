@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { Badge, Group, Table, Text } from '@mantine/core';
 import { IconTicket, IconUser } from '@tabler/icons-react';
 import type { HelpDeskCaseListItem } from '../../lib/help-desk/types';
+import { resolveContactEmail } from '../../lib/help-desk/contactEmail';
 import { formatTicketDateIso } from '../../lib/help-desk/dates';
 import { getPriorityColor, getPriorityIcon, getStatusColor } from '../../lib/help-desk/ticketDisplay';
 
@@ -23,7 +24,8 @@ export function HelpDeskCasesTable({
   const router = useRouter();
 
   const openTicket = (ticket: HelpDeskCaseListItem) => {
-    sessionStorage.setItem('selectedTicket', JSON.stringify(ticket));
+    const normalized = { ...ticket, email: resolveContactEmail(ticket) };
+    sessionStorage.setItem('selectedTicket', JSON.stringify(normalized));
     sessionStorage.setItem('ticketsList', JSON.stringify(tickets));
     router.push(`/process/help-desk/view-ticket?id=${ticket.id_case}`);
   };

@@ -57,8 +57,12 @@ import {
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
-import { useHelpDeskAccess } from '../../../../../components/help-desk/hooks/useHelpDeskAccess';
-import { getOperatorPanelUrl, getRequesterPanelUrl } from '../../../../../lib/help-desk/subprocessRoles';
+import { hasAdminRole } from '../../../../../lib/access-control';
+import { getRequesterPanelUrl } from '../../../../../lib/help-desk/subprocessRoles';
+import {
+  CONTACT_EMAIL_PLACEHOLDER,
+  resolveContactEmail,
+} from '../../../../../lib/help-desk/contactEmail';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 
 interface Ticket {
@@ -163,13 +167,11 @@ function normalizeTicketPayload(data: unknown, ticketId?: string): Ticket | null
   }
   if (!raw) return null;
 
-  const storedEmail = typeof raw.email === 'string' ? raw.email.trim() : '';
-  const inferredEmail =
-    typeof raw.requester_email === 'string' ? raw.requester_email.trim() : '';
-
   return {
     ...raw,
-    email: storedEmail || inferredEmail,
+    email: resolveContactEmail(raw),
+    requester_email:
+      typeof raw.requester_email === 'string' ? raw.requester_email.trim() : raw.requester_email,
   };
 }
 
@@ -220,7 +222,11 @@ function ViewTicketPage() {
   } | null>(null);
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
-  const { isOperator: canManageTickets } = useHelpDeskAccess();
+  const isAdmin = hasAdminRole(session?.user?.role);
+  const ticketsPanelUrl = '/process/help-desk/create-ticket';
+  const cameFromTicketsPanel = ticketsList.length > 0;
+  const backPanelUrl =
+    cameFromTicketsPanel || isAdmin ? ticketsPanelUrl : getRequesterPanelUrl();
   const [userId, setUserId] = useState<number | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
@@ -230,15 +236,16 @@ function ViewTicketPage() {
   });
 
   useEffect(() => {
-    if (!canManageTickets && isEditing) {
+    if (!isAdmin && isEditing) {
       setIsEditing(false);
     }
-  }, [canManageTickets, isEditing]);
+  }, [isAdmin, isEditing]);
 
   const navigateToPreviousTicket = () => {
     if (currentTicketIndex !== null && currentTicketIndex > 0) {
       const previousIndex = currentTicketIndex - 1;
-      const previousTicket = ticketsList[previousIndex];
+      const previousTicket =
+        normalizeTicketPayload(ticketsList[previousIndex]) ?? ticketsList[previousIndex];
       setTicket(previousTicket);
       setOriginalTicket(previousTicket);
       setCurrentTicketIndex(previousIndex);
@@ -250,7 +257,7 @@ function ViewTicketPage() {
   const navigateToNextTicket = () => {
     if (currentTicketIndex !== null && currentTicketIndex < ticketsList.length - 1) {
       const nextIndex = currentTicketIndex + 1;
-      const nextTicket = ticketsList[nextIndex];
+      const nextTicket = normalizeTicketPayload(ticketsList[nextIndex]) ?? ticketsList[nextIndex];
       setTicket(nextTicket);
       setOriginalTicket(nextTicket);
       setCurrentTicketIndex(nextIndex);
@@ -326,15 +333,8 @@ function ViewTicketPage() {
         });
     };
 
-    // El ?id= de la URL manda (p. ej. desde notificaciones). sessionStorage solo si coincide.
+    // Siempre cargar desde API cuando hay ?id= (evita caché con correos inferidos).
     if (urlTicketId && !Number.isNaN(urlTicketId)) {
-      if (storedTicketRaw) {
-        const storedTicket = JSON.parse(storedTicketRaw) as Ticket;
-        if (storedTicket.id_case === urlTicketId) {
-          loadTicketFromStorage(storedTicket);
-          return;
-        }
-      }
       fetchTicketById(String(urlTicketId));
       return;
     }
@@ -373,12 +373,10 @@ function ViewTicketPage() {
   useEffect(() => {
     if (ticket) {
       fetchOptions();
-      if (canManageTickets) {
-        fetchSubprocessUsers();
-      }
+      fetchSubprocessUsers();
       fetchNotes();
     }
-  }, [ticket, canManageTickets]);
+  }, [ticket]);
 
   useEffect(() => {
     if (ticket?.id_category && !isEditing) {
@@ -492,8 +490,10 @@ function ViewTicketPage() {
   };
 
   const fetchSubprocessUsers = async () => {
+    console.log('Frontend - fetchSubprocessUsers called');
     try {
       const response = await fetch('/api/help-desk/technical');
+      console.log('Frontend - fetchSubprocessUsers response status:', response.status);
 
       if (response.ok) {
         const data: {
@@ -503,18 +503,18 @@ function ViewTicketPage() {
           name: string;
         }[] = await response.json();
 
+        console.log('Frontend - fetchSubprocessUsers received data:', data);
+
         setTechnicals(
           data.map((item) => ({
             value: item.id_subprocess_user_company.toString(),
             label: item.name,
           }))
         );
-      } else if (response.status !== 499) {
-        console.error('fetchSubprocessUsers failed:', response.status);
+      } else {
+        console.error('Frontend - fetchSubprocessUsers failed with status:', response.status);
       }
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
-      if (error instanceof Error && error.message === 'aborted') return;
       console.error('Error fetching subprocess users:', error);
     }
   };
@@ -742,7 +742,7 @@ function ViewTicketPage() {
   };
 
   const handleStartEditing = () => {
-    if (!canManageTickets) return;
+    if (!isAdmin) return;
     setIsEditing(true);
     setUpdateMessage(null);
   };
@@ -917,7 +917,7 @@ function ViewTicketPage() {
   };
 
   const handleUpdateCase = async () => {
-    if (!canManageTickets) return;
+    if (!isAdmin) return;
     if (!validateFields()) {
       return;
     }
@@ -1086,7 +1086,7 @@ function ViewTicketPage() {
 
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
-    { title: 'Mesa de Ayuda', href: canManageTickets ? getOperatorPanelUrl() : getRequesterPanelUrl() },
+    { title: 'Mesa de Ayuda', href: '/process/help-desk/create-ticket' },
     { title: 'Detalle del Caso', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (
@@ -1124,7 +1124,7 @@ function ViewTicketPage() {
           </Alert>
           <Button
             fullWidth
-            onClick={() => router.push(canManageTickets ? getOperatorPanelUrl() : getRequesterPanelUrl())}
+            onClick={() => router.push('/process/help-desk/create-ticket')}
             leftSection={<IconArrowLeft size={16} />}
           >
             Volver al Panel de Casos
@@ -1143,7 +1143,7 @@ function ViewTicketPage() {
           </Text>
           <Button
             fullWidth
-            onClick={() => router.push(canManageTickets ? getOperatorPanelUrl() : getRequesterPanelUrl())}
+            onClick={() => router.push('/process/help-desk/create-ticket')}
             leftSection={<IconArrowLeft size={16} />}
           >
             Volver al Panel de Casos
@@ -1337,7 +1337,9 @@ function ViewTicketPage() {
                       <Text size='sm' c={ticket.email?.trim() ? 'dimmed' : 'orange.7'}>
                         {ticket.email?.trim()
                           ? `Se enviará a: ${ticket.email.trim()}`
-                          : 'Configure el correo en Contacto del solicitante antes de guardar la nota.'}
+                          : isAdmin
+                            ? 'Configure el correo en Contacto del solicitante antes de guardar la nota.'
+                            : 'El caso aún no tiene un correo de contacto configurado.'}
                       </Text>
                     )}
                     <Group justify='flex-end'>
@@ -1374,7 +1376,7 @@ function ViewTicketPage() {
                       <IconCheck size={18} className='text-green-6' />
                       Resolución del Caso
                     </Title>
-                    {!isTicketResolved() && canManageTickets && (
+                    {!isTicketResolved() && isAdmin && (
                       <ActionIcon variant='subtle' onClick={() => setShowResolution(!showResolution)}>
                         {showResolution ? <IconX size={16} /> : <IconCheck size={16} />}
                       </ActionIcon>
@@ -1398,7 +1400,7 @@ function ViewTicketPage() {
                     </Card>
                   )}
 
-                  {!isTicketResolved() && canManageTickets && showResolution && (
+                  {!isTicketResolved() && isAdmin && showResolution && (
                     <Stack>
                       <Select
                         label='Estado del caso'
@@ -1591,7 +1593,7 @@ function ViewTicketPage() {
 
                 <TextInput
                   label='Correo electrónico'
-                  placeholder='correo@empresa.com'
+                  placeholder={CONTACT_EMAIL_PLACEHOLDER}
                   type='email'
                   value={ticket.email ?? ''}
                   onChange={(e) => {
@@ -1678,7 +1680,7 @@ function ViewTicketPage() {
           <FileUpload
             ticketId={ticket.id_case}
             onFilesChange={setAttachedFiles}
-            disabled={!canManageTickets || isTicketResolved()}
+            disabled={!isAdmin || isTicketResolved()}
           />
         </Card>
 
@@ -1703,7 +1705,7 @@ function ViewTicketPage() {
 
           <Group justify='space-between'>
             <Group>
-              {canManageTickets &&
+              {isAdmin &&
                 (!isEditing ? (
                   <Button
                     color='blue'
@@ -1733,7 +1735,7 @@ function ViewTicketPage() {
                     </Button>
                   </>
                 ))}
-              {canManageTickets && isTicketResolved() && (
+              {isAdmin && isTicketResolved() && (
                 <Text size='sm' color='dimmed'>
                   Los casos resueltos no se pueden modificar.
                 </Text>
@@ -1742,12 +1744,10 @@ function ViewTicketPage() {
 
             <Button
               variant='outline'
-              onClick={() =>
-                router.push(canManageTickets ? getOperatorPanelUrl() : getRequesterPanelUrl())
-              }
+              onClick={() => router.push(backPanelUrl)}
               leftSection={<IconArrowLeft size={16} />}
             >
-              {canManageTickets ? 'Volver al Panel' : 'Volver a Mis tickets'}
+              {cameFromTicketsPanel || isAdmin ? 'Volver al Panel' : 'Volver a Mis tickets'}
             </Button>
           </Group>
         </Card>

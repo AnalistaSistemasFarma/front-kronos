@@ -1,2 +1,6 @@
-/** URL registrada en BD para "Mis Tickets" (casos creados por el usuario). */
-export { default } from '../my-tickets/page';
+import { redirect } from 'next/navigation';
+
+/** Ruta legacy en BD → mis tickets del usuario */
+export default function AssignedTicketsRedirectPage() {
+  redirect('/process/help-desk/my-tickets');
+}

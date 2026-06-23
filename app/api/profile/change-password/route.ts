@@ -1,8 +1,10 @@
 import bcrypt from 'bcryptjs';
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '../../../../lib/prisma';
+import { PrismaClient } from '../../../../app/generated/prisma';
 import { authOptions } from '../../auth/[...nextauth]/route';
+
+const prisma = new PrismaClient();
 
 // Simple in-memory rate limiter
 const rateLimitMap = new Map<string, { attempts: number; resetTime: number }>();

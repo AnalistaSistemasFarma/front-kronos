@@ -1,7 +1,9 @@
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
-import { prisma } from '../../../lib/prisma';
+import { PrismaClient } from '../../../app/generated/prisma';
 import { authOptions } from '../auth/[...nextauth]/route';
+
+const prisma = new PrismaClient();
 
 // Helper function to check if user has admin permissions
 async function checkAdminPermission(userEmail: string): Promise<boolean> {

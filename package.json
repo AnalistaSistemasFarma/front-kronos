@@ -3,11 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "next dev -p 8080 --turbopack",
     "build": "next build --turbopack",
     "start": "next start -p 3003",
-    "lint": "eslint",
-    "verify:deploy": "node scripts/verify-deployment-changes.cjs"
+    "lint": "eslint"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",

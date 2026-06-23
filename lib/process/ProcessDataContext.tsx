@@ -10,9 +10,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { SUBPROCESS_ASSIGNMENTS_CHANGED } from './subprocessAssignmentsEvents';
 
 export interface ProcessRecord {
   id_process: number;
@@ -44,7 +42,6 @@ const ProcessDataContext = createContext<ProcessDataContextValue | null>(null);
 
 export function ProcessDataProvider({ children }: { children: ReactNode }) {
   const { status } = useSession();
-  const pathname = usePathname();
   const [processes, setProcesses] = useState<ProcessRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -62,7 +59,7 @@ export function ProcessDataProvider({ children }: { children: ReactNode }) {
       }
       setError(null);
 
-      const response = await fetch('/api/processes', { cache: 'no-store' });
+      const response = await fetch('/api/processes');
       if (!response.ok) {
         throw new Error('Error al obtener los procesos');
       }
@@ -83,26 +80,6 @@ export function ProcessDataProvider({ children }: { children: ReactNode }) {
       void fetchProcesses();
     }
   }, [status, fetchProcesses]);
-
-  useEffect(() => {
-    if (status !== 'authenticated') return;
-    if (pathname !== '/process') return;
-    void fetchProcesses({ silent: loaded.current });
-  }, [pathname, status, fetchProcesses]);
-
-  useEffect(() => {
-    if (status !== 'authenticated') return;
-    if (pathname !== '/process') return;
-
-    const refresh = () => void fetchProcesses({ silent: true });
-    const onAssignmentsChanged = () => refresh();
-
-    window.addEventListener(SUBPROCESS_ASSIGNMENTS_CHANGED, onAssignmentsChanged);
-
-    return () => {
-      window.removeEventListener(SUBPROCESS_ASSIGNMENTS_CHANGED, onAssignmentsChanged);
-    };
-  }, [pathname, status, fetchProcesses]);
 
   const value = useMemo(
     () => ({ processes, loading, refreshing, error, fetchProcesses }),
