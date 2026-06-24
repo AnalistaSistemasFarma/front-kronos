@@ -61,8 +61,9 @@ import { useHelpDeskAccess } from '../../../../../components/help-desk/hooks/use
 import { getOperatorPanelUrl, getRequesterPanelUrl } from '../../../../../lib/help-desk/subprocessRoles';
 import {
   CONTACT_EMAIL_PLACEHOLDER,
-  resolveContactEmail,
+  getCaseContactEmail,
 } from '../../../../../lib/help-desk/contactEmail';
+import { syncTicketContactEmailInSession } from '../../../../../lib/help-desk/ticketsBoardStorage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 
 interface Ticket {
@@ -169,7 +170,7 @@ function normalizeTicketPayload(data: unknown, ticketId?: string): Ticket | null
 
   return {
     ...raw,
-    email: resolveContactEmail(raw),
+    email: getCaseContactEmail(raw),
     requester_email:
       typeof raw.requester_email === 'string' ? raw.requester_email.trim() : raw.requester_email,
   };
@@ -491,7 +492,7 @@ function ViewTicketPage() {
     }
   };
 
-  const fetchSubprocessUsers = async () => {
+  const fetchSubprocessUsers = async (retry = 0) => {
     try {
       const response = await fetch('/api/help-desk/technical');
 
@@ -509,6 +510,9 @@ function ViewTicketPage() {
             label: item.name,
           }))
         );
+      } else if (response.status === 500 && retry < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return fetchSubprocessUsers(retry + 1);
       } else if (response.status !== 499) {
         console.error('fetchSubprocessUsers failed:', response.status);
       }
@@ -937,6 +941,17 @@ function ViewTicketPage() {
       setOriginalTicket(ticket ? { ...ticket, email: ticket.email?.trim() || '' } : null);
       setIsEditing(false);
 
+      if (ticket?.id_case) {
+        syncTicketContactEmailInSession(ticket.id_case, ticket.email);
+        setTicketsList((prev) =>
+          prev.map((item) =>
+            item.id_case === ticket.id_case
+              ? { ...item, email: ticket.email?.trim() || undefined }
+              : item
+          )
+        );
+      }
+
       if (attachedFiles.length > 0) {
         setTimeout(() => fetchFolderContents(), 2000);
       }
@@ -1014,7 +1029,7 @@ function ViewTicketPage() {
 
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
-    { title: 'Mesa de Ayuda', href: canManageTickets ? getOperatorPanelUrl() : getRequesterPanelUrl() },
+    { title: 'Mesa de Ayuda', href: backPanelUrl },
     { title: 'Detalle del Caso', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (
@@ -1052,7 +1067,7 @@ function ViewTicketPage() {
           </Alert>
           <Button
             fullWidth
-            onClick={() => router.push(canManageTickets ? getOperatorPanelUrl() : getRequesterPanelUrl())}
+            onClick={() => router.push(backPanelUrl)}
             leftSection={<IconArrowLeft size={16} />}
           >
             Volver al Panel de Casos
@@ -1071,7 +1086,7 @@ function ViewTicketPage() {
           </Text>
           <Button
             fullWidth
-            onClick={() => router.push(canManageTickets ? getOperatorPanelUrl() : getRequesterPanelUrl())}
+            onClick={() => router.push(backPanelUrl)}
             leftSection={<IconArrowLeft size={16} />}
           >
             Volver al Panel de Casos

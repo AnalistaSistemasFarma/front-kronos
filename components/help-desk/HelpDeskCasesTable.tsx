@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { Badge, Group, Table, Text } from '@mantine/core';
 import { IconTicket, IconUser } from '@tabler/icons-react';
 import type { HelpDeskCaseListItem } from '../../lib/help-desk/types';
-import { resolveContactEmail } from '../../lib/help-desk/contactEmail';
+import { getCaseContactEmail, getCaseContactEmailDisplay } from '../../lib/help-desk/contactEmail';
 import { formatTicketDateIso } from '../../lib/help-desk/dates';
 import { getPriorityColor, getPriorityIcon, getStatusColor } from '../../lib/help-desk/ticketDisplay';
 
@@ -24,7 +24,8 @@ export function HelpDeskCasesTable({
   const router = useRouter();
 
   const openTicket = (ticket: HelpDeskCaseListItem) => {
-    const normalized = { ...ticket, email: resolveContactEmail(ticket) };
+    const contactEmail = getCaseContactEmail(ticket);
+    const normalized = { ...ticket, email: contactEmail || undefined };
     sessionStorage.setItem('selectedTicket', JSON.stringify(normalized));
     sessionStorage.setItem('ticketsList', JSON.stringify(tickets));
     router.push(`/process/help-desk/view-ticket?id=${ticket.id_case}`);
@@ -59,7 +60,11 @@ export function HelpDeskCasesTable({
               </Table.Td>
             </Table.Tr>
           ) : (
-            tickets.map((ticket) => (
+            tickets.map((ticket) => {
+              const contactEmail = getCaseContactEmail(ticket);
+              const contactEmailLabel = getCaseContactEmailDisplay(ticket);
+
+              return (
               <Table.Tr
                 key={ticket.id_case}
                 className='cursor-pointer hover:bg-gray-50 transition-colors'
@@ -81,8 +86,14 @@ export function HelpDeskCasesTable({
                       <Text size='sm' fw={500} className='max-w-[200px] truncate'>
                         {ticket.requester_name || '—'}
                       </Text>
-                      <Text size='xs' c='dimmed' className='max-w-[200px] truncate'>
-                        {ticket.requester_email || '—'}
+                      <Text
+                        size='xs'
+                        c='dimmed'
+                        fs={contactEmail ? undefined : 'italic'}
+                        className='max-w-[200px] truncate'
+                        title={contactEmailLabel}
+                      >
+                        {contactEmailLabel}
                       </Text>
                     </div>
                   </Table.Td>
@@ -113,7 +124,8 @@ export function HelpDeskCasesTable({
                   </Group>
                 </Table.Td>
               </Table.Tr>
-            ))
+            );
+            })
           )}
         </Table.Tbody>
       </Table>

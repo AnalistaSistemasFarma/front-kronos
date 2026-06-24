@@ -25,6 +25,7 @@ import {
   Badge,
 } from '@mantine/core';
 import { HelpDeskCasesTable } from '../help-desk/HelpDeskCasesTable';
+import { normalizeCaseListItem } from '../../lib/help-desk/contactEmail';
 import type { HelpDeskCaseListItem } from '../../lib/help-desk/types';
 import {
   IconAlertCircle,
@@ -95,7 +96,8 @@ export function MyTicketsBoard() {
       if (!response.ok) throw new Error('Error al cargar tus tickets');
 
       const data: MyTicketsResponse = await response.json();
-      setTickets(Array.isArray(data.tickets) ? data.tickets : []);
+      const rawTickets = Array.isArray(data.tickets) ? data.tickets : [];
+      setTickets(rawTickets.map((ticket) => normalizeCaseListItem(ticket)));
       setProfile(data.user ?? null);
       setCounts(data.counts ?? null);
       setLoaded(true);

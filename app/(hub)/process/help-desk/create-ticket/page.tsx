@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import Link from 'next/link';
@@ -45,6 +45,7 @@ import {
   type TicketsBoardFilters,
 } from '../../../../../lib/help-desk/ticketsBoardStorage';
 import type { HelpDeskCaseListItem } from '../../../../../lib/help-desk/types';
+import { normalizeCaseListItem } from '../../../../../lib/help-desk/contactEmail';
 import {
   IconAlertCircle,
   IconChevronRight,
@@ -76,6 +77,7 @@ interface ConsultResponse {
 function TicketsBoard() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const subprocessId = searchParams.get('subprocess_id');
   const { isOperator, isRequester, loading: loadingHelpDeskAccess } = useHelpDeskAccess();
@@ -109,6 +111,7 @@ function TicketsBoard() {
   const scrollRestoredRef = useRef(false);
   const initialDataLoadedRef = useRef(false);
   const skipFilterFetchRef = useRef(true);
+  const previousPathRef = useRef<string | null>(null);
   const filtersRef = useRef(filters);
   const searchRef = useRef(debouncedSearch);
 
@@ -155,7 +158,6 @@ function TicketsBoard() {
     const saved = loadTicketsBoardState();
     if (saved) {
       setFilters(saved.filters);
-      setFiltersExpanded(saved.filtersExpanded);
       if (saved.tickets?.length) {
         setTickets(saved.tickets);
         setInitialLoading(false);
@@ -419,7 +421,10 @@ function TicketsBoard() {
       }
 
       const data = await response.json();
-      setTickets(data);
+      const normalizedTickets = Array.isArray(data)
+        ? data.map((ticket: Ticket) => normalizeCaseListItem(ticket))
+        : data;
+      setTickets(normalizedTickets);
       setError(null);
       hasLoadedOnce.current = true;
 
@@ -428,7 +433,7 @@ function TicketsBoard() {
           filters: activeFilters,
           filtersExpanded,
           scrollY: window.scrollY,
-          tickets: data,
+          tickets: normalizedTickets,
         });
       }
     } catch (err) {
@@ -458,6 +463,19 @@ function TicketsBoard() {
     debouncedSearch,
     fetchTickets,
   ]);
+
+  useEffect(() => {
+    if (!boardHydrated || !initialDataLoadedRef.current) return;
+    if (!pathname.includes('/help-desk/create-ticket')) return;
+
+    const previous = previousPathRef.current;
+    previousPathRef.current = pathname;
+
+    if (previous && previous !== pathname && previous.includes('/help-desk/view-ticket')) {
+      setFiltersExpanded(false);
+      void fetchTickets({ silent: true });
+    }
+  }, [pathname, boardHydrated, fetchTickets]);
 
   const handleFilterChange = (field: keyof TicketsBoardFilters, value: string) => {
     setFilters((prev) => ({

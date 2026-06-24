@@ -11,7 +11,9 @@
   requester?: number | string;
   requester_name?: string;
   requester_email?: string;
+  /** c.email normalizado desde API (contact_email). */
   email?: string;
+  contact_email?: string | null;
   case_type?: string;
   description?: string;
   category?: string;
