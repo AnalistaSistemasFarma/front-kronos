@@ -1015,42 +1015,6 @@ function RequestBoard() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder style={{ backgroundColor: 'var(--mantine-color-gray-light)' }}>
-                <Group>
-                  <IconProgress size={24} style={{ color: 'var(--mantine-color-dimmed)' }} />
-                  <div>
-                    <Text size='xs' c='blue.6'>
-                      En Borrador
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {
-                        workFlows.filter((t) => t.status_process?.toLowerCase() === 'en borrador')
-                          .length
-                      }
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder style={{ backgroundColor: 'var(--mantine-color-yellow-light)' }}>
-                <Group>
-                  <IconProgress size={24} className='text-yellow-500' />
-                  <div>
-                    <Text size='xs' c='blue.6'>
-                      Por Autorizar
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {
-                        workFlows.filter((t) => t.status_process?.toLowerCase() === 'por autorizar')
-                          .length
-                      }
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
               <Card p='md' radius='md' withBorder style={{ backgroundColor: 'var(--mantine-color-green-light)' }}>
                 <Group>
                   <IconCheck size={24} className='text-green-600' />
