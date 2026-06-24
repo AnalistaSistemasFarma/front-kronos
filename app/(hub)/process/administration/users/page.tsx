@@ -35,6 +35,7 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
+import { notifySubprocessAssignmentsChanged } from '@/lib/process/subprocessAssignmentsEvents';
 
 interface User {
   id: string;
@@ -325,36 +326,38 @@ function UserManagement() {
     setSubprocessSearch('');
 
     try {
-      // Fetch all subprocesses
-      const subprocessesResponse = await fetch('/api/subprocesses');
+      const [subprocessesResponse, companiesResponse, assignedResponse] = await Promise.all([
+        fetch('/api/subprocesses', { cache: 'no-store' }),
+        fetch('/api/companies', { cache: 'no-store' }),
+        fetch(`/api/users/${user.id}/subprocesses`, { cache: 'no-store' }),
+      ]);
+
+      let companiesData: Company[] = [];
+      if (companiesResponse.ok) {
+        companiesData = await companiesResponse.json();
+        setCompanies(companiesData);
+      }
+
       if (subprocessesResponse.ok) {
         const { subprocesses } = await subprocessesResponse.json();
         setAllSubprocesses(subprocesses);
       }
 
-      // Fetch companies
-      const companiesResponse = await fetch('/api/companies');
-      if (companiesResponse.ok) {
-        const companiesData = await companiesResponse.json();
-        setCompanies(companiesData);
-      }
-
-      // Fetch user's assigned subprocesses
-      const assignedResponse = await fetch(`/api/users/${user.id}/subprocesses`);
       if (assignedResponse.ok) {
         const { assignedSubprocesses: assigned } = await assignedResponse.json();
         setAssignedSubprocesses(assigned);
 
-        // Set default company if user has assignments
-        if (assigned.length > 0 && companies.length > 0) {
-          setSelectedCompany(assigned[0].companyId.toString());
+        if (assigned.length > 0) {
+          const defaultCompany = assigned[0];
+          setSelectedCompany(defaultCompany.companyId.toString());
           setSelectedSubprocessIds(
-            assigned[0].subprocesses.map((s: { subprocessId: number }) => s.subprocessId)
+            defaultCompany.subprocesses.map((s: { subprocessId: number }) => s.subprocessId)
           );
-        } else if (companies.length > 0) {
-          // Set first company as default if no assignments
-          setSelectedCompany(companies[0].id.toString());
+        } else if (companiesData.length > 0) {
+          setSelectedCompany(companiesData[0].id.toString());
         }
+      } else if (companiesData.length > 0) {
+        setSelectedCompany(companiesData[0].id.toString());
       }
     } catch (error) {
       console.error('Error loading subprocess data:', error);
@@ -408,6 +411,24 @@ function UserManagement() {
     );
   };
 
+  const getTotalAssignedSubprocessCount = () => {
+    const uniqueIds = new Set<number>();
+    for (const company of assignedSubprocesses) {
+      for (const subprocess of company.subprocesses) {
+        uniqueIds.add(subprocess.subprocessId);
+      }
+    }
+    return uniqueIds.size;
+  };
+
+  const getOtherCompanyAssignments = () => {
+    if (!selectedCompany) return [];
+    const companyId = parseInt(selectedCompany, 10);
+    return assignedSubprocesses.filter(
+      (assignment) => assignment.companyId !== companyId && assignment.subprocesses.length > 0
+    );
+  };
+
   const handleSaveSubprocesses = async () => {
     if (!selectedUser || !selectedCompany) {
       toast.error('Por favor seleccione una empresa');
@@ -436,6 +457,24 @@ function UserManagement() {
       toast.success(
         `Subprocesos actualizados: ${result.added} agregados, ${result.removed} removidos`
       );
+
+      const assignedResponse = await fetch(`/api/users/${selectedUser.id}/subprocesses`, {
+        cache: 'no-store',
+      });
+      if (assignedResponse.ok) {
+        const { assignedSubprocesses: assigned } = await assignedResponse.json();
+        setAssignedSubprocesses(assigned);
+        const companyAssignments = assigned.find(
+          (a: AssignedSubprocess) => a.companyId === parseInt(selectedCompany, 10)
+        );
+        setSelectedSubprocessIds(
+          companyAssignments?.subprocesses.map(
+            (s: AssignedSubprocess['subprocesses'][number]) => s.subprocessId
+          ) ?? []
+        );
+      }
+
+      notifySubprocessAssignmentsChanged();
       setSubprocessModalOpened(false);
     } catch (error) {
       console.error('Error saving subprocesses:', error);
@@ -855,15 +894,43 @@ function UserManagement() {
               <Select
                 label='Empresa'
                 placeholder='Seleccione una empresa'
-                data={companies.map((c) => ({
-                  value: c.id.toString(),
-                  label: c.name,
-                }))}
+                data={companies.map((c) => {
+                  const assignment = assignedSubprocesses.find((a) => a.companyId === c.id);
+                  const count = assignment?.subprocesses.length ?? 0;
+                  return {
+                    value: c.id.toString(),
+                    label: count > 0 ? `${c.name} (${count} asignados)` : c.name,
+                  };
+                })}
                 value={selectedCompany}
                 onChange={(value) => handleCompanyChange(value || '')}
                 required
                 disabled={companies.length === 0}
               />
+
+              {getTotalAssignedSubprocessCount() > 0 && (
+                <Alert color='gray' variant='light'>
+                  <div className='text-sm'>
+                    Este usuario tiene <strong>{getTotalAssignedSubprocessCount()}</strong>{' '}
+                    subproceso(s) en total en la página de Procesos (suma de todas las empresas).
+                  </div>
+                </Alert>
+              )}
+
+              {getOtherCompanyAssignments().length > 0 && (
+                <Alert color='yellow' variant='light'>
+                  <div className='text-sm'>
+                    <strong>Atención:</strong> también tiene asignaciones en otras empresas:{' '}
+                    {getOtherCompanyAssignments()
+                      .map(
+                        (assignment) =>
+                          `${assignment.companyName} (${assignment.subprocesses.length})`
+                      )
+                      .join(', ')}
+                    . Cambie de empresa arriba para revisarlas o quitarlas.
+                  </div>
+                </Alert>
+              )}
 
               {companies.length === 0 && (
                 <Alert color='yellow' variant='light'>

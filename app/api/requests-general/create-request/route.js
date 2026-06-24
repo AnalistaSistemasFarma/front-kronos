@@ -17,6 +17,7 @@ export async function POST(req) {
       process,
       createdby,
       url,
+      formValues,
     } = body;
 
     if (!company || !subject || !process || !descripcion) {
@@ -106,6 +107,24 @@ export async function POST(req) {
           .input("id_user", sql.NVarChar, row.id_user)
           .query(insertTaskQuery);
 
+      }
+
+      // Guardar respuestas de los campos condicionales del formulario
+      if (Array.isArray(formValues)) {
+        for (const fv of formValues) {
+          if (!fv || fv.id_field == null) continue;
+
+          await new sql.Request(transaction)
+            .input("id_request", sql.Int, newRequestId)
+            .input("id_field", sql.Int, fv.id_field)
+            .input("id_option", sql.Int, fv.id_option ?? null)
+            .input("value_text", sql.NVarChar(1000), fv.value_text ?? null)
+            .query(`
+              INSERT INTO request_form_value
+              (id_request_general, id_form_field, id_option, value_text)
+              VALUES (@id_request, @id_field, @id_option, @value_text)
+            `);
+        }
       }
 
       const processUserResult = await new sql.Request(transaction)

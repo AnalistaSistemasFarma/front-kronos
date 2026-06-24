@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
 import { useSession } from 'next-auth/react';
@@ -65,6 +65,7 @@ import {
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import toast from 'react-hot-toast';
 
 interface RequestTask {
   id: number;
@@ -159,6 +160,8 @@ function RequestBoard() {
     url: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
+  // Bloqueo síncrono de doble-submit (el estado createLoading se actualiza async)
+  const isSubmittingRef = useRef(false);
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
   const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
@@ -194,6 +197,25 @@ function RequestBoard() {
   const [idUser, setIdUser] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
   const [folderContents, setFolderContents] = useState([]);
+
+  // Archivos requeridos parametrizados del proceso seleccionado
+  const [requiredFiles, setRequiredFiles] = useState<
+    { id: number; file_label: string; required: boolean; conditions: number[] }[]
+  >([]);
+  const [filesByDoc, setFilesByDoc] = useState<Record<number, UploadedFile[]>>({});
+  const [loadingProcessFiles, setLoadingProcessFiles] = useState(false);
+
+  // Campos condicionales del proceso seleccionado y respuestas del cliente
+  const [formFields, setFormFields] = useState<
+    {
+      id: number;
+      field_label: string;
+      required: boolean;
+      options: { id: number; option_label: string }[];
+      conditions: number[];
+    }[]
+  >([]);
+  const [fieldValues, setFieldValues] = useState<Record<number, number>>({});
 
   const [filters, setFilters] = useState({
     id: '',
@@ -306,6 +328,139 @@ function RequestBoard() {
       setSearchResults([]);
     }
   }, [activitySearch, processCategories, categories]);
+
+  useEffect(() => {
+    if (formData.process) {
+      fetchProcessFiles(formData.process);
+      fetchProcessFields(formData.process);
+    } else {
+      setRequiredFiles([]);
+      setFilesByDoc({});
+      setFormFields([]);
+      setFieldValues({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.process]);
+
+  const fetchProcessFiles = async (processId: string) => {
+    try {
+      setLoadingProcessFiles(true);
+      const response = await fetch(
+        `/api/requests-general/process-files?id_process=${processId}`
+      );
+
+      if (!response.ok) throw new Error('Failed to fetch process files');
+
+      const data = await response.json();
+      setRequiredFiles(
+        data.map(
+          (f: {
+            id: number;
+            file_label: string;
+            required: boolean | number;
+            conditions: number[];
+          }) => ({
+            id: f.id,
+            file_label: f.file_label,
+            required: Boolean(f.required),
+            conditions: f.conditions || [],
+          })
+        )
+      );
+      setFilesByDoc({});
+    } catch (err) {
+      console.error('Error fetching process files:', err);
+      setRequiredFiles([]);
+      setFilesByDoc({});
+    } finally {
+      setLoadingProcessFiles(false);
+    }
+  };
+
+  const fetchProcessFields = async (processId: string) => {
+    try {
+      const response = await fetch(
+        `/api/requests-general/process-fields?id_process=${processId}`
+      );
+
+      if (!response.ok) throw new Error('Failed to fetch process fields');
+
+      const data = await response.json();
+      setFormFields(
+        data.map(
+          (f: {
+            id: number;
+            field_label: string;
+            required: boolean | number;
+            options: { id: number; option_label: string }[];
+            conditions: number[];
+          }) => ({
+            id: f.id,
+            field_label: f.field_label,
+            required: Boolean(f.required),
+            options: f.options || [],
+            conditions: f.conditions || [],
+          })
+        )
+      );
+      setFieldValues({});
+    } catch (err) {
+      console.error('Error fetching process fields:', err);
+      setFormFields([]);
+      setFieldValues({});
+    }
+  };
+
+  // Visibilidad anidada: una sola pasada por orden. Un campo es visible si no tiene
+  // condiciones, o si alguna de sus opciones condicionantes ya está elegida en un campo
+  // visible anterior (DAG: las condiciones solo apuntan a campos previos).
+  const computeVisibility = () => {
+    const selected = new Set<number>();
+    const visibleFields: typeof formFields = [];
+    for (const field of formFields) {
+      const visible =
+        field.conditions.length === 0 || field.conditions.some((c) => selected.has(c));
+      if (visible) {
+        visibleFields.push(field);
+        const val = fieldValues[field.id];
+        if (val) selected.add(val);
+      }
+    }
+    return { visibleFields, selectedOptionIds: selected };
+  };
+
+  const { visibleFields, selectedOptionIds } = computeVisibility();
+
+  // Un documento se muestra/exige si no tiene condiciones, o si alguna está elegida (OR)
+  const isFileVisible = (doc: { conditions: number[] }) =>
+    doc.conditions.length === 0 || doc.conditions.some((c) => selectedOptionIds.has(c));
+
+  const visibleRequiredFiles = requiredFiles.filter(isFileVisible);
+
+  // Limpia las respuestas de campos que quedaron ocultos (no enviar respuestas obsoletas)
+  useEffect(() => {
+    const selected = new Set<number>();
+    const visibleIds = new Set<number>();
+    for (const field of formFields) {
+      const visible =
+        field.conditions.length === 0 || field.conditions.some((c) => selected.has(c));
+      if (visible) {
+        visibleIds.add(field.id);
+        const val = fieldValues[field.id];
+        if (val) selected.add(val);
+      }
+    }
+    const toRemove = Object.keys(fieldValues)
+      .map(Number)
+      .filter((id) => !visibleIds.has(id));
+    if (toRemove.length > 0) {
+      setFieldValues((prev) => {
+        const next = { ...prev };
+        toRemove.forEach((id) => delete next[id]);
+        return next;
+      });
+    }
+  }, [formFields, fieldValues]);
 
   const handleActivitySelect = (result: (typeof searchResults)[0]) => {
     setFormData({
@@ -594,74 +749,135 @@ function RequestBoard() {
       errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
     }
 
+    // Validar campos condicionales obligatorios (solo los VISIBLES)
+    for (const field of visibleFields) {
+      if (field.required && !fieldValues[field.id]) {
+        errors[`field_${field.id}`] = `Debe seleccionar: ${field.field_label}`;
+      }
+    }
+
+    // Validar solo los documentos obligatorios VISIBLES según las condiciones
+    for (const doc of visibleRequiredFiles) {
+      if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
+        errors[`file_${doc.id}`] = `Debe adjuntar el documento: ${doc.file_label}`;
+      }
+    }
+
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
   const handleCreateTicketWithValidation = async () => {
-    if (createLoading) return;
-
-    if (!validateForm()) {
-      return;
-    }
+    if (isSubmittingRef.current) return;
+    if (!validateForm()) return;
     await handleCreateTicket();
   };
 
   const handleCreateTicket = async () => {
-    if (createLoading) return;
-    
+    // Bloqueo síncrono: cierra la ventana de carrera del doble clic (createLoading es async).
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+
     try {
       setCreateLoading(true);
-      const response = await fetch('/api/requests-general/create-request', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          company: formData.company,
-          subject: formData.subject,
-          descripcion: formData.descripcion,
-          category: parseInt(formData.category),
-          process: parseInt(formData.process),
-          createdby: userId,
-          url: formData.url,
-        }),
-      });
+      setError(null);
+
+      // --- Fase A: crear la solicitud ---
+      // El modal de creación NO tiene ninguna ruta de reintento: un solo POST por intento.
+      // Así es imposible re-disparar una creación y duplicar la solicitud.
+      let response: Response;
+      try {
+        response = await fetch('/api/requests-general/create-request', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            company: formData.company,
+            subject: formData.subject,
+            descripcion: formData.descripcion,
+            category: parseInt(formData.category),
+            process: parseInt(formData.process),
+            createdby: userId,
+            url: formData.url,
+            formValues: visibleFields
+              .filter((f) => fieldValues[f.id])
+              .map((f) => ({ id_field: f.id, id_option: fieldValues[f.id] })),
+          }),
+        });
+      } catch (networkErr) {
+        // La solicitud NO se creó: el modal queda abierto para reintentar de forma segura.
+        console.error('Error de red al crear la solicitud:', networkErr);
+        setError('No se pudo crear la solicitud. Intente de nuevo.');
+        toast.error('No se pudo crear la solicitud. Intente de nuevo.');
+        return;
+      }
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create ticket');
+        let detail = '';
+        try {
+          const errorData = await response.json();
+          detail = errorData.error || '';
+        } catch {
+          // respuesta sin cuerpo JSON
+        }
+        console.error('Fallo al crear la solicitud:', detail);
+        setError('No se pudo crear la solicitud. Intente de nuevo.');
+        toast.error('No se pudo crear la solicitud. Intente de nuevo.');
+        return;
       }
 
       const newTicket = await response.json();
+      const requestId = Number(newTicket.id_request);
+      // A partir de aquí la solicitud EXISTE en BD: pase lo que pase, NO se recrea y el modal
+      // se cierra al final.
 
-      setTickets((prev) => [newTicket, ...prev]);
+      // --- Fase B: subir los archivos a la carpeta de la solicitud ya creada ---
+      // Documentos parametrizados visibles (con etiqueta) + archivos libres adicionales
+      const filesToUpload: { file: File; label?: string }[] = [
+        ...visibleRequiredFiles.flatMap((doc) =>
+          (filesByDoc[doc.id] || []).map((f) => ({ file: f.file, label: doc.file_label }))
+        ),
+        ...attachedFiles.map((file) => ({ file: file.file })),
+      ];
 
-      if (attachedFiles.length > 0) {
-        const token = await getMicrosoftToken();
-        if (!token) {
-          throw new Error('No se pudo obtener el token de acceso para subir archivos.');
-        }
+      let uploadOk = true;
+      if (filesToUpload.length > 0) {
+        try {
+          const token = await getMicrosoftToken();
+          if (!token) {
+            throw new Error('No se pudo obtener el token de acceso para subir archivos.');
+          }
 
-        const folderName = `Request-${newTicket.id_request}`;
-        const filesToUpload = attachedFiles.map((file) => ({ file: file.file }));
-
-        if (filesToUpload.length > 0) {
+          const folderName = `Request-${requestId}`;
           await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
+        } catch (uploadErr) {
+          // La solicitud YA quedó creada: no se reintenta aquí. La recarga de archivos se hace
+          // desde la vista de la solicitud. Se informa y se cierra el modal igual.
+          uploadOk = false;
+          console.error('Error al subir archivos:', uploadErr);
+          toast.error(
+            `Solicitud #${requestId} creada, pero NO se pudieron subir los archivos. ` +
+              `Ábrala desde la lista y cárguelos en la vista de la solicitud.`,
+            { duration: 10000 }
+          );
         }
       }
 
-      await sendRequestEmailNotification(
-        newTicket.id_request,
-        formData.subject,
-        parseInt(formData.process)
-      );
-      
+      // --- Fase C: notificación por correo (best-effort, no bloquea el cierre) ---
       try {
-        await NotifySuccess(newTicket, formData);
-      } catch (err) {
-        console.error('Error en NotifySuccess:', err);
-        setError('No se pudo notificar por Teams, pero la solicitud fue creada.');
+        await sendRequestEmailNotification(
+          requestId,
+          formData.subject,
+          parseInt(formData.process)
+        );
+      } catch (notifyErr) {
+        console.error('Error en notificación por correo:', notifyErr);
+      }
+
+      // --- Cierre: la solicitud existe, así que siempre limpiamos y cerramos el modal ---
+      if (uploadOk) {
+        toast.success(`Solicitud #${requestId} creada correctamente.`);
       }
 
       setFormData({
@@ -674,24 +890,22 @@ function RequestBoard() {
       });
 
       setAttachedFiles([]);
+      setFilesByDoc({});
+      setRequiredFiles([]);
+      setFormFields([]);
+      setFieldValues({});
 
       fetchTickets();
       setModalOpened(false);
-    } catch (err) {
-      console.error('Error creating ticket:', err);
-      setError('Failed to create ticket. Please try again.');
     } finally {
       setCreateLoading(false);
+      isSubmittingRef.current = false;
     }
   };
 
-  async function NotifySuccess(_newTicket: unknown, _formData: unknown) {
-    // Push + campanita: el servidor envía en POST /api/requests-general/create-request
-  }
-
   async function CheckOrCreateFolderAndUpload(
     folderName: string,
-    files: { file: File }[],
+    files: { file: File; label?: string }[],
     token: string
   ) {
     try {
@@ -717,9 +931,13 @@ function RequestBoard() {
       const folderId = createResponse.data.id;
 
       if (files && files.length > 0) {
-        const uploadPromises = files.map((file: { file: File }) =>
+        const uploadNames = files.map((file) =>
+          file.label ? `${file.label} - ${file.file.name}` : file.file.name
+        );
+
+        const uploadPromises = files.map((file: { file: File; label?: string }, index) =>
           axios.put(
-            `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
+            `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${uploadNames[index]}:/content`,
             file.file,
             {
               headers: {
@@ -730,15 +948,32 @@ function RequestBoard() {
           )
         );
 
-        const results = await Promise.all(uploadPromises);
+        // allSettled (no all): si un archivo falla, no abortamos los demás y reportamos
+        // exactamente cuáles fallaron en lugar de perder esa información.
+        const results = await Promise.allSettled(uploadPromises);
 
-        results.forEach((response, index) => {
-          if (response.status === 201 || response.status === 200) {
-            console.log(`Archivo subido: ${files[index].file.name}`, response.data);
+        const failed: string[] = [];
+        results.forEach((result, index) => {
+          if (
+            result.status === 'fulfilled' &&
+            (result.value.status === 201 || result.value.status === 200)
+          ) {
+            console.log(`Archivo subido: ${uploadNames[index]}`, result.value.data);
           } else {
-            console.log(`Error al subir el archivo: ${files[index].file.name}`);
+            const reason =
+              result.status === 'rejected'
+                ? result.reason
+                : `status ${result.value.status}`;
+            console.log(`Error al subir el archivo: ${uploadNames[index]}`, reason);
+            failed.push(uploadNames[index]);
           }
         });
+
+        if (failed.length > 0) {
+          throw new Error(
+            `No se pudieron subir ${failed.length} archivo(s): ${failed.join(', ')}`
+          );
+        }
       } else {
         console.log('No hay archivos seleccionados para subir.');
       }
@@ -1438,6 +1673,7 @@ function RequestBoard() {
             setActivitySearch('');
             setSearchResults([]);
             setShowActivitySearch(false);
+            setError(null);
             setFormData({
               company: '',
               subject: '',
@@ -1673,9 +1909,90 @@ function RequestBoard() {
 
             <Divider />
 
+            {visibleFields.length > 0 && (
+              <Stack gap='md'>
+                <Text fw={600}>Información adicional</Text>
+                <Grid>
+                  {visibleFields.map((field) => (
+                    <Grid.Col span={{ base: 12, md: 6 }} key={field.id}>
+                      <Select
+                        label={field.field_label}
+                        placeholder='Seleccione una opción'
+                        required={field.required}
+                        data={field.options.map((o) => ({
+                          value: o.id.toString(),
+                          label: o.option_label,
+                        }))}
+                        value={fieldValues[field.id] ? fieldValues[field.id].toString() : null}
+                        onChange={(value) => {
+                          setFieldValues((prev) => {
+                            const next = { ...prev };
+                            if (value) next[field.id] = parseInt(value);
+                            else delete next[field.id];
+                            return next;
+                          });
+                          if (formErrors[`field_${field.id}`]) {
+                            setFormErrors((prev) => ({ ...prev, [`field_${field.id}`]: '' }));
+                          }
+                        }}
+                        error={formErrors[`field_${field.id}`]}
+                        clearable
+                        leftSection={<IconTag size={16} />}
+                      />
+                    </Grid.Col>
+                  ))}
+                </Grid>
+                <Divider />
+              </Stack>
+            )}
+
+            {visibleRequiredFiles.length > 0 && (
+              <Stack gap='lg'>
+                <div>
+                  <Text fw={600}>Documentos Requeridos</Text>
+                  <Text size='sm' c='dimmed'>
+                    Adjunte cada documento en su campo correspondiente. Los marcados como obligatorios
+                    son necesarios para crear la solicitud.
+                  </Text>
+                </div>
+
+                {visibleRequiredFiles.map((doc) => (
+                  <div key={doc.id}>
+                    <Group gap='xs' mb='xs'>
+                      <Text fw={500}>{doc.file_label}</Text>
+                      <Badge
+                        color={doc.required ? 'red' : 'gray'}
+                        variant='light'
+                        size='sm'
+                      >
+                        {doc.required ? 'Obligatorio' : 'Opcional'}
+                      </Badge>
+                    </Group>
+                    <FileUpload
+                      ticketId={0}
+                      onFilesChange={(files) => {
+                        setFilesByDoc((prev) => ({ ...prev, [doc.id]: files }));
+                        if (formErrors[`file_${doc.id}`]) {
+                          setFormErrors((prev) => ({ ...prev, [`file_${doc.id}`]: '' }));
+                        }
+                      }}
+                      autoUpload={false}
+                      disabled={formDataLoading}
+                    />
+                    {formErrors[`file_${doc.id}`] && (
+                      <Text size='sm' c='red' mt='xs'>
+                        {formErrors[`file_${doc.id}`]}
+                      </Text>
+                    )}
+                  </div>
+                ))}
+              </Stack>
+            )}
+
+            {/* Subida libre: siempre disponible para adjuntar documentos adicionales */}
             <div>
               <Text fw={600} mb='xs'>
-                Archivos Adjuntos (Opcional)
+                {requiredFiles.length > 0 ? 'Archivos adicionales (Opcional)' : 'Archivos Adjuntos (Opcional)'}
               </Text>
               <FileUpload
                 ticketId={0}
@@ -1697,6 +2014,7 @@ function RequestBoard() {
                   setActivitySearch('');
                   setSearchResults([]);
                   setShowActivitySearch(false);
+                  setError(null);
                 }}
                 size='md'
               >
