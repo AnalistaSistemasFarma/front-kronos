@@ -105,6 +105,13 @@ interface FormFieldDef {
   conditions: number[];
 }
 
+// Solo estos usuarios (rol admin) pueden modificar el campo "Activo" del flujo
+const ADMIN_USER_IDS = [
+  'cmihj3clq0000kkvglm23u7dy',
+  'cmgicd6470000ekpi1a33o581',
+  'cmgqz404x0000ct9k1j8xdet1',
+];
+
 function ViewWorkFlowPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -151,6 +158,9 @@ function ViewWorkFlowPage() {
   const [loadingUserId, setLoadingUserId] = useState(false);
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
+
+  // Solo los administradores autorizados pueden modificar el campo "Activo"
+  const canEditActive = userId != null && ADMIN_USER_IDS.includes(String(userId));
 
   // Estados para el modal de agregar tareas
   const [addTaskModalOpened, setAddTaskModalOpened] = useState(false);
@@ -1213,7 +1223,7 @@ function ViewWorkFlowPage() {
                       <Text size='sm' c='dimmed' fw={500}>
                         Activo
                       </Text>
-                      {isEditing ? (
+                      {isEditing && canEditActive ? (
                         <Switch
                           checked={editedWorkflow?.active === 1}
                           onChange={(e) =>
@@ -1225,23 +1235,30 @@ function ViewWorkFlowPage() {
                           color='green'
                         />
                       ) : (
-                        <Group gap='xs'>
-                          {workflow.active === 1 ? (
-                            <>
-                              <IconCheck size={18} className='text-green-500' />
-                              <Badge color='green' size='lg' variant='light'>
-                                Sí
-                              </Badge>
-                            </>
-                          ) : (
-                            <>
-                              <IconX size={18} style={{ color: 'var(--mantine-color-dimmed)' }} />
-                              <Badge color='gray' size='lg' variant='light'>
-                                No
-                              </Badge>
-                            </>
+                        <Stack gap={4}>
+                          <Group gap='xs'>
+                            {workflow.active === 1 ? (
+                              <>
+                                <IconCheck size={18} className='text-green-500' />
+                                <Badge color='green' size='lg' variant='light'>
+                                  Sí
+                                </Badge>
+                              </>
+                            ) : (
+                              <>
+                                <IconX size={18} style={{ color: 'var(--mantine-color-dimmed)' }} />
+                                <Badge color='gray' size='lg' variant='light'>
+                                  No
+                                </Badge>
+                              </>
+                            )}
+                          </Group>
+                          {isEditing && !canEditActive && (
+                            <Text size='xs' c='dimmed'>
+                              Solo un administrador puede modificar este campo.
+                            </Text>
                           )}
-                        </Group>
+                        </Stack>
                       )}
                     </Stack>
                   </Card>
