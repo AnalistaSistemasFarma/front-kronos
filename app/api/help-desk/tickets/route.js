@@ -8,6 +8,8 @@ import {
   checkHelpDeskOperatorAccess,
 } from '../../../../lib/help-desk/access';
 import {
+  BOARD_CASE_SEARCH_SQL,
+  CASE_CONTACT_EMAIL_SQL,
   REQUESTER_EMAIL_FILTER_SQL,
   REQUESTER_EMAIL_SQL,
   REQUESTER_ID_FILTER_SQL,
@@ -38,6 +40,7 @@ export async function GET(req) {
     const requester_id = searchParams.get('requester_id');
     const requester_email = searchParams.get('requester_email');
     const requester_search = searchParams.get('requester_search');
+    const search = searchParams.get('search')?.trim() ?? '';
 
     const isOperator = await checkHelpDeskOperatorAccess(userEmail);
 
@@ -59,13 +62,17 @@ export async function GET(req) {
 
     const pool = await sql.connect(sqlConfig);
 
-    const hasRequesterFilter = Boolean(requester_id || requester_email || requester_search);
+    const hasBoardSearch = search.length > 0;
+    const hasRequesterFilter = Boolean(
+      requester_id || requester_email || requester_search || hasBoardSearch
+    );
 
     let query = `
       SELECT 
         c.case_type, c.creation_date, c.description, c.end_date, 
         c.id_case, c.id_department, c.id_technical, c.place, 
-        c.priority, c.requester, c.subject_case, c.email, cg.id_category,
+        c.priority, c.requester, c.subject_case, c.email,
+        ${CASE_CONTACT_EMAIL_SQL} AS contact_email, cg.id_category,
         cg.category, sg.id_subcategory, sg.subcategory, a.id_activity,
         a.activity, sc.status, u.name AS nombreTecnico, d.department,
         sc.id_status_case, c.resolution, co.company, co.id_company,
@@ -93,13 +100,19 @@ export async function GET(req) {
       query += ` AND ${REQUESTER_EMAIL_FILTER_SQL}`;
     } else if (requester_search) {
       query += ` AND ${REQUESTER_SEARCH_FILTER_SQL}`;
+    } else if (hasBoardSearch) {
+      query += ` AND ${BOARD_CASE_SEARCH_SQL}`;
     }
     if (priority) query += ` AND c.priority = @priority`;
     if (company) query += ` AND co.id_company = @company`;
     if (status && status !== '0') query += ` AND sc.id_status_case = @status`;
     else if (!status && !id && !hasRequesterFilter) query += ` AND sc.id_status_case = 1`;
     if (assigned_user) query += ` AND u.name LIKE '%' + @assigned_user + '%'`;
-    if (technician) query += ` AND c.id_technical = @technician`;
+    if (technician === 'unassigned') {
+      query += ` AND (c.id_technical IS NULL OR c.id_technical = 0)`;
+    } else if (technician) {
+      query += ` AND c.id_technical = @technician`;
+    }
     if (date_from && date_to) query += ` AND c.creation_date BETWEEN @date_from AND @date_to`;
 
     query += ` ORDER BY c.id_case DESC`;
@@ -109,11 +122,14 @@ export async function GET(req) {
     if (requester_id) request.input('requester_id', sql.NVarChar(255), requester_id);
     if (requester_email) request.input('requester_email', sql.NVarChar(255), requester_email.trim());
     if (requester_search) request.input('requester_search', sql.NVarChar(255), requester_search.trim());
+    if (hasBoardSearch) request.input('search', sql.NVarChar(255), search);
     if (priority) request.input('priority', sql.NVarChar, priority);
     if (status) request.input('status', sql.Int, status);
     if (company) request.input('company', sql.Int, company);
     if (assigned_user) request.input('assigned_user', sql.NVarChar, assigned_user);
-    if (technician) request.input('technician', sql.Int, technician);
+    if (technician && technician !== 'unassigned') {
+      request.input('technician', sql.Int, Number(technician));
+    }
     if (date_from && date_to) {
       request.input('date_from', sql.Date, date_from);
       request.input('date_to', sql.Date, date_to);

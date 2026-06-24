@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import Link from 'next/link';
@@ -33,6 +33,9 @@ import {
 import { ReportsChart } from '../../../../../components/help-desk/ReportsChart';
 import { HelpDeskDashboardLinkButton } from '../../../../../components/help-desk/HelpDeskDashboardLinkButton';
 import { HelpDeskCasesTable } from '../../../../../components/help-desk/HelpDeskCasesTable';
+import {
+  HelpDeskTicketsFilters,
+} from '../../../../../components/help-desk/HelpDeskTicketsFilters';
 import { useHelpDeskAccess } from '../../../../../components/help-desk/hooks/useHelpDeskAccess';
 import { getRequesterPanelUrl } from '../../../../../lib/help-desk/subprocessRoles';
 import {
@@ -42,6 +45,7 @@ import {
   type TicketsBoardFilters,
 } from '../../../../../lib/help-desk/ticketsBoardStorage';
 import type { HelpDeskCaseListItem } from '../../../../../lib/help-desk/types';
+import { normalizeCaseListItem } from '../../../../../lib/help-desk/contactEmail';
 import {
   IconAlertCircle,
   IconChevronRight,
@@ -73,6 +77,7 @@ interface ConsultResponse {
 function TicketsBoard() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const subprocessId = searchParams.get('subprocess_id');
   const { isOperator, isRequester, loading: loadingHelpDeskAccess } = useHelpDeskAccess();
@@ -94,18 +99,29 @@ function TicketsBoard() {
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [tableRefreshing, setTableRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const hasLoadedOnce = useRef(false);
   const [filters, setFilters] = useState<TicketsBoardFilters>(DEFAULT_TICKETS_BOARD_FILTERS);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [boardHydrated, setBoardHydrated] = useState(false);
   const scrollRestoredRef = useRef(false);
   const initialDataLoadedRef = useRef(false);
+  const skipFilterFetchRef = useRef(true);
+  const previousPathRef = useRef<string | null>(null);
   const filtersRef = useRef(filters);
+  const searchRef = useRef(debouncedSearch);
 
   useEffect(() => {
     filtersRef.current = filters;
   }, [filters]);
+
+  useEffect(() => {
+    searchRef.current = debouncedSearch;
+  }, [debouncedSearch]);
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
     requestType: '',
@@ -134,13 +150,18 @@ function TicketsBoard() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
     const saved = loadTicketsBoardState();
     if (saved) {
       setFilters(saved.filters);
-      setFiltersExpanded(saved.filtersExpanded);
       if (saved.tickets?.length) {
         setTickets(saved.tickets);
-        setLoading(false);
+        setInitialLoading(false);
+        hasLoadedOnce.current = true;
       }
     }
     setBoardHydrated(true);
@@ -197,7 +218,7 @@ function TicketsBoard() {
   }, [boardHydrated, filtersExpanded, tickets]);
 
   useEffect(() => {
-    if (!boardHydrated || loading || scrollRestoredRef.current) return;
+    if (!boardHydrated || initialLoading || scrollRestoredRef.current) return;
 
     const saved = loadTicketsBoardState();
     if (saved?.scrollY && saved.scrollY > 0) {
@@ -206,7 +227,7 @@ function TicketsBoard() {
       });
     }
     scrollRestoredRef.current = true;
-  }, [boardHydrated, loading]);
+  }, [boardHydrated, initialLoading]);
 
   useEffect(() => {
     const globalStore = localStorage.getItem('global-store');
@@ -359,50 +380,114 @@ function TicketsBoard() {
     }
   };
 
-  const fetchTickets = async (opts?: { silent?: boolean }) => {
+  const fetchTickets = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? hasLoadedOnce.current;
     try {
-      if (!opts?.silent) setLoading(true);
+      if (silent) {
+        setTableRefreshing(true);
+      } else {
+        setInitialLoading(true);
+      }
 
       const activeFilters = filtersRef.current;
+      const activeSearch = searchRef.current;
       const params = new URLSearchParams();
       if (subprocessId) params.append('subprocess_id', subprocessId);
       if (activeFilters.priority) params.append('priority', activeFilters.priority);
-      if (activeFilters.status) params.append('status', activeFilters.status);
+      const searchById = activeSearch.length > 0 && /^\d+$/.test(activeSearch);
+      if (searchById) {
+        params.append('status', '0');
+      } else if (activeFilters.status) {
+        params.append('status', activeFilters.status);
+      }
       if (activeFilters.assigned_user) params.append('assigned_user', activeFilters.assigned_user);
       if (activeFilters.date_from) params.append('date_from', activeFilters.date_from);
       if (activeFilters.date_to) params.append('date_to', activeFilters.date_to);
       if (activeFilters.technician) params.append('technician', activeFilters.technician);
       if (activeFilters.company) params.append('company', activeFilters.company);
+      if (activeSearch) params.append('search', activeSearch);
 
       const response = await fetch(`/api/help-desk/tickets?${params.toString()}`);
 
-      if (!response.ok) throw new Error('Error al cargar los casos');
+      if (!response.ok) {
+        let message = 'Error al cargar los casos';
+        try {
+          const body = await response.json();
+          if (body?.error) message = body.error;
+        } catch {
+          // ignore parse errors
+        }
+        throw new Error(message);
+      }
 
       const data = await response.json();
-      setTickets(data);
+      const normalizedTickets = Array.isArray(data)
+        ? data.map((ticket: Ticket) => normalizeCaseListItem(ticket))
+        : data;
+      setTickets(normalizedTickets);
       setError(null);
+      hasLoadedOnce.current = true;
 
       if (boardHydrated) {
         saveTicketsBoardState({
           filters: activeFilters,
           filtersExpanded,
           scrollY: window.scrollY,
-          tickets: data,
+          tickets: normalizedTickets,
         });
       }
     } catch (err) {
       console.error('Error fetching tickets:', err);
       setError('No se pudieron cargar los casos. Por favor intente nuevamente.');
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setTableRefreshing(false);
     }
-  };
+  }, [subprocessId, filtersExpanded, boardHydrated]);
 
-  const handleFilterChange = (field: string, value: string) => {
+  useEffect(() => {
+    if (!boardHydrated || !initialDataLoadedRef.current) return;
+    if (status === 'loading' || loadingHelpDeskAccess || !session || !isOperator) return;
+    if (skipFilterFetchRef.current) {
+      skipFilterFetchRef.current = false;
+      return;
+    }
+    void fetchTickets({ silent: true });
+  }, [
+    boardHydrated,
+    session,
+    status,
+    isOperator,
+    loadingHelpDeskAccess,
+    filters,
+    debouncedSearch,
+    fetchTickets,
+  ]);
+
+  useEffect(() => {
+    if (!boardHydrated || !initialDataLoadedRef.current) return;
+    if (!pathname.includes('/help-desk/create-ticket')) return;
+
+    const previous = previousPathRef.current;
+    previousPathRef.current = pathname;
+
+    if (previous && previous !== pathname && previous.includes('/help-desk/view-ticket')) {
+      setFiltersExpanded(false);
+      void fetchTickets({ silent: true });
+    }
+  }, [pathname, boardHydrated, fetchTickets]);
+
+  const handleFilterChange = (field: keyof TicketsBoardFilters, value: string) => {
     setFilters((prev) => ({
       ...prev,
       [field]: value,
     }));
+  };
+
+  const handleClearAllFilters = () => {
+    setSearchQuery('');
+    setDebouncedSearch('');
+    setFilters({ ...DEFAULT_TICKETS_BOARD_FILTERS });
   };
 
   const handleFormChange = (field: string, value: string) => {
@@ -478,7 +563,7 @@ function TicketsBoard() {
       });
       setTechnicalsError(null);
 
-      fetchTickets();
+      fetchTickets({ silent: true });
       setModalOpened(false);
     } catch (err) {
       console.error('Error creating ticket:', err);
@@ -488,7 +573,7 @@ function TicketsBoard() {
     }
   };
 
-  if (status === 'loading' || loading || loadingHelpDeskAccess) {
+  if (status === 'loading' || initialLoading || loadingHelpDeskAccess) {
     return (
       <div className='min-h-screen flex items-center justify-center'>
         <div>Cargando...</div>
@@ -702,128 +787,44 @@ function TicketsBoard() {
           </Alert>
         )}
 
-        {/* Filters Section */}
-        <Card shadow='sm' p='lg' radius='md' withBorder mb='6' className='bg-white'>
-          <Group justify='space-between' mb='md'>
-            <Title order={3} className='flex items-center gap-2'>
-              <IconFilter size={20} />
-              Filtros de Búsqueda
-            </Title>
-            <ActionIcon
-              variant='subtle'
-              onClick={() => setFiltersExpanded(!filtersExpanded)}
-              aria-label={filtersExpanded ? 'Ocultar filtros' : 'Mostrar filtros'}
-            >
-              {filtersExpanded ? <IconX size={16} /> : <IconFilter size={16} />}
-            </ActionIcon>
-          </Group>
-
-          <Collapse in={filtersExpanded}>
-            <Box mt='md'>
-              <Grid>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Prioridad'
-                    placeholder='Todas las prioridades'
-                    clearable
-                    data={[
-                      { value: 'Baja', label: 'Baja' },
-                      { value: 'Media', label: 'Media' },
-                      { value: 'Alta', label: 'Alta' },
-                    ]}
-                    value={filters.priority}
-                    onChange={(value) => handleFilterChange('priority', value || '')}
-                    leftSection={<IconFlag size={16} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Estado'
-                    placeholder='Todas los estados'
-                    clearable
-                    data={[
-                      { value: '0', label: 'Todos' },
-                      { value: '1', label: 'Abierto' },
-                      { value: '2', label: 'Resuelto' },
-                      { value: '3', label: 'Cancelado' },
-                    ]}
-                    value={filters.status}
-                    onChange={(value) => handleFilterChange('status', value || '')}
-                    leftSection={<IconFlag size={16} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Empresa'
-                    placeholder='Todas las empresas'
-                    clearable
-                    data={companies}
-                    value={filters.company}
-                    onChange={(value) => handleFilterChange('company', value || '')}
-                    leftSection={<IconBuilding size={16} />}
-                    disabled={loadingOptions}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Técnico Asignado'
-                    placeholder='Todos los técnicos'
-                    clearable
-                    data={technicals}
-                    value={filters.technician}
-                    onChange={(value) => handleFilterChange('technician', value || '')}
-                    leftSection={<IconUser size={16} />}
-                    disabled={loadingOptions || loadingTechnicals}
-                    rightSection={loadingTechnicals ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div> : null}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Fecha Desde'
-                    type='date'
-                    value={filters.date_from}
-                    onChange={(e) => handleFilterChange('date_from', e.target.value)}
-                    leftSection={<IconCalendarEvent size={16} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Fecha Hasta'
-                    type='date'
-                    value={filters.date_to}
-                    onChange={(e) => handleFilterChange('date_to', e.target.value)}
-                    leftSection={<IconCalendarEvent size={16} />}
-                  />
-                </Grid.Col>
-              </Grid>
-
-              <Group justify='flex-end' mt='md'>
-                <Button
-                  variant='outline'
-                  onClick={() =>
-                    setFilters({ ...DEFAULT_TICKETS_BOARD_FILTERS })
-                  }
-                  leftSection={<IconX size={16} />}
-                >
-                  Limpiar Filtros
-                </Button>
-                <Button onClick={() => void fetchTickets()} leftSection={<IconRefresh size={16} />}>
-                  Aplicar Filtros
-                </Button>
-              </Group>
-            </Box>
-          </Collapse>
-        </Card>
+        <HelpDeskTicketsFilters
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          isSearching={tableRefreshing}
+          filters={filters}
+          onFilterChange={handleFilterChange}
+          technicals={technicals}
+          loadingTechnicals={loadingTechnicals}
+          companies={companies}
+          loadingCompanies={loadingOptions}
+          filtersExpanded={filtersExpanded}
+          onToggleExpanded={() => setFiltersExpanded((v) => !v)}
+          onClearAll={handleClearAllFilters}
+          resultCount={tickets.length}
+        />
 
         <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden' p='lg'>
-          <LoadingOverlay visible={loading} />
+          <LoadingOverlay visible={tableRefreshing} zIndex={50} overlayProps={{ blur: 1 }} />
 
           <Title order={3} mb='md' className='flex items-center gap-2'>
             <IconTicket size={20} />
             Lista de Casos
           </Title>
 
-          <HelpDeskCasesTable tickets={tickets} />
+          <HelpDeskCasesTable
+            tickets={tickets}
+            showRequester
+            emptyMessage={
+              debouncedSearch || filters.technician
+                ? 'No hay casos con estos criterios'
+                : 'No se encontraron casos'
+            }
+            emptyHint={
+              debouncedSearch || filters.technician
+                ? 'Prueba otro ID, nombre de solicitante o técnico'
+                : 'Intenta ajustar los filtros'
+            }
+          />
         </Card>
 
         <Modal

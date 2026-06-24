@@ -7,6 +7,7 @@ import { checkHelpDeskRequesterAccess } from '../../../../lib/help-desk/access';
 import {
   MY_TICKETS_EMAIL_SEARCH_SQL,
   MY_TICKETS_SCOPE_SQL,
+  CASE_CONTACT_EMAIL_SQL,
   REQUESTER_EMAIL_SQL,
   REQUESTER_JOINS,
   REQUESTER_NAME_SQL,
@@ -64,7 +65,8 @@ export async function GET(req) {
       SELECT
         c.case_type, c.creation_date, c.description, c.end_date,
         c.id_case, c.id_department, c.id_technical, c.place,
-        c.priority, c.requester, c.subject_case, c.email, cg.id_category,
+        c.priority, c.requester, c.subject_case, c.email,
+        ${CASE_CONTACT_EMAIL_SQL} AS contact_email, cg.id_category,
         cg.category, sg.id_subcategory, sg.subcategory, a.id_activity,
         a.activity, sc.status, u.name AS nombreTecnico, d.department,
         sc.id_status_case, c.resolution, co.company, co.id_company,

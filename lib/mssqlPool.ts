@@ -50,8 +50,14 @@ export async function getPool(): Promise<sql.ConnectionPool> {
   const configMatches = global.__kronosMssqlPoolConfigKey === configKey;
 
   const existing = global.__kronosMssqlPool;
-  if (existing?.connected && configMatches && moduleMatches) {
-    return existing;
+  if (existing && configMatches && moduleMatches) {
+    if (existing.connected) {
+      return existing;
+    }
+    const pending = global.__kronosMssqlPoolPromise;
+    if (pending) {
+      return pending;
+    }
   }
 
   const inFlight = global.__kronosMssqlPoolPromise;

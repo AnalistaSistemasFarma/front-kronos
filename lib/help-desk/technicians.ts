@@ -1,4 +1,4 @@
-import { getPool } from '../mssqlPool';
+import { withMssqlPool } from '../mssqlPool';
 
 /**
  * Mismo criterio que GET /api/help-desk/technical y el dashboard operativo:
@@ -18,18 +18,19 @@ export async function isHelpDeskTechnician(userEmail: string): Promise<boolean> 
   if (!userEmail?.trim()) return false;
 
   try {
-    const pool = await getPool();
-    const result = await pool
-      .request()
-      .input('subprocess_id', HELP_DESK_TECHNICIAN_SUBPROCESS_ID)
-      .input('email', userEmail.trim())
-      .query(`
+    return await withMssqlPool(async (pool) => {
+      const result = await pool
+        .request()
+        .input('subprocess_id', HELP_DESK_TECHNICIAN_SUBPROCESS_ID)
+        .input('email', userEmail.trim())
+        .query(`
         SELECT TOP 1 u.id
         ${TECHNICIAN_BASE_SQL}
           AND LOWER(LTRIM(RTRIM(u.email))) = LOWER(LTRIM(RTRIM(@email)))
       `);
 
-    return result.recordset.length > 0;
+      return result.recordset.length > 0;
+    });
   } catch (error) {
     console.error('Error checking help desk technician:', error);
     return false;
@@ -46,11 +47,11 @@ export interface HelpDeskTechnicianRow {
 
 /** Lista de técnicos (misma fuente que /api/help-desk/technical). */
 export async function listHelpDeskTechnicians(): Promise<HelpDeskTechnicianRow[]> {
-  const pool = await getPool();
-  const result = await pool
-    .request()
-    .input('subprocess_id', HELP_DESK_TECHNICIAN_SUBPROCESS_ID)
-    .query(`
+  return withMssqlPool(async (pool) => {
+    const result = await pool
+      .request()
+      .input('subprocess_id', HELP_DESK_TECHNICIAN_SUBPROCESS_ID)
+      .query(`
       SELECT
         suc.id_subprocess_user_company,
         s.subprocess,
@@ -65,5 +66,6 @@ export async function listHelpDeskTechnicians(): Promise<HelpDeskTechnicianRow[]
       ORDER BY u.name
     `);
 
-  return result.recordset as HelpDeskTechnicianRow[];
+    return result.recordset as HelpDeskTechnicianRow[];
+  });
 }
