@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ExcelJS from 'exceljs';
@@ -33,6 +33,10 @@ import {
 import { ReportsChart } from '../../../../../components/help-desk/ReportsChart';
 import { HelpDeskDashboardLinkButton } from '../../../../../components/help-desk/HelpDeskDashboardLinkButton';
 import { HelpDeskCasesTable } from '../../../../../components/help-desk/HelpDeskCasesTable';
+import {
+  HelpDeskTicketsFilters,
+  type TicketsBoardFilters,
+} from '../../../../../components/help-desk/HelpDeskTicketsFilters';
 import { useHelpDeskAccess } from '../../../../../components/help-desk/hooks/useHelpDeskAccess';
 import { hasAdminRole } from '../../../../../lib/access-control';
 import type { HelpDeskCaseListItem } from '../../../../../lib/help-desk/types';
@@ -85,9 +89,13 @@ function TicketsBoard() {
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [tableRefreshing, setTableRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState({
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const hasLoadedOnce = useRef(false);
+  const [filters, setFilters] = useState<TicketsBoardFilters>({
     priority: '',
     status: '1',
     assigned_user: '',
@@ -125,16 +133,16 @@ function TicketsBoard() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (status === 'loading') return;
-    if (!session) {
-      router.push('/login');
-      return;
-    }
-    fetchTickets();
+    const timer = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (status === 'loading' || !session || !isAdmin) return;
     fetchOptions();
     fetchFormData();
     fetchSubprocessUsers();
-  }, [session, status, router, filters]);
+  }, [session, status, isAdmin]);
 
   useEffect(() => {
     const globalStore = localStorage.getItem('global-store');
@@ -290,39 +298,81 @@ function TicketsBoard() {
     }
   };
 
-  const fetchTickets = async () => {
+  const fetchTickets = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? hasLoadedOnce.current;
     try {
-      setLoading(true);
+      if (silent) {
+        setTableRefreshing(true);
+      } else {
+        setInitialLoading(true);
+      }
 
       const params = new URLSearchParams();
       if (subprocessId) params.append('subprocess_id', subprocessId);
       if (filters.priority) params.append('priority', filters.priority);
-      if (filters.status) params.append('status', filters.status);
+      const searchById = debouncedSearch.length > 0 && /^\d+$/.test(debouncedSearch);
+      if (searchById) {
+        params.append('status', '0');
+      } else if (filters.status) {
+        params.append('status', filters.status);
+      }
       if (filters.assigned_user) params.append('assigned_user', filters.assigned_user);
       if (filters.date_from) params.append('date_from', filters.date_from);
       if (filters.date_to) params.append('date_to', filters.date_to);
       if (filters.technician) params.append('technician', filters.technician);
       if (filters.company) params.append('company', filters.company);
+      if (debouncedSearch) params.append('search', debouncedSearch);
 
       const response = await fetch(`/api/help-desk/tickets?${params.toString()}`);
 
-      if (!response.ok) throw new Error('Error al cargar los casos');
+      if (!response.ok) {
+        let message = 'Error al cargar los casos';
+        try {
+          const body = await response.json();
+          if (body?.error) message = body.error;
+        } catch {
+          // ignore parse errors
+        }
+        throw new Error(message);
+      }
 
       const data = await response.json();
       setTickets(data);
+      setError(null);
+      hasLoadedOnce.current = true;
     } catch (err) {
       console.error('Error fetching tickets:', err);
       setError('No se pudieron cargar los casos. Por favor intente nuevamente.');
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setTableRefreshing(false);
     }
-  };
+  }, [subprocessId, filters, debouncedSearch]);
 
-  const handleFilterChange = (field: string, value: string) => {
+  useEffect(() => {
+    if (status === 'loading' || !session || !isAdmin) return;
+    void fetchTickets({ silent: hasLoadedOnce.current });
+  }, [session, status, isAdmin, filters, debouncedSearch, fetchTickets]);
+
+  const handleFilterChange = (field: keyof TicketsBoardFilters, value: string) => {
     setFilters((prev) => ({
       ...prev,
       [field]: value,
     }));
+  };
+
+  const handleClearAllFilters = () => {
+    setSearchQuery('');
+    setDebouncedSearch('');
+    setFilters({
+      priority: '',
+      status: '1',
+      assigned_user: '',
+      date_from: '',
+      date_to: '',
+      technician: '',
+      company: '',
+    });
   };
 
   const handleFormChange = (field: string, value: string) => {
@@ -398,7 +448,7 @@ function TicketsBoard() {
       });
       setTechnicalsError(null);
 
-      fetchTickets();
+      fetchTickets({ silent: true });
       setModalOpened(false);
     } catch (err) {
       console.error('Error creating ticket:', err);
@@ -408,7 +458,7 @@ function TicketsBoard() {
     }
   };
 
-  if (status === 'loading' || loading) {
+  if (status === 'loading' || initialLoading) {
     return (
       <div className='min-h-screen flex items-center justify-center'>
         <div>Cargando...</div>
@@ -626,136 +676,44 @@ function TicketsBoard() {
           </Alert>
         )}
 
-        {/* Filters Section */}
-        <Card shadow='sm' p='lg' radius='md' withBorder mb='6' className='bg-white'>
-          <Group justify='space-between' mb='md'>
-            <Title order={3} className='flex items-center gap-2'>
-              <IconFilter size={20} />
-              Filtros de Búsqueda
-            </Title>
-            <ActionIcon
-              variant='subtle'
-              onClick={() => setFiltersExpanded(!filtersExpanded)}
-              aria-label={filtersExpanded ? 'Ocultar filtros' : 'Mostrar filtros'}
-            >
-              {filtersExpanded ? <IconX size={16} /> : <IconFilter size={16} />}
-            </ActionIcon>
-          </Group>
-
-          <Collapse in={filtersExpanded}>
-            <Box mt='md'>
-              <Grid>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Prioridad'
-                    placeholder='Todas las prioridades'
-                    clearable
-                    data={[
-                      { value: 'Baja', label: 'Baja' },
-                      { value: 'Media', label: 'Media' },
-                      { value: 'Alta', label: 'Alta' },
-                    ]}
-                    value={filters.priority}
-                    onChange={(value) => handleFilterChange('priority', value || '')}
-                    leftSection={<IconFlag size={16} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Estado'
-                    placeholder='Todas los estados'
-                    clearable
-                    data={[
-                      { value: '0', label: 'Todos' },
-                      { value: '1', label: 'Abierto' },
-                      { value: '2', label: 'Resuelto' },
-                      { value: '3', label: 'Cancelado' },
-                    ]}
-                    value={filters.status}
-                    onChange={(value) => handleFilterChange('status', value || '')}
-                    leftSection={<IconFlag size={16} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Empresa'
-                    placeholder='Todas las empresas'
-                    clearable
-                    data={companies}
-                    value={filters.company}
-                    onChange={(value) => handleFilterChange('company', value || '')}
-                    leftSection={<IconBuilding size={16} />}
-                    disabled={loadingOptions}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Técnico Asignado'
-                    placeholder='Todos los técnicos'
-                    clearable
-                    data={technicals}
-                    value={filters.technician}
-                    onChange={(value) => handleFilterChange('technician', value || '')}
-                    leftSection={<IconUser size={16} />}
-                    disabled={loadingOptions || loadingTechnicals}
-                    rightSection={loadingTechnicals ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div> : null}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Fecha Desde'
-                    type='date'
-                    value={filters.date_from}
-                    onChange={(e) => handleFilterChange('date_from', e.target.value)}
-                    leftSection={<IconCalendarEvent size={16} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Fecha Hasta'
-                    type='date'
-                    value={filters.date_to}
-                    onChange={(e) => handleFilterChange('date_to', e.target.value)}
-                    leftSection={<IconCalendarEvent size={16} />}
-                  />
-                </Grid.Col>
-              </Grid>
-
-              <Group justify='flex-end' mt='md'>
-                <Button
-                  variant='outline'
-                  onClick={() =>
-                    setFilters({
-                      priority: '',
-                      status: '',
-                      assigned_user: '',
-                      date_from: '',
-                      date_to: '',
-                      technician: '',
-                      company: '',
-                    })
-                  }
-                  leftSection={<IconX size={16} />}
-                >
-                  Limpiar Filtros
-                </Button>
-                <Button onClick={fetchTickets} leftSection={<IconRefresh size={16} />}>
-                  Aplicar Filtros
-                </Button>
-              </Group>
-            </Box>
-          </Collapse>
-        </Card>
+        <HelpDeskTicketsFilters
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          isSearching={tableRefreshing}
+          filters={filters}
+          onFilterChange={handleFilterChange}
+          technicals={technicals}
+          loadingTechnicals={loadingTechnicals}
+          companies={companies}
+          loadingCompanies={loadingOptions}
+          filtersExpanded={filtersExpanded}
+          onToggleExpanded={() => setFiltersExpanded((v) => !v)}
+          onClearAll={handleClearAllFilters}
+          resultCount={tickets.length}
+        />
 
         <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden' p='lg'>
-          <LoadingOverlay visible={loading} />
+          <LoadingOverlay visible={tableRefreshing} zIndex={50} overlayProps={{ blur: 1 }} />
 
           <Title order={3} mb='md' className='flex items-center gap-2'>
             <IconTicket size={20} />
             Lista de Casos
           </Title>
 
-          <HelpDeskCasesTable tickets={tickets} />
+          <HelpDeskCasesTable
+            tickets={tickets}
+            showRequester
+            emptyMessage={
+              debouncedSearch || filters.technician
+                ? 'No hay casos con estos criterios'
+                : 'No se encontraron casos'
+            }
+            emptyHint={
+              debouncedSearch || filters.technician
+                ? 'Prueba otro ID, nombre de solicitante o técnico'
+                : 'Intenta ajustar los filtros'
+            }
+          />
         </Card>
 
         <Modal

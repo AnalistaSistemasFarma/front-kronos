@@ -32,12 +32,12 @@ export function HelpDeskCasesTable({
 
   return (
     <div className='overflow-x-auto'>
-      <Table striped highlightOnHover>
+      <Table striped highlightOnHover layout='fixed' className='min-w-[960px]'>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>ID</Table.Th>
-            <Table.Th>Asunto</Table.Th>
-            {showRequester && <Table.Th>Solicitante</Table.Th>}
+            <Table.Th style={{ width: 88, minWidth: 88 }}>ID</Table.Th>
+            <Table.Th style={{ width: '22%' }}>Asunto</Table.Th>
+            {showRequester && <Table.Th style={{ width: '16%' }}>Solicitante</Table.Th>}
             <Table.Th>Empresa</Table.Th>
             <Table.Th>Prioridad</Table.Th>
             <Table.Th>Estado</Table.Th>
@@ -65,13 +65,13 @@ export function HelpDeskCasesTable({
                 className='cursor-pointer hover:bg-gray-50 transition-colors'
                 onClick={() => openTicket(ticket)}
               >
-                <Table.Td>
-                  <Badge variant='light' color='blue' size='sm'>
+                <Table.Td style={{ width: 88, minWidth: 88 }} className='whitespace-nowrap'>
+                  <Badge variant='light' color='blue' size='sm' className='font-mono tabular-nums'>
                     #{ticket.id_case}
                   </Badge>
                 </Table.Td>
                 <Table.Td>
-                  <Text fw={500} className='max-w-xs truncate'>
+                  <Text fw={500} lineClamp={2} title={ticket.subject_case}>
                     {ticket.subject_case}
                   </Text>
                 </Table.Td>
