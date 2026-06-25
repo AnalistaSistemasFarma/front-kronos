@@ -302,6 +302,11 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           SELECT rg.id, rg.subject_request AS subject, rg.[description],
                  rg.status_req AS id_status, sc.status AS status,
                  cr.category AS category, pc.process AS process,
+                 STUFF((SELECT ', ' + ru.name
+                    FROM user_process_category_request_general upcrg2
+                    INNER JOIN [user] ru ON ru.id = upcrg2.id_user
+                    WHERE upcrg2.id_process_category = pcrg.id_process_category
+                    FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS responsible,
                  rg.id_company, c.company, u.name AS requester,
                  rg.created_at, rg.date_resolution, rg.resolution, rg.url
           FROM requests_general rg
@@ -335,6 +340,11 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           SELECT rg.id, rg.subject_request AS subject, rg.[description],
                  rg.status_req AS id_status, sc.status AS status,
                  cr.category AS category, pc.process AS process,
+                 STUFF((SELECT ', ' + ru.name
+                    FROM user_process_category_request_general upcrg2
+                    INNER JOIN [user] ru ON ru.id = upcrg2.id_user
+                    WHERE upcrg2.id_process_category = pcrg.id_process_category
+                    FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS responsible,
                  rg.id_company, c.company, u.name AS requester,
                  rg.created_at, rg.date_resolution, rg.resolution, rg.url
           FROM requests_general rg
