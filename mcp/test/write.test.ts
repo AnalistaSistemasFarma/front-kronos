@@ -311,12 +311,12 @@ describe('el candado read-only sigue intacto pese a las tools de escritura', () 
     expect(mock.capturedWrite.length).toBeGreaterThan(0);
   });
 
-  it('la lista de tools ahora incluye exactamente 2 de escritura y 11 de lectura', async () => {
+  it('la lista de tools ahora incluye exactamente 2 de escritura y 12 de lectura', async () => {
     const server = buildServer();
     const client = await connectClient(server);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names.length).toBe(13);
+    expect(names.length).toBe(16);
     expect(names).toContain('kronos_categorize_case');
     expect(names).toContain('kronos_categorize_request');
     const writeTools = names.filter((n) => n.startsWith('kronos_categorize_'));
