@@ -297,3 +297,43 @@ body {
   animation-timing-function: linear;
   animation-fill-mode: forwards;
 }
+
+/* ─── Campana de notificaciones (tema claro / oscuro) ─── */
+.notification-bell-dropdown.mantine-Popover-dropdown {
+  background-color: var(--app-surface, var(--surface)) !important;
+  border-color: var(--app-border, var(--border-subtle)) !important;
+  color: var(--app-text, var(--foreground));
+}
+
+.notification-bell-header,
+.notification-bell-footer {
+  background-color: var(--app-surface, var(--surface));
+}
+
+.notification-bell-footer {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.notification-bell-text {
+  color: var(--app-text, var(--foreground));
+}
+
+.notification-bell-text-muted {
+  color: var(--app-text-muted, var(--mantine-color-dimmed));
+}
+
+.notification-bell-accent {
+  color: var(--app-accent, var(--mantine-color-anchor));
+}
+
+.notification-bell-row {
+  background-color: transparent;
+}
+
+.notification-bell-row--unread {
+  background-color: color-mix(in srgb, var(--app-accent, #2563eb) 14%, var(--app-surface, #fff));
+}
+
+.notification-bell-row--interactive:hover {
+  background-color: var(--app-surface-raised, var(--surface-muted)) !important;
+}

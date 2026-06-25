@@ -1,13 +1,10 @@
-import sql from 'mssql';
-import sqlConfig from '../../../../dbconfig';
 import { NextResponse } from 'next/server';
+import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const companyId = searchParams.get('companyId');
-    
-    const pool = await sql.connect(sqlConfig);
 
     const queryCompanies = `
       SELECT 
@@ -25,11 +22,11 @@ export async function GET(req) {
         ON cr.id = ccr.id_category_request
       WHERE cr.active = 1
     `;
-    
+
     if (companyId) {
-      queryCategories += ` AND c.id_company = ${companyId}`;
+      queryCategories += ` AND c.id_company = @companyId`;
     }
-    
+
     queryCategories += ` ORDER BY cr.category`;
 
     const queryProcessCategories = `
@@ -59,14 +56,20 @@ export async function GET(req) {
       ORDER BY u.name
     `;
 
-    const [companiesRes, categoriesRes, processCategoriesRes, assignedUsersRes] = await Promise.all(
-      [
-        pool.request().query(queryCompanies),
-        pool.request().query(queryCategories),
-        pool.request().query(queryProcessCategories),
-        pool.request().query(queryAssignedUsers),
-      ]
-    );
+    const [companiesRes, categoriesRes, processCategoriesRes, assignedUsersRes] =
+      await withMssqlPool(async (pool) => {
+        const categoriesRequest = pool.request();
+        if (companyId) {
+          categoriesRequest.input('companyId', sql.Int, Number(companyId));
+        }
+
+        return Promise.all([
+          pool.request().query(queryCompanies),
+          categoriesRequest.query(queryCategories),
+          pool.request().query(queryProcessCategories),
+          pool.request().query(queryAssignedUsers),
+        ]);
+      });
 
     return NextResponse.json(
       {

@@ -32,6 +32,7 @@ import {
   Flex,
   ActionIcon,
   Box,
+  TagsInput,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -212,7 +213,12 @@ function ViewTicketPage() {
     estado: '',
     resolucion: '',
     notificarPorCorreo: false,
+    correo: '',
   });
+  const [availableEmails, setAvailableEmails] = useState<string[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
+  const [selectedNoteEmails, setSelectedNoteEmails] = useState<string[]>([]);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [originalTicket, setOriginalTicket] = useState<Ticket | null>(null);
@@ -234,6 +240,7 @@ function ViewTicketPage() {
 
   const [noteData, setNoteData] = useState({
     notificarPorCorreo: false,
+    correo: '',
   });
 
   useEffect(() => {
@@ -442,6 +449,32 @@ function ViewTicketPage() {
     }
   }, [status, userName, userId, getUserIdByName]);
 
+  const fetchUsersWithEmails = async () => {
+    try {
+      setLoadingUsers(true);
+      const response = await fetch('/api/requests-general/users-emails');
+      if (response.ok) {
+        const data = await response.json();
+        const emails: string[] = (data.users || [])
+          .map((user: { email: string }) => user.email?.trim())
+          .filter((email: string): email is string => Boolean(email));
+        setAvailableEmails([...new Set(emails)]);
+      } else {
+        console.error('Error al cargar usuarios:', response.statusText);
+      }
+    } catch (error) {
+      console.error('Error cargando usuarios:', error);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  useEffect(() => {
+    if (status === 'authenticated') {
+      fetchUsersWithEmails();
+    }
+  }, [status]);
+
   const fetchOptions = async () => {
     try {
       setLoadingOptions(true);
@@ -640,15 +673,19 @@ function ViewTicketPage() {
         await fetchNotes();
 
         if (noteData.notificarPorCorreo) {
-          const contactEmail = ticket.email?.trim() ?? '';
-          if (!contactEmail || !isValidEmail(contactEmail)) {
-            toast.error('Configure un correo válido en Contacto del solicitante antes de notificar.');
+          const recipients = selectedNoteEmails.map((email) => email.trim()).filter(Boolean);
+          const invalid = recipients.filter((email) => !isValidEmail(email));
+          if (recipients.length === 0) {
+            toast.error('Agregue al menos un correo electrónico para notificar.');
+          } else if (invalid.length > 0) {
+            toast.error(`Correo(s) inválido(s): ${invalid.join(', ')}`);
           } else {
-            await sendNoteEmailNotification(contactEmail);
+            await sendNoteEmailNotification(recipients.join('; '));
           }
         }
 
-        setNoteData({ notificarPorCorreo: false });
+        setNoteData({ notificarPorCorreo: false, correo: '' });
+        setSelectedNoteEmails([]);
       } else {
         const errorData = await response.json();
         console.error('Error al agregar nota:', errorData.error);
@@ -736,10 +773,14 @@ function ViewTicketPage() {
     }
 
     if (resolutionData.notificarPorCorreo) {
-      const contactEmail = ticket?.email?.trim() ?? '';
-      if (!contactEmail || !isValidEmail(contactEmail)) {
-        errors.email =
-          'Configure un correo válido en Contacto del solicitante para enviar la notificación';
+      const recipients = selectedEmails.map((email) => email.trim()).filter(Boolean);
+      if (recipients.length === 0) {
+        errors.correo = 'Agregue al menos un correo electrónico para enviar la notificación';
+      } else {
+        const invalid = recipients.filter((email) => !isValidEmail(email));
+        if (invalid.length > 0) {
+          errors.correo = `Correo(s) inválido(s): ${invalid.join(', ')}`;
+        }
       }
     }
 
@@ -747,7 +788,7 @@ function ViewTicketPage() {
     return Object.keys(errors).length === 0;
   };
 
-  const sendEmailNotification = async (contactEmail: string): Promise<boolean> => {
+  const sendEmailNotification = async (recipients: string): Promise<boolean> => {
     if (!process.env.API_EMAIL) {
       console.error('Error: La variable de entorno API_EMAIL no está configurada');
       setUpdateMessage({
@@ -759,7 +800,7 @@ function ViewTicketPage() {
 
     try {
       const message = `Actualización del Caso #${ticket?.id_case} - ${ticket?.subject_case}`;
-      const emails = contactEmail;
+      const emails = recipients;
 
       const table: Array<Record<string, string | number | undefined>> = [
         {
@@ -801,7 +842,7 @@ function ViewTicketPage() {
     }
   };
 
-  const sendNoteEmailNotification = async (contactEmail: string): Promise<boolean> => {
+  const sendNoteEmailNotification = async (recipients: string): Promise<boolean> => {
     if (!process.env.API_EMAIL) {
       console.error('Error: La variable de entorno API_EMAIL no está configurada');
       return false;
@@ -809,7 +850,7 @@ function ViewTicketPage() {
 
     try {
       const message = `Nueva Nota en Caso #${ticket?.id_case} - ${ticket?.subject_case}`;
-      const emails = contactEmail;
+      const emails = recipients;
 
       const table: Array<Record<string, string | number | undefined>> = [
         {
@@ -906,7 +947,8 @@ function ViewTicketPage() {
 
       let emailSent = true;
       if (resolutionData.notificarPorCorreo) {
-        emailSent = await sendEmailNotification(ticket?.email?.trim() ?? '');
+        const recipients = selectedEmails.map((email) => email.trim()).filter(Boolean);
+        emailSent = await sendEmailNotification(recipients.join('; '));
       }
 
       if (emailSent) {
@@ -972,7 +1014,9 @@ function ViewTicketPage() {
           estado: '',
           resolucion: '',
           notificarPorCorreo: false,
+          correo: '',
         });
+        setSelectedEmails([]);
         setShowResolution(false);
       }
     } catch (error) {
@@ -1268,20 +1312,44 @@ function ViewTicketPage() {
                     <Checkbox
                       label='¿Notificar por correo electrónico?'
                       checked={noteData.notificarPorCorreo}
-                      onChange={(e) =>
-                        setNoteData({
-                          notificarPorCorreo: e.currentTarget.checked,
-                        })
-                      }
+                      onChange={(e) => {
+                        const checked = e.currentTarget.checked;
+                        if (checked) {
+                          const contactEmail = ticket.email?.trim();
+                          const defaults =
+                            contactEmail && isValidEmail(contactEmail) ? [contactEmail] : [];
+                          setSelectedNoteEmails(defaults);
+                          setNoteData({
+                            notificarPorCorreo: true,
+                            correo: defaults.join('; '),
+                          });
+                        } else {
+                          setSelectedNoteEmails([]);
+                          setNoteData({ notificarPorCorreo: false, correo: '' });
+                        }
+                      }}
                       disabled={!userId || loadingUserId || isTicketResolved()}
                       mb='sm'
                     />
                     {noteData.notificarPorCorreo && (
-                      <Text size='sm' c={ticket.email?.trim() ? 'dimmed' : 'orange.7'}>
-                        {ticket.email?.trim()
-                          ? `Se enviará a: ${ticket.email.trim()}`
-                          : 'Configure el correo en Contacto del solicitante antes de guardar la nota.'}
-                      </Text>
+                      <TagsInput
+                        label='Correos electrónicos'
+                        placeholder='Escribe o selecciona correos y presiona Enter'
+                        description='Puedes agregar varios correos. Selecciona de la lista o escribe uno nuevo.'
+                        data={availableEmails}
+                        value={selectedNoteEmails}
+                        onChange={(values) => {
+                          setSelectedNoteEmails(values);
+                          setNoteData({
+                            ...noteData,
+                            correo: values.join('; '),
+                          });
+                        }}
+                        clearable
+                        disabled={loadingUsers || isTicketResolved()}
+                        leftSection={<IconAt size={16} />}
+                        mb='sm'
+                      />
                     )}
                     <Group justify='flex-end'>
                       <ActionIcon
@@ -1365,21 +1433,50 @@ function ViewTicketPage() {
                       <Checkbox
                         label='¿Notificar por correo electrónico?'
                         checked={resolutionData.notificarPorCorreo}
-                        onChange={(e) =>
-                          setResolutionData({
-                            ...resolutionData,
-                            notificarPorCorreo: e.currentTarget.checked,
-                          })
-                        }
+                        onChange={(e) => {
+                          const checked = e.currentTarget.checked;
+                          if (checked) {
+                            const contactEmail = ticket.email?.trim();
+                            const defaults =
+                              contactEmail && isValidEmail(contactEmail) ? [contactEmail] : [];
+                            setSelectedEmails(defaults);
+                            setResolutionData({
+                              ...resolutionData,
+                              notificarPorCorreo: true,
+                              correo: defaults.join('; '),
+                            });
+                          } else {
+                            setSelectedEmails([]);
+                            setResolutionData({
+                              ...resolutionData,
+                              notificarPorCorreo: false,
+                              correo: '',
+                            });
+                          }
+                        }}
                         disabled={!isEditing}
                         mb='sm'
                       />
                       {resolutionData.notificarPorCorreo && (
-                        <Text size='sm' c={ticket.email?.trim() ? 'dimmed' : 'orange.7'} mb='sm'>
-                          {ticket.email?.trim()
-                            ? `Se enviará a: ${ticket.email.trim()}`
-                            : 'Configure el correo en Contacto del solicitante antes de guardar.'}
-                        </Text>
+                        <TagsInput
+                          label='Correos electrónicos'
+                          placeholder='Escribe o selecciona correos y presiona Enter'
+                          description='Puedes agregar varios correos. Selecciona de la lista o escribe uno nuevo.'
+                          data={availableEmails}
+                          value={selectedEmails}
+                          onChange={(values) => {
+                            setSelectedEmails(values);
+                            setResolutionData({
+                              ...resolutionData,
+                              correo: values.join('; '),
+                            });
+                          }}
+                          clearable
+                          disabled={!isEditing || loadingUsers}
+                          leftSection={<IconAt size={16} />}
+                          error={formErrors.correo}
+                          mb='sm'
+                        />
                       )}
                       <Textarea
                         label='Descripción de la resolución'

@@ -1,11 +1,8 @@
-import sql from 'mssql';
-import sqlConfig from '../../../../dbconfig';
 import { NextResponse } from 'next/server';
+import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 
 export async function GET(req) {
   try {
-    const pool = await sql.connect(sqlConfig);
-
     const { searchParams } = new URL(req.url);
     const idRequest = searchParams.get('id_request');
 
@@ -16,10 +13,11 @@ export async function GET(req) {
       );
     }
 
-    const result = await pool
-      .request()
-      .input('idRequest', sql.Int, parseInt(idRequest))
-      .query(`
+    const result = await withMssqlPool(async (pool) => {
+      return pool
+        .request()
+        .input('idRequest', sql.Int, parseInt(idRequest, 10))
+        .query(`
         SELECT
           rfv.id,
           rfv.id_form_field,
@@ -33,6 +31,7 @@ export async function GET(req) {
         WHERE rfv.id_request_general = @idRequest
         ORDER BY ff.display_order, ff.id
       `);
+    });
 
     return NextResponse.json(result.recordset, { status: 200 });
   } catch (err) {
