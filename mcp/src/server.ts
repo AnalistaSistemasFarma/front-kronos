@@ -9,7 +9,6 @@
  *   (src/write.ts), transaccional, parametrizada y auditada.
  */
 import express, { type Request, type Response } from 'express';
-import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -74,8 +73,13 @@ export function createApp(
       maxPageSize: config.maxPageSize,
       defaultPageSize: config.defaultPageSize,
     });
+    // Stateless REAL: sessionIdGenerator undefined => el transporte NO exige el
+    // handshake `initialize` previo en cada petición (cada request usa un
+    // transport+server propio y autocontenido). Con un generador definido, el
+    // SDK marcaba "Server not initialized" en todo tools/* porque el transport
+    // fresco de esa petición nunca veía el initialize.
     const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
+      sessionIdGenerator: undefined,
     });
 
     res.on('close', () => {
