@@ -274,7 +274,7 @@ function LoginForm() {
           color: isDark ? 'rgba(201, 214, 240, 0.75)' : 'rgba(17, 53, 98, 0.72)',
         }}
       >
-        © 2025 Portal de servicios. Todos los derechos reservados.
+        © {new Date().getFullYear()} Portal de servicios. Todos los derechos reservados.
       </Text>
     </div>
   );
