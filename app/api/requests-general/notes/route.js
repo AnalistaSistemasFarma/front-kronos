@@ -1,6 +1,5 @@
-import sql from 'mssql';
-import sqlConfig from '../../../../dbconfig.js';
 import { NextResponse } from 'next/server';
+import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 
 // GET - Obtener notas de un caso
 export async function GET(req) {
@@ -15,8 +14,6 @@ export async function GET(req) {
       );
     }
 
-    const pool = await sql.connect(sqlConfig);
-
     const query = `
       SELECT n.id_note, n.note, u.name as 'createdBy', n.creation_date
       FROM notes n
@@ -25,10 +22,12 @@ export async function GET(req) {
       ORDER BY n.id_note DESC
     `;
 
-    const request = pool.request();
-    request.input('id_request', sql.Int, id_request);
-
-    const result = await request.query(query);
+    const result = await withMssqlPool(async (pool) => {
+      return pool
+        .request()
+        .input('id_request', sql.Int, Number(id_request))
+        .query(query);
+    });
 
     return NextResponse.json(result.recordset, { status: 200 });
   } catch (err) {
@@ -70,48 +69,39 @@ export async function POST(req) {
       );
     }
 
-    const pool = await sql.connect(sqlConfig);
-    const transaction = new sql.Transaction(pool);
-
-    try {
+    const newNoteId = await withMssqlPool(async (pool) => {
+      const transaction = new sql.Transaction(pool);
       await transaction.begin();
 
-      const insertNoteQuery = `
-        INSERT INTO notes (note, id_request, created_by)
-        OUTPUT INSERTED.id_note
-        VALUES (@note, @id_request, @created_by);
-      `;
+      try {
+        const insertNoteQuery = `
+          INSERT INTO notes (note, id_request, created_by)
+          OUTPUT INSERTED.id_note
+          VALUES (@note, @id_request, @created_by);
+        `;
 
-      const request = new sql.Request(transaction);
-      request.input('note', sql.Text, note.trim());
-      request.input('id_request', sql.Int, id_request);
-      request.input('created_by', sql.NVarChar, created_by);
+        const request = new sql.Request(transaction);
+        request.input('note', sql.Text, note.trim());
+        request.input('id_request', sql.Int, id_request);
+        request.input('created_by', sql.NVarChar, created_by);
 
-      const result = await request.query(insertNoteQuery);
-      const newNoteId = result.recordset[0].id_note;
+        const result = await request.query(insertNoteQuery);
+        await transaction.commit();
+        return result.recordset[0].id_note;
+      } catch (dbError) {
+        await transaction.rollback();
+        throw dbError;
+      }
+    });
 
-      await transaction.commit();
-
-      return new Response(
-        JSON.stringify({
-          message: 'Nota agregada exitosamente',
-          id_note: newNoteId,
-          success: true,
-        }),
-        { status: 201 }
-      );
-    } catch (dbError) {
-      await transaction.rollback();
-      console.error('Error al agregar nota:', dbError);
-      return new Response(
-        JSON.stringify({
-          error: 'Error al agregar la nota en la base de datos',
-          details: 'No se pudo guardar la nota. Por favor intente nuevamente.',
-          technical: dbError.message,
-        }),
-        { status: 500 }
-      );
-    }
+    return new Response(
+      JSON.stringify({
+        message: 'Nota agregada exitosamente',
+        id_note: newNoteId,
+        success: true,
+      }),
+      { status: 201 }
+    );
   } catch (err) {
     console.error('Error general en la solicitud:', err);
     return new Response(

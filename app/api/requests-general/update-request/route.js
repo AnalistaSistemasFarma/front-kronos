@@ -1,37 +1,41 @@
-import sql from 'mssql';
-import sqlConfig from '../../../../dbconfig.js';
+import {
+  fireAndForgetNotification,
+  isRequestClosedStatus,
+  notifyRequestClosed,
+} from '../../../../lib/notificationEvents.js';
+import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 
 export async function POST(req) {
   try {
     const body = await req.json();
-    const {
-      id,
-      status,
-      process_category,
-      id_technical,
-      resolucion,
-    } = body;
+    const { id, status, process_category, id_technical, resolucion } = body;
 
-    if (
-      !id ||
-      !id_technical
-    ) {
+    if (!id || !id_technical) {
       return new Response(
         JSON.stringify({
           error: 'Campos obligatorios faltantes',
-          details: 'Por favor complete todos los campos requeridos antes de actualizar la solicitud.',
+          details:
+            'Por favor complete todos los campos requeridos antes de actualizar la solicitud.',
         }),
         { status: 400 }
       );
     }
 
-    const pool = await sql.connect(sqlConfig);
-    const transaction = new sql.Transaction(pool);
-
-    try {
+    const { prevRow } = await withMssqlPool(async (pool) => {
+      const transaction = new sql.Transaction(pool);
       await transaction.begin();
 
-      const updateCaseQuery = `
+      try {
+        const prevResult = await new sql.Request(transaction)
+          .input('id', sql.Int, id)
+          .query(`
+          SELECT rg.status_req, rg.subject_request, rg.id_requester
+          FROM requests_general rg
+          WHERE rg.id = @id
+        `);
+        const prevRow = prevResult.recordset[0];
+
+        const updateCaseQuery = `
         UPDATE requests_general
         SET
           status_req = @status,
@@ -45,58 +49,65 @@ export async function POST(req) {
         WHERE id = @id
       `;
 
-      const updateCaseRequest = new sql.Request(transaction);
-      updateCaseRequest.input('status', sql.Int, status);
-      updateCaseRequest.input('resolucion', sql.NVarChar(255), resolucion || null);
-      updateCaseRequest.input('id_executor_final', sql.NVarChar(1000), id_technical || null);
-      updateCaseRequest.input('id', sql.Int, id);
+        const updateCaseRequest = new sql.Request(transaction);
+        updateCaseRequest.input('status', sql.Int, status);
+        updateCaseRequest.input('resolucion', sql.NVarChar(255), resolucion || null);
+        updateCaseRequest.input('id_executor_final', sql.NVarChar(1000), id_technical || null);
+        updateCaseRequest.input('id', sql.Int, id);
 
-      await updateCaseRequest.query(updateCaseQuery);
+        await updateCaseRequest.query(updateCaseQuery);
 
-      if (process_category) {
-        const updateCategoryQuery = `
+        if (process_category) {
+          const updateCategoryQuery = `
           UPDATE process_category_request_general
           SET id_process_category = @process_category
           WHERE id_request_general = @id
         `;
 
-        const updateCategoryRequest = new sql.Request(transaction);
-        updateCategoryRequest.input('process_category', sql.Int, process_category);
-        updateCategoryRequest.input('id', sql.Int, id);
+          const updateCategoryRequest = new sql.Request(transaction);
+          updateCategoryRequest.input('process_category', sql.Int, process_category);
+          updateCategoryRequest.input('id', sql.Int, id);
 
-        await updateCategoryRequest.query(updateCategoryQuery);
+          await updateCategoryRequest.query(updateCategoryQuery);
+        }
+
+        await transaction.commit();
+        return { prevRow };
+      } catch (dbError) {
+        await transaction.rollback();
+        throw dbError;
       }
+    });
 
-      await transaction.commit();
+    const prevStatus = prevRow?.status_req ?? null;
+    const nextStatus = status ?? null;
 
-      return new Response(
-        JSON.stringify({
-          message: 'Caso actualizado exitosamente',
-          success: true,
-        }),
-        { status: 200 }
-      );
-    } catch (dbError) {
-      await transaction.rollback();
-      console.error('Error en el proceso de actualización:', dbError);
-
-      return new Response(
-        JSON.stringify({
-          error: 'Error al actualizar el caso en la base de datos',
-          details: 'No se pudo guardar la información. Por favor intente nuevamente.',
-          technical: dbError.message,
-        }),
-        { status: 500 }
+    if (isRequestClosedStatus(nextStatus) && !isRequestClosedStatus(prevStatus)) {
+      fireAndForgetNotification(
+        notifyRequestClosed({
+          requestId: id,
+          subject: prevRow?.subject_request,
+          requesterUserId: prevRow?.id_requester,
+          statusId: nextStatus,
+        })
       );
     }
-  } catch (err) {
-    console.error('Error general en la solicitud:', err);
 
     return new Response(
       JSON.stringify({
-        error: 'Error del servidor al procesar la solicitud',
-        details: 'Ocurrió un error inesperado. Por favor intente nuevamente más tarde.',
-        technical: err.message,
+        message: 'Caso actualizado exitosamente',
+        success: true,
+      }),
+      { status: 200 }
+    );
+  } catch (dbError) {
+    console.error('Error en el proceso de actualización:', dbError);
+
+    return new Response(
+      JSON.stringify({
+        error: 'Error al actualizar el caso en la base de datos',
+        details: 'No se pudo guardar la información. Por favor intente nuevamente.',
+        technical: dbError.message,
       }),
       { status: 500 }
     );

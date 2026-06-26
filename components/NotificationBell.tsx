@@ -298,16 +298,21 @@ export default function NotificationBell() {
           </Tooltip>
         </Indicator>
       </Popover.Target>
-      <Popover.Dropdown p={0}>
-        <Group justify='space-between' px='md' py='sm' className='border-b border-[var(--app-border)]'>
-          <Text size='sm' fw={600}>
+      <Popover.Dropdown p={0} className='notification-bell-dropdown'>
+        <Group
+          justify='space-between'
+          px='md'
+          py='sm'
+          className='notification-bell-header border-b border-[var(--app-border)]'
+        >
+          <Text size='sm' fw={600} className='notification-bell-text'>
             Notificaciones
           </Text>
           {unreadCount > 0 && (
             <UnstyledButton onClick={markAllRead}>
               <Group gap={4}>
-                <IconCheck size={14} />
-                <Text size='xs' c='blue'>
+                <IconCheck size={14} className='notification-bell-accent' />
+                <Text size='xs' className='notification-bell-accent'>
                   Marcar todas
                 </Text>
               </Group>
@@ -321,7 +326,7 @@ export default function NotificationBell() {
               <Loader size='sm' />
             </Group>
           ) : notifications.length === 0 ? (
-            <Text size='sm' c='dimmed' ta='center' py='xl'>
+            <Text size='sm' ta='center' py='xl' className='notification-bell-text-muted'>
               No tienes notificaciones
             </Text>
           ) : (
@@ -338,10 +343,11 @@ export default function NotificationBell() {
             justify='space-between'
             px='md'
             py='sm'
-            className='border-t border-[var(--app-border)]'
-            style={{ background: 'var(--app-surface-muted, var(--mantine-color-gray-0))' }}
+            className='notification-bell-footer border-t border-[var(--app-border)]'
           >
-            <Text size='xs'>Notificaciones push</Text>
+            <Text size='xs' className='notification-bell-text'>
+              Notificaciones push
+            </Text>
             <Switch
               size='sm'
               checked={isSubscribed}
@@ -387,12 +393,9 @@ function NotificationRow({
           align='flex-start'
           px='md'
           py='sm'
-          className={`border-b border-[var(--app-border)] transition-colors ${
-            hasLink ? 'hover:bg-[var(--mantine-color-gray-0)]' : ''
-          }`}
-          style={{
-            background: isUnread ? 'var(--mantine-color-blue-0)' : undefined,
-          }}
+          className={`notification-bell-row border-b border-[var(--app-border)] transition-colors ${
+            isUnread ? 'notification-bell-row--unread' : ''
+          } ${hasLink ? 'notification-bell-row--interactive' : ''}`}
         >
           <ThemeIcon
             size={36}
@@ -411,23 +414,23 @@ function NotificationRow({
                   Nueva
                 </Badge>
               ) : null}
-              <Text size='sm' fw={600} lineClamp={1} style={{ flex: 1 }}>
+              <Text size='sm' fw={600} lineClamp={1} className='notification-bell-text' style={{ flex: 1 }}>
                 {n.title}
               </Text>
             </Group>
-            <Text size='xs' c='dimmed' lineClamp={2}>
+            <Text size='xs' lineClamp={2} className='notification-bell-text-muted'>
               {n.body}
             </Text>
             <Group gap={6} mt={6} wrap='nowrap'>
-              <Text size='xs' c='dimmed'>
+              <Text size='xs' className='notification-bell-text-muted'>
                 {formatRelative(n.created_at)}
               </Text>
               {hasLink ? (
                 <>
-                  <Text size='xs' c='dimmed'>
+                  <Text size='xs' className='notification-bell-text-muted'>
                     ·
                   </Text>
-                  <Text size='xs' c='blue' fw={600} lineClamp={1}>
+                  <Text size='xs' fw={600} lineClamp={1} className='notification-bell-accent'>
                     {actionLabel}
                   </Text>
                 </>

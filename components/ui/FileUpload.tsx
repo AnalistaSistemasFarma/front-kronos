@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Group,
   Button,
@@ -71,6 +71,15 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const onFilesChangeRef = useRef(onFilesChange);
+
+  useEffect(() => {
+    onFilesChangeRef.current = onFilesChange;
+  }, [onFilesChange]);
+
+  useEffect(() => {
+    onFilesChangeRef.current?.(files);
+  }, [files]);
 
   const getFileIcon = (type: string) => {
     if (type.includes('pdf')) return <IconFileText size={20} />;
@@ -279,16 +288,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
           await uploadFile(uploadedFile.file, uploadedFile.id);
         }
       }
-
-      // Notificar cambios
-      if (onFilesChange) {
-        setFiles((currentFiles) => {
-          onFilesChange(currentFiles);
-          return currentFiles;
-        });
-      }
     },
-    [files.length, maxFiles, disabled, onFilesChange]
+    [files.length, maxFiles, disabled, autoUpload]
   );
 
   const handleDrop = useCallback(
@@ -330,18 +331,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
     [handleFiles]
   );
 
-  const removeFile = useCallback(
-    (fileId: string) => {
-      setFiles((prev) => {
-        const newFiles = prev.filter((f) => f.id !== fileId);
-        if (onFilesChange) {
-          onFilesChange(newFiles);
-        }
-        return newFiles;
-      });
-    },
-    [onFilesChange]
-  );
+  const removeFile = useCallback((fileId: string) => {
+    setFiles((prev) => prev.filter((f) => f.id !== fileId));
+  }, []);
 
   const retryUpload = useCallback(
     async (fileId: string) => {
