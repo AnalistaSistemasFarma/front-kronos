@@ -62,6 +62,20 @@ jobs:
           if (-not (Test-Path "mcp\.env")) { throw "FALTA mcp\.env (MCP). Abortando para no romper el entorno." }
           Write-Host "OK: .env (front) y mcp\.env presentes."
 
+      - name: Detener apps del test (liberar locks de binarios nativos)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          # En Windows, mientras GSS-Front-TEST (next start) y kronos-mcp-test
+          # corren, mantienen ABIERTOS binarios nativos (next-swc *.node, prisma
+          # query_engine *.node). Eso hace fallar `npm ci` con EPERM al intentar
+          # borrarlos. Por eso DETENEMOS solo las apps del test antes de instalar
+          # y construir, y las arrancamos de nuevo al final.
+          # NUNCA pm2 stop all / kill: SOLO estas dos apps. cf-kronos-test (tunel)
+          # queda corriendo; el front vuelve enseguida.
+          pm2 stop GSS-Front-TEST kronos-mcp-test
+          Write-Host "Apps del test detenidas (cf-kronos-test sigue arriba)."
+
       - name: Instalar dependencias y generar Prisma (front)
         shell: powershell
         run: |
@@ -90,13 +104,17 @@ jobs:
           npm run build
           if ($LASTEXITCODE -ne 0) { throw "npm run build (mcp) fallo" }
 
-      - name: Reiniciar apps pm2 del entorno de pruebas
+      - name: Arrancar apps pm2 del entorno de pruebas
+        # always(): aunque un paso previo falle, volvemos a levantar las apps para
+        # no dejar el entorno de pruebas caido (usaria el ultimo build valido).
+        if: always()
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           Set-Location $env:PROJECT_DIR
-          # SOLO las apps del test. NUNCA restart all / kill / apps ajenas.
-          pm2 restart GSS-Front-TEST kronos-mcp-test
+          # SOLO las apps del test (las detuvimos antes). NUNCA all / kill / ajenas.
+          # restart re-arranca lo detenido y recarga el codigo nuevo.
+          pm2 restart GSS-Front-TEST kronos-mcp-test --update-env
           if ($LASTEXITCODE -ne 0) { throw "pm2 restart fallo" }
           pm2 save
           Write-Host "== estado pm2 =="
