@@ -1,0 +1,122 @@
+name: Deploy a PRUEBAS (.230)
+
+# Auto-deploy del entorno de PRUEBAS Kronos/SynerLink en la .230 (pce0023).
+# Se dispara al hacer push/merge a la rama `testing`, o a mano (workflow_dispatch).
+#
+# ESTRATEGIA: NO usa actions/checkout. El runner self-hosted actua sobre el clon
+# EXISTENTE en C:\Users\nicolas.rivera\projects\front-kronos-test, donde viven
+# los .env locales (gitignored, con secretos) y la config del entorno. Un
+# checkout normal los perderia. En su lugar hacemos fetch + reset --hard a
+# origin/testing (solo afecta archivos VERSIONADOS; los .env untracked sobreviven
+# porque NO ejecutamos `git clean`).
+
+on:
+  push:
+    branches: [testing]
+  workflow_dispatch:
+
+# Evita despliegues solapados: si llega un push mientras corre, se encola.
+concurrency:
+  group: deploy-testing-230
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build y reinicio pm2 en la .230
+    runs-on: [self-hosted, kronos-230]
+    env:
+      PROJECT_DIR: C:\Users\nicolas.rivera\projects\front-kronos-test
+    steps:
+      - name: Mostrar contexto
+        shell: powershell
+        run: |
+          Write-Host "Commit:  $env:GITHUB_SHA"
+          Write-Host "Rama:    $env:GITHUB_REF"
+          Write-Host "Trigger: $env:GITHUB_EVENT_NAME"
+          Write-Host "Dir:     $env:PROJECT_DIR"
+
+      - name: Actualizar codigo (fetch + reset a origin/testing)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:PROJECT_DIR
+          Write-Host "== git fetch =="
+          git fetch origin testing
+          if ($LASTEXITCODE -ne 0) { throw "git fetch fallo" }
+          git checkout testing
+          if ($LASTEXITCODE -ne 0) { throw "git checkout testing fallo" }
+          Write-Host "== git reset --hard origin/testing =="
+          # reset --hard solo toca archivos VERSIONADOS. Los .env gitignored/
+          # untracked NO se borran (no ejecutamos git clean a proposito).
+          git reset --hard origin/testing
+          if ($LASTEXITCODE -ne 0) { throw "git reset fallo" }
+          Write-Host "HEAD ahora:"
+          git rev-parse HEAD
+
+      - name: Verificar que los .env locales siguen presentes
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:PROJECT_DIR
+          if (-not (Test-Path ".env"))     { throw "FALTA .env (front). Abortando para no romper el entorno." }
+          if (-not (Test-Path "mcp\.env")) { throw "FALTA mcp\.env (MCP). Abortando para no romper el entorno." }
+          Write-Host "OK: .env (front) y mcp\.env presentes."
+
+      - name: Instalar dependencias y generar Prisma (front)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:PROJECT_DIR
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci (front) fallo" }
+          npx prisma generate
+          if ($LASTEXITCODE -ne 0) { throw "prisma generate fallo" }
+
+      - name: Build front (Next.js)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:PROJECT_DIR
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "npm run build (front) fallo" }
+
+      - name: Build MCP
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location (Join-Path $env:PROJECT_DIR "mcp")
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci (mcp) fallo" }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "npm run build (mcp) fallo" }
+
+      - name: Reiniciar apps pm2 del entorno de pruebas
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:PROJECT_DIR
+          # SOLO las apps del test. NUNCA restart all / kill / apps ajenas.
+          pm2 restart GSS-Front-TEST kronos-mcp-test
+          if ($LASTEXITCODE -ne 0) { throw "pm2 restart fallo" }
+          pm2 save
+          Write-Host "== estado pm2 =="
+          pm2 list
+
+      - name: Smoke test (HTTP 200 en localhost:3030)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:PROJECT_DIR
+          $ok = $false
+          for ($i = 1; $i -le 12; $i++) {
+            try {
+              $r = Invoke-WebRequest -Uri "http://localhost:3030" -UseBasicParsing -TimeoutSec 10
+              Write-Host "Intento $i -> HTTP $($r.StatusCode)"
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch {
+              Write-Host "Intento $i -> aun no responde: $($_.Exception.Message)"
+            }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $ok) { throw "Smoke test fallo: localhost:3030 no devolvio 200 tras varios intentos." }
+          Write-Host "OK: GSS-Front-TEST responde 200 en localhost:3030."
