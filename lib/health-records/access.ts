@@ -132,6 +132,26 @@ export function isCompanyReady(access: HealthRecordsCompanyAccess): boolean {
   );
 }
 
+/**
+ * Devuelve el acceso (con endpoint y credenciales, SOLO servidor) de UNA empresa
+ * para un usuario, validando el nivel requerido y que la empresa este lista.
+ * null si no tiene permiso, la empresa no aplica, o no esta configurada.
+ * Uso en las rutas de crear/editar/cargue masivo.
+ */
+export async function getCompanyEndpointForUser(
+  userEmail: string,
+  companyId: number,
+  level: 'read' | 'write'
+): Promise<HealthRecordsCompanyAccess | null> {
+  const access = await getHealthRecordsAccess(userEmail);
+  const company = access.find((a) => a.idCompany === companyId);
+  if (!company) return null;
+  if (level === 'write' && !company.canWrite) return null;
+  if (!company.canRead) return null;
+  if (!isCompanyReady(company)) return null;
+  return company;
+}
+
 /** Proyecta el acceso a la forma segura para el navegador (sin credenciales). */
 export function toPublicAccess(
   access: HealthRecordsCompanyAccess[]

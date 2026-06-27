@@ -115,6 +115,78 @@ export async function sapGet<T = unknown>(session: SapSession, path: string): Pr
   return response.json() as Promise<T>;
 }
 
+/**
+ * POST generico al Service Layer (ej. crear un UDO). Devuelve el cuerpo de la
+ * respuesta (en SAP B1, el objeto creado, con DocEntry/DocNum).
+ */
+export async function sapPost<T = unknown>(
+  session: SapSession,
+  path: string,
+  body: unknown
+): Promise<T> {
+  const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: `B1SESSION=${session.sessionId}`,
+    },
+    body: JSON.stringify(body),
+    // @ts-expect-error - Node.js fetch admite un agent
+    agent: sapAgent,
+  });
+
+  if (response.status === 401) {
+    throw new SapError('Sesion SAP expirada o invalida', 401);
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new SapError(`SAP POST ${path} fallo (${response.status})`, response.status, detail);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+/**
+ * PATCH generico al Service Layer (ej. editar un UDO o agregar lineas a una
+ * coleccion hija). SAP responde 204 No Content en exito.
+ *
+ * `replaceCollections=true` agrega el header B1S-ReplaceCollectionsOnPatch, que
+ * REEMPLAZA las colecciones hijas en vez de hacer merge/append. Para AGREGAR
+ * un log a la bitacora (append), dejarlo en false.
+ */
+export async function sapPatch(
+  session: SapSession,
+  path: string,
+  body: unknown,
+  replaceCollections = false
+): Promise<void> {
+  const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Cookie: `B1SESSION=${session.sessionId}`,
+  };
+  if (replaceCollections) headers['B1S-ReplaceCollectionsOnPatch'] = 'true';
+
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(body),
+    // @ts-expect-error - Node.js fetch admite un agent
+    agent: sapAgent,
+  });
+
+  if (response.status === 401) {
+    throw new SapError('Sesion SAP expirada o invalida', 401);
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new SapError(`SAP PATCH ${path} fallo (${response.status})`, response.status, detail);
+  }
+}
+
 /** Cierra la sesion del Service Layer. Best-effort: no lanza si falla. */
 export async function sapLogout(session: SapSession): Promise<void> {
   try {

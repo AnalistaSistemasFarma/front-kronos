@@ -2,8 +2,10 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
-import { Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group } from '@mantine/core';
-import { IconSearch, IconAlertTriangle } from '@tabler/icons-react';
+import { Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group, Button } from '@mantine/core';
+import { IconSearch, IconAlertTriangle, IconPlus, IconUpload } from '@tabler/icons-react';
+import CreateModal from './CreateModal';
+import BulkModal from './BulkModal';
 
 /**
  * Registros Sanitarios (multiempresa).
@@ -57,6 +59,8 @@ export default function HealthRecordsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCompany, setSelectedCompany] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   useEffect(() => {
     if (session) loadData();
@@ -140,9 +144,28 @@ export default function HealthRecordsPage() {
     ...companies.map((c) => ({ value: String(c.idCompany), label: c.companyName })),
   ];
 
+  const writable = companies
+    .filter((c) => c.canWrite)
+    .map((c) => ({ idCompany: c.idCompany, companyName: c.companyName }));
+
   return (
     <div style={{ padding: '1rem' }}>
-      <h2>Registros Sanitarios</h2>
+      <Group justify="space-between" align="center">
+        <h2 style={{ margin: 0 }}>Registros Sanitarios</h2>
+        {writable.length > 0 && (
+          <Group gap="xs">
+            <Button leftSection={<IconPlus size={16} />} onClick={() => setCreateOpen(true)}>
+              Crear
+            </Button>
+            <Button variant="default" leftSection={<IconUpload size={16} />} onClick={() => setBulkOpen(true)}>
+              Cargue masivo
+            </Button>
+          </Group>
+        )}
+      </Group>
+
+      <CreateModal opened={createOpen} onClose={() => setCreateOpen(false)} companies={writable} onCreated={loadData} />
+      <BulkModal opened={bulkOpen} onClose={() => setBulkOpen(false)} companies={writable} onLoaded={loadData} />
 
       {companyErrors.length > 0 && (
         <Alert color="yellow" icon={<IconAlertTriangle size={16} />} mt="sm" mb="sm">
