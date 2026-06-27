@@ -254,6 +254,11 @@ model sap_endpoints {
   is_active       Boolean  @default(true)
   created_at      DateTime @default(now())
   updated_at      DateTime
+  // Nombre del UDO de registros sanitarios en la base SAP de esta empresa.
+  // Varía por empresa (ej. FAR_RegiSanitario en Farmalogica, prefijo distinto en otras),
+  // por eso se mapea aqui en vez de asumir un nombre fijo. Null = la empresa no tiene el modulo.
+  health_records_entity         String?
+  health_records_log_collection String?
   company         Company  @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
 }
 
