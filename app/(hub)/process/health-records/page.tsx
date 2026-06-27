@@ -1,0 +1,220 @@
+'use client';
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { useSession } from 'next-auth/react';
+import { Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group } from '@mantine/core';
+import { IconSearch, IconAlertTriangle } from '@tabler/icons-react';
+
+/**
+ * Registros Sanitarios (multiempresa).
+ *
+ * Pantalla unica que consolida los registros sanitarios de TODAS las empresas
+ * a las que el usuario tiene acceso. A diferencia del modulo de compras, aqui
+ * el navegador NUNCA ve credenciales SAP: solo consume dos endpoints propios
+ * (/api/health-records/access y /api/health-records/list) que resuelven todo
+ * en el servidor.
+ */
+
+interface CompanyAccess {
+  idCompany: number;
+  companyName: string;
+  canRead: boolean;
+  canWrite: boolean;
+  ready: boolean;
+}
+
+interface HealthRecord {
+  companyId: number;
+  companyName: string;
+  DocNum?: number;
+  U_Registro_Sanitario?: string;
+  U_Referencia?: string;
+  U_Descripcion?: string;
+  U_Pais?: string;
+  U_Titular?: string;
+  U_Fecha_Vencimiento?: string;
+  U_Estado_Comercializacion?: string;
+  [key: string]: unknown;
+}
+
+interface CompanyError {
+  companyId: number;
+  companyName: string;
+  message: string;
+}
+
+const ITEMS_PER_PAGE = 15;
+
+export default function HealthRecordsPage() {
+  const { data: session } = useSession();
+
+  const [companies, setCompanies] = useState<CompanyAccess[]>([]);
+  const [records, setRecords] = useState<HealthRecord[]>([]);
+  const [companyErrors, setCompanyErrors] = useState<CompanyError[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCompany, setSelectedCompany] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    if (session) loadData();
+  }, [session]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const accessRes = await fetch('/api/health-records/access');
+      if (!accessRes.ok) throw new Error('No se pudo verificar el acceso al modulo');
+      const accessData = await accessRes.json();
+      const userCompanies: CompanyAccess[] = accessData.companies ?? [];
+      setCompanies(userCompanies);
+
+      if (userCompanies.length === 0) {
+        setError('No tiene acceso a registros sanitarios en ninguna empresa.');
+        return;
+      }
+
+      const listRes = await fetch('/api/health-records/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ top: 500 }),
+      });
+      if (!listRes.ok) throw new Error('No se pudieron cargar los registros sanitarios');
+      const listData = await listRes.json();
+
+      setRecords(listData.items ?? []);
+      setCompanyErrors(listData.errors ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error inesperado');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filtered = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return records.filter((r) => {
+      if (selectedCompany !== 'all' && String(r.companyId) !== selectedCompany) return false;
+      if (!term) return true;
+      return [
+        r.U_Registro_Sanitario,
+        r.U_Referencia,
+        r.U_Descripcion,
+        r.U_Titular,
+        r.U_Pais,
+      ]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(term));
+    });
+  }, [records, searchTerm, selectedCompany]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+  const pageItems = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedCompany]);
+
+  if (loading) {
+    return (
+      <Group justify="center" mt="xl">
+        <Loader />
+      </Group>
+    );
+  }
+
+  if (error) {
+    return (
+      <Alert color="red" title="Registros Sanitarios" mt="md">
+        {error}
+      </Alert>
+    );
+  }
+
+  const companyOptions = [
+    { value: 'all', label: 'Todas las empresas' },
+    ...companies.map((c) => ({ value: String(c.idCompany), label: c.companyName })),
+  ];
+
+  return (
+    <div style={{ padding: '1rem' }}>
+      <h2>Registros Sanitarios</h2>
+
+      {companyErrors.length > 0 && (
+        <Alert color="yellow" icon={<IconAlertTriangle size={16} />} mt="sm" mb="sm">
+          No se pudo consultar:{' '}
+          {companyErrors.map((e) => `${e.companyName} (${e.message})`).join(', ')}
+        </Alert>
+      )}
+
+      <Group mt="md" mb="md" gap="sm">
+        <TextInput
+          placeholder="Buscar por registro, referencia, descripcion, titular o pais"
+          leftSection={<IconSearch size={16} />}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.currentTarget.value)}
+          style={{ flex: 1, minWidth: 280 }}
+        />
+        <Select
+          data={companyOptions}
+          value={selectedCompany}
+          onChange={(v) => setSelectedCompany(v ?? 'all')}
+          allowDeselect={false}
+          w={220}
+        />
+      </Group>
+
+      <Table striped highlightOnHover withTableBorder>
+        <Table.Thead>
+          <Table.Tr>
+            <Table.Th>Empresa</Table.Th>
+            <Table.Th>Registro Sanitario</Table.Th>
+            <Table.Th>Referencia</Table.Th>
+            <Table.Th>Descripcion</Table.Th>
+            <Table.Th>Pais</Table.Th>
+            <Table.Th>Titular</Table.Th>
+            <Table.Th>Vencimiento</Table.Th>
+            <Table.Th>Estado</Table.Th>
+          </Table.Tr>
+        </Table.Thead>
+        <Table.Tbody>
+          {pageItems.length === 0 ? (
+            <Table.Tr>
+              <Table.Td colSpan={8} style={{ textAlign: 'center' }}>
+                Sin registros para mostrar.
+              </Table.Td>
+            </Table.Tr>
+          ) : (
+            pageItems.map((r) => (
+              <Table.Tr key={`${r.companyId}-${r.DocNum ?? r.U_Registro_Sanitario}`}>
+                <Table.Td>
+                  <Badge variant="light">{r.companyName}</Badge>
+                </Table.Td>
+                <Table.Td>{r.U_Registro_Sanitario ?? '-'}</Table.Td>
+                <Table.Td>{r.U_Referencia ?? '-'}</Table.Td>
+                <Table.Td>{r.U_Descripcion ?? '-'}</Table.Td>
+                <Table.Td>{r.U_Pais ?? '-'}</Table.Td>
+                <Table.Td>{r.U_Titular ?? '-'}</Table.Td>
+                <Table.Td>{r.U_Fecha_Vencimiento?.slice(0, 10) ?? '-'}</Table.Td>
+                <Table.Td>{r.U_Estado_Comercializacion ?? '-'}</Table.Td>
+              </Table.Tr>
+            ))
+          )}
+        </Table.Tbody>
+      </Table>
+
+      <Group justify="space-between" mt="md">
+        <span style={{ fontSize: 13, color: '#666' }}>
+          {filtered.length} registro(s) — {companies.length} empresa(s) con acceso
+        </span>
+        {totalPages > 1 && (
+          <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} />
+        )}
+      </Group>
+    </div>
+  );
+}
