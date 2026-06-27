@@ -151,23 +151,24 @@ export default function HealthRecordsPage() {
         </Alert>
       )}
 
-      <Group mt="md" mb="md" gap="sm">
+      <Group mt="md" mb="md" gap="sm" wrap="wrap">
         <TextInput
           placeholder="Buscar por registro, referencia, descripcion, titular o pais"
           leftSection={<IconSearch size={16} />}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.currentTarget.value)}
-          style={{ flex: 1, minWidth: 280 }}
+          style={{ flex: '1 1 240px' }}
         />
         <Select
           data={companyOptions}
           value={selectedCompany}
           onChange={(v) => setSelectedCompany(v ?? 'all')}
           allowDeselect={false}
-          w={220}
+          style={{ flex: '0 1 220px', minWidth: 180 }}
         />
       </Group>
 
+      <Table.ScrollContainer minWidth={780}>
       <Table striped highlightOnHover withTableBorder>
         <Table.Thead>
           <Table.Tr>
@@ -206,6 +207,7 @@ export default function HealthRecordsPage() {
           )}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
       <Group justify="space-between" mt="md">
         <span style={{ fontSize: 13, color: '#666' }}>
