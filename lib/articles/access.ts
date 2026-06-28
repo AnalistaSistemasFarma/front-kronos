@@ -26,10 +26,9 @@ import { prisma } from '../prisma';
  * configurado con credenciales (baseUrl + companyDB).
  */
 
-// Reuso del acceso de health-records (testeo inmediato sin filas nuevas en BD).
-// Para acceso dedicado, cambie a '/process/articles' y '/process/articles/manage'.
-export const ARTICLES_READ_URL = '/process/health-records';
-export const ARTICLES_WRITE_URL = '/process/health-records/manage';
+// Permisos dedicados del modulo (subprocesos sembrados en BD: lectura y gestion).
+export const ARTICLES_READ_URL = '/process/articles';
+export const ARTICLES_WRITE_URL = '/process/articles/manage';
 
 /** Endpoint SAP de una empresa, con credenciales. SOLO uso en servidor. */
 export interface CompanySapEndpoint {
