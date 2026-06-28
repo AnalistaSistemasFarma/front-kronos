@@ -31,7 +31,8 @@ export interface StandardField {
  */
 export const STANDARD_FIELDS: StandardField[] = [
   { label: 'Codigo', field: 'ItemCode', type: 'string', editable: false, requiredOnCreate: true, inExcel: true },
-  { label: 'Descripcion', field: 'ItemName', type: 'string', editable: true, requiredOnCreate: true, inExcel: true },
+  // RN: la descripcion NO es editable en la actualizacion (solo se captura al crear).
+  { label: 'Descripcion', field: 'ItemName', type: 'string', editable: false, requiredOnCreate: true, inExcel: true },
   { label: 'Grupo de articulos', field: 'ItemsGroupCode', type: 'int', editable: true, requiredOnCreate: true, inExcel: true },
   { label: 'Nombre extranjero', field: 'ForeignName', type: 'string', editable: true, inExcel: true },
   { label: 'Tipo de articulo', field: 'ItemType', type: 'itemType', editable: true, inExcel: true },
