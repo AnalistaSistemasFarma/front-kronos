@@ -6,7 +6,7 @@ import {
   isCompanyReady,
   type ArticlesCompanyAccess,
 } from '../../../../lib/articles/access';
-import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
+import { sapGetAll, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 import { STANDARD_FIELD_NAMES, getCompanyCustomFields } from '../../../../lib/articles/fields';
 
 /**
@@ -71,14 +71,15 @@ async function fetchCompanyItems(
     if (filterString) query.set('$filter', filterString);
     query.set('$select', select);
     query.set('$orderby', 'ItemCode');
-    query.set('$top', String(top));
 
-    const data = await sapGet<{ value?: Record<string, unknown>[] }>(
-      session,
-      `Items?${query.toString()}`
-    );
+    // SAP entrega de a 20 por pagina; sapGetAll sigue la paginacion (nextLink)
+    // hasta traer todos los Items de la empresa, con `top` como tope de seguridad.
+    const rows = await sapGetAll<Record<string, unknown>>(session, `Items?${query.toString()}`, {
+      pageSize: 500,
+      cap: top,
+    });
 
-    return (data.value ?? []).map((row) => ({
+    return rows.map((row) => ({
       ...row,
       companyId: access.idCompany,
       companyName: access.companyName,
@@ -96,7 +97,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: ListRequestBody = await request.json().catch(() => ({}));
-    const top = Math.min(Math.max(body.top ?? 200, 1), 1000);
+    const top = Math.min(Math.max(body.top ?? 10000, 1), 20000);
     const filterString = buildFilter(body.filters);
 
     const access = await getArticlesAccess(session.user.email);
