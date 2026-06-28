@@ -2,10 +2,12 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Modal, Select, TextInput, Button, Group, Stack, Alert, SimpleGrid, Badge, Text, Divider,
+  Modal, Select, TextInput, Button, Group, Stack, Alert, SimpleGrid, Badge, Text,
+  Divider, Loader, Accordion, Table, Center,
 } from '@mantine/core';
 import {
   STANDARD_FIELDS,
+  STANDARD_FIELD_NAMES,
   ITEM_TYPES,
   FLAG_YES,
   FLAG_NO,
@@ -13,6 +15,7 @@ import {
   INT_FIELDS,
   CONFIRM_FIELDS,
   getCompanyCustomFields,
+  humanizeCustomField,
   type CustomField,
 } from '../../../../lib/articles/fields';
 
@@ -38,6 +41,11 @@ interface Props {
   onUpdated: () => void;
 }
 
+interface ItemGroup {
+  number: number;
+  name: string;
+}
+
 const FLAG_OPTIONS = [
   { value: FLAG_YES, label: 'Si' },
   { value: FLAG_NO, label: 'No' },
@@ -45,34 +53,156 @@ const FLAG_OPTIONS = [
 
 type FormState = Record<string, string>;
 
-function fromArticle(article: Article, customFields: CustomField[]): FormState {
+/** Nombres de campos estandar gestionados (para clasificar el resto como "adicional"). */
+const STANDARD_SET = new Set(STANDARD_FIELD_NAMES);
+
+/** Construye el estado del formulario a partir del item COMPLETO de SAP. */
+function buildForm(
+  item: Record<string, unknown>,
+  customFields: CustomField[]
+): FormState {
   const form: FormState = {};
   for (const f of STANDARD_FIELDS) {
-    const raw = article[f.field];
+    const raw = item[f.field];
     form[f.field] = raw == null ? '' : String(raw);
   }
+  // Campos custom del mapa curado.
   for (const cf of customFields) {
-    const raw = article[cf.field];
+    const raw = item[cf.field];
     form[cf.field] = raw == null ? '' : String(raw);
+  }
+  // Cualquier OTRO campo U_* poblado que no este en el mapa.
+  for (const [key, raw] of Object.entries(item)) {
+    if (!/^U_/.test(key)) continue;
+    if (raw == null) continue;
+    if (key in form) continue;
+    form[key] = String(raw);
   }
   return form;
 }
 
-export default function EditModal({ article, canWrite, onClose, onUpdated }: Props) {
-  const customFields: CustomField[] = article ? getCompanyCustomFields(article.companyName) : [];
+/** Lista de todos los campos U_* poblados del item (mapa + extras). */
+function resolveCustomFields(
+  item: Record<string, unknown>,
+  mapped: CustomField[]
+): CustomField[] {
+  const result: CustomField[] = [];
+  const seen = new Set<string>();
+  for (const cf of mapped) {
+    // Solo se muestran los del mapa que tienen valor en el item.
+    if (item[cf.field] != null && String(item[cf.field]).trim() !== '') {
+      result.push(cf);
+      seen.add(cf.field);
+    }
+  }
+  for (const [key, raw] of Object.entries(item)) {
+    if (!/^U_/.test(key)) continue;
+    if (seen.has(key)) continue;
+    if (raw == null || String(raw).trim() === '') continue;
+    result.push({ field: key, label: humanizeCustomField(key) });
+    seen.add(key);
+  }
+  return result;
+}
 
+/** Da formato legible a un valor escalar de un campo estandar de solo lectura. */
+function formatReadValue(key: string, raw: unknown): string {
+  if (raw == null) return '';
+  const value = String(raw);
+
+  // Banderas tYES/tNO.
+  if (value === 'tYES') return 'Si';
+  if (value === 'tNO') return 'No';
+
+  // Enum de tipo de articulo.
+  const itemType = ITEM_TYPES.find((t) => t.value === value);
+  if (itemType) return itemType.label;
+
+  // Fechas ISO -> YYYY-MM-DD.
+  const isoDate = /^(\d{4}-\d{2}-\d{2})(T.*)?$/.exec(value);
+  if (isoDate) return isoDate[1];
+
+  return value;
+}
+
+/** ¿El valor es "vacio" para efectos de mostrarlo en lectura? */
+function isEmptyValue(raw: unknown): boolean {
+  if (raw == null) return true;
+  if (typeof raw === 'string' && raw.trim() === '') return true;
+  if (Array.isArray(raw)) return true;
+  if (typeof raw === 'object') return true;
+  return false;
+}
+
+export default function EditModal({ article, canWrite, onClose, onUpdated }: Props) {
+  const [fullItem, setFullItem] = useState<Record<string, unknown> | null>(null);
   const [form, setForm] = useState<FormState>({});
   const [original, setOriginal] = useState<FormState>({});
+  const [customFields, setCustomFields] = useState<CustomField[]>([]);
+  const [groups, setGroups] = useState<ItemGroup[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (article) {
-      const initial = fromArticle(article, getCompanyCustomFields(article.companyName));
-      setForm(initial);
-      setOriginal(initial);
+    if (!article) {
+      setFullItem(null);
+      setForm({});
+      setOriginal({});
+      setCustomFields([]);
+      setGroups([]);
+      setLoadError(null);
       setError(null);
+      return;
     }
+
+    let cancelled = false;
+    const itemCode = String(article.ItemCode ?? '');
+
+    const load = async () => {
+      setLoading(true);
+      setLoadError(null);
+      setError(null);
+      try {
+        const [itemRes, groupsRes] = await Promise.all([
+          fetch(
+            `/api/articles/item?companyId=${article.companyId}&itemCode=${encodeURIComponent(itemCode)}`
+          ),
+          fetch(`/api/articles/item-groups?companyId=${article.companyId}`),
+        ]);
+
+        const itemData = await itemRes.json();
+        if (!itemRes.ok) {
+          if (!cancelled) setLoadError(itemData.error || 'No se pudo cargar el detalle del articulo');
+          return;
+        }
+        const item: Record<string, unknown> = itemData.item ?? {};
+
+        const groupsData = await groupsRes.json().catch(() => ({}));
+        const loadedGroups: ItemGroup[] = groupsRes.ok ? (groupsData.groups ?? []) : [];
+
+        const mapped = getCompanyCustomFields(article.companyName);
+        const resolved = resolveCustomFields(item, mapped);
+        const initial = buildForm(item, resolved);
+
+        if (cancelled) return;
+        setFullItem(item);
+        setCustomFields(resolved);
+        setGroups(loadedGroups);
+        setForm(initial);
+        setOriginal(initial);
+      } catch {
+        if (!cancelled) setLoadError('Error de red al cargar el detalle del articulo');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [article]);
 
   const set = (field: string, value: string) => setForm((r) => ({ ...r, [field]: value }));
@@ -165,6 +295,19 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
         />
       );
     }
+    if (f.field === 'ItemsGroupCode' && groups.length > 0) {
+      return (
+        <Select
+          key={f.field}
+          label={f.label}
+          data={groups.map((g) => ({ value: String(g.number), label: `${g.name} (${g.number})` }))}
+          value={value || null}
+          onChange={(v) => set(f.field, v ?? '')}
+          searchable
+          disabled={disabled}
+        />
+      );
+    }
     return (
       <TextInput
         key={f.field}
@@ -176,6 +319,20 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
       />
     );
   };
+
+  /** Campos estandar poblados que NO se gestionan (ni editables ni U_*): solo lectura. */
+  const additionalRows: { key: string; value: string }[] = (() => {
+    if (!fullItem) return [];
+    const rows: { key: string; value: string }[] = [];
+    for (const [key, raw] of Object.entries(fullItem)) {
+      if (STANDARD_SET.has(key)) continue; // ya se muestra arriba
+      if (/^U_/.test(key)) continue; // van en "Campos personalizados"
+      if (isEmptyValue(raw)) continue; // vacios, arrays, objetos, colecciones
+      rows.push({ key, value: formatReadValue(key, raw) });
+    }
+    rows.sort((a, b) => a.key.localeCompare(b.key));
+    return rows;
+  })();
 
   return (
     <Modal
@@ -191,26 +348,68 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
           <Group gap="xs">
             <Text size="sm" fw={500}>Empresa:</Text>
             <Badge variant="light">{article.companyName}</Badge>
+            {article.ItemCode && (
+              <Badge variant="outline" color="gray">{article.ItemCode}</Badge>
+            )}
           </Group>
 
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
-            {STANDARD_FIELDS.map((f) => renderStandard(f))}
-          </SimpleGrid>
+          {loading && (
+            <Center py="lg">
+              <Loader />
+            </Center>
+          )}
 
-          {customFields.length > 0 && (
+          {!loading && loadError && <Alert color="red">{loadError}</Alert>}
+
+          {!loading && !loadError && fullItem && (
             <>
-              <Divider label={`Campos especificos de ${article.companyName}`} />
+              <Divider label="Datos del articulo" labelPosition="left" />
               <SimpleGrid cols={{ base: 1, sm: 2 }}>
-                {customFields.map((cf) => (
-                  <TextInput
-                    key={cf.field}
-                    label={cf.label}
-                    value={form[cf.field] ?? ''}
-                    onChange={(e) => set(cf.field, e.currentTarget.value)}
-                    disabled={!canWrite}
-                  />
-                ))}
+                {STANDARD_FIELDS.map((f) => renderStandard(f))}
               </SimpleGrid>
+
+              <Divider label="Campos personalizados" labelPosition="left" />
+              {customFields.length > 0 ? (
+                <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                  {customFields.map((cf) => (
+                    <TextInput
+                      key={cf.field}
+                      label={cf.label}
+                      value={form[cf.field] ?? ''}
+                      onChange={(e) => set(cf.field, e.currentTarget.value)}
+                      disabled={!canWrite}
+                    />
+                  ))}
+                </SimpleGrid>
+              ) : (
+                <Text size="xs" c="dimmed">
+                  Este articulo no tiene campos personalizados con valor.
+                </Text>
+              )}
+
+              {additionalRows.length > 0 && (
+                <Accordion variant="contained" mt="xs">
+                  <Accordion.Item value="additional">
+                    <Accordion.Control>
+                      Informacion adicional ({additionalRows.length} campos)
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      <Table withRowBorders={false} verticalSpacing={4} fz="sm">
+                        <Table.Tbody>
+                          {additionalRows.map((row) => (
+                            <Table.Tr key={row.key}>
+                              <Table.Td style={{ color: '#666', whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+                                {row.key}
+                              </Table.Td>
+                              <Table.Td style={{ wordBreak: 'break-word' }}>{row.value}</Table.Td>
+                            </Table.Tr>
+                          ))}
+                        </Table.Tbody>
+                      </Table>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                </Accordion>
+              )}
             </>
           )}
 
@@ -218,7 +417,11 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
             <Button variant="default" onClick={onClose} disabled={saving}>
               {canWrite ? 'Cancelar' : 'Cerrar'}
             </Button>
-            {canWrite && <Button onClick={submit} loading={saving}>Guardar</Button>}
+            {canWrite && !loadError && (
+              <Button onClick={submit} loading={saving} disabled={loading}>
+                Guardar
+              </Button>
+            )}
           </Group>
         </Stack>
       )}

@@ -22,9 +22,16 @@ export function escapeOData(value: string): string {
 }
 
 /**
- * Whitelist: toma solo los campos estandar gestionados + los custom U_* del
- * mapa de ESA empresa. Descarta cualquier otro campo y los vacios. Los campos
- * enteros (ItemsGroupCode) se convierten a numero.
+ * Whitelist de campos aceptados al crear/editar un articulo:
+ *   - los campos estandar gestionados (STANDARD_FIELD_NAMES),
+ *   - los custom U_* del mapa de ESA empresa,
+ *   - y, en general, CUALQUIER campo cuyo nombre empiece por `U_` (campos de
+ *     usuario / UDF de SAP). Esto permite editar todos los campos
+ *     personalizados que tenga el articulo, no solo los del mapa curado, sin
+ *     abrir la puerta a campos de sistema arbitrarios.
+ *
+ * Descarta cualquier otro campo y los vacios. Los campos enteros
+ * (ItemsGroupCode) se convierten a numero.
  */
 export function sanitizeItem(input: Record<string, unknown>, companyName: string): ItemInput {
   const allowed = new Set<string>([
@@ -34,7 +41,8 @@ export function sanitizeItem(input: Record<string, unknown>, companyName: string
 
   const out: ItemInput = {};
   for (const [key, raw] of Object.entries(input)) {
-    if (!allowed.has(key)) continue;
+    // Se acepta si esta en la whitelist estandar/mapa O es un campo de usuario U_*.
+    if (!allowed.has(key) && !/^U_/.test(key)) continue;
     if (raw === undefined || raw === null) continue;
 
     if (INT_FIELDS.includes(key)) {

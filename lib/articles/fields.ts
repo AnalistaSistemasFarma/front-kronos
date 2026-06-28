@@ -186,6 +186,18 @@ export function getCompanyCustomFields(companyName: string): CustomField[] {
   return [];
 }
 
+/**
+ * Etiqueta legible para un campo de usuario U_* que NO esta en el mapa curado:
+ * quita el prefijo `U_` (o `U_IT_`, `U_Lab_`) y reemplaza guiones bajos por
+ * espacios. Ej. "U_IT_Principio_Activo" -> "IT Principio Activo".
+ */
+export function humanizeCustomField(field: string): string {
+  return field
+    .replace(/^U_/, '')
+    .replace(/_/g, ' ')
+    .trim();
+}
+
 export interface TemplateColumn {
   header: string;
   field: string;
