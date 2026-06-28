@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
-import { Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group, Button } from '@mantine/core';
-import { IconSearch, IconAlertTriangle, IconPlus, IconUpload } from '@tabler/icons-react';
+import { Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group, Button, ActionIcon } from '@mantine/core';
+import { IconSearch, IconAlertTriangle, IconPlus, IconUpload, IconEdit, IconEye } from '@tabler/icons-react';
 import CreateModal from './CreateModal';
 import BulkModal from './BulkModal';
+import EditModal from './EditModal';
 
 /**
  * Registros Sanitarios (multiempresa).
@@ -61,6 +62,7 @@ export default function HealthRecordsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [selected, setSelected] = useState<HealthRecord | null>(null);
 
   useEffect(() => {
     if (session) loadData();
@@ -148,6 +150,9 @@ export default function HealthRecordsPage() {
     .filter((c) => c.canWrite)
     .map((c) => ({ idCompany: c.idCompany, companyName: c.companyName }));
 
+  const canWriteFor = (companyId: number) =>
+    companies.find((c) => c.idCompany === companyId)?.canWrite ?? false;
+
   return (
     <div style={{ padding: '1rem' }}>
       <Group justify="space-between" align="center">
@@ -166,6 +171,12 @@ export default function HealthRecordsPage() {
 
       <CreateModal opened={createOpen} onClose={() => setCreateOpen(false)} companies={writable} onCreated={loadData} />
       <BulkModal opened={bulkOpen} onClose={() => setBulkOpen(false)} companies={writable} onLoaded={loadData} />
+      <EditModal
+        record={selected}
+        canWrite={selected ? canWriteFor(selected.companyId) : false}
+        onClose={() => setSelected(null)}
+        onUpdated={loadData}
+      />
 
       {companyErrors.length > 0 && (
         <Alert color="yellow" icon={<IconAlertTriangle size={16} />} mt="sm" mb="sm">
@@ -203,12 +214,13 @@ export default function HealthRecordsPage() {
             <Table.Th>Titular</Table.Th>
             <Table.Th>Vencimiento</Table.Th>
             <Table.Th>Estado</Table.Th>
+            <Table.Th>Acciones</Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
           {pageItems.length === 0 ? (
             <Table.Tr>
-              <Table.Td colSpan={8} style={{ textAlign: 'center' }}>
+              <Table.Td colSpan={9} style={{ textAlign: 'center' }}>
                 Sin registros para mostrar.
               </Table.Td>
             </Table.Tr>
@@ -225,6 +237,11 @@ export default function HealthRecordsPage() {
                 <Table.Td>{r.U_Titular ?? '-'}</Table.Td>
                 <Table.Td>{r.U_Fecha_Vencimiento?.slice(0, 10) ?? '-'}</Table.Td>
                 <Table.Td>{r.U_Estado_Comercializacion ?? '-'}</Table.Td>
+                <Table.Td>
+                  <ActionIcon variant="subtle" size="sm" onClick={() => setSelected(r)} aria-label={canWriteFor(r.companyId) ? 'Editar' : 'Ver detalle'}>
+                    {canWriteFor(r.companyId) ? <IconEdit size={16} /> : <IconEye size={16} />}
+                  </ActionIcon>
+                </Table.Td>
               </Table.Tr>
             ))
           )}
