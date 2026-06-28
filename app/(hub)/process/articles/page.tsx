@@ -216,7 +216,11 @@ export default function ArticlesPage() {
             </Table.Tr>
           ) : (
             pageItems.map((r) => (
-              <Table.Tr key={`${r.companyId}-${r.ItemCode}`}>
+              <Table.Tr
+                key={`${r.companyId}-${r.ItemCode}`}
+                onClick={() => setSelected(r)}
+                style={{ cursor: 'pointer' }}
+              >
                 <Table.Td>
                   <Badge variant="light">{r.companyName}</Badge>
                 </Table.Td>
