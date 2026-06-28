@@ -134,6 +134,21 @@ function isEmptyValue(raw: unknown): boolean {
   return false;
 }
 
+/**
+ * Regla de contraste: Mantine pinta los campos deshabilitados en gris muy claro
+ * (baja legibilidad). Para los campos bloqueados (no editables) forzamos un color
+ * de texto legible (ink-2 GSS #38445a) sobre fondo gris suave, conservando el
+ * indicador visual de "no editable" pero cumpliendo el contraste minimo.
+ */
+const LOCKED_FIELD_STYLES = {
+  input: {
+    color: '#38445a',
+    opacity: 1,
+    WebkitTextFillColor: '#38445a',
+    backgroundColor: '#f1f3f5',
+  },
+} as const;
+
 export default function EditModal({ article, canWrite, onClose, onUpdated }: Props) {
   const [fullItem, setFullItem] = useState<Record<string, unknown> | null>(null);
   const [form, setForm] = useState<FormState>({});
@@ -280,6 +295,7 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
           value={value || FLAG_NO}
           onChange={(v) => set(f.field, v ?? FLAG_NO)}
           disabled={disabled}
+          styles={disabled ? LOCKED_FIELD_STYLES : undefined}
         />
       );
     }
@@ -292,6 +308,7 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
           value={value || 'itItems'}
           onChange={(v) => set(f.field, v ?? 'itItems')}
           disabled={disabled}
+          styles={disabled ? LOCKED_FIELD_STYLES : undefined}
         />
       );
     }
@@ -305,6 +322,7 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
           onChange={(v) => set(f.field, v ?? '')}
           searchable
           disabled={disabled}
+          styles={disabled ? LOCKED_FIELD_STYLES : undefined}
         />
       );
     }
@@ -315,6 +333,7 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
         value={value}
         onChange={(e) => set(f.field, e.currentTarget.value)}
         disabled={disabled}
+        styles={disabled ? LOCKED_FIELD_STYLES : undefined}
         type={INT_FIELDS.includes(f.field) ? 'number' : undefined}
       />
     );
@@ -378,6 +397,7 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
                       value={form[cf.field] ?? ''}
                       onChange={(e) => set(cf.field, e.currentTarget.value)}
                       disabled={!canWrite}
+                      styles={!canWrite ? LOCKED_FIELD_STYLES : undefined}
                     />
                   ))}
                 </SimpleGrid>
