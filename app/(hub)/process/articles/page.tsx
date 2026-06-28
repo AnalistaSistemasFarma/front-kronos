@@ -83,7 +83,7 @@ export default function ArticlesPage() {
       const listRes = await fetch('/api/articles/list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ top: 500 }),
+        body: JSON.stringify({ top: 10000 }),
       });
       if (!listRes.ok) throw new Error('No se pudieron cargar los articulos');
       const listData = await listRes.json();

@@ -91,7 +91,11 @@ export async function sapLogin(creds: SapCredentials): Promise<SapSession> {
  * GET generico al Service Layer. `path` es la ruta relativa a /b1s/v1/
  * (ej. "FAR_RegiSanitario?$top=1"). Lanza SapError(401) si la sesion expiro.
  */
-export async function sapGet<T = unknown>(session: SapSession, path: string): Promise<T> {
+export async function sapGet<T = unknown>(
+  session: SapSession,
+  path: string,
+  extraHeaders?: Record<string, string>
+): Promise<T> {
   const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
 
   const response = await fetch(url, {
@@ -99,6 +103,7 @@ export async function sapGet<T = unknown>(session: SapSession, path: string): Pr
     headers: {
       'Content-Type': 'application/json',
       Cookie: `B1SESSION=${session.sessionId}`,
+      ...extraHeaders,
     },
     // @ts-expect-error - Node.js fetch admite un agent
     agent: sapAgent,
@@ -113,6 +118,36 @@ export async function sapGet<T = unknown>(session: SapSession, path: string): Pr
   }
 
   return response.json() as Promise<T>;
+}
+
+/**
+ * GET que recorre TODA la paginacion del Service Layer. SAP entrega por paginas
+ * (PageSize por defecto = 20, sin importar el $top); este helper pide paginas
+ * grandes con el header `Prefer: odata.maxpagesize` y sigue `@odata.nextLink`
+ * (u `odata.nextLink`) hasta agotar el conjunto o alcanzar `cap` filas (tope de
+ * seguridad). Reutilizable por todos los modulos para "ver/descargar todo".
+ */
+export async function sapGetAll<T = Record<string, unknown>>(
+  session: SapSession,
+  path: string,
+  opts: { pageSize?: number; cap?: number } = {}
+): Promise<T[]> {
+  const pageSize = opts.pageSize ?? 500;
+  const cap = opts.cap ?? 20000;
+  const headers = { Prefer: `odata.maxpagesize=${pageSize}` };
+
+  const out: T[] = [];
+  let next: string | null = path.replace(/^\/+/, '');
+
+  while (next && out.length < cap) {
+    const page: { value?: T[]; 'odata.nextLink'?: string; '@odata.nextLink'?: string } =
+      await sapGet(session, next, headers);
+    out.push(...(page.value ?? []));
+    const link = page['@odata.nextLink'] ?? page['odata.nextLink'] ?? null;
+    next = link ? link.replace(/^\/+/, '') : null;
+  }
+
+  return out.slice(0, cap);
 }
 
 /**
