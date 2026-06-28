@@ -34,10 +34,8 @@ import { prisma } from '../prisma';
 // URL dedicada del modulo (sembrar el subproceso en BD para usarla; ver reporte).
 export const PURCHASES_READ_URL = '/process/purchases';
 
-// URL reusada mientras no exista la fila dedicada (subproceso de Articulos).
-// Cambie PURCHASES_ACCESS_URL a PURCHASES_READ_URL en cuanto se siembre la fila.
-const ARTICLES_READ_URL = '/process/articles';
-const PURCHASES_ACCESS_URL = ARTICLES_READ_URL;
+// Permiso dedicado del modulo (subproceso '/process/purchases' sembrado en BD).
+const PURCHASES_ACCESS_URL = PURCHASES_READ_URL;
 
 /** Endpoint SAP de una empresa, con credenciales. SOLO uso en servidor. */
 export interface CompanySapEndpoint {
