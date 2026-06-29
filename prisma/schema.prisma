@@ -2,12 +2,13 @@ generator client {
   provider = "prisma-client-js"
   output   = "../app/generated/prisma"
 }
- 
+
 datasource db {
-  provider = "sqlserver"
-  url      = env("DATABASE_URL")
-  shadowDatabaseUrl = env("SHADOW_DATABASE_URL") 
+  provider          = "sqlserver"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
+
 model Account {
   id                String  @id @default(cuid())
   userId            String
@@ -27,56 +28,58 @@ model Account {
   @@unique([provider, providerAccountId])
   @@map("account")
 }
- 
+
 model Session {
   id           String   @id @default(cuid())
   sessionToken String   @unique
   userId       String
   expires      DateTime
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
- 
+
   @@map("session")
 }
- 
+
 model User {
-  id            String         @id @default(cuid())
-  name          String?
-  email         String         @unique
-  emailVerified DateTime?
-  image         String?
-  password      String?
-  createdAt     DateTime       @default(now())
-  isActive      Boolean        @default(true)
+  id             String         @id @default(cuid())
+  name           String?
+  email          String         @unique
+  emailVerified  DateTime?
+  image          String?
+  password       String?
+  createdAt      DateTime       @default(now())
+  isActive       Boolean        @default(true)
   role           String         @default("user")
   phone          String?
   identification String?
-  accounts      Account[]
-  companyUsers  CompanyUser[]
-  sessions      Session[]
-  auditLogs     UserAuditLog[]
- 
+  accounts       Account[]
+  companyUsers   CompanyUser[]
+  sessions       Session[]
+  auditLogs      UserAuditLog[]
+
   @@map("user")
 }
- 
+
 model VerificationToken {
   identifier String
   token      String   @unique
   expires    DateTime
- 
+
   @@unique([identifier, token])
   @@map("verification_token")
 }
 
 model Company {
-  id_company    Int             @id @default(autoincrement())
-  company       String
-  company_logo  String?
-  companyUsers  CompanyUser[]
-  sap_endpoints sap_endpoints[]
+  id_company      Int              @id @default(autoincrement())
+  company         String
+  company_logo    String?
+  companyUsers    CompanyUser[]
+  sap_endpoints   sap_endpoints[]
+  cargoAliases    CargoAlias[]
+  cargoJerarquias CargoJerarquia[]
 
   @@map("company")
 }
- 
+
 model CompanyUser {
   id_company_user Int                     @id @default(autoincrement())
   id_company      Int
@@ -84,19 +87,19 @@ model CompanyUser {
   company         Company                 @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
   user            User                    @relation(fields: [id_user], references: [id], onDelete: Cascade)
   subprocesses    SubprocessUserCompany[]
- 
+
   @@map("company_user")
 }
- 
+
 model Process {
   id_process   Int          @id @default(autoincrement())
   process      String
   process_url  String?
   subprocesses Subprocess[]
- 
+
   @@map("process")
 }
- 
+
 model Subprocess {
   id_subprocess           Int                     @id @default(autoincrement())
   subprocess              String
@@ -104,10 +107,10 @@ model Subprocess {
   subprocess_url          String?
   process                 Process                 @relation(fields: [id_process], references: [id_process], onDelete: Cascade)
   subprocessUserCompanies SubprocessUserCompany[]
- 
+
   @@map("subprocess")
 }
- 
+
 model SubprocessUserCompany {
   id_subprocess_user_company Int         @id @default(autoincrement())
   id_subprocess              Int
@@ -134,26 +137,26 @@ model StatusCase {
   id_status_case Int    @id @default(autoincrement())
   status         String @unique
   cases          Case[]
- 
+
   @@map("status_case")
 }
- 
+
 model Active {
-  id_active    Int            @id @default(autoincrement())
-  name         String         @unique
-  Renamedcase  Case[]
+  id_active   Int    @id @default(autoincrement())
+  name        String @unique
+  Renamedcase Case[]
 
   @@map("active")
 }
- 
+
 model Department {
   id_department Int    @id @default(autoincrement())
   department    String @unique
   cases         Case[]
- 
+
   @@map("department")
 }
- 
+
 model Category {
   id_category   Int            @id @default(autoincrement())
   category      String         @unique
@@ -162,7 +165,7 @@ model Category {
 
   @@map("category")
 }
- 
+
 model Subcategory {
   id_subcategory Int            @id @default(autoincrement())
   subcategory    String         @unique
@@ -173,7 +176,7 @@ model Subcategory {
 
   @@map("subcategory")
 }
- 
+
 model Activity {
   id_activity    Int            @id @default(autoincrement())
   activity       String
@@ -183,7 +186,7 @@ model Activity {
 
   @@map("activity")
 }
- 
+
 model Case {
   id_case          Int               @id @default(autoincrement())
   description      String            @db.Text
@@ -199,7 +202,7 @@ model Case {
   id_department    Int
   case_type        String
   priority         String
-  email         String?           @db.NVarChar(255)
+  email            String?           @db.NVarChar(255)
   active           Active?           @relation(fields: [id_active], references: [id_active], onDelete: NoAction)
   department       Department        @relation(fields: [id_department], references: [id_department])
   statusCase       StatusCase        @relation(fields: [id_status_case], references: [id_status_case])
@@ -210,7 +213,7 @@ model Case {
 
   @@map("case")
 }
- 
+
 model CategoryCase {
   id_category_case Int         @id @default(autoincrement())
   id_case          Int
@@ -224,7 +227,7 @@ model CategoryCase {
 
   @@map("category_case")
 }
- 
+
 model Note {
   id_note Int    @id @default(autoincrement())
   id_case Int
@@ -233,7 +236,7 @@ model Note {
 
   @@map("notes")
 }
- 
+
 model LogCaseHelpDesk {
   id_log  Int    @id @default(autoincrement())
   id_case Int
@@ -244,22 +247,76 @@ model LogCaseHelpDesk {
 }
 
 model sap_endpoints {
-  id_sap_endpoint Int      @id @default(autoincrement())
-  id_company      Int
-  endpoint_name   String
-  base_url        String
-  username        String?
-  password        String?
-  client          String?
-  is_active       Boolean  @default(true)
-  created_at      DateTime @default(now())
-  updated_at      DateTime
+  id_sap_endpoint               Int      @id @default(autoincrement())
+  id_company                    Int
+  endpoint_name                 String
+  base_url                      String
+  username                      String?
+  password                      String?
+  client                        String?
+  is_active                     Boolean  @default(true)
+  created_at                    DateTime @default(now())
+  updated_at                    DateTime
   // Nombre del UDO de registros sanitarios en la base SAP de esta empresa.
   // Varía por empresa (ej. FAR_RegiSanitario en Farmalogica, prefijo distinto en otras),
   // por eso se mapea aqui en vez de asumir un nombre fijo. Null = la empresa no tiene el modulo.
   health_records_entity         String?
   health_records_log_collection String?
-  company         Company  @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
+  company                       Company  @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
+}
+
+// === Módulo Organigrama (SynerLink) ===
+// Catálogo maestro de cargos del grupo. Usa un id estable + tabla de alias
+// (CargoAlias) para que renombrar un cargo no rompa la historia (Farmalógica
+// migra Direcciones→Gerencias; Ryan acumula 22 versiones de cambios de cargo).
+model Cargo {
+  id_cargo           Int              @id @default(autoincrement())
+  nombre_normalizado String           @unique
+  // Estratégico / Táctico / Operativo
+  nivel              String?
+  // Gerencia / Dirección / Jefatura / Coordinación / Analista / Auxiliar / Profesional / Técnico
+  nivel_clasico      String?
+  is_active          Boolean          @default(true)
+  created_at         DateTime         @default(now())
+  aliases            CargoAlias[]
+  // Jerarquías donde este cargo es el subordinado
+  jerarquias         CargoJerarquia[] @relation("CargoSubordinado")
+  // Jerarquías donde este cargo es el padre/jefe
+  jerarquiasHijas    CargoJerarquia[] @relation("CargoPadre")
+
+  @@map("cargo")
+}
+
+// Nombres históricos y variantes de un cargo (p.ej. "Director X" ↔ "Gerente X").
+// id_company nulo = alias global; con valor = alias específico de esa empresa.
+model CargoAlias {
+  id_cargo_alias Int      @id @default(autoincrement())
+  id_cargo       Int
+  alias          String
+  id_company     Int?
+  created_at     DateTime @default(now())
+  cargo          Cargo    @relation(fields: [id_cargo], references: [id_cargo], onDelete: Cascade)
+  company        Company? @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("cargo_alias")
+}
+
+// Jerarquía de reporte POR EMPRESA: el mismo cargo reporta distinto en
+// Farmalógica vs Ryan. id_cargo_padre nulo = raíz (Junta / Gerente General).
+// aproximada = el organigrama no permite inferir el parent con certeza.
+model CargoJerarquia {
+  id_cargo_jerarquia Int      @id @default(autoincrement())
+  id_company         Int
+  id_cargo           Int
+  id_cargo_padre     Int?
+  aproximada         Boolean  @default(false)
+  created_at         DateTime @default(now())
+  company            Company  @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
+  cargo              Cargo    @relation("CargoSubordinado", fields: [id_cargo], references: [id_cargo], onDelete: NoAction, onUpdate: NoAction)
+  cargoPadre         Cargo?   @relation("CargoPadre", fields: [id_cargo_padre], references: [id_cargo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, id_cargo])
+  @@map("cargo_jerarquia")
 }
 
 model sysdiagrams {
