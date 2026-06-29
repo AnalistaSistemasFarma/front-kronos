@@ -113,7 +113,7 @@ export default function OrganigramaPage() {
   }
 
   return (
-    <div style={{ padding: '1rem', maxWidth: 1000, margin: '0 auto' }}>
+    <div style={{ padding: '1rem', maxWidth: 1600, margin: '0 auto' }}>
       <Group justify="space-between" align="center" mb="md">
         <h2 style={{ margin: 0 }}>Organigrama</h2>
         <Select
