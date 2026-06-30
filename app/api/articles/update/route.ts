@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/articles/access';
 import { actualizarArticulo, sanitizeItem } from '../../../../lib/articles/articles';
+import { EDITABLE_ON_UPDATE } from '../../../../lib/articles/fields';
 import { registrarCambioArticulo } from '../../../../lib/articles/log';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
@@ -32,12 +33,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const changes = sanitizeItem(body.changes ?? {}, company.companyName);
+    const sanitized = sanitizeItem(body.changes ?? {}, company.companyName);
     // El ItemCode es la clave, nunca se cambia via PATCH del cuerpo.
-    delete changes.ItemCode;
+    delete sanitized.ItemCode;
+
+    // RN: en la actualización solo se permiten los campos editables (hoy: BarCode).
+    // Se descarta cualquier otro campo que llegue, sin importar el origen.
+    const changes: Record<string, string | number> = {};
+    for (const f of EDITABLE_ON_UPDATE) {
+      if (f in sanitized) changes[f] = sanitized[f];
+    }
 
     if (Object.keys(changes).length === 0) {
-      return NextResponse.json({ error: 'No hay cambios para guardar' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'No hay cambios permitidos para guardar (solo se puede editar el código de barras)' },
+        { status: 400 }
+      );
     }
 
     const sap = await sapLogin({

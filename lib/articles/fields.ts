@@ -33,20 +33,25 @@ export const STANDARD_FIELDS: StandardField[] = [
   { label: 'Codigo', field: 'ItemCode', type: 'string', editable: false, requiredOnCreate: true, inExcel: true },
   // RN: la descripcion NO es editable en la actualizacion (solo se captura al crear).
   { label: 'Descripcion', field: 'ItemName', type: 'string', editable: false, requiredOnCreate: true, inExcel: true },
-  { label: 'Grupo de articulos', field: 'ItemsGroupCode', type: 'int', editable: true, requiredOnCreate: true, inExcel: true },
-  { label: 'Nombre extranjero', field: 'ForeignName', type: 'string', editable: true, inExcel: true },
-  { label: 'Tipo de articulo', field: 'ItemType', type: 'itemType', editable: true, inExcel: true },
+  // RN: en la ACTUALIZACIÓN solo se permite editar el Código de barras (BarCode).
+  // El resto queda de solo lectura (SAP solo admite ese cambio por ahora).
+  { label: 'Grupo de articulos', field: 'ItemsGroupCode', type: 'int', editable: false, requiredOnCreate: true, inExcel: true },
+  { label: 'Nombre extranjero', field: 'ForeignName', type: 'string', editable: false, inExcel: true },
+  { label: 'Tipo de articulo', field: 'ItemType', type: 'itemType', editable: false, inExcel: true },
   { label: 'Codigo de barras / GTIN', field: 'BarCode', type: 'string', editable: true, inExcel: true },
-  { label: 'Es de ventas', field: 'SalesItem', type: 'flag', editable: true, inExcel: true },
-  { label: 'Es de compras', field: 'PurchaseItem', type: 'flag', editable: true, inExcel: true },
-  { label: 'Es de inventario', field: 'InventoryItem', type: 'flag', editable: true, inExcel: true },
-  { label: 'Activo (valido)', field: 'Valid', type: 'flag', editable: true },
-  { label: 'Inactivo (congelado)', field: 'Frozen', type: 'flag', editable: true },
-  { label: 'Proveedor principal', field: 'Mainsupplier', type: 'string', editable: true, inExcel: true },
-  { label: 'Unidad de venta', field: 'SalesUnit', type: 'string', editable: true, inExcel: true },
-  { label: 'Unidad de compra', field: 'PurchaseUnit', type: 'string', editable: true, inExcel: true },
-  { label: 'Unidad de inventario', field: 'InventoryUOM', type: 'string', editable: true, inExcel: true },
+  { label: 'Es de ventas', field: 'SalesItem', type: 'flag', editable: false, inExcel: true },
+  { label: 'Es de compras', field: 'PurchaseItem', type: 'flag', editable: false, inExcel: true },
+  { label: 'Es de inventario', field: 'InventoryItem', type: 'flag', editable: false, inExcel: true },
+  { label: 'Activo (valido)', field: 'Valid', type: 'flag', editable: false },
+  { label: 'Inactivo (congelado)', field: 'Frozen', type: 'flag', editable: false },
+  { label: 'Proveedor principal', field: 'Mainsupplier', type: 'string', editable: false, inExcel: true },
+  { label: 'Unidad de venta', field: 'SalesUnit', type: 'string', editable: false, inExcel: true },
+  { label: 'Unidad de compra', field: 'PurchaseUnit', type: 'string', editable: false, inExcel: true },
+  { label: 'Unidad de inventario', field: 'InventoryUOM', type: 'string', editable: false, inExcel: true },
 ];
+
+/** Campos permitidos en la ACTUALIZACIÓN (solo estos se envían/aceptan al editar). */
+export const EDITABLE_ON_UPDATE = STANDARD_FIELDS.filter((f) => f.editable).map((f) => f.field);
 
 /** Nombres de los campos estandar (para whitelist en el servidor). */
 export const STANDARD_FIELD_NAMES = STANDARD_FIELDS.map((f) => f.field);
