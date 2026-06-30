@@ -274,9 +274,10 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
   /** Calcula los cambios (campos editables que difieren del original). */
   const computeChanges = (): Record<string, string> => {
     const changes: Record<string, string> = {};
+    // RN: en la actualización solo se permiten los campos estándar editables
+    // (hoy: Código de barras). Los campos personalizados son de solo lectura.
     const editableNames = STANDARD_FIELDS.filter((f) => f.editable).map((f) => f.field);
-    const allFields = [...editableNames, ...customFields.map((c) => c.field)];
-    for (const f of allFields) {
+    for (const f of editableNames) {
       if ((form[f] ?? '') !== (original[f] ?? '')) changes[f] = form[f] ?? '';
     }
     return changes;
@@ -440,13 +441,13 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
               {customFields.length > 0 ? (
                 <SimpleGrid cols={{ base: 1, sm: 2 }}>
                   {customFields.map((cf) => (
+                    // RN: solo lectura en la edición (solo el Código de barras es editable).
                     <TextInput
                       key={cf.field}
                       label={cf.label}
                       value={form[cf.field] ?? ''}
-                      onChange={(e) => set(cf.field, e.currentTarget.value)}
-                      disabled={!canWrite}
-                      styles={!canWrite ? LOCKED_FIELD_STYLES : undefined}
+                      disabled
+                      styles={LOCKED_FIELD_STYLES}
                     />
                   ))}
                 </SimpleGrid>
