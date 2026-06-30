@@ -139,14 +139,13 @@ function RequestBoard() {
   const newTempId = (prefix: string) =>
     `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-  // Campos condicionales parametrizados por proceso (solo Select por ahora)
   const [formFields, setFormFields] = useState<
     Array<{
       tempId: string;
       field_label: string;
       required: boolean;
       options: Array<{ tempId: string; option_label: string }>;
-      condition_option_temps: string[]; // opciones de campos anteriores que activan este campo
+      condition_option_temps: string[]; 
     }>
   >([]);
   const [fieldForm, setFieldForm] = useState({ field_label: '', required: true });
@@ -173,7 +172,6 @@ function RequestBoard() {
     setFormFields(
       formFields
         .filter((f) => f.tempId !== fieldTempId)
-        // Limpiar condiciones de otros campos que apuntaban a opciones de este campo
         .map((f) => ({
           ...f,
           condition_option_temps: f.condition_option_temps.filter((t) => !optionIds.includes(t)),
@@ -230,7 +228,6 @@ function RequestBoard() {
     );
   };
 
-  // Lista plana de TODAS las opciones (para condicionar archivos)
   const conditionOptions = formFields.flatMap((f) =>
     f.options.map((o) => ({
       value: o.tempId,
@@ -238,7 +235,6 @@ function RequestBoard() {
     }))
   );
 
-  // Opciones de campos ANTERIORES a uno dado (para condicionar campos, evita ciclos)
   const optionsBeforeField = (fieldTempId: string) => {
     const idx = formFields.findIndex((f) => f.tempId === fieldTempId);
     return formFields.slice(0, idx).flatMap((f) =>
@@ -257,7 +253,6 @@ function RequestBoard() {
       .join(', ');
   };
 
-  // Archivos requeridos parametrizados por proceso
   const [requiresFiles, setRequiresFiles] = useState(false);
   const [requiredFiles, setRequiredFiles] = useState<
     Array<{

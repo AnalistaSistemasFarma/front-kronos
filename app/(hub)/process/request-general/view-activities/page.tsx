@@ -701,7 +701,6 @@ function ViewRequestPage() {
         await addSystemNote(resolutionData.resolucion);
       }
 
-      // Refrescar datos desde el servidor
       await fetchRequestData();
 
       setIsEditing(false);

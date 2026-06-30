@@ -316,7 +316,6 @@ function ViewRequestPage() {
     }
   };
 
-  // Cargar usuarios al montar el componente
   useEffect(() => {
     fetchUsersWithEmails();
   }, []);

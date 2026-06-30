@@ -147,7 +147,6 @@ function ViewWorkFlowPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [canEdit, setCanEdit] = useState(false);
 
-  // Estados para edición
   const [editedWorkflow, setEditedWorkflow] = useState<WorkFlow | null>(null);
   const [editedTasks, setEditedTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<{ value: string; label: string }[]>([]);
@@ -160,10 +159,8 @@ function ViewWorkFlowPage() {
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
 
-  // Solo los administradores autorizados pueden modificar el campo "Activo"
   const canEditActive = userId != null && ADMIN_USER_IDS.includes(String(userId));
 
-  // Estados para el modal de agregar tareas
   const [addTaskModalOpened, setAddTaskModalOpened] = useState(false);
   const [newTaskForm, setNewTaskForm] = useState({
     task: '',
@@ -195,7 +192,6 @@ function ViewWorkFlowPage() {
     }
   }, [workflow?.id]);
 
-  // Cargar usuarios y estados al montar el componente
   useEffect(() => {
     fetchUsers();
     fetchStatusOptions();
@@ -362,7 +358,6 @@ function ViewWorkFlowPage() {
   };
 
   const fetchStatusOptions = async () => {
-    // Estados disponibles según la base de datos
     setStatusOptions([
       { value: '1', label: 'Activo' },
       { value: '2', label: 'Pendiente' },
@@ -419,12 +414,11 @@ function ViewWorkFlowPage() {
     }
   };
 
-  // Funciones para manejar tareas nuevas
   const handleAddTask = () => {
     if (!newTaskForm.task.trim()) return;
 
     const newTask: Task = {
-      id: Date.now() * -1, // ID negativo para identificar que es nueva
+      id: Date.now() * -1, 
       task: newTaskForm.task,
       active: 1,
       cost: newTaskForm.cost || 0,
@@ -442,10 +436,9 @@ function ViewWorkFlowPage() {
     setEditedTasks(editedTasks.filter(t => t.id !== taskId));
   };
 
-  // Funciones para manejar archivos requeridos
   const handleAddFile = () => {
     const newFile: FileDef = {
-      id: Date.now() * -1, // ID negativo = nuevo
+      id: Date.now() * -1, 
       file_label: '',
       required: true,
       conditions: [],
@@ -463,7 +456,6 @@ function ViewWorkFlowPage() {
     setEditedFiles(next);
   };
 
-  // Funciones para manejar campos condicionales
   const handleAddFormField = () => {
     const newField: FormFieldDef = {
       id: Date.now() * -1,
@@ -526,7 +518,6 @@ function ViewWorkFlowPage() {
     );
   };
 
-  // Todas las opciones (de editedFormFields) para condicionar archivos
   const allOptionsData = editedFormFields.flatMap((f) =>
     f.options.map((o) => ({
       value: o.id.toString(),
@@ -534,7 +525,6 @@ function ViewWorkFlowPage() {
     }))
   );
 
-  // Opciones de campos ANTERIORES (para condicionar un campo, evita ciclos)
   const optionsBeforeFieldData = (fieldId: number) => {
     const idx = editedFormFields.findIndex((f) => f.id === fieldId);
     return editedFormFields.slice(0, idx).flatMap((f) =>
@@ -545,7 +535,6 @@ function ViewWorkFlowPage() {
     );
   };
 
-  // Etiqueta(s) de condición para modo vista (usa los campos guardados)
   const conditionLabelsView = (optionIds: number[]) => {
     if (!optionIds || optionIds.length === 0) return 'Siempre';
     const labels = [];
@@ -640,7 +629,6 @@ function ViewWorkFlowPage() {
         .filter((origFile) => !editedFiles.find((ef) => ef.id === origFile.id))
         .map((f) => f.id);
 
-      // Compara dos listas de ids como conjuntos (sin importar el orden)
       const sameIdSet = (a: number[], b: number[]) =>
         a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');
 
@@ -658,7 +646,6 @@ function ViewWorkFlowPage() {
       const filesChanged =
         newFiles.length > 0 || deletedFileIds.length > 0 || updatedFiles.length > 0;
 
-      // Diff de campos condicionales (con opciones anidadas)
       const newFormFields = editedFormFields.filter(
         (f) => f.id < 0 && f.field_label.trim()
       );
@@ -693,7 +680,6 @@ function ViewWorkFlowPage() {
       const formFieldsChanged =
         newFormFields.length > 0 || deletedFieldIds.length > 0 || updatedFormFields.length > 0;
 
-      // Construye las opciones (create/update/delete) de un campo para el payload
       const buildOptionActions = (field: FormFieldDef, orig?: FormFieldDef) => {
         const actions: {
           id?: number;
@@ -809,7 +795,6 @@ function ViewWorkFlowPage() {
             id_user_assigned: task.id_assigned_user,
             action: 'update' as const,
           })),
-          // Tareas eliminadas
           ...deletedTaskIds.map((id) => ({
             id,
             action: 'delete' as const,
