@@ -262,6 +262,9 @@ model sap_endpoints {
   // por eso se mapea aqui en vez de asumir un nombre fijo. Null = la empresa no tiene el modulo.
   health_records_entity         String?
   health_records_log_collection String?
+  // Nombre del UDO de bitácora de cambios de artículos en la base SAP de esta
+  // empresa (ej. ART_CHG_LOG en OLP). Null = la empresa no registra el log.
+  articles_log_object           String?
   company                       Company  @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
 }
 

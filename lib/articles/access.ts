@@ -37,6 +37,8 @@ export interface CompanySapEndpoint {
   password: string;
   /** CompanyDB de SAP B1 (columna `client`). */
   companyDB: string;
+  /** UDO de bitácora de cambios de artículos (null = la empresa no lo registra). */
+  logObject: string | null;
 }
 
 /** Acceso de un usuario a una empresa dentro del modulo. */
@@ -106,6 +108,7 @@ export async function getArticlesAccess(userEmail: string): Promise<ArticlesComp
               username: ep.username ?? '',
               password: ep.password ?? '',
               companyDB: ep.client ?? '',
+              logObject: ep.articles_log_object ?? null,
             }
           : null,
       };
