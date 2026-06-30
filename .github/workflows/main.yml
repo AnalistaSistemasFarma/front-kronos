@@ -18,11 +18,14 @@ on:
 # reinicia las ~25 apps de la flota) y `xcopy` sobre el repo de prod (que pisaba
 # cambios locales no commiteados). Este esquema corrige ambos.
 #
-# NO se ejecuta `prisma generate` en el deploy: el cliente ya está generado en
-# disco y la app en ejecución mantiene bloqueado query_engine-windows.dll.node,
-# lo que hace fallar el rename con EPERM. Si alguna vez cambia prisma/schema.prisma
-# hay que regenerarlo manualmente (detener GSS-Front, `npx prisma generate`,
-# reiniciar).
+# MIGRACIONES PRISMA: igual que el deploy de PRUEBAS, este workflow aplica las
+# migraciones pendientes (`npx prisma migrate deploy`) y regenera el cliente
+# (`npx prisma generate`) en cada deploy. Como en Windows la app en ejecución
+# mantiene bloqueado query_engine-windows.dll.node (lo que hace fallar el rename
+# del cliente con EPERM), se DETIENE GSS-Front antes de migrar/generar/compilar y
+# se vuelve a arrancar al final (mismo patrón que el deploy de pruebas). Por eso
+# este deploy ya no usa `pm2 reload` de cero downtime: hay una breve ventana de
+# indisponibilidad mientras se regenera el cliente Prisma.
 
 jobs:
   deploy:
@@ -41,9 +44,18 @@ jobs:
           echo === Instalando dependencias ===
           call npm install || exit /b 1
 
+          echo === Deteniendo GSS-Front (liberar lock de query_engine-windows.dll.node) ===
+          call pm2 stop GSS-Front || exit /b 1
+
+          echo === Aplicando migraciones Prisma (migrate deploy) ===
+          call npx prisma migrate deploy || exit /b 1
+
+          echo === Regenerando cliente Prisma (generate) ===
+          call npx prisma generate || exit /b 1
+
           echo === Compilando (next build) ===
           call npm run build || exit /b 1
 
-          echo === Recargando GSS-Front (reload, cero downtime) ===
-          call pm2 reload GSS-Front || exit /b 1
+          echo === Reiniciando GSS-Front ===
+          call pm2 restart GSS-Front || exit /b 1
           call pm2 save
