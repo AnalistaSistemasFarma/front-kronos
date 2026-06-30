@@ -65,6 +65,7 @@ import {
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import { sanitizeOneDriveName } from '../../../../../lib/onedriveName';
 import toast from 'react-hot-toast';
 
 interface RequestTask {
@@ -932,7 +933,9 @@ function RequestBoard() {
 
       if (files && files.length > 0) {
         const uploadNames = files.map((file) =>
-          file.label ? `${file.label} - ${file.file.name}` : file.file.name
+          sanitizeOneDriveName(
+            file.label ? `${file.label} - ${file.file.name}` : file.file.name
+          )
         );
 
         const uploadPromises = files.map((file: { file: File; label?: string }, index) =>

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/articles/access';
 import { crearArticulo, itemExiste, sanitizeItem } from '../../../../lib/articles/articles';
+import { registrarCambioArticulo } from '../../../../lib/articles/log';
 import { REQUIRED_ON_CREATE } from '../../../../lib/articles/fields';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
@@ -61,6 +62,13 @@ export async function POST(request: NextRequest) {
       }
 
       const created = await crearArticulo(sap, item);
+      // Bitácora de creación (best-effort): registra el artículo creado.
+      await registrarCambioArticulo(sap, company.endpoint.logObject, {
+        itemCode: created,
+        action: 'crear',
+        changes: item,
+        userEmail: session.user.email,
+      });
       return NextResponse.json({ ok: true, itemCode: created, companyId });
     } finally {
       await sapLogout(sap);

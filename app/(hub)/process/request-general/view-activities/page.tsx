@@ -1517,57 +1517,61 @@ function ViewRequestPage() {
                   Descargar todos
                 </Button>
               </Group>
-              {folderContents.map((file: FolderFile) => (
-                <Card key={file.id} withBorder p='sm' bg='gray.0'>
-                  <Flex align='center' gap='sm'>
-                    <Box c='blue'>
-                      {file.name.toLowerCase().endsWith('.pdf') && <IconFileText size={20} />}
-                      {(file.name.toLowerCase().endsWith('.doc') ||
-                        file.name.toLowerCase().endsWith('.docx')) && <IconFileText size={20} />}
-                      {(file.name.toLowerCase().endsWith('.xls') ||
-                        file.name.toLowerCase().endsWith('.xlsx')) && (
-                        <IconFileSpreadsheet size={20} />
-                      )}
-                      {(file.name.toLowerCase().endsWith('.png') ||
-                        file.name.toLowerCase().endsWith('.jpg') ||
-                        file.name.toLowerCase().endsWith('.jpeg')) && <IconPhoto size={20} />}
-                      {!file.name
-                        .toLowerCase()
-                        .match(/\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg)$/) && <IconFile size={20} />}
-                    </Box>
-                    <Box style={{ flex: 1 }}>
-                      <Text size='sm' fw={500} lineClamp={1}>
-                        {file.name}
-                      </Text>
-                      <Text size='xs' c='dimmed'>
-                        {file.size ? formatFileSize(file.size) : 'Tamaño desconocido'}
-                      </Text>
-                      {file.lastModifiedDateTime && (
-                        <Text size='xs' c='dimmed'>
-                          Subido: {new Date(file.lastModifiedDateTime).toLocaleDateString('es-CO')}
-                        </Text>
-                      )}
-                    </Box>
-                    <Group gap='xs'>
-                      <Badge color='teal' size='sm'>
-                        Almacenado
-                      </Badge>
-                      <ActionIcon
-                        variant='subtle'
-                        color='blue'
-                        size='sm'
-                        component='a'
-                        href={file.webUrl}
-                        target='_blank'
-                        rel='noopener noreferrer'
-                        aria-label={`Descargar archivo ${file.name}`}
-                      >
-                        <IconEye size={16} />
-                      </ActionIcon>
-                    </Group>
-                  </Flex>
-                </Card>
-              ))}
+              <ScrollArea.Autosize mah={360} offsetScrollbars type='auto'>
+                <Stack gap='sm'>
+                  {folderContents.map((file: FolderFile) => (
+                    <Card key={file.id} withBorder p='sm' bg='gray.0'>
+                      <Flex align='center' gap='sm'>
+                        <Box c='blue'>
+                          {file.name.toLowerCase().endsWith('.pdf') && <IconFileText size={20} />}
+                          {(file.name.toLowerCase().endsWith('.doc') ||
+                            file.name.toLowerCase().endsWith('.docx')) && <IconFileText size={20} />}
+                          {(file.name.toLowerCase().endsWith('.xls') ||
+                            file.name.toLowerCase().endsWith('.xlsx')) && (
+                            <IconFileSpreadsheet size={20} />
+                          )}
+                          {(file.name.toLowerCase().endsWith('.png') ||
+                            file.name.toLowerCase().endsWith('.jpg') ||
+                            file.name.toLowerCase().endsWith('.jpeg')) && <IconPhoto size={20} />}
+                          {!file.name
+                            .toLowerCase()
+                            .match(/\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg)$/) && <IconFile size={20} />}
+                        </Box>
+                        <Box style={{ flex: 1 }}>
+                          <Text size='sm' fw={500} lineClamp={1}>
+                            {file.name}
+                          </Text>
+                          <Text size='xs' c='dimmed'>
+                            {file.size ? formatFileSize(file.size) : 'Tamaño desconocido'}
+                          </Text>
+                          {file.lastModifiedDateTime && (
+                            <Text size='xs' c='dimmed'>
+                              Subido: {new Date(file.lastModifiedDateTime).toLocaleDateString('es-CO')}
+                            </Text>
+                          )}
+                        </Box>
+                        <Group gap='xs'>
+                          <Badge color='teal' size='sm'>
+                            Almacenado
+                          </Badge>
+                          <ActionIcon
+                            variant='subtle'
+                            color='blue'
+                            size='sm'
+                            component='a'
+                            href={file.webUrl}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            aria-label={`Descargar archivo ${file.name}`}
+                          >
+                            <IconEye size={16} />
+                          </ActionIcon>
+                        </Group>
+                      </Flex>
+                    </Card>
+                  ))}
+                </Stack>
+              </ScrollArea.Autosize>
             </Stack>
           )}
 
