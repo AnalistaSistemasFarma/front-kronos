@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/articles/access';
 import { actualizarArticulo, sanitizeItem } from '../../../../lib/articles/articles';
+import { registrarCambioArticulo } from '../../../../lib/articles/log';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -48,6 +49,13 @@ export async function POST(request: NextRequest) {
 
     try {
       await actualizarArticulo(sap, itemCode, changes);
+      // Bitácora de cambios (best-effort): solo si la empresa tiene log configurado.
+      await registrarCambioArticulo(sap, company.endpoint.logObject, {
+        itemCode,
+        action: 'actualizar',
+        changes,
+        userEmail: session.user.email,
+      });
       return NextResponse.json({ ok: true, itemCode, companyId });
     } finally {
       await sapLogout(sap);
