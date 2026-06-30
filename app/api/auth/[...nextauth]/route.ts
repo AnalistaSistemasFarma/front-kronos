@@ -82,6 +82,7 @@ export const authOptions: AuthOptions = {
     },
     async session({ session, token }: { session: Session; token: JWT }) {
       if (token && session.user) {
+        session.user.id = token.sub;
         session.user.image = token.image as string;
         session.user.role = token.role as string | undefined;
       }
