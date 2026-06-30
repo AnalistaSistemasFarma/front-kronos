@@ -25,6 +25,7 @@ import {
   IconCloudUpload,
 } from '@tabler/icons-react';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../microsoft-365/useGetMicrosoftToken';
+import { sanitizeOneDriveName } from '../../lib/onedriveName';
 
 export interface UploadedFile {
   id: string;
@@ -205,8 +206,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
       // Subir archivos a la carpeta
       if (files && files.length > 0) {
         const uploadPromises = files.map(async (fileWrapper) => {
+          const uploadName = sanitizeOneDriveName(fileWrapper.file.name);
           const response = await fetch(
-            `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${fileWrapper.file.name}:/content`,
+            `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${uploadName}:/content`,
             {
               method: 'PUT',
               headers: {
