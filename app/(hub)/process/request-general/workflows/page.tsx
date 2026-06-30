@@ -54,6 +54,7 @@ import {
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
+import { getFileLabelError } from '../../../../../lib/onedriveName';
 
 interface WorkFlow {
   id: number;
@@ -274,6 +275,7 @@ function RequestBoard() {
 
   const addRequiredFile = () => {
     if (!fileForm.file_label.trim()) return;
+    if (getFileLabelError(fileForm.file_label)) return;
 
     setRequiredFiles([
       ...requiredFiles,
@@ -2037,6 +2039,7 @@ function RequestBoard() {
                                   addRequiredFile();
                                 }
                               }}
+                              error={getFileLabelError(fileForm.file_label)}
                               size='lg'
                               classNames={{
                                 label: 'text-sm font-medium mb-2',
@@ -2086,7 +2089,7 @@ function RequestBoard() {
                               color='blue'
                               fullWidth
                               h={48}
-                              disabled={!fileForm.file_label.trim()}
+                              disabled={!fileForm.file_label.trim() || !!getFileLabelError(fileForm.file_label)}
                               className='cursor-pointer hover:bg-blue-700 transition-colors duration-200'
                               size='lg'
                             >
