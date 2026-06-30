@@ -27,9 +27,16 @@ on:
 # este deploy ya no usa `pm2 reload` de cero downtime: hay una breve ventana de
 # indisponibilidad mientras se regenera el cliente Prisma.
 
+# RUNNER FIJO: se usa la etiqueta `serfarma05` (además de self-hosted) para anclar
+# el deploy EXCLUSIVAMENTE al runner de producción. Antes decía solo `self-hosted`,
+# etiqueta que también tiene el runner de PRUEBAS (kronos-230-runner): el job podia
+# caer en la maquina equivocada y fallaba en el primer `cd` con "no se encuentra la
+# ruta" (la ruta de prod no existe en la .230). La etiqueta serfarma05 solo la tiene
+# el runner de prod (automated-deploy), asi que el job siempre corre donde debe.
+
 jobs:
   deploy:
-    runs-on: self-hosted
+    runs-on: [self-hosted, serfarma05]
 
     steps:
       - name: Deploy on production repository
