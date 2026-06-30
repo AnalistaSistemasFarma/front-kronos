@@ -5,31 +5,31 @@ on:
     branches:
       - main
 
-# Auto-deploy de PRODUCCIÓN (serfarma05). Mismo patrón robusto que el deploy de
-# PRUEBAS (.230), adaptado a prod (shell cmd, una sola app GSS-Front).
+# Auto-deploy de PRODUCCIÓN (serfarma05, app pm2 GSS-Front en :3003).
 #
 # RUNNER FIJO: se ancla con la etiqueta `serfarma05` (además de self-hosted)
 # porque el repo tiene DOS runners self-hosted Windows (prod y la .230). Con solo
 # `self-hosted` el job podía caer en la máquina equivocada y fallar en el `cd`.
 #
-# CÓDIGO: se usa `git fetch` + `git reset --hard origin/main` (NO `git pull`).
-# `pull` se aborta si el árbol de trabajo de prod tiene cambios locales en
-# archivos versionados (eso tumbó el deploy del 2026-06-30). `reset --hard` solo
-# afecta archivos VERSIONADOS; los git-ignored (dbconfig.js, app/generated/prisma,
-# .env) sobreviven porque NO ejecutamos `git clean`.
+# CÓDIGO: `git fetch` + `git reset --hard origin/main` (NO `git pull`). `pull` se
+# aborta si el árbol de prod tiene cambios locales en archivos versionados (eso
+# tumbó el deploy del 2026-06-30). `reset --hard` solo toca archivos VERSIONADOS;
+# los git-ignored (dbconfig.js, app/generated/prisma, .env) sobreviven porque NO
+# ejecutamos `git clean`.
 #
-# PRISMA: igual que pruebas, se regenera el cliente (`npx prisma generate`) en
-# cada deploy. NO se corre `prisma migrate deploy`: la BD de prod no está
-# baselined para migraciones de Prisma (da P3005) y las migraciones se aplican a
-# mano en la ventana de promoción, con backup previo. Como en Windows la app en
-# ejecución bloquea query_engine-windows.dll.node (genera EPERM al regenerar), se
-# DETIENE GSS-Front antes de instalar/generar/compilar y se reinicia al final.
-# Hay una breve ventana de indisponibilidad por deploy (el cero downtime queda
-# pendiente para una mejora posterior).
+# PRISMA: este deploy NO corre `prisma generate` ni `migrate deploy`. Motivos:
+#   - `generate` falla con EPERM en Windows porque GSS-Front Y kronos-mcp mantienen
+#     bloqueado query_engine-windows.dll.node (lo documentó el commit 3957e49 que
+#     quitó ese paso). El cliente ya está generado en disco (app/generated/prisma).
+#   - `migrate deploy` falla con P3005 (la BD de prod no está baselined para
+#     migraciones de Prisma).
+#   Si cambia prisma/schema.prisma o hay una migración nueva, se aplican A MANO en
+#   la ventana de promoción, con backup previo (detener apps, generate/migrar,
+#   reiniciar). El deploy automático asume que el esquema no cambió.
 #
-# SEGURIDAD: el paso de reinicio corre con `if: always()`, así que aunque falle un
-# paso previo (install/generate/build) GSS-Front SIEMPRE se vuelve a levantar y
-# prod nunca queda caído.
+# CERO DOWNTIME: se usa `pm2 reload` (recarga grácil instancia por instancia del
+# cluster), no `stop`/`restart`. Si el build falla, NO se recarga: GSS-Front sigue
+# sirviendo el build anterior, así que prod nunca queda caído.
 
 concurrency:
   group: deploy-prod-serfarma05
@@ -52,31 +52,18 @@ jobs:
           git reset --hard origin/main || exit /b 1
           git rev-parse --short HEAD
 
-      - name: Detener GSS-Front (liberar lock de query_engine-windows.dll.node)
-        shell: cmd
-        run: |
-          cd /d %PROJECT_DIR% || exit /b 1
-          call pm2 stop GSS-Front || exit /b 1
-
-      - name: Instalar dependencias y regenerar cliente Prisma
+      - name: Instalar dependencias y compilar
         shell: cmd
         run: |
           cd /d %PROJECT_DIR% || exit /b 1
           echo === npm install ===
           call npm install || exit /b 1
-          echo === npx prisma generate ===
-          call npx prisma generate || exit /b 1
-
-      - name: Compilar (next build)
-        shell: cmd
-        run: |
-          cd /d %PROJECT_DIR% || exit /b 1
+          echo === next build ===
           call npm run build || exit /b 1
 
-      - name: Reiniciar GSS-Front (siempre, aunque un paso previo falle)
-        if: always()
+      - name: Recargar GSS-Front (reload, cero downtime)
         shell: cmd
         run: |
           cd /d %PROJECT_DIR% || exit /b 1
-          call pm2 restart GSS-Front || exit /b 1
+          call pm2 reload GSS-Front || exit /b 1
           call pm2 save
