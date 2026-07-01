@@ -192,6 +192,7 @@ model Case {
   creation_date    DateTime          @default(now())
   resolution       String?           @db.Text
   end_date         DateTime?
+  id_executor_final String?          @db.NVarChar(255)
   id_technical     String
   requester        String
   id_active        Int?

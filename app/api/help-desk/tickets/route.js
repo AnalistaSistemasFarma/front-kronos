@@ -17,6 +17,14 @@ import {
   REQUESTER_NAME_SQL,
   REQUESTER_SEARCH_FILTER_SQL,
 } from '../../../../lib/help-desk/requesterSql';
+import {
+  ASSIGNED_USER_FILTER_SQL,
+  CASE_EXECUTOR_JOIN_SQL,
+  CASE_EXECUTOR_NAME_SQL,
+  ensureCaseExecutorColumn,
+  TECHNICIAN_FILTER_SQL,
+  TECHNICIAN_UNASSIGNED_FILTER_SQL,
+} from '../../../../lib/help-desk/caseExecutorSql.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,6 +69,7 @@ export async function GET(req) {
     }
 
     const pool = await sql.connect(sqlConfig);
+    await ensureCaseExecutorColumn(pool);
 
     const hasBoardSearch = search.length > 0;
     const hasRequesterFilter = Boolean(
@@ -77,7 +86,8 @@ export async function GET(req) {
         a.activity, sc.status, u.name AS nombreTecnico, d.department,
         sc.id_status_case, c.resolution, co.company, co.id_company,
         ${REQUESTER_NAME_SQL} AS requester_name,
-        ${REQUESTER_EMAIL_SQL} AS requester_email
+        ${REQUESTER_EMAIL_SQL} AS requester_email,
+        ${CASE_EXECUTOR_NAME_SQL}
       FROM [case] c
       LEFT JOIN category_case cc ON cc.id_case = c.id_case
       LEFT JOIN category cg ON cg.id_category = cc.id_category
@@ -90,6 +100,7 @@ export async function GET(req) {
       LEFT JOIN [user] u ON CAST(u.id AS NVARCHAR(255)) = CAST(cu.id_user AS NVARCHAR(255))
       ${REQUESTER_JOINS}
 	    LEFT JOIN company co ON co.id_company = c.company
+      ${CASE_EXECUTOR_JOIN_SQL}
       WHERE 1=1
     `;
 
@@ -107,11 +118,11 @@ export async function GET(req) {
     if (company) query += ` AND co.id_company = @company`;
     if (status && status !== '0') query += ` AND sc.id_status_case = @status`;
     else if (!status && !id && !hasRequesterFilter) query += ` AND sc.id_status_case = 1`;
-    if (assigned_user) query += ` AND u.name LIKE '%' + @assigned_user + '%'`;
+    if (assigned_user) query += ` AND ${ASSIGNED_USER_FILTER_SQL}`;
     if (technician === 'unassigned') {
-      query += ` AND (c.id_technical IS NULL OR c.id_technical = 0)`;
+      query += ` AND ${TECHNICIAN_UNASSIGNED_FILTER_SQL}`;
     } else if (technician) {
-      query += ` AND c.id_technical = @technician`;
+      query += ` AND ${TECHNICIAN_FILTER_SQL}`;
     }
     if (date_from && date_to) query += ` AND c.creation_date BETWEEN @date_from AND @date_to`;
 

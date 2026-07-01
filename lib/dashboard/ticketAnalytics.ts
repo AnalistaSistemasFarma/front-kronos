@@ -32,6 +32,7 @@ export interface HelpDeskCase {
   /** Horas desde creation_date hasta closed_at (solo casos cerrados medibles) */
   resolution_hours?: number | null;
   nombreTecnico?: string;
+  executor_final?: string;
   company?: string;
   resolution?: string;
 }
@@ -94,6 +95,10 @@ function parseCaseDate(value: string | Date | null | undefined): Date | null {
 }
 
 export function getTechnicianLabel(c: HelpDeskCase): string {
+  if (isClosedCase(c)) {
+    const resolver = c.executor_final?.trim();
+    return resolver && resolver.length > 0 ? resolver : 'No registrado';
+  }
   const name = c.nombreTecnico?.trim();
   return name && name.length > 0 ? name : 'Sin asignar';
 }
