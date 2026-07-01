@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
           const docNum = await crearRegistro(sap, company.endpoint, record, userName, 'Creado por cargue masivo');
           ok.push({ row: rowNum, registro, docNum });
         } catch (err) {
-          const msg = err instanceof SapError ? err.message : err instanceof Error ? err.message : 'Error';
+          const msg = err instanceof SapError ? err.friendly : err instanceof Error ? err.message : 'Error';
           failed.push({ row: rowNum, registro, error: msg });
         }
       }
