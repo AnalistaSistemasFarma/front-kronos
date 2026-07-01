@@ -2,8 +2,8 @@
 
 import React, { useState } from 'react';
 import ExcelJS from 'exceljs';
-import { Modal, Select, Button, Group, Stack, Alert, Text, FileButton, Divider } from '@mantine/core';
-import { IconDownload, IconUpload } from '@tabler/icons-react';
+import { Modal, Select, Button, Group, Stack, Alert, Text, FileButton } from '@mantine/core';
+import { IconDownload, IconUpload, IconCircleCheck, IconAlertTriangle } from '@tabler/icons-react';
 import { TEMPLATE_COLUMNS, DATE_FIELDS } from '../../../../lib/health-records/fields';
 
 interface WritableCompany {
@@ -141,7 +141,36 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
   return (
     <Modal opened={opened} onClose={close} title="Cargue masivo de registros sanitarios" size="lg">
       <Stack gap="sm">
-        {error && <Alert color="red">{error}</Alert>}
+        {error && <Alert color="red" title="Error" icon={<IconAlertTriangle size={18} />}>{error}</Alert>}
+
+        {report && (
+          <Alert
+            color={report.summary.fallidos > 0 ? 'red' : report.summary.creados > 0 ? 'green' : 'blue'}
+            title="Resultado del cargue"
+            icon={report.summary.fallidos > 0 ? <IconAlertTriangle size={18} /> : <IconCircleCheck size={18} />}
+            withCloseButton
+            onClose={() => setReport(null)}
+          >
+            <Text size="sm">
+              Creados: <b>{report.summary.creados}</b> · Duplicados: <b>{report.summary.duplicados}</b> · Fallidos:{' '}
+              <b>{report.summary.fallidos}</b> (de {report.summary.total})
+            </Text>
+            {report.failed.length > 0 && (
+              <Text size="xs" mt="xs">
+                <b>Fallidos:</b>{' '}
+                {report.failed.slice(0, 20).map((f) => `Fila ${f.row} (${f.registro}): ${f.error}`).join(' · ')}
+                {report.failed.length > 20 ? ` … y ${report.failed.length - 20} más` : ''}
+              </Text>
+            )}
+            {report.duplicated.length > 0 && (
+              <Text size="xs" mt="xs">
+                <b>Omitidos por duplicado:</b>{' '}
+                {report.duplicated.slice(0, 20).map((d) => `Fila ${d.row} (${d.registro}): ${d.reason}`).join(' · ')}
+                {report.duplicated.length > 20 ? ` … y ${report.duplicated.length - 20} más` : ''}
+              </Text>
+            )}
+          </Alert>
+        )}
 
         <Select
           label="Empresa"
@@ -169,26 +198,6 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
           <Text size="sm">
             Archivo: <b>{fileName}</b> — {rows.length} fila(s) con datos.
           </Text>
-        )}
-
-        {report && (
-          <>
-            <Divider label="Resultado" />
-            <Text size="sm">
-              Creados: <b>{report.summary.creados}</b> · Duplicados: <b>{report.summary.duplicados}</b> · Fallidos:{' '}
-              <b>{report.summary.fallidos}</b> (de {report.summary.total})
-            </Text>
-            {report.duplicated.length > 0 && (
-              <Alert color="yellow" title={`Omitidos por duplicado (${report.duplicated.length})`}>
-                {report.duplicated.slice(0, 20).map((d) => `Fila ${d.row} (${d.registro}): ${d.reason}`).join(' · ')}
-              </Alert>
-            )}
-            {report.failed.length > 0 && (
-              <Alert color="red" title={`Fallidos (${report.failed.length})`}>
-                {report.failed.slice(0, 20).map((f) => `Fila ${f.row} (${f.registro}): ${f.error}`).join(' · ')}
-              </Alert>
-            )}
-          </>
         )}
 
         <Group justify="flex-end" mt="sm">
