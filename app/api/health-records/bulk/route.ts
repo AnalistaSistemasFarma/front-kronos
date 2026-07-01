@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/health-records/access';
-import { articuloExiste, crearRegistro, registroExiste, sanitizeRecord } from '../../../../lib/health-records/records';
+import { articuloExiste, crearRegistro, getFieldSizes, registroExiste, sanitizeRecord } from '../../../../lib/health-records/records';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -51,6 +51,10 @@ export async function POST(request: NextRequest) {
       companyDB: company.endpoint.companyDB,
     });
 
+    // Tamaños de los campos en SAP, para validar el largo antes de crear
+    // (así la simulación detecta "demasiado largo" sin intentar el POST).
+    const fieldSizes = await getFieldSizes(sap, entity);
+
     const ok: { row: number; registro: string; docNum: number }[] = [];
     const duplicated: { row: number; registro: string; reason: string }[] = [];
     const failed: { row: number; registro: string; error: string }[] = [];
@@ -65,6 +69,21 @@ export async function POST(request: NextRequest) {
         const faltantes = REQUIRED.filter((f) => !record[f]);
         if (faltantes.length > 0) {
           failed.push({ row: rowNum, registro, error: `Datos faltantes: ${faltantes.join(', ')}` });
+          continue;
+        }
+
+        // Validar el largo de cada campo contra su tamaño en SAP (evita el 400).
+        const rec = record as Record<string, string | undefined>;
+        const largo = Object.entries(fieldSizes).find(
+          ([field, max]) => (rec[field]?.length ?? 0) > max
+        );
+        if (largo) {
+          const [field, max] = largo;
+          failed.push({
+            row: rowNum,
+            registro,
+            error: `El campo ${field} supera el máximo de ${max} caracteres (tiene ${rec[field]!.length})`,
+          });
           continue;
         }
 
