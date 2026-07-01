@@ -2,17 +2,14 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/health-records/access';
-import {
-  crearRegistro,
-  registroExiste,
-  sanitizeRecord,
-} from '../../../../lib/health-records/records';
+import { checkAdminPrivileges } from '../../../../lib/access-control';
+import { eliminarRegistro } from '../../../../lib/health-records/records';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
- * Crea un registro sanitario en la base SAP de la empresa indicada.
- * El usuario debe tener permiso de ESCRITURA en esa empresa. El Login y la
- * creacion ocurren solo en el servidor.
+ * Elimina un registro sanitario (DELETE por DocNum). SOLO administradores.
+ * Requiere ademas permiso de escritura en la empresa. La validacion de admin es
+ * autoritativa aqui: aunque la UI oculte el boton, el servidor la reimpone.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -20,12 +17,20 @@ export async function POST(request: NextRequest) {
     if (!session || !session.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    const userName = session.user.name || session.user.email;
+
+    const isAdmin = await checkAdminPrivileges(session.user.email);
+    if (!isAdmin) {
+      return NextResponse.json(
+        { error: 'Solo los administradores pueden eliminar registros sanitarios' },
+        { status: 403 }
+      );
+    }
 
     const body = await request.json().catch(() => ({}));
     const companyId = Number(body.companyId);
-    if (!companyId) {
-      return NextResponse.json({ error: 'Falta companyId' }, { status: 400 });
+    const docNum = Number(body.docNum);
+    if (!companyId || !docNum) {
+      return NextResponse.json({ error: 'Falta companyId o docNum' }, { status: 400 });
     }
 
     const company = await getCompanyEndpointForUser(session.user.email, companyId, 'write');
@@ -35,11 +40,7 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       );
     }
-
-    const record = sanitizeRecord(body.record ?? {});
-    if (!record.U_Registro_Sanitario) {
-      return NextResponse.json({ error: 'El numero de registro sanitario es obligatorio' }, { status: 400 });
-    }
+    const entity = company.endpoint.healthRecordsEntity!;
 
     const sap = await sapLogin({
       baseUrl: company.endpoint.baseUrl,
@@ -49,27 +50,7 @@ export async function POST(request: NextRequest) {
     });
 
     try {
-      const existe = await registroExiste(
-        sap,
-        company.endpoint.healthRecordsEntity!,
-        record.U_Referencia ?? '',
-        record.U_Registro_Sanitario
-      );
-      if (existe) {
-        return NextResponse.json(
-          { error: `Ya existe el registro sanitario ${record.U_Registro_Sanitario} para este producto` },
-          { status: 409 }
-        );
-      }
-
-      const docNum = await crearRegistro(
-        sap,
-        company.endpoint,
-        record,
-        userName,
-        String(body.comentario ?? '').trim()
-      );
-
+      await eliminarRegistro(sap, entity, docNum);
       return NextResponse.json({ ok: true, docNum, companyId });
     } finally {
       await sapLogout(sap);
@@ -78,7 +59,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof SapError) {
       return NextResponse.json({ error: error.message, detail: error.detail }, { status: error.status });
     }
-    console.error('Error creando registro sanitario:', error);
+    console.error('Error eliminando registro sanitario:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

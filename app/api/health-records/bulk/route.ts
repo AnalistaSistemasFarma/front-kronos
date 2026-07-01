@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/health-records/access';
-import { crearRegistro, registroExiste, sanitizeRecord } from '../../../../lib/health-records/records';
+import { articuloExiste, crearRegistro, getFieldSizes, registroExiste, sanitizeRecord } from '../../../../lib/health-records/records';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -26,6 +26,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const companyId = Number(body.companyId);
     const rows: Record<string, unknown>[] = Array.isArray(body.rows) ? body.rows : [];
+    // Simulacion: corre TODAS las validaciones pero NO crea nada en SAP.
+    const dryRun = body.dryRun === true;
 
     if (!companyId) return NextResponse.json({ error: 'Falta companyId' }, { status: 400 });
     if (rows.length === 0) return NextResponse.json({ error: 'No hay filas para cargar' }, { status: 400 });
@@ -49,6 +51,10 @@ export async function POST(request: NextRequest) {
       companyDB: company.endpoint.companyDB,
     });
 
+    // Tamaños de los campos en SAP, para validar el largo antes de crear
+    // (así la simulación detecta "demasiado largo" sin intentar el POST).
+    const fieldSizes = await getFieldSizes(sap, entity);
+
     const ok: { row: number; registro: string; docNum: number }[] = [];
     const duplicated: { row: number; registro: string; reason: string }[] = [];
     const failed: { row: number; registro: string; error: string }[] = [];
@@ -66,21 +72,53 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        if (seen.has(registro)) {
-          duplicated.push({ row: rowNum, registro, reason: 'Duplicado dentro del archivo' });
+        // Validar el largo de cada campo contra su tamaño en SAP (evita el 400).
+        const rec = record as Record<string, string | undefined>;
+        const largo = Object.entries(fieldSizes).find(
+          ([field, max]) => (rec[field]?.length ?? 0) > max
+        );
+        if (largo) {
+          const [field, max] = largo;
+          failed.push({
+            row: rowNum,
+            registro,
+            error: `El campo ${field} supera el máximo de ${max} caracteres (tiene ${rec[field]!.length})`,
+          });
+          continue;
+        }
+
+        // Un mismo RS puede repetirse en productos distintos; el duplicado se
+        // evalua por la pareja (Referencia + Registro Sanitario).
+        const dupKey = `${record.U_Referencia}||${registro}`;
+        if (seen.has(dupKey)) {
+          duplicated.push({ row: rowNum, registro, reason: 'Duplicado dentro del archivo (mismo producto y registro)' });
           continue;
         }
 
         try {
-          if (await registroExiste(sap, entity, registro)) {
-            duplicated.push({ row: rowNum, registro, reason: 'Ya existe en SAP' });
+          // El articulo (Referencia) debe existir en SAP antes de asignarle un RS.
+          if (!(await articuloExiste(sap, record.U_Referencia as string))) {
+            failed.push({
+              row: rowNum,
+              registro,
+              error: `El articulo '${record.U_Referencia}' no existe en SAP`,
+            });
             continue;
           }
-          seen.add(registro);
+          if (await registroExiste(sap, entity, record.U_Referencia as string, registro)) {
+            duplicated.push({ row: rowNum, registro, reason: 'Ya existe en SAP para este producto' });
+            continue;
+          }
+          seen.add(dupKey);
+          if (dryRun) {
+            // Simulacion: pasa todas las validaciones, pero NO se crea.
+            ok.push({ row: rowNum, registro, docNum: 0 });
+            continue;
+          }
           const docNum = await crearRegistro(sap, company.endpoint, record, userName, 'Creado por cargue masivo');
           ok.push({ row: rowNum, registro, docNum });
         } catch (err) {
-          const msg = err instanceof SapError ? err.message : err instanceof Error ? err.message : 'Error';
+          const msg = err instanceof SapError ? err.friendly : err instanceof Error ? err.message : 'Error';
           failed.push({ row: rowNum, registro, error: msg });
         }
       }
@@ -89,6 +127,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
+      dryRun,
       summary: { total: rows.length, creados: ok.length, duplicados: duplicated.length, fallidos: failed.length },
       ok,
       duplicated,

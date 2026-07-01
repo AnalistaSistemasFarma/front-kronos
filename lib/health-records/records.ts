@@ -1,4 +1,4 @@
-import { sapGet, sapPost, sapPatch, type SapSession } from '../sap/serviceLayer';
+import { sapGet, sapPost, sapPatch, sapDelete, type SapSession } from '../sap/serviceLayer';
 import type { CompanySapEndpoint } from './access';
 
 /**
@@ -52,20 +52,80 @@ function today(): string {
 }
 
 /**
- * ¿Ya existe un registro con ese U_Registro_Sanitario en la base?
- * Replica la validacion de duplicados de SAPSEND.
+ * ¿Ya existe el registro sanitario para ESE MISMO producto (Referencia)?
+ * Regla de negocio: un mismo RS PUEDE repetirse en productos distintos (p. ej.
+ * varias presentaciones/concentraciones comparten registro). Solo es duplicado
+ * cuando ya existe la pareja (Referencia + Registro Sanitario).
  */
 export async function registroExiste(
   session: SapSession,
   entity: string,
+  referencia: string,
   registroSanitario: string
 ): Promise<boolean> {
-  const filter = encodeURIComponent(`U_Registro_Sanitario eq '${escapeOData(registroSanitario)}'`);
+  const filter = encodeURIComponent(
+    `U_Referencia eq '${escapeOData(referencia)}' and U_Registro_Sanitario eq '${escapeOData(registroSanitario)}'`
+  );
   const data = await sapGet<{ value?: unknown[] }>(
     session,
-    `${entity}?$filter=${filter}&$select=DocEntry,U_Registro_Sanitario`
+    `${entity}?$filter=${filter}&$select=DocEntry,U_Referencia,U_Registro_Sanitario`
   );
   return (data.value?.length ?? 0) > 0;
+}
+
+/**
+ * ¿Existe el articulo (maestra de articulos de SAP, OITM) con ese ItemCode?
+ * Se valida antes de asignarle un registro sanitario: no debe crearse un RS
+ * para un articulo que no existe en SAP.
+ */
+export async function articuloExiste(session: SapSession, itemCode: string): Promise<boolean> {
+  const filter = encodeURIComponent(`ItemCode eq '${escapeOData(itemCode)}'`);
+  const data = await sapGet<{ value?: unknown[] }>(
+    session,
+    `Items?$filter=${filter}&$select=ItemCode&$top=1`
+  );
+  return (data.value?.length ?? 0) > 0;
+}
+
+/** Elimina un registro sanitario por su clave (DocEntry). */
+export async function eliminarRegistro(
+  session: SapSession,
+  entity: string,
+  docEntry: number
+): Promise<void> {
+  await sapDelete(session, `${entity}(${docEntry})`);
+}
+
+/**
+ * Tamaños máximos (EditSize) de los campos de texto del UDO de registros
+ * sanitarios, leídos de la metadata de SAP (UserFieldsMD). Sirve para validar
+ * el largo ANTES de crear (así la simulación detecta "valor demasiado largo"
+ * sin tener que intentar el POST). Devuelve un mapa { U_Campo: maxLargo }.
+ */
+export async function getFieldSizes(
+  session: SapSession,
+  udoCode: string
+): Promise<Record<string, number>> {
+  const sizes: Record<string, number> = {};
+  try {
+    const udo = await sapGet<{ TableName?: string }>(
+      session,
+      `UserObjectsMD('${udoCode}')?$select=TableName`
+    );
+    const table = udo?.TableName;
+    if (!table) return sizes;
+    const data = await sapGet<{ value?: { Name: string; Type: string; EditSize: number }[] }>(
+      session,
+      `UserFieldsMD?$filter=TableName eq '@${table}'&$select=Name,Type,EditSize&$top=200`
+    );
+    for (const f of data.value ?? []) {
+      // Solo campos de texto (alfanuméricos / memo) tienen límite relevante.
+      if (f.Type === 'db_Alpha' || f.Type === 'db_Memo') sizes[`U_${f.Name}`] = f.EditSize;
+    }
+  } catch {
+    // Si no se puede leer la metadata, no se valida el largo (no bloquea).
+  }
+  return sizes;
 }
 
 /**

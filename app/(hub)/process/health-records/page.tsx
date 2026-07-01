@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 import { Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group, Button, ActionIcon } from '@mantine/core';
-import { IconSearch, IconAlertTriangle, IconPlus, IconUpload, IconEdit, IconEye } from '@tabler/icons-react';
+import { IconSearch, IconAlertTriangle, IconPlus, IconUpload, IconEdit, IconEye, IconTrash } from '@tabler/icons-react';
 import CreateModal from './CreateModal';
 import BulkModal from './BulkModal';
 import EditModal from './EditModal';
@@ -63,6 +63,8 @@ export default function HealthRecordsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [selected, setSelected] = useState<HealthRecord | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (session) loadData();
@@ -78,6 +80,7 @@ export default function HealthRecordsPage() {
       const accessData = await accessRes.json();
       const userCompanies: CompanyAccess[] = accessData.companies ?? [];
       setCompanies(userCompanies);
+      setIsAdmin(Boolean(accessData.isAdmin));
 
       if (userCompanies.length === 0) {
         setError('No tiene acceso a registros sanitarios en ninguna empresa.');
@@ -98,6 +101,30 @@ export default function HealthRecordsPage() {
       setError(err instanceof Error ? err.message : 'Error inesperado');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDelete = async (r: HealthRecord) => {
+    if (r.DocNum == null) return;
+    const label = r.U_Registro_Sanitario || r.U_Referencia || `#${r.DocNum}`;
+    if (!window.confirm(`¿Eliminar el registro sanitario "${label}" de ${r.companyName}? Esta accion no se puede deshacer.`)) {
+      return;
+    }
+    const key = `${r.companyId}-${r.DocNum}`;
+    try {
+      setDeletingKey(key);
+      const res = await fetch('/api/health-records/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: r.companyId, docNum: r.DocNum }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'No se pudo eliminar el registro');
+      await loadData();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Error al eliminar');
+    } finally {
+      setDeletingKey(null);
     }
   };
 
@@ -238,9 +265,23 @@ export default function HealthRecordsPage() {
                 <Table.Td>{r.U_Fecha_Vencimiento?.slice(0, 10) ?? '-'}</Table.Td>
                 <Table.Td>{r.U_Estado_Comercializacion ?? '-'}</Table.Td>
                 <Table.Td>
-                  <ActionIcon variant="subtle" size="sm" onClick={() => setSelected(r)} aria-label={canWriteFor(r.companyId) ? 'Editar' : 'Ver detalle'}>
-                    {canWriteFor(r.companyId) ? <IconEdit size={16} /> : <IconEye size={16} />}
-                  </ActionIcon>
+                  <Group gap={4} wrap="nowrap">
+                    <ActionIcon variant="subtle" size="sm" onClick={() => setSelected(r)} aria-label={canWriteFor(r.companyId) ? 'Editar' : 'Ver detalle'}>
+                      {canWriteFor(r.companyId) ? <IconEdit size={16} /> : <IconEye size={16} />}
+                    </ActionIcon>
+                    {isAdmin && canWriteFor(r.companyId) && (
+                      <ActionIcon
+                        variant="subtle"
+                        color="red"
+                        size="sm"
+                        loading={deletingKey === `${r.companyId}-${r.DocNum}`}
+                        onClick={() => handleDelete(r)}
+                        aria-label="Eliminar"
+                      >
+                        <IconTrash size={16} />
+                      </ActionIcon>
+                    )}
+                  </Group>
                 </Table.Td>
               </Table.Tr>
             ))

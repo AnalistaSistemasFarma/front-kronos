@@ -26,6 +26,22 @@ export class SapError extends Error {
     this.detail = detail;
     this.companyId = companyId;
   }
+
+  /**
+   * Mensaje legible que devuelve SAP en el cuerpo del error
+   * (error.message.value). Si no se puede extraer, cae al message generico.
+   * Evita mostrarle al usuario solo "fallo (400)".
+   */
+  get friendly(): string {
+    try {
+      const d = JSON.parse(this.detail);
+      const value = d?.error?.message?.value ?? d?.error?.message;
+      if (value) return String(value);
+    } catch {
+      /* el detalle no es JSON */
+    }
+    return this.message;
+  }
 }
 
 export interface SapCredentials {
@@ -219,6 +235,26 @@ export async function sapPatch(
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
     throw new SapError(`SAP PATCH ${path} fallo (${response.status})`, response.status, detail);
+  }
+}
+
+/** Elimina un recurso del Service Layer (DELETE entity(key)). */
+export async function sapDelete(session: SapSession, path: string): Promise<void> {
+  const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
+
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: { Cookie: `B1SESSION=${session.sessionId}` },
+    // @ts-expect-error - Node.js fetch admite un agent
+    agent: sapAgent,
+  });
+
+  if (response.status === 401) {
+    throw new SapError('Sesion SAP expirada o invalida', 401);
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new SapError(`SAP DELETE ${path} fallo (${response.status})`, response.status, detail);
   }
 }
 

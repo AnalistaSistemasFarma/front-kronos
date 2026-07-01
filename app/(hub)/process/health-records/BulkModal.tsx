@@ -2,8 +2,8 @@
 
 import React, { useState } from 'react';
 import ExcelJS from 'exceljs';
-import { Modal, Select, Button, Group, Stack, Alert, Text, FileButton, Divider } from '@mantine/core';
-import { IconDownload, IconUpload } from '@tabler/icons-react';
+import { Modal, Select, Button, Group, Stack, Alert, Text, FileButton, Table, ScrollArea } from '@mantine/core';
+import { IconDownload, IconUpload, IconCircleCheck, IconAlertTriangle, IconEye } from '@tabler/icons-react';
 import { TEMPLATE_COLUMNS, DATE_FIELDS } from '../../../../lib/health-records/fields';
 
 interface WritableCompany {
@@ -17,6 +17,7 @@ interface Props {
   onLoaded: () => void;
 }
 interface BulkReport {
+  dryRun?: boolean;
   summary: { total: number; creados: number; duplicados: number; fallidos: number };
   ok: { row: number; registro: string; docNum: number }[];
   duplicated: { row: number; registro: string; reason: string }[];
@@ -105,7 +106,7 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
     }
   };
 
-  const upload = async () => {
+  const upload = async (dryRun = false) => {
     if (!companyId) return setError('Seleccione una empresa');
     if (rows.length === 0) return setError('Cargue un archivo con datos');
     setLoading(true);
@@ -114,15 +115,18 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
       const res = await fetch('/api/health-records/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyId: Number(companyId), rows }),
+        body: JSON.stringify({ companyId: Number(companyId), rows, dryRun }),
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || 'Fallo el cargue');
         return;
       }
+      // OJO: NO llamar onLoaded() aqui. Dispara el loading de la pagina padre,
+      // que reemplaza toda la vista por un spinner y DESMONTA este modal,
+      // perdiendo el reporte (el usuario veia "se cerro / no salio nada").
+      // La lista se refresca al cerrar el modal (ver close()).
       setReport(data);
-      onLoaded();
     } catch {
       setError('Error de red durante el cargue');
     } finally {
@@ -135,13 +139,88 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
     setFileName('');
     setReport(null);
     setError(null);
+    onLoaded();
     onClose();
   };
 
   return (
     <Modal opened={opened} onClose={close} title="Cargue masivo de registros sanitarios" size="lg">
       <Stack gap="sm">
-        {error && <Alert color="red">{error}</Alert>}
+        {error && <Alert color="red" title="Error" icon={<IconAlertTriangle size={18} />}>{error}</Alert>}
+
+        {report && (
+          <>
+            <Alert
+              color={report.summary.fallidos > 0 ? 'red' : report.summary.creados > 0 ? 'green' : 'blue'}
+              title={report.dryRun ? 'Simulación (no se creó nada)' : 'Resultado del cargue'}
+              icon={report.summary.fallidos > 0 ? <IconAlertTriangle size={18} /> : <IconCircleCheck size={18} />}
+              withCloseButton
+              onClose={() => setReport(null)}
+            >
+              <Text size="sm">
+                {report.dryRun ? 'Se crearían' : 'Creados'}: <b>{report.summary.creados}</b> ·{' '}
+                Duplicados/omitidos: <b>{report.summary.duplicados}</b> ·{' '}
+                Con error: <b>{report.summary.fallidos}</b> (de {report.summary.total})
+              </Text>
+            </Alert>
+
+            {report.failed.length > 0 && (
+              <div>
+                <Text size="sm" fw={600} c="red" mb={4}>
+                  Filas con error ({report.failed.length})
+                </Text>
+                <ScrollArea.Autosize mah={220}>
+                  <Table striped withTableBorder withColumnBorders stickyHeader>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th w={60}>Fila</Table.Th>
+                        <Table.Th>Registro Sanitario</Table.Th>
+                        <Table.Th>Error</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {report.failed.map((f) => (
+                        <Table.Tr key={`f-${f.row}`}>
+                          <Table.Td>{f.row}</Table.Td>
+                          <Table.Td>{f.registro || '-'}</Table.Td>
+                          <Table.Td>{f.error}</Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea.Autosize>
+              </div>
+            )}
+
+            {report.duplicated.length > 0 && (
+              <div>
+                <Text size="sm" fw={600} c="yellow.8" mb={4}>
+                  Omitidos por duplicado ({report.duplicated.length})
+                </Text>
+                <ScrollArea.Autosize mah={180}>
+                  <Table striped withTableBorder withColumnBorders stickyHeader>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th w={60}>Fila</Table.Th>
+                        <Table.Th>Registro Sanitario</Table.Th>
+                        <Table.Th>Motivo</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {report.duplicated.map((d) => (
+                        <Table.Tr key={`d-${d.row}`}>
+                          <Table.Td>{d.row}</Table.Td>
+                          <Table.Td>{d.registro || '-'}</Table.Td>
+                          <Table.Td>{d.reason}</Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea.Autosize>
+              </div>
+            )}
+          </>
+        )}
 
         <Select
           label="Empresa"
@@ -171,29 +250,18 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
           </Text>
         )}
 
-        {report && (
-          <>
-            <Divider label="Resultado" />
-            <Text size="sm">
-              Creados: <b>{report.summary.creados}</b> · Duplicados: <b>{report.summary.duplicados}</b> · Fallidos:{' '}
-              <b>{report.summary.fallidos}</b> (de {report.summary.total})
-            </Text>
-            {report.duplicated.length > 0 && (
-              <Alert color="yellow" title={`Omitidos por duplicado (${report.duplicated.length})`}>
-                {report.duplicated.slice(0, 20).map((d) => `Fila ${d.row} (${d.registro}): ${d.reason}`).join(' · ')}
-              </Alert>
-            )}
-            {report.failed.length > 0 && (
-              <Alert color="red" title={`Fallidos (${report.failed.length})`}>
-                {report.failed.slice(0, 20).map((f) => `Fila ${f.row} (${f.registro}): ${f.error}`).join(' · ')}
-              </Alert>
-            )}
-          </>
-        )}
-
         <Group justify="flex-end" mt="sm">
           <Button variant="default" onClick={close} disabled={loading}>Cerrar</Button>
-          <Button onClick={upload} loading={loading} disabled={rows.length === 0}>
+          <Button
+            variant="light"
+            leftSection={<IconEye size={16} />}
+            onClick={() => upload(true)}
+            loading={loading}
+            disabled={rows.length === 0}
+          >
+            Simular
+          </Button>
+          <Button onClick={() => upload(false)} loading={loading} disabled={rows.length === 0}>
             Cargar {rows.length > 0 ? `(${rows.length})` : ''}
           </Button>
         </Group>
