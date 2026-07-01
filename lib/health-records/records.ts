@@ -52,18 +52,23 @@ function today(): string {
 }
 
 /**
- * ¿Ya existe un registro con ese U_Registro_Sanitario en la base?
- * Replica la validacion de duplicados de SAPSEND.
+ * ¿Ya existe el registro sanitario para ESE MISMO producto (Referencia)?
+ * Regla de negocio: un mismo RS PUEDE repetirse en productos distintos (p. ej.
+ * varias presentaciones/concentraciones comparten registro). Solo es duplicado
+ * cuando ya existe la pareja (Referencia + Registro Sanitario).
  */
 export async function registroExiste(
   session: SapSession,
   entity: string,
+  referencia: string,
   registroSanitario: string
 ): Promise<boolean> {
-  const filter = encodeURIComponent(`U_Registro_Sanitario eq '${escapeOData(registroSanitario)}'`);
+  const filter = encodeURIComponent(
+    `U_Referencia eq '${escapeOData(referencia)}' and U_Registro_Sanitario eq '${escapeOData(registroSanitario)}'`
+  );
   const data = await sapGet<{ value?: unknown[] }>(
     session,
-    `${entity}?$filter=${filter}&$select=DocEntry,U_Registro_Sanitario`
+    `${entity}?$filter=${filter}&$select=DocEntry,U_Referencia,U_Registro_Sanitario`
   );
   return (data.value?.length ?? 0) > 0;
 }

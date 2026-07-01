@@ -68,8 +68,11 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        if (seen.has(registro)) {
-          duplicated.push({ row: rowNum, registro, reason: 'Duplicado dentro del archivo' });
+        // Un mismo RS puede repetirse en productos distintos; el duplicado se
+        // evalua por la pareja (Referencia + Registro Sanitario).
+        const dupKey = `${record.U_Referencia}||${registro}`;
+        if (seen.has(dupKey)) {
+          duplicated.push({ row: rowNum, registro, reason: 'Duplicado dentro del archivo (mismo producto y registro)' });
           continue;
         }
 
@@ -83,11 +86,11 @@ export async function POST(request: NextRequest) {
             });
             continue;
           }
-          if (await registroExiste(sap, entity, registro)) {
-            duplicated.push({ row: rowNum, registro, reason: 'Ya existe en SAP' });
+          if (await registroExiste(sap, entity, record.U_Referencia as string, registro)) {
+            duplicated.push({ row: rowNum, registro, reason: 'Ya existe en SAP para este producto' });
             continue;
           }
-          seen.add(registro);
+          seen.add(dupKey);
           if (dryRun) {
             // Simulacion: pasa todas las validaciones, pero NO se crea.
             ok.push({ row: rowNum, registro, docNum: 0 });
