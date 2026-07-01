@@ -52,6 +52,7 @@ import {
   IconTag,
 } from '@tabler/icons-react';
 import Link from 'next/link';
+import { getFileLabelError } from '../../../../../lib/onedriveName';
 
 interface WorkFlow {
   id: number;
@@ -591,6 +592,17 @@ function ViewWorkFlowPage() {
 
   const handleSaveChanges = async () => {
     if (!editedWorkflow) return;
+
+    const invalidFile = editedFiles.find(
+      (f) => f.file_label.trim() && getFileLabelError(f.file_label)
+    );
+    if (invalidFile) {
+      setUpdateMessage({
+        type: 'error',
+        text: `El documento "${invalidFile.file_label}" tiene caracteres no permitidos para OneDrive (\\ / : * ? " < > | # %).`,
+      });
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -1857,6 +1869,7 @@ function ViewWorkFlowPage() {
                             newFiles[index] = { ...newFiles[index], file_label: e.target.value };
                             setEditedFiles(newFiles);
                           }}
+                          error={getFileLabelError(editedFiles[index]?.file_label || '')}
                           style={{ flex: 1 }}
                         />
                         <Checkbox
