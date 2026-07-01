@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/health-records/access';
-import { crearRegistro, registroExiste, sanitizeRecord } from '../../../../lib/health-records/records';
+import { articuloExiste, crearRegistro, registroExiste, sanitizeRecord } from '../../../../lib/health-records/records';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -72,6 +72,15 @@ export async function POST(request: NextRequest) {
         }
 
         try {
+          // El articulo (Referencia) debe existir en SAP antes de asignarle un RS.
+          if (!(await articuloExiste(sap, record.U_Referencia as string))) {
+            failed.push({
+              row: rowNum,
+              registro,
+              error: `El articulo '${record.U_Referencia}' no existe en SAP`,
+            });
+            continue;
+          }
           if (await registroExiste(sap, entity, registro)) {
             duplicated.push({ row: rowNum, registro, reason: 'Ya existe en SAP' });
             continue;

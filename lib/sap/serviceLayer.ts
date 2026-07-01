@@ -222,6 +222,26 @@ export async function sapPatch(
   }
 }
 
+/** Elimina un recurso del Service Layer (DELETE entity(key)). */
+export async function sapDelete(session: SapSession, path: string): Promise<void> {
+  const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
+
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: { Cookie: `B1SESSION=${session.sessionId}` },
+    // @ts-expect-error - Node.js fetch admite un agent
+    agent: sapAgent,
+  });
+
+  if (response.status === 401) {
+    throw new SapError('Sesion SAP expirada o invalida', 401);
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new SapError(`SAP DELETE ${path} fallo (${response.status})`, response.status, detail);
+  }
+}
+
 /** Cierra la sesion del Service Layer. Best-effort: no lanza si falla. */
 export async function sapLogout(session: SapSession): Promise<void> {
   try {
