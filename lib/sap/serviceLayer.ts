@@ -33,15 +33,31 @@ export class SapError extends Error {
    * Evita mostrarle al usuario solo "fallo (400)".
    */
   get friendly(): string {
-    try {
-      const d = JSON.parse(this.detail);
-      const value = d?.error?.message?.value ?? d?.error?.message;
-      if (value) return String(value);
-    } catch {
-      /* el detalle no es JSON */
-    }
-    return this.message;
+    return extractSapMessage(this.detail) ?? this.message;
   }
+}
+
+/**
+ * Extrae el mensaje legible del cuerpo de error del Service Layer
+ * (SAP responde { error: { message: { value: "..." } } }). Devuelve null si no
+ * se puede extraer. Se usa para que el `message` del SapError YA traiga la causa
+ * real (no depende de getters ni de instanceof en el consumidor).
+ */
+function extractSapMessage(detail: string): string | null {
+  try {
+    const d = JSON.parse(detail);
+    const value = d?.error?.message?.value ?? d?.error?.message;
+    if (value) return String(value);
+  } catch {
+    /* el detalle no es JSON */
+  }
+  return null;
+}
+
+/** Construye el message del error incluyendo la causa real de SAP si existe. */
+function sapErrorMessage(fallback: string, detail: string): string {
+  const sap = extractSapMessage(detail);
+  return sap ? sap : fallback;
 }
 
 export interface SapCredentials {
@@ -130,7 +146,7 @@ export async function sapGet<T = unknown>(
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new SapError(`SAP GET ${path} fallo (${response.status})`, response.status, detail);
+    throw new SapError(sapErrorMessage(`SAP GET ${path} fallo (${response.status})`, detail), response.status, detail);
   }
 
   return response.json() as Promise<T>;
@@ -193,7 +209,7 @@ export async function sapPost<T = unknown>(
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new SapError(`SAP POST ${path} fallo (${response.status})`, response.status, detail);
+    throw new SapError(sapErrorMessage(`SAP POST ${path} fallo (${response.status})`, detail), response.status, detail);
   }
 
   return response.json() as Promise<T>;
@@ -234,7 +250,7 @@ export async function sapPatch(
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new SapError(`SAP PATCH ${path} fallo (${response.status})`, response.status, detail);
+    throw new SapError(sapErrorMessage(`SAP PATCH ${path} fallo (${response.status})`, detail), response.status, detail);
   }
 }
 
@@ -254,7 +270,7 @@ export async function sapDelete(session: SapSession, path: string): Promise<void
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new SapError(`SAP DELETE ${path} fallo (${response.status})`, response.status, detail);
+    throw new SapError(sapErrorMessage(`SAP DELETE ${path} fallo (${response.status})`, detail), response.status, detail);
   }
 }
 
