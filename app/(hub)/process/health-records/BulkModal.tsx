@@ -121,8 +121,11 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
         setError(data.error || 'Fallo el cargue');
         return;
       }
+      // OJO: NO llamar onLoaded() aqui. Dispara el loading de la pagina padre,
+      // que reemplaza toda la vista por un spinner y DESMONTA este modal,
+      // perdiendo el reporte (el usuario veia "se cerro / no salio nada").
+      // La lista se refresca al cerrar el modal (ver close()).
       setReport(data);
-      onLoaded();
     } catch {
       setError('Error de red durante el cargue');
     } finally {
@@ -135,6 +138,7 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
     setFileName('');
     setReport(null);
     setError(null);
+    onLoaded();
     onClose();
   };
 
