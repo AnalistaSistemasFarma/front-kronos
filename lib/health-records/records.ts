@@ -1,4 +1,4 @@
-import { sapGet, sapPost, sapPatch, type SapSession } from '../sap/serviceLayer';
+import { sapGet, sapPost, sapPatch, sapDelete, type SapSession } from '../sap/serviceLayer';
 import type { CompanySapEndpoint } from './access';
 
 /**
@@ -66,6 +66,29 @@ export async function registroExiste(
     `${entity}?$filter=${filter}&$select=DocEntry,U_Registro_Sanitario`
   );
   return (data.value?.length ?? 0) > 0;
+}
+
+/**
+ * ¿Existe el articulo (maestra de articulos de SAP, OITM) con ese ItemCode?
+ * Se valida antes de asignarle un registro sanitario: no debe crearse un RS
+ * para un articulo que no existe en SAP.
+ */
+export async function articuloExiste(session: SapSession, itemCode: string): Promise<boolean> {
+  const filter = encodeURIComponent(`ItemCode eq '${escapeOData(itemCode)}'`);
+  const data = await sapGet<{ value?: unknown[] }>(
+    session,
+    `Items?$filter=${filter}&$select=ItemCode&$top=1`
+  );
+  return (data.value?.length ?? 0) > 0;
+}
+
+/** Elimina un registro sanitario por su clave (DocEntry). */
+export async function eliminarRegistro(
+  session: SapSession,
+  entity: string,
+  docEntry: number
+): Promise<void> {
+  await sapDelete(session, `${entity}(${docEntry})`);
 }
 
 /**
