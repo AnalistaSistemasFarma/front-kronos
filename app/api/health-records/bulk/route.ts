@@ -26,6 +26,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const companyId = Number(body.companyId);
     const rows: Record<string, unknown>[] = Array.isArray(body.rows) ? body.rows : [];
+    // Simulacion: corre TODAS las validaciones pero NO crea nada en SAP.
+    const dryRun = body.dryRun === true;
 
     if (!companyId) return NextResponse.json({ error: 'Falta companyId' }, { status: 400 });
     if (rows.length === 0) return NextResponse.json({ error: 'No hay filas para cargar' }, { status: 400 });
@@ -86,6 +88,11 @@ export async function POST(request: NextRequest) {
             continue;
           }
           seen.add(registro);
+          if (dryRun) {
+            // Simulacion: pasa todas las validaciones, pero NO se crea.
+            ok.push({ row: rowNum, registro, docNum: 0 });
+            continue;
+          }
           const docNum = await crearRegistro(sap, company.endpoint, record, userName, 'Creado por cargue masivo');
           ok.push({ row: rowNum, registro, docNum });
         } catch (err) {
@@ -98,6 +105,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
+      dryRun,
       summary: { total: rows.length, creados: ok.length, duplicados: duplicated.length, fallidos: failed.length },
       ok,
       duplicated,
