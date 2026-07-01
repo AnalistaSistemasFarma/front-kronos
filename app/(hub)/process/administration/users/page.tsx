@@ -124,6 +124,8 @@ function UserManagement() {
     identification: '',
   });
   const [formLoading, setFormLoading] = useState(false);
+  const [accessChecked, setAccessChecked] = useState(false);
+  const [hasAdminAccess, setHasAdminAccess] = useState(false);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -167,8 +169,45 @@ function UserManagement() {
       router.push('/login');
       return;
     }
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    void fetch('/api/dashboard/access', { credentials: 'same-origin' })
+      .then(async (res) => {
+        if (cancelled) return;
+        if (!res.ok) {
+          throw new Error('No tienes permisos para acceder a esta página');
+        }
+        const data = await res.json();
+        if (!data.allowed) {
+          throw new Error(
+            'No tienes permisos para acceder a esta página. Se requiere rol admin o acceso al subproceso de usuarios.'
+          );
+        }
+        setHasAdminAccess(true);
+        setAccessChecked(true);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message =
+          err instanceof Error ? err.message : 'No tienes permisos para acceder a esta página';
+        setError(message);
+        setHasAdminAccess(false);
+        setAccessChecked(true);
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session, status, router]);
+
+  useEffect(() => {
+    if (!accessChecked || !hasAdminAccess) return;
     fetchUsers();
-  }, [session, status, router, fetchUsers]);
+  }, [accessChecked, hasAdminAccess, fetchUsers]);
 
   const handleFilterChange = (field: string, value: string) => {
     setFilters((prev) => ({

@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '../../../../lib/mssqlPool';
 import { requireDashboardAdminApi } from '../../../../lib/dashboard/dashboardAccess';
+import {
+  CASE_EXECUTOR_JOIN_SQL,
+  CASE_EXECUTOR_NAME_SQL,
+  ensureCaseExecutorColumn,
+} from '../../../../lib/help-desk/caseExecutorSql.js';
 
 /**
  * Casos de mesa de ayuda para el dashboard (todos los estados, filtro por fecha de creación).
@@ -12,6 +17,7 @@ export async function GET(req: Request) {
     if (!auth.ok) return auth.response;
 
     const pool = await getPool();
+    await ensureCaseExecutorColumn(pool);
     const { searchParams } = new URL(req.url);
     const date_from = searchParams.get('date_from');
     const date_to = searchParams.get('date_to');
@@ -49,6 +55,7 @@ export async function GET(req: Request) {
         sc.status,
         sc.id_status_case,
         u.name AS nombreTecnico,
+        ${CASE_EXECUTOR_NAME_SQL},
         d.department,
         c.resolution,
         co.company
@@ -76,6 +83,7 @@ export async function GET(req: Request) {
       LEFT JOIN company_user cu ON cu.id_company_user = suc.id_company_user
       LEFT JOIN [user] u ON u.id = cu.id_user
       LEFT JOIN company co ON co.id_company = c.company
+      ${CASE_EXECUTOR_JOIN_SQL}
       WHERE 1=1
     `;
 

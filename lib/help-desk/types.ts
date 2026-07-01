@@ -23,4 +23,5 @@
   id_status_case?: number;
   resolution?: string;
   end_date?: string;
+  executor_final?: string;
 }

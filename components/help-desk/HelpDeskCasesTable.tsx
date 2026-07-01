@@ -6,7 +6,7 @@ import { IconTicket, IconUser } from '@tabler/icons-react';
 import type { HelpDeskCaseListItem } from '../../lib/help-desk/types';
 import { getCaseContactEmail, getCaseContactEmailDisplay } from '../../lib/help-desk/contactEmail';
 import { formatTicketDateIso } from '../../lib/help-desk/dates';
-import { getPriorityColor, getPriorityIcon, getStatusColor } from '../../lib/help-desk/ticketDisplay';
+import { getCaseResponsibleLabel, getPriorityColor, getPriorityIcon, getStatusColor } from '../../lib/help-desk/ticketDisplay';
 
 interface HelpDeskCasesTableProps {
   tickets: HelpDeskCaseListItem[];
@@ -43,7 +43,7 @@ export function HelpDeskCasesTable({
             <Table.Th>Prioridad</Table.Th>
             <Table.Th>Estado</Table.Th>
             <Table.Th>Fecha de Creación</Table.Th>
-            <Table.Th>Técnico Asignado</Table.Th>
+            <Table.Th>Responsable</Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -120,7 +120,7 @@ export function HelpDeskCasesTable({
                 <Table.Td>
                   <Group gap={4}>
                     <IconUser size={14} className='text-gray-400' />
-                    <Text size='sm'>{ticket.nombreTecnico || 'Sin asignar'}</Text>
+                    <Text size='sm'>{getCaseResponsibleLabel(ticket)}</Text>
                   </Group>
                 </Table.Td>
               </Table.Tr>

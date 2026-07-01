@@ -9,6 +9,7 @@ import {
   notifyTicketClosed,
   notifyTicketToTechnicians,
 } from '../../../../lib/notificationEvents.js';
+import { ensureCaseExecutorColumn } from '../../../../lib/help-desk/caseExecutorSql.js';
 
 export async function POST(req) {
   try {
@@ -60,6 +61,19 @@ export async function POST(req) {
     }
 
     const pool = await sql.connect(sqlConfig);
+    await ensureCaseExecutorColumn(pool);
+
+    const executorResult = await pool
+      .request()
+      .input('email', sql.NVarChar(255), session.user.email.trim())
+      .query(`
+        SELECT TOP 1 id, name
+        FROM [user]
+        WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(@email)))
+      `);
+    const executorUserId = executorResult.recordset[0]?.id ?? null;
+    const executorUserName = executorResult.recordset[0]?.name ?? session.user.name ?? null;
+
     const transaction = new sql.Transaction(pool);
 
     try {
@@ -89,6 +103,11 @@ export async function POST(req) {
             WHEN @status IN (2, 3) THEN COALESCE(end_date, SYSDATETIME())
             WHEN @status IN (1, 4) THEN NULL
             ELSE end_date
+          END,
+          id_executor_final = CASE
+            WHEN @status IN (2, 3) AND @prev_status NOT IN (2, 3) THEN @id_executor_final
+            WHEN @status IN (1, 4) THEN NULL
+            ELSE id_executor_final
           END
         WHERE id_case = @id_case;
       `;
@@ -102,6 +121,8 @@ export async function POST(req) {
       updateCaseRequest.input('place', sql.NVarChar(1000), place);
       updateCaseRequest.input('email', sql.NVarChar(255), email?.trim() || null);
       updateCaseRequest.input('resolucion', sql.Text, resolucion || null);
+      updateCaseRequest.input('id_executor_final', sql.NVarChar(255), executorUserId);
+      updateCaseRequest.input('prev_status', sql.Int, prevRow?.id_status_case ?? null);
       updateCaseRequest.input('id_case', sql.Int, id_case);
 
       await updateCaseRequest.query(updateCaseQuery);
@@ -163,6 +184,7 @@ export async function POST(req) {
         JSON.stringify({
           message: 'Caso actualizado exitosamente',
           success: true,
+          executor_final: executorUserName,
         }),
         { status: 200 }
       );

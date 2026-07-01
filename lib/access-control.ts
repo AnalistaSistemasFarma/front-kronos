@@ -2,38 +2,62 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../app/api/auth/[...nextauth]/route';
 import { prisma } from './prisma';
 
+const ADMIN_USERS_SUBPROCESS_URL = '/process/administration/users';
+
+function isAdminRole(role?: string | null): boolean {
+  const normalized = role?.trim().toLowerCase();
+  return normalized === 'admin' || normalized === 'super_user';
+}
+
+/** Resuelve el email canónico en BD (evita 403 por diferencias de mayúsculas en sesión vs SQL). */
+export async function resolveCanonicalUserEmail(userEmail: string): Promise<string | null> {
+  const trimmed = userEmail?.trim();
+  if (!trimmed) return null;
+
+  const exact = await prisma.user.findUnique({
+    where: { email: trimmed },
+    select: { email: true },
+  });
+  if (exact?.email) return exact.email;
+
+  const rows = await prisma.$queryRaw<Array<{ email: string }>>`
+    SELECT TOP 1 email
+    FROM [user]
+    WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${trimmed})))
+  `;
+  return rows[0]?.email ?? null;
+}
+
 /**
  * Check if user has admin privileges based on role or subprocess access
  * @param userEmail - The email of the user to check
  * @returns Promise<boolean> - True if user has admin privileges
  */
 export async function checkAdminPrivileges(userEmail: string): Promise<boolean> {
-  if (!userEmail) {
+  const email = await resolveCanonicalUserEmail(userEmail);
+  if (!email) {
     return false;
   }
 
   try {
-    // First check user role in database
     const user = await prisma.user.findUnique({
-      where: { email: userEmail },
+      where: { email },
       select: { role: true },
     });
 
-    // Check if user has admin or super_user role
-    if (user?.role === 'admin' || user?.role === 'super_user') {
+    if (isAdminRole(user?.role)) {
       return true;
     }
 
-    // If not admin by role, check subprocess access
     const adminSubprocess = await prisma.subprocessUserCompany.findFirst({
       where: {
         companyUser: {
           user: {
-            email: userEmail,
+            email,
           },
         },
         subprocess: {
-          subprocess_url: '/process/administration/users',
+          subprocess_url: ADMIN_USERS_SUBPROCESS_URL,
         },
       },
     });
@@ -76,5 +100,5 @@ export async function getCurrentUserAdminStatus(): Promise<{
  * @returns boolean - True if user has admin privileges
  */
 export function hasAdminRole(userRole?: string): boolean {
-  return userRole === 'admin' || userRole === 'super_user';
+  return isAdminRole(userRole);
 }
