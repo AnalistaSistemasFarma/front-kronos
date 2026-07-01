@@ -26,6 +26,22 @@ export class SapError extends Error {
     this.detail = detail;
     this.companyId = companyId;
   }
+
+  /**
+   * Mensaje legible que devuelve SAP en el cuerpo del error
+   * (error.message.value). Si no se puede extraer, cae al message generico.
+   * Evita mostrarle al usuario solo "fallo (400)".
+   */
+  get friendly(): string {
+    try {
+      const d = JSON.parse(this.detail);
+      const value = d?.error?.message?.value ?? d?.error?.message;
+      if (value) return String(value);
+    } catch {
+      /* el detalle no es JSON */
+    }
+    return this.message;
+  }
 }
 
 export interface SapCredentials {
