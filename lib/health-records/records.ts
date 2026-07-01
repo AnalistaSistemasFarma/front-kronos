@@ -97,6 +97,38 @@ export async function eliminarRegistro(
 }
 
 /**
+ * Tamaños máximos (EditSize) de los campos de texto del UDO de registros
+ * sanitarios, leídos de la metadata de SAP (UserFieldsMD). Sirve para validar
+ * el largo ANTES de crear (así la simulación detecta "valor demasiado largo"
+ * sin tener que intentar el POST). Devuelve un mapa { U_Campo: maxLargo }.
+ */
+export async function getFieldSizes(
+  session: SapSession,
+  udoCode: string
+): Promise<Record<string, number>> {
+  const sizes: Record<string, number> = {};
+  try {
+    const udo = await sapGet<{ TableName?: string }>(
+      session,
+      `UserObjectsMD('${udoCode}')?$select=TableName`
+    );
+    const table = udo?.TableName;
+    if (!table) return sizes;
+    const data = await sapGet<{ value?: { Name: string; Type: string; EditSize: number }[] }>(
+      session,
+      `UserFieldsMD?$filter=TableName eq '@${table}'&$select=Name,Type,EditSize&$top=200`
+    );
+    for (const f of data.value ?? []) {
+      // Solo campos de texto (alfanuméricos / memo) tienen límite relevante.
+      if (f.Type === 'db_Alpha' || f.Type === 'db_Memo') sizes[`U_${f.Name}`] = f.EditSize;
+    }
+  } catch {
+    // Si no se puede leer la metadata, no se valida el largo (no bloquea).
+  }
+  return sizes;
+}
+
+/**
  * Agrega una linea a la bitacora (colección hija). Append: sin
  * B1S-ReplaceCollectionsOnPatch. El nombre de la colección varia por empresa.
  */
