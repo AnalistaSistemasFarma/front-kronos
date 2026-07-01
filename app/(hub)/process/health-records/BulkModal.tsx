@@ -18,10 +18,11 @@ interface Props {
 }
 interface BulkReport {
   dryRun?: boolean;
-  summary: { total: number; creados: number; duplicados: number; fallidos: number };
+  summary: { total: number; creados: number; duplicados: number; fallidos: number; advertencias?: number };
   ok: { row: number; registro: string; docNum: number }[];
   duplicated: { row: number; registro: string; reason: string }[];
   failed: { row: number; registro: string; error: string }[];
+  warnings?: { row: number; field: string; value: string; similar: string }[];
 }
 
 const HEADER_TO_FIELD = new Map(TEMPLATE_COLUMNS.map((c) => [c.header, c.field]));
@@ -160,7 +161,9 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
               <Text size="sm">
                 {report.dryRun ? 'Se crearían' : 'Creados'}: <b>{report.summary.creados}</b> ·{' '}
                 Duplicados/omitidos: <b>{report.summary.duplicados}</b> ·{' '}
-                Con error: <b>{report.summary.fallidos}</b> (de {report.summary.total})
+                Con error: <b>{report.summary.fallidos}</b>
+                {report.summary.advertencias ? <> · Advertencias: <b>{report.summary.advertencias}</b></> : null}{' '}
+                (de {report.summary.total})
               </Text>
             </Alert>
 
@@ -212,6 +215,36 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
                           <Table.Td>{d.row}</Table.Td>
                           <Table.Td>{d.registro || '-'}</Table.Td>
                           <Table.Td>{d.reason}</Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea.Autosize>
+              </div>
+            )}
+
+            {report.warnings && report.warnings.length > 0 && (
+              <div>
+                <Text size="sm" fw={600} c="orange.7" mb={4}>
+                  Advertencias — posibles duplicados por tildes/mayúsculas ({report.warnings.length})
+                </Text>
+                <ScrollArea.Autosize mah={180}>
+                  <Table striped withTableBorder withColumnBorders stickyHeader>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th w={60}>Fila</Table.Th>
+                        <Table.Th>Campo</Table.Th>
+                        <Table.Th>Valor a cargar</Table.Th>
+                        <Table.Th>Ya existe como</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {report.warnings.map((w, i) => (
+                        <Table.Tr key={`w-${w.row}-${i}`}>
+                          <Table.Td>{w.row}</Table.Td>
+                          <Table.Td>{w.field}</Table.Td>
+                          <Table.Td>{w.value}</Table.Td>
+                          <Table.Td>{w.similar}</Table.Td>
                         </Table.Tr>
                       ))}
                     </Table.Tbody>
