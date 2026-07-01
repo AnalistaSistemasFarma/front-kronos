@@ -9,7 +9,8 @@
     "lint": "eslint",
     "verify:deploy": "node scripts/verify-deployment-changes.cjs",
     "migrate:case-executor": "node scripts/migrate-case-executor-column.cjs",
-    "audit:executor-final": "node scripts/audit-missing-executor-final.cjs"
+    "audit:executor-final": "node scripts/audit-missing-executor-final.cjs",
+    "seed:organigrama": "node prisma/seeds/organigrama.mjs"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
