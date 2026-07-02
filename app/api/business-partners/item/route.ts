@@ -50,12 +50,13 @@ export async function GET(request: NextRequest) {
     });
 
     try {
-      // GET por clave SIN $select -> objeto BusinessPartners completo, con las
-      // colecciones hijas clave expandidas (direcciones, contactos, bancos).
-      const expand = 'BPAddresses,ContactEmployees,BPBankAccounts';
+      // GET por clave SIN $select ni $expand -> objeto BusinessPartners completo.
+      // En SAP B1 Service Layer BPAddresses/ContactEmployees/BPBankAccounts NO son
+      // propiedades de navegacion (no se pueden $expand: da "Cannot expand invalid
+      // navigation property"): son colecciones que YA vienen embebidas en el objeto.
       const item = await sapGet<Record<string, unknown>>(
         sap,
-        `BusinessPartners('${escapeOData(cardCode)}')?$expand=${expand}`
+        `BusinessPartners('${escapeOData(cardCode)}')`
       );
       return NextResponse.json({ item });
     } finally {
