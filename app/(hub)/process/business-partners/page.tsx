@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
-import { Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group } from '@mantine/core';
-import { IconSearch, IconAlertTriangle } from '@tabler/icons-react';
+import { Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group, ActionIcon } from '@mantine/core';
+import { IconSearch, IconAlertTriangle, IconEdit, IconEye } from '@tabler/icons-react';
 import { FLAG_YES, cardTypeLabel } from '../../../../lib/business-partners/fields';
+import EditModal, { type Partner } from './EditModal';
 
 /**
  * Socios de Negocio (multiempresa, SOLO LECTURA).
@@ -22,6 +23,7 @@ interface CompanyAccess {
   idCompany: number;
   companyName: string;
   canRead: boolean;
+  canWrite: boolean;
   ready: boolean;
 }
 
@@ -29,22 +31,6 @@ interface CompanyError {
   companyId: number;
   companyName: string;
   message: string;
-}
-
-interface Partner {
-  companyId: number;
-  companyName: string;
-  CardCode?: string;
-  CardName?: string;
-  CardType?: string;
-  FederalTaxID?: string;
-  Phone1?: string;
-  EmailAddress?: string;
-  CurrentAccountBalance?: number;
-  Currency?: string;
-  Valid?: string;
-  Frozen?: string;
-  [key: string]: unknown;
 }
 
 const ITEMS_PER_PAGE = 15;
@@ -84,6 +70,7 @@ export default function BusinessPartnersPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCompany, setSelectedCompany] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const [selected, setSelected] = useState<Partner | null>(null);
 
   useEffect(() => {
     if (session) loadData();
@@ -161,11 +148,21 @@ export default function BusinessPartnersPage() {
     ...companies.map((c) => ({ value: String(c.idCompany), label: c.companyName })),
   ];
 
+  const canWriteFor = (companyId: number) =>
+    companies.find((c) => c.idCompany === companyId)?.canWrite ?? false;
+
   return (
     <div style={{ padding: '1rem' }}>
       <Group justify="space-between" align="center">
         <h2 style={{ margin: 0 }}>Socios de Negocio</h2>
       </Group>
+
+      <EditModal
+        partner={selected}
+        canWrite={selected ? canWriteFor(selected.companyId) : false}
+        onClose={() => setSelected(null)}
+        onUpdated={loadData}
+      />
 
       {companyErrors.length > 0 && (
         <Alert color="yellow" icon={<IconAlertTriangle size={16} />} mt="sm" mb="sm">
@@ -205,18 +202,23 @@ export default function BusinessPartnersPage() {
               <Table.Th style={{ textAlign: 'right' }}>Saldo</Table.Th>
               <Table.Th>Moneda</Table.Th>
               <Table.Th>Estado</Table.Th>
+              <Table.Th>Acciones</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
             {pageItems.length === 0 ? (
               <Table.Tr>
-                <Table.Td colSpan={10} style={{ textAlign: 'center' }}>
+                <Table.Td colSpan={11} style={{ textAlign: 'center' }}>
                   Sin socios de negocio para mostrar.
                 </Table.Td>
               </Table.Tr>
             ) : (
               pageItems.map((r) => (
-                <Table.Tr key={`${r.companyId}-${r.CardCode}`}>
+                <Table.Tr
+                  key={`${r.companyId}-${r.CardCode}`}
+                  onClick={() => setSelected(r)}
+                  style={{ cursor: 'pointer' }}
+                >
                   <Table.Td>
                     <Badge variant="light">{r.companyName}</Badge>
                   </Table.Td>
@@ -231,6 +233,16 @@ export default function BusinessPartnersPage() {
                   </Table.Td>
                   <Table.Td>{r.Currency ?? '-'}</Table.Td>
                   <Table.Td>{stateBadge(r)}</Table.Td>
+                  <Table.Td>
+                    <ActionIcon
+                      variant="subtle"
+                      size="sm"
+                      onClick={() => setSelected(r)}
+                      aria-label={canWriteFor(r.companyId) ? 'Editar' : 'Ver detalle'}
+                    >
+                      {canWriteFor(r.companyId) ? <IconEdit size={16} /> : <IconEye size={16} />}
+                    </ActionIcon>
+                  </Table.Td>
                 </Table.Tr>
               ))
             )}

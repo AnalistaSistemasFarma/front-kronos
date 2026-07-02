@@ -10,11 +10,12 @@ import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/servi
  *
  * A diferencia del listado, hace un GET de BusinessPartners('CardCode') SIN
  * $select, de modo que SAP devuelve el objeto entero (todos los campos
- * escalares estandar). La UI usa esto para mostrar la ficha del socio.
+ * escalares estandar + la familia U_*), y EXPANDE las colecciones hijas clave
+ * con $expand=BPAddresses,ContactEmployees,BPBankAccounts (direcciones,
+ * personas de contacto y cuentas bancarias). La UI usa esto para mostrar "toda
+ * la informacion" del socio y permitir editar el encabezado.
  *
- * Requiere permiso de LECTURA en la empresa. NO trae las colecciones hijas
- * pesadas (direcciones, personas de contacto, etc.): el GET por clave devuelve
- * el cabezal del socio, suficiente para el detalle.
+ * Requiere permiso de LECTURA en la empresa.
  */
 
 /** Escapa comillas simples para claves literales OData. */
@@ -49,10 +50,12 @@ export async function GET(request: NextRequest) {
     });
 
     try {
-      // GET por clave SIN $select -> objeto BusinessPartners completo.
+      // GET por clave SIN $select -> objeto BusinessPartners completo, con las
+      // colecciones hijas clave expandidas (direcciones, contactos, bancos).
+      const expand = 'BPAddresses,ContactEmployees,BPBankAccounts';
       const item = await sapGet<Record<string, unknown>>(
         sap,
-        `BusinessPartners('${escapeOData(cardCode)}')`
+        `BusinessPartners('${escapeOData(cardCode)}')?$expand=${expand}`
       );
       return NextResponse.json({ item });
     } finally {
