@@ -130,17 +130,13 @@ export async function POST(req) {
       const prevStatus = prevRow?.id_status_case ?? null;
       const nextStatus = status ?? null;
 
-      if (
-        nextTechnical &&
-        prevTechnical != null &&
-        Number(nextTechnical) !== Number(prevTechnical)
-      ) {
+      if (nextTechnical && Number(nextTechnical) !== Number(prevTechnical)) {
         fireAndForgetNotification(
           notifyTicketToTechnicians({
             caseId: id_case,
             subject: prevRow?.subject_case,
             technicianId: nextTechnical,
-            isReassignment: true,
+            isReassignment: prevTechnical != null,
           })
         );
       }
