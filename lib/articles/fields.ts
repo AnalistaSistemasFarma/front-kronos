@@ -44,7 +44,7 @@ export const STANDARD_FIELDS: StandardField[] = [
   { label: 'Es de compras', field: 'PurchaseItem', type: 'flag', editable: false, inExcel: true },
   { label: 'Es de inventario', field: 'InventoryItem', type: 'flag', editable: false, inExcel: true },
   { label: 'Activo (valido)', field: 'Valid', type: 'flag', editable: false },
-  { label: 'Inactivo (congelado)', field: 'Frozen', type: 'flag', editable: false },
+  { label: 'Inactivo (congelado)', field: 'Frozen', type: 'flag', editable: true },
   { label: 'Proveedor principal (CardCode)', field: 'Mainsupplier', type: 'string', editable: true, inExcel: true },
   { label: 'Unidad de venta', field: 'SalesUnit', type: 'string', editable: false, inExcel: true },
   { label: 'Unidad de compra', field: 'PurchaseUnit', type: 'string', editable: false, inExcel: true },
@@ -86,6 +86,13 @@ export interface CustomField {
   label: string;
   /** Nombre OData del campo U_* en la base SAP de la empresa. */
   field: string;
+  /**
+   * Editable tras la creacion (en EditModal). Por defecto los custom son de
+   * solo lectura; solo los marcados con editable:true se pueden modificar y
+   * enviar en la actualizacion. Editar VALORES de UDF por Service Layer esta
+   * permitido (es dato, no estructura).
+   */
+  editable?: boolean;
 }
 
 /**
@@ -117,7 +124,9 @@ export const COMPANY_CUSTOM_FIELDS: Record<string, CustomField[]> = {
     { label: 'Regulado', field: 'U_IT_Regulado' },
     { label: 'Via de administracion', field: 'U_IT_Via_Adm' },
     { label: 'IUM', field: 'U_IT_IUM' },
-    { label: 'Temperatura', field: 'U_IT_Temperatura' },
+    { label: 'Temperatura', field: 'U_IT_Temperatura', editable: true },
+    { label: 'Agotado', field: 'U_IT_Agotado', editable: true },
+    { label: 'Clasificación de producto', field: 'U_ClasificacionProducto', editable: true },
     { label: 'SKU proveedor', field: 'U_IT_SKU_Proveedor' },
     { label: 'Registro sanitario', field: 'U_IT_Registro_Sanitario' },
     { label: 'Vida util', field: 'U_IT_Vida_Util' },
@@ -191,6 +200,17 @@ export function getCompanyCustomFields(companyName: string): CustomField[] {
     if (normalizeCompanyName(key) === target) return fields;
   }
   return [];
+}
+
+/**
+ * Nombres de los campos custom EDITABLES de una empresa (editable === true).
+ * Se usa como whitelist en la actualizacion: solo estos UDF se aceptan/envian
+ * al editar, ademas de los estandar editables (EDITABLE_ON_UPDATE).
+ */
+export function getEditableCustomFields(companyName: string): string[] {
+  return getCompanyCustomFields(companyName)
+    .filter((c) => c.editable === true)
+    .map((c) => c.field);
 }
 
 /**

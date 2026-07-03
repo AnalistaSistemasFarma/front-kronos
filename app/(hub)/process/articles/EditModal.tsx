@@ -116,8 +116,10 @@ function resolveCustomFields(
   const result: CustomField[] = [];
   const seen = new Set<string>();
   for (const cf of mapped) {
-    // Solo se muestran los del mapa que tienen valor en el item.
-    if (item[cf.field] != null && String(item[cf.field]).trim() !== '') {
+    // Los EDITABLES siempre se muestran (aunque esten vacios, para poder
+    // capturarlos); los de solo lectura solo si tienen valor en el item.
+    const hasValue = item[cf.field] != null && String(item[cf.field]).trim() !== '';
+    if (cf.editable === true || hasValue) {
       result.push(cf);
       seen.add(cf.field);
     }
@@ -274,10 +276,12 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
   /** Calcula los cambios (campos editables que difieren del original). */
   const computeChanges = (): Record<string, string> => {
     const changes: Record<string, string> = {};
-    // RN: en la actualización solo se permiten los campos estándar editables
-    // (hoy: Código de barras y Proveedor principal). Los campos personalizados
-    // son de solo lectura.
+    // Campos estándar editables (Código de barras, Proveedor principal, Frozen…)
     const editableNames = STANDARD_FIELDS.filter((f) => f.editable).map((f) => f.field);
+    // Más los campos personalizados marcados editables de la empresa (UDF).
+    for (const cf of customFields) {
+      if (cf.editable === true) editableNames.push(cf.field);
+    }
     for (const f of editableNames) {
       if ((form[f] ?? '') !== (original[f] ?? '')) changes[f] = form[f] ?? '';
     }
@@ -441,16 +445,21 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
               <Divider label="Campos personalizados" labelPosition="left" />
               {customFields.length > 0 ? (
                 <SimpleGrid cols={{ base: 1, sm: 2 }}>
-                  {customFields.map((cf) => (
-                    // RN: solo lectura en la edición (solo el Código de barras es editable).
-                    <TextInput
-                      key={cf.field}
-                      label={cf.label}
-                      value={form[cf.field] ?? ''}
-                      disabled
-                      styles={LOCKED_FIELD_STYLES}
-                    />
-                  ))}
+                  {customFields.map((cf) => {
+                    // Los UDF marcados editables se editan como texto libre; el
+                    // resto queda de solo lectura.
+                    const disabled = !canWrite || cf.editable !== true;
+                    return (
+                      <TextInput
+                        key={cf.field}
+                        label={cf.label}
+                        value={form[cf.field] ?? ''}
+                        onChange={(e) => set(cf.field, e.currentTarget.value)}
+                        disabled={disabled}
+                        styles={disabled ? LOCKED_FIELD_STYLES : undefined}
+                      />
+                    );
+                  })}
                 </SimpleGrid>
               ) : (
                 <Text size="xs" c="dimmed">
