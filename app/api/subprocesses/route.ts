@@ -1,29 +1,8 @@
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
+import { checkAdminPrivileges } from '../../../lib/access-control';
 import { prisma } from '../../../lib/prisma';
 import { authOptions } from '../auth/[...nextauth]/route';
-
-// Helper function to check if user has admin permissions
-async function checkAdminPermission(userEmail: string): Promise<boolean> {
-  try {
-    const adminSubprocess = await prisma.subprocessUserCompany.findFirst({
-      where: {
-        companyUser: {
-          user: {
-            email: userEmail,
-          },
-        },
-        subprocess: {
-          subprocess_url: '/process/administration/users',
-        },
-      },
-    });
-    return !!adminSubprocess;
-  } catch (error) {
-    console.error('Error checking admin permission:', error);
-    return false;
-  }
-}
 
 // GET /api/subprocesses - Fetch all available subprocesses
 export async function GET() {
@@ -33,7 +12,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const isAdmin = await checkAdminPermission(session.user.email);
+    const isAdmin = await checkAdminPrivileges(session.user.email);
     if (!isAdmin) {
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }

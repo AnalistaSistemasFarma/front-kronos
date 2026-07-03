@@ -1,5 +1,6 @@
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
+import { checkAdminPrivileges } from '../../../lib/access-control';
 import { prisma } from '../../../lib/prisma';
 import { authOptions } from '../auth/[...nextauth]/route';
 
@@ -12,23 +13,10 @@ export async function GET() {
     }
 
     const userEmail = session.user.email;
-
-    // Check if user has admin access
-    const adminSubprocess = await prisma.subprocessUserCompany.findFirst({
-      where: {
-        companyUser: {
-          user: {
-            email: userEmail,
-          },
-        },
-        subprocess: {
-          subprocess_url: '/process/administration/users',
-        },
-      },
-    });
+    const isAdmin = await checkAdminPrivileges(userEmail);
 
     // If admin, return all companies; otherwise return only user's companies
-    if (adminSubprocess) {
+    if (isAdmin) {
       const allCompanies = await prisma.company.findMany({
         orderBy: {
           company: 'asc',

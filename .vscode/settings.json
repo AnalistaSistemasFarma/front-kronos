@@ -8,5 +8,7 @@
   },
   "tailwindCSS.includeLanguages": {
     "css": "css"
-  }
+  },
+  "prisma.pinToPrisma6": true,
+  "prisma.schemaPath": "prisma/schema.prisma"
 }

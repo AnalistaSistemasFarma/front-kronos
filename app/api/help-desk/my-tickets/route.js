@@ -12,6 +12,12 @@ import {
   REQUESTER_JOINS,
   REQUESTER_NAME_SQL,
 } from '../../../../lib/help-desk/requesterSql';
+import {
+  CASE_EXECUTOR_JOIN_SQL,
+  CASE_EXECUTOR_NAME_SQL,
+  ensureCaseExecutorColumn,
+  MY_TICKETS_RESOLVED_BY_USER_SQL,
+} from '../../../../lib/help-desk/caseExecutorSql.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,6 +51,7 @@ export async function GET(req) {
     const email_search = searchParams.get('email_search')?.trim() ?? '';
 
     const pool = await sql.connect(sqlConfig);
+    await ensureCaseExecutorColumn(pool);
 
     const userResult = await pool
       .request()
@@ -72,6 +79,10 @@ export async function GET(req) {
         sc.id_status_case, c.resolution, co.company, co.id_company,
         ${REQUESTER_NAME_SQL} AS requester_name,
         ${REQUESTER_EMAIL_SQL} AS requester_email,
+        ${CASE_EXECUTOR_NAME_SQL},
+        CASE
+          WHEN ${MY_TICKETS_RESOLVED_BY_USER_SQL} THEN 1 ELSE 0
+        END AS is_resolved_by_me,
         CASE
           WHEN EXISTS (
             SELECT 1
@@ -94,6 +105,7 @@ export async function GET(req) {
       LEFT JOIN [user] u ON CAST(u.id AS NVARCHAR(255)) = CAST(cu.id_user AS NVARCHAR(255))
       ${REQUESTER_JOINS}
       LEFT JOIN company co ON co.id_company = c.company
+      ${CASE_EXECUTOR_JOIN_SQL}
       WHERE ${MY_TICKETS_SCOPE_SQL}
     `;
 
@@ -130,6 +142,7 @@ export async function GET(req) {
           open: tickets.filter((t) => t.id_status_case === 1).length,
           resolved: tickets.filter((t) => t.id_status_case === 2).length,
           assigned: tickets.filter((t) => t.is_assigned_to_me === 1).length,
+          resolved_by_me: tickets.filter((t) => t.is_resolved_by_me === 1).length,
         },
       },
       { status: 200 }

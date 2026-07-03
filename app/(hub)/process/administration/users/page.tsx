@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense, useCallback } from 'react';
+import { useState, useEffect, Suspense, useCallback, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -21,6 +21,7 @@ import {
   ActionIcon,
   Pagination,
   Loader,
+  LoadingOverlay,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -83,13 +84,16 @@ function UserManagement() {
   const router = useRouter();
 
   const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [bootstrapping, setBootstrapping] = useState(true);
+  const [tableRefreshing, setTableRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filters, setFilters] = useState({
-    search: '',
     role: '',
     status: '',
   });
+  const hasLoadedOnce = useRef(false);
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 10,
@@ -124,14 +128,21 @@ function UserManagement() {
     identification: '',
   });
   const [formLoading, setFormLoading] = useState(false);
+  const [accessChecked, setAccessChecked] = useState(false);
+  const [hasAdminAccess, setHasAdminAccess] = useState(false);
 
   const fetchUsers = useCallback(async () => {
+    const silent = hasLoadedOnce.current;
     try {
-      setLoading(true);
+      if (silent) {
+        setTableRefreshing(true);
+      } else {
+        setBootstrapping(true);
+      }
       const params = new URLSearchParams({
         page: pagination.page.toString(),
         limit: pagination.limit.toString(),
-        search: filters.search,
+        search: debouncedSearch,
         role: filters.role,
         status: filters.status,
       });
@@ -151,15 +162,22 @@ function UserManagement() {
         total: data.pagination.total,
         pages: data.pagination.pages,
       }));
+      hasLoadedOnce.current = true;
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error ? err.message : 'Unable to load users. Please try again.';
       setError(errorMessage);
       console.error('Error fetching users:', err);
     } finally {
-      setLoading(false);
+      setBootstrapping(false);
+      setTableRefreshing(false);
     }
-  }, [filters.search, filters.role, filters.status, pagination.page, pagination.limit]);
+  }, [debouncedSearch, filters.role, filters.status, pagination.page, pagination.limit]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -167,15 +185,57 @@ function UserManagement() {
       router.push('/login');
       return;
     }
-    fetchUsers();
-  }, [session, status, router, fetchUsers]);
 
-  const handleFilterChange = (field: string, value: string) => {
+    let cancelled = false;
+    setBootstrapping(true);
+    setError(null);
+
+    void fetch('/api/dashboard/access', { credentials: 'same-origin' })
+      .then(async (res) => {
+        if (cancelled) return;
+        if (!res.ok) {
+          throw new Error('No tienes permisos para acceder a esta página');
+        }
+        const data = await res.json();
+        if (!data.allowed) {
+          throw new Error(
+            'No tienes permisos para acceder a esta página. Se requiere rol admin o acceso al subproceso de usuarios.'
+          );
+        }
+        setHasAdminAccess(true);
+        setAccessChecked(true);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message =
+          err instanceof Error ? err.message : 'No tienes permisos para acceder a esta página';
+        setError(message);
+        setHasAdminAccess(false);
+        setAccessChecked(true);
+        setBootstrapping(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session, status, router]);
+
+  useEffect(() => {
+    if (!accessChecked || !hasAdminAccess) return;
+    fetchUsers();
+  }, [accessChecked, hasAdminAccess, fetchUsers]);
+
+  const handleFilterChange = (field: 'role' | 'status', value: string) => {
     setFilters((prev) => ({
       ...prev,
       [field]: value,
     }));
-    setPagination((prev) => ({ ...prev, page: 1 })); // Reset to first page
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    setPagination((prev) => ({ ...prev, page: 1 }));
   };
 
   const handleCreateUser = async () => {
@@ -510,7 +570,7 @@ function UserManagement() {
     document.body.removeChild(link);
   };
 
-  if (status === 'loading' || loading) {
+  if (status === 'loading' || (bootstrapping && !hasLoadedOnce.current)) {
     return (
       <div className='min-h-screen flex items-center justify-center'>
         <Loader size='lg' />
@@ -592,8 +652,8 @@ function UserManagement() {
             label='Buscar'
             placeholder='Nombre o email'
             leftSection={<IconSearch size={16} />}
-            value={filters.search}
-            onChange={(e) => handleFilterChange('search', e.target.value)}
+            value={searchQuery ?? ''}
+            onChange={(e) => handleSearchChange(e.target.value)}
           />
           <Select
             label='Rol'
@@ -621,7 +681,8 @@ function UserManagement() {
       </Paper>
 
       {/* Users Table */}
-      <Paper shadow='sm' radius='md' withBorder>
+      <Paper shadow='sm' radius='md' withBorder pos='relative'>
+        <LoadingOverlay visible={tableRefreshing} zIndex={200} overlayProps={{ radius: 'md' }} />
         <div className='overflow-x-auto'>
           <Table stickyHeader>
             <Table.Thead>
@@ -757,13 +818,13 @@ function UserManagement() {
           <TextInput
             label='Teléfono'
             placeholder='Ej: +57 300 123 4567'
-            value={formData.phone}
+            value={formData.phone ?? ''}
             onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
           />
           <TextInput
             label='Identificación'
             placeholder='Número de documento'
-            value={formData.identification}
+            value={formData.identification ?? ''}
             onChange={(e) => setFormData({ ...formData, identification: e.target.value })}
           />
           <Group justify='flex-end'>
@@ -830,13 +891,13 @@ function UserManagement() {
           <TextInput
             label='Teléfono'
             placeholder='Ej: +57 300 123 4567'
-            value={formData.phone}
+            value={formData.phone ?? ''}
             onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
           />
           <TextInput
             label='Identificación'
             placeholder='Número de documento'
-            value={formData.identification}
+            value={formData.identification ?? ''}
             onChange={(e) => setFormData({ ...formData, identification: e.target.value })}
           />
           <Group justify='flex-end'>

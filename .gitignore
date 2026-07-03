@@ -43,3 +43,6 @@ next-env.d.ts
 dbconfig.js
 
 /app/generated/prisma
+
+# documentación interna (no versionada)
+/docs-internal/

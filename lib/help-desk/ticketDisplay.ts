@@ -39,3 +39,25 @@ export function getPriorityIcon(priority: string) {
       return createElement(IconFlag, { size: 14 });
   }
 }
+
+export function isHelpDeskCaseClosed(idStatusCase?: number, status?: string): boolean {
+  if (idStatusCase === 2 || idStatusCase === 3) return true;
+  const normalized = String(status ?? '').toLowerCase();
+  return (
+    normalized.includes('resuelt') ||
+    normalized.includes('cancel') ||
+    normalized.includes('cerrad')
+  );
+}
+
+export function getCaseResponsibleLabel(ticket: {
+  id_status_case?: number;
+  status?: string;
+  nombreTecnico?: string;
+  executor_final?: string;
+}): string {
+  if (isHelpDeskCaseClosed(ticket.id_status_case, ticket.status)) {
+    return ticket.executor_final?.trim() || 'No registrado';
+  }
+  return ticket.nombreTecnico?.trim() || 'Sin asignar';
+}

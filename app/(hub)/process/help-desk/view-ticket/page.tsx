@@ -90,6 +90,7 @@ interface Ticket {
   id_status_case: number;
   resolution?: string;
   end_date?: string;
+  executor_final?: string;
   company?: string;
   email?: string;
   requester_email?: string;
@@ -276,6 +277,24 @@ function ViewTicketPage() {
 
   const isTicketResolved = () => {
     return ticket?.id_status_case === 2 || ticket?.status?.toLowerCase() === 'resuelto';
+  };
+
+  const isTicketClosed = () => {
+    const statusId = ticket?.id_status_case;
+    const statusText = ticket?.status?.toLowerCase() ?? '';
+    return (
+      statusId === 2 ||
+      statusId === 3 ||
+      statusText.includes('resuelt') ||
+      statusText.includes('cancel')
+    );
+  };
+
+  const getClosureLabel = () => {
+    if (ticket?.id_status_case === 3 || ticket?.status?.toLowerCase().includes('cancel')) {
+      return 'Cancelado por';
+    }
+    return 'Resuelto por';
   };
 
   const formatFileSize = (bytes: number): string => {
@@ -967,10 +986,18 @@ function ViewTicketPage() {
           const statusId = parseInt(resolutionData.estado) || prev.id_status_case;
           const isClosing = statusId === 2 || statusId === 3;
           const isReopening = statusId === 1 || statusId === 4;
+          const closedBy =
+            isClosing && !isClosedStatusId(prev.id_status_case)
+              ? result.executor_final || session?.user?.name || prev.executor_final
+              : isReopening
+                ? undefined
+                : prev.executor_final;
           return {
             ...prev,
             status: statusText,
             id_status_case: statusId,
+            resolution: resolutionData.resolucion || prev.resolution,
+            executor_final: closedBy,
             end_date: isClosing
               ? prev.end_date ?? new Date().toISOString()
               : isReopening
@@ -1392,19 +1419,33 @@ function ViewTicketPage() {
                     )}
                   </Group>
 
-                  {/* Mostrar información de resolución si el caso está resuelto */}
-                  {isTicketResolved() && (
+                  {/* Mostrar información de resolución si el caso está cerrado */}
+                  {isTicketClosed() && (
                     <Card withBorder radius='md' p='md' bg='teal.0' mb='md'>
                       <Stack gap='sm'>
                         <Text fw={600}>Información de Resolución</Text>
-                        <Text size='sm' className='whitespace-pre-line text-gray-700'>
-                          {ticket.resolution}
-                        </Text>
-                        {ticket.end_date && (
-                          <Text size='xs'>
-                            Fecha de resolución: {formatTicketDateLocale(ticket.end_date)}
+                        {ticket.resolution?.trim() ? (
+                          <Text size='sm' className='whitespace-pre-line text-gray-700'>
+                            {ticket.resolution}
+                          </Text>
+                        ) : (
+                          <Text size='sm' c='dimmed'>
+                            Sin descripción de resolución registrada.
                           </Text>
                         )}
+                        <Stack gap={4}>
+                          <Text size='xs'>
+                            {getClosureLabel()}:{' '}
+                            <Text component='span' fw={600}>
+                              {ticket.executor_final?.trim() || 'No registrado'}
+                            </Text>
+                          </Text>
+                          {ticket.end_date && (
+                            <Text size='xs'>
+                              Fecha de cierre: {formatTicketDateLocale(ticket.end_date)}
+                            </Text>
+                          )}
+                        </Stack>
                       </Stack>
                     </Card>
                   )}
