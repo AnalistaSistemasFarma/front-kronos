@@ -33,8 +33,9 @@ export const STANDARD_FIELDS: StandardField[] = [
   { label: 'Codigo', field: 'ItemCode', type: 'string', editable: false, requiredOnCreate: true, inExcel: true },
   // RN: la descripcion NO es editable en la actualizacion (solo se captura al crear).
   { label: 'Descripcion', field: 'ItemName', type: 'string', editable: false, requiredOnCreate: true, inExcel: true },
-  // RN: en la ACTUALIZACIÓN solo se permite editar el Código de barras (BarCode).
-  // El resto queda de solo lectura (SAP solo admite ese cambio por ahora).
+  // RN: en la ACTUALIZACIÓN se permite editar el Código de barras (BarCode) y el
+  // Proveedor principal (Mainsupplier = CardCode del proveedor). El resto queda de
+  // solo lectura (SAP solo admite esos cambios por ahora).
   { label: 'Grupo de articulos', field: 'ItemsGroupCode', type: 'int', editable: false, requiredOnCreate: true, inExcel: true },
   { label: 'Nombre extranjero', field: 'ForeignName', type: 'string', editable: false, inExcel: true },
   { label: 'Tipo de articulo', field: 'ItemType', type: 'itemType', editable: false, inExcel: true },
@@ -44,7 +45,7 @@ export const STANDARD_FIELDS: StandardField[] = [
   { label: 'Es de inventario', field: 'InventoryItem', type: 'flag', editable: false, inExcel: true },
   { label: 'Activo (valido)', field: 'Valid', type: 'flag', editable: false },
   { label: 'Inactivo (congelado)', field: 'Frozen', type: 'flag', editable: false },
-  { label: 'Proveedor principal', field: 'Mainsupplier', type: 'string', editable: false, inExcel: true },
+  { label: 'Proveedor principal (CardCode)', field: 'Mainsupplier', type: 'string', editable: true, inExcel: true },
   { label: 'Unidad de venta', field: 'SalesUnit', type: 'string', editable: false, inExcel: true },
   { label: 'Unidad de compra', field: 'PurchaseUnit', type: 'string', editable: false, inExcel: true },
   { label: 'Unidad de inventario', field: 'InventoryUOM', type: 'string', editable: false, inExcel: true },
