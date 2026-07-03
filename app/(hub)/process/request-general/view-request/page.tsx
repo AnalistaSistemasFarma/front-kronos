@@ -1986,7 +1986,7 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={() => {
                     setModalTasksOpened(true);
-                    fetchTasksRG();
+                    fetchTasksRG(request.id);
                   }}
                   leftSection={<IconTicket size={16} />}
                 >
