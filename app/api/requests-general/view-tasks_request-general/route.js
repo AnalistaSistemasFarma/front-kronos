@@ -18,8 +18,9 @@ export async function GET(req) {
 
     const query = `
         SELECT 
-          trg.id, trg.id_request_general, trg.id_task, tpc.task, trg.id_status, sc.status, trg.id_assigned, u.name, trg.start_date, trg.end_date, trg.resolution, trg.date_resolution, rg.description, 
-          rg.subject_request, rg.id_company, c.company, rg.created_at, rg.id_requester, urg.name as name_requester, rg.status_req
+          trg.id, trg.id_request_general, trg.id_task, tpc.task, trg.id_status, sc.status, trg.id_assigned, u.name, trg.start_date, trg.end_date, trg.resolution, trg.date_resolution, rg.description,
+          rg.subject_request, rg.id_company, c.company, rg.created_at, rg.id_requester, urg.name as name_requester, rg.status_req,
+          tpc.is_sequential, tpc.display_order
         FROM task_request_general trg
         INNER JOIN requests_general rg ON rg.id = trg.id_request_general
         INNER JOIN [user] urg ON urg.id = rg.id_requester
@@ -42,7 +43,23 @@ export async function GET(req) {
       'registros'
     );
 
-    return NextResponse.json(result.recordset, { status: 200 });
+    // Calcular bloqueo de tareas secuenciales: una tarea secuencial está bloqueada
+    // si su predecesora inmediata (por display_order, id_task) NO está cerrada (2/3).
+    const rows = result.recordset;
+    const CLOSED = new Set([2, 3]);
+    const ordered = [...rows].sort((a, b) => {
+      const da = a.display_order ?? 0;
+      const db = b.display_order ?? 0;
+      if (da !== db) return da - db;
+      return a.id_task - b.id_task;
+    });
+    for (let i = 0; i < ordered.length; i++) {
+      const t = ordered[i];
+      const prev = ordered[i - 1];
+      t.locked = Boolean(t.is_sequential) && !!prev && !CLOSED.has(prev.id_status);
+    }
+
+    return NextResponse.json(rows, { status: 200 });
   } catch (err) {
     if (err?.message === 'aborted' || err?.name === 'AbortError') {
       return NextResponse.json([], { status: 200 });

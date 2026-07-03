@@ -7,6 +7,7 @@ import {
   Indicator,
   Popover,
   ScrollArea,
+  SegmentedControl,
   Switch,
   Text,
   ThemeIcon,
@@ -93,12 +94,20 @@ export default function NotificationBell() {
     usePushNotifications(userEmail);
 
   const [opened, setOpened] = useState(false);
+  // Lista de NO leídas: es la que alimenta el polling recurrente y el badge.
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [fetching, setFetching] = useState(false);
   const [mounted, setMounted] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const fetchInFlightRef = useRef(false);
+
+  // Vista activa en el dropdown y lista de leídas (se carga solo bajo demanda).
+  const [view, setView] = useState<'unread' | 'read'>('unread');
+  const [readNotifications, setReadNotifications] = useState<Notification[]>([]);
+  const [readLoaded, setReadLoaded] = useState(false);
+  const [fetchingRead, setFetchingRead] = useState(false);
+  const readAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -116,7 +125,7 @@ export default function NotificationBell() {
     setFetching(true);
 
     try {
-      const res = await apiFetch('/api/notifications', { signal: controller.signal });
+      const res = await apiFetch('/api/notifications?status=unread', { signal: controller.signal });
       if (controller.signal.aborted) return;
       if (!res.ok) return;
 
@@ -131,6 +140,34 @@ export default function NotificationBell() {
       fetchInFlightRef.current = false;
       if (!controller.signal.aborted) {
         setFetching(false);
+      }
+    }
+  }, [isAuthenticated]);
+
+  // Carga las leídas solo cuando el usuario lo pide (no entra en el polling).
+  const fetchRead = useCallback(async () => {
+    if (!isAuthenticated) return;
+
+    readAbortRef.current?.abort();
+    const controller = new AbortController();
+    readAbortRef.current = controller;
+    setFetchingRead(true);
+
+    try {
+      const res = await apiFetch('/api/notifications?status=read', { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (!res.ok) return;
+
+      const data = await res.json();
+      if (controller.signal.aborted) return;
+
+      setReadNotifications(data.notifications || []);
+      setReadLoaded(true);
+    } catch (err) {
+      if (isAbortError(err) || controller.signal.aborted) return;
+    } finally {
+      if (!controller.signal.aborted) {
+        setFetchingRead(false);
       }
     }
   }, [isAuthenticated]);
@@ -162,9 +199,31 @@ export default function NotificationBell() {
 
   useEffect(() => {
     if (opened && isAuthenticated) {
+      // Siempre refresca las no leídas (mantiene el badge al día);
+      // las leídas solo si esa es la vista activa y no se han cargado.
       void fetchNotifications();
+      if (view === 'read' && !readLoaded) {
+        void fetchRead();
+      }
     }
-  }, [opened, isAuthenticated, fetchNotifications]);
+  }, [opened, isAuthenticated, fetchNotifications, fetchRead, view, readLoaded]);
+
+  useEffect(() => {
+    return () => {
+      readAbortRef.current?.abort();
+    };
+  }, []);
+
+  const handleViewChange = useCallback(
+    (next: string) => {
+      const nextView = next === 'read' ? 'read' : 'unread';
+      setView(nextView);
+      if (nextView === 'read' && !readLoaded) {
+        void fetchRead();
+      }
+    },
+    [readLoaded, fetchRead]
+  );
 
   const navigateToDetail = useCallback(
     (path: string) => {
@@ -217,10 +276,10 @@ export default function NotificationBell() {
       } catch {
         /* no bloquear navegación */
       }
-      setNotifications((prev) =>
-        prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x))
-      );
+      // Sale de la lista de no leídas; la de leídas se recargará al verla.
+      setNotifications((prev) => prev.filter((x) => x.id !== n.id));
       setUnreadCount((c) => Math.max(0, c - 1));
+      setReadLoaded(false);
     }
 
     setOpened(false);
@@ -239,10 +298,13 @@ export default function NotificationBell() {
       toast.error('No se pudieron marcar las notificaciones. Intenta de nuevo.');
       return;
     }
-    setNotifications((prev) =>
-      prev.map((n) => (n.read_at ? n : { ...n, read_at: new Date().toISOString() }))
-    );
+    // Todas pasan a leídas: se vacía la lista de no leídas y se invalida la de leídas.
+    setNotifications([]);
     setUnreadCount(0);
+    setReadLoaded(false);
+    if (view === 'read') {
+      void fetchRead();
+    }
   };
 
   const togglePush = async () => {
@@ -298,21 +360,16 @@ export default function NotificationBell() {
           </Tooltip>
         </Indicator>
       </Popover.Target>
-      <Popover.Dropdown p={0} className='notification-bell-dropdown'>
-        <Group
-          justify='space-between'
-          px='md'
-          py='sm'
-          className='notification-bell-header border-b border-[var(--app-border)]'
-        >
-          <Text size='sm' fw={600} className='notification-bell-text'>
+      <Popover.Dropdown p={0}>
+        <Group justify='space-between' px='md' py='sm' className='border-b border-[var(--app-border)]'>
+          <Text size='sm' fw={600}>
             Notificaciones
           </Text>
           {unreadCount > 0 && (
             <UnstyledButton onClick={markAllRead}>
               <Group gap={4}>
-                <IconCheck size={14} className='notification-bell-accent' />
-                <Text size='xs' className='notification-bell-accent'>
+                <IconCheck size={14} />
+                <Text size='xs' c='blue'>
                   Marcar todas
                 </Text>
               </Group>
@@ -321,17 +378,33 @@ export default function NotificationBell() {
         </Group>
 
         <ScrollArea.Autosize mah={420}>
-          {fetching && notifications.length === 0 ? (
+          {view === 'unread' ? (
+            fetching && notifications.length === 0 ? (
+              <Group justify='center' py='xl'>
+                <Loader size='sm' />
+              </Group>
+            ) : notifications.length === 0 ? (
+              <Text size='sm' c='dimmed' ta='center' py='xl'>
+                No tienes notificaciones sin leer
+              </Text>
+            ) : (
+              <ul className='list-none m-0 p-0'>
+                {notifications.map((n) => (
+                  <NotificationRow key={n.id} notification={n} onOpen={handleClick} />
+                ))}
+              </ul>
+            )
+          ) : fetchingRead && readNotifications.length === 0 ? (
             <Group justify='center' py='xl'>
               <Loader size='sm' />
             </Group>
           ) : notifications.length === 0 ? (
-            <Text size='sm' ta='center' py='xl' className='notification-bell-text-muted'>
+            <Text size='sm' c='dimmed' ta='center' py='xl'>
               No tienes notificaciones
             </Text>
           ) : (
             <ul className='list-none m-0 p-0'>
-              {notifications.map((n) => (
+              {readNotifications.map((n) => (
                 <NotificationRow key={n.id} notification={n} onOpen={handleClick} />
               ))}
             </ul>

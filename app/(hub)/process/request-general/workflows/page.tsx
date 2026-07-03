@@ -51,6 +51,8 @@ import {
   IconTrash,
   IconList,
   IconListCheck,
+  IconChevronUp,
+  IconChevronDown,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
@@ -125,6 +127,7 @@ function RequestBoard() {
       asignado: string;
       costo: number;
       centroCosto: string;
+      secuencial: boolean;
     }>
   >([]);
   const [taskForm, setTaskForm] = useState({
@@ -132,21 +135,31 @@ function RequestBoard() {
     asignado: '',
     costo: '',
     centroCosto: '',
+    secuencial: false,
   });
+
+  const moveTask = (index: number, dir: -1 | 1) => {
+    setTasks((prev) => {
+      const next = [...prev];
+      const target = index + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
 
   const [taskFormKey, setTaskFormKey] = useState(0);
 
   const newTempId = (prefix: string) =>
     `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-  // Campos condicionales parametrizados por proceso (solo Select por ahora)
   const [formFields, setFormFields] = useState<
     Array<{
       tempId: string;
       field_label: string;
       required: boolean;
       options: Array<{ tempId: string; option_label: string }>;
-      condition_option_temps: string[]; // opciones de campos anteriores que activan este campo
+      condition_option_temps: string[]; 
     }>
   >([]);
   const [fieldForm, setFieldForm] = useState({ field_label: '', required: true });
@@ -173,7 +186,6 @@ function RequestBoard() {
     setFormFields(
       formFields
         .filter((f) => f.tempId !== fieldTempId)
-        // Limpiar condiciones de otros campos que apuntaban a opciones de este campo
         .map((f) => ({
           ...f,
           condition_option_temps: f.condition_option_temps.filter((t) => !optionIds.includes(t)),
@@ -230,7 +242,6 @@ function RequestBoard() {
     );
   };
 
-  // Lista plana de TODAS las opciones (para condicionar archivos)
   const conditionOptions = formFields.flatMap((f) =>
     f.options.map((o) => ({
       value: o.tempId,
@@ -238,7 +249,6 @@ function RequestBoard() {
     }))
   );
 
-  // Opciones de campos ANTERIORES a uno dado (para condicionar campos, evita ciclos)
   const optionsBeforeField = (fieldTempId: string) => {
     const idx = formFields.findIndex((f) => f.tempId === fieldTempId);
     return formFields.slice(0, idx).flatMap((f) =>
@@ -257,7 +267,6 @@ function RequestBoard() {
       .join(', ');
   };
 
-  // Archivos requeridos parametrizados por proceso
   const [requiresFiles, setRequiresFiles] = useState(false);
   const [requiredFiles, setRequiredFiles] = useState<
     Array<{
@@ -305,10 +314,11 @@ function RequestBoard() {
         asignado: taskForm.asignado,
         costo: parseFloat(taskForm.costo) || 0,
         centroCosto: taskForm.centroCosto,
+        secuencial: taskForm.secuencial,
       },
     ]);
 
-    setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+    setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false });
 
     setTaskFormKey(prev => prev + 1);
   };
@@ -762,12 +772,14 @@ function RequestBoard() {
     try {
       setCreateLoading(true);
 
-      const tasksToSend = tasks.map((task) => ({
+      const tasksToSend = tasks.map((task, index) => ({
         id: task.id,
         task: task.tarea,
         id_user: task.asignado || null,
         cost: task.costo || 0,
         cost_center: task.centroCosto || null,
+        is_sequential: task.secuencial,
+        display_order: index,
       }));
 
       console.log('asignados tareas ' + tasksToSend);
@@ -826,7 +838,7 @@ function RequestBoard() {
         assignedProcess: '',
       });
       setTasks([]);
-      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false });
       setRequiresFiles(false);
       setRequiredFiles([]);
       setFileForm({ file_label: '', required: true, condition_option_temps: [] });
@@ -1244,7 +1256,7 @@ function RequestBoard() {
             setCurrentStep(1);
             setFormErrors({});
             setTasks([]);
-            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false });
             setRequiresFiles(false);
             setRequiredFiles([]);
             setFileForm({ file_label: '', required: true, condition_option_temps: [] });
@@ -1700,6 +1712,13 @@ function RequestBoard() {
                         </Button>
                       </Grid.Col>
                     </Grid>
+
+                    <Checkbox
+                      mt='md'
+                      label='Secuencial: esta tarea requiere que la anterior esté resuelta'
+                      checked={taskForm.secuencial}
+                      onChange={(e) => setTaskForm({ ...taskForm, secuencial: e.currentTarget.checked })}
+                    />
                   </div>
 
                   {/* Tabla de tareas agregadas - Mejorada */}
@@ -1723,24 +1742,32 @@ function RequestBoard() {
                             <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider'>
                               Centro de Costo
                             </Table.Th>
+                            <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'>
+                              Secuencial
+                            </Table.Th>
                             <Table.Th
                               className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'
-                              style={{ width: 100 }}
+                              style={{ width: 140 }}
                             >
                               Acciones
                             </Table.Th>
                           </Table.Tr>
                         </Table.Thead>
                         <Table.Tbody>
-                          {tasks.map((task) => (
+                          {tasks.map((task, index) => (
                             <Table.Tr
                               key={task.id}
                               className='hover:bg-blue-50/50 transition-colors duration-150'
                             >
                               <Table.Td className='py-4 px-5'>
-                                <Text size='base' fw={500}>
-                                  {task.tarea}
-                                </Text>
+                                <Group gap={6} wrap='nowrap'>
+                                  <Badge size='sm' variant='light' color='gray' radius='sm'>
+                                    {index + 1}
+                                  </Badge>
+                                  <Text size='base' fw={500}>
+                                    {task.tarea}
+                                  </Text>
+                                </Group>
                               </Table.Td>
                               <Table.Td className='py-4 px-5'>
                                 <Group gap={4}>
@@ -1765,16 +1792,44 @@ function RequestBoard() {
                                 </Text>
                               </Table.Td>
                               <Table.Td className='py-4 px-5 text-center'>
-                                <ActionIcon
-                                  color='red'
-                                  variant='subtle'
-                                  size={40}
-                                  onClick={() => removeTask(task.id)}
-                                  title='Eliminar tarea'
-                                  className='cursor-pointer hover:bg-red-50 transition-colors duration-150'
-                                >
-                                  <IconTrash size={18} />
-                                </ActionIcon>
+                                {task.secuencial ? (
+                                  <Badge color='indigo' variant='light' size='sm'>
+                                    Secuencial
+                                  </Badge>
+                                ) : (
+                                  <Text size='sm' c='dimmed'>—</Text>
+                                )}
+                              </Table.Td>
+                              <Table.Td className='py-4 px-5'>
+                                <Group gap={4} justify='center' wrap='nowrap'>
+                                  <ActionIcon
+                                    variant='subtle'
+                                    color='gray'
+                                    onClick={() => moveTask(index, -1)}
+                                    disabled={index === 0}
+                                    title='Subir'
+                                  >
+                                    <IconChevronUp size={18} />
+                                  </ActionIcon>
+                                  <ActionIcon
+                                    variant='subtle'
+                                    color='gray'
+                                    onClick={() => moveTask(index, 1)}
+                                    disabled={index === tasks.length - 1}
+                                    title='Bajar'
+                                  >
+                                    <IconChevronDown size={18} />
+                                  </ActionIcon>
+                                  <ActionIcon
+                                    color='red'
+                                    variant='subtle'
+                                    onClick={() => removeTask(task.id)}
+                                    title='Eliminar tarea'
+                                    className='cursor-pointer hover:bg-red-50 transition-colors duration-150'
+                                  >
+                                    <IconTrash size={18} />
+                                  </ActionIcon>
+                                </Group>
                               </Table.Td>
                             </Table.Tr>
                           ))}
@@ -2195,7 +2250,7 @@ function RequestBoard() {
                   setCurrentStep(1);
                   setFormErrors({});
                   setTasks([]);
-                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false });
                 }
               }}
               size='md'

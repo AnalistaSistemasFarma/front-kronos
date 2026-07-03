@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
  * Conexión propia (no getPool): en Turbopack HMR el pool global puede quedar
  * ligado a otra instancia de mssql y romper .input() con EPARAM.
  */
-export async function GET() {
+export async function GET(request) {
   let pool;
   try {
     const session = await getServerSession(authOptions);
@@ -24,6 +24,25 @@ export async function GET() {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
+    // status=unread (por defecto): consulta ligera para el polling recurrente.
+    // status=read: solo bajo demanda cuando el usuario pide ver las leídas.
+    const { searchParams } = new URL(request.url);
+    const statusFilter = searchParams.get('status') === 'read' ? 'read' : 'unread';
+
+    pool = await sql.connect(sqlConfig);
+
+    if (statusFilter === 'read') {
+      const readResult = await pool
+        .request()
+        .input('email', sql.NVarChar(255), session.user.email)
+        .query(
+          `SELECT TOP 50 id, title, body, url, read_at, created_at
+           FROM notifications
+           WHERE email = @email AND read_at IS NOT NULL
+           ORDER BY read_at DESC`
+        );
+
+      return NextResponse.json({ notifications: readResult.recordset });
     const userEmail = session.user.email;
     const { isOperator: isTechnician } = await getHelpDeskUserRole(userEmail);
 
@@ -46,12 +65,26 @@ export async function GET() {
       .query(
         `SELECT TOP 50 id, title, body, url, read_at, created_at
          FROM notifications
-         WHERE email = @email
+         WHERE email = @email AND read_at IS NULL
          ORDER BY created_at DESC`
       );
 
+<<<<<<< HEAD
+    // Conteo exacto de no leídas (independiente del TOP 50) para el badge.
+    const countResult = await pool
+      .request()
+      .input('email', sql.NVarChar(255), session.user.email)
+      .query(
+        `SELECT COUNT(*) AS unreadCount
+         FROM notifications
+         WHERE email = @email AND read_at IS NULL`
+      );
+
+    const unreadCount = countResult.recordset[0]?.unreadCount ?? 0;
+=======
     const notifications = filterNotificationsForUser(result.recordset, { isTechnician });
     const unreadCount = notifications.filter((n) => !n.read_at).length;
+>>>>>>> daca730b48b668f282d9dbf92d4a12c57a507292
 
     return NextResponse.json({ notifications, unreadCount });
   } catch (err) {

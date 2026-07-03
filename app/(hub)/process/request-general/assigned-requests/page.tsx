@@ -160,7 +160,7 @@ function RequestBoard() {
 
   const [filters, setFilters] = useState({
     id: '',
-    status: '',
+    status: '1',
     company: '',
     date_from: '',
     date_to: '',

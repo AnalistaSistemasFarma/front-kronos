@@ -161,7 +161,6 @@ function RequestBoard() {
     url: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
-  // Bloqueo síncrono de doble-submit (el estado createLoading se actualiza async)
   const isSubmittingRef = useRef(false);
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
@@ -199,14 +198,12 @@ function RequestBoard() {
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
   const [folderContents, setFolderContents] = useState([]);
 
-  // Archivos requeridos parametrizados del proceso seleccionado
   const [requiredFiles, setRequiredFiles] = useState<
     { id: number; file_label: string; required: boolean; conditions: number[] }[]
   >([]);
   const [filesByDoc, setFilesByDoc] = useState<Record<number, UploadedFile[]>>({});
   const [loadingProcessFiles, setLoadingProcessFiles] = useState(false);
 
-  // Campos condicionales del proceso seleccionado y respuestas del cliente
   const [formFields, setFormFields] = useState<
     {
       id: number;
@@ -340,7 +337,6 @@ function RequestBoard() {
       setFormFields([]);
       setFieldValues({});
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.process]);
 
   const fetchProcessFiles = async (processId: string) => {
@@ -412,9 +408,6 @@ function RequestBoard() {
     }
   };
 
-  // Visibilidad anidada: una sola pasada por orden. Un campo es visible si no tiene
-  // condiciones, o si alguna de sus opciones condicionantes ya está elegida en un campo
-  // visible anterior (DAG: las condiciones solo apuntan a campos previos).
   const computeVisibility = () => {
     const selected = new Set<number>();
     const visibleFields: typeof formFields = [];
@@ -432,13 +425,11 @@ function RequestBoard() {
 
   const { visibleFields, selectedOptionIds } = computeVisibility();
 
-  // Un documento se muestra/exige si no tiene condiciones, o si alguna está elegida (OR)
   const isFileVisible = (doc: { conditions: number[] }) =>
     doc.conditions.length === 0 || doc.conditions.some((c) => selectedOptionIds.has(c));
 
   const visibleRequiredFiles = requiredFiles.filter(isFileVisible);
 
-  // Limpia las respuestas de campos que quedaron ocultos (no enviar respuestas obsoletas)
   useEffect(() => {
     const selected = new Set<number>();
     const visibleIds = new Set<number>();
@@ -750,14 +741,12 @@ function RequestBoard() {
       errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
     }
 
-    // Validar campos condicionales obligatorios (solo los VISIBLES)
     for (const field of visibleFields) {
       if (field.required && !fieldValues[field.id]) {
         errors[`field_${field.id}`] = `Debe seleccionar: ${field.field_label}`;
       }
     }
 
-    // Validar solo los documentos obligatorios VISIBLES según las condiciones
     for (const doc of visibleRequiredFiles) {
       if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
         errors[`file_${doc.id}`] = `Debe adjuntar el documento: ${doc.file_label}`;
@@ -775,7 +764,6 @@ function RequestBoard() {
   };
 
   const handleCreateTicket = async () => {
-    // Bloqueo síncrono: cierra la ventana de carrera del doble clic (createLoading es async).
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
 
@@ -783,9 +771,6 @@ function RequestBoard() {
       setCreateLoading(true);
       setError(null);
 
-      // --- Fase A: crear la solicitud ---
-      // El modal de creación NO tiene ninguna ruta de reintento: un solo POST por intento.
-      // Así es imposible re-disparar una creación y duplicar la solicitud.
       let response: Response;
       try {
         response = await fetch('/api/requests-general/create-request', {
@@ -807,7 +792,6 @@ function RequestBoard() {
           }),
         });
       } catch (networkErr) {
-        // La solicitud NO se creó: el modal queda abierto para reintentar de forma segura.
         console.error('Error de red al crear la solicitud:', networkErr);
         setError('No se pudo crear la solicitud. Intente de nuevo.');
         toast.error('No se pudo crear la solicitud. Intente de nuevo.');
@@ -820,7 +804,6 @@ function RequestBoard() {
           const errorData = await response.json();
           detail = errorData.error || '';
         } catch {
-          // respuesta sin cuerpo JSON
         }
         console.error('Fallo al crear la solicitud:', detail);
         setError('No se pudo crear la solicitud. Intente de nuevo.');
@@ -830,11 +813,6 @@ function RequestBoard() {
 
       const newTicket = await response.json();
       const requestId = Number(newTicket.id_request);
-      // A partir de aquí la solicitud EXISTE en BD: pase lo que pase, NO se recrea y el modal
-      // se cierra al final.
-
-      // --- Fase B: subir los archivos a la carpeta de la solicitud ya creada ---
-      // Documentos parametrizados visibles (con etiqueta) + archivos libres adicionales
       const filesToUpload: { file: File; label?: string }[] = [
         ...visibleRequiredFiles.flatMap((doc) =>
           (filesByDoc[doc.id] || []).map((f) => ({ file: f.file, label: doc.file_label }))
@@ -853,8 +831,6 @@ function RequestBoard() {
           const folderName = `Request-${requestId}`;
           await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
         } catch (uploadErr) {
-          // La solicitud YA quedó creada: no se reintenta aquí. La recarga de archivos se hace
-          // desde la vista de la solicitud. Se informa y se cierra el modal igual.
           uploadOk = false;
           console.error('Error al subir archivos:', uploadErr);
           toast.error(
@@ -865,7 +841,6 @@ function RequestBoard() {
         }
       }
 
-      // --- Fase C: notificación por correo (best-effort, no bloquea el cierre) ---
       try {
         await sendRequestEmailNotification(
           requestId,
@@ -876,7 +851,6 @@ function RequestBoard() {
         console.error('Error en notificación por correo:', notifyErr);
       }
 
-      // --- Cierre: la solicitud existe, así que siempre limpiamos y cerramos el modal ---
       if (uploadOk) {
         toast.success(`Solicitud #${requestId} creada correctamente.`);
       }
@@ -951,8 +925,6 @@ function RequestBoard() {
           )
         );
 
-        // allSettled (no all): si un archivo falla, no abortamos los demás y reportamos
-        // exactamente cuáles fallaron en lugar de perder esa información.
         const results = await Promise.allSettled(uploadPromises);
 
         const failed: string[] = [];

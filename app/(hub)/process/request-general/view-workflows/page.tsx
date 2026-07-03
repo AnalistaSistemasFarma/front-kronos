@@ -50,6 +50,8 @@ import {
   IconUser,
   IconFileDescription,
   IconTag,
+  IconChevronUp,
+  IconChevronDown,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { getFileLabelError } from '../../../../../lib/onedriveName';
@@ -77,6 +79,7 @@ interface Task {
   cost_center: string;
   assigned_user: string;
   id_assigned_user: string;
+  is_sequential: boolean;
 }
 
 interface Note {
@@ -147,7 +150,6 @@ function ViewWorkFlowPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [canEdit, setCanEdit] = useState(false);
 
-  // Estados para edición
   const [editedWorkflow, setEditedWorkflow] = useState<WorkFlow | null>(null);
   const [editedTasks, setEditedTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<{ value: string; label: string }[]>([]);
@@ -160,17 +162,26 @@ function ViewWorkFlowPage() {
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
 
-  // Solo los administradores autorizados pueden modificar el campo "Activo"
   const canEditActive = userId != null && ADMIN_USER_IDS.includes(String(userId));
 
-  // Estados para el modal de agregar tareas
   const [addTaskModalOpened, setAddTaskModalOpened] = useState(false);
   const [newTaskForm, setNewTaskForm] = useState({
     task: '',
     id_assigned_user: '',
     cost: 0,
     cost_center: '',
+    is_sequential: false,
   });
+
+  const moveEditedTask = (index: number, dir: -1 | 1) => {
+    setEditedTasks((prev) => {
+      const next = [...prev];
+      const target = index + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
 
   useEffect(() => {
     const storedWorkflow = sessionStorage.getItem('selectedRequest');
@@ -195,7 +206,6 @@ function ViewWorkFlowPage() {
     }
   }, [workflow?.id]);
 
-  // Cargar usuarios y estados al montar el componente
   useEffect(() => {
     fetchUsers();
     fetchStatusOptions();
@@ -260,7 +270,12 @@ function ViewWorkFlowPage() {
       }
 
       const data = await response.json();
-      setTasks(data);
+      setTasks(
+        data.map((t: Task & { is_sequential: boolean | number }) => ({
+          ...t,
+          is_sequential: Boolean(t.is_sequential),
+        }))
+      );
     } catch (err) {
       console.error('Error fetching tasks:', err);
       setTasks([]);
@@ -362,7 +377,6 @@ function ViewWorkFlowPage() {
   };
 
   const fetchStatusOptions = async () => {
-    // Estados disponibles según la base de datos
     setStatusOptions([
       { value: '1', label: 'Activo' },
       { value: '2', label: 'Pendiente' },
@@ -419,22 +433,22 @@ function ViewWorkFlowPage() {
     }
   };
 
-  // Funciones para manejar tareas nuevas
   const handleAddTask = () => {
     if (!newTaskForm.task.trim()) return;
 
     const newTask: Task = {
-      id: Date.now() * -1, // ID negativo para identificar que es nueva
+      id: Date.now() * -1,
       task: newTaskForm.task,
       active: 1,
       cost: newTaskForm.cost || 0,
       cost_center: newTaskForm.cost_center,
       assigned_user: users.find(u => u.value === newTaskForm.id_assigned_user)?.label || '',
       id_assigned_user: newTaskForm.id_assigned_user,
+      is_sequential: newTaskForm.is_sequential,
     };
 
     setEditedTasks([...editedTasks, newTask]);
-    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '' });
+    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false });
     setAddTaskModalOpened(false);
   };
 
@@ -442,10 +456,9 @@ function ViewWorkFlowPage() {
     setEditedTasks(editedTasks.filter(t => t.id !== taskId));
   };
 
-  // Funciones para manejar archivos requeridos
   const handleAddFile = () => {
     const newFile: FileDef = {
-      id: Date.now() * -1, // ID negativo = nuevo
+      id: Date.now() * -1, 
       file_label: '',
       required: true,
       conditions: [],
@@ -463,7 +476,6 @@ function ViewWorkFlowPage() {
     setEditedFiles(next);
   };
 
-  // Funciones para manejar campos condicionales
   const handleAddFormField = () => {
     const newField: FormFieldDef = {
       id: Date.now() * -1,
@@ -526,7 +538,6 @@ function ViewWorkFlowPage() {
     );
   };
 
-  // Todas las opciones (de editedFormFields) para condicionar archivos
   const allOptionsData = editedFormFields.flatMap((f) =>
     f.options.map((o) => ({
       value: o.id.toString(),
@@ -534,7 +545,6 @@ function ViewWorkFlowPage() {
     }))
   );
 
-  // Opciones de campos ANTERIORES (para condicionar un campo, evita ciclos)
   const optionsBeforeFieldData = (fieldId: number) => {
     const idx = editedFormFields.findIndex((f) => f.id === fieldId);
     return editedFormFields.slice(0, idx).flatMap((f) =>
@@ -545,7 +555,6 @@ function ViewWorkFlowPage() {
     );
   };
 
-  // Etiqueta(s) de condición para modo vista (usa los campos guardados)
   const conditionLabelsView = (optionIds: number[]) => {
     if (!optionIds || optionIds.length === 0) return 'Siempre';
     const labels = [];
@@ -619,16 +628,19 @@ function ViewWorkFlowPage() {
         .filter(origTask => !editedTasks.find(et => et.id === origTask.id))
         .map(t => t.id);
       
-      const updatedTasks = editedTasks.filter(task => {
+      const updatedTasks = editedTasks.filter((task, idx) => {
         if (task.id < 0) return false;
         const originalTask = originalTasks.find(ot => ot.id === task.id);
         if (!originalTask) return false;
+        const originalIdx = originalTasks.findIndex(ot => ot.id === task.id);
         return (
           originalTask.task !== task.task ||
           originalTask.active !== task.active ||
           originalTask.cost !== task.cost ||
           originalTask.cost_center !== task.cost_center ||
-          originalTask.id_assigned_user !== task.id_assigned_user
+          originalTask.id_assigned_user !== task.id_assigned_user ||
+          Boolean(originalTask.is_sequential) !== Boolean(task.is_sequential) ||
+          originalIdx !== idx // cambió el orden
         );
       });
 
@@ -640,7 +652,6 @@ function ViewWorkFlowPage() {
         .filter((origFile) => !editedFiles.find((ef) => ef.id === origFile.id))
         .map((f) => f.id);
 
-      // Compara dos listas de ids como conjuntos (sin importar el orden)
       const sameIdSet = (a: number[], b: number[]) =>
         a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');
 
@@ -658,7 +669,6 @@ function ViewWorkFlowPage() {
       const filesChanged =
         newFiles.length > 0 || deletedFileIds.length > 0 || updatedFiles.length > 0;
 
-      // Diff de campos condicionales (con opciones anidadas)
       const newFormFields = editedFormFields.filter(
         (f) => f.id < 0 && f.field_label.trim()
       );
@@ -693,7 +703,6 @@ function ViewWorkFlowPage() {
       const formFieldsChanged =
         newFormFields.length > 0 || deletedFieldIds.length > 0 || updatedFormFields.length > 0;
 
-      // Construye las opciones (create/update/delete) de un campo para el payload
       const buildOptionActions = (field: FormFieldDef, orig?: FormFieldDef) => {
         const actions: {
           id?: number;
@@ -728,6 +737,8 @@ function ViewWorkFlowPage() {
         cost?: number;
         cost_center?: string;
         id_user_assigned?: string;
+        is_sequential?: boolean;
+        display_order?: number;
         action: 'create' | 'update' | 'delete';
       }
 
@@ -798,6 +809,8 @@ function ViewWorkFlowPage() {
             cost: task.cost,
             cost_center: task.cost_center,
             id_user_assigned: task.id_assigned_user,
+            is_sequential: task.is_sequential,
+            display_order: editedTasks.findIndex((t) => t.id === task.id),
             action: 'create' as const,
           })),
           ...updatedTasks.map((task) => ({
@@ -807,9 +820,10 @@ function ViewWorkFlowPage() {
             cost: task.cost,
             cost_center: task.cost_center,
             id_user_assigned: task.id_assigned_user,
+            is_sequential: task.is_sequential,
+            display_order: editedTasks.findIndex((t) => t.id === task.id),
             action: 'update' as const,
           })),
-          // Tareas eliminadas
           ...deletedTaskIds.map((id) => ({
             id,
             action: 'delete' as const,
@@ -1399,23 +1413,65 @@ function ViewWorkFlowPage() {
                                         placeholder='Nombre de la tarea'
                                       />
                                     ) : (
-                                      <Text size='md' fw={600} className='mb-1'>
-                                        {task.task}
-                                      </Text>
+                                      <Group gap='xs'>
+                                        <Text size='md' fw={600} className='mb-1'>
+                                          {task.task}
+                                        </Text>
+                                        {task.is_sequential && (
+                                          <Badge color='indigo' variant='light' size='sm'>
+                                            Secuencial
+                                          </Badge>
+                                        )}
+                                      </Group>
                                     )}
                                   </div>
                                   {isEditing && (
-                                    <ActionIcon
-                                      color='red'
-                                      variant='subtle'
-                                      size='lg'
-                                      onClick={() => handleRemoveTask(task.id)}
-                                      title='Eliminar tarea'
-                                    >
-                                      <IconTrash size={18} />
-                                    </ActionIcon>
+                                    <Group gap={4} wrap='nowrap'>
+                                      <ActionIcon
+                                        variant='subtle'
+                                        color='gray'
+                                        onClick={() => moveEditedTask(index, -1)}
+                                        disabled={index === 0}
+                                        title='Subir'
+                                      >
+                                        <IconChevronUp size={18} />
+                                      </ActionIcon>
+                                      <ActionIcon
+                                        variant='subtle'
+                                        color='gray'
+                                        onClick={() => moveEditedTask(index, 1)}
+                                        disabled={index === editedTasks.length - 1}
+                                        title='Bajar'
+                                      >
+                                        <IconChevronDown size={18} />
+                                      </ActionIcon>
+                                      <ActionIcon
+                                        color='red'
+                                        variant='subtle'
+                                        size='lg'
+                                        onClick={() => handleRemoveTask(task.id)}
+                                        title='Eliminar tarea'
+                                      >
+                                        <IconTrash size={18} />
+                                      </ActionIcon>
+                                    </Group>
                                   )}
                                 </Group>
+
+                                {isEditing && (
+                                  <Checkbox
+                                    label='Secuencial: requiere que la tarea anterior esté resuelta'
+                                    checked={editedTasks[index]?.is_sequential || false}
+                                    onChange={(e) => {
+                                      const newTasks = [...editedTasks];
+                                      newTasks[index] = {
+                                        ...newTasks[index],
+                                        is_sequential: e.currentTarget.checked,
+                                      };
+                                      setEditedTasks(newTasks);
+                                    }}
+                                  />
+                                )}
 
                                 <Grid mt='sm'>
                                   <Grid.Col span={{ base: 12, sm: 4 }}>
@@ -2003,7 +2059,7 @@ function ViewWorkFlowPage() {
           opened={addTaskModalOpened}
           onClose={() => {
             setAddTaskModalOpened(false);
-            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '' });
+            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false });
           }}
           title={
             <Group gap='sm'>
@@ -2116,12 +2172,18 @@ function ViewWorkFlowPage() {
               </Grid.Col>
             </Grid>
 
+            <Checkbox
+              label='Secuencial: requiere que la tarea anterior esté resuelta'
+              checked={newTaskForm.is_sequential}
+              onChange={(e) => setNewTaskForm({ ...newTaskForm, is_sequential: e.currentTarget.checked })}
+            />
+
             <Group justify='flex-end' gap='sm' mt='md'>
               <Button
                 variant='outline'
                 onClick={() => {
                   setAddTaskModalOpened(false);
-                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '' });
+                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false });
                 }}
                 className='cursor-pointer transition-colors duration-200'
               >
