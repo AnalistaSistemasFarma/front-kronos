@@ -114,8 +114,11 @@ export interface CustomField {
  * espacios no importan) via getCompanyCustomFields().
  */
 export const COMPANY_CUSTOM_FIELDS: Record<string, CustomField[]> = {
-  // ONE LATAM PHARMA — familia U_IT_* (la mas rica).
-  'ONE LATAM PHARMA': [
+  // ONELATAMPHARMA — familia U_IT_* (la mas rica). La clave DEBE coincidir con
+  // el nombre real de la empresa en BD (company.company = 'ONELATAMPHARMA', sin
+  // espacios); si no coincide, getCompanyCustomFields() no aplica y los campos
+  // caen al modo humanizado de solo lectura.
+  'ONELATAMPHARMA': [
     { label: 'CUM', field: 'U_IT_CUM' },
     { label: 'ATC', field: 'U_IT_ATC' },
     { label: 'Descripcion ATC', field: 'U_IT_DescAtc' },
