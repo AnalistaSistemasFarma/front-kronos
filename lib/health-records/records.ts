@@ -1,4 +1,4 @@
-import { sapGet, sapPost, sapPatch, sapDelete, type SapSession } from '../sap/serviceLayer';
+import { sapGet, sapGetAll, sapPost, sapPatch, sapDelete, type SapSession } from '../sap/serviceLayer';
 import type { CompanySapEndpoint } from './access';
 
 /**
@@ -126,6 +126,54 @@ export async function getFieldSizes(
     // Si no se puede leer la metadata, no se valida el largo (no bloquea).
   }
   return sizes;
+}
+
+/**
+ * Normaliza un nombre para comparar variantes: sin tildes/diacríticos, en
+ * mayúsculas, con espacios colapsados. Así "LABORATORIOS LA SANTÉ S.A." y
+ * "LABORATORIOS LA SANTE S.A." se consideran el mismo nombre.
+ */
+export function normalizeName(value: string): string {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Indexa los valores DISTINTOS ya existentes de ciertos campos de nombre
+ * (p. ej. U_Titular, U_Fabricante) por su forma normalizada, para detectar en
+ * el cargue variantes por tildes/mayúsculas/espacios que fragmentan reportes.
+ * Devuelve { campo: Map<normalizado, Set<valorCrudoExistente>> }.
+ */
+export async function getNombresExistentes(
+  session: SapSession,
+  entity: string,
+  fields: string[]
+): Promise<Record<string, Map<string, Set<string>>>> {
+  const out: Record<string, Map<string, Set<string>>> = {};
+  for (const f of fields) out[f] = new Map();
+  try {
+    const rows = await sapGetAll<Record<string, unknown>>(
+      session,
+      `${entity}?$select=${fields.join(',')}`,
+      { pageSize: 500, cap: 20000 }
+    );
+    for (const r of rows) {
+      for (const f of fields) {
+        const raw = r[f];
+        if (typeof raw !== 'string' || !raw.trim()) continue;
+        const norm = normalizeName(raw);
+        if (!out[f].has(norm)) out[f].set(norm, new Set());
+        out[f].get(norm)!.add(raw.trim());
+      }
+    }
+  } catch {
+    // Si no se puede leer, no se generan advertencias (no bloquea).
+  }
+  return out;
 }
 
 /**
