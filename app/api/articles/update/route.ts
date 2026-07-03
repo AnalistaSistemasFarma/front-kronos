@@ -37,8 +37,9 @@ export async function POST(request: NextRequest) {
     // El ItemCode es la clave, nunca se cambia via PATCH del cuerpo.
     delete sanitized.ItemCode;
 
-    // RN: en la actualización solo se permiten los campos editables (hoy: BarCode).
-    // Se descarta cualquier otro campo que llegue, sin importar el origen.
+    // RN: en la actualización solo se permiten los campos editables
+    // (hoy: BarCode y Mainsupplier). Se descarta cualquier otro campo que
+    // llegue, sin importar el origen.
     const changes: Record<string, string | number> = {};
     for (const f of EDITABLE_ON_UPDATE) {
       if (f in sanitized) changes[f] = sanitized[f];
@@ -46,7 +47,7 @@ export async function POST(request: NextRequest) {
 
     if (Object.keys(changes).length === 0) {
       return NextResponse.json(
-        { error: 'No hay cambios permitidos para guardar (solo se puede editar el código de barras)' },
+        { error: 'No hay cambios permitidos para guardar (solo se pueden editar el código de barras y el proveedor principal)' },
         { status: 400 }
       );
     }

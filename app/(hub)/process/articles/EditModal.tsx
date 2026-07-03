@@ -275,7 +275,8 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
   const computeChanges = (): Record<string, string> => {
     const changes: Record<string, string> = {};
     // RN: en la actualización solo se permiten los campos estándar editables
-    // (hoy: Código de barras). Los campos personalizados son de solo lectura.
+    // (hoy: Código de barras y Proveedor principal). Los campos personalizados
+    // son de solo lectura.
     const editableNames = STANDARD_FIELDS.filter((f) => f.editable).map((f) => f.field);
     for (const f of editableNames) {
       if ((form[f] ?? '') !== (original[f] ?? '')) changes[f] = form[f] ?? '';
