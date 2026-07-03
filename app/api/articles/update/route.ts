@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/articles/access';
 import { actualizarArticulo, sanitizeItem } from '../../../../lib/articles/articles';
-import { EDITABLE_ON_UPDATE } from '../../../../lib/articles/fields';
+import { EDITABLE_ON_UPDATE, getEditableCustomFields } from '../../../../lib/articles/fields';
 import { registrarCambioArticulo } from '../../../../lib/articles/log';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
@@ -37,17 +37,22 @@ export async function POST(request: NextRequest) {
     // El ItemCode es la clave, nunca se cambia via PATCH del cuerpo.
     delete sanitized.ItemCode;
 
-    // RN: en la actualización solo se permiten los campos editables
-    // (hoy: BarCode y Mainsupplier). Se descarta cualquier otro campo que
-    // llegue, sin importar el origen.
+    // RN: en la actualización solo se permiten los campos editables: los
+    // estándar marcados editables (EDITABLE_ON_UPDATE) más los UDF editables
+    // de la empresa (getEditableCustomFields). Se descarta cualquier otro campo
+    // que llegue, sin importar el origen.
+    const allowedFields = [
+      ...EDITABLE_ON_UPDATE,
+      ...getEditableCustomFields(company.companyName),
+    ];
     const changes: Record<string, string | number> = {};
-    for (const f of EDITABLE_ON_UPDATE) {
+    for (const f of allowedFields) {
       if (f in sanitized) changes[f] = sanitized[f];
     }
 
     if (Object.keys(changes).length === 0) {
       return NextResponse.json(
-        { error: 'No hay cambios permitidos para guardar (solo se pueden editar el código de barras y el proveedor principal)' },
+        { error: 'No hay cambios permitidos para guardar' },
         { status: 400 }
       );
     }
