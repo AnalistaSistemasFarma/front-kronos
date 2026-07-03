@@ -43,10 +43,10 @@ export async function GET(request) {
         );
 
       return NextResponse.json({ notifications: readResult.recordset });
+    }
+
     const userEmail = session.user.email;
     const { isOperator: isTechnician } = await getHelpDeskUserRole(userEmail);
-
-    pool = await sql.connect(sqlConfig);
 
     await cleanupDeprecatedNewTicketNotifications(pool, userEmail);
 
@@ -69,22 +69,8 @@ export async function GET(request) {
          ORDER BY created_at DESC`
       );
 
-<<<<<<< HEAD
-    // Conteo exacto de no leídas (independiente del TOP 50) para el badge.
-    const countResult = await pool
-      .request()
-      .input('email', sql.NVarChar(255), session.user.email)
-      .query(
-        `SELECT COUNT(*) AS unreadCount
-         FROM notifications
-         WHERE email = @email AND read_at IS NULL`
-      );
-
-    const unreadCount = countResult.recordset[0]?.unreadCount ?? 0;
-=======
     const notifications = filterNotificationsForUser(result.recordset, { isTechnician });
     const unreadCount = notifications.filter((n) => !n.read_at).length;
->>>>>>> daca730b48b668f282d9dbf92d4a12c57a507292
 
     return NextResponse.json({ notifications, unreadCount });
   } catch (err) {
