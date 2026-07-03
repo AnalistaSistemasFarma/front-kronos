@@ -80,12 +80,16 @@ interface Request {
   company: string;
   created_at: string;
   requester: string;
+  id_requester?: number;
+  requester_email?: string;
   status: string;
   assignedUserId?: number;
   assignedUserName?: string;
   id_process_category?: number | null;
   user?: string;
+  usuario?: string;
   id_status_case: number;
+  status_req?: number;
   id_category: number;
   resolution?: string;
   date_resolution?: string;
@@ -192,7 +196,7 @@ function ViewRequestPage() {
   const [loadingTaskRG, setLoadingTaskRG] = useState(false);
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
-  const [userId, setUserId] = useState<number | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -233,58 +237,115 @@ function ViewRequestPage() {
   >([]);
 
   useEffect(() => {
-    const storedRequest = sessionStorage.getItem('selectedRequest');
-    if (storedRequest) {
-      const requestData = JSON.parse(storedRequest);
-      setRequest(requestData);
-      setOriginalRequest(requestData);
-      setLoading(false);
-    } else if (id) {
-      fetch(`/api/requests-general/view-request?id=${id}`)
-        .then((res) => {
-          if (!res.ok) throw new Error('Error al cargar la solicitud');
-          return res.json();
-        })
-        .then((data) => {
-          const mappedData = {
-            ...data,
-            resolution: data.resolutioncase || null,
-            date_resolution: data.date_resolution || null,
-          };
-          setRequest(mappedData);
-          setOriginalRequest(mappedData);
-          setLoading(false);
-        })
-        .catch((err) => {
-          console.error('Error fetching request:', err);
-          setError('No se pudo cargar la solicitud. Por favor intente nuevamente.');
-          setLoading(false);
-        });
+    const storedRaw = sessionStorage.getItem('selectedRequest');
+    let storedRequest: Request | null = null;
+
+    if (storedRaw) {
+      try {
+        storedRequest = JSON.parse(storedRaw) as Request;
+        setRequest(storedRequest);
+        setOriginalRequest(storedRequest);
+        setLoading(false);
+      } catch {
+        sessionStorage.removeItem('selectedRequest');
+      }
     }
+
+    if (!id) {
+      if (!storedRequest) setLoading(false);
+      return;
+    }
+
+    fetch(`/api/requests-general/view-request?id=${id}`)
+      .then((res) => {
+        if (!res.ok) throw new Error('Error al cargar la solicitud');
+        return res.json();
+      })
+      .then((data) => {
+        // Campos que la API de detalle aporta/normaliza.
+        const apiFields: Partial<Request> = {
+          subject: data.subject_request ?? data.subject,
+          description: data.description,
+          category: data.category,
+          process: data.process,
+          company: data.company,
+          id_company: data.id_company,
+          id_status_case: data.status_req ?? data.id_status_case,
+          status_req: data.status_req ?? data.id_status_case,
+          id_process_category: data.id_process_category,
+          assignedUserName: data.assignedUserName,
+          user: data.user ?? data.assignedUserName ?? data.usuario,
+          requester: data.requester,
+          id_requester: data.id_requester,
+          requester_email: data.requester_email,
+          executor_final: data.executor_final,
+          resolution: data.resolutioncase || null,
+          date_resolution: data.date_resolution || null,
+        };
+
+        // Base: datos de la lista (forma que el formulario espera). Si no hay, usar la API.
+        const base: Request = storedRequest ?? (data as Request);
+        const merged: Request = { ...base };
+
+        // Sobreponer solo valores presentes para no borrar datos buenos con nulos.
+        (Object.keys(apiFields) as (keyof Request)[]).forEach((key) => {
+          const value = apiFields[key];
+          if (value !== undefined && value !== null && value !== '') {
+            (merged as unknown as Record<string, unknown>)[key] = value;
+          }
+        });
+
+        // El correo y el id del solicitante deben venir siempre de la API.
+        merged.requester_email = data.requester_email ?? merged.requester_email;
+        merged.id_requester = data.id_requester ?? merged.id_requester;
+
+        setRequest(merged);
+        setOriginalRequest(merged);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error('Error fetching request:', err);
+        if (!storedRequest) {
+          setError('No se pudo cargar la solicitud. Por favor intente nuevamente.');
+        }
+        setLoading(false);
+      });
   }, [id]);
 
   useEffect(() => {
-    if (request) {
-      fetchFormData();
-      fetchNotes();
-      fetchTasksRG();
-      fetchFolderContents();
-      fetchFormValues();
-    }
-  }, [request]);
-
-  const fetchFormValues = async () => {
     if (!request?.id) return;
+
+    const controller = new AbortController();
+    const requestId = request.id;
+
+    const loadRelatedData = async () => {
+      await Promise.all([
+        fetchNotes(requestId, controller.signal),
+        fetchTasksRG(requestId, controller.signal),
+        fetchFormValues(requestId, controller.signal),
+      ]);
+    };
+
+    void fetchFormData();
+    void fetchFolderContents();
+    void loadRelatedData();
+
+    return () => controller.abort();
+  }, [request?.id]);
+
+  const fetchFormValues = async (requestId: number, signal?: AbortSignal) => {
     try {
       const response = await fetch(
-        `/api/requests-general/request-form-values?id_request=${request.id}`
+        `/api/requests-general/request-form-values?id_request=${requestId}`,
+        { signal }
       );
       if (!response.ok) throw new Error('Error al cargar las respuestas del formulario');
       const data = await response.json();
-      setRequestFormValues(data);
+      if (!signal?.aborted) setRequestFormValues(data);
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
       console.error('Error fetching form values:', err);
-      setRequestFormValues([]);
+      if (!signal?.aborted) setRequestFormValues([]);
     }
   };
 
@@ -324,7 +385,7 @@ function ViewRequestPage() {
     fetchUsersWithEmails();
   }, []);
 
-  const getUserIdByName = async (userName: string): Promise<number | null> => {
+  const getUserIdByName = async (userName: string): Promise<string | null> => {
     if (!session || status !== 'authenticated') {
       console.error('No hay sesión activa para realizar esta operación');
       return null;
@@ -379,14 +440,41 @@ function ViewRequestPage() {
 
       setIsAdmin(hasAdminRole);
 
-      const isAssignedUser = request.user === userName;
+      // El "solicitado" (asignado al proceso) es quien gestiona y puede editar.
+      // NO se incluye `usuario` (rg.[user] = creador/solicitante): el solicitante
+      // no debe poder editar la solicitud.
+      const normalize = (value?: string | null) => (value || '').trim().toLowerCase();
+      const currentUser = normalize(userName);
+
+      // El solicitante (creador) NUNCA puede editar, sin importar su rol (admin, etc.).
+      const isRequester =
+        (session.user?.id &&
+          request.id_requester &&
+          String(session.user.id) === String(request.id_requester)) ||
+        (currentUser !== '' && normalize(request.requester) === currentUser);
+
+      if (isRequester) {
+        setCanEdit(false);
+        console.log('Permission check: solicitante — edición bloqueada', {
+          userName,
+          requester: request.requester,
+          id_requester: request.id_requester,
+        });
+        return;
+      }
+
+      // El "solicitado" (asignado al proceso) es quien gestiona y puede editar.
+      const assignedCandidates = [request.user, request.assignedUserName].map(normalize);
+
+      const isAssignedUser =
+        currentUser !== '' && assignedCandidates.some((name) => name !== '' && name === currentUser);
 
       const hasEditPermission = hasAdminRole || isAssignedUser;
 
       setCanEdit(hasEditPermission);
       console.log('Permission check:', {
         userName,
-        assignedUserName: request.user,
+        assignedCandidates,
         isAssignedUser,
         hasAdminRole,
         canEdit: hasEditPermission,
@@ -401,7 +489,15 @@ function ViewRequestPage() {
   };
 
   useEffect(() => {
-    if (status === 'authenticated' && userName && !userId) {
+    if (status !== 'authenticated') return;
+
+    const sessionUserId = session?.user?.id;
+    if (sessionUserId) {
+      setUserId(sessionUserId);
+      return;
+    }
+
+    if (userName && !userId) {
       getUserIdByName(userName).then((id) => {
         if (id) {
           setUserId(id);
@@ -409,14 +505,14 @@ function ViewRequestPage() {
         }
       });
     }
-  }, [status, userName, userId, getUserIdByName]);
+  }, [status, userName, userId, session?.user?.id]);
 
   useEffect(() => {
     if (request && session) {
       setLoadingPermissions(true);
       checkEditPermissions();
     }
-  }, [request, session, userName]);
+  }, [request?.id, request?.id_requester, request?.requester, request?.user, request?.assignedUserName, session, userName, session?.user?.id]);
 
   useEffect(() => {
     if (request?.category) {
@@ -460,41 +556,46 @@ function ViewRequestPage() {
     }
   };
 
-  const fetchNotes = async () => {
-    if (!request?.id) return;
+  const fetchNotes = async (requestId: number, signal?: AbortSignal) => {
     try {
       setLoadingNotes(true);
-      const response = await fetch(`/api/requests-general/notes?id_request=${request.id}`);
+      const response = await fetch(`/api/requests-general/notes?id_request=${requestId}`, {
+        signal,
+      });
 
       if (response.ok) {
         const data: Note[] = await response.json();
-        setNotes(data);
-      } else {
+        if (!signal?.aborted) setNotes(data);
+      } else if (!signal?.aborted) {
         console.error('Error al cargar notas');
       }
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error('Error fetching notes:', error);
     } finally {
-      setLoadingNotes(false);
+      if (!signal?.aborted) setLoadingNotes(false);
     }
   };
 
-  const fetchTasksRG = async () => {
-    if (!request?.id) return;
+  const fetchTasksRG = async (requestId: number, signal?: AbortSignal) => {
     try {
       setLoadingTaskRG(true);
-      const response = await fetch(`/api/requests-general/view-tasks_request-general?idReq=${request.id}`);
+      const response = await fetch(
+        `/api/requests-general/view-tasks_request-general?idReq=${requestId}`,
+        { signal }
+      );
 
       if (response.ok) {
         const data: ViewTasksRequestGeneral[] = await response.json();
-        setTaskRQ(data);
-      } else {
+        if (!signal?.aborted) setTaskRQ(data);
+      } else if (!signal?.aborted) {
         console.error('Error al cargar tareas de la solicitud');
       }
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error('Error fetching tasks:', error);
     } finally {
-      setLoadingTaskRG(false);
+      if (!signal?.aborted) setLoadingTaskRG(false);
     }
   };
 
@@ -661,7 +762,7 @@ function ViewRequestPage() {
     setUpdateMessage(null);
   };
 
-  const validateFields = (): boolean => {
+  const validateFields = (): Record<string, string> => {
     const errors: Record<string, string> = {};
 
     if (!request?.subject || request.subject.trim() === '') {
@@ -689,7 +790,7 @@ function ViewRequestPage() {
     }
 
     setFormErrors(errors);
-    return Object.keys(errors).length === 0;
+    return errors;
   };
 
   const sendEmailNotification = async (): Promise<boolean> => {
@@ -845,7 +946,14 @@ function ViewRequestPage() {
   };
 
   const handleUpdateRequest = async () => {
-    if (!validateFields()) {
+    const validationErrors = validateFields();
+    if (Object.keys(validationErrors).length > 0) {
+      setUpdateMessage({
+        type: 'error',
+        text:
+          Object.values(validationErrors)[0] ||
+          'Faltan campos obligatorios. Revisa el asunto, la categoría, la descripción y la resolución.',
+      });
       return;
     }
 
@@ -967,7 +1075,16 @@ function ViewRequestPage() {
   };
 
   const isRequestResolved = () => {
-    return request?.status?.toLowerCase() === 'completada' || Boolean(request?.resolution && request.resolution.trim() !== '');
+    const statusText = request?.status?.toLowerCase() ?? '';
+    const statusId = Number(request?.id_status_case ?? request?.status_req);
+    const closedByStatus =
+      statusId === 2 ||
+      statusId === 3 ||
+      statusText.includes('resuelt') ||
+      statusText.includes('cancel') ||
+      statusText.includes('completad');
+
+    return closedByStatus || Boolean(request?.resolution && request.resolution.trim() !== '');
   };
 
   const handleAddNote = async () => {
@@ -989,7 +1106,7 @@ function ViewRequestPage() {
       if (response.ok) {
         setNewNote('');
         setSelectedNoteEmails([]);
-        await fetchNotes();
+        await fetchNotes(request.id);
 
         if (noteData.notificarPorCorreo) {
           const emailSent = await sendNoteEmailNotification();
@@ -1011,11 +1128,15 @@ function ViewRequestPage() {
 
   const handleFilesChange = (files: UploadedFile[]) => {
     setAttachedFiles(files);
-    if (!hasNotedUpload.current && files.some((f) => f.status === 'success')) {
-      hasNotedUpload.current = true;
-      addSystemNote('Se cargaron archivos a la solicitud.');
-    }
   };
+
+  useEffect(() => {
+    if (!hasNotedUpload.current && attachedFiles.some((f) => f.status === 'success')) {
+      hasNotedUpload.current = true;
+      void addSystemNote('Se cargaron archivos a la solicitud.');
+      void fetchFolderContents();
+    }
+  }, [attachedFiles]);
 
   const addSystemNote = async (text: string) => {
     if (!request?.id || !userId) return;
@@ -1034,7 +1155,7 @@ function ViewRequestPage() {
       });
 
       if (response.ok) {
-        await fetchNotes();
+        await fetchNotes(request.id);
       } else {
         const errorData = await response.json();
         console.error('Error al agregar nota:', errorData.error);
@@ -1061,7 +1182,7 @@ function ViewRequestPage() {
       });
       if (response.ok) {
         toast.success('Asignado actualizado exitosamente');
-        await fetchTasksRG();
+        if (request?.id) await fetchTasksRG(request.id);
       } else {
         const err = await response.json().catch(() => ({}));
         console.error('Error al actualizar asignado:', err.error || response.statusText);
@@ -1632,12 +1753,21 @@ function ViewRequestPage() {
                         checked={resolutionData.notificarPorCorreo}
                         onChange={(e) => {
                           const checked = e.currentTarget.checked;
-                          setResolutionData({
-                            ...resolutionData,
-                            notificarPorCorreo: checked,
-                            correo: checked ? resolutionData.correo : '',
-                          });
-                          if (!checked) {
+                          if (checked) {
+                            const requesterEmail = request?.requester_email?.trim();
+                            const defaultEmails = requesterEmail ? [requesterEmail] : [];
+                            setSelectedEmails(defaultEmails);
+                            setResolutionData({
+                              ...resolutionData,
+                              notificarPorCorreo: true,
+                              correo: defaultEmails.join('; '),
+                            });
+                          } else {
+                            setResolutionData({
+                              ...resolutionData,
+                              notificarPorCorreo: false,
+                              correo: '',
+                            });
                             setSelectedEmails([]);
                           }
                         }}
@@ -1850,7 +1980,8 @@ function ViewRequestPage() {
                   Las solicitudes completadas no se pueden modificar.
                 </Text>
               )}
-              {(request.id_assigned_process_category || request.id_assigned_category) == userId && (
+              {String(request.id_assigned_process_category || request.id_assigned_category || '') ===
+                String(userId || '') && (
                 <Button
                   color='blue'
                   onClick={() => {

@@ -1,0 +1,225 @@
+import { sapGet, sapGetAll, sapPost, sapPatch, sapDelete, type SapSession } from '../sap/serviceLayer';
+import type { CompanySapEndpoint } from './access';
+
+/**
+ * Logica de negocio de registros sanitarios (UDO de SAP B1), compartida por las
+ * rutas de creacion individual y cargue masivo. Todo server-side.
+ */
+
+/** Campos U_* permitidos del registro (whitelist; se ignora cualquier otro). */
+export const HEALTH_RECORD_FIELDS = [
+  'U_Referencia',
+  'U_Descripcion',
+  'U_Fecha_Creacion',
+  'U_Fecha_Actualizacion',
+  'U_Pais',
+  'U_Titular',
+  'U_Fabricante',
+  'U_Registro_Sanitario',
+  'U_Fecha_Vencimiento',
+  'U_Codigo_CUM',
+  'U_Codigo_IUM',
+  'U_Vida_Util',
+  'U_Estado_Entrada',
+  'U_Estado_Comercializacion',
+  'U_Obsoleto',
+  'U_SEND_Link',
+] as const;
+
+export type HealthRecordInput = Partial<Record<(typeof HEALTH_RECORD_FIELDS)[number], string>>;
+
+/** Escapa comillas simples para literales OData. */
+export function escapeOData(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/** Toma solo los campos permitidos, como strings recortados. Descarta vacios. */
+export function sanitizeRecord(input: Record<string, unknown>): HealthRecordInput {
+  const out: HealthRecordInput = {};
+  for (const field of HEALTH_RECORD_FIELDS) {
+    const raw = input[field];
+    if (raw === undefined || raw === null) continue;
+    const value = String(raw).trim();
+    if (value === '') continue;
+    out[field] = value;
+  }
+  return out;
+}
+
+/** Fecha de hoy en formato YYYY-MM-DD (para el log). */
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * ¿Ya existe el registro sanitario para ESE MISMO producto (Referencia)?
+ * Regla de negocio: un mismo RS PUEDE repetirse en productos distintos (p. ej.
+ * varias presentaciones/concentraciones comparten registro). Solo es duplicado
+ * cuando ya existe la pareja (Referencia + Registro Sanitario).
+ */
+export async function registroExiste(
+  session: SapSession,
+  entity: string,
+  referencia: string,
+  registroSanitario: string
+): Promise<boolean> {
+  const filter = encodeURIComponent(
+    `U_Referencia eq '${escapeOData(referencia)}' and U_Registro_Sanitario eq '${escapeOData(registroSanitario)}'`
+  );
+  const data = await sapGet<{ value?: unknown[] }>(
+    session,
+    `${entity}?$filter=${filter}&$select=DocEntry,U_Referencia,U_Registro_Sanitario`
+  );
+  return (data.value?.length ?? 0) > 0;
+}
+
+/**
+ * ¿Existe el articulo (maestra de articulos de SAP, OITM) con ese ItemCode?
+ * Se valida antes de asignarle un registro sanitario: no debe crearse un RS
+ * para un articulo que no existe en SAP.
+ */
+export async function articuloExiste(session: SapSession, itemCode: string): Promise<boolean> {
+  const filter = encodeURIComponent(`ItemCode eq '${escapeOData(itemCode)}'`);
+  const data = await sapGet<{ value?: unknown[] }>(
+    session,
+    `Items?$filter=${filter}&$select=ItemCode&$top=1`
+  );
+  return (data.value?.length ?? 0) > 0;
+}
+
+/** Elimina un registro sanitario por su clave (DocEntry). */
+export async function eliminarRegistro(
+  session: SapSession,
+  entity: string,
+  docEntry: number
+): Promise<void> {
+  await sapDelete(session, `${entity}(${docEntry})`);
+}
+
+/**
+ * Tamaños máximos (EditSize) de los campos de texto del UDO de registros
+ * sanitarios, leídos de la metadata de SAP (UserFieldsMD). Sirve para validar
+ * el largo ANTES de crear (así la simulación detecta "valor demasiado largo"
+ * sin tener que intentar el POST). Devuelve un mapa { U_Campo: maxLargo }.
+ */
+export async function getFieldSizes(
+  session: SapSession,
+  udoCode: string
+): Promise<Record<string, number>> {
+  const sizes: Record<string, number> = {};
+  try {
+    const udo = await sapGet<{ TableName?: string }>(
+      session,
+      `UserObjectsMD('${udoCode}')?$select=TableName`
+    );
+    const table = udo?.TableName;
+    if (!table) return sizes;
+    const data = await sapGet<{ value?: { Name: string; Type: string; EditSize: number }[] }>(
+      session,
+      `UserFieldsMD?$filter=TableName eq '@${table}'&$select=Name,Type,EditSize&$top=200`
+    );
+    for (const f of data.value ?? []) {
+      // Solo campos de texto (alfanuméricos / memo) tienen límite relevante.
+      if (f.Type === 'db_Alpha' || f.Type === 'db_Memo') sizes[`U_${f.Name}`] = f.EditSize;
+    }
+  } catch {
+    // Si no se puede leer la metadata, no se valida el largo (no bloquea).
+  }
+  return sizes;
+}
+
+/**
+ * Normaliza un nombre para comparar variantes: sin tildes/diacríticos, en
+ * mayúsculas, con espacios colapsados. Así "LABORATORIOS LA SANTÉ S.A." y
+ * "LABORATORIOS LA SANTE S.A." se consideran el mismo nombre.
+ */
+export function normalizeName(value: string): string {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Indexa los valores DISTINTOS ya existentes de ciertos campos de nombre
+ * (p. ej. U_Titular, U_Fabricante) por su forma normalizada, para detectar en
+ * el cargue variantes por tildes/mayúsculas/espacios que fragmentan reportes.
+ * Devuelve { campo: Map<normalizado, Set<valorCrudoExistente>> }.
+ */
+export async function getNombresExistentes(
+  session: SapSession,
+  entity: string,
+  fields: string[]
+): Promise<Record<string, Map<string, Set<string>>>> {
+  const out: Record<string, Map<string, Set<string>>> = {};
+  for (const f of fields) out[f] = new Map();
+  try {
+    const rows = await sapGetAll<Record<string, unknown>>(
+      session,
+      `${entity}?$select=${fields.join(',')}`,
+      { pageSize: 500, cap: 20000 }
+    );
+    for (const r of rows) {
+      for (const f of fields) {
+        const raw = r[f];
+        if (typeof raw !== 'string' || !raw.trim()) continue;
+        const norm = normalizeName(raw);
+        if (!out[f].has(norm)) out[f].set(norm, new Set());
+        out[f].get(norm)!.add(raw.trim());
+      }
+    }
+  } catch {
+    // Si no se puede leer, no se generan advertencias (no bloquea).
+  }
+  return out;
+}
+
+/**
+ * Agrega una linea a la bitacora (colección hija). Append: sin
+ * B1S-ReplaceCollectionsOnPatch. El nombre de la colección varia por empresa.
+ */
+export async function agregarLog(
+  session: SapSession,
+  entity: string,
+  logCollection: string,
+  docNum: number,
+  userName: string,
+  comentario: string
+): Promise<void> {
+  await sapPatch(session, `${entity}(${docNum})`, {
+    [logCollection]: [
+      { U_RegSan_Fec: today(), U_RegSan_Nom: userName, U_RegSan_Com: comentario },
+    ],
+  });
+}
+
+/**
+ * Crea un registro sanitario (POST) y, si hay colección de logs configurada,
+ * agrega la primera linea de bitacora. Devuelve el DocNum creado.
+ */
+export async function crearRegistro(
+  session: SapSession,
+  endpoint: CompanySapEndpoint,
+  record: HealthRecordInput,
+  userName: string,
+  comentario: string
+): Promise<number> {
+  const entity = endpoint.healthRecordsEntity!;
+  const created = await sapPost<{ DocNum?: number }>(session, entity, record);
+  const docNum = created?.DocNum;
+
+  if (docNum != null && endpoint.healthRecordsLogCollection) {
+    await agregarLog(
+      session,
+      entity,
+      endpoint.healthRecordsLogCollection,
+      docNum,
+      userName,
+      comentario || 'Creado desde SynerLink'
+    );
+  }
+
+  return docNum ?? -1;
+}

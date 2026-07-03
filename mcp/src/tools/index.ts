@@ -121,6 +121,16 @@ function companyClause(column: string, filter: CompanyFilter): Prisma.Sql {
   return Prisma.sql`${Prisma.raw(column)} IN (${Prisma.join(filter.companyIds)})`;
 }
 
+/**
+ * Limpia espacios/saltos de línea sobrantes en las etiquetas de proceso y
+ * categoría de una solicitud (los valores del catálogo suelen traer `\r\n`).
+ */
+function trimRequestLabels(row: Record<string, unknown>): void {
+  for (const key of ['category', 'process'] as const) {
+    if (typeof row[key] === 'string') row[key] = (row[key] as string).trim();
+  }
+}
+
 export const ENTITY_METADATA = {
   requests: {
     description:
@@ -203,23 +213,25 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 13,
+  totalTools: 16,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
     'kronos_get_request',
+    'kronos_list_request_notes',
     'kronos_list_tickets',
     'kronos_get_ticket',
     'kronos_list_processes',
+    'kronos_list_process_categories',
     'kronos_list_activities',
     'kronos_list_departments',
     'kronos_list_categories',
     'kronos_list_users',
     'kronos_search',
   ],
-  write: ['kronos_categorize_case', 'kronos_categorize_request'],
+  write: ['kronos_categorize_case', 'kronos_categorize_request', 'kronos_create_request'],
   writeNote:
-    'El servidor YA NO es 100% solo lectura: existe una única ruta de escritura, acotada a categorización (caso: tabla puente category_case; solicitud: tabla puente process_category_request_general), transaccional, parametrizada y auditada. El candado assertReadOnlySql sigue intacto para las 11 tools de lectura.',
+    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general) y creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones). Todas transaccionales, parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las 12 tools de lectura.',
 } as const;
 
 export function registerTools(server: McpServer, ctx: ToolContext): void {
@@ -230,7 +242,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_metadata',
-    'Describe las entidades y campos disponibles, el alcance (empresas) de la API key actual, y las capacidades del servidor (11 tools de lectura + 2 de escritura para categorizar).',
+    'Describe las entidades y campos disponibles, el alcance (empresas) de la API key actual, y las capacidades del servidor (12 tools de lectura + 3 de escritura: 2 de categorización y 1 de creación de solicitudes).',
     {},
     async () =>
       withAudit(ctx, 'kronos_metadata', {}, async () => ({
@@ -286,20 +298,30 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         }
         const whereSql = Prisma.join(where, ' AND ');
 
-        const rows = await queryReadOnly<unknown>(Prisma.sql`
+        const rows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
           SELECT rg.id, rg.subject_request AS subject, rg.[description],
                  rg.status_req AS id_status, sc.status AS status,
+                 cr.category AS category, pc.process AS process,
+                 STUFF((SELECT ', ' + ru.name
+                    FROM user_process_category_request_general upcrg2
+                    INNER JOIN [user] ru ON ru.id = upcrg2.id_user
+                    WHERE upcrg2.id_process_category = pcrg.id_process_category
+                    FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS responsible,
                  rg.id_company, c.company, u.name AS requester,
                  rg.created_at, rg.date_resolution, rg.resolution, rg.url
           FROM requests_general rg
           INNER JOIN company c ON c.id_company = rg.id_company
           LEFT JOIN status_case sc ON sc.id_status_case = rg.status_req
           LEFT JOIN [user] u ON u.id = rg.id_requester
+          LEFT JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+          LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+          LEFT JOIN category_request cr ON cr.id = pc.id_category_request
           WHERE ${whereSql}
           ORDER BY rg.id DESC
           OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
         `);
 
+        for (const r of rows) trimRequestLabels(r);
         return { result: { count: rows.length, limit, offset, data: rows }, rows: rows.length };
       })
   );
@@ -309,23 +331,107 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_get_request',
-    'Obtiene una solicitud por id. Solo la devuelve si pertenece a una empresa del alcance.',
+    'Obtiene una solicitud por id, con sus notas/seguimientos y las tareas del workflow (con tiempos). Solo la devuelve si pertenece a una empresa del alcance.',
     { id: z.number().int().describe('id de la solicitud (requests_general.id).') },
     async (args) =>
       withAudit(ctx, 'kronos_get_request', args, async () => {
         const filter = effectiveCompanyFilter(ctx.scope, null);
-        const rows = await queryReadOnly<unknown>(Prisma.sql`
+        const rows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
           SELECT rg.id, rg.subject_request AS subject, rg.[description],
                  rg.status_req AS id_status, sc.status AS status,
+                 cr.category AS category, pc.process AS process,
+                 STUFF((SELECT ', ' + ru.name
+                    FROM user_process_category_request_general upcrg2
+                    INNER JOIN [user] ru ON ru.id = upcrg2.id_user
+                    WHERE upcrg2.id_process_category = pcrg.id_process_category
+                    FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS responsible,
                  rg.id_company, c.company, u.name AS requester,
                  rg.created_at, rg.date_resolution, rg.resolution, rg.url
           FROM requests_general rg
           INNER JOIN company c ON c.id_company = rg.id_company
           LEFT JOIN status_case sc ON sc.id_status_case = rg.status_req
           LEFT JOIN [user] u ON u.id = rg.id_requester
+          LEFT JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+          LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+          LEFT JOIN category_request cr ON cr.id = pc.id_category_request
           WHERE rg.id = ${args.id} AND ${companyClause('rg.id_company', filter)}
         `);
-        return { result: rows[0] ?? null, rows: rows.length };
+
+        const request = rows[0] ?? null;
+        if (!request) return { result: null, rows: 0 };
+        trimRequestLabels(request);
+
+        // Notas/seguimientos de la solicitud (solo tras confirmar el alcance).
+        const notes = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT n.id_note, n.note, u.name AS createdBy, n.creation_date
+          FROM notes n
+          LEFT JOIN [user] u ON u.id = n.created_by
+          WHERE n.id_request = ${args.id}
+          ORDER BY n.id_note DESC
+        `);
+
+        // Tareas del workflow de la solicitud, con sus tiempos.
+        const tasks = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT trg.id, trg.id_task, tpc.task AS task, trg.id_status,
+                 sc.status, trg.id_assigned, u.name AS assignedTo,
+                 trg.start_date, trg.end_date, trg.date_resolution, trg.resolution
+          FROM task_request_general trg
+          LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task
+          LEFT JOIN status_case sc ON sc.id_status_case = trg.id_status
+          LEFT JOIN [user] u ON u.id = trg.id_assigned
+          WHERE trg.id_request_general = ${args.id}
+          ORDER BY trg.id ASC
+        `);
+        return { result: { ...request, notes, tasks }, rows: 1 };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_request_notes  (vista vw_notas_solicitudes)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_request_notes',
+    'Lista notas/seguimientos de solicitudes desde la vista vw_notas_solicitudes, de forma eficiente y paginada (pensada para consultar TODAS las notas sin pedir solicitud por solicitud). Filtra SIEMPRE por las empresas del alcance. Permite acotar por solicitud (requestId) y empresa (companyId).',
+    {
+      requestId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Acota a las notas de una solicitud (vw_notas_solicitudes.ID_Solicitud).'),
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a consultar; se interseca con el alcance de la key.'),
+      limit: z.number().int().optional(),
+      offset: z.number().int().optional(),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_request_notes', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const limit = clampLimit(ctx, args.limit);
+        const offset = clampOffset(args.offset);
+
+        // El alcance por empresa se aplica ligando la nota con su solicitud
+        // mediante la columna ID_Solicitud de la vista.
+        const where: Prisma.Sql[] = [companyClause('rg.id_company', filter)];
+        if (args.requestId !== undefined) {
+          where.push(Prisma.sql`vn.ID_Solicitud = ${args.requestId}`);
+        }
+        const whereSql = Prisma.join(where, ' AND ');
+
+        const rows = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT vn.id_note, vn.ID_Solicitud AS id_request, vn.Nota AS note,
+                 vn.Creador_Nota AS createdBy, vn.Fecha_Nota AS creationDate,
+                 rg.id_company, c.company
+          FROM vw_notas_solicitudes vn
+          INNER JOIN requests_general rg ON rg.id = vn.ID_Solicitud
+          INNER JOIN company c ON c.id_company = rg.id_company
+          WHERE ${whereSql}
+          ORDER BY vn.ID_Solicitud DESC, vn.id_note DESC
+          OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+        `);
+        return { result: { count: rows.length, limit, offset, data: rows }, rows: rows.length };
       })
   );
 
@@ -499,6 +605,38 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
             subcategories: { select: { id_subcategory: true, subcategory: true } },
           },
         });
+        return { result: { count: data.length, limit: take, offset: skip, data }, rows: data.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_process_categories  (catálogo de workflows de solicitudes)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_process_categories',
+    'Lista las CATEGORÍAS DE PROCESO (workflows) de solicitudes, con su descripción de qué hace cada una. Filtra por las empresas del alcance. Úsala para ASESORAR sobre qué proceso elegir y para obtener el id_process_category válido al crear una solicitud con kronos_create_request.',
+    {
+      companyId: z.number().int().optional().describe('Empresa a acotar; se interseca con el alcance de la key.'),
+      onlyActive: z.boolean().optional().describe('Si es true, solo procesos activos (pc.active = 1).'),
+      limit: z.number().int().optional(),
+      offset: z.number().int().optional(),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_process_categories', args, async () => {
+        const take = clampLimit(ctx, args.limit);
+        const skip = clampOffset(args.offset);
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const activeClause = args.onlyActive ? Prisma.sql`AND pc.active = 1` : Prisma.empty;
+        const data = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT pc.id AS id_process_category, pc.process AS name, pc.description,
+                 pc.active, ccr.id_company, co.company
+          FROM process_category pc
+          INNER JOIN company_category_request ccr ON ccr.id_category_request = pc.id_category_request
+          INNER JOIN company co ON co.id_company = ccr.id_company
+          WHERE ${companyClause('ccr.id_company', filter)} ${activeClause}
+          ORDER BY co.company, pc.process
+          OFFSET ${skip} ROWS FETCH NEXT ${take} ROWS ONLY
+        `);
         return { result: { count: data.length, limit: take, offset: skip, data }, rows: data.length };
       })
   );
@@ -805,6 +943,138 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           };
         });
 
+        return { result, rows: 1 };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_create_request  (ESCRITURA) — crea una solicitud + workflow + notifs
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_create_request',
+    'ESCRITURA. Crea una nueva solicitud en SynerLink: inserta en requests_general, la vincula a su categoría de proceso, instancia automáticamente las tareas del workflow y registra notificaciones (en la app) para el responsable del proceso y los asignados. Acotada a las empresas del alcance de la key. Valida empresa, proceso (activo y habilitado para la empresa) y solicitante. Transaccional y auditada. Use kronos_list_process_categories para el id_process_category y kronos_list_users para el solicitante.',
+    {
+      companyId: z.number().int().describe('id_company de la empresa de la solicitud (debe estar en el alcance de la key).'),
+      subject: z.string().min(1).describe('Asunto de la solicitud (subject_request).'),
+      description: z.string().min(1).describe('Descripción de la solicitud.'),
+      requesterUserId: z.string().min(1).describe('id del usuario solicitante (user.id). Resuélvalo con kronos_list_users.'),
+      id_process_category: z.number().int().describe('process_category.id del proceso al que pertenece (kronos_list_process_categories).'),
+      url: z.string().optional().describe('URL opcional asociada a la solicitud.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_create_request', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId);
+        const result = await executeWrite(async (tx: TxClient) => {
+          // 1. La empresa existe y está en el alcance de la key.
+          const okCompany = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok
+            FROM company c
+            WHERE c.id_company = ${args.companyId} AND ${companyClause('c.id_company', filter)}
+          `);
+          if (okCompany.length === 0) {
+            throw new Error('empresa inexistente o fuera de alcance');
+          }
+
+          // 2. El proceso existe, está activo y está habilitado para la empresa.
+          const okProcess = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok
+            FROM process_category pc
+            INNER JOIN company_category_request ccr
+              ON ccr.id_category_request = pc.id_category_request
+            WHERE pc.id = ${args.id_process_category}
+              AND pc.active = 1
+              AND ccr.id_company = ${args.companyId}
+          `);
+          if (okProcess.length === 0) {
+            throw new Error('proceso inexistente, inactivo o no habilitado para la empresa');
+          }
+
+          // 3. El solicitante existe.
+          const okUser = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok FROM [user] u WHERE u.id = ${args.requesterUserId}
+          `);
+          if (okUser.length === 0) {
+            throw new Error('usuario solicitante inexistente');
+          }
+
+          // 4. Insertar la solicitud (status_req = 1 = Abierto).
+          const inserted = await tx.$queryRaw<{ id: number }[]>(Prisma.sql`
+            INSERT INTO requests_general (description, subject_request, id_company, id_requester, status_req, url)
+            OUTPUT INSERTED.id
+            VALUES (${args.description}, ${args.subject}, ${args.companyId}, ${args.requesterUserId}, 1, ${args.url ?? null})
+          `);
+          const newRow = inserted[0];
+          if (!newRow) {
+            throw new Error('no se pudo crear la solicitud');
+          }
+          const newId = newRow.id;
+
+          // 5. Vincular la solicitud a su categoría de proceso.
+          await tx.$executeRaw(Prisma.sql`
+            INSERT INTO process_category_request_general (id_request_general, id_process_category)
+            VALUES (${newId}, ${args.id_process_category})
+          `);
+
+          // 6. Instanciar las tareas del workflow (id_status = 4 = Sin Empezar).
+          const tasks = await tx.$queryRaw<{ id_task: number; id_user: string; email: string | null }[]>(Prisma.sql`
+            SELECT tpc.id AS id_task, utrg.id_user, u.email
+            FROM user_task_request_general utrg
+            INNER JOIN task_process_category tpc ON tpc.id = utrg.id_task
+            INNER JOIN [user] u ON u.id = utrg.id_user
+            WHERE tpc.id_process_category = ${args.id_process_category}
+          `);
+          for (const t of tasks) {
+            await tx.$executeRaw(Prisma.sql`
+              INSERT INTO task_request_general (id_request_general, id_task, id_status, id_assigned)
+              VALUES (${newId}, ${t.id_task}, 4, ${t.id_user})
+            `);
+          }
+
+          // 7. Correos: responsable del proceso + asignados de las tareas.
+          const procUsers = await tx.$queryRaw<{ email: string | null }[]>(Prisma.sql`
+            SELECT u.email
+            FROM user_process_category_request_general upcrg
+            INNER JOIN [user] u ON u.id = upcrg.id_user
+            WHERE upcrg.id_process_category = ${args.id_process_category}
+          `);
+          const processEmail = procUsers[0]?.email ?? null;
+          const taskEmails = Array.from(
+            new Set(tasks.map((t) => t.email).filter((e): e is string => Boolean(e)))
+          );
+
+          // 8. Notificaciones en la app (tabla notifications), igual que notifyNewRequest.
+          //    Nota: el push del navegador (web-push) lo envía la SPA; aquí se
+          //    persiste la notificación en BD (campana), que es la parte durable.
+          const viewUrl =
+            args.url && args.url.trim()
+              ? args.url.trim()
+              : `/process/request-general/view-request?id=${newId}&from=general-requests`;
+          const activitiesUrl = `/process/request-general/view-activities?id=${newId}&from=assigned-activities`;
+          const processList = processEmail ? [processEmail] : [];
+          const taskList = taskEmails.filter((e) => !processList.includes(e));
+
+          for (const email of processList) {
+            await tx.$executeRaw(Prisma.sql`
+              INSERT INTO notifications (email, title, body, url)
+              VALUES (${email}, ${'Nueva solicitud · SynerLink'}, ${`#${newId} — ${args.subject}`}, ${viewUrl})
+            `);
+          }
+          for (const email of taskList) {
+            await tx.$executeRaw(Prisma.sql`
+              INSERT INTO notifications (email, title, body, url)
+              VALUES (${email}, ${'Actividad asignada · SynerLink'}, ${`Tienes una actividad en la solicitud #${newId} — ${args.subject}`}, ${activitiesUrl})
+            `);
+          }
+
+          return {
+            id_request: newId,
+            id_company: args.companyId,
+            id_process_category: args.id_process_category,
+            requester: args.requesterUserId,
+            tasksCreated: tasks.length,
+            notified: { processEmail, taskEmails },
+          };
+        });
         return { result, rows: 1 };
       })
   );

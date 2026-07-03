@@ -5,45 +5,65 @@ on:
     branches:
       - main
 
-# El runner es self-hosted en el MISMO servidor de producción (serfarma05) y corre
-# como DFARUNIADM\nicolas.rivera, la cuenta dueña del código y del daemon pm2 que
-# ejecuta GSS-Front. Por eso el deploy se construye directamente sobre el
-# repositorio de prod (C:\Users\administrador.DFARUNIADM\projects\front-kronos),
-# que SÍ contiene los archivos git-ignored necesarios para compilar: dbconfig.js
-# (credenciales SQL) y app/generated/prisma (cliente Prisma generado).
+# Auto-deploy de PRODUCCIÓN (serfarma05, app pm2 GSS-Front en :3003).
 #
-# El esquema anterior (checkout limpio -> npm run build) fallaba siempre con 102
-# errores "Module not found: ../dbconfig" y "../app/generated/prisma" porque esos
-# archivos no existen en un checkout limpio. Además hacia `pm2 restart all` (que
-# reinicia las ~25 apps de la flota) y `xcopy` sobre el repo de prod (que pisaba
-# cambios locales no commiteados). Este esquema corrige ambos.
+# RUNNER FIJO: se ancla con la etiqueta `serfarma05` (además de self-hosted)
+# porque el repo tiene DOS runners self-hosted Windows (prod y la .230). Con solo
+# `self-hosted` el job podía caer en la máquina equivocada y fallar en el `cd`.
 #
-# NO se ejecuta `prisma generate` en el deploy: el cliente ya está generado en
-# disco y la app en ejecución mantiene bloqueado query_engine-windows.dll.node,
-# lo que hace fallar el rename con EPERM. Si alguna vez cambia prisma/schema.prisma
-# hay que regenerarlo manualmente (detener GSS-Front, `npx prisma generate`,
-# reiniciar).
+# CÓDIGO: `git fetch` + `git reset --hard origin/main` (NO `git pull`). `pull` se
+# aborta si el árbol de prod tiene cambios locales en archivos versionados (eso
+# tumbó el deploy del 2026-06-30). `reset --hard` solo toca archivos VERSIONADOS;
+# los git-ignored (dbconfig.js, app/generated/prisma, .env) sobreviven porque NO
+# ejecutamos `git clean`.
+#
+# PRISMA: este deploy NO corre `prisma generate` ni `migrate deploy`. Motivos:
+#   - `generate` falla con EPERM en Windows porque GSS-Front Y kronos-mcp mantienen
+#     bloqueado query_engine-windows.dll.node (lo documentó el commit 3957e49 que
+#     quitó ese paso). El cliente ya está generado en disco (app/generated/prisma).
+#   - `migrate deploy` falla con P3005 (la BD de prod no está baselined para
+#     migraciones de Prisma).
+#   Si cambia prisma/schema.prisma o hay una migración nueva, se aplican A MANO en
+#   la ventana de promoción, con backup previo (detener apps, generate/migrar,
+#   reiniciar). El deploy automático asume que el esquema no cambió.
+#
+# CERO DOWNTIME: se usa `pm2 reload` (recarga grácil instancia por instancia del
+# cluster), no `stop`/`restart`. Si el build falla, NO se recarga: GSS-Front sigue
+# sirviendo el build anterior, así que prod nunca queda caído.
+
+concurrency:
+  group: deploy-prod-serfarma05
+  cancel-in-progress: false
 
 jobs:
   deploy:
-    runs-on: self-hosted
+    runs-on: [self-hosted, serfarma05]
+    env:
+      PROJECT_DIR: C:\Users\administrador.DFARUNIADM\projects\front-kronos
 
     steps:
-      - name: Deploy on production repository
+      - name: Actualizar codigo (fetch + reset --hard a origin/main)
         shell: cmd
         run: |
-          cd /d C:\Users\administrador.DFARUNIADM\projects\front-kronos || exit /b 1
-
-          echo === Actualizando codigo (git pull origin main) ===
+          cd /d %PROJECT_DIR% || exit /b 1
+          echo === git fetch origin ===
           git fetch origin || exit /b 1
-          git pull origin main || exit /b 1
+          echo === git reset --hard origin/main ===
+          git reset --hard origin/main || exit /b 1
+          git rev-parse --short HEAD
 
-          echo === Instalando dependencias ===
+      - name: Instalar dependencias y compilar
+        shell: cmd
+        run: |
+          cd /d %PROJECT_DIR% || exit /b 1
+          echo === npm install ===
           call npm install || exit /b 1
-
-          echo === Compilando (next build) ===
+          echo === next build ===
           call npm run build || exit /b 1
 
-          echo === Recargando GSS-Front (reload, cero downtime) ===
+      - name: Recargar GSS-Front (reload, cero downtime)
+        shell: cmd
+        run: |
+          cd /d %PROJECT_DIR% || exit /b 1
           call pm2 reload GSS-Front || exit /b 1
           call pm2 save
