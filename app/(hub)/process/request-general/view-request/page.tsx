@@ -37,8 +37,8 @@ import {
   ScrollArea,
   Modal,
   Box,
-  Table,
   MultiSelect,
+  ThemeIcon,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -64,6 +64,7 @@ import {
   IconFileSpreadsheet,
   IconPhoto,
   IconEye,
+  IconLock,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
@@ -126,6 +127,9 @@ interface ViewTasksRequestGeneral {
   id_requester: number;
   name_requester: string;
   status_req: number;
+  is_sequential?: boolean;
+  locked?: boolean;
+  display_order?: number;
 }
 
 interface CompanyData {
@@ -1099,6 +1103,8 @@ function ViewRequestPage() {
         return 'blue';
       case 'resuelto':
         return 'green';
+      case 'cancelado':
+        return 'red';
       default:
         return 'red';
     }
@@ -1112,8 +1118,10 @@ function ViewRequestPage() {
         return 'En Progreso';
       case 'resuelto':
         return 'Resuelto';
+      case 'cancelado':
+        return 'Cancelado';
       default:
-        return 'red';
+        return status || 'Desconocido';
     }
   };
 
@@ -1845,7 +1853,10 @@ function ViewRequestPage() {
               {(request.id_assigned_process_category || request.id_assigned_category) == userId && (
                 <Button
                   color='blue'
-                  onClick={() => setModalTasksOpened(true)}
+                  onClick={() => {
+                    setModalTasksOpened(true);
+                    fetchTasksRG();
+                  }}
                   leftSection={<IconTicket size={16} />}
                 >
                   Ver Tareas
@@ -1892,91 +1903,178 @@ function ViewRequestPage() {
               <Text>Cargando tareas...</Text>
             </div>
           ) : taskRQ.length > 0 ? (
-            <Table striped highlightOnHover withTableBorder>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Tarea</Table.Th>
-                  <Table.Th>Asignado</Table.Th>
-                  <Table.Th>Estado</Table.Th>
-                  <Table.Th>Fecha Inicio</Table.Th>
-                  <Table.Th>Fecha Fin</Table.Th>
-                  <Table.Th>Resolución</Table.Th>
-                  <Table.Th>Acción</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {taskRQ.map((task) => (
-                  <Table.Tr key={task.id}>
-                    <Table.Td>{task.task}</Table.Td>
-                    <Table.Td>
-                      {task.status?.toLowerCase() === 'resuelto' ? (
-                        task.name
-                      ) : (
-                        <Select
-                          data={assignableUsers}
-                          value={task.id_assigned ? String(task.id_assigned) : null}
-                          onChange={(value) => handleUpdateTaskAssigned(task.id, value)}
-                          searchable
-                          allowDeselect={false}
-                          disabled={updatingAssigneeId === task.id}
-                          size="xs"
-                          comboboxProps={{ withinPortal: true }}
-                        />
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge color={getStatusColorTask(task.status)} size="sm">
-                        {getStatusTask(task.status)}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {task.start_date
-                        ? new Intl.DateTimeFormat('es-CO', {
-                            day: 'numeric',
-                            month: 'long',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            hour12: true,
-                          }).format(
-                            new Date(
-                              new Date(task.start_date).getTime()
-                            )
-                          )
-                        : 'N/A'}
-                    </Table.Td>
-                    <Table.Td>
-                      {task.end_date
-                        ? new Intl.DateTimeFormat('es-CO', {
-                            day: 'numeric',
-                            month: 'long',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            hour12: true,
-                          }).format(
-                            new Date(
-                              new Date(task.end_date).getTime()
-                            )
-                          )
-                        : 'N/A'}
-                    </Table.Td>
-                    <Table.Td>
-                      {task.resolution}
-                    </Table.Td>
-                    <Table.Td>
-                      <ActionIcon
-                        variant="subtle"
-                        color="blue"
-                        onClick={() => handleViewTask(task)}
+<ScrollArea.Autosize mah="65vh" offsetScrollbars>
+              <Stack gap={0}>
+              {[...taskRQ]
+                .sort((a, b) => {
+                  const da = a.display_order ?? 0;
+                  const db = b.display_order ?? 0;
+                  if (da !== db) return da - db;
+                  return a.id_task - b.id_task;
+                })
+                .map((task, index, arr) => {
+                  const isLast = index === arr.length - 1;
+                  const statusLower = task.status?.toLowerCase();
+                  const isResolved = task.id_status === 2 || statusLower === 'resuelto';
+                  const isCancelled = task.id_status === 3 || statusLower === 'cancelado';
+                  const isLocked = !!task.locked;
+                  const bulletColor = isResolved
+                    ? 'green'
+                    : isCancelled
+                    ? 'red'
+                    : isLocked
+                    ? 'gray'
+                    : 'blue';
+                  const fmtDate = (d?: string) =>
+                    d
+                      ? new Intl.DateTimeFormat('es-CO', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: true,
+                        }).format(new Date(d))
+                      : 'N/A';
+                  return (
+                    <Flex key={task.id} gap="md" align="stretch">
+                      <Flex direction="column" align="center" style={{ flexShrink: 0 }}>
+                        <ThemeIcon
+                          radius="xl"
+                          size={36}
+                          color={bulletColor}
+                          variant={isLocked ? 'light' : 'filled'}
+                        >
+                          {isResolved ? (
+                            <IconCheck size={18} />
+                          ) : isCancelled ? (
+                            <IconX size={18} />
+                          ) : isLocked ? (
+                            <IconLock size={16} />
+                          ) : (
+                            <Text fw={700} size="sm" c="white">
+                              {index + 1}
+                            </Text>
+                          )}
+                        </ThemeIcon>
+                        {!isLast && (
+                          <Box
+                            style={{
+                              flex: 1,
+                              width: 2,
+                              minHeight: 20,
+                              backgroundColor: isResolved
+                                ? 'var(--mantine-color-green-5)'
+                                : 'var(--mantine-color-default-border)',
+                            }}
+                          />
+                        )}
+                      </Flex>
+                      <Paper
+                        withBorder
+                        p="sm"
+                        radius="md"
+                        mb="sm"
+                        style={{ flex: 1, minWidth: 0, opacity: isLocked ? 0.75 : 1 }}
                       >
-                        <IconEye size={16} />
-                      </ActionIcon>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
+                        <Group justify="space-between" align="flex-start" wrap="nowrap">
+                          <Box style={{ flex: 1, minWidth: 0 }}>
+                            <Group gap={8} mb={6}>
+                              <Text fw={600}>{task.task}</Text>
+                              <Badge
+                                color={getStatusColorTask(task.status)}
+                                size="sm"
+                                styles={{
+                                  root: { maxWidth: 'unset' },
+                                  label: { overflow: 'visible' },
+                                }}
+                              >
+                                {getStatusTask(task.status)}
+                              </Badge>
+                              <Badge
+                                color={task.is_sequential ? 'grape' : 'gray'}
+                                variant="light"
+                                size="sm"
+                              >
+                                {task.is_sequential ? 'Secuencial' : 'Paralela'}
+                              </Badge>
+                              {isLocked && (
+                                <Badge
+                                  color="orange"
+                                  variant="light"
+                                  size="sm"
+                                  leftSection={<IconLock size={12} />}
+                                >
+                                  Bloqueada
+                                </Badge>
+                              )}
+                            </Group>
+                            <Group gap={6} align="center" mb={8} wrap="nowrap">
+                              <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+                                Asignado:
+                              </Text>
+                              {isResolved ? (
+                                <Text size="sm">{task.name}</Text>
+                              ) : (
+                                <Select
+                                  data={assignableUsers}
+                                  value={task.id_assigned ? String(task.id_assigned) : null}
+                                  onChange={(value) => handleUpdateTaskAssigned(task.id, value)}
+                                  searchable
+                                  allowDeselect={false}
+                                  disabled={updatingAssigneeId === task.id}
+                                  size="xs"
+                                  comboboxProps={{ withinPortal: true }}
+                                  style={{ minWidth: 220 }}
+                                />
+                              )}
+                            </Group>
+                            <Group gap="lg">
+                              <Text size="xs" c="dimmed">
+                                Inicio: {fmtDate(task.start_date)}
+                              </Text>
+                              <Text size="xs" c="dimmed">
+                                Fin: {fmtDate(task.end_date)}
+                              </Text>
+                            </Group>
+                            {task.resolution && (
+                              <Text size="sm" mt={6}>
+                                <Text span fw={500}>
+                                  Resolución:{' '}
+                                </Text>
+                                {task.resolution}
+                              </Text>
+                            )}
+                            {isLocked && (
+                              <Group gap={4} mt={8} wrap="nowrap">
+                                <IconLock size={13} color="var(--mantine-color-orange-6)" />
+                                <Text size="xs" c="orange">
+                                  Esperando que se resuelva la tarea anterior.
+                                </Text>
+                              </Group>
+                            )}
+                          </Box>
+                          <ActionIcon
+                            variant="subtle"
+                            color="blue"
+                            onClick={() => handleViewTask(task)}
+                            disabled={isLocked}
+                            title={
+                              isLocked
+                                ? 'Bloqueada: primero debe resolverse la tarea anterior'
+                                : 'Ver / resolver tarea'
+                            }
+                            style={{ flexShrink: 0 }}
+                          >
+                            <IconEye size={18} />
+                          </ActionIcon>
+                        </Group>
+                      </Paper>
+                    </Flex>
+                  );
+                })}
+              </Stack>
+            </ScrollArea.Autosize>
           ) : (
             <div className="text-center py-8">
               <Text color="gray">No hay tareas asignadas a esta solicitud</Text>

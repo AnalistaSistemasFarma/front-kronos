@@ -1,8 +1,26 @@
 import sql from 'mssql';
 import dbconfig from '../dbconfig';
 
-const buildMssqlConfig = dbconfig.buildMssqlConfig as () => sql.config;
-const getDatabaseConfigKey = dbconfig.getDatabaseConfigKey as () => string;
+// `dbconfig` puede ser un objeto de configuración plano (dbconfig.js) o exponer helpers.
+// Soportamos ambos: si trae buildMssqlConfig/getDatabaseConfigKey los usamos; si no,
+// tratamos el propio objeto como la config de mssql y derivamos una clave estable.
+const dbAny = dbconfig as unknown as {
+  buildMssqlConfig?: () => sql.config;
+  getDatabaseConfigKey?: () => string;
+  server?: string;
+  database?: string;
+  user?: string;
+};
+
+const buildMssqlConfig: () => sql.config =
+  typeof dbAny.buildMssqlConfig === 'function'
+    ? dbAny.buildMssqlConfig
+    : () => dbconfig as unknown as sql.config;
+
+const getDatabaseConfigKey: () => string =
+  typeof dbAny.getDatabaseConfigKey === 'function'
+    ? dbAny.getDatabaseConfigKey
+    : () => `${dbAny.server ?? ''}/${dbAny.database ?? ''}/${dbAny.user ?? ''}`;
 
 /**
  * Tipos .input() de la misma instancia de mssql que el pool activo.

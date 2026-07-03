@@ -145,7 +145,7 @@ function RequestGeneralPage() {
   const [folderContents, setFolderContents] = useState([]);
 
   const [filters, setFilters] = useState({
-    status: '',
+    status: '1',
     company: '',
     date_from: '',
     date_to: '',

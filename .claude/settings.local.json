@@ -5,7 +5,9 @@
       "PowerShell(Copy-Item \"c:\\\\Users\\\\nicolas.rojas\\\\Projects\\\\front-kronos\\\\public\\\\logo.png\" \"c:\\\\Users\\\\nicolas.rojas\\\\Projects\\\\front-kronos\\\\public\\\\iconocel.png\")",
       "Bash(npx tsc *)",
       "PowerShell(npx eslint \"app/\\(hub\\)/process/request-general/create-request/page.tsx\" 2>&1)",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "PowerShell(npx eslint \"app/\\(hub\\)/process/request-general/view-request/page.tsx\" \"app/\\(hub\\)/process/request-general/view-activities/page.tsx\")",
+      "PowerShell(npx eslint \"app/\\(hub\\)/process/request-general/view-request/page.tsx\" \"app/\\(hub\\)/process/request-general/view-activities/page.tsx\"; \"ESLINT_EXIT=$LASTEXITCODE\")"
     ]
   }
 }

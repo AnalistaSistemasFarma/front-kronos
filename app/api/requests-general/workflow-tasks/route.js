@@ -19,19 +19,21 @@ export async function GET(req) {
     }
 
     const query = `
-      SELECT 
+      SELECT
         tpc.id,
         tpc.task,
         tpc.active,
         tpc.cost,
         tpc.cost_center,
+        tpc.is_sequential,
+        tpc.display_order,
         u.name as assigned_user,
 		    u.id as id_assigned_user
       FROM task_process_category tpc
       LEFT JOIN user_task_request_general utrg ON utrg.id_task = tpc.id
       LEFT JOIN [user] u ON u.id = utrg.id_user
       WHERE tpc.active = 1 AND tpc.id_process_category = @idProcess
-      ORDER BY tpc.id
+      ORDER BY tpc.display_order, tpc.id
     `;
 
     const request = pool.request();

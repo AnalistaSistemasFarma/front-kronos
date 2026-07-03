@@ -79,6 +79,8 @@ export async function POST(req) {
       const getTasksQuery = `
         SELECT
           tpc.id AS id_task,
+          tpc.is_sequential,
+          tpc.display_order,
           utrg.id_user,
           u.email
         FROM user_task_request_general utrg
@@ -86,12 +88,28 @@ export async function POST(req) {
           ON tpc.id = utrg.id_task
         INNER JOIN [user] u
           ON u.id = utrg.id_user
-        WHERE tpc.id_process_category = @process;
+        WHERE tpc.id_process_category = @process
+        ORDER BY tpc.display_order, tpc.id;
       `;
 
       const tasksResult = await new sql.Request(transaction)
         .input("process", sql.Int, process)
         .query(getTasksQuery);
+
+      // Creación diferida (lazy) de tareas secuenciales: al crear la solicitud solo se
+      // instancian las tareas NO secuenciales (paralelas) + la PRIMERA del orden. Cada tarea
+      // secuencial posterior se crea recién cuando su tarea anterior se cierra (ver update-activities).
+      const orderKey = (r) => [r.display_order ?? 0, r.id_task];
+      const firstTaskRow = tasksResult.recordset.reduce((min, r) => {
+        if (!min) return r;
+        const [ma, mb] = orderKey(min);
+        const [ra, rb] = orderKey(r);
+        return ra < ma || (ra === ma && rb < mb) ? r : min;
+      }, null);
+      const firstTaskId = firstTaskRow ? firstTaskRow.id_task : null;
+
+      const shouldCreateNow = (row) =>
+        !row.is_sequential || row.id_task === firstTaskId;
 
       const insertTaskQuery = `
         INSERT INTO task_request_general
@@ -99,13 +117,19 @@ export async function POST(req) {
         VALUES (@id_request, @id_task, 4, @id_user);
       `;
 
+      const createdRows = [];
+
       for (const row of tasksResult.recordset) {
+
+        if (!shouldCreateNow(row)) continue;
 
         await new sql.Request(transaction)
           .input("id_request", sql.Int, newRequestId)
           .input("id_task", sql.Int, row.id_task)
           .input("id_user", sql.NVarChar, row.id_user)
           .query(insertTaskQuery);
+
+        createdRows.push(row);
 
       }
 
@@ -140,7 +164,7 @@ export async function POST(req) {
       const processEmail = processUserResult.recordset[0]?.email || null;
 
       const taskEmails = [
-        ...new Set(tasksResult.recordset.map(t => t.email))
+        ...new Set(createdRows.map(t => t.email))
       ];
 
       await transaction.commit();

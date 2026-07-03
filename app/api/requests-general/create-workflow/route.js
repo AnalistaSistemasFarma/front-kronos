@@ -102,6 +102,7 @@ export async function POST(req) {
         5️⃣ INSERT TASKS (LOOP)
         ========================= */
 
+        let taskOrder = 0;
         for (const t of task) {
 
           const insertTaskQuery = `
@@ -111,7 +112,9 @@ export async function POST(req) {
               id_process_category,
               active,
               cost,
-              cost_center
+              cost_center,
+              is_sequential,
+              display_order
               )
               OUTPUT INSERTED.id
               VALUES
@@ -120,7 +123,9 @@ export async function POST(req) {
               @id_process,
               1,
               @cost,
-              @cost_center
+              @cost_center,
+              @is_sequential,
+              @display_order
               );
           `;
 
@@ -130,6 +135,12 @@ export async function POST(req) {
           taskRequest.input("id_process", sql.Int, processId);
           taskRequest.input("cost", sql.Numeric(12,0), t.cost || 0);
           taskRequest.input("cost_center", sql.NVarChar(1000), t.cost_center || null);
+          taskRequest.input("is_sequential", sql.Bit, t.is_sequential ? 1 : 0);
+          taskRequest.input(
+            "display_order",
+            sql.Int,
+            t.display_order !== undefined && t.display_order !== null ? t.display_order : taskOrder++
+          );
 
           const taskResult = await taskRequest.query(insertTaskQuery);
 
