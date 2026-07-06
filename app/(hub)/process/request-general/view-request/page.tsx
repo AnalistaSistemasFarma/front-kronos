@@ -202,6 +202,7 @@ function ViewRequestPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loadingPermissions, setLoadingPermissions] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const notesViewportRef = useRef<HTMLDivElement>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [originalRequest, setOriginalRequest] = useState<Request | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -350,8 +351,8 @@ function ViewRequestPage() {
   };
 
   useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (notesViewportRef.current) {
+      notesViewportRef.current.scrollTop = notesViewportRef.current.scrollHeight;
     }
   }, [notes]);
 
@@ -1373,20 +1374,20 @@ function ViewRequestPage() {
         </Card>
 
         <div className='flex flex-col lg:flex-row gap-6'>
-          <div className='flex-1 order-2 lg:order-1'>
+          <div className='flex-1 order-2 lg:order-1 lg:sticky lg:top-6 self-start'>
             <Card
               shadow='sm'
               p='xl'
               radius='md'
               withBorder
-              className='bg-white h-full flex flex-col'
+              className='bg-white flex flex-col'
             >
               <Title order={3} mb='md' className='flex items-center gap-2'>
                 <IconNote size={20} />
                 Historial de Interacciones
               </Title>
 
-              <ScrollArea h={400} className='flex-1 mb-4' offsetScrollbars>
+              <ScrollArea h='calc(100vh - 420px)' className='mb-4' offsetScrollbars viewportRef={notesViewportRef}>
                 <div className='space-y-4 p-2'>
                   {notes.length > 0 ? (
                     notes.map((note) => {
