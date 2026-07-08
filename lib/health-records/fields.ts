@@ -13,7 +13,6 @@ export interface TemplateColumn {
 /** Columnas del Excel de cargue masivo: header exacto (con tildes) -> campo U_*. */
 export const TEMPLATE_COLUMNS: TemplateColumn[] = [
   { header: 'Referencia', field: 'U_Referencia', required: true },
-  { header: 'Descripción', field: 'U_Descripcion', required: true },
   { header: 'Registro Sanitario', field: 'U_Registro_Sanitario', required: true },
   { header: 'País', field: 'U_Pais' },
   { header: 'Titular', field: 'U_Titular' },
