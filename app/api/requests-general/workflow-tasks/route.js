@@ -1,10 +1,9 @@
-import sql from 'mssql';
-import sqlConfig from '../../../../dbconfig';
+import { sql, getPool } from '../../../../lib/mssqlPool';
 import { NextResponse } from 'next/server';
 
 export async function GET(req) {
   try {
-    const pool = await sql.connect(sqlConfig);
+    const pool = await getPool();
 
     const { searchParams } = new URL(req.url);
     const idProcess = searchParams.get('id_process');
