@@ -65,6 +65,7 @@ import {
   IconPhoto,
   IconEye,
   IconLock,
+  IconArrowBackUp,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
@@ -178,6 +179,8 @@ function ViewRequestPage() {
   const router = useRouter();
   const id = searchParams.get('id');
   const from = searchParams.get('from') || searchParams.get('mode') || 'create-request';
+  const RETURNED_STATUS_ID = 7;
+  const OPEN_STATUS_ID = 1;
   const [request, setRequest] = useState<Request | null>(null);
   const [companies, setCompanies] = useState<Option[]>([]);
   const [categories, setCategories] = useState<Option[]>([]);
@@ -226,6 +229,10 @@ function ViewRequestPage() {
     notificarPorCorreo: false,
   });
   const [modalTasksOpened, setModalTasksOpened] = useState(false);
+  const [reopenModalOpened, setReopenModalOpened] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
+  const [reopenSubmitting, setReopenSubmitting] = useState(false);
+  const [reopenError, setReopenError] = useState('');
   const [availableUsers, setAvailableUsers] = useState<UserEmail[]>([]);
   const [assignableUsers, setAssignableUsers] = useState<UserEmail[]>([]);
   const [updatingAssigneeId, setUpdatingAssigneeId] = useState<number | null>(null);
@@ -986,14 +993,17 @@ function ViewRequestPage() {
         }
       }
 
+      const isReturning = Number(resolutionData.estado) === RETURNED_STATUS_ID;
+      const motivo = resolutionData.resolucion?.trim() || '';
+
       const updateData = {
         id: request?.id,
         id_technical: userId,
         process_category: request?.id_process_category ? Number(request.id_process_category) : null,
-        status: resolutionData.estado !== '' 
+        status: resolutionData.estado !== ''
           ? Number(resolutionData.estado)
           : Number(request?.id_status_case),
-        resolucion: resolutionData.resolucion || null,
+        resolucion: isReturning ? null : (resolutionData.resolucion || null),
       };
 
       const response = await fetch('/api/requests-general/update-request', {
@@ -1026,7 +1036,25 @@ function ViewRequestPage() {
       }
 
       if (resolutionData.estado) {
-        setRequest((prev) => (prev ? { ...prev, status: resolutionData.estado } : null));
+        const chosenStatus = Number(resolutionData.estado);
+        const statusLabel =
+          chosenStatus === RETURNED_STATUS_ID
+            ? 'Devuelta'
+            : chosenStatus === 2
+            ? 'Resuelto'
+            : chosenStatus === 3
+            ? 'Cancelado'
+            : (request?.status ?? '');
+        setRequest((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: statusLabel,
+                id_status_case: chosenStatus,
+                status_req: chosenStatus,
+              }
+            : null
+        );
       }
 
       setOriginalRequest(request);
@@ -1037,15 +1065,7 @@ function ViewRequestPage() {
       }
 
       if (resolutionData.estado) {
-        const closedStatus = Number(resolutionData.estado);
-        if (isClosedStatusId(closedStatus)) {
-          showClosureNotification({
-            type: 'request',
-            id: request?.id,
-            subject: request?.subject,
-            status: closedStatus === 3 ? 'cancelled' : 'resolved',
-          });
-        }
+        const chosenStatus = Number(resolutionData.estado);
 
         setResolutionData({
           ...resolutionData,
@@ -1054,7 +1074,21 @@ function ViewRequestPage() {
           notificarPorCorreo: false,
         });
         setShowResolution(false);
-        await addSystemNote('Se ha cerrado la solicitud');
+
+        if (isReturning) {
+          // Devolver: nota con el motivo, sin notificación de cierre.
+          await addSystemNote(`Solicitud devuelta. Motivo: ${motivo}`);
+        } else {
+          if (isClosedStatusId(chosenStatus)) {
+            showClosureNotification({
+              type: 'request',
+              id: request?.id,
+              subject: request?.subject,
+              status: chosenStatus === 3 ? 'cancelled' : 'resolved',
+            });
+          }
+          await addSystemNote('Se ha cerrado la solicitud');
+        }
       }
     } catch (error) {
       console.error('Error updating request:', error);
@@ -1064,6 +1098,65 @@ function ViewRequestPage() {
       });
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handleReopenRequest = async () => {
+    const motivo = reopenReason.trim();
+    if (!motivo) {
+      setReopenError('El motivo de la reapertura es obligatorio.');
+      return;
+    }
+    if (!request?.id || !userId) return;
+
+    setReopenSubmitting(true);
+    setReopenError('');
+    try {
+      const response = await fetch('/api/requests-general/update-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: request.id,
+          id_technical: userId,
+          process_category: request.id_process_category
+            ? Number(request.id_process_category)
+            : null,
+          status: OPEN_STATUS_ID,
+          resolucion: null,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Error al reabrir la solicitud');
+      }
+
+      await addSystemNote(`Solicitud reabierta. Motivo: ${motivo}`);
+
+      setRequest((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: 'En progreso',
+              id_status_case: OPEN_STATUS_ID,
+              status_req: OPEN_STATUS_ID,
+            }
+          : null
+      );
+
+      setReopenModalOpened(false);
+      setReopenReason('');
+      setUpdateMessage({
+        type: 'success',
+        text: 'Solicitud reabierta correctamente',
+      });
+    } catch (error) {
+      console.error('Error reopening request:', error);
+      setReopenError(
+        error instanceof Error ? error.message : 'Error al reabrir la solicitud'
+      );
+    } finally {
+      setReopenSubmitting(false);
     }
   };
 
@@ -1078,6 +1171,10 @@ function ViewRequestPage() {
   const isRequestResolved = () => {
     const statusText = request?.status?.toLowerCase() ?? '';
     const statusId = Number(request?.id_status_case ?? request?.status_req);
+    // Una solicitud DEVUELTA no se considera cerrada: se puede editar / reabrir.
+    if (statusId === RETURNED_STATUS_ID || statusText.includes('devuel')) {
+      return false;
+    }
     const closedByStatus =
       statusId === 2 ||
       statusId === 3 ||
@@ -1252,9 +1349,13 @@ function ViewRequestPage() {
       case 'pendiente':
         return 'orange';
       case 'en progreso':
+      case 'abierto':
         return 'blue';
       case 'completada':
         return 'green';
+      case 'devuelta':
+      case 'devuelto':
+        return 'orange';
       default:
         return 'gray';
     }
@@ -1742,6 +1843,7 @@ function ViewRequestPage() {
                         data={[
                           { value: '2', label: 'Resuelto' },
                           { value: '3', label: 'Cancelado' },
+                          { value: '7', label: 'Devolver' },
                         ]}
                         value={resolutionData.estado}
                         onChange={(val) =>
@@ -1976,6 +2078,22 @@ function ViewRequestPage() {
                   </Button>
                 </>
               )}
+              {Number(request.id_status_case ?? request.status_req) === RETURNED_STATUS_ID &&
+                (canEdit ||
+                  String(request.id_requester ?? '') === String(userId ?? '')) &&
+                !loadingPermissions && (
+                  <Button
+                    color='orange'
+                    onClick={() => {
+                      setReopenReason('');
+                      setReopenError('');
+                      setReopenModalOpened(true);
+                    }}
+                    leftSection={<IconArrowBackUp size={16} />}
+                  >
+                    Reabrir solicitud
+                  </Button>
+                )}
               {isRequestResolved() && (
                 <Text size='sm' color='dimmed'>
                   Las solicitudes completadas no se pueden modificar.
@@ -2017,6 +2135,57 @@ function ViewRequestPage() {
             )}
           </Group>
         </Card>
+
+        <Modal
+          opened={reopenModalOpened}
+          onClose={() => {
+            if (!reopenSubmitting) setReopenModalOpened(false);
+          }}
+          title={
+            <Text fw={600} size="lg">
+              Reabrir solicitud #{request?.id}
+            </Text>
+          }
+          centered
+        >
+          <Stack gap="md">
+            <Text size="sm" c="dimmed">
+              La solicitud volverá a estado &quot;En progreso&quot;. Indica el motivo de la
+              reapertura; quedará registrado como nota.
+            </Text>
+            <Textarea
+              label="Motivo de la reapertura"
+              placeholder="Escribe el motivo..."
+              autosize
+              minRows={3}
+              value={reopenReason}
+              onChange={(e) => {
+                setReopenReason(e.currentTarget.value);
+                if (reopenError) setReopenError('');
+              }}
+              error={reopenError || undefined}
+              withAsterisk
+            />
+            <Group justify="flex-end">
+              <Button
+                variant="outline"
+                color="gray"
+                onClick={() => setReopenModalOpened(false)}
+                disabled={reopenSubmitting}
+              >
+                Cancelar
+              </Button>
+              <Button
+                color="orange"
+                leftSection={<IconArrowBackUp size={16} />}
+                onClick={handleReopenRequest}
+                loading={reopenSubmitting}
+              >
+                Reabrir
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
 
         <Modal
           opened={modalTasksOpened}
