@@ -52,9 +52,11 @@ import {
   IconTag,
   IconChevronUp,
   IconChevronDown,
+  IconEye,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { getFileLabelError } from '../../../../../lib/onedriveName';
+import toast from 'react-hot-toast';
 
 interface WorkFlow {
   id: number;
@@ -161,10 +163,13 @@ function ViewWorkFlowPage() {
   const [loadingUserId, setLoadingUserId] = useState(false);
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
+  const [createLoading, setCreateLoading] = useState(false);
 
   const canEditActive = userId != null && ADMIN_USER_IDS.includes(String(userId));
 
   const [addTaskModalOpened, setAddTaskModalOpened] = useState(false);
+  const [observersModalOpened, setObserversModalOpened] = useState(false);
+  const [observers, setObservers] = useState<string[]>([]);
   const [newTaskForm, setNewTaskForm] = useState({
     task: '',
     id_assigned_user: '',
@@ -950,6 +955,73 @@ function ViewWorkFlowPage() {
     }
   };
 
+  const openObserversModal = async () => {
+    if (!workflow) return;
+    setObserversModalOpened(true);
+    try {
+      const res = await fetch(
+        `/api/requests-general/assign-viewer?id_process_category=${workflow.id}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setObservers(Array.isArray(data.observers) ? data.observers : []);
+      }
+    } catch (err) {
+      console.error('Error al cargar observadores:', err);
+    }
+  };
+
+  const handleAsignViewer = async () => {
+    if (!workflow) return;
+
+    if (observers.length === 0) {
+      toast.error('Selecciona al menos un usuario.');
+      return;
+    }
+
+    try {
+      setCreateLoading(true);
+      setError(null);
+
+      let response: Response;
+      try {
+        response = await fetch('/api/requests-general/assign-viewer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            observers,
+            id_process_category: workflow.id,
+          }),
+        });
+      } catch (networkErr) {
+        console.error('Error de red al asignar el observador:', networkErr);
+        setError('No se pudo asignar el observador. Intente de nuevo.');
+        toast.error('No se pudo asignar el observador. Intente de nuevo.');
+        return;
+      }
+
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const errorData = await response.json();
+          detail = errorData.error || '';
+        } catch {
+        }
+        console.error('Fallo al asignar el observador:', detail);
+        setError('No se pudo asignar el observador. Intente de nuevo.');
+        toast.error('No se pudo asignar el observador. Intente de nuevo.');
+        return;
+      }
+
+      toast.success('Observadores asignados correctamente.');
+      setObserversModalOpened(false);
+    } finally {
+      setCreateLoading(false);
+    }
+  };
+
   const getActiveColor = (active: number) => {
     return active === 1 ? 'green' : 'gray';
   };
@@ -1092,6 +1164,13 @@ function ViewWorkFlowPage() {
             </div>
 
             <Group>
+              <Button
+                variant='light'
+                leftSection={<IconEye size={16} />}
+                onClick={openObserversModal}
+              >
+                Observadores{observers.length > 0 ? ` (${observers.length})` : ''}
+              </Button>
               <Badge color={getActiveColor(workflow.active)} size='lg' radius='sm' variant='light'>
                 {getActiveText(workflow.active)}
               </Badge>
@@ -2053,6 +2132,78 @@ function ViewWorkFlowPage() {
             </Button>
           </Group>
         </Card>
+
+        <Modal
+          opened={observersModalOpened}
+          onClose={() => setObserversModalOpened(false)}
+          title={
+            <Group gap='sm'>
+              <div className='flex items-center justify-center w-10 h-10 rounded-lg bg-blue-100'>
+                <IconEye size={20} className='text-blue-600' />
+              </div>
+              <div>
+                <Text size='lg' fw={600}>
+                  Agregar Observadores
+                </Text>
+                <Text size='xs' c='dimmed'>
+                  Selecciona los usuarios que seguirán este flujo de trabajo
+                </Text>
+              </div>
+            </Group>
+          }
+          size='lg'
+          radius='lg'
+          overlayProps={{ blur: 4 }}
+          centered
+        >
+          <Stack gap='lg'>
+            <MultiSelect
+              label='Observadores'
+              placeholder='Selecciona usuarios'
+              data={users}
+              value={observers}
+              onChange={setObservers}
+              leftSection={<IconUser size={16} />}
+              searchable
+              clearable
+              hidePickedOptions
+              nothingFoundMessage='No hay usuarios'
+              size='md'
+            />
+
+            {observers.length > 0 && (
+              <Group gap={6}>
+                {observers.map((id) => {
+                  const u = users.find((x) => x.value === id);
+                  return (
+                    <Badge
+                      key={id}
+                      variant='light'
+                      color='blue'
+                      leftSection={<IconUser size={12} />}
+                    >
+                      {u?.label ?? id}
+                    </Badge>
+                  );
+                })}
+              </Group>
+            )}
+
+            <Group justify='flex-end' gap='sm' mt='md'>
+              <Button variant='outline' onClick={() => setObservers([])}>
+                Limpiar
+              </Button>
+              <Button
+                onClick={() => handleAsignViewer()}
+                leftSection={<IconCheck size={16} />}
+                loading={createLoading}
+                disabled={createLoading}
+              >
+                Listo
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
 
         {/* Modal para agregar nueva tarea */}
         <Modal

@@ -1367,6 +1367,8 @@ function ViewRequestPage() {
         return '/process/request-general/general-requests';
       case 'assigned-requests':
         return '/process/request-general/assigned-requests';
+      case 'viewer-request':
+        return '/process/request-general/viewer-request';
       case 'create-request':
       default:
         return '/process/request-general/create-request';
