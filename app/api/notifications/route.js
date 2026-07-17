@@ -1,5 +1,4 @@
-import sql from 'mssql';
-import sqlConfig from '../../../dbconfig';
+import { sql, getPool } from '../../../lib/mssqlPool';
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../auth/[...nextauth]/route';
@@ -12,12 +11,7 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-/**
- * Conexión propia (no getPool): en Turbopack HMR el pool global puede quedar
- * ligado a otra instancia de mssql y romper .input() con EPARAM.
- */
 export async function GET(request) {
-  let pool;
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
@@ -29,7 +23,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const statusFilter = searchParams.get('status') === 'read' ? 'read' : 'unread';
 
-    pool = await sql.connect(sqlConfig);
+    const pool = await getPool();
 
     if (statusFilter === 'read') {
       const readResult = await pool
@@ -76,9 +70,5 @@ export async function GET(request) {
   } catch (err) {
     console.error('[GET /api/notifications] Error:', err);
     return NextResponse.json({ error: 'Error al obtener notificaciones' }, { status: 500 });
-  } finally {
-    if (pool?.connected) {
-      await pool.close().catch(() => {});
-    }
   }
 }
