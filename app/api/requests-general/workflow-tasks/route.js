@@ -26,11 +26,15 @@ export async function GET(req) {
         tpc.cost_center,
         tpc.is_sequential,
         tpc.display_order,
+        tpc.is_authorization,
+        tpc.type_authorization,
+        taut.type_authorization as type_authorization_label,
         u.name as assigned_user,
 		    u.id as id_assigned_user
       FROM task_process_category tpc
       LEFT JOIN user_task_request_general utrg ON utrg.id_task = tpc.id
       LEFT JOIN [user] u ON u.id = utrg.id_user
+      LEFT JOIN types_authorization taut ON taut.id = tpc.type_authorization
       WHERE tpc.active = 1 AND tpc.id_process_category = @idProcess
       ORDER BY tpc.display_order, tpc.id
     `;

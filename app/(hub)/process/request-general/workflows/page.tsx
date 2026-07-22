@@ -128,6 +128,8 @@ function RequestBoard() {
       costo: number;
       centroCosto: string;
       secuencial: boolean;
+      esAutorizacion: boolean;
+      tipoAutorizacion: string;
     }>
   >([]);
   const [taskForm, setTaskForm] = useState({
@@ -136,7 +138,12 @@ function RequestBoard() {
     costo: '',
     centroCosto: '',
     secuencial: false,
+    esAutorizacion: false,
+    tipoAutorizacion: '',
   });
+  const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
 
   const moveTask = (index: number, dir: -1 | 1) => {
     setTasks((prev) => {
@@ -305,6 +312,7 @@ function RequestBoard() {
 
   const addTask = () => {
     if (!taskForm.tarea.trim()) return;
+    if (taskForm.esAutorizacion && !taskForm.tipoAutorizacion) return;
 
     setTasks([
       ...tasks,
@@ -315,10 +323,20 @@ function RequestBoard() {
         costo: parseFloat(taskForm.costo) || 0,
         centroCosto: taskForm.centroCosto,
         secuencial: taskForm.secuencial,
+        esAutorizacion: taskForm.esAutorizacion,
+        tipoAutorizacion: taskForm.esAutorizacion ? taskForm.tipoAutorizacion : '',
       },
     ]);
 
-    setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false });
+    setTaskForm({
+      tarea: '',
+      asignado: '',
+      costo: '',
+      centroCosto: '',
+      secuencial: false,
+      esAutorizacion: false,
+      tipoAutorizacion: '',
+    });
 
     setTaskFormKey(prev => prev + 1);
   };
@@ -524,6 +542,21 @@ function RequestBoard() {
     fetchCompanies();
     fetchConsultsWorkFlows();
   }, [session, status, router]);
+
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    fetch('/api/requests-general/authorization-types', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: { id: number; type_authorization: string }[]) => {
+        setAuthorizationTypeOptions(
+          (data || []).map((t) => ({
+            value: t.id.toString(),
+            label: t.type_authorization,
+          }))
+        );
+      })
+      .catch((err) => console.error('Error cargando tipos de autorización:', err));
+  }, [status]);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -780,6 +813,10 @@ function RequestBoard() {
         cost_center: task.centroCosto || null,
         is_sequential: task.secuencial,
         display_order: index,
+        is_authorization: task.esAutorizacion,
+        type_authorization: task.esAutorizacion
+          ? Number(task.tipoAutorizacion) || null
+          : null,
       }));
 
       console.log('asignados tareas ' + tasksToSend);
@@ -838,7 +875,7 @@ function RequestBoard() {
         assignedProcess: '',
       });
       setTasks([]);
-      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false });
+      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '' });
       setRequiresFiles(false);
       setRequiredFiles([]);
       setFileForm({ file_label: '', required: true, condition_option_temps: [] });
@@ -1256,7 +1293,7 @@ function RequestBoard() {
             setCurrentStep(1);
             setFormErrors({});
             setTasks([]);
-            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false });
+            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '' });
             setRequiresFiles(false);
             setRequiredFiles([]);
             setFileForm({ file_label: '', required: true, condition_option_temps: [] });
@@ -1704,7 +1741,10 @@ function RequestBoard() {
                           fullWidth
                           h={48}
                           mt={26}
-                          disabled={!taskForm.tarea.trim()}
+                          disabled={
+                            !taskForm.tarea.trim() ||
+                            (taskForm.esAutorizacion && !taskForm.tipoAutorizacion)
+                          }
                           className='cursor-pointer hover:bg-blue-700 transition-colors duration-200'
                           size='lg'
                         >
@@ -1719,6 +1759,40 @@ function RequestBoard() {
                       checked={taskForm.secuencial}
                       onChange={(e) => setTaskForm({ ...taskForm, secuencial: e.currentTarget.checked })}
                     />
+
+                    <Checkbox
+                      mt='sm'
+                      label='Tarea de autorización'
+                      checked={taskForm.esAutorizacion}
+                      onChange={(e) =>
+                        setTaskForm({
+                          ...taskForm,
+                          esAutorizacion: e.currentTarget.checked,
+                          tipoAutorizacion: e.currentTarget.checked ? taskForm.tipoAutorizacion : '',
+                        })
+                      }
+                    />
+
+                    {taskForm.esAutorizacion && (
+                      <Select
+                        mt='sm'
+                        label='Tipo de autorización'
+                        placeholder='Seleccione el tipo'
+                        data={authorizationTypeOptions}
+                        value={taskForm.tipoAutorizacion}
+                        onChange={(value) =>
+                          setTaskForm({ ...taskForm, tipoAutorizacion: value || '' })
+                        }
+                        searchable
+                        withAsterisk
+                        error={
+                          taskForm.esAutorizacion && !taskForm.tipoAutorizacion
+                            ? 'Selecciona el tipo de autorización'
+                            : undefined
+                        }
+                        maw={400}
+                      />
+                    )}
                   </div>
 
                   {/* Tabla de tareas agregadas - Mejorada */}
@@ -1744,6 +1818,9 @@ function RequestBoard() {
                             </Table.Th>
                             <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'>
                               Secuencial
+                            </Table.Th>
+                            <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'>
+                              Autorización
                             </Table.Th>
                             <Table.Th
                               className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'
@@ -1795,6 +1872,17 @@ function RequestBoard() {
                                 {task.secuencial ? (
                                   <Badge color='indigo' variant='light' size='sm'>
                                     Secuencial
+                                  </Badge>
+                                ) : (
+                                  <Text size='sm' c='dimmed'>—</Text>
+                                )}
+                              </Table.Td>
+                              <Table.Td className='py-4 px-5 text-center'>
+                                {task.esAutorizacion ? (
+                                  <Badge color='teal' variant='light' size='sm'>
+                                    {authorizationTypeOptions.find(
+                                      (o) => o.value === task.tipoAutorizacion
+                                    )?.label || 'Autorización'}
                                   </Badge>
                                 ) : (
                                   <Text size='sm' c='dimmed'>—</Text>
@@ -2250,7 +2338,7 @@ function RequestBoard() {
                   setCurrentStep(1);
                   setFormErrors({});
                   setTasks([]);
-                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false });
+                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '' });
                 }
               }}
               size='md'

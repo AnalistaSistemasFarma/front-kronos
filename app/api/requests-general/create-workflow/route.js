@@ -114,7 +114,9 @@ export async function POST(req) {
               cost,
               cost_center,
               is_sequential,
-              display_order
+              display_order,
+              is_authorization,
+              type_authorization
               )
               OUTPUT INSERTED.id
               VALUES
@@ -125,7 +127,9 @@ export async function POST(req) {
               @cost,
               @cost_center,
               @is_sequential,
-              @display_order
+              @display_order,
+              @is_authorization,
+              @type_authorization
               );
           `;
 
@@ -140,6 +144,12 @@ export async function POST(req) {
             "display_order",
             sql.Int,
             t.display_order !== undefined && t.display_order !== null ? t.display_order : taskOrder++
+          );
+          taskRequest.input("is_authorization", sql.Bit, t.is_authorization ? 1 : 0);
+          taskRequest.input(
+            "type_authorization",
+            sql.Int,
+            t.is_authorization ? (t.type_authorization ?? null) : null
           );
 
           const taskResult = await taskRequest.query(insertTaskQuery);

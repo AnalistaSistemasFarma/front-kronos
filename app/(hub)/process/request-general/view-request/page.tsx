@@ -2237,7 +2237,7 @@ function ViewRequestPage() {
                           hour: '2-digit',
                           minute: '2-digit',
                           hour12: true,
-                        }).format(new Date(d))
+                        }).format(new Date(d).getTime() + 5 * 60 * 60 * 1000 )
                       : 'N/A';
                   return (
                     <Flex key={task.id} gap="md" align="stretch">

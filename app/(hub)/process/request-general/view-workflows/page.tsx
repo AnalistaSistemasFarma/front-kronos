@@ -82,6 +82,9 @@ interface Task {
   assigned_user: string;
   id_assigned_user: string;
   is_sequential: boolean;
+  is_authorization: boolean;
+  type_authorization: number | null;
+  type_authorization_label?: string | null;
 }
 
 interface Note {
@@ -176,7 +179,12 @@ function ViewWorkFlowPage() {
     cost: 0,
     cost_center: '',
     is_sequential: false,
+    is_authorization: false,
+    type_authorization: '',
   });
+  const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
 
   const moveEditedTask = (index: number, dir: -1 | 1) => {
     setEditedTasks((prev) => {
@@ -214,6 +222,7 @@ function ViewWorkFlowPage() {
   useEffect(() => {
     fetchUsers();
     fetchStatusOptions();
+    fetchAuthorizationTypes();
     fetchNotes();
   }, []);
 
@@ -276,9 +285,11 @@ function ViewWorkFlowPage() {
 
       const data = await response.json();
       setTasks(
-        data.map((t: Task & { is_sequential: boolean | number }) => ({
+        data.map((t: Task & { is_sequential: boolean | number; is_authorization: boolean | number }) => ({
           ...t,
           is_sequential: Boolean(t.is_sequential),
+          is_authorization: Boolean(t.is_authorization),
+          type_authorization: t.type_authorization ?? null,
         }))
       );
     } catch (err) {
@@ -381,6 +392,25 @@ function ViewWorkFlowPage() {
     }
   };
 
+  const fetchAuthorizationTypes = async () => {
+    try {
+      const response = await fetch('/api/requests-general/authorization-types', {
+        cache: 'no-store',
+      });
+      if (response.ok) {
+        const data: { id: number; type_authorization: string }[] = await response.json();
+        setAuthorizationTypeOptions(
+          (data || []).map((t) => ({
+            value: t.id.toString(),
+            label: t.type_authorization,
+          }))
+        );
+      }
+    } catch (err) {
+      console.error('Error fetching authorization types:', err);
+    }
+  };
+
   const fetchStatusOptions = async () => {
     setStatusOptions([
       { value: '1', label: 'Activo' },
@@ -440,6 +470,7 @@ function ViewWorkFlowPage() {
 
   const handleAddTask = () => {
     if (!newTaskForm.task.trim()) return;
+    if (newTaskForm.is_authorization && !newTaskForm.type_authorization) return;
 
     const newTask: Task = {
       id: Date.now() * -1,
@@ -450,10 +481,17 @@ function ViewWorkFlowPage() {
       assigned_user: users.find(u => u.value === newTaskForm.id_assigned_user)?.label || '',
       id_assigned_user: newTaskForm.id_assigned_user,
       is_sequential: newTaskForm.is_sequential,
+      is_authorization: newTaskForm.is_authorization,
+      type_authorization: newTaskForm.is_authorization
+        ? Number(newTaskForm.type_authorization) || null
+        : null,
+      type_authorization_label: newTaskForm.is_authorization
+        ? authorizationTypeOptions.find((o) => o.value === newTaskForm.type_authorization)?.label ?? null
+        : null,
     };
 
     setEditedTasks([...editedTasks, newTask]);
-    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false });
+    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '' });
     setAddTaskModalOpened(false);
   };
 
@@ -645,6 +683,8 @@ function ViewWorkFlowPage() {
           originalTask.cost_center !== task.cost_center ||
           originalTask.id_assigned_user !== task.id_assigned_user ||
           Boolean(originalTask.is_sequential) !== Boolean(task.is_sequential) ||
+          Boolean(originalTask.is_authorization) !== Boolean(task.is_authorization) ||
+          (originalTask.type_authorization ?? null) !== (task.type_authorization ?? null) ||
           originalIdx !== idx // cambió el orden
         );
       });
@@ -744,6 +784,8 @@ function ViewWorkFlowPage() {
         id_user_assigned?: string;
         is_sequential?: boolean;
         display_order?: number;
+        is_authorization?: boolean;
+        type_authorization?: number | null;
         action: 'create' | 'update' | 'delete';
       }
 
@@ -816,6 +858,8 @@ function ViewWorkFlowPage() {
             id_user_assigned: task.id_assigned_user,
             is_sequential: task.is_sequential,
             display_order: editedTasks.findIndex((t) => t.id === task.id),
+            is_authorization: task.is_authorization,
+            type_authorization: task.is_authorization ? (task.type_authorization ?? null) : null,
             action: 'create' as const,
           })),
           ...updatedTasks.map((task) => ({
@@ -827,6 +871,8 @@ function ViewWorkFlowPage() {
             id_user_assigned: task.id_assigned_user,
             is_sequential: task.is_sequential,
             display_order: editedTasks.findIndex((t) => t.id === task.id),
+            is_authorization: task.is_authorization,
+            type_authorization: task.is_authorization ? (task.type_authorization ?? null) : null,
             action: 'update' as const,
           })),
           ...deletedTaskIds.map((id) => ({
@@ -1501,6 +1547,11 @@ function ViewWorkFlowPage() {
                                             Secuencial
                                           </Badge>
                                         )}
+                                        {task.is_authorization && (
+                                          <Badge color='teal' variant='light' size='sm'>
+                                            {task.type_authorization_label || 'Autorización'}
+                                          </Badge>
+                                        )}
                                       </Group>
                                     )}
                                   </div>
@@ -1549,6 +1600,60 @@ function ViewWorkFlowPage() {
                                       };
                                       setEditedTasks(newTasks);
                                     }}
+                                  />
+                                )}
+
+                                {isEditing && (
+                                  <Checkbox
+                                    label='Tarea de autorización'
+                                    checked={editedTasks[index]?.is_authorization || false}
+                                    onChange={(e) => {
+                                      const checked = e.currentTarget.checked;
+                                      const newTasks = [...editedTasks];
+                                      newTasks[index] = {
+                                        ...newTasks[index],
+                                        is_authorization: checked,
+                                        type_authorization: checked
+                                          ? newTasks[index].type_authorization
+                                          : null,
+                                        type_authorization_label: checked
+                                          ? newTasks[index].type_authorization_label
+                                          : null,
+                                      };
+                                      setEditedTasks(newTasks);
+                                    }}
+                                  />
+                                )}
+
+                                {isEditing && editedTasks[index]?.is_authorization && (
+                                  <Select
+                                    label='Tipo de autorización'
+                                    placeholder='Seleccione el tipo'
+                                    data={authorizationTypeOptions}
+                                    value={
+                                      editedTasks[index]?.type_authorization != null
+                                        ? String(editedTasks[index].type_authorization)
+                                        : null
+                                    }
+                                    onChange={(value) => {
+                                      const newTasks = [...editedTasks];
+                                      newTasks[index] = {
+                                        ...newTasks[index],
+                                        type_authorization: value ? Number(value) : null,
+                                        type_authorization_label:
+                                          authorizationTypeOptions.find((o) => o.value === value)?.label ?? null,
+                                      };
+                                      setEditedTasks(newTasks);
+                                    }}
+                                    searchable
+                                    withAsterisk
+                                    error={
+                                      editedTasks[index]?.is_authorization &&
+                                      editedTasks[index]?.type_authorization == null
+                                        ? 'Selecciona el tipo de autorización'
+                                        : undefined
+                                    }
+                                    maw={400}
                                   />
                                 )}
 
@@ -2210,7 +2315,7 @@ function ViewWorkFlowPage() {
           opened={addTaskModalOpened}
           onClose={() => {
             setAddTaskModalOpened(false);
-            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false });
+            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '' });
           }}
           title={
             <Group gap='sm'>
@@ -2329,12 +2434,46 @@ function ViewWorkFlowPage() {
               onChange={(e) => setNewTaskForm({ ...newTaskForm, is_sequential: e.currentTarget.checked })}
             />
 
+            <Checkbox
+              mt='sm'
+              label='Tarea de autorización'
+              checked={newTaskForm.is_authorization}
+              onChange={(e) =>
+                setNewTaskForm({
+                  ...newTaskForm,
+                  is_authorization: e.currentTarget.checked,
+                  type_authorization: e.currentTarget.checked ? newTaskForm.type_authorization : '',
+                })
+              }
+            />
+
+            {newTaskForm.is_authorization && (
+              <Select
+                mt='sm'
+                label='Tipo de autorización'
+                placeholder='Seleccione el tipo'
+                data={authorizationTypeOptions}
+                value={newTaskForm.type_authorization}
+                onChange={(value) =>
+                  setNewTaskForm({ ...newTaskForm, type_authorization: value || '' })
+                }
+                searchable
+                withAsterisk
+                error={
+                  newTaskForm.is_authorization && !newTaskForm.type_authorization
+                    ? 'Selecciona el tipo de autorización'
+                    : undefined
+                }
+                maw={400}
+              />
+            )}
+
             <Group justify='flex-end' gap='sm' mt='md'>
               <Button
                 variant='outline'
                 onClick={() => {
                   setAddTaskModalOpened(false);
-                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false });
+                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '' });
                 }}
                 className='cursor-pointer transition-colors duration-200'
               >
@@ -2342,7 +2481,10 @@ function ViewWorkFlowPage() {
               </Button>
               <Button
                 onClick={handleAddTask}
-                disabled={!newTaskForm.task.trim()}
+                disabled={
+                  !newTaskForm.task.trim() ||
+                  (newTaskForm.is_authorization && !newTaskForm.type_authorization)
+                }
                 className='bg-blue-600 hover:bg-blue-700 cursor-pointer transition-colors duration-200'
               >
                 Agregar Tarea
