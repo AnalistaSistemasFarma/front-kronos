@@ -1,0 +1,105 @@
+name: CI — Compuerta de calidad
+
+# Fase 0 del plan de control de calidad para el pase a producción.
+#
+# Corre en runners GitHub-hosted (ubuntu-latest), NO en los self-hosted de deploy
+# (esos hacen build+reinicio pm2 en Windows). Esta compuerta solo VERIFICA:
+# compilación de tipos (tsc), lint, build de Next.js y pruebas unitarias, tanto
+# del front (raíz) como del servidor MCP (mcp/).
+#
+# Se dispara en cada PR hacia `testing` o `main`, y también al pushear la rama
+# `chore/fase0-quality-gate` (para poder validar la propia compuerta en verde).
+
+on:
+  pull_request:
+    branches: [testing, main]
+  push:
+    branches: [chore/fase0-quality-gate]
+  workflow_dispatch: {}
+
+# Cancela corridas anteriores del mismo ref si llega una nueva (ahorra minutos).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # FRONT (raíz): tsc --noEmit + lint + build + pruebas unitarias (vitest)
+  # ---------------------------------------------------------------------------
+  front:
+    name: Front — tsc, lint, build, tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Instalar dependencias (front)
+        # npm ci exige lockfile en sync; si por alguna razón falla, caemos a
+        # npm install para no bloquear la compuerta por un desajuste puntual.
+        run: npm ci || npm install
+
+      - name: Generar cliente Prisma
+        # Genera app/generated/prisma (gitignored). Lo necesitan tanto el build
+        # del front como el MCP. No requiere conexión a BD real.
+        run: npx prisma generate
+
+      - name: Crear stub de dbconfig (sin credenciales)
+        # dbconfig.js está en .gitignore y no existe en un clon limpio; sin él
+        # tsc/build fallan con TS2307. Copiamos un stub seguro solo para CI.
+        run: cp .github/dbconfig.ci.stub.js dbconfig.js
+
+      - name: Chequeo de tipos (tsc --noEmit)
+        run: npx tsc --noEmit
+
+      - name: Lint (eslint)
+        # continue-on-error: el repo trae un error de lint PREEXISTENTE
+        # (ecosystem-test.config.js: require() prohibido). La compuerta no debe
+        # romperse por deuda previa; el objetivo es no introducir NUEVOS.
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Build (next build)
+        run: npm run build
+
+      - name: Pruebas unitarias (vitest)
+        run: npm test
+
+  # ---------------------------------------------------------------------------
+  # MCP (mcp/): build (tsc) + pruebas unitarias (vitest)
+  # ---------------------------------------------------------------------------
+  mcp:
+    name: MCP — build y tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+
+      - name: Instalar dependencias del front (para el cliente Prisma)
+        # mcp/src/db.ts importa ../../app/generated/prisma; hay que generarlo
+        # desde la raíz antes de compilar/probar el MCP.
+        run: npm ci || npm install
+
+      - name: Generar cliente Prisma (raíz)
+        run: npx prisma generate
+
+      - name: Instalar dependencias (mcp)
+        run: cd mcp && (npm ci || npm install)
+
+      - name: Build MCP (tsc)
+        run: cd mcp && npm run build
+
+      - name: Pruebas unitarias MCP (vitest)
+        run: cd mcp && npm test
