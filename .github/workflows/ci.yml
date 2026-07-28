@@ -67,8 +67,40 @@ jobs:
       - name: Build (next build)
         run: npm run build
 
-      - name: Pruebas unitarias (vitest)
-        run: npm test
+      - name: Pruebas unitarias + cobertura (vitest)
+        # Corre la suite con cobertura. Los umbrales (piso "ratchet") están en
+        # vitest.config.ts; si la cobertura baja del piso, este paso FALLA y la
+        # compuerta se pone en rojo.
+        run: npm test -- --coverage
+
+      - name: Publicar resumen de cobertura
+        # Vuelca el resumen de cobertura al summary del job (no bloqueante).
+        if: always()
+        run: |
+          echo "## Cobertura de pruebas (front)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e '
+              const t = require("./coverage/coverage-summary.json").total;
+              const row = (k) => `| ${k} | ${t[k].pct}% | ${t[k].covered}/${t[k].total} |`;
+              console.log("| Métrica | % | Cubierto/Total |");
+              console.log("|---|---|---|");
+              console.log(row("lines"));
+              console.log(row("statements"));
+              console.log(row("functions"));
+              console.log(row("branches"));
+            ' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_No se generó coverage-summary.json._" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Subir reporte de cobertura como artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-front
+          path: coverage/
+          if-no-files-found: ignore
+          retention-days: 14
 
   # ---------------------------------------------------------------------------
   # MCP (mcp/): build (tsc) + pruebas unitarias (vitest)

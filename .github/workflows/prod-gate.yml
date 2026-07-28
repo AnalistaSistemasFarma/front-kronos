@@ -1,0 +1,64 @@
+name: Compuerta de promoción a producción
+
+# Fase 2 del plan de control de calidad.
+#
+# Corre la batería GO / NO-GO / GO-CONDICIONADO del "flujo de autorización"
+# (scripts/prod-gate-check.mjs) en los PR que promueven a producción, es decir,
+# los que apuntan a `main` (testing -> main). También se puede lanzar a mano con
+# workflow_dispatch para dar el veredicto antes de un pase.
+#
+# Reusa el mismo setup del ci.yml (Node 20, npm ci, prisma generate, stub de
+# dbconfig). Publica el resumen de compuertas en el summary del job.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Rama base para el diff (default origin/main)'
+        required: false
+        default: 'origin/main'
+
+concurrency:
+  group: prod-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: GO / NO-GO
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Historial completo para poder calcular el diff contra la base.
+          fetch-depth: 0
+
+      - name: Configurar Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Instalar dependencias (front)
+        run: npm ci || npm install
+
+      - name: Generar cliente Prisma
+        run: npx prisma generate
+
+      - name: Crear stub de dbconfig (sin credenciales)
+        run: cp .github/dbconfig.ci.stub.js dbconfig.js
+
+      - name: Instalar dependencias (mcp)
+        run: cd mcp && (npm ci || npm install)
+
+      - name: Asegurar la rama base para el diff
+        # El script compara contra origin/main (o la base indicada). En un PR el
+        # merge-base ya está disponible con fetch-depth 0; garantizamos el ref.
+        run: git fetch origin main:refs/remotes/origin/main || true
+
+      - name: Ejecutar compuerta GO / NO-GO
+        run: |
+          BASE="${{ github.event.inputs.base || 'origin/main' }}"
+          node scripts/prod-gate-check.mjs --base "$BASE"
