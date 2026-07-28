@@ -64,6 +64,37 @@ jobs:
         continue-on-error: true
         run: npm run lint
 
+      - name: Auditoría de dependencias (npm audit — INFORMATIVO)
+        # "Opción 2": análisis de seguridad gratis en el CI. Este paso NO es
+        # bloqueante a propósito: hoy hay deuda de vulnerabilidades PREEXISTENTE
+        # en dependencias transitivas (~3 críticas y ~18 altas). Si lo pusiéramos
+        # bloqueante, la compuerta quedaría en rojo por deuda vieja, no por el
+        # cambio del PR. Por eso arranca solo SURFACEANDO el conteo por severidad
+        # al resumen del job.
+        #
+        # PLAN: depurar las vulnerabilidades (npm audit fix / bump de deps) y,
+        # cuando el árbol esté saneado, subir este paso a bloqueante quitando el
+        # `|| true` y el continue-on-error, y ajustando --audit-level.
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "## Auditoría de dependencias (npm audit — front)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "_Informativo: no bloquea la compuerta (deuda preexistente)._" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          # --audit-level=high define el umbral de severidad; el `|| true` evita
+          # que el paso falle por la deuda vigente.
+          npm audit --audit-level=high || true
+          npm audit --json > audit-front.json 2>/dev/null || true
+          node -e '
+            const v = require("./audit-front.json").metadata.vulnerabilities;
+            console.log("| Severidad | Cantidad |");
+            console.log("|---|---|");
+            for (const k of ["critical","high","moderate","low","info","total"]) {
+              console.log(`| ${k} | ${v[k]} |`);
+            }
+          ' >> "$GITHUB_STEP_SUMMARY" || echo "_No se pudo generar el resumen de npm audit._" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Build (next build)
         run: npm run build
 
@@ -135,3 +166,26 @@ jobs:
 
       - name: Pruebas unitarias MCP (vitest)
         run: cd mcp && npm test
+
+      - name: Auditoría de dependencias MCP (npm audit — INFORMATIVO)
+        # Igual que en el front: informativo, no bloqueante. Surfacea el conteo
+        # por severidad del árbol de dependencias del servidor MCP. PLAN: subir
+        # a bloqueante cuando la deuda de vulnerabilidades esté saneada.
+        if: always()
+        continue-on-error: true
+        run: |
+          cd mcp
+          echo "## Auditoría de dependencias (npm audit — mcp)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "_Informativo: no bloquea la compuerta (deuda preexistente)._" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          npm audit --audit-level=high || true
+          npm audit --json > audit-mcp.json 2>/dev/null || true
+          node -e '
+            const v = require("./audit-mcp.json").metadata.vulnerabilities;
+            console.log("| Severidad | Cantidad |");
+            console.log("|---|---|");
+            for (const k of ["critical","high","moderate","low","info","total"]) {
+              console.log(`| ${k} | ${v[k]} |`);
+            }
+          ' >> "$GITHUB_STEP_SUMMARY" || echo "_No se pudo generar el resumen de npm audit (mcp)._" >> "$GITHUB_STEP_SUMMARY"

@@ -24,6 +24,23 @@ batería de validación del "flujo de autorización" y emite un veredicto:
 | 6 | **Chequeo de DDL/esquema** — detecta SQL de esquema (`ALTER/CREATE TABLE`, `ADD COLUMN`, …) o cambios en `prisma/schema.prisma` en el diff. Si hay cambios de esquema en código **sin** script `.sql`/migración que los acompañe → **GO-CONDICIONADO** con la acción "correr DDL manual en prod" (recuerde: en prod **NO** se corre `prisma migrate`). | Condiciona |
 | 7 | **Regresión de tools MCP** — confirma que el contrato de tools (`totalTools`, nombres) sigue intacto vía las pruebas de `mcp/test`. | Avisa |
 
+> **Refuerzo "opción 2" (análisis de seguridad gratis).** Las compuertas 2 y 5
+> quedan reforzadas por dos controles estáticos sin costo:
+>
+> - **Compuerta 2 (lint):** `eslint.config.mjs` registra `eslint-plugin-security`
+>   con **todas sus reglas en modo `warn`** (nunca `error`). Así SURFACEA
+>   patrones peligrosos (inyección de objetos, `eval`, regex vulnerables a ReDoS,
+>   `child_process`, `Buffer` sin aserción, posibles ataques de temporización,
+>   `require`/`fs` con ruta no literal, etc.) **sin romper** el build ni la
+>   compuerta por deuda preexistente.
+> - **Compuerta 5 (audit):** el CI (`.github/workflows/ci.yml`) corre `npm audit`
+>   **informativo** (no bloqueante) en los jobs *front* y *MCP*, volcando el
+>   conteo por severidad al resumen del job.
+>
+> Ambos arrancan **informativos** a propósito (criterio "ratchet"): el plan es
+> depurar los hallazgos de seguridad y las vulnerabilidades y, cuando el árbol
+> esté saneado, subir las reglas y el `npm audit` a **bloqueantes**.
+
 ### Cómo lo corre el Agente Orus localmente (veredicto antes de un pase a prod)
 
 Desde la raíz del repo, con el entorno de CI reproducido:
