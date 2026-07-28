@@ -56,6 +56,7 @@ import {
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { getFileLabelError } from '../../../../../lib/onedriveName';
+import { SAP_SOURCES } from '../../../../../lib/requests-general/sapSources';
 import toast from 'react-hot-toast';
 
 interface WorkFlow {
@@ -109,10 +110,36 @@ interface FieldOptionDef {
 interface FormFieldDef {
   id: number;
   field_label: string;
+  field_type: string;
   required: boolean;
   options: FieldOptionDef[];
   conditions: number[];
 }
+
+const FIELD_TYPE_LABELS: Record<string, string> = {
+  select: 'Lista',
+  text: 'Texto',
+  number: 'Número',
+  date: 'Fecha',
+  ...Object.fromEntries(Object.entries(SAP_SOURCES).map(([key, s]) => [key, s.label])),
+};
+
+// Datos agrupados para el Select "Tipo": básicos + fuentes SAP curadas.
+const FIELD_TYPE_SELECT_DATA = [
+  {
+    group: 'Básico',
+    items: [
+      { value: 'select', label: 'Lista (opciones)' },
+      { value: 'text', label: 'Texto' },
+      { value: 'number', label: 'Número' },
+      { value: 'date', label: 'Fecha' },
+    ],
+  },
+  {
+    group: 'SAP',
+    items: Object.entries(SAP_SOURCES).map(([key, s]) => ({ value: key, label: s.label })),
+  },
+];
 
 // Solo estos usuarios (rol admin) pueden modificar el campo "Activo" del flujo
 const ADMIN_USER_IDS = [
@@ -352,12 +379,14 @@ function ViewWorkFlowPage() {
           (f: {
             id: number;
             field_label: string;
+            field_type?: string;
             required: boolean | number;
             options: { id: number; option_label: string }[];
             conditions: number[];
           }) => ({
             id: f.id,
             field_label: f.field_label,
+            field_type: f.field_type || 'select',
             required: Boolean(f.required),
             options: f.options || [],
             conditions: f.conditions || [],
@@ -523,6 +552,7 @@ function ViewWorkFlowPage() {
     const newField: FormFieldDef = {
       id: Date.now() * -1,
       field_label: '',
+      field_type: 'select',
       required: true,
       options: [],
       conditions: [],
@@ -807,6 +837,7 @@ function ViewWorkFlowPage() {
       interface FormFieldToProcess {
         id?: number;
         field_label?: string;
+        field_type?: string;
         required?: boolean;
         condition_option_ids?: number[];
         options?: OptionToProcess[];
@@ -916,6 +947,7 @@ function ViewWorkFlowPage() {
         const fieldsToProcess: FormFieldToProcess[] = [
           ...newFormFields.map((field) => ({
             field_label: field.field_label,
+            field_type: field.field_type,
             required: field.required,
             condition_option_ids: field.conditions,
             options: buildOptionActions(field),
@@ -1879,6 +1911,27 @@ function ViewWorkFlowPage() {
                           }}
                           style={{ flex: 1 }}
                         />
+                        {field.id < 0 ? (
+                          <Select
+                            label='Tipo'
+                            data={FIELD_TYPE_SELECT_DATA}
+                            value={editedFormFields[fieldIndex]?.field_type || 'select'}
+                            onChange={(value) => {
+                              const next = [...editedFormFields];
+                              next[fieldIndex] = {
+                                ...next[fieldIndex],
+                                field_type: value || 'select',
+                              };
+                              setEditedFormFields(next);
+                            }}
+                            allowDeselect={false}
+                            w={150}
+                          />
+                        ) : (
+                          <Badge color='grape' variant='light' size='lg' mb={6}>
+                            {FIELD_TYPE_LABELS[field.field_type] || 'Lista'}
+                          </Badge>
+                        )}
                         <Checkbox
                           label='Obligatorio'
                           checked={editedFormFields[fieldIndex]?.required || false}
@@ -1904,61 +1957,72 @@ function ViewWorkFlowPage() {
                         </ActionIcon>
                       </Group>
 
-                      <Group gap='xs'>
-                        {field.options.length === 0 ? (
-                          <Text size='sm' c='dimmed'>
-                            Sin opciones aún.
-                          </Text>
-                        ) : (
-                          field.options.map((o) => (
-                            <Badge
-                              key={o.id}
-                              variant='light'
-                              color='blue'
-                              size='lg'
-                              styles={{ root: { textTransform: 'none' } }}
-                              rightSection={
-                                <ActionIcon
-                                  size='xs'
-                                  variant='transparent'
-                                  color='red'
-                                  onClick={() => handleRemoveOption(field.id, o.id)}
-                                  title='Quitar opción'
+                      {field.field_type === 'select' ? (
+                        <>
+                          <Group gap='xs'>
+                            {field.options.length === 0 ? (
+                              <Text size='sm' c='dimmed'>
+                                Sin opciones aún.
+                              </Text>
+                            ) : (
+                              field.options.map((o) => (
+                                <Badge
+                                  key={o.id}
+                                  variant='light'
+                                  color='blue'
+                                  size='lg'
+                                  styles={{ root: { textTransform: 'none' } }}
+                                  rightSection={
+                                    <ActionIcon
+                                      size='xs'
+                                      variant='transparent'
+                                      color='red'
+                                      onClick={() => handleRemoveOption(field.id, o.id)}
+                                      title='Quitar opción'
+                                    >
+                                      <IconX size={12} />
+                                    </ActionIcon>
+                                  }
                                 >
-                                  <IconX size={12} />
-                                </ActionIcon>
-                              }
-                            >
-                              {o.option_label}
-                            </Badge>
-                          ))
-                        )}
-                      </Group>
+                                  {o.option_label}
+                                </Badge>
+                              ))
+                            )}
+                          </Group>
 
-                      <Group gap='xs'>
-                        <TextInput
-                          placeholder='Nueva opción (ej. Contado)'
-                          value={optionInputs[field.id] || ''}
-                          onChange={(e) =>
-                            setOptionInputs((prev) => ({ ...prev, [field.id]: e.target.value }))
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleAddOption(field.id);
-                            }
-                          }}
-                          style={{ flex: 1 }}
-                        />
-                        <Button
-                          variant='light'
-                          onClick={() => handleAddOption(field.id)}
-                          leftSection={<IconPlus size={16} />}
-                          disabled={!(optionInputs[field.id] || '').trim()}
-                        >
-                          Opción
-                        </Button>
-                      </Group>
+                          <Group gap='xs'>
+                            <TextInput
+                              placeholder='Nueva opción (ej. Contado)'
+                              value={optionInputs[field.id] || ''}
+                              onChange={(e) =>
+                                setOptionInputs((prev) => ({ ...prev, [field.id]: e.target.value }))
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleAddOption(field.id);
+                                }
+                              }}
+                              style={{ flex: 1 }}
+                            />
+                            <Button
+                              variant='light'
+                              onClick={() => handleAddOption(field.id)}
+                              leftSection={<IconPlus size={16} />}
+                              disabled={!(optionInputs[field.id] || '').trim()}
+                            >
+                              Opción
+                            </Button>
+                          </Group>
+                        </>
+                      ) : (
+                        <Text size='sm' c='dimmed'>
+                          Campo de {(FIELD_TYPE_LABELS[field.field_type] || 'lista').toLowerCase()}:{' '}
+                          {SAP_SOURCES[field.field_type]
+                            ? 'el usuario buscará y seleccionará un registro desde SAP al crear la solicitud.'
+                            : 'el usuario ingresará el valor al crear la solicitud (sin opciones predefinidas).'}
+                        </Text>
+                      )}
 
                       {optionsBeforeFieldData(field.id).length > 0 && (
                         <MultiSelect
@@ -1985,6 +2049,9 @@ function ViewWorkFlowPage() {
                           </Text>
                         </Group>
                         <Group gap='xs'>
+                          <Badge color='grape' variant='light' size='sm'>
+                            {FIELD_TYPE_LABELS[field.field_type] || 'Lista'}
+                          </Badge>
                           {field.conditions.length > 0 && (
                             <Badge
                               color='grape'

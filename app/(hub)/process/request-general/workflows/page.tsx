@@ -57,6 +57,7 @@ import {
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import { getFileLabelError } from '../../../../../lib/onedriveName';
+import { SAP_SOURCES } from '../../../../../lib/requests-general/sapSources';
 
 interface WorkFlow {
   id: number;
@@ -160,16 +161,50 @@ function RequestBoard() {
   const newTempId = (prefix: string) =>
     `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
+  const FIELD_TYPE_LABELS: Record<string, string> = {
+    select: 'Lista',
+    text: 'Texto',
+    number: 'Número',
+    date: 'Fecha',
+    ...Object.fromEntries(
+      Object.entries(SAP_SOURCES).map(([key, s]) => [key, s.label])
+    ),
+  };
+
+  const fieldTypeSelectData = [
+    {
+      group: 'Básico',
+      items: [
+        { value: 'select', label: 'Lista (opciones)' },
+        { value: 'text', label: 'Texto' },
+        { value: 'number', label: 'Número' },
+        { value: 'date', label: 'Fecha' },
+      ],
+    },
+    {
+      group: 'SAP',
+      items: Object.entries(SAP_SOURCES).map(([key, s]) => ({
+        value: key,
+        label: s.label,
+      })),
+    },
+  ];
+
   const [formFields, setFormFields] = useState<
     Array<{
       tempId: string;
       field_label: string;
+      field_type: string;
       required: boolean;
       options: Array<{ tempId: string; option_label: string }>;
-      condition_option_temps: string[]; 
+      condition_option_temps: string[];
     }>
   >([]);
-  const [fieldForm, setFieldForm] = useState({ field_label: '', required: true });
+  const [fieldForm, setFieldForm] = useState({
+    field_label: '',
+    field_type: 'select',
+    required: true,
+  });
   const [optionInputs, setOptionInputs] = useState<Record<string, string>>({});
 
   const addFormField = () => {
@@ -179,12 +214,13 @@ function RequestBoard() {
       {
         tempId: newTempId('f'),
         field_label: fieldForm.field_label.trim(),
+        field_type: fieldForm.field_type,
         required: fieldForm.required,
         options: [],
         condition_option_temps: [],
       },
     ]);
-    setFieldForm({ field_label: '', required: true });
+    setFieldForm({ field_label: '', field_type: 'select', required: true });
   };
 
   const removeFormField = (fieldTempId: string) => {
@@ -842,10 +878,15 @@ function RequestBoard() {
                 }))
               : [],
           formFields: formFields
-            .filter((f) => f.field_label.trim() && f.options.length > 0)
+            .filter(
+              (f) =>
+                f.field_label.trim() &&
+                (f.field_type !== 'select' || f.options.length > 0)
+            )
             .map((f) => ({
               tempId: f.tempId,
               field_label: f.field_label,
+              field_type: f.field_type,
               required: f.required,
               options: f.options.map((o) => ({
                 tempId: o.tempId,
@@ -880,7 +921,7 @@ function RequestBoard() {
       setRequiredFiles([]);
       setFileForm({ file_label: '', required: true, condition_option_temps: [] });
       setFormFields([]);
-      setFieldForm({ field_label: '', required: true });
+      setFieldForm({ field_label: '', field_type: 'select', required: true });
       setOptionInputs({});
       setAssignedCategoryInfo(null);
 
@@ -1298,7 +1339,7 @@ function RequestBoard() {
             setRequiredFiles([]);
             setFileForm({ file_label: '', required: true, condition_option_temps: [] });
             setFormFields([]);
-            setFieldForm({ field_label: '', required: true });
+            setFieldForm({ field_label: '', field_type: 'select', required: true });
             setOptionInputs({});
             setFormData({
               company: '',
@@ -1963,8 +2004,9 @@ function RequestBoard() {
                       </Text>
                     </Group>
                     <Text size='sm' c='dimmed'>
-                      Defina campos tipo lista (ej. &quot;Tipo de cliente&quot;) cuyas opciones
-                      pueden condicionar qué archivos se piden al crear la solicitud.
+                      Defina campos tipo lista, texto, número o fecha (ej. &quot;Tipo de cliente&quot;,
+                      &quot;Valor estimado&quot;). Las opciones de los campos tipo lista pueden condicionar
+                      qué otros campos o archivos se piden al crear la solicitud.
                     </Text>
                   </div>
 
@@ -1973,7 +2015,7 @@ function RequestBoard() {
                       Agregar Campo
                     </Text>
                     <Grid align='flex-end'>
-                      <Grid.Col span={{ base: 12, md: 8 }}>
+                      <Grid.Col span={{ base: 12, md: 5 }}>
                         <TextInput
                           label='Nombre del campo *'
                           placeholder='Ej. Tipo de cliente'
@@ -1985,6 +2027,22 @@ function RequestBoard() {
                               addFormField();
                             }
                           }}
+                          size='lg'
+                          classNames={{
+                            label: 'text-sm font-medium mb-2',
+                            input: 'min-h-[48px] text-base',
+                          }}
+                        />
+                      </Grid.Col>
+                      <Grid.Col span={{ base: 12, md: 3 }}>
+                        <Select
+                          label='Tipo de campo'
+                          data={fieldTypeSelectData}
+                          value={fieldForm.field_type}
+                          onChange={(value) =>
+                            setFieldForm({ ...fieldForm, field_type: value || 'select' })
+                          }
+                          allowDeselect={false}
                           size='lg'
                           classNames={{
                             label: 'text-sm font-medium mb-2',
@@ -2024,6 +2082,9 @@ function RequestBoard() {
                           <Group justify='space-between' mb='sm'>
                             <Group gap='xs'>
                               <Text fw={600}>{field.field_label}</Text>
+                              <Badge color='grape' variant='light' size='sm'>
+                                {FIELD_TYPE_LABELS[field.field_type] || 'Lista'}
+                              </Badge>
                               <Badge color={field.required ? 'red' : 'gray'} variant='light' size='sm'>
                                 {field.required ? 'Obligatorio' : 'Opcional'}
                               </Badge>
@@ -2038,61 +2099,72 @@ function RequestBoard() {
                             </ActionIcon>
                           </Group>
 
-                          <Group gap='xs' mb='sm'>
-                            {field.options.length === 0 ? (
-                              <Text size='sm' c='dimmed'>
-                                Aún sin opciones. Agregue al menos una para poder condicionar archivos.
-                              </Text>
-                            ) : (
-                              field.options.map((o) => (
-                                <Badge
-                                  key={o.tempId}
-                                  variant='light'
-                                  color='blue'
-                                  size='lg'
-                                  rightSection={
-                                    <ActionIcon
-                                      size='xs'
-                                      variant='transparent'
-                                      color='red'
-                                      onClick={() => removeOption(field.tempId, o.tempId)}
-                                      title='Quitar opción'
+                          {field.field_type === 'select' ? (
+                            <>
+                              <Group gap='xs' mb='sm'>
+                                {field.options.length === 0 ? (
+                                  <Text size='sm' c='dimmed'>
+                                    Aún sin opciones. Agregue al menos una para poder condicionar archivos.
+                                  </Text>
+                                ) : (
+                                  field.options.map((o) => (
+                                    <Badge
+                                      key={o.tempId}
+                                      variant='light'
+                                      color='blue'
+                                      size='lg'
+                                      rightSection={
+                                        <ActionIcon
+                                          size='xs'
+                                          variant='transparent'
+                                          color='red'
+                                          onClick={() => removeOption(field.tempId, o.tempId)}
+                                          title='Quitar opción'
+                                        >
+                                          <IconX size={12} />
+                                        </ActionIcon>
+                                      }
+                                      styles={{ root: { textTransform: 'none' } }}
                                     >
-                                      <IconX size={12} />
-                                    </ActionIcon>
-                                  }
-                                  styles={{ root: { textTransform: 'none' } }}
-                                >
-                                  {o.option_label}
-                                </Badge>
-                              ))
-                            )}
-                          </Group>
+                                      {o.option_label}
+                                    </Badge>
+                                  ))
+                                )}
+                              </Group>
 
-                          <Group gap='xs'>
-                            <TextInput
-                              placeholder='Nueva opción (ej. Contado)'
-                              value={optionInputs[field.tempId] || ''}
-                              onChange={(e) =>
-                                setOptionInputs((prev) => ({ ...prev, [field.tempId]: e.target.value }))
-                              }
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  addOption(field.tempId);
-                                }
-                              }}
-                              style={{ flex: 1 }}
-                            />
-                            <Button
-                              variant='light'
-                              onClick={() => addOption(field.tempId)}
-                              leftSection={<IconPlus size={16} />}
-                              disabled={!(optionInputs[field.tempId] || '').trim()}
-                            >
-                              Opción
-                            </Button>
-                          </Group>
+                              <Group gap='xs'>
+                                <TextInput
+                                  placeholder='Nueva opción (ej. Contado)'
+                                  value={optionInputs[field.tempId] || ''}
+                                  onChange={(e) =>
+                                    setOptionInputs((prev) => ({ ...prev, [field.tempId]: e.target.value }))
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      addOption(field.tempId);
+                                    }
+                                  }}
+                                  style={{ flex: 1 }}
+                                />
+                                <Button
+                                  variant='light'
+                                  onClick={() => addOption(field.tempId)}
+                                  leftSection={<IconPlus size={16} />}
+                                  disabled={!(optionInputs[field.tempId] || '').trim()}
+                                >
+                                  Opción
+                                </Button>
+                              </Group>
+                            </>
+                          ) : (
+                            <Text size='sm' c='dimmed' mb='sm'>
+                              Campo de {(FIELD_TYPE_LABELS[field.field_type] || 'lista').toLowerCase()}:{' '}
+                              {SAP_SOURCES[field.field_type]
+                                ? 'el usuario buscará y seleccionará un registro desde SAP al crear la solicitud.'
+                                : 'el usuario ingresará el valor al crear la solicitud (sin opciones predefinidas).'}
+                            </Text>
+                          )}
 
                           {optionsBeforeField(field.tempId).length > 0 && (
                             <MultiSelect
