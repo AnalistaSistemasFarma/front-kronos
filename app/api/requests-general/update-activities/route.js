@@ -50,7 +50,8 @@ export async function POST(req) {
         .input('id', sql.Int, id)
         .query(`
           SELECT trg.id_status, trg.id_request_general, trg.id_task, rg.subject_request,
-                 tpc.task, tpc.is_sequential, tpc.display_order, tpc.id_process_category
+                 tpc.task, tpc.is_sequential, tpc.display_order, tpc.id_process_category,
+                 tpc.is_authorization
           FROM task_request_general trg
           INNER JOIN requests_general rg ON rg.id = trg.id_request_general
           LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task
@@ -102,20 +103,32 @@ export async function POST(req) {
         console.log(`${TAG} 2) Gate secuencial: la tarea NO es secuencial, no se valida predecesora.`);
       }
 
+      // Para tareas de autorización, además de registrar al ejecutor final, se asigna la tarea
+      // al autorizador (id_assigned), se sellan start_date/end_date y la fecha de resolución
+      // (date_resolution) con la fecha actual, tanto al autorizar como al rechazar. Para el resto
+      // de actividades el comportamiento permanece igual (start_date/end_date/id_assigned según el
+      // body; date_resolution solo si hay resolución).
+      const isAuthorizationTask = !!prevRow?.is_authorization;
+
       const updateQuery = `
         UPDATE task_request_general
         SET
           id_status = @id_status,
-          start_date = @start_date,
-          end_date = @end_date,
+          start_date = ${isAuthorizationTask ? 'GETDATE()' : '@start_date'},
+          end_date = ${isAuthorizationTask ? 'GETDATE()' : '@end_date'},
           resolution = @resolution,
           id_executor_final = @id_executor_final,
-          date_resolution = CASE
+          ${isAuthorizationTask ? 'id_assigned = @id_executor_final,' : ''}
+          date_resolution = ${
+            isAuthorizationTask
+              ? 'GETDATE()'
+              : `CASE
             WHEN @resolution IS NOT NULL
                  AND LTRIM(RTRIM(@resolution)) <> ''
             THEN GETDATE()
             ELSE date_resolution
-          END
+          END`
+          }
         WHERE id = @id
       `;
 
@@ -203,7 +216,7 @@ export async function POST(req) {
               .input('display_order', sql.Int, prevRow.display_order ?? 0)
               .input('id_task', sql.Int, prevRow.id_task)
               .query(`
-                SELECT TOP 1 tpc.id, tpc.task, tpc.is_sequential
+                SELECT TOP 1 tpc.id, tpc.task, tpc.is_sequential, tpc.is_authorization
                 FROM task_process_category tpc
                 WHERE tpc.id_process_category = @id_process
                   AND tpc.active = 1
@@ -246,27 +259,44 @@ export async function POST(req) {
                 console.log(`${TAG} 6.4) Responsables de la siguiente tarea =`,
                   assigneesResult.recordset.map((a) => ({ id_user: a.id_user, email: a.email })));
 
-                if (assigneesResult.recordset.length === 0) {
-                  console.warn(
-                    `${TAG} ⚠ La siguiente tarea ${nextTask.id} no tiene responsable con email; no se crea/notifica.`
-                  );
-                }
-
                 const createdTasks = [];
-                for (const a of assigneesResult.recordset) {
-                  const inserted = await new sql.Request(pool)
-                    .input('id_request', sql.Int, prevRow.id_request_general)
-                    .input('id_task', sql.Int, nextTask.id)
-                    .input('id_user', sql.NVarChar, a.id_user)
-                    .query(`
-                      INSERT INTO task_request_general
-                      (id_request_general, id_task, id_status, id_assigned)
-                      OUTPUT INSERTED.id
-                      VALUES (@id_request, @id_task, 4, @id_user)
-                    `);
-                  const newTaskId = inserted.recordset[0]?.id;
-                  console.log(`${TAG} 6.5) ✔ Creada task_request_general id=${newTaskId} para responsable ${a.email} (${a.id_user}).`);
-                  createdTasks.push({ newTaskId, userId: a.id_user, email: a.email });
+
+                if (assigneesResult.recordset.length === 0) {
+                  if (nextTask.is_authorization) {
+                    // Tarea de autorización sin responsable: se instancia igual con id_assigned = NULL.
+                    // Por ahora no se enruta a ningún autorizador, así que no hay a quién notificar.
+                    const inserted = await new sql.Request(pool)
+                      .input('id_request', sql.Int, prevRow.id_request_general)
+                      .input('id_task', sql.Int, nextTask.id)
+                      .query(`
+                        INSERT INTO task_request_general
+                        (id_request_general, id_task, id_status, id_assigned)
+                        OUTPUT INSERTED.id
+                        VALUES (@id_request, @id_task, 4, NULL)
+                      `);
+                    const newTaskId = inserted.recordset[0]?.id;
+                    console.log(`${TAG} 6.5) ✔ Creada task_request_general id=${newTaskId} de AUTORIZACIÓN sin responsable (sin notificación).`);
+                  } else {
+                    console.warn(
+                      `${TAG} ⚠ La siguiente tarea ${nextTask.id} no tiene responsable con email; no se crea/notifica.`
+                    );
+                  }
+                } else {
+                  for (const a of assigneesResult.recordset) {
+                    const inserted = await new sql.Request(pool)
+                      .input('id_request', sql.Int, prevRow.id_request_general)
+                      .input('id_task', sql.Int, nextTask.id)
+                      .input('id_user', sql.NVarChar, a.id_user)
+                      .query(`
+                        INSERT INTO task_request_general
+                        (id_request_general, id_task, id_status, id_assigned)
+                        OUTPUT INSERTED.id
+                        VALUES (@id_request, @id_task, 4, @id_user)
+                      `);
+                    const newTaskId = inserted.recordset[0]?.id;
+                    console.log(`${TAG} 6.5) ✔ Creada task_request_general id=${newTaskId} para responsable ${a.email} (${a.id_user}).`);
+                    createdTasks.push({ newTaskId, userId: a.id_user, email: a.email });
+                  }
                 }
 
                 // Registrar la notificación en la campana de forma GARANTIZADA (se espera antes de

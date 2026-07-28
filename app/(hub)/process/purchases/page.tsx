@@ -36,6 +36,7 @@ const ITEMS_PER_PAGE = 15;
 /** Da formato legible a una fecha ISO -> YYYY-MM-DD. */
 function formatDate(raw: unknown): string {
   if (raw == null || raw === '') return '-';
+  // eslint-disable-next-line security/detect-unsafe-regex -- Falso positivo de safe-regex por el cuantificador anidado `(T.*)?`: el `?` acota `.*` a una sola ejecucion, por lo que NO hay backtracking catastrofico (verificado lineal: 1M chars en ~2 ms). Ademas el input es un valor de campo de SAP, corto y acotado.
   const iso = /^(\d{4}-\d{2}-\d{2})(T.*)?$/.exec(String(raw));
   return iso ? iso[1] : String(raw);
 }
