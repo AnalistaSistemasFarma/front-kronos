@@ -1,93 +1,62 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
-import axios from 'axios';
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+import { useState, useEffect, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   Title,
   Paper,
-  Text,
-  Badge,
-  Button,
-  Divider,
-  Group,
   Stack,
-  Card,
-  Textarea,
-  TextInput,
-  Select,
-  Checkbox,
-  Grid,
   Alert,
-  LoadingOverlay,
   Breadcrumbs,
   Anchor,
-  Flex,
-  ActionIcon,
-  Box,
-  Modal,
-  Collapse,
   Table,
-  Progress,
+  TextInput,
+  Select,
+  Button,
+  Group,
+  Badge,
+  Modal,
+  Textarea,
+  Grid,
+  Card,
+  Text,
+  Divider,
+  LoadingOverlay,
+  ActionIcon,
   Tooltip,
+  Collapse,
+  Box,
+  Flex,
+  Progress,
   RingProgress,
   Loader,
 } from '@mantine/core';
 import {
-  IconCalendar,
-  IconUser,
-  IconBuilding,
-  IconNote,
-  IconChevronRight,
   IconAlertCircle,
-  IconArrowLeft,
-  IconCheck,
-  IconX,
-  IconFlag,
-  IconTicket,
+  IconChevronRight,
+  IconSearch,
+  IconPlus,
   IconFilter,
-  IconClock,
-  IconUpload,
-  IconFile,
-  IconFileText,
-  IconFileSpreadsheet,
-  IconPhoto,
+  IconX,
+  IconCheck,
   IconRefresh,
+  IconFileDescription,
+  IconCalendarEvent,
+  IconUser,
+  IconFlag,
+  IconClock,
+  IconBuilding,
   IconProgress,
   IconCircleCheckFilled,
   IconCircleDot,
   IconCircle,
   IconUserCheck,
   IconTag,
-  IconCalendarEvent,
-  IconDownload,
 } from '@tabler/icons-react';
-import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
-import { createPrerenderSearchParamsForClientPage } from 'next/dist/server/request/search-params';
-
-interface Ticket {
-  id: number;
-  subject: string;
-  description: string;
-  user: string;
-  status: string;
-  created_at: string;
-  category: string;
-  process: string;
-  id_category: number;
-  id_company: number;
-  requester: string;
-  company: string;
-  email: string;
-  phone: string;
-  identification: string;
-}
 
 interface RequestTask {
   id: number;
@@ -97,16 +66,27 @@ interface RequestTask {
   status_task: string;
 }
 
-interface Note {
-  id_note: number;
-  note: string;
-  createdBy: string;
-  creation_date?: string;
+interface Ticket {
+  id: number;
+  description: string;
+  user: string;
+  status: string;
+  created_at: string;
+  category: string;
+  id_company: number;
+  requester: string;
+  company: string;
+  subject: string;
 }
 
-interface Option {
-  value: string;
-  label: string;
+interface CompanyData {
+  id_company: number;
+  company: string;
+}
+
+interface CategoryData {
+  id: number;
+  category: string;
 }
 
 interface ProcessCategoryData {
@@ -114,23 +94,23 @@ interface ProcessCategoryData {
   process: string;
   id_category_request: number;
   category: string;
+  email?: string;
 }
 
-interface FolderFile {
-  id: string;
-  name: string;
-  size?: number;
-  lastModifiedDateTime?: string;
-  '@microsoft.graph.downloadUrl'?: string;
+interface ConsultResponse {
+  companies: CompanyData[];
+  categories: CategoryData[];
+  processCategories: ProcessCategoryData[];
+  assignedUsers: { id: string; name: string }[];
 }
 
-function RequestBoard() {
+function ViewerRequestGeneralPage() {
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
   const [userId, setUserId] = useState<number | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [userIdInitialized, setUserIdInitialized] = useState(false);
-  const [processes, setProcess] = useState<{ value: string; label: string }[]>([]);
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const subprocessId = searchParams.get('subprocess_id');
@@ -139,35 +119,40 @@ function RequestBoard() {
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
     company: '',
-    usuario: '',
-    descripcion: '',
+    subject: '',
     category: '',
     process: '',
+    descripcion: '',
   });
+  const [createLoading, setCreateLoading] = useState(false);
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
-  const [categories, setCategories] = useState<Option[]>([]);
+  const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
   const [processCategories, setProcessCategories] = useState<
-    { value: string; label: string; id_category_request: number }[]
+    { value: string; label: string; id_category_request: number; email?: string }[]
   >([]);
   const [filteredProcesses, setFilteredProcesses] = useState<{ value: string; label: string }[]>(
     []
   );
   const [assignedUsers, setAssignedUsers] = useState<{ value: string; label: string }[]>([]);
+  const [formDataLoading, setFormDataLoading] = useState(false);
+  const [formDataError, setFormDataError] = useState<string | null>(null);
   const [idUser, setIdUser] = useState('');
+  const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
+  const [folderContents, setFolderContents] = useState([]);
 
   const [filters, setFilters] = useState({
-    id: '',
     status: '1',
     company: '',
     date_from: '',
     date_to: '',
     assigned_to: '',
-    process: '',
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -175,7 +160,6 @@ function RequestBoard() {
       router.push('/login');
       return;
     }
-    fetchCompanies();
     fetchFormData();
   }, [session, status, router]);
 
@@ -192,7 +176,7 @@ function RequestBoard() {
           if (id) {
             setUserId(id);
             setUserIdInitialized(true);
-            fetchTicketsWithUserId(id, filters);
+            fetchTicketsWithUserId(id);
           } else {
             setUserIdInitialized(true);
           }
@@ -239,42 +223,7 @@ function RequestBoard() {
       console.log('fetchTickets: No se puede ejecutar sin userId');
       return;
     }
-    await fetchTicketsWithUserId(userId, filters);
-  };
-
-  const fetchTicketsWithUserId = async (userIdToUse: number, filtersToUse?: typeof filters) => {
-    try {
-      setLoading(true);
-
-      const params = new URLSearchParams();
-      params.append('idUser', userIdToUse.toString());
-
-      if (filtersToUse) {
-        if (filtersToUse.id) params.append('id', filtersToUse.id); 
-        if (filtersToUse.status) params.append('status', filtersToUse.status);
-        if (filtersToUse.company) params.append('company', filtersToUse.company);
-        if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
-        if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
-        if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
-        if (filtersToUse.process) params.append('process', filtersToUse.process);
-      }
-
-      const url = `/api/requests-general/request-assigned?${params.toString()}`;
-
-      const response = await fetch(url);
-
-      if (!response.ok) throw new Error('Failed to fetch assigned tickets');
-
-      const data = await response.json();
-      console.log('fetchTicketsWithUserId: Tickets asignados recibidos:', data.length, 'tickets');
-      setTickets(data);
-      fetchTasksForTickets(data);
-    } catch (err) {
-      console.error('Error fetching assigned tickets:', err);
-      setError('Unable to load assigned tickets. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+    await fetchTicketsWithUserId(userId);
   };
 
   const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
@@ -294,6 +243,77 @@ function RequestBoard() {
       setTasksByRequest(grouped);
     } catch (err) {
       console.error('Error fetching request tasks:', err);
+    }
+  };
+
+  const fetchTicketsWithUserId = async (
+    userIdToUse: number,
+    filtersToUse: typeof filters = filters
+  ) => {
+    try {
+      setLoading(true);
+
+      const params = new URLSearchParams();
+      params.append('idUser', userIdToUse.toString());
+
+      if (filtersToUse.status) params.append('status', filtersToUse.status);
+      if (filtersToUse.company) params.append('company', filtersToUse.company);
+      if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
+      if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
+      if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
+
+      const url = `/api/requests-general/viewer-request?${params.toString()}`;
+
+      const response = await fetch(url);
+
+      if (!response.ok) throw new Error('Failed to fetch tickets');
+
+      const data = await response.json();
+      console.log('fetchTicketsWithUserId: Tickets recibidos:', data.length, 'tickets');
+      setTickets(data);
+      fetchTasksForTickets(data);
+    } catch (err) {
+      console.error('Error fetching tickets:', err);
+      setError('Unable to load tickets. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const validateFilters = () => {
+    const errors: string[] = [];
+
+    if (filters.date_from && filters.date_to) {
+      const fromDate = new Date(filters.date_from);
+      const toDate = new Date(filters.date_to);
+      if (fromDate > toDate) {
+        errors.push('La fecha "Desde" no puede ser mayor que la fecha "Hasta"');
+      }
+    }
+
+    if (filters.company && !companies.find((c) => c.value === filters.company)) {
+      errors.push('La empresa seleccionada no es válida');
+    }
+
+    if (filters.assigned_to && !assignedUsers.find((u) => u.value === filters.assigned_to)) {
+      errors.push('La persona asignada seleccionada no es válida');
+    }
+
+    if (errors.length > 0) {
+      setError(errors.join('. '));
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleApplyFilters = async () => {
+    if (!validateFilters()) {
+      return;
+    }
+
+    if (userId) {
+      await fetchTicketsWithUserId(userId);
     }
   };
 
@@ -338,90 +358,57 @@ function RequestBoard() {
     }
   };
 
-  const fetchCompanies = async () => {
-    try {
-      setLoading(true);
-
-      const response = await fetch(`/api/requests-general/consult-request`);
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Frontend - fetchCompanies received data:', data);
-
-        if (data.companies && Array.isArray(data.companies)) {
-          setCompany(
-            data.companies.map((sub: { id_company: number; company: string }) => ({
-              value: sub.id_company.toString(),
-              label: sub.company,
-            }))
-          );
-          console.log(
-            'Frontend - fetchCompanies state updated:',
-            data.companies.map((sub: { id_company: number; company: string }) => ({
-              value: sub.id_company.toString(),
-              label: sub.company,
-            }))
-          );
-        } else {
-          console.error('Frontend - fetchCompanies: companies data is not an array or missing');
-          setCompany([]);
-        }
-        if (data.processCategories && Array.isArray(data.processCategories)) {
-          setProcess(
-            data.processCategories.map((sub: { id_process: number; process: string }) => ({
-              value: sub.id_process.toString(),
-              label: sub.process,
-            }))
-          );
-        } else {
-          console.error(
-            'Frontend - fetchCompanies: processCategories data is not an array or missing'
-          );
-          setProcess([]);
-        }
-      } else {
-        console.error('Frontend - fetchCompanies failed with status:', response.status);
-      }
-    } catch (err) {
-      console.error('Error fetching companies:', err);
-      setError('Unable to load companies. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const fetchFormData = async () => {
     try {
+      setFormDataLoading(true);
+      setFormDataError(null);
+
       const response = await fetch(`/api/requests-general/consult-request`);
 
       if (response.ok) {
-        const data = await response.json();
-        console.log('Frontend - fetchFormData received data:', data);
-        setCategories(
-          data.categories.map((c: { id: number; category: string }) => ({
-            value: c.id.toString(),
-            label: c.category,
+        const data: ConsultResponse = await response.json();
+        setCompany(
+          data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
+        );
+        setFormData((prev) => ({
+          ...prev,
+          company: "3",
+        }));
+        setCategories(data.categories.map((c) => ({ value: c.id.toString(), label: c.category })));
+        setProcessCategories(
+          data.processCategories.map((p) => ({
+            value: p.id_process.toString(),
+            label: p.process,
+            id_category_request: p.id_category_request,
+            email: p.email,
           }))
         );
-        setProcessCategories(
-          data.processCategories.map(
-            (p: { id_process: number; process: string; id_category_request: number }) => ({
-              value: p.id_process.toString(),
-              label: p.process,
-              id_category_request: p.id_category_request,
-            })
-          )
-        );
         if (data.assignedUsers) {
-          setAssignedUsers(
-            data.assignedUsers.map((u: { name: string }) => ({ value: u.name, label: u.name }))
-          );
+          setAssignedUsers(data.assignedUsers.map((u) => ({ value: u.name, label: u.name })));
         }
       } else {
         console.error('Frontend - fetchFormData failed with status:', response.status);
+        setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
       }
     } catch (err) {
       console.error('Error fetching form data:', err);
+      setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
+    } finally {
+      setFormDataLoading(false);
+    }
+  };
+
+  const handleFormChange = (field: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+
+    if (formErrors[field]) {
+      setFormErrors((prev) => ({
+        ...prev,
+        [field]: '',
+      }));
     }
   };
 
@@ -453,11 +440,11 @@ function RequestBoard() {
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
       case 'abierto':
-        return 'blue';
-      case 'cancelado':
-        return 'red';
-      case 'resuelto':
         return 'green';
+      case 'cancelado':
+        return 'gray';
+      case 'resuelto':
+        return 'blue';
       case 'devuelta':
       case 'devuelto':
         return 'orange';
@@ -515,7 +502,7 @@ function RequestBoard() {
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
     { title: 'Solicitudes Generales', href: '#' },
-    { title: 'Solicitudes Asignadas', href: '#' },
+    { title: 'Panel de Solicitudes', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (
       <Link key={index} href={item.href} passHref>
@@ -530,46 +517,10 @@ function RequestBoard() {
     )
   );
 
-  async function exportToExcel() {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Datos');
-
-    type TicketKeys = keyof Ticket;
-
-    const columnMapOrdered: { key: TicketKeys; header: string }[] = [
-      { key: "requester", header: "nombre_solicitante" },
-      { key: "subject", header: "cargo" },
-      { key: "description", header: "conocimiento_experiencia_obligatoria" },
-      { key: "email", header: "correo_electronico_firmante_1" },
-      { key: "phone", header: "numero_celular_firmante_1" },
-      { key: "identification", header: "numero_documento_firmante_1" }
-    ];
-    
-    worksheet.columns = columnMapOrdered;
-
-    tickets.forEach((row) => worksheet.addRow(row));
-
-    tickets.forEach(item => {
-      const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
-
-      columnMapOrdered.forEach(col => {
-        row[col.key] = item[col.key];
-      });
-
-      worksheet.addRow(row);
-    });
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-
-    saveAs(blob, 'InformeSolicitudesAsignadas.xlsx');
-  }
-
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
+        {/* Header Section */}
         <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
@@ -581,13 +532,14 @@ function RequestBoard() {
                 order={1}
                 className='text-3xl font-bold mb-2 flex items-center gap-3'
               >
-                <IconTicket size={32} className='text-blue-600' />
-                Solicitudes Asignadas
+                <IconFileDescription size={32} className='text-blue-600' />
+                Observar Mis Solicitudes
               </Title>
               <Text size='lg' c='dimmed'>
-                Gestión de solicitudes asignadas a ti
+                Observación de mis solicitudes
               </Text>
             </div>
+
           </Flex>
 
           <Grid>
@@ -611,7 +563,7 @@ function RequestBoard() {
                 }}
               >
                 <Group>
-                  <IconTicket size={24} color='var(--mantine-color-blue-light-color)' />
+                  <IconFileDescription size={24} color='var(--mantine-color-blue-light-color)' />
                   <div>
                     <Text size='xs' c='var(--mantine-color-blue-light-color)'>
                       Total de Solicitudes
@@ -646,7 +598,7 @@ function RequestBoard() {
                   <IconProgress size={24} color='var(--mantine-color-orange-light-color)' />
                   <div>
                     <Text size='xs' c='var(--mantine-color-orange-light-color)'>
-                      Pendiente
+                      Pendientes
                     </Text>
                     <Text size='lg' fw={600}>
                       {tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
@@ -719,22 +671,6 @@ function RequestBoard() {
                 })()}
               </Card>
             </Grid.Col>
-            {filters.process == '4' && (
-              <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
-                  <Group>
-                    <Button
-                      onClick={() => exportToExcel()}
-                      size='lg'
-                      leftSection={<IconDownload size={18} />}
-                      className='bg-green-500 hover:bg-green-700'
-                    >
-                      Descargar XLSX
-                    </Button>
-                  </Group>
-                </Card>
-              </Grid.Col>
-            )}
           </Grid>
         </Card>
 
@@ -760,6 +696,7 @@ function RequestBoard() {
               variant='subtle'
               onClick={() => setFiltersExpanded(!filtersExpanded)}
               aria-label={filtersExpanded ? 'Ocultar filtros' : 'Mostrar filtros'}
+              data-testid='filter-toggle'
             >
               {filtersExpanded ? <IconX size={16} /> : <IconFilter size={16} />}
             </ActionIcon>
@@ -768,16 +705,6 @@ function RequestBoard() {
           <Collapse in={filtersExpanded}>
             <Box mt='md'>
               <Grid>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='ID Solicitud'
-                    type='text'
-                    value={filters.id}
-                    onChange={(e) => handleFilterChange('id', e.target.value)}
-                    leftSection={<IconFilter size={16} />}
-                    data-testid='id-filter'
-                  />
-                </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <Select
                     label='Estado'
@@ -793,6 +720,7 @@ function RequestBoard() {
                     value={filters.status}
                     onChange={(value) => handleFilterChange('status', value || '')}
                     leftSection={<IconFlag size={16} />}
+                    data-testid='status-filter'
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
@@ -804,17 +732,7 @@ function RequestBoard() {
                     value={filters.company}
                     onChange={(value) => handleFilterChange('company', value || '')}
                     leftSection={<IconBuilding size={16} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Proceso'
-                    placeholder='Todas los procesos'
-                    clearable
-                    data={processes}
-                    value={filters.process}
-                    onChange={(value) => handleFilterChange('process', value || '')}
-                    leftSection={<IconBuilding size={16} />}
+                    data-testid='company-filter'
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
@@ -824,6 +742,7 @@ function RequestBoard() {
                     value={filters.date_from}
                     onChange={(e) => handleFilterChange('date_from', e.target.value)}
                     leftSection={<IconCalendarEvent size={16} />}
+                    data-testid='date_from-filter'
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
@@ -833,6 +752,19 @@ function RequestBoard() {
                     value={filters.date_to}
                     onChange={(e) => handleFilterChange('date_to', e.target.value)}
                     leftSection={<IconCalendarEvent size={16} />}
+                    data-testid='date_to-filter'
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Persona Asignada'
+                    placeholder='Todas las personas'
+                    clearable
+                    data={assignedUsers}
+                    value={filters.assigned_to}
+                    onChange={(value) => handleFilterChange('assigned_to', value || '')}
+                    leftSection={<IconUserCheck size={16} />}
+                    data-testid='assigned_to-filter'
                   />
                 </Grid.Col>
               </Grid>
@@ -840,26 +772,34 @@ function RequestBoard() {
               <Group justify='flex-end' mt='md'>
                 <Button
                   variant='outline'
-                  onClick={() => {
+                  onClick={async () => {
                     const clearedFilters = {
-                      id: '',
                       status: '',
                       company: '',
                       date_from: '',
                       date_to: '',
                       assigned_to: '',
-                      process: '',
                     };
                     setFilters(clearedFilters);
-                    if (userId) {
-                      fetchTicketsWithUserId(userId, clearedFilters);
-                    }
+
+                    setError(null);
+
+                    setTimeout(async () => {
+                      if (userId) {
+                        await fetchTicketsWithUserId(userId);
+                      }
+                    }, 100);
                   }}
                   leftSection={<IconX size={16} />}
+                  data-testid='clear-filters'
                 >
                   Limpiar Filtros
                 </Button>
-                <Button onClick={fetchTickets} leftSection={<IconRefresh size={16} />}>
+                <Button
+                  onClick={handleApplyFilters}
+                  leftSection={<IconRefresh size={16} />}
+                  data-testid='apply-filters'
+                >
                   Aplicar Filtros
                 </Button>
               </Group>
@@ -867,12 +807,13 @@ function RequestBoard() {
           </Collapse>
         </Card>
 
+        {/* Enhanced Table */}
         <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
           <Title order={3} mb='md' className='flex items-center gap-2'>
-            <IconTicket size={20} />
-            Lista de Solicitudes Asignadas
+            <IconFileDescription size={20} />
+            Lista de Solicitudes
           </Title>
 
           <div className='overflow-x-auto'>
@@ -881,7 +822,7 @@ function RequestBoard() {
                 <Table.Tr>
                   <Table.Th>ID</Table.Th>
                   <Table.Th>Asunto</Table.Th>
-                  <Table.Th>Proceso / Empresa</Table.Th>
+                  <Table.Th>Compañía / Categoría</Table.Th>
                   <Table.Th>Estado</Table.Th>
                   <Table.Th>Fecha</Table.Th>
                   <Table.Th>Solicitante / Asignado</Table.Th>
@@ -892,12 +833,12 @@ function RequestBoard() {
                   <Table.Tr>
                     <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
-                        <IconTicket size={48} className='text-gray-300' />
+                        <IconFileDescription size={48} className='text-gray-300' />
                         <Text size='lg' fw={500}>
-                          No se encontraron solicitudes asignadas
+                          No se encontraron solicitudes
                         </Text>
                         <Text size='sm' c='gray.5'>
-                          No tienes solicitudes asignadas actualmente
+                          Intenta ajustar los filtros o crea una nueva solicitud
                         </Text>
                       </div>
                     </Table.Td>
@@ -910,7 +851,7 @@ function RequestBoard() {
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
                         window.open(
-                          `/process/request-general/view-request?id=${ticket.id}&from=assigned-requests`
+                          `/process/request-general/view-request?id=${ticket.id}&from=viewer-request`
                         );
                       }}
                     >
@@ -975,15 +916,15 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={2}>
-                          <Text size='sm' fw={500}>
-                            {ticket.process}
-                          </Text>
                           <Group gap={4} wrap='nowrap'>
-                            <IconBuilding size={13} className='text-gray-400' />
-                            <Text size='xs' c='dimmed'>
+                            <IconBuilding size={14} className='text-gray-400' />
+                            <Text size='sm' fw={500}>
                               {ticket.company}
                             </Text>
                           </Group>
+                          <Text size='xs' c='dimmed'>
+                            {ticket.category}
+                          </Text>
                         </Stack>
                       </Table.Td>
                       <Table.Td style={{ whiteSpace: 'nowrap' }}>
@@ -1003,29 +944,28 @@ function RequestBoard() {
                         })()}
                       </Table.Td>
                       <Table.Td>
-                        <Group gap={4} wrap='nowrap' align='flex-start'>
-                          <IconCalendarEvent size={14} className='text-gray-400' style={{ marginTop: 2 }} />
-                          <Text size='sm' c='dimmed'>
-                            {(() => {
+                        <Text size="sm" c="dimmed">
+                          {
+                            (() => {
                               const raw = ticket.created_at;
-                              if (!raw) return 'Sin fecha';
+                              if (!raw) return "Sin fecha";
 
                               const date = new Date(raw);
-                              if (isNaN(date.getTime())) return 'Fecha inválida';
+                              if (isNaN(date.getTime())) return "Fecha inválida";
 
                               const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
 
-                              return new Intl.DateTimeFormat('es-CO', {
-                                day: 'numeric',
-                                month: 'long',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
+                              return new Intl.DateTimeFormat("es-CO", {
+                                day: "numeric",
+                                month: "long",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
                                 hour12: true,
                               }).format(adjusted);
-                            })()}
-                          </Text>
-                        </Group>
+                            })()
+                          }
+                        </Text>
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={4}>
@@ -1048,15 +988,16 @@ function RequestBoard() {
             </Table>
           </div>
         </Card>
+
       </div>
     </div>
   );
 }
 
-export default function TicketsBoardPage() {
+export default function ViewerRequestsGeneralPage() {
   return (
-    <Suspense fallback={<div>Cargando...</div>}>
-      <RequestBoard />
+    <Suspense fallback={<div>Loading...</div>}>
+      <ViewerRequestGeneralPage />
     </Suspense>
   );
 }

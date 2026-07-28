@@ -196,6 +196,16 @@ export const ENTITY_METADATA = {
     companyColumn: null,
     fields: ['id_category', 'category', 'subcategories'],
   },
+  request_tasks: {
+    description:
+      'Tareas/actividades del workflow de las solicitudes (task_request_general). Una fila por actividad, con sus tiempos (start_date, end_date, date_resolution). Consulta masiva via kronos_list_request_tasks, sin pedir solicitud por solicitud.',
+    companyColumn: 'requests_general.id_company (via id_request_general)',
+    fields: [
+      'id', 'id_request', 'id_task', 'task', 'id_status', 'status',
+      'id_assigned', 'assignedTo', 'start_date', 'end_date',
+      'date_resolution', 'resolution', 'id_company', 'company',
+    ],
+  },
   users: {
     description:
       'Usuarios. Solo se devuelven los pertenecientes a las empresas del alcance. Campos sensibles excluidos (password, tokens).',
@@ -213,12 +223,13 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 16,
+  totalTools: 17,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
     'kronos_get_request',
     'kronos_list_request_notes',
+    'kronos_list_request_tasks',
     'kronos_list_tickets',
     'kronos_get_ticket',
     'kronos_list_processes',
@@ -429,6 +440,59 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           INNER JOIN company c ON c.id_company = rg.id_company
           WHERE ${whereSql}
           ORDER BY vn.ID_Solicitud DESC, vn.id_note DESC
+          OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+        `);
+        return { result: { count: rows.length, limit, offset, data: rows }, rows: rows.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_request_tasks  (task_request_general, masivo)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_request_tasks',
+    'Lista en bloque las tareas/actividades del workflow de las solicitudes (tabla task_request_general), de forma eficiente y paginada, para NO pedir solicitud por solicitud con kronos_get_request. Filtra SIEMPRE por las empresas del alcance. Permite acotar por solicitud (requestId) y empresa (companyId). Devuelve los tiempos (start_date, end_date, date_resolution) de cada actividad.',
+    {
+      requestId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Acota a las tareas de una solicitud (task_request_general.id_request_general).'),
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a consultar; se interseca con el alcance de la key.'),
+      limit: z.number().int().optional(),
+      offset: z.number().int().optional(),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_request_tasks', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const limit = clampLimit(ctx, args.limit);
+        const offset = clampOffset(args.offset);
+
+        // El alcance por empresa se aplica ligando la tarea con su solicitud.
+        const where: Prisma.Sql[] = [companyClause('rg.id_company', filter)];
+        if (args.requestId !== undefined) {
+          where.push(Prisma.sql`trg.id_request_general = ${args.requestId}`);
+        }
+        const whereSql = Prisma.join(where, ' AND ');
+
+        const rows = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT trg.id, trg.id_request_general AS id_request, trg.id_task,
+                 tpc.task AS task, trg.id_status, sc.status,
+                 trg.id_assigned, u.name AS assignedTo,
+                 trg.start_date, trg.end_date, trg.date_resolution, trg.resolution,
+                 rg.id_company, c.company
+          FROM task_request_general trg
+          INNER JOIN requests_general rg ON rg.id = trg.id_request_general
+          INNER JOIN company c ON c.id_company = rg.id_company
+          LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task
+          LEFT JOIN status_case sc ON sc.id_status_case = trg.id_status
+          LEFT JOIN [user] u ON u.id = trg.id_assigned
+          WHERE ${whereSql}
+          ORDER BY trg.id_request_general DESC, trg.id ASC
           OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
         `);
         return { result: { count: rows.length, limit, offset, data: rows }, rows: rows.length };

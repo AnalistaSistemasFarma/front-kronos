@@ -51,10 +51,12 @@ model User {
   role           String         @default("user")
   phone          String?
   identification String?
-  accounts       Account[]
-  companyUsers   CompanyUser[]
-  sessions       Session[]
-  auditLogs      UserAuditLog[]
+  accounts                Account[]
+  companyUsers            CompanyUser[]
+  departmentUsers         DepartmentUser[]
+  userTypesAuthorizations UserTypesAuthorization[]
+  sessions                Session[]
+  auditLogs               UserAuditLog[]
 
   @@map("user")
 }
@@ -150,11 +152,40 @@ model Active {
 }
 
 model Department {
-  id_department Int    @id @default(autoincrement())
-  department    String @unique
-  cases         Case[]
+  id_department   Int              @id @default(autoincrement())
+  department      String           @unique
+  cases           Case[]
+  departmentUsers DepartmentUser[]
 
   @@map("department")
+}
+
+model DepartmentUser {
+  id            Int        @id @default(autoincrement())
+  id_user       String
+  id_department Int
+  user          User       @relation(fields: [id_user], references: [id])
+  department    Department @relation(fields: [id_department], references: [id_department])
+
+  @@map("department_user")
+}
+
+model TypesAuthorization {
+  id                 Int                      @id @default(autoincrement())
+  type_authorization String
+  userTypes          UserTypesAuthorization[]
+
+  @@map("types_authorization")
+}
+
+model UserTypesAuthorization {
+  id                 Int                @id @default(autoincrement())
+  type_authorization Int
+  id_user            String
+  typeAuthorization  TypesAuthorization @relation(fields: [type_authorization], references: [id])
+  user               User               @relation(fields: [id_user], references: [id])
+
+  @@map("user_types_authorization")
 }
 
 model Category {

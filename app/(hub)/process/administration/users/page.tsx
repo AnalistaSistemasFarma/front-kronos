@@ -14,6 +14,7 @@ import {
   Table,
   TextInput,
   Select,
+  MultiSelect,
   Button,
   Group,
   Badge,
@@ -113,6 +114,13 @@ function UserManagement() {
   const [subprocessSearch, setSubprocessSearch] = useState('');
   const [subprocessLoading, setSubprocessLoading] = useState(false);
 
+  // Authorization types states (submodal shown when the "Autorización" subprocess is assigned)
+  const [authTypeModalOpened, setAuthTypeModalOpened] = useState(false);
+  const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
+  const [selectedAuthorizationTypeIds, setSelectedAuthorizationTypeIds] = useState<string[]>([]);
+
   // Form states
   const [formData, setFormData] = useState({
     name: '',
@@ -124,6 +132,17 @@ function UserManagement() {
     identification: '',
   });
   const [formLoading, setFormLoading] = useState(false);
+
+  // Department assignment states
+  const [departmentOptions, setDepartmentOptions] = useState<{ value: string; label: string }[]>(
+    []
+  );
+  const [selectedDepartmentIds, setSelectedDepartmentIds] = useState<string[]>([]);
+
+  // Id of the "Autorización" subprocess (identified by its url), if present in the catalog
+  const authSubprocessId =
+    allSubprocesses.find((s) => s.subprocess_url === '/process/authorization')?.id_subprocess ??
+    null;
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -170,6 +189,26 @@ function UserManagement() {
     fetchUsers();
   }, [session, status, router, fetchUsers]);
 
+  // Load department catalog for the MultiSelect (used in create/edit modals)
+  useEffect(() => {
+    if (status === 'loading' || !session) return;
+
+    const loadDepartments = async () => {
+      try {
+        const response = await fetch('/api/help-desk/departments', { cache: 'no-store' });
+        if (!response.ok) return;
+        const data: { id_department: number; department: string }[] = await response.json();
+        setDepartmentOptions(
+          data.map((d) => ({ value: d.id_department.toString(), label: d.department }))
+        );
+      } catch (err) {
+        console.error('Error loading departments:', err);
+      }
+    };
+
+    loadDepartments();
+  }, [session, status]);
+
   const handleFilterChange = (field: string, value: string) => {
     setFilters((prev) => ({
       ...prev,
@@ -196,6 +235,18 @@ function UserManagement() {
 
       const { user } = await response.json();
 
+      // Assign selected departments to the newly created user
+      if (selectedDepartmentIds.length > 0) {
+        const deptResponse = await fetch(`/api/users/${user.id}/departments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ departmentIds: selectedDepartmentIds.map(Number) }),
+        });
+        if (!deptResponse.ok) {
+          toast.error('Usuario creado, pero no se pudieron asignar los departamentos');
+        }
+      }
+
       // Add the new user to the list
       setUsers((prev) => [user, ...prev]);
 
@@ -209,6 +260,7 @@ function UserManagement() {
         phone: '',
         identification: '',
       });
+      setSelectedDepartmentIds([]);
       setCreateModalOpened(false);
       toast.success('Usuario creado exitosamente');
     } catch (err: unknown) {
@@ -250,12 +302,23 @@ function UserManagement() {
 
       const { user } = await response.json();
 
+      // Update the user's department assignments (replace set)
+      const deptResponse = await fetch(`/api/users/${selectedUser.id}/departments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ departmentIds: selectedDepartmentIds.map(Number) }),
+      });
+      if (!deptResponse.ok) {
+        toast.error('Usuario actualizado, pero no se pudieron guardar los departamentos');
+      }
+
       // Update the user in the list
       setUsers((prev) => prev.map((u) => (u.id === user.id ? user : u)));
 
       // Reset form and close modal
       setEditModalOpened(false);
       setSelectedUser(null);
+      setSelectedDepartmentIds([]);
       toast.success('Usuario actualizado exitosamente');
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Error al actualizar usuario';
@@ -298,7 +361,7 @@ function UserManagement() {
     }
   };
 
-  const openEditModal = (user: User) => {
+  const openEditModal = async (user: User) => {
     setSelectedUser(user);
     setFormData({
       name: user.name || '',
@@ -309,7 +372,21 @@ function UserManagement() {
       phone: user.phone || '',
       identification: user.identification || '',
     });
+    setSelectedDepartmentIds([]);
     setEditModalOpened(true);
+
+    // Preload the departments currently assigned to this user
+    try {
+      const response = await fetch(`/api/users/${user.id}/departments`, { cache: 'no-store' });
+      if (response.ok) {
+        const { departments } = await response.json();
+        setSelectedDepartmentIds(
+          departments.map((d: { id_department: number }) => d.id_department.toString())
+        );
+      }
+    } catch (err) {
+      console.error('Error loading user departments:', err);
+    }
   };
 
   const openDeleteModal = (user: User) => {
@@ -324,13 +401,35 @@ function UserManagement() {
     setSelectedCompany('');
     setSelectedSubprocessIds([]);
     setSubprocessSearch('');
+    setSelectedAuthorizationTypeIds([]);
 
     try {
-      const [subprocessesResponse, companiesResponse, assignedResponse] = await Promise.all([
+      const [
+        subprocessesResponse,
+        companiesResponse,
+        assignedResponse,
+        authTypesResponse,
+        userAuthTypesResponse,
+      ] = await Promise.all([
         fetch('/api/subprocesses', { cache: 'no-store' }),
         fetch('/api/companies', { cache: 'no-store' }),
         fetch(`/api/users/${user.id}/subprocesses`, { cache: 'no-store' }),
+        fetch('/api/authorization-types', { cache: 'no-store' }),
+        fetch(`/api/users/${user.id}/authorization-types`, { cache: 'no-store' }),
       ]);
+
+      if (authTypesResponse.ok) {
+        const types: { id: number; type_authorization: string }[] = await authTypesResponse.json();
+        setAuthorizationTypeOptions(
+          types.map((t) => ({ value: t.id.toString(), label: t.type_authorization }))
+        );
+        console.log(authTypesResponse);
+      }
+
+      if (userAuthTypesResponse.ok) {
+        const { typeIds } = await userAuthTypesResponse.json();
+        setSelectedAuthorizationTypeIds((typeIds as number[]).map((id) => id.toString()));
+      }
 
       let companiesData: Company[] = [];
       if (companiesResponse.ok) {
@@ -383,11 +482,14 @@ function UserManagement() {
   };
 
   const handleSubprocessToggle = (subprocessId: number) => {
-    setSelectedSubprocessIds((prev) =>
-      prev.includes(subprocessId)
-        ? prev.filter((id) => id !== subprocessId)
-        : [...prev, subprocessId]
-    );
+    setSelectedSubprocessIds((prev) => {
+      const isSelected = prev.includes(subprocessId);
+      // When the "Autorización" subprocess is turned ON, open the types submodal
+      if (!isSelected && subprocessId === authSubprocessId) {
+        setAuthTypeModalOpened(true);
+      }
+      return isSelected ? prev.filter((id) => id !== subprocessId) : [...prev, subprocessId];
+    });
   };
 
   const handleSelectAll = () => {
@@ -435,6 +537,22 @@ function UserManagement() {
       return;
     }
 
+    // Determine whether the "Autorización" subprocess will remain assigned to the user (global,
+    // per-user rule): either it's selected for the current company, or it's already assigned in
+    // another company.
+    const currentHasAuth = authSubprocessId !== null && selectedSubprocessIds.includes(authSubprocessId);
+    const otherHasAuth = assignedSubprocesses.some(
+      (a) =>
+        a.companyId !== parseInt(selectedCompany, 10) &&
+        a.subprocesses.some((s) => s.subprocessUrl === '/process/authorization')
+    );
+    const authAssignedAfterSave = currentHasAuth || otherHasAuth;
+
+    if (authAssignedAfterSave && selectedAuthorizationTypeIds.length === 0) {
+      toast.error('Debe seleccionar al menos un tipo de autorización');
+      return;
+    }
+
     try {
       setSubprocessLoading(true);
       const response = await fetch(`/api/users/${selectedUser.id}/subprocesses`, {
@@ -454,6 +572,23 @@ function UserManagement() {
       }
 
       const result = await response.json();
+
+      // Persist authorization types (per-user). Empty array clears them when Autorización is no
+      // longer assigned in any company.
+      const authTypesResponse = await fetch(
+        `/api/users/${selectedUser.id}/authorization-types`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            typeIds: authAssignedAfterSave ? selectedAuthorizationTypeIds.map(Number) : [],
+          }),
+        }
+      );
+      if (!authTypesResponse.ok) {
+        toast.error('Subprocesos guardados, pero no se pudieron guardar los tipos de autorización');
+      }
+
       toast.success(
         `Subprocesos actualizados: ${result.added} agregados, ${result.removed} removidos`
       );
@@ -567,7 +702,13 @@ function UserManagement() {
         <p className='text-gray-600'>Gestiona usuarios del sistema de manera segura y eficiente</p>
         <br />
         <Group>
-          <Button leftSection={<IconPlus size={16} />} onClick={() => setCreateModalOpened(true)}>
+          <Button
+            leftSection={<IconPlus size={16} />}
+            onClick={() => {
+              setSelectedDepartmentIds([]);
+              setCreateModalOpened(true);
+            }}
+          >
             Crear Usuario
           </Button>
           <Button variant='outline' leftSection={<IconDownload size={16} />} onClick={exportToCSV}>
@@ -766,6 +907,15 @@ function UserManagement() {
             value={formData.identification}
             onChange={(e) => setFormData({ ...formData, identification: e.target.value })}
           />
+          <MultiSelect
+            label='Departamentos'
+            placeholder='Seleccione uno o más departamentos'
+            data={departmentOptions}
+            value={selectedDepartmentIds}
+            onChange={setSelectedDepartmentIds}
+            searchable
+            clearable
+          />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setCreateModalOpened(false)}>
               Cancelar
@@ -838,6 +988,15 @@ function UserManagement() {
             placeholder='Número de documento'
             value={formData.identification}
             onChange={(e) => setFormData({ ...formData, identification: e.target.value })}
+          />
+          <MultiSelect
+            label='Departamentos'
+            placeholder='Seleccione uno o más departamentos'
+            data={departmentOptions}
+            value={selectedDepartmentIds}
+            onChange={setSelectedDepartmentIds}
+            searchable
+            clearable
           />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setEditModalOpened(false)}>
@@ -1010,9 +1169,26 @@ function UserManagement() {
                                   </div>
                                 )}
                               </div>
-                              {selectedSubprocessIds.includes(subprocess.id_subprocess) && (
-                                <IconCheck size={20} color='#113562' />
-                              )}
+                              <Group gap='xs'>
+                                {subprocess.id_subprocess === authSubprocessId &&
+                                  selectedSubprocessIds.includes(subprocess.id_subprocess) && (
+                                    <Button
+                                      size='xs'
+                                      variant='light'
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setAuthTypeModalOpened(true);
+                                      }}
+                                    >
+                                      Configurar tipos
+                                      {selectedAuthorizationTypeIds.length > 0 &&
+                                        ` (${selectedAuthorizationTypeIds.length})`}
+                                    </Button>
+                                  )}
+                                {selectedSubprocessIds.includes(subprocess.id_subprocess) && (
+                                  <IconCheck size={20} color='#113562' />
+                                )}
+                              </Group>
                             </Group>
                           </Paper>
                         ))
@@ -1044,6 +1220,35 @@ function UserManagement() {
               </Group>
             </>
           )}
+        </Stack>
+      </Modal>
+
+      {/* Authorization Types Submodal */}
+      <Modal
+        opened={authTypeModalOpened}
+        onClose={() => setAuthTypeModalOpened(false)}
+        title='Tipos de autorización'
+        size='md'
+        zIndex={1000}
+      >
+        <Stack>
+          <p className='text-sm text-gray-600'>
+            El subproceso <strong>Autorización</strong> requiere al menos un tipo de autorización.
+            Seleccione uno o más.
+          </p>
+          <MultiSelect
+            label='Tipos de autorización'
+            placeholder='Seleccione uno o más tipos'
+            data={authorizationTypeOptions}
+            value={selectedAuthorizationTypeIds}
+            onChange={setSelectedAuthorizationTypeIds}
+            searchable
+            clearable
+            comboboxProps={{ withinPortal: true, zIndex: 1100 }}
+          />
+          <Group justify='flex-end'>
+            <Button onClick={() => setAuthTypeModalOpened(false)}>Aceptar</Button>
+          </Group>
         </Stack>
       </Modal>
     </div>

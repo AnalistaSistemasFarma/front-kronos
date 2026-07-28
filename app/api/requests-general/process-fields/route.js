@@ -1,5 +1,4 @@
-import sql from 'mssql';
-import sqlConfig from '../../../../dbconfig';
+import { sql, getPool } from '../../../../lib/mssqlPool';
 import { NextResponse } from 'next/server';
 
 export async function GET(req) {
@@ -14,7 +13,7 @@ export async function GET(req) {
       );
     }
 
-    const pool = await sql.connect(sqlConfig);
+    const pool = await getPool();
     const id = parseInt(idProcess);
 
     const [fieldsResult, optionsResult, condResult] = await Promise.all([

@@ -20,7 +20,7 @@ import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer'
  * reporte { ok, duplicated, failed }. Todo server-side, una sola sesion SAP.
  */
 
-const REQUIRED = ['U_Referencia', 'U_Descripcion', 'U_Registro_Sanitario'] as const;
+const REQUIRED = ['U_Referencia', 'U_Registro_Sanitario'] as const;
 const MAX_ROWS = 2000;
 
 export async function POST(request: NextRequest) {

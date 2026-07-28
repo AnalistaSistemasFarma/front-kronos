@@ -76,19 +76,24 @@ export async function POST(req) {
         .input("process", sql.Int, process)
         .query(insertProcess);
 
+      // LEFT JOIN (no INNER): así también aparecen las tareas SIN responsable asignado.
+      // Las de autorización sin responsable se instancian igual (id_assigned = NULL); las
+      // normales sin responsable se omiten en el loop de abajo.
       const getTasksQuery = `
         SELECT
           tpc.id AS id_task,
           tpc.is_sequential,
           tpc.display_order,
+          tpc.is_authorization,
           utrg.id_user,
           u.email
-        FROM user_task_request_general utrg
-        INNER JOIN task_process_category tpc
-          ON tpc.id = utrg.id_task
-        INNER JOIN [user] u
+        FROM task_process_category tpc
+        LEFT JOIN user_task_request_general utrg
+          ON utrg.id_task = tpc.id
+        LEFT JOIN [user] u
           ON u.id = utrg.id_user
         WHERE tpc.id_process_category = @process
+          AND tpc.active = 1
         ORDER BY tpc.display_order, tpc.id;
       `;
 
@@ -123,10 +128,17 @@ export async function POST(req) {
 
         if (!shouldCreateNow(row)) continue;
 
+        const hasAssignee = row.id_user != null;
+        const isAuthorization = !!row.is_authorization;
+
+        // Tarea normal sin responsable: no se puede trabajar, se omite (comportamiento previo).
+        // Tarea de autorización sin responsable: se crea igual con id_assigned = NULL.
+        if (!hasAssignee && !isAuthorization) continue;
+
         await new sql.Request(transaction)
           .input("id_request", sql.Int, newRequestId)
           .input("id_task", sql.Int, row.id_task)
-          .input("id_user", sql.NVarChar, row.id_user)
+          .input("id_user", sql.NVarChar, hasAssignee ? row.id_user : null)
           .query(insertTaskQuery);
 
         createdRows.push(row);
@@ -164,7 +176,7 @@ export async function POST(req) {
       const processEmail = processUserResult.recordset[0]?.email || null;
 
       const taskEmails = [
-        ...new Set(createdRows.map(t => t.email))
+        ...new Set(createdRows.map(t => t.email).filter(Boolean))
       ];
 
       await transaction.commit();
