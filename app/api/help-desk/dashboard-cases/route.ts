@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '../../../../lib/mssqlPool';
-import { requireDashboardAdminApi } from '../../../../lib/dashboard/dashboardAccess';
+import { requireDashboardAdminOrIntegrationApi } from '../../../../lib/dashboard/dashboardAccess';
 
 /**
  * Casos de mesa de ayuda para el dashboard (todos los estados, filtro por fecha de creación).
@@ -8,7 +8,7 @@ import { requireDashboardAdminApi } from '../../../../lib/dashboard/dashboardAcc
  */
 export async function GET(req: Request) {
   try {
-    const auth = await requireDashboardAdminApi();
+    const auth = await requireDashboardAdminOrIntegrationApi(req);
     if (!auth.ok) return auth.response;
 
     const pool = await getPool();
