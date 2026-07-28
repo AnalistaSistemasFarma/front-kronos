@@ -53,6 +53,7 @@ function formatValue(col: PurchaseColumn, raw: unknown): string {
   if (col.type === 'state') return stateLabel(value);
 
   if (col.type === 'date') {
+    // eslint-disable-next-line security/detect-unsafe-regex -- Falso positivo de safe-regex por el cuantificador anidado `(T.*)?`: el `?` acota `.*` a una sola ejecucion, por lo que NO hay backtracking catastrofico (verificado lineal: 1M chars en ~2 ms). Ademas el input es un valor de campo de SAP, corto y acotado.
     const iso = /^(\d{4}-\d{2}-\d{2})(T.*)?$/.exec(value);
     if (iso) return iso[1];
     return value;

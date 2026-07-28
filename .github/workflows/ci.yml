@@ -65,16 +65,19 @@ jobs:
         run: npm run lint
 
       - name: Auditoría de dependencias (npm audit — INFORMATIVO)
-        # "Opción 2": análisis de seguridad gratis en el CI. Este paso NO es
-        # bloqueante a propósito: hoy hay deuda de vulnerabilidades PREEXISTENTE
-        # en dependencias transitivas (~3 críticas y ~18 altas). Si lo pusiéramos
-        # bloqueante, la compuerta quedaría en rojo por deuda vieja, no por el
-        # cambio del PR. Por eso arranca solo SURFACEANDO el conteo por severidad
-        # al resumen del job.
+        # "Opción 2": análisis de seguridad gratis en el CI. Este paso del FRONT
+        # sigue INFORMATIVO a propósito: la Fase 3 saneó lo saneable sin romper
+        # la app (bump de next-auth a 4.24.15 + override de tar a >=7.5.7), lo
+        # que bajó las críticas de 3 a 1. La crítica remanente es `next`, cuyo
+        # arreglo (bump a 15.5.22) cambia el pin del framework e introduce nuevas
+        # altas/moderadas; queda a decisión de Nicolás (ver PR). El resto de
+        # altas son transitivas cuyo fix es "compatible" según npm pero, al
+        # aplicarlo con `npm audit fix`, arrastra subárboles con MÁS hallazgos
+        # (18→29 altas), por lo que se descartó.
         #
-        # PLAN: depurar las vulnerabilidades (npm audit fix / bump de deps) y,
-        # cuando el árbol esté saneado, subir este paso a bloqueante quitando el
-        # `|| true` y el continue-on-error, y ajustando --audit-level.
+        # PLAN: cuando el árbol del front esté saneado (o Nicolás apruebe el bump
+        # de next), subir este paso a bloqueante quitando el `|| true` y el
+        # continue-on-error. El MCP YA es bloqueante (ver job mcp: 0 vulns).
         if: always()
         continue-on-error: true
         run: |
@@ -167,19 +170,16 @@ jobs:
       - name: Pruebas unitarias MCP (vitest)
         run: cd mcp && npm test
 
-      - name: Auditoría de dependencias MCP (npm audit — INFORMATIVO)
-        # Igual que en el front: informativo, no bloqueante. Surfacea el conteo
-        # por severidad del árbol de dependencias del servidor MCP. PLAN: subir
-        # a bloqueante cuando la deuda de vulnerabilidades esté saneada.
+      - name: Resumen de dependencias MCP (npm audit — informativo)
+        # Vuelca el conteo por severidad del árbol del MCP al summary del job.
+        # NO bloqueante (solo reporta). El bloqueo real lo hace el paso
+        # siguiente.
         if: always()
         continue-on-error: true
         run: |
           cd mcp
           echo "## Auditoría de dependencias (npm audit — mcp)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "_Informativo: no bloquea la compuerta (deuda preexistente)._" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          npm audit --audit-level=high || true
           npm audit --json > audit-mcp.json 2>/dev/null || true
           node -e '
             const v = require("./audit-mcp.json").metadata.vulnerabilities;
@@ -189,3 +189,11 @@ jobs:
               console.log(`| ${k} | ${v[k]} |`);
             }
           ' >> "$GITHUB_STEP_SUMMARY" || echo "_No se pudo generar el resumen de npm audit (mcp)._" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Auditoría de dependencias MCP (npm audit — BLOQUEANTE, high+)
+        # Fase 3 (ratchet): el árbol del MCP quedó SANEADO (0 vulnerabilidades)
+        # tras `npm audit fix`. Por eso este paso YA es BLOQUEANTE: falla el job
+        # si aparece cualquier vulnerabilidad de severidad ALTA o CRÍTICA en el
+        # MCP, impidiendo que regrese la deuda. (El front sigue informativo
+        # porque conserva deuda transitiva pendiente de decisión.)
+        run: cd mcp && npm audit --audit-level=high
