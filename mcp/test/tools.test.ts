@@ -114,8 +114,9 @@ describe('enforcement de empresa en las tools', () => {
     expect(meta.allowedCompanyIds).toEqual([1]);
     // Ya no es 100% solo lectura: hay una ruta de escritura acotada.
     expect(meta.readOnly).toBe(false);
-    expect(meta.capabilities.totalTools).toBe(17);
+    expect(meta.capabilities.totalTools).toBe(18);
     expect(meta.capabilities.write).toContain('kronos_categorize_case');
+    expect(meta.capabilities.write).toContain('kronos_add_note');
   });
 });
 
@@ -171,25 +172,27 @@ describe('alcance admin "*" — ve todas las empresas', () => {
   });
 });
 
-describe('superficie de tools — 12 de lectura + 2 de escritura (categorización)', () => {
-  it('todas empiezan por kronos_; las únicas de escritura son las 2 de categorización', async () => {
+describe('superficie de tools — 14 de lectura + 4 de escritura (categorización, creación y nota)', () => {
+  it('todas empiezan por kronos_; las de escritura son categorización, creación y nota de bitácora', async () => {
     const server = buildServer();
     const client = await connectClient(server);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
 
-    expect(names.length).toBe(17);
-    // Las únicas tools que mutan datos son las dos de categorización.
+    expect(names.length).toBe(18);
+    // Las dos tools de categorización siguen siendo de escritura.
     const writeTools = names.filter((n) => n.startsWith('kronos_categorize_'));
     expect(writeTools.sort()).toEqual(['kronos_categorize_case', 'kronos_categorize_request']);
-    // La tool de creación de solicitudes también es de escritura.
+    // La creación de solicitudes y la nota de bitácora también son de escritura.
     expect(names).toContain('kronos_create_request');
+    expect(names).toContain('kronos_add_note');
     // Las demás (lectura) no usan verbos de mutación generales.
     const writeVerbs = /(create|update|delete|insert|remove|write|set_|authorize|assign|mutat)/i;
     const writeToolNames = new Set([
       'kronos_categorize_case',
       'kronos_categorize_request',
       'kronos_create_request',
+      'kronos_add_note',
     ]);
     for (const n of names) {
       expect(n.startsWith('kronos_')).toBe(true);
