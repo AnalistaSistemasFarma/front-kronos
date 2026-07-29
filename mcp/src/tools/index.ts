@@ -223,7 +223,7 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 17,
+  totalTools: 18,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
@@ -240,7 +240,7 @@ export const TOOL_CAPABILITIES = {
     'kronos_list_users',
     'kronos_search',
   ],
-  write: ['kronos_categorize_case', 'kronos_categorize_request', 'kronos_create_request'],
+  write: ['kronos_categorize_case', 'kronos_categorize_request', 'kronos_create_request', 'kronos_add_note'],
   writeNote:
     'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general) y creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones). Todas transaccionales, parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las 12 tools de lectura.',
 } as const;
@@ -1142,4 +1142,232 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         return { result, rows: 1 };
       })
   );
+
+  // ---------------------------------------------------------------------------
+  // kronos_add_note  (ESCRITURA) — agrega una nota a la bitácora de una solicitud
+  // ---------------------------------------------------------------------------
+  // Replica EXACTAMENTE la ruta de la app (POST /api/requests-general/notes):
+  //   INSERT INTO notes (note, id_request, created_by) ...  (creation_date por
+  //   default de la BD). Transaccional, parametrizada, validada por alcance de
+  //   empresa y auditada. El candado assertReadOnlySql queda intacto: esta tool
+  //   escribe por el camino dedicado executeWrite (src/write.ts).
+  //
+  // Notificación por correo (opcional): reutiliza el MISMO servicio de correo de
+  // la app (API_EMAIL -> POST {base}/sapsend/sendMessage con el contrato
+  // { userEmail, title, table, outro, logoUrl }). NO se inventa un mailer/SMTP
+  // nuevo. La URL del servicio se toma de process.env.KRONOS_MCP_API_EMAIL (o
+  // API_EMAIL como respaldo). Si no está configurada, la nota SÍ se inserta y se
+  // devuelve emailSent:false con el motivo. El correo se dispara FUERA de la
+  // transacción (I/O de red) para no sostener la transacción de BD.
+  server.tool(
+    'kronos_add_note',
+    'ESCRITURA. Agrega una nota/seguimiento a la bitácora de una solicitud general (tabla notes: note + id_request + created_by; creation_date por default). Acotada a las empresas del alcance de la key. Opcionalmente (notifyByEmail=true) dispara la MISMA notificación por correo de la app a los participantes del proceso (solicitante + responsables del proceso + asignados de las tareas). Transaccional, parametrizada y auditada. Use kronos_get_request para ubicar la solicitud y kronos_list_users para el autor.',
+    {
+      requestId: z.number().int().describe('requests_general.id de la solicitud a la que se agrega la nota.'),
+      note: z.string().min(1).describe('Texto de la nota (no vacío).'),
+      notifyByEmail: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe('Si es true, notifica por correo a los participantes del proceso (igual que el check de la app).'),
+      authorUserId: z
+        .string()
+        .optional()
+        .describe('user.id que figura como autor de la nota (created_by). Por defecto Nicolás Rivera.'),
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a acotar; se interseca con el alcance de la key.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_add_note', args, async () => {
+        const DEFAULT_AUTHOR = 'cmgicd6470000ekpi1a33o581'; // Nicolás Rivera
+        const authorUserId =
+          args.authorUserId && args.authorUserId.trim() ? args.authorUserId.trim() : DEFAULT_AUTHOR;
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const scopeClause = companyClause('rg.id_company', filter);
+
+        // Escritura transaccional (inserción de la nota + recolección de datos
+        // para el correo). El correo se envía DESPUÉS del commit.
+        const tx = await executeWrite(async (t: TxClient) => {
+          // a. La solicitud existe y pertenece al alcance. Recuperamos datos
+          //    de contexto para el cuerpo del correo (mismos campos que la app).
+          const reqRow = await t.$queryRaw<
+            {
+              id: number;
+              id_company: number;
+              subject: string | null;
+              created_at: Date | null;
+              company: string | null;
+              category: string | null;
+              process: string | null;
+            }[]
+          >(Prisma.sql`
+            SELECT TOP 1 rg.id, rg.id_company, rg.subject_request AS subject, rg.created_at,
+                   c.company AS company, cr.category AS category, pc.process AS process
+            FROM requests_general rg
+            INNER JOIN company c ON c.id_company = rg.id_company
+            LEFT JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+            LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+            LEFT JOIN category_request cr ON cr.id = pc.id_category_request
+            WHERE rg.id = ${args.requestId} AND ${scopeClause}
+          `);
+          const request = reqRow[0];
+          if (!request) {
+            throw new Error('solicitud inexistente o fuera de alcance');
+          }
+
+          // b. El autor existe.
+          const okUser = await t.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok FROM [user] u WHERE u.id = ${authorUserId}
+          `);
+          if (okUser.length === 0) {
+            throw new Error('usuario autor de la nota inexistente');
+          }
+
+          // c. Insertar la nota, IGUAL que POST /api/requests-general/notes.
+          const inserted = await t.$queryRaw<{ id_note: number; creation_date: Date | null }[]>(
+            Prisma.sql`
+              INSERT INTO notes (note, id_request, created_by)
+              OUTPUT INSERTED.id_note, INSERTED.creation_date
+              VALUES (${args.note.trim()}, ${args.requestId}, ${authorUserId})
+            `
+          );
+          const noteRow = inserted[0];
+          if (!noteRow) {
+            throw new Error('no se pudo insertar la nota');
+          }
+
+          // d. Si se pidió correo, recolectar destinatarios (participantes del
+          //    proceso): solicitante + responsables del proceso + asignados de
+          //    las tareas de la solicitud. Se filtran correos vacíos/duplicados.
+          let recipients: string[] = [];
+          if (args.notifyByEmail) {
+            const rows = await t.$queryRaw<{ email: string | null }[]>(Prisma.sql`
+              SELECT u.email
+              FROM [user] u
+              INNER JOIN requests_general rg ON rg.id_requester = u.id
+              WHERE rg.id = ${args.requestId}
+              UNION
+              SELECT u.email
+              FROM user_process_category_request_general upcrg
+              INNER JOIN process_category_request_general pcrg
+                ON pcrg.id_process_category = upcrg.id_process_category
+              INNER JOIN [user] u ON u.id = upcrg.id_user
+              WHERE pcrg.id_request_general = ${args.requestId}
+              UNION
+              SELECT u.email
+              FROM task_request_general trg
+              INNER JOIN [user] u ON u.id = trg.id_assigned
+              WHERE trg.id_request_general = ${args.requestId}
+            `);
+            recipients = Array.from(
+              new Set(rows.map((r) => (r.email ?? '').trim()).filter((e) => e.length > 0))
+            );
+          }
+
+          return {
+            request,
+            id_note: noteRow.id_note,
+            creation_date: noteRow.creation_date,
+            recipients,
+          };
+        });
+
+        // -----------------------------------------------------------------------
+        // Notificación por correo (fuera de la transacción). Reutiliza el mismo
+        // servicio de la app; NO inventa mailer/SMTP. Nunca tumba la respuesta:
+        // la nota ya quedó insertada.
+        // -----------------------------------------------------------------------
+        let emailSent = false;
+        let emailInfo: Record<string, unknown> = {};
+        if (args.notifyByEmail) {
+          const apiEmailBase = (process.env.KRONOS_MCP_API_EMAIL ?? process.env.API_EMAIL ?? '').trim();
+          if (!apiEmailBase) {
+            emailInfo = {
+              skipped: true,
+              reason:
+                'Servicio de correo no configurado (defina KRONOS_MCP_API_EMAIL en mcp/.env para reutilizar el mailer de la app). La nota se insertó igual.',
+              recipients: tx.recipients,
+            };
+          } else if (tx.recipients.length === 0) {
+            emailInfo = { skipped: true, reason: 'no hay destinatarios con correo válido', recipients: [] };
+          } else {
+            try {
+              const targetUrl = `${apiEmailBase.replace(/\/+$/, '')}/sapsend/sendMessage`;
+              const createdAt = tx.request.created_at
+                ? new Date(tx.request.created_at).toISOString().split('T')[0]
+                : 'N/A';
+              const table = [
+                {
+                  'ID de la Solicitud': tx.request.id,
+                  Asunto: tx.request.subject ?? '',
+                  'Categoría': tx.request.category ?? '',
+                  Proceso: tx.request.process ?? '',
+                  Empresa: tx.request.company ?? '',
+                  'Fecha de Creación': createdAt,
+                },
+              ];
+              const safeNote = args.note
+                .trim()
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+              const outro =
+                `<div style="margin-top:20px;padding:15px;border-radius:8px;background:#f8f9fa;border:1px solid #e0e0e0;">` +
+                `<h3 style="margin:0 0 10px 0;font-size:16px;">Nota agregada</h3>` +
+                `<p style="margin:0;white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word;line-height:1.6;font-size:14px;">${safeNote}</p></div>` +
+                `<p style="margin-top:20px;">Este es un mensaje automático del sistema de Solicitudes Generales. Se ha agregado una nueva nota a la solicitud #${tx.request.id}.</p>`;
+              const payload = {
+                userEmail: tx.recipients.join('; '),
+                title: `Nueva Nota en la Solicitud #${tx.request.id} - ${tx.request.subject ?? ''}`,
+                table,
+                outro,
+                logoUrl: 'https://farmalogica.com.co/imagenes/logos/logo20.png',
+              };
+              const res = await fetch(targetUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: AbortSignal.timeout(20000),
+              });
+              const bodyText = await res.text();
+              if (res.status >= 200 && res.status < 300) {
+                emailSent = true;
+                emailInfo = { recipients: tx.recipients, status: res.status };
+              } else {
+                emailInfo = {
+                  error: 'el servicio de correo rechazó el envío',
+                  status: res.status,
+                  details: bodyText.slice(0, 500),
+                  recipients: tx.recipients,
+                };
+              }
+            } catch (err) {
+              emailInfo = {
+                error: 'fallo al invocar el servicio de correo',
+                details: (err as Error).message,
+                recipients: tx.recipients,
+              };
+            }
+          }
+        }
+
+        return {
+          result: {
+            id_note: tx.id_note,
+            id_request: args.requestId,
+            id_company: tx.request.id_company,
+            created_by: authorUserId,
+            creation_date: tx.creation_date,
+            notifyByEmail: Boolean(args.notifyByEmail),
+            emailSent,
+            email: args.notifyByEmail ? emailInfo : undefined,
+          },
+          rows: 1,
+        };
+      })
+  );
+
 }
