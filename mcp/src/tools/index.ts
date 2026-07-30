@@ -11,6 +11,12 @@ import { effectiveCompanyFilter, type CompanyFilter } from '../scope.js';
 import { getPrisma, Prisma, queryReadOnly } from '../db.js';
 import { executeWrite, type TxClient } from '../write.js';
 import type { AuditLogger } from '../audit.js';
+import {
+  GraphClient,
+  loadGraphConfig,
+  requestFolderPath,
+  type GraphFile,
+} from '../graph.js';
 
 interface ToolContext {
   scope: AuthScope;
@@ -131,6 +137,39 @@ function trimRequestLabels(row: Record<string, unknown>): void {
   }
 }
 
+/**
+ * Cliente MS Graph (OneDrive) compartido, inicializado de forma perezosa a
+ * partir de las MISMAS credenciales que usa el front-kronos para subir los
+ * adjuntos. Si el entorno no trae credenciales de Graph, queda `null` y las
+ * tools de adjuntos degradan a solo metadatos de BD (comportamiento previo).
+ */
+let graphClientSingleton: GraphClient | null | undefined;
+function getGraphClient(): GraphClient | null {
+  if (graphClientSingleton === undefined) {
+    const cfg = loadGraphConfig();
+    graphClientSingleton = cfg ? new GraphClient(cfg) : null;
+  }
+  return graphClientSingleton;
+}
+
+/** Tamaño máximo para devolver contenido base64 inline en get_attachment. */
+const MAX_INLINE_BASE64_BYTES = 4 * 1024 * 1024; // 4 MB
+
+/** Normaliza un GraphFile para la salida de las tools. */
+function graphFileToOutput(f: GraphFile) {
+  return {
+    file_id: f.id,
+    name: f.name,
+    size: f.size,
+    mime_type: f.mimeType,
+    created: f.createdDateTime,
+    modified: f.lastModifiedDateTime,
+    download_url: f.downloadUrl,
+    web_url: f.webUrl,
+  };
+}
+
+
 export const ENTITY_METADATA = {
   requests: {
     description:
@@ -212,6 +251,16 @@ export const ENTITY_METADATA = {
     companyColumn: 'company_user.id_company (vía relación)',
     fields: Object.keys(USER_SAFE_SELECT),
   },
+  attachments: {
+    description:
+      'Adjuntos/documentos de una solicitud. El CONTENIDO binario NO se guarda en la base de datos: los archivos se suben a OneDrive (MS Graph) en la carpeta determinística SAPSEND/TEC/SG/Request-<id>. kronos_list_attachments devuelve DOS cosas: (a) "required_files" = la DEFINICIÓN de qué archivos exige el proceso (file_process_category: etiqueta, obligatoriedad, condición) y (b) "files" = los archivos REALES cargados en OneDrive (name, size, tipo, fechas, file_id y download_url temporal). kronos_get_attachment resuelve el archivo real (download_url y, opcional, base64) o la definición del proceso.',
+    companyColumn: 'requests_general.id_company (via id_request_general)',
+    fields: [
+      'required_files[]: attachment_ref, id_file_process_category, file_label, required, active, conditional, condition_option',
+      'files[]: file_id, name, size, mime_type, created, modified, download_url, web_url',
+      'onedrive_folder', 'folder_url', 'onedrive_available',
+    ],
+  },
 } as const;
 
 /**
@@ -223,13 +272,15 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 18,
+  totalTools: 20,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
     'kronos_get_request',
     'kronos_list_request_notes',
     'kronos_list_request_tasks',
+    'kronos_list_attachments',
+    'kronos_get_attachment',
     'kronos_list_tickets',
     'kronos_get_ticket',
     'kronos_list_processes',
@@ -253,7 +304,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_metadata',
-    'Describe las entidades y campos disponibles, el alcance (empresas) de la API key actual, y las capacidades del servidor (12 tools de lectura + 3 de escritura: 2 de categorización y 1 de creación de solicitudes).',
+    'Describe las entidades y campos disponibles, el alcance (empresas) de la API key actual, y las capacidades del servidor (16 tools de lectura + 4 de escritura: 2 de categorización y 1 de creación de solicitudes).',
     {},
     async () =>
       withAudit(ctx, 'kronos_metadata', {}, async () => ({
@@ -496,6 +547,308 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
         `);
         return { result: { count: rows.length, limit, offset, data: rows }, rows: rows.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_attachments  (adjuntos/documentos de una solicitud)
+  //
+  // MODELO DE DATOS (importante): en SynerLink/Kronos el CONTENIDO de los
+  // archivos NO se guarda en la base de datos. Los documentos se cargan a
+  // OneDrive/SharePoint (MS Graph). En la BD solo hay:
+  //   - file_process_category: DEFINICIÓN de qué archivos requiere cada proceso
+  //     (etiqueta, obligatoriedad, condición vía file_condition_option).
+  //   - requests_general.url: PUNTERO de texto libre a la carpeta/URL donde se
+  //     guardaron los documentos de esa solicitud (opcional; muchas vacío).
+  // Por eso esta tool devuelve METADATOS: los archivos requeridos por el proceso
+  // de la solicitud + el puntero de carpeta de la solicitud. No existe un id ni
+  // un binario por archivo efectivamente cargado.
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_attachments',
+    'Lista los adjuntos/documentos de una solicitud. Devuelve DOS bloques: (1) "required_files" = la DEFINICIÓN de los archivos que exige el proceso (etiqueta, obligatorio/opcional, condición), y (2) "files" = los archivos REALES cargados en OneDrive (MS Graph) para esa solicitud, en la carpeta SAPSEND/TEC/SG/Request-<id>, con name, size, mime_type, fechas, file_id y download_url (enlace temporal de descarga directa). Use el file_id o el name en kronos_get_attachment para traer un archivo puntual. Filtra SIEMPRE por las empresas del alcance. No hay adjuntos a nivel de tarea en el modelo actual.',
+    {
+      requestId: z
+        .number()
+        .int()
+        .describe('id de la solicitud (requests_general.id) cuyos adjuntos se listan.'),
+      taskId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Opcional. id de una tarea del workflow (task_request_general.id). El modelo actual NO guarda adjuntos por tarea; si se pasa, se devuelve una nota indicándolo, junto con los adjuntos de la solicitud.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_attachments', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, null);
+
+        // 1. La solicitud existe y pertenece al alcance. Resolvemos su proceso
+        //    (vía la tabla puente process_category_request_general, que es la
+        //    fuente autoritativa del proceso — la columna directa
+        //    requests_general.id_process_category está poblada solo en parte) y
+        //    su puntero de carpeta (url) en una sola consulta.
+        const reqRows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+          SELECT rg.id, rg.subject_request AS subject,
+                 pcrg.id_process_category AS id_process_category,
+                 pc.process AS process, rg.url AS folder_url,
+                 rg.id_company, c.company
+          FROM requests_general rg
+          INNER JOIN company c ON c.id_company = rg.id_company
+          LEFT JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+          LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+          WHERE rg.id = ${args.requestId} AND ${companyClause('rg.id_company', filter)}
+        `);
+        const request = reqRows[0];
+        if (!request) return { result: null, rows: 0 };
+
+        const idProcessCategory = request.id_process_category as number | null;
+
+        // 2. Definición de archivos requeridos por el proceso de la solicitud,
+        //    con su condición (si el archivo solo se pide para cierta opción).
+        let files: Record<string, unknown>[] = [];
+        if (idProcessCategory != null) {
+          files = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+            SELECT fpc.id AS id_file_process_category, fpc.file_label,
+                   fpc.required, fpc.active, fpc.display_order,
+                   fco.id_option AS condition_option_id,
+                   pffo.option_label AS condition_option_label
+            FROM file_process_category fpc
+            LEFT JOIN file_condition_option fco ON fco.id_file_process_category = fpc.id
+            LEFT JOIN process_form_field_option pffo ON pffo.id = fco.id_option
+            WHERE fpc.id_process_category = ${idProcessCategory} AND fpc.active = 1
+            ORDER BY ISNULL(fpc.display_order, 2147483647), fpc.id
+          `);
+        }
+
+        const attachments = files.map((f) => ({
+          // Ref estable (no es un id de archivo cargado; identifica la definición
+          // del archivo requerido dentro de esta solicitud).
+          attachment_ref: `${args.requestId}:${f.id_file_process_category}`,
+          id_request: args.requestId,
+          id_file_process_category: f.id_file_process_category,
+          file_label: f.file_label,
+          required: f.required,
+          active: f.active,
+          conditional: f.condition_option_id != null,
+          condition_option: f.condition_option_id != null
+            ? { id_option: f.condition_option_id, label: f.condition_option_label }
+            : null,
+          // El binario no está en la BD; se resuelve por la carpeta de la solicitud.
+          folder_url: request.folder_url ?? null,
+          content_available: false,
+        }));
+
+        const taskNote = args.taskId !== undefined
+          ? 'El modelo de datos de Kronos/SynerLink no almacena adjuntos por tarea (task_request_general no tiene columnas de archivo). Se devuelven los adjuntos de la solicitud.'
+          : undefined;
+
+        // 3. Archivos REALES en OneDrive (vía MS Graph), en la carpeta
+        //    determinística de la solicitud: SAPSEND/TEC/SG/Request-<id>.
+        //    Reutiliza las credenciales app-only del front. Si Graph no está
+        //    configurado o falla, se degrada a solo metadatos (no rompe la tool).
+        const graph = getGraphClient();
+        let realFiles: ReturnType<typeof graphFileToOutput>[] = [];
+        let graphError: string | undefined;
+        const folderPath = requestFolderPath(args.requestId);
+        if (graph) {
+          try {
+            const files = await graph.listFolderFiles(folderPath);
+            realFiles = files.map(graphFileToOutput);
+          } catch (err) {
+            graphError = (err as Error).message;
+          }
+        }
+
+        return {
+          result: {
+            id_request: args.requestId,
+            subject: request.subject,
+            process: typeof request.process === 'string' ? (request.process as string).trim() : request.process,
+            id_company: request.id_company,
+            company: request.company,
+            folder_url: request.folder_url ?? null,
+            // Carpeta REAL en OneDrive (convención del front-kronos).
+            onedrive_folder: folderPath,
+            storage_note:
+              'Los documentos reales se cargan a OneDrive (MS Graph), no a la base de datos. "required_files" son las definiciones de archivos que exige el proceso; "files" son los archivos REALES cargados en la carpeta OneDrive de la solicitud (con download_url temporal y file_id para kronos_get_attachment).',
+            ...(taskNote ? { task_note: taskNote } : {}),
+            // Definiciones exigidas por el proceso (comportamiento histórico).
+            required_files_count: attachments.length,
+            required_files: attachments,
+            // Archivos reales en OneDrive.
+            onedrive_available: graph != null,
+            ...(graphError ? { onedrive_error: graphError } : {}),
+            files_count: realFiles.length,
+            files: realFiles,
+          },
+          rows: realFiles.length || attachments.length,
+        };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_get_attachment  (puntero de un adjunto puntual)
+  //
+  // Como el binario NO está en la BD (vive en OneDrive/SharePoint), esta tool
+  // NO devuelve base64. Devuelve el PUNTERO resolvable (carpeta de la solicitud)
+  // más los metadatos del archivo requerido, y un aviso explícito de que el
+  // contenido debe obtenerse desde OneDrive/SharePoint. El attachment_ref tiene
+  // el formato "<requestId>:<id_file_process_category>" que entrega
+  // kronos_list_attachments.
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_get_attachment',
+    'Obtiene un adjunto de una solicitud. Tiene DOS modos: (A) ARCHIVO REAL de OneDrive: pase "requestId" + "fileId" (el file_id que entrega kronos_list_attachments en "files"), o "requestId" + "fileName"; devuelve metadatos del archivo real y un download_url temporal (descarga directa sin auth), y opcionalmente el contenido en base64 si es pequeño y se pide includeContent=true. (B) DEFINICIÓN del archivo requerido por el proceso: pase "attachmentRef" con formato "<requestId>:<id_file_process_category>"; devuelve la definición (etiqueta, obligatoriedad, condición) y el puntero de carpeta, sin binario. Filtra SIEMPRE por las empresas del alcance.',
+    {
+      attachmentRef: z
+        .string()
+        .regex(/^\d+:\d+$/, 'attachmentRef debe tener el formato "<requestId>:<id_file_process_category>".')
+        .optional()
+        .describe('Modo B (definición del proceso): "<requestId>:<id_file_process_category>" (de kronos_list_attachments.required_files).'),
+      requestId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Modo A (archivo real): id de la solicitud (requests_general.id).'),
+      fileId: z
+        .string()
+        .optional()
+        .describe('Modo A: file_id (driveItem id) del archivo real, tal como lo entrega kronos_list_attachments en "files".'),
+      fileName: z
+        .string()
+        .optional()
+        .describe('Modo A alternativo: nombre exacto del archivo dentro de la carpeta OneDrive de la solicitud (se resuelve el file_id automáticamente).'),
+      includeContent: z
+        .boolean()
+        .optional()
+        .describe('Modo A: si es true y el archivo pesa <= 4 MB, incluye el contenido en base64. Por defecto false (se usa download_url).'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_get_attachment', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, null);
+
+        // ---- Modo A: ARCHIVO REAL de OneDrive (requestId + fileId/fileName) ----
+        if (args.attachmentRef === undefined && args.requestId !== undefined) {
+          const requestId = args.requestId;
+          // Validar que la solicitud pertenece al alcance de empresa.
+          const reqRows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+            SELECT rg.id, rg.subject_request AS subject, rg.id_company, c.company
+            FROM requests_general rg
+            INNER JOIN company c ON c.id_company = rg.id_company
+            WHERE rg.id = ${requestId} AND ${companyClause('rg.id_company', filter)}
+          `);
+          const reqRow = reqRows[0];
+          if (!reqRow) return { result: null, rows: 0 };
+
+          const graph = getGraphClient();
+          if (!graph) {
+            throw new Error('MS Graph no está configurado en este MCP; no se puede resolver el archivo real de OneDrive.');
+          }
+
+          const folderPath = requestFolderPath(requestId);
+          let file: GraphFile | null = null;
+
+          if (args.fileId) {
+            file = await graph.getItemById(args.fileId);
+          } else if (args.fileName) {
+            const files = await graph.listFolderFiles(folderPath);
+            file = files.find((f) => f.name === args.fileName) ?? null;
+          } else {
+            throw new Error('En modo archivo real debe indicar "fileId" o "fileName".');
+          }
+
+          if (!file) return { result: null, rows: 0 };
+
+          let contentBase64: string | null = null;
+          let contentNote: string | undefined;
+          if (args.includeContent) {
+            if (file.size != null && file.size <= MAX_INLINE_BASE64_BYTES) {
+              const buf = await graph.downloadContent(file.id);
+              contentBase64 = buf.toString('base64');
+            } else {
+              contentNote = `El archivo supera el límite de ${MAX_INLINE_BASE64_BYTES} bytes para contenido inline; use download_url.`;
+            }
+          }
+
+          return {
+            result: {
+              mode: 'onedrive_file',
+              id_request: requestId,
+              subject: reqRow.subject,
+              id_company: reqRow.id_company,
+              company: reqRow.company,
+              onedrive_folder: folderPath,
+              file: graphFileToOutput(file),
+              content_available: contentBase64 != null,
+              content_base64: contentBase64,
+              ...(contentNote ? { content_note: contentNote } : {}),
+              storage_note:
+                'Archivo real obtenido de OneDrive (MS Graph). "download_url" es un enlace temporal de descarga directa (sin autenticación); expira. Para el binario también puede pedir includeContent=true en archivos pequeños.',
+            },
+            rows: 1,
+          };
+        }
+
+        if (args.attachmentRef === undefined) {
+          throw new Error('Debe indicar "attachmentRef" (definición) o "requestId" + "fileId"/"fileName" (archivo real).');
+        }
+
+        // ---- Modo B: DEFINICIÓN del archivo requerido por el proceso ----
+        const [reqStr, fileStr] = args.attachmentRef.split(':');
+        const requestId = Number.parseInt(reqStr ?? '', 10);
+        const idFilePc = Number.parseInt(fileStr ?? '', 10);
+
+        // La solicitud existe y está en el alcance; el archivo requerido existe y
+        // pertenece al proceso de esa solicitud. Todo en una consulta.
+        // El proceso de la solicitud se resuelve por la tabla puente
+        // process_category_request_general (fuente autoritativa), no por la
+        // columna directa requests_general.id_process_category.
+        const rows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+          SELECT rg.id AS id_request, rg.subject_request AS subject,
+                 rg.url AS folder_url, rg.id_company, c.company,
+                 pc.process AS process,
+                 fpc.id AS id_file_process_category, fpc.file_label,
+                 fpc.required, fpc.active,
+                 fco.id_option AS condition_option_id,
+                 pffo.option_label AS condition_option_label
+          FROM requests_general rg
+          INNER JOIN company c ON c.id_company = rg.id_company
+          INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+          LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+          INNER JOIN file_process_category fpc
+            ON fpc.id = ${idFilePc} AND fpc.id_process_category = pcrg.id_process_category
+          LEFT JOIN file_condition_option fco ON fco.id_file_process_category = fpc.id
+          LEFT JOIN process_form_field_option pffo ON pffo.id = fco.id_option
+          WHERE rg.id = ${requestId} AND ${companyClause('rg.id_company', filter)}
+        `);
+        const row = rows[0];
+        if (!row) return { result: null, rows: 0 };
+
+        return {
+          result: {
+            attachment_ref: args.attachmentRef,
+            id_request: row.id_request,
+            subject: row.subject,
+            process: typeof row.process === 'string' ? (row.process as string).trim() : row.process,
+            id_company: row.id_company,
+            company: row.company,
+            id_file_process_category: row.id_file_process_category,
+            file_label: row.file_label,
+            required: row.required,
+            active: row.active,
+            conditional: row.condition_option_id != null,
+            condition_option: row.condition_option_id != null
+              ? { id_option: row.condition_option_id, label: row.condition_option_label }
+              : null,
+            // Puntero resolvable al almacén real del documento.
+            folder_url: row.folder_url ?? null,
+            content_available: false,
+            content_base64: null,
+            storage_note:
+              'El contenido del archivo NO se almacena en la base de datos de Kronos/SynerLink; los documentos se cargan a OneDrive/SharePoint (MS Graph). Use folder_url para localizar el documento en OneDrive/SharePoint. Este MCP no tiene acceso al almacén de archivos, por lo que no puede devolver el binario.',
+          },
+          rows: 1,
+        };
       })
   );
 
