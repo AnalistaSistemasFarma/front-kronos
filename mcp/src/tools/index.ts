@@ -272,7 +272,7 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 20,
+  totalTools: 21,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
@@ -291,9 +291,9 @@ export const TOOL_CAPABILITIES = {
     'kronos_list_users',
     'kronos_search',
   ],
-  write: ['kronos_categorize_case', 'kronos_categorize_request', 'kronos_create_request', 'kronos_add_note'],
+  write: ['kronos_categorize_case', 'kronos_categorize_request', 'kronos_create_request', 'kronos_add_note', 'kronos_resolve_task'],
   writeNote:
-    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general) y creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones). Todas transaccionales, parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las 12 tools de lectura.',
+    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general), creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones), notas de bitácora (kronos_add_note) y resolución de actividades del workflow (kronos_resolve_task: cierra task_request_general con id_status=2 + date_resolution/end_date + id_executor_final, respetando el gate secuencial y avanzando el flujo). Todas transaccionales, parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las tools de lectura.',
 } as const;
 
 export function registerTools(server: McpServer, ctx: ToolContext): void {
@@ -1717,6 +1717,235 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
             notifyByEmail: Boolean(args.notifyByEmail),
             emailSent,
             email: args.notifyByEmail ? emailInfo : undefined,
+          },
+          rows: 1,
+        };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_resolve_task  (ESCRITURA) — resuelve/cierra una tarea del workflow
+  // ---------------------------------------------------------------------------
+  // Replica la ruta de la app (POST /api/requests-general/update-activities):
+  // marca la actividad como Resuelta (id_status = 2), fija la resolución y los
+  // tiempos de cierre (date_resolution / end_date = GETDATE()) y deja registrado
+  // quién la ejecutó finalmente (id_executor_final). Todo transaccional,
+  // parametrizado, validado por alcance de empresa y auditado. El candado
+  // assertReadOnlySql queda intacto: escribe por el camino dedicado executeWrite.
+  //
+  // GATE SECUENCIAL: si la plantilla de la tarea (task_process_category) es
+  // secuencial (is_sequential = 1), la tarea inmediatamente anterior del flujo
+  // (por display_order, luego id_task) DEBE estar cerrada (id_status en 2 =
+  // Resuelto o 3 = Cancelado) antes de poder resolver esta. Si no lo está, se
+  // rechaza (mismo comportamiento que la app).
+  //
+  // CREACIÓN DIFERIDA: al cerrar la tarea, si todas sus instancias quedan
+  // cerradas y la SIGUIENTE tarea secuencial del flujo aún no existe como
+  // instancia de esta solicitud, se instancia (id_status = 4 = Sin Empezar)
+  // para sus responsables y se registran las notificaciones en la app, igual
+  // que la app al avanzar el workflow.
+  server.tool(
+    'kronos_resolve_task',
+    'ESCRITURA. Resuelve/cierra una actividad del workflow de una solicitud (tabla task_request_general): la marca como Resuelta (id_status = 2), guarda la resolución y fija date_resolution/end_date = GETDATE(), y registra el ejecutor final (id_executor_final). Respeta el gate secuencial (si la plantilla es secuencial, la actividad anterior debe estar cerrada) y, al cerrar, instancia la siguiente actividad secuencial del flujo si corresponde (Sin Empezar) con sus notificaciones. Acotada a las empresas del alcance de la key. Transaccional, parametrizada y auditada. Use kronos_list_request_tasks o kronos_get_request para ubicar la actividad (task_request_general.id) y kronos_list_users para el ejecutor.',
+    {
+      taskId: z
+        .number()
+        .int()
+        .describe('task_request_general.id de la actividad del workflow a resolver.'),
+      resolution: z
+        .string()
+        .min(1)
+        .describe('Texto de la resolución/observación con que se cierra la actividad (no vacío).'),
+      executorUserId: z
+        .string()
+        .optional()
+        .describe('user.id que se registra como ejecutor final (id_executor_final). Por defecto se conserva el asignado actual (id_assigned).'),
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a acotar; se interseca con el alcance de la key.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_resolve_task', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const scopeClause = companyClause('rg.id_company', filter);
+        const resolutionText = args.resolution.trim();
+
+        const result = await executeWrite(async (t: TxClient) => {
+          // 1. La actividad existe, pertenece a una solicitud del alcance, y
+          //    recuperamos sus datos de contexto (incluida la plantilla).
+          const taskRows = await t.$queryRaw<
+            {
+              id: number;
+              id_request_general: number;
+              id_task: number;
+              id_status: number | null;
+              id_assigned: string | null;
+              id_company: number;
+              id_process_category: number | null;
+              is_sequential: boolean | null;
+              display_order: number | null;
+            }[]
+          >(Prisma.sql`
+            SELECT TOP 1 trg.id, trg.id_request_general, trg.id_task, trg.id_status,
+                   trg.id_assigned, rg.id_company,
+                   tpc.id_process_category, tpc.is_sequential, tpc.display_order
+            FROM task_request_general trg
+            INNER JOIN requests_general rg ON rg.id = trg.id_request_general
+            LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task
+            WHERE trg.id = ${args.taskId} AND ${scopeClause}
+          `);
+          const task = taskRows[0];
+          if (!task) {
+            throw new Error('actividad inexistente o fuera de alcance');
+          }
+          if (task.id_status === 2 || task.id_status === 3) {
+            throw new Error('la actividad ya está cerrada (resuelta o cancelada)');
+          }
+
+          // 2. Ejecutor final: el indicado o, por defecto, el asignado actual.
+          let executor = args.executorUserId && args.executorUserId.trim()
+            ? args.executorUserId.trim()
+            : task.id_assigned;
+          if (args.executorUserId && args.executorUserId.trim()) {
+            const okUser = await t.$queryRaw<{ ok: number }[]>(Prisma.sql`
+              SELECT TOP 1 1 AS ok FROM [user] u WHERE u.id = ${executor}
+            `);
+            if (okUser.length === 0) {
+              throw new Error('usuario ejecutor final inexistente');
+            }
+          }
+
+          // 3. Gate secuencial: si la plantilla es secuencial, la actividad
+          //    inmediatamente anterior del flujo (por display_order, luego
+          //    id_task) debe estar cerrada (2 Resuelto o 3 Cancelado) en esta
+          //    misma solicitud.
+          if (task.is_sequential && task.id_process_category != null) {
+            const prevRows = await t.$queryRaw<{ id_status: number | null }[]>(Prisma.sql`
+              SELECT TOP 1 prev.id_status
+              FROM task_request_general prev
+              INNER JOIN task_process_category ptpc ON ptpc.id = prev.id_task
+              WHERE prev.id_request_general = ${task.id_request_general}
+                AND ptpc.id_process_category = ${task.id_process_category}
+                AND (
+                      ISNULL(ptpc.display_order, 2147483647) < ISNULL(${task.display_order}, 2147483647)
+                   OR (ISNULL(ptpc.display_order, 2147483647) = ISNULL(${task.display_order}, 2147483647)
+                       AND prev.id_task < ${task.id_task})
+                    )
+              ORDER BY ISNULL(ptpc.display_order, 2147483647) DESC, prev.id_task DESC
+            `);
+            const prev = prevRows[0];
+            if (prev && prev.id_status !== 2 && prev.id_status !== 3) {
+              throw new Error(
+                'gate secuencial: la actividad anterior del flujo aún no está resuelta/cancelada; no se puede cerrar esta actividad todavía'
+              );
+            }
+          }
+
+          // 4. Cerrar la actividad, igual que la app (update-activities).
+          const updated = await t.$executeRaw(Prisma.sql`
+            UPDATE task_request_general
+            SET id_status = 2,
+                resolution = ${resolutionText},
+                date_resolution = GETDATE(),
+                end_date = GETDATE(),
+                id_executor_final = ${executor}
+            WHERE id = ${args.taskId}
+          `);
+          if (updated === 0) {
+            throw new Error('no se pudo actualizar la actividad');
+          }
+
+          // 5. Creación diferida de la siguiente actividad secuencial del flujo.
+          //    Solo si esta plantilla es secuencial, TODAS sus instancias de
+          //    esta solicitud quedaron cerradas, y la siguiente plantilla
+          //    secuencial aún no está instanciada en esta solicitud.
+          const created: { id_task: number; assignees: string[] }[] = [];
+          if (task.is_sequential && task.id_process_category != null) {
+            const openSame = await t.$queryRaw<{ pend: number }[]>(Prisma.sql`
+              SELECT COUNT(*) AS pend
+              FROM task_request_general trg
+              WHERE trg.id_request_general = ${task.id_request_general}
+                AND trg.id_task = ${task.id_task}
+                AND trg.id_status NOT IN (2, 3)
+            `);
+            const stillOpen = Number(openSame[0]?.pend ?? 0);
+            if (stillOpen === 0) {
+              // Siguiente plantilla secuencial del proceso (por display_order,
+              // luego id) que NO tenga aún instancia en esta solicitud.
+              const nextTemplates = await t.$queryRaw<{ id_task: number }[]>(Prisma.sql`
+                SELECT ntpc.id AS id_task
+                FROM task_process_category ntpc
+                WHERE ntpc.id_process_category = ${task.id_process_category}
+                  AND ntpc.active = 1
+                  AND ntpc.is_sequential = 1
+                  AND (
+                        ISNULL(ntpc.display_order, 2147483647) > ISNULL(${task.display_order}, 2147483647)
+                     OR (ISNULL(ntpc.display_order, 2147483647) = ISNULL(${task.display_order}, 2147483647)
+                         AND ntpc.id > ${task.id_task})
+                      )
+                  AND NOT EXISTS (
+                        SELECT 1 FROM task_request_general etrg
+                        WHERE etrg.id_request_general = ${task.id_request_general}
+                          AND etrg.id_task = ntpc.id
+                      )
+                ORDER BY ISNULL(ntpc.display_order, 2147483647) ASC, ntpc.id ASC
+              `);
+              const nextTemplate = nextTemplates[0];
+              if (nextTemplate) {
+                const assignees = await t.$queryRaw<{ id_user: string; email: string | null }[]>(
+                  Prisma.sql`
+                    SELECT utrg.id_user, u.email
+                    FROM user_task_request_general utrg
+                    INNER JOIN [user] u ON u.id = utrg.id_user
+                    WHERE utrg.id_task = ${nextTemplate.id_task}
+                  `
+                );
+                for (const a of assignees) {
+                  await t.$executeRaw(Prisma.sql`
+                    INSERT INTO task_request_general (id_request_general, id_task, id_status, id_assigned)
+                    VALUES (${task.id_request_general}, ${nextTemplate.id_task}, 4, ${a.id_user})
+                  `);
+                }
+                // Notificaciones en la app (campana) para los nuevos asignados.
+                const activitiesUrl = `/process/request-general/view-activities?id=${task.id_request_general}&from=assigned-activities`;
+                const emails = Array.from(
+                  new Set(assignees.map((a) => (a.email ?? '').trim()).filter((e) => e.length > 0))
+                );
+                for (const email of emails) {
+                  await t.$executeRaw(Prisma.sql`
+                    INSERT INTO notifications (email, title, body, url)
+                    VALUES (${email}, ${'Actividad asignada · SynerLink'}, ${`Tienes una nueva actividad en la solicitud #${task.id_request_general}`}, ${activitiesUrl})
+                  `);
+                }
+                created.push({
+                  id_task: nextTemplate.id_task,
+                  assignees: assignees.map((a) => a.id_user),
+                });
+              }
+            }
+          }
+
+          return {
+            id: task.id,
+            id_request: task.id_request_general,
+            id_company: task.id_company,
+            id_task: task.id_task,
+            id_executor_final: executor,
+            nextTasksCreated: created,
+          };
+        });
+
+        return {
+          result: {
+            id_task_request: result.id,
+            id_request: result.id_request,
+            id_company: result.id_company,
+            id_status: 2,
+            resolution: resolutionText,
+            id_executor_final: result.id_executor_final,
+            nextTasksCreated: result.nextTasksCreated,
           },
           rows: 1,
         };
