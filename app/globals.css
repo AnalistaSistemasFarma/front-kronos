@@ -302,7 +302,12 @@ body {
 .notification-bell-dropdown.mantine-Popover-dropdown {
   background-color: var(--app-surface, var(--surface)) !important;
   border-color: var(--app-border, var(--border-subtle)) !important;
-  color: var(--app-text, var(--foreground));
+  color: var(--app-text, var(--foreground)) !important;
+}
+
+.notification-bell-dropdown .mantine-Text-root,
+.notification-bell-dropdown .mantine-Badge-label {
+  color: inherit;
 }
 
 .notification-bell-header,
@@ -315,15 +320,15 @@ body {
 }
 
 .notification-bell-text {
-  color: var(--app-text, var(--foreground));
+  color: var(--app-text, var(--foreground)) !important;
 }
 
 .notification-bell-text-muted {
-  color: var(--app-text-muted, var(--mantine-color-dimmed));
+  color: var(--app-text-muted, #64748b) !important;
 }
 
 .notification-bell-accent {
-  color: var(--app-accent, var(--mantine-color-anchor));
+  color: var(--app-accent, #2563eb) !important;
 }
 
 .notification-bell-row {
@@ -331,9 +336,19 @@ body {
 }
 
 .notification-bell-row--unread {
-  background-color: color-mix(in srgb, var(--app-accent, #2563eb) 14%, var(--app-surface, #fff));
+  background-color: color-mix(in srgb, var(--app-accent, #2563eb) 12%, var(--app-surface, #fff));
 }
 
 .notification-bell-row--interactive:hover {
   background-color: var(--app-surface-raised, var(--surface-muted)) !important;
+}
+
+html[data-mantine-color-scheme='dark'] .notification-bell-text-muted,
+[data-mantine-color-scheme='dark'] .notification-bell-text-muted {
+  color: var(--app-text-muted, #94a3b8) !important;
+}
+
+html[data-mantine-color-scheme='dark'] .notification-bell-accent,
+[data-mantine-color-scheme='dark'] .notification-bell-accent {
+  color: var(--app-accent, #5eb3e8) !important;
 }
