@@ -53,7 +53,7 @@ export default function DashboardSolicitantePage() {
         if (!accessRes.ok || !accessData.allowed) {
           throw new Error(
             accessData.error ||
-              'No tienes asignado el subproceso Dashboard Solicitante'
+              'No tienes asignado el subproceso Dashboard solicitudes'
           );
         }
 
@@ -94,7 +94,7 @@ export default function DashboardSolicitantePage() {
 
   if (error) {
     return (
-      <Alert icon={<IconAlertCircle size={16} />} title='Dashboard Solicitante' color='red' m='md'>
+      <Alert icon={<IconAlertCircle size={16} />} title='Dashboard solicitudes' color='red' m='md'>
         {error}
       </Alert>
     );
@@ -103,7 +103,7 @@ export default function DashboardSolicitantePage() {
   return (
     <RequestRoleDashboard
       kind='solicitante'
-      title='Dashboard Solicitante'
+      title='Dashboard solicitudes'
       subtitle='Resumen de tus procesos (solicitudes) y las actividades asociadas'
       requests={requests}
       activities={activities}

@@ -25,8 +25,12 @@ export function isHubHiddenRequestDashboardSubprocess(subprocess: {
   return (
     name === 'dashboard solicitado' ||
     name.includes('dashboard solicitado') ||
+    name === 'dashboard personal' ||
+    name.includes('dashboard personal') ||
     name === 'dashboard solicitante' ||
-    name.includes('dashboard solicitante')
+    name.includes('dashboard solicitante') ||
+    name === 'dashboard solicitudes' ||
+    name.includes('dashboard solicitudes')
   );
 }
 
