@@ -149,10 +149,14 @@ export async function POST(req) {
         results.process = { success: true };
       }
 
+      // Condiciones (M:N) de tareas: se recolectan aquí y se aplican en una pasada posterior,
+      // cuando ya existen todas las opciones nuevas (optionTempToId poblado).
+      const taskConditionSets = []; // { taskId, condition_option_ids }
+
       // Actualizar tareas si es necesario
       if (shouldUpdateTasks) {
         for (const task of tasks) {
-          const { id, task: taskName, active: taskActive, cost, cost_center: taskCostCenter, id_user_assigned: taskUserAssigned, is_sequential: taskIsSequential, display_order: taskDisplayOrder, is_authorization: taskIsAuthorization, type_authorization: taskTypeAuthorization, action } = task;
+          const { id, task: taskName, active: taskActive, cost, cost_center: taskCostCenter, id_user_assigned: taskUserAssigned, is_sequential: taskIsSequential, display_order: taskDisplayOrder, is_authorization: taskIsAuthorization, type_authorization: taskTypeAuthorization, condition_option_ids: taskConditionOptionIds, action } = task;
 
           if (action === 'create') {
             // Crear nueva tarea
@@ -180,6 +184,11 @@ export async function POST(req) {
 
             const taskResult = await taskRequest.query(insertTaskQuery);
             const newTaskId = taskResult.recordset[0].id;
+
+            taskConditionSets.push({
+              taskId: newTaskId,
+              condition_option_ids: Array.isArray(taskConditionOptionIds) ? taskConditionOptionIds : [],
+            });
 
             // Asignar usuario a la tarea si existe
             if (taskUserAssigned) {
@@ -226,6 +235,11 @@ export async function POST(req) {
 
             await taskRequest.query(updateTaskQuery);
 
+            taskConditionSets.push({
+              taskId: id,
+              condition_option_ids: Array.isArray(taskConditionOptionIds) ? taskConditionOptionIds : [],
+            });
+
             // Actualizar usuario asignado
             // Primero eliminar asignación anterior
             const deleteUserTaskQuery = `
@@ -264,6 +278,11 @@ export async function POST(req) {
             await new sql.Request(transaction)
               .input('id_task', sql.Int, id)
               .query(deleteUserTaskQuery);
+
+            // Eliminar las condiciones por opción de la tarea
+            await new sql.Request(transaction)
+              .input('id_task', sql.Int, id)
+              .query(`DELETE FROM task_condition_option WHERE id_task = @id_task`);
 
             // Luego eliminar la tarea
             const deleteTaskQuery = `
@@ -320,6 +339,9 @@ export async function POST(req) {
               await new sql.Request(transaction)
                 .input('id', sql.Int, opt.id)
                 .query(`DELETE FROM file_condition_option WHERE id_option = @id`);
+              await new sql.Request(transaction)
+                .input('id', sql.Int, opt.id)
+                .query(`DELETE FROM task_condition_option WHERE id_option = @id`);
             }
           }
         };
@@ -374,6 +396,9 @@ export async function POST(req) {
               .query(`DELETE FROM file_condition_option WHERE id_option IN (SELECT id FROM process_form_field_option WHERE id_form_field = @id)`);
             await new sql.Request(transaction)
               .input('id', sql.Int, id)
+              .query(`DELETE FROM task_condition_option WHERE id_option IN (SELECT id FROM process_form_field_option WHERE id_form_field = @id)`);
+            await new sql.Request(transaction)
+              .input('id', sql.Int, id)
               .query(`DELETE FROM field_condition_option WHERE id_form_field = @id`);
             // Soft-delete del campo y de sus opciones
             await new sql.Request(transaction)
@@ -402,6 +427,21 @@ export async function POST(req) {
             .input('id_form_field', sql.Int, fc.fieldId)
             .input('id_option', sql.Int, optId)
             .query(`INSERT INTO field_condition_option (id_form_field, id_option) VALUES (@id_form_field, @id_option)`);
+        }
+      }
+
+      // Aplica (reemplaza) el conjunto de condiciones de cada tarea procesada
+      for (const tc of taskConditionSets) {
+        await new sql.Request(transaction)
+          .input('id_task', sql.Int, tc.taskId)
+          .query(`DELETE FROM task_condition_option WHERE id_task = @id_task`);
+        for (const raw of tc.condition_option_ids) {
+          const optId = resolveOptionId(raw);
+          if (!optId) continue;
+          await new sql.Request(transaction)
+            .input('id_task', sql.Int, tc.taskId)
+            .input('id_option', sql.Int, optId)
+            .query(`INSERT INTO task_condition_option (id_task, id_option) VALUES (@id_task, @id_option)`);
         }
       }
 

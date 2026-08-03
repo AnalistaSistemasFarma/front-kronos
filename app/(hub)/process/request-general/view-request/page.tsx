@@ -49,6 +49,7 @@ import {
   IconAlertCircle,
   IconArrowLeft,
   IconCheck,
+  IconRefresh,
   IconX,
   IconFlag,
   IconTicket,
@@ -98,6 +99,17 @@ interface Request {
   idProceso: number;
   id_assigned_category: number;
   id_assigned_process_category: number;
+  id_treasury_requests?: number | null;
+  numero_sapsend?: number | null;
+  sapsend_status?: string | null;
+  sapsend_error?: string | null;
+  sapsend_synced_at?: string | null;
+  sapsend_status_request?: string | null;
+  sapsend_auth_status?: string | null;
+  sapsend_auth_error?: string | null;
+  sapsend_auth_synced_at?: string | null;
+  sapsend_files_synced_at?: string | null;
+  sapsend_files_error?: string | null;
 }
 
 interface Option {
@@ -182,6 +194,8 @@ function ViewRequestPage() {
   const RETURNED_STATUS_ID = 7;
   const OPEN_STATUS_ID = 1;
   const [request, setRequest] = useState<Request | null>(null);
+  const [sapsendResending, setSapsendResending] = useState(false);
+  const [sapsendFilesSending, setSapsendFilesSending] = useState(false);
   const [companies, setCompanies] = useState<Option[]>([]);
   const [categories, setCategories] = useState<Option[]>([]);
   const [processCategories, setProcessCategories] = useState<
@@ -289,6 +303,17 @@ function ViewRequestPage() {
           executor_final: data.executor_final,
           resolution: data.resolutioncase || null,
           date_resolution: data.date_resolution || null,
+          id_treasury_requests: data.id_treasury_requests,
+          numero_sapsend: data.numero_sapsend,
+          sapsend_status: data.sapsend_status,
+          sapsend_error: data.sapsend_error,
+          sapsend_synced_at: data.sapsend_synced_at,
+          sapsend_status_request: data.sapsend_status_request,
+          sapsend_auth_status: data.sapsend_auth_status,
+          sapsend_auth_error: data.sapsend_auth_error,
+          sapsend_auth_synced_at: data.sapsend_auth_synced_at,
+          sapsend_files_synced_at: data.sapsend_files_synced_at,
+          sapsend_files_error: data.sapsend_files_error,
         };
 
         // Base: datos de la lista (forma que el formulario espera). Si no hay, usar la API.
@@ -1233,8 +1258,39 @@ function ViewRequestPage() {
       hasNotedUpload.current = true;
       void addSystemNote('Se cargaron archivos a la solicitud.');
       void fetchFolderContents();
+      // SAPSEND: reenviar los adjuntos recién subidos (silencioso; el servidor aplica el gate).
+      void triggerSapsendFiles(false);
     }
   }, [attachedFiles]);
+
+  // Reenvía a SAPSEND los adjuntos de la solicitud (los lee desde OneDrive el servidor).
+  const triggerSapsendFiles = async (showToast: boolean) => {
+    if (!request?.id) return;
+    if (showToast) setSapsendFilesSending(true);
+    try {
+      const res = await fetch('/api/requests-general/sapsend-files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: request.id }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!showToast) return;
+      if (res.status === 202 || data?.pending) {
+        toast('La solicitud aún no está en SAPSEND; intenta de nuevo en un momento.', { icon: '⏳' });
+      } else if (res.ok && data?.ok) {
+        toast.success(
+          data.sent > 0 ? `Archivos enviados a SAPSEND (${data.sent})` : 'Sin archivos para enviar'
+        );
+      } else {
+        toast.error(data?.error || 'No se pudieron enviar los archivos a SAPSEND');
+      }
+    } catch (err) {
+      console.error('Error enviando archivos a SAPSEND:', err);
+      if (showToast) toast.error('Error de red al enviar archivos a SAPSEND');
+    } finally {
+      if (showToast) setSapsendFilesSending(false);
+    }
+  };
 
   const addSystemNote = async (text: string) => {
     if (!request?.id || !userId) return;
@@ -1442,6 +1498,121 @@ function ViewRequestPage() {
     );
   }
 
+  const handleSapsendResend = async () => {
+    if (!request) return;
+    setSapsendResending(true);
+    try {
+      const res = await fetch('/api/requests-general/sapsend-resend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: request.id }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) {
+        setRequest((prev) =>
+          prev
+            ? {
+                ...prev,
+                sapsend_status: 'sent',
+                sapsend_error: null,
+                id_treasury_requests: data.id_treasury_requests ?? prev.id_treasury_requests,
+                numero_sapsend: data.numero ?? prev.numero_sapsend,
+              }
+            : prev
+        );
+        toast.success('Solicitud enviada a SAPSEND correctamente');
+      } else {
+        const msg = data?.error || 'No se pudo enviar a SAPSEND';
+        setRequest((prev) =>
+          prev ? { ...prev, sapsend_status: 'failed', sapsend_error: msg } : prev
+        );
+        toast.error(msg);
+      }
+    } catch (err) {
+      console.error('Error reenviando a SAPSEND:', err);
+      toast.error('Error de red al reenviar a SAPSEND');
+    } finally {
+      setSapsendResending(false);
+    }
+  };
+
+  const renderSapsendStatus = () => {
+    if (!request?.sapsend_status) return null;
+    const status = request.sapsend_status;
+    const isSent = status === 'sent';
+    const color = isSent ? 'green' : status === 'pending' ? 'yellow' : 'red';
+    const label = isSent ? 'Enviado' : status === 'pending' ? 'Pendiente' : 'No enviado';
+    return (
+      <Alert
+        color={color}
+        variant='light'
+        mb='4'
+        title={
+          <Group gap='xs'>
+            <Text fw={600}>SAPSEND — Tesorería</Text>
+            <Badge color={color} variant='light' size='sm'>
+              {label}
+            </Badge>
+          </Group>
+        }
+      >
+        <Stack gap={6}>
+          {isSent && (
+            <Text size='sm'>
+              Solicitud de tesorería creada
+              {request.numero_sapsend ? ` · N° ${request.numero_sapsend}` : ''}
+              {request.id_treasury_requests ? ` (ID ${request.id_treasury_requests})` : ''}.
+            </Text>
+          )}
+          {request.sapsend_status_request && (
+            <Text size='sm'>
+              Estado en SAPSEND: <strong>{request.sapsend_status_request}</strong>
+              {request.sapsend_auth_status === 'conflict' ? ' (modificada en SAPSEND)' : ''}.
+            </Text>
+          )}
+          {request.sapsend_auth_status === 'failed' && request.sapsend_auth_error && (
+            <Text size='sm' c='red'>
+              Autorización no aplicada en SAPSEND: {request.sapsend_auth_error}
+            </Text>
+          )}
+          {!isSent && request.sapsend_error && (
+            <Text size='sm' c='red'>
+              {request.sapsend_error}
+            </Text>
+          )}
+          {request.sapsend_files_error && (
+            <Text size='sm' c='red'>
+              Archivos: {request.sapsend_files_error}
+            </Text>
+          )}
+          <Group gap='xs'>
+            {!isSent && (
+              <Button
+                size='xs'
+                color='blue'
+                leftSection={<IconRefresh size={14} />}
+                loading={sapsendResending}
+                onClick={handleSapsendResend}
+              >
+                Reenviar a SAPSEND
+              </Button>
+            )}
+            <Button
+              size='xs'
+              variant='light'
+              color='blue'
+              leftSection={<IconRefresh size={14} />}
+              loading={sapsendFilesSending}
+              onClick={() => triggerSapsendFiles(true)}
+            >
+              Reenviar archivos a SAPSEND
+            </Button>
+          </Group>
+        </Stack>
+      </Alert>
+    );
+  };
+
   return (
     <div className='min-h-screen bg-gray-50'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
@@ -1474,6 +1645,8 @@ function ViewRequestPage() {
               Esta solicitud ha sido resuelta y no se puede modificar.
             </Alert>
           )}
+
+          {renderSapsendStatus()}
         </Card>
 
         <div className='flex flex-col lg:flex-row gap-6'>

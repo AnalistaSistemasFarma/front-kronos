@@ -51,6 +51,7 @@ model User {
   role           String         @default("user")
   phone          String?
   identification String?
+  id_user_sapsend Int?
   accounts                Account[]
   companyUsers            CompanyUser[]
   departmentUsers         DepartmentUser[]
