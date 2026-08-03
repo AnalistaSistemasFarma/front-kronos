@@ -101,6 +101,12 @@ export function buildPieChart(
     },
     options: baseChartOptions<'pie'>({
       cutout: options?.cutout,
+      animation: {
+        duration: 750,
+        easing: 'easeOutQuart',
+        animateRotate: true,
+        animateScale: true,
+      },
       plugins: {
         legend: {
           display: options?.showLegend ?? true,
@@ -123,7 +129,7 @@ export function buildPieChart(
 
 export function buildVerticalBarChart(
   items: NamedValue[],
-  color: string,
+  color: string | string[],
   opts?: {
     labelSuffix?: string;
     datasetLabel?: string;
@@ -134,6 +140,9 @@ export function buildVerticalBarChart(
 ): { data: ChartData<'bar'>; options: ChartOptions<'bar'> } {
   const labelSuffix = opts?.labelSuffix ?? 'tareas';
   const formatValue = opts?.formatValue;
+  const colors = Array.isArray(color)
+    ? items.map((_, i) => color[i % color.length])
+    : color;
 
   return {
     data: {
@@ -142,9 +151,10 @@ export function buildVerticalBarChart(
         {
           label: opts?.datasetLabel ?? labelSuffix,
           data: items.map((i) => i.value),
-          backgroundColor: color,
-          borderRadius: 6,
-          maxBarThickness: 36,
+          backgroundColor: colors,
+          borderRadius: 8,
+          borderSkipped: false,
+          maxBarThickness: 40,
         },
       ],
     },
@@ -297,24 +307,30 @@ export function buildSimpleLineChart(
 
 export function buildAreaLineChart(
   points: TimeSeriesPoint[],
-  lineColor: string
+  lineColor: string,
+  opts?: { valueLabel?: string; fillAlpha?: number }
 ): { data: ChartData<'line'>; options: ChartOptions<'line'> } {
+  const valueLabel = opts?.valueLabel ?? 'Tareas';
+  const fillAlpha = opts?.fillAlpha ?? 0.28;
+  const fill = hexToRgba(lineColor, fillAlpha);
+
   return {
     data: {
       labels: points.map((p) => p.label),
       datasets: [
         {
-          label: 'Tareas',
+          label: valueLabel,
           data: points.map((p) => p.value),
           borderColor: lineColor,
-          backgroundColor: 'rgba(61, 182, 224, 0.22)',
+          backgroundColor: fill,
           fill: true,
-          tension: 0.35,
-          pointRadius: 4,
-          pointHoverRadius: 6,
+          tension: 0.4,
+          borderWidth: 3,
+          pointRadius: 5,
+          pointHoverRadius: 8,
           pointBackgroundColor: '#ffffff',
           pointBorderColor: lineColor,
-          pointBorderWidth: 2,
+          pointBorderWidth: 3,
         },
       ],
     },
@@ -327,12 +343,31 @@ export function buildAreaLineChart(
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (ctx) => `${ctx.parsed.y ?? 0} tareas`,
+            label: (ctx) => `${ctx.parsed.y ?? 0} ${valueLabel.toLowerCase()}`,
           },
         },
       },
     }),
   };
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const raw = hex.replace('#', '').trim();
+  const full =
+    raw.length === 3
+      ? raw
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : raw;
+  if (full.length !== 6 || Number.isNaN(Number.parseInt(full, 16))) {
+    return `rgba(61, 182, 224, ${alpha})`;
+  }
+  const n = Number.parseInt(full, 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 export function buildHoursLineChart(
