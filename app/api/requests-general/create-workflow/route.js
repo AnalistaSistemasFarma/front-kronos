@@ -103,6 +103,7 @@ export async function POST(req) {
         ========================= */
 
         let taskOrder = 0;
+        const insertedTasks = []; // { taskId, condition_option_temps } — condiciones diferidas
         for (const t of task) {
 
           const insertTaskQuery = `
@@ -155,6 +156,15 @@ export async function POST(req) {
           const taskResult = await taskRequest.query(insertTaskQuery);
 
           const taskId = taskResult.recordset[0].id;
+
+          // Las condiciones por opción se insertan en una pasada posterior (las opciones
+          // aún no existen aquí). Se guarda el taskId + sus tempIds de condición.
+          insertedTasks.push({
+            taskId,
+            condition_option_temps: Array.isArray(t.condition_option_temps)
+              ? t.condition_option_temps
+              : [],
+          });
 
 
           /* =========================
@@ -253,6 +263,25 @@ export async function POST(req) {
               .query(`
                 INSERT INTO field_condition_option (id_form_field, id_option)
                 VALUES (@id_form_field, @id_option);
+              `);
+          }
+        }
+
+      /* =========================
+        7️⃣.1 INSERT CONDICIONES DE TAREAS (opciones ya resueltas en optionTempToId)
+        Una tarea con condiciones solo se instancia si se elige alguna de sus opciones.
+        ========================= */
+
+        for (const tk of insertedTasks) {
+          for (const temp of tk.condition_option_temps) {
+            const optId = optionTempToId[temp] ?? null;
+            if (!optId) continue;
+            await new sql.Request(transaction)
+              .input("id_task", sql.Int, tk.taskId)
+              .input("id_option", sql.Int, optId)
+              .query(`
+                INSERT INTO task_condition_option (id_task, id_option)
+                VALUES (@id_task, @id_option);
               `);
           }
         }

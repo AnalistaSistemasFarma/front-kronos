@@ -29,10 +29,21 @@ export async function GET(req) {
         pc.assigned as assignedUserId,
         assignedUser.name as assignedUserName,
         rg.subject_request, 
-        rg.resolution as resolutioncase, 
+        rg.resolution as resolutioncase,
         rg.date_resolution,
 		    uex.name as executor_final,
-        rg.url
+        rg.url,
+        rg.id_treasury_requests,
+        rg.numero_sapsend,
+        rg.sapsend_status,
+        rg.sapsend_error,
+        rg.sapsend_synced_at,
+        rg.sapsend_status_request,
+        rg.sapsend_auth_status,
+        rg.sapsend_auth_error,
+        rg.sapsend_auth_synced_at,
+        rg.sapsend_files_synced_at,
+        rg.sapsend_files_error
       FROM requests_general rg
       INNER JOIN company c ON c.id_company = rg.id_company
       LEFT JOIN [user] urq ON urq.id = rg.id_requester

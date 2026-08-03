@@ -138,16 +138,11 @@ export async function GET(req: Request) {
       },
       { status: 500 }
     );
-  } finally {
-    // Ensure the database connection is closed
-    if (pool && pool.connected) {
-      try {
-        await pool.close();
-      } catch (closeError) {
-        console.error('Error closing database connection:', closeError);
-      }
-    }
   }
+  // Importante: NO cerrar el pool aquí. `sql.connect(sqlConfig)` devuelve el pool GLOBAL
+  // compartido por todo el proceso; cerrarlo por request tumba la conexión de las demás
+  // rutas que usan `sql.connect` (notes-workflow, update-workflow-complete, assign-viewer,
+  // create-request, etc.). El pool se mantiene abierto y se reutiliza entre requests.
 }
 
 /**
