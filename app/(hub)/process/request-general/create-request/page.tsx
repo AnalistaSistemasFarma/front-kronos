@@ -1937,9 +1937,41 @@ function RequestBoard() {
                       });
                       clearFieldError();
                     };
+                    // "Valor a Pagar"/monto: no hay field_type de moneda, se detecta por label.
+                    // Muestra separador de miles (400.000) y guarda el número limpio (400000).
+                    const isMoneyField = /valor a pagar|monto/i.test(field.field_label);
                     return (
                       <Grid.Col span={{ base: 12, md: 6 }} key={field.id}>
-                        {field.field_type === 'select' ? (
+                        {isMoneyField ? (
+                          <NumberInput
+                            label={field.field_label}
+                            placeholder='Ingrese el valor'
+                            required={field.required}
+                            value={
+                              rawValue === undefined || rawValue === ''
+                                ? ''
+                                : (rawValue as number | string)
+                            }
+                            onChange={(value) => {
+                              setFieldValues((prev) => {
+                                const next = { ...prev };
+                                if (value === '' || value === null || value === undefined)
+                                  delete next[field.id];
+                                else next[field.id] = value;
+                                return next;
+                              });
+                              clearFieldError();
+                            }}
+                            thousandSeparator='.'
+                            decimalSeparator=','
+                            decimalScale={0}
+                            allowNegative={false}
+                            hideControls
+                            min={0}
+                            error={formErrors[`field_${field.id}`]}
+                            leftSection={<IconTag size={16} />}
+                          />
+                        ) : field.field_type === 'select' ? (
                           <Select
                             label={field.field_label}
                             placeholder='Seleccione una opción'
