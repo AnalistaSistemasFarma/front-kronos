@@ -4,9 +4,9 @@ import {
   fireAndForgetNotification,
   isActivityResolvedStatus,
   notifyActivityResolved,
-  notifyActivityAssigned,
 } from '../../../../lib/notificationEvents.js';
 import { syncAuthorizationToSapsend } from '../../../../lib/sapsend/authorizationStatus.js';
+import { advanceSequentialTask } from '../../../../lib/workflow/advanceSequentialTask.js';
 
 export async function POST(req) {
   const TAG = '[update-activities]';
@@ -206,154 +206,16 @@ export async function POST(req) {
 
       console.log(`${TAG} 5) ¿Se acaba de cerrar la tarea? justClosed =`, justClosed, `(prevStatus=${prevStatus} -> nextStatus=${nextStatus})`);
 
-      if (justClosed && prevRow?.id_process_category != null) {
-        console.log(`${TAG} 6) Evaluando creación diferida de la SIGUIENTE tarea del proceso ${prevRow.id_process_category}...`);
-        try {
-          // 1. La tarea actual debe quedar totalmente cerrada (todas sus instancias en 2/3).
-          const openResult = await new sql.Request(pool)
-            .input('id_request', sql.Int, prevRow.id_request_general)
-            .input('id_task', sql.Int, prevRow.id_task)
-            .query(`
-              SELECT COUNT(*) AS openCount
-              FROM task_request_general
-              WHERE id_request_general = @id_request
-                AND id_task = @id_task
-                AND id_status NOT IN (2, 3)
-            `);
-          const stillOpen = openResult.recordset[0]?.openCount ?? 0;
-          console.log(`${TAG} 6.1) Instancias de la tarea actual aún abiertas = ${stillOpen} (debe ser 0 para continuar).`);
-
-          if (stillOpen === 0) {
-            // 2. Buscar la siguiente tarea del template (por display_order, id).
-            const nextResult = await new sql.Request(pool)
-              .input('id_process', sql.Int, prevRow.id_process_category)
-              .input('display_order', sql.Int, prevRow.display_order ?? 0)
-              .input('id_task', sql.Int, prevRow.id_task)
-              .input('id_request', sql.Int, prevRow.id_request_general)
-              .query(`
-                SELECT TOP 1 tpc.id, tpc.task, tpc.is_sequential, tpc.is_authorization
-                FROM task_process_category tpc
-                WHERE tpc.id_process_category = @id_process
-                  AND tpc.active = 1
-                  AND (
-                    ISNULL(tpc.display_order, 0) > @display_order
-                    OR (ISNULL(tpc.display_order, 0) = @display_order AND tpc.id > @id_task)
-                  )
-                  AND (
-                    NOT EXISTS (SELECT 1 FROM task_condition_option tco WHERE tco.id_task = tpc.id)
-                    OR EXISTS (
-                      SELECT 1 FROM task_condition_option tco
-                      INNER JOIN request_form_value rfv ON rfv.id_option = tco.id_option
-                      WHERE tco.id_task = tpc.id AND rfv.id_request_general = @id_request
-                    )
-                  )
-                ORDER BY ISNULL(tpc.display_order, 0), tpc.id
-              `);
-            const nextTask = nextResult.recordset[0];
-            console.log(`${TAG} 6.2) Siguiente tarea del template =`, nextTask
-              ? { id: nextTask.id, task: nextTask.task, is_sequential: nextTask.is_sequential }
-              : 'NINGUNA (era la última)');
-
-            if (nextTask && nextTask.is_sequential) {
-              // 3. Solo crear si aún no tiene instancias en esta solicitud (idempotencia).
-              const existsResult = await new sql.Request(pool)
-                .input('id_request', sql.Int, prevRow.id_request_general)
-                .input('id_task', sql.Int, nextTask.id)
-                .query(`
-                  SELECT COUNT(*) AS cnt
-                  FROM task_request_general
-                  WHERE id_request_general = @id_request AND id_task = @id_task
-                `);
-              const alreadyExists = (existsResult.recordset[0]?.cnt ?? 0) > 0;
-              console.log(`${TAG} 6.3) ¿La siguiente tarea ya existe en la solicitud? alreadyExists =`, alreadyExists);
-
-              if (!alreadyExists) {
-                // Traer responsable + email (mismo patrón que create-request: el email es lo que
-                // se registra en la campana, no el id).
-                const assigneesResult = await new sql.Request(pool)
-                  .input('id_task', sql.Int, nextTask.id)
-                  .query(`
-                    SELECT utrg.id_user, u.email
-                    FROM user_task_request_general utrg
-                    INNER JOIN [user] u ON u.id = utrg.id_user
-                    WHERE utrg.id_task = @id_task
-                  `);
-
-                console.log(`${TAG} 6.4) Responsables de la siguiente tarea =`,
-                  assigneesResult.recordset.map((a) => ({ id_user: a.id_user, email: a.email })));
-
-                const createdTasks = [];
-
-                if (assigneesResult.recordset.length === 0) {
-                  if (nextTask.is_authorization) {
-                    // Tarea de autorización sin responsable: se instancia igual con id_assigned = NULL.
-                    // Por ahora no se enruta a ningún autorizador, así que no hay a quién notificar.
-                    const inserted = await new sql.Request(pool)
-                      .input('id_request', sql.Int, prevRow.id_request_general)
-                      .input('id_task', sql.Int, nextTask.id)
-                      .query(`
-                        INSERT INTO task_request_general
-                        (id_request_general, id_task, id_status, id_assigned)
-                        OUTPUT INSERTED.id
-                        VALUES (@id_request, @id_task, 4, NULL)
-                      `);
-                    const newTaskId = inserted.recordset[0]?.id;
-                    console.log(`${TAG} 6.5) ✔ Creada task_request_general id=${newTaskId} de AUTORIZACIÓN sin responsable (sin notificación).`);
-                  } else {
-                    console.warn(
-                      `${TAG} ⚠ La siguiente tarea ${nextTask.id} no tiene responsable con email; no se crea/notifica.`
-                    );
-                  }
-                } else {
-                  for (const a of assigneesResult.recordset) {
-                    const inserted = await new sql.Request(pool)
-                      .input('id_request', sql.Int, prevRow.id_request_general)
-                      .input('id_task', sql.Int, nextTask.id)
-                      .input('id_user', sql.NVarChar, a.id_user)
-                      .query(`
-                        INSERT INTO task_request_general
-                        (id_request_general, id_task, id_status, id_assigned)
-                        OUTPUT INSERTED.id
-                        VALUES (@id_request, @id_task, 4, @id_user)
-                      `);
-                    const newTaskId = inserted.recordset[0]?.id;
-                    console.log(`${TAG} 6.5) ✔ Creada task_request_general id=${newTaskId} para responsable ${a.email} (${a.id_user}).`);
-                    createdTasks.push({ newTaskId, userId: a.id_user, email: a.email });
-                  }
-                }
-
-                // Registrar la notificación en la campana de forma GARANTIZADA (se espera antes de
-                // responder), para que no se pierda como pasaría con fire-and-forget en serverless.
-                await Promise.all(
-                  createdTasks.map((ct) => {
-                    console.log(`${TAG} 6.6) 🔔 Enviando notificación de "Actividad asignada" a ${ct.email} (task ${ct.newTaskId})...`);
-                    return notifyActivityAssigned({
-                      taskId: ct.newTaskId,
-                      userId: ct.userId,
-                      requestId: prevRow.id_task,
-                      subject: prevRow.subject_request,
-                      taskName: nextTask.task,
-                    })
-                      .then((res) => {
-                        console.log(`${TAG} 6.7) ✔ Notificación a ${ct.email} =>`, res);
-                      })
-                      .catch((notifyErr) => {
-                        console.error(
-                          `${TAG} ✖ Error notificando a ${ct.email || ct.userId}:`,
-                          notifyErr
-                        );
-                      });
-                  })
-                );
-              }
-            }
-          }
-        } catch (lazyErr) {
-          // No romper la respuesta: la actualización ya se confirmó.
-          console.error(`${TAG} ✖ Error creando la siguiente tarea secuencial:`, lazyErr);
-        }
-      } else if (justClosed) {
-        console.log(`${TAG} 6) Tarea cerrada pero sin id_process_category; no se evalúa creación diferida.`);
+      // Creación diferida de la siguiente tarea secuencial (extraída a un helper compartido para
+      // reutilizarla también en el endpoint entrante de SAPSEND). Comportamiento idéntico.
+      if (justClosed) {
+        await advanceSequentialTask(pool, {
+          id_request_general: prevRow.id_request_general,
+          id_task: prevRow.id_task,
+          id_process_category: prevRow.id_process_category,
+          display_order: prevRow.display_order,
+          subject_request: prevRow.subject_request,
+        });
       }
 
       console.log(`${TAG} ✅ Respondiendo 200 (tarea ${id} actualizada).`);
