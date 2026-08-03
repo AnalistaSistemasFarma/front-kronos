@@ -6,6 +6,7 @@ import {
   notifyActivityResolved,
   notifyActivityAssigned,
 } from '../../../../lib/notificationEvents.js';
+import { syncAuthorizationToSapsend } from '../../../../lib/sapsend/authorizationStatus.js';
 
 export async function POST(req) {
   const TAG = '[update-activities]';
@@ -182,6 +183,19 @@ export async function POST(req) {
         );
       }
 
+      // SAPSEND: si es una tarea de autorización de tesorería que se autorizó (2) o rechazó (3),
+      // aplicar la misma decisión en SAPSEND. No bloquea; el gate (¿es de tesorería?) vive dentro.
+      if (isAuthorizationTask && (Number(nextStatus) === 2 || Number(nextStatus) === 3)) {
+        fireAndForgetNotification(
+          syncAuthorizationToSapsend(
+            prevRow?.id_request_general,
+            Number(nextStatus) === 2,
+            id_assigned,
+            resolution
+          )
+        );
+      }
+
       // Creación diferida (lazy) de la siguiente tarea secuencial: cuando esta tarea se cierra
       // (Resuelto=2 o Cancelado=3), si la siguiente tarea del orden es secuencial y aún no existe
       // en la solicitud, se instancia ahora y se notifica a su(s) responsable(s).
@@ -215,6 +229,7 @@ export async function POST(req) {
               .input('id_process', sql.Int, prevRow.id_process_category)
               .input('display_order', sql.Int, prevRow.display_order ?? 0)
               .input('id_task', sql.Int, prevRow.id_task)
+              .input('id_request', sql.Int, prevRow.id_request_general)
               .query(`
                 SELECT TOP 1 tpc.id, tpc.task, tpc.is_sequential, tpc.is_authorization
                 FROM task_process_category tpc
@@ -223,6 +238,14 @@ export async function POST(req) {
                   AND (
                     ISNULL(tpc.display_order, 0) > @display_order
                     OR (ISNULL(tpc.display_order, 0) = @display_order AND tpc.id > @id_task)
+                  )
+                  AND (
+                    NOT EXISTS (SELECT 1 FROM task_condition_option tco WHERE tco.id_task = tpc.id)
+                    OR EXISTS (
+                      SELECT 1 FROM task_condition_option tco
+                      INNER JOIN request_form_value rfv ON rfv.id_option = tco.id_option
+                      WHERE tco.id_task = tpc.id AND rfv.id_request_general = @id_request
+                    )
                   )
                 ORDER BY ISNULL(tpc.display_order, 0), tpc.id
               `);

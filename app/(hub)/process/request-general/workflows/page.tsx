@@ -131,6 +131,7 @@ function RequestBoard() {
       secuencial: boolean;
       esAutorizacion: boolean;
       tipoAutorizacion: string;
+      condition_option_temps: string[];
     }>
   >([]);
   const [taskForm, setTaskForm] = useState({
@@ -141,6 +142,7 @@ function RequestBoard() {
     secuencial: false,
     esAutorizacion: false,
     tipoAutorizacion: '',
+    condition_option_temps: [] as string[],
   });
   const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
     { value: string; label: string }[]
@@ -240,6 +242,12 @@ function RequestBoard() {
         condition_option_temps: f.condition_option_temps.filter((t) => !optionIds.includes(t)),
       }))
     );
+    setTasks((prev) =>
+      prev.map((t) => ({
+        ...t,
+        condition_option_temps: t.condition_option_temps.filter((c) => !optionIds.includes(c)),
+      }))
+    );
   };
 
   const setFieldConditions = (fieldTempId: string, temps: string[]) => {
@@ -281,6 +289,12 @@ function RequestBoard() {
       prev.map((f) => ({
         ...f,
         condition_option_temps: f.condition_option_temps.filter((t) => t !== optionTempId),
+      }))
+    );
+    setTasks((prev) =>
+      prev.map((t) => ({
+        ...t,
+        condition_option_temps: t.condition_option_temps.filter((c) => c !== optionTempId),
       }))
     );
   };
@@ -361,6 +375,7 @@ function RequestBoard() {
         secuencial: taskForm.secuencial,
         esAutorizacion: taskForm.esAutorizacion,
         tipoAutorizacion: taskForm.esAutorizacion ? taskForm.tipoAutorizacion : '',
+        condition_option_temps: taskForm.condition_option_temps,
       },
     ]);
 
@@ -372,6 +387,7 @@ function RequestBoard() {
       secuencial: false,
       esAutorizacion: false,
       tipoAutorizacion: '',
+      condition_option_temps: [],
     });
 
     setTaskFormKey(prev => prev + 1);
@@ -853,6 +869,7 @@ function RequestBoard() {
         type_authorization: task.esAutorizacion
           ? Number(task.tipoAutorizacion) || null
           : null,
+        condition_option_temps: task.condition_option_temps,
       }));
 
       console.log('asignados tareas ' + tasksToSend);
@@ -916,7 +933,7 @@ function RequestBoard() {
         assignedProcess: '',
       });
       setTasks([]);
-      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '' });
+      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', condition_option_temps: [] });
       setRequiresFiles(false);
       setRequiredFiles([]);
       setFileForm({ file_label: '', required: true, condition_option_temps: [] });
@@ -1334,7 +1351,7 @@ function RequestBoard() {
             setCurrentStep(1);
             setFormErrors({});
             setTasks([]);
-            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '' });
+            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', condition_option_temps: [] });
             setRequiresFiles(false);
             setRequiredFiles([]);
             setFileForm({ file_label: '', required: true, condition_option_temps: [] });
@@ -1834,6 +1851,23 @@ function RequestBoard() {
                         maw={400}
                       />
                     )}
+
+                    {conditionOptions.length > 0 && (
+                      <MultiSelect
+                        mt='sm'
+                        label='Ejecutar esta tarea solo si se elige'
+                        placeholder='Siempre (sin condición)'
+                        data={conditionOptions}
+                        value={taskForm.condition_option_temps}
+                        onChange={(value) =>
+                          setTaskForm({ ...taskForm, condition_option_temps: value })
+                        }
+                        clearable
+                        searchable
+                        leftSection={<IconTag size={16} />}
+                        maw={500}
+                      />
+                    )}
                   </div>
 
                   {/* Tabla de tareas agregadas - Mejorada */}
@@ -1882,9 +1916,16 @@ function RequestBoard() {
                                   <Badge size='sm' variant='light' color='gray' radius='sm'>
                                     {index + 1}
                                   </Badge>
-                                  <Text size='base' fw={500}>
-                                    {task.tarea}
-                                  </Text>
+                                  <div>
+                                    <Text size='base' fw={500}>
+                                      {task.tarea}
+                                    </Text>
+                                    {task.condition_option_temps.length > 0 && (
+                                      <Badge size='xs' variant='light' color='grape' mt={2} styles={{ root: { textTransform: 'none' } }}>
+                                        Si: {conditionLabels(task.condition_option_temps)}
+                                      </Badge>
+                                    )}
+                                  </div>
                                 </Group>
                               </Table.Td>
                               <Table.Td className='py-4 px-5'>
@@ -2410,7 +2451,7 @@ function RequestBoard() {
                   setCurrentStep(1);
                   setFormErrors({});
                   setTasks([]);
-                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '' });
+                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', condition_option_temps: [] });
                 }
               }}
               size='md'

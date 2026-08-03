@@ -46,7 +46,27 @@ export async function GET(req) {
     const result = await request.query(query);
     console.log('API workflow-tasks: Resultados obtenidos:', result.recordset.length, 'registros');
 
-    return NextResponse.json(result.recordset, { status: 200 });
+    // Condiciones por opción de cada tarea (M:N). Se adjuntan como `conditions: number[]`.
+    const condResult = await pool.request()
+      .input('idProcess', sql.Int, parseInt(idProcess))
+      .query(`
+        SELECT tco.id_task, tco.id_option
+        FROM task_condition_option tco
+        INNER JOIN task_process_category tpc ON tpc.id = tco.id_task
+        WHERE tpc.active = 1 AND tpc.id_process_category = @idProcess
+      `);
+
+    const condByTask = {};
+    for (const row of condResult.recordset) {
+      (condByTask[row.id_task] ||= []).push(row.id_option);
+    }
+
+    const tasksWithConditions = result.recordset.map((t) => ({
+      ...t,
+      conditions: condByTask[t.id] || [],
+    }));
+
+    return NextResponse.json(tasksWithConditions, { status: 200 });
   } catch (err) {
     console.error('Error en el procesamiento de la solicitud:', err);
     return NextResponse.json(

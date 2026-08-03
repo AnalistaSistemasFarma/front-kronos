@@ -851,6 +851,14 @@ function RequestBoard() {
 
           const folderName = `Request-${requestId}`;
           await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
+
+          // SAPSEND: reenviar los adjuntos (si es solicitud de tesorería). No bloquea; el servidor
+          // aplica el gate y lee los archivos desde OneDrive.
+          fetch('/api/requests-general/sapsend-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: requestId }),
+          }).catch((e) => console.error('Error enviando archivos a SAPSEND:', e));
         } catch (uploadErr) {
           uploadOk = false;
           console.error('Error al subir archivos:', uploadErr);

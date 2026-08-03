@@ -4,6 +4,7 @@ import {
   fireAndForgetNotification,
   notifyNewRequest,
 } from "../../../../lib/notificationEvents.js";
+import { syncRequestToSapsend } from "../../../../lib/sapsend/treasury.js";
 
 export async function POST(req) {
   try {
@@ -101,11 +102,39 @@ export async function POST(req) {
         .input("process", sql.Int, process)
         .query(getTasksQuery);
 
+      // Condiciones por opción de las tareas (M:N). Una tarea condicionada solo se instancia
+      // si se eligió alguna de sus opciones ligadas (OR); sin condiciones se instancia siempre.
+      const taskCondResult = await new sql.Request(transaction)
+        .input("process", sql.Int, process)
+        .query(`
+          SELECT tco.id_task, tco.id_option
+          FROM task_condition_option tco
+          INNER JOIN task_process_category tpc ON tpc.id = tco.id_task
+          WHERE tpc.id_process_category = @process AND tpc.active = 1
+        `);
+      const taskConditions = {}; // id_task -> [id_option]
+      for (const row of taskCondResult.recordset) {
+        (taskConditions[row.id_task] ||= []).push(row.id_option);
+      }
+      // Opciones elegidas por el usuario (llegan en el body; aún no están en request_form_value).
+      const selectedOptions = new Set(
+        (Array.isArray(formValues) ? formValues : [])
+          .filter((fv) => fv && fv.id_option != null)
+          .map((fv) => Number(fv.id_option))
+      );
+      const taskEligible = (idTask) => {
+        const conds = taskConditions[idTask];
+        return !conds || conds.length === 0 || conds.some((o) => selectedOptions.has(o));
+      };
+
+      // Solo las tareas elegibles participan en la instanciación y en el cálculo de "la primera".
+      const eligibleTaskRows = tasksResult.recordset.filter((r) => taskEligible(r.id_task));
+
       // Creación diferida (lazy) de tareas secuenciales: al crear la solicitud solo se
       // instancian las tareas NO secuenciales (paralelas) + la PRIMERA del orden. Cada tarea
       // secuencial posterior se crea recién cuando su tarea anterior se cierra (ver update-activities).
       const orderKey = (r) => [r.display_order ?? 0, r.id_task];
-      const firstTaskRow = tasksResult.recordset.reduce((min, r) => {
+      const firstTaskRow = eligibleTaskRows.reduce((min, r) => {
         if (!min) return r;
         const [ma, mb] = orderKey(min);
         const [ra, rb] = orderKey(r);
@@ -124,7 +153,7 @@ export async function POST(req) {
 
       const createdRows = [];
 
-      for (const row of tasksResult.recordset) {
+      for (const row of eligibleTaskRows) {
 
         if (!shouldCreateNow(row)) continue;
 
@@ -190,6 +219,11 @@ export async function POST(req) {
           requestUrl: url,
         })
       );
+
+      // Integración SAPSEND: si es una solicitud de pago de tesorería, crea la solicitud de
+      // tesorería en SAPSEND. No bloquea ni hace fallar la creación (el gate y el registro de
+      // estado/errores viven dentro de syncRequestToSapsend).
+      fireAndForgetNotification(syncRequestToSapsend(newRequestId));
 
       return new Response(
         JSON.stringify({
