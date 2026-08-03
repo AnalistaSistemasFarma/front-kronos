@@ -22,7 +22,7 @@ export async function GET() {
     const allowed = await hasRequestDashboardAccess(session.user.email, 'solicitado');
     if (!allowed) {
       return NextResponse.json(
-        { error: 'Sin permiso para el Dashboard Solicitado' },
+        { error: 'Sin permiso para el Dashboard personal' },
         { status: 403 }
       );
     }

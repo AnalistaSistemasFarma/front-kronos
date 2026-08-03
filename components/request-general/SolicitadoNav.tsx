@@ -32,8 +32,6 @@ const navItems: {
 export default function SolicitadoNav() {
   const { activeTab, setActiveTab } = useSolicitadoTab();
   const { palette } = useDashboardChartPalette();
-  const activeLabel =
-    navItems.find((i) => i.tab === activeTab)?.label ?? 'Mis procesos';
 
   return (
     <Paper
@@ -46,7 +44,7 @@ export default function SolicitadoNav() {
       }}
     >
       <Title order={3} mb='xs' style={{ color: palette.primary, lineHeight: 1.2 }}>
-        {activeLabel}
+        Dashboard personal
       </Title>
       <Group gap='xs' wrap='wrap' grow>
         {navItems.map((item) => {
