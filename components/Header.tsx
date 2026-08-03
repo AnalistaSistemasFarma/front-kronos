@@ -21,6 +21,7 @@ import {
   isHubInstantSwapRoute,
 } from '../lib/navigation/AppSectionContext';
 import { useDashboardAdminOptional } from '../lib/dashboard/DashboardAdminContext';
+import { useRequestRoleNavOptional } from '../lib/request-general/SolicitadoNavContext';
 import { buildLogoutCallbackUrl } from '../lib/auth/logout';
 
 function useAppSectionOptional(): AppSectionContextValue | null {
@@ -33,11 +34,37 @@ export default function Header() {
   const router = useRouter();
   const sectionCtx = useAppSectionOptional();
   const dashboardAdmin = useDashboardAdminOptional();
+  const roleNav = useRequestRoleNavOptional();
   const isDashboardAdmin = dashboardAdmin?.isDashboardAdmin ?? false;
   const loadingDashboardAdmin = dashboardAdmin?.loadingDashboardAdmin ?? false;
+  const hasSolicitanteAccess = roleNav?.hasSolicitanteAccess ?? false;
+  const hasSolicitadoAccess = roleNav?.hasSolicitadoAccess ?? false;
+  const loadingRoleNav = roleNav?.loadingRoleNav ?? false;
+  const solicitanteUrl =
+    roleNav?.solicitanteUrl ?? '/process/request-general/dashboard-solicitante';
+  const solicitadoUrl =
+    roleNav?.solicitadoUrl ?? '/process/request-general/dashboard-solicitado';
   const { theme, toggleTheme } = useTheme();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const showDashboardNav = !loadingDashboardAdmin && isDashboardAdmin;
+  const showSolicitanteNav = !loadingRoleNav && hasSolicitanteAccess;
+  const showSolicitadoNav = !loadingRoleNav && hasSolicitadoAccess;
+  const isSolicitanteActive = pathname.startsWith(solicitanteUrl);
+  const isSolicitadoActive = pathname.startsWith(solicitadoUrl);
+  const isRoleDashActive = isSolicitanteActive || isSolicitadoActive;
+
+  const homeUrl = showSolicitadoNav
+    ? solicitadoUrl
+    : showSolicitanteNav
+      ? solicitanteUrl
+      : isDashboardAdmin
+        ? DASHBOARD_TAB_URL.solicitudes
+        : PROCESS_HUB_URL;
+
+  const roleLinkClass = (active: boolean) =>
+    `app-nav-link px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+      active ? 'app-nav-link--active' : ''
+    }`;
 
   const handleSignOut = () => {
     const search = typeof window !== 'undefined' ? window.location.search : '';
@@ -71,11 +98,44 @@ export default function Header() {
 
   const navLinkClass = (section: AppSection) =>
     `app-nav-link px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-      activeSection === section ? 'app-nav-link--active' : ''
+      !isRoleDashActive && activeSection === section ? 'app-nav-link--active' : ''
     }`;
 
   const logoSrc =
     theme === 'dark' ? '/Logo_Principal_Blanco_Ancho.svg' : '/Logo_Principal.svg';
+
+  const roleNavLinks = (mobile = false) => (
+    <>
+      {showSolicitanteNav && (
+        <Link
+          href={solicitanteUrl}
+          prefetch
+          className={
+            mobile
+              ? `block w-full text-left text-base font-medium ${roleLinkClass(isSolicitanteActive)}`
+              : roleLinkClass(isSolicitanteActive)
+          }
+          onClick={() => setIsMobileMenuOpen(false)}
+        >
+          Solicitante
+        </Link>
+      )}
+      {showSolicitadoNav && (
+        <Link
+          href={solicitadoUrl}
+          prefetch
+          className={
+            mobile
+              ? `block w-full text-left text-base font-medium ${roleLinkClass(isSolicitadoActive)}`
+              : roleLinkClass(isSolicitadoActive)
+          }
+          onClick={() => setIsMobileMenuOpen(false)}
+        >
+          Mis procesos
+        </Link>
+      )}
+    </>
+  );
 
   return (
     <>
@@ -103,7 +163,7 @@ export default function Header() {
             </div>
 
             <div className='flex items-center'>
-              {sectionCtx ? (
+              {sectionCtx && !showSolicitadoNav && !showSolicitanteNav ? (
                 <UnstyledButton
                   onClick={() => goToSection(isDashboardAdmin ? 'dashboard' : 'process')}
                   aria-label={isDashboardAdmin ? 'Ir al dashboard' : 'Ir a procesos'}
@@ -117,10 +177,7 @@ export default function Header() {
                   />
                 </UnstyledButton>
               ) : (
-                <Link
-                  href={isDashboardAdmin ? DASHBOARD_TAB_URL.solicitudes : PROCESS_HUB_URL}
-                  aria-label={isDashboardAdmin ? 'Ir al dashboard' : 'Ir a procesos'}
-                >
+                <Link href={homeUrl} aria-label='Ir al inicio'>
                   <Image
                     src={logoSrc}
                     alt='Logo'
@@ -152,6 +209,7 @@ export default function Header() {
                     >
                       Procesos
                     </button>
+                    {roleNavLinks(false)}
                   </>
                 ) : (
                   <>
@@ -167,6 +225,7 @@ export default function Header() {
                     <Link href={PROCESS_HUB_URL} prefetch className={navLinkClass('process')}>
                       Procesos
                     </Link>
+                    {roleNavLinks(false)}
                   </>
                 )}
               </div>
@@ -248,6 +307,7 @@ export default function Header() {
               >
                 Procesos
               </button>
+              {roleNavLinks(true)}
             </>
           ) : (
             <>
@@ -269,6 +329,7 @@ export default function Header() {
               >
                 Procesos
               </Link>
+              {roleNavLinks(true)}
             </>
           )}
         </nav>

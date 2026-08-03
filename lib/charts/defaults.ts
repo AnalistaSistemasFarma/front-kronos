@@ -49,7 +49,7 @@ export function baseChartOptions<T extends 'bar' | 'line' | 'pie' | 'doughnut'>(
     responsive: true,
     maintainAspectRatio: false,
     devicePixelRatio: getChartDevicePixelRatio(),
-    animation: { duration: 500 },
+    animation: { duration: 750, easing: 'easeOutQuart' },
     plugins: {
       legend: {
         labels: {

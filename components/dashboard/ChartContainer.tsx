@@ -21,6 +21,8 @@ interface ChartContainerProps<T extends ChartType = ChartType> {
   options?: ChartOptions<T>;
   onChartClick?: (index: number | null) => void;
   pinnedIndex?: number | null;
+  /** Al cambiar, reinicia la animación de entrada (0 → valor) */
+  entranceKey?: string | number;
 }
 
 /**
@@ -37,6 +39,7 @@ export function ChartContainer<T extends ChartType = ChartType>({
   options,
   onChartClick,
   pinnedIndex,
+  entranceKey,
 }: ChartContainerProps<T>) {
   const viewport = useChartViewport();
 
@@ -84,6 +87,7 @@ export function ChartContainer<T extends ChartType = ChartType>({
       onChartClick={onChartClick}
       pinnedIndex={pinnedIndex}
       layoutRevision={layoutRevision}
+      entranceKey={entranceKey}
     />
   );
 
