@@ -18,6 +18,7 @@ import {
   Anchor,
   Table,
   TextInput,
+  NumberInput,
   Select,
   Button,
   Group,
@@ -66,6 +67,8 @@ import {
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 import { sanitizeOneDriveName } from '../../../../../lib/onedriveName';
+import { isSapField } from '../../../../../lib/requests-general/sapSources';
+import SapOptionSelect from './SapOptionSelect';
 import toast from 'react-hot-toast';
 
 interface RequestTask {
@@ -208,12 +211,13 @@ function RequestBoard() {
     {
       id: number;
       field_label: string;
+      field_type: string;
       required: boolean;
       options: { id: number; option_label: string }[];
       conditions: number[];
     }[]
   >([]);
-  const [fieldValues, setFieldValues] = useState<Record<number, number>>({});
+  const [fieldValues, setFieldValues] = useState<Record<number, number | string>>({});
 
   const [filters, setFilters] = useState({
     id: '',
@@ -388,12 +392,14 @@ function RequestBoard() {
           (f: {
             id: number;
             field_label: string;
+            field_type?: string;
             required: boolean | number;
             options: { id: number; option_label: string }[];
             conditions: number[];
           }) => ({
             id: f.id,
             field_label: f.field_label,
+            field_type: f.field_type || 'select',
             required: Boolean(f.required),
             options: f.options || [],
             conditions: f.conditions || [],
@@ -416,8 +422,10 @@ function RequestBoard() {
         field.conditions.length === 0 || field.conditions.some((c) => selected.has(c));
       if (visible) {
         visibleFields.push(field);
+        // Solo los campos tipo lista aportan una opción al conjunto que condiciona a otros
+        // campos/archivos; texto/número/fecha guardan un valor libre (sin id de opción).
         const val = fieldValues[field.id];
-        if (val) selected.add(val);
+        if (field.field_type === 'select' && typeof val === 'number') selected.add(val);
       }
     }
     return { visibleFields, selectedOptionIds: selected };
@@ -439,7 +447,7 @@ function RequestBoard() {
       if (visible) {
         visibleIds.add(field.id);
         const val = fieldValues[field.id];
-        if (val) selected.add(val);
+        if (field.field_type === 'select' && typeof val === 'number') selected.add(val);
       }
     }
     const toRemove = Object.keys(fieldValues)
@@ -742,8 +750,13 @@ function RequestBoard() {
     }
 
     for (const field of visibleFields) {
-      if (field.required && !fieldValues[field.id]) {
-        errors[`field_${field.id}`] = `Debe seleccionar: ${field.field_label}`;
+      const val = fieldValues[field.id];
+      const empty = val === undefined || val === null || val === '';
+      if (field.required && empty) {
+        errors[`field_${field.id}`] =
+          field.field_type === 'select'
+            ? `Debe seleccionar: ${field.field_label}`
+            : `Debe completar: ${field.field_label}`;
       }
     }
 
@@ -787,8 +800,16 @@ function RequestBoard() {
             createdby: userId,
             url: formData.url,
             formValues: visibleFields
-              .filter((f) => fieldValues[f.id])
-              .map((f) => ({ id_field: f.id, id_option: fieldValues[f.id] })),
+              .filter((f) => {
+                const v = fieldValues[f.id];
+                return v !== undefined && v !== null && v !== '';
+              })
+              .map((f) => {
+                const v = fieldValues[f.id];
+                return f.field_type === 'select'
+                  ? { id_field: f.id, id_option: v }
+                  : { id_field: f.id, value_text: String(v) };
+              }),
           }),
         });
       } catch (networkErr) {
@@ -1032,6 +1053,9 @@ function RequestBoard() {
         return 'gray';
       case 'resuelto':
         return 'blue';
+      case 'devuelta':
+      case 'devuelto':
+        return 'orange';
       default:
         return 'gray';
     }
@@ -1367,6 +1391,7 @@ function RequestBoard() {
                       { value: '1', label: 'Abierto' },
                       { value: '3', label: 'Cancelado' },
                       { value: '2', label: 'Resuelto' },
+                      { value: '7', label: 'Devuelta' },
                     ]}
                     value={filters.status}
                     onChange={(value) => handleFilterChange('status', value || '')}
@@ -1888,34 +1913,102 @@ function RequestBoard() {
               <Stack gap='md'>
                 <Text fw={600}>Información adicional</Text>
                 <Grid>
-                  {visibleFields.map((field) => (
-                    <Grid.Col span={{ base: 12, md: 6 }} key={field.id}>
-                      <Select
-                        label={field.field_label}
-                        placeholder='Seleccione una opción'
-                        required={field.required}
-                        data={field.options.map((o) => ({
-                          value: o.id.toString(),
-                          label: o.option_label,
-                        }))}
-                        value={fieldValues[field.id] ? fieldValues[field.id].toString() : null}
-                        onChange={(value) => {
-                          setFieldValues((prev) => {
-                            const next = { ...prev };
-                            if (value) next[field.id] = parseInt(value);
-                            else delete next[field.id];
-                            return next;
-                          });
-                          if (formErrors[`field_${field.id}`]) {
-                            setFormErrors((prev) => ({ ...prev, [`field_${field.id}`]: '' }));
-                          }
-                        }}
-                        error={formErrors[`field_${field.id}`]}
-                        clearable
-                        leftSection={<IconTag size={16} />}
-                      />
-                    </Grid.Col>
-                  ))}
+                  {visibleFields.map((field) => {
+                    const rawValue = fieldValues[field.id];
+                    const clearFieldError = () => {
+                      if (formErrors[`field_${field.id}`]) {
+                        setFormErrors((prev) => ({ ...prev, [`field_${field.id}`]: '' }));
+                      }
+                    };
+                    const setTextValue = (v: string) => {
+                      setFieldValues((prev) => {
+                        const next = { ...prev };
+                        if (v) next[field.id] = v;
+                        else delete next[field.id];
+                        return next;
+                      });
+                      clearFieldError();
+                    };
+                    return (
+                      <Grid.Col span={{ base: 12, md: 6 }} key={field.id}>
+                        {field.field_type === 'select' ? (
+                          <Select
+                            label={field.field_label}
+                            placeholder='Seleccione una opción'
+                            required={field.required}
+                            data={field.options.map((o) => ({
+                              value: o.id.toString(),
+                              label: o.option_label,
+                            }))}
+                            value={
+                              typeof rawValue === 'number' ? rawValue.toString() : null
+                            }
+                            onChange={(value) => {
+                              setFieldValues((prev) => {
+                                const next = { ...prev };
+                                if (value) next[field.id] = parseInt(value);
+                                else delete next[field.id];
+                                return next;
+                              });
+                              clearFieldError();
+                            }}
+                            error={formErrors[`field_${field.id}`]}
+                            clearable
+                            leftSection={<IconTag size={16} />}
+                          />
+                        ) : isSapField(field.field_type) ? (
+                          <SapOptionSelect
+                            source={field.field_type}
+                            companyId={Number(formData.company) || undefined}
+                            label={field.field_label}
+                            required={field.required}
+                            value={typeof rawValue === 'string' ? rawValue : undefined}
+                            onChange={setTextValue}
+                            error={formErrors[`field_${field.id}`]}
+                          />
+                        ) : field.field_type === 'number' ? (
+                          <NumberInput
+                            label={field.field_label}
+                            placeholder='Ingrese un valor'
+                            required={field.required}
+                            value={rawValue === undefined ? '' : (rawValue as number | string)}
+                            onChange={(value) => {
+                              setFieldValues((prev) => {
+                                const next = { ...prev };
+                                if (value === '' || value === null || value === undefined)
+                                  delete next[field.id];
+                                else next[field.id] = value;
+                                return next;
+                              });
+                              clearFieldError();
+                            }}
+                            error={formErrors[`field_${field.id}`]}
+                            leftSection={<IconTag size={16} />}
+                          />
+                        ) : field.field_type === 'date' ? (
+                          <TextInput
+                            type='date'
+                            label={field.field_label}
+                            required={field.required}
+                            value={typeof rawValue === 'string' ? rawValue : ''}
+                            onChange={(e) => setTextValue(e.currentTarget.value)}
+                            error={formErrors[`field_${field.id}`]}
+                            leftSection={<IconTag size={16} />}
+                          />
+                        ) : (
+                          <TextInput
+                            label={field.field_label}
+                            placeholder='Ingrese el valor'
+                            required={field.required}
+                            value={typeof rawValue === 'string' ? rawValue : ''}
+                            onChange={(e) => setTextValue(e.currentTarget.value)}
+                            error={formErrors[`field_${field.id}`]}
+                            leftSection={<IconTag size={16} />}
+                          />
+                        )}
+                      </Grid.Col>
+                    );
+                  })}
                 </Grid>
                 <Divider />
               </Stack>

@@ -458,6 +458,9 @@ function RequestBoard() {
         return 'red';
       case 'resuelto':
         return 'green';
+      case 'devuelta':
+      case 'devuelto':
+        return 'orange';
       default:
         return 'gray';
     }
@@ -785,6 +788,7 @@ function RequestBoard() {
                       { value: '1', label: 'Abierto' },
                       { value: '3', label: 'Cancelado' },
                       { value: '2', label: 'Resuelto' },
+                      { value: '7', label: 'Devuelta' },
                     ]}
                     value={filters.status}
                     onChange={(value) => handleFilterChange('status', value || '')}

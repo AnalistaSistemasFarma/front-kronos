@@ -3,6 +3,10 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../app/api/auth/[...nextauth]/route';
 import { checkAdminPrivileges } from '../access-control';
 import { prisma } from '@/lib/prisma';
+import { extractBearer, isValidIntegrationApiKey } from '../integration/apiKeyAuth';
+
+/** Identidad sintética cuando la petición usa API key de integración (SharePoint/PA). */
+export const INTEGRATION_ACTOR_EMAIL = 'integration:sharepoint';
 
 /** Rol global admin/super_user (p. ej. verificación de edición de solicitudes). */
 export function isDashboardAdminRole(role?: string | null): boolean {
@@ -30,6 +34,10 @@ export async function getDashboardAdminForSession(): Promise<{
   return { allowed, email };
 }
 
+/**
+ * Solo sesión NextAuth (cookie). Usado por el resto de endpoints de dashboard.
+ * No acepta Bearer: no cambia el comportamiento existente.
+ */
 export async function requireDashboardAdminApi(): Promise<
   { ok: true; email: string } | { ok: false; response: NextResponse }
 > {
@@ -59,4 +67,37 @@ export async function requireDashboardAdminApi(): Promise<
     };
   }
   return { ok: true, email };
+}
+
+/**
+ * Sesión NextAuth **o** API key de integración (`Authorization: Bearer …`).
+ * Usar solo en rutas pensadas para SharePoint / Power Automate
+ * (dashboard-cases, view-requests). El resto de endpoints no deben llamar esto.
+ */
+export async function requireDashboardAdminOrIntegrationApi(
+  req: Request
+): Promise<{ ok: true; email: string; via: 'session' | 'api_key' } | { ok: false; response: NextResponse }> {
+  const bearer = extractBearer(req.headers.get('authorization'));
+  if (bearer && isValidIntegrationApiKey(bearer)) {
+    return { ok: true, email: INTEGRATION_ACTOR_EMAIL, via: 'api_key' };
+  }
+
+  // Bearer presente pero inválido → 401 (no caer a cookie; evita confusión en Postman/PA)
+  if (bearer) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          success: false,
+          error: 'No autorizado',
+          hint: 'API key inválida. Use Authorization: Bearer <INTEGRATION_API_KEYS>.',
+        },
+        { status: 401 }
+      ),
+    };
+  }
+
+  const sessionAuth = await requireDashboardAdminApi();
+  if (!sessionAuth.ok) return sessionAuth;
+  return { ok: true, email: sessionAuth.email, via: 'session' };
 }
