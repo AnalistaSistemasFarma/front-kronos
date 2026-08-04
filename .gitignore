@@ -43,3 +43,6 @@ next-env.d.ts
 dbconfig.js
 
 /app/generated/prisma
+
+# Claude Code — configuración local por-desarrollador (no versionar)
+.claude/settings.local.json
