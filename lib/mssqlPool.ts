@@ -59,6 +59,17 @@ export function isMssqlNotOpenError(error: unknown): boolean {
 }
 
 /**
+ * Errores de conexión recuperables reintentando con un pool nuevo: la conexión no está abierta
+ * (ENOTOPEN) o se cerró mientras la operación estaba en vuelo (ECONNCLOSED, típico si el pool
+ * global se recicla durante una espera larga).
+ */
+export function isRetryablePoolError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = (error as { code: string }).code;
+  return code === 'ENOTOPEN' || code === 'ECONNCLOSED';
+}
+
+/**
  * Pool compartido de la aplicación. No cerrar por request (evita agotar el pool global).
  * Usa single-flight para evitar ENOTOPEN por conexiones concurrentes en dev.
  */
@@ -114,7 +125,7 @@ export async function withMssqlPool<T>(
   try {
     return await fn(await getPool());
   } catch (error) {
-    if (!isMssqlNotOpenError(error)) throw error;
+    if (!isRetryablePoolError(error)) throw error;
     invalidateGlobalPool();
     return fn(await getPool());
   }

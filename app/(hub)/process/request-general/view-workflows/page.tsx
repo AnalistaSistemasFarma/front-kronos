@@ -86,6 +86,7 @@ interface Task {
   is_authorization: boolean;
   type_authorization: number | null;
   type_authorization_label?: string | null;
+  conditions: number[];
 }
 
 interface Note {
@@ -208,6 +209,7 @@ function ViewWorkFlowPage() {
     is_sequential: false,
     is_authorization: false,
     type_authorization: '',
+    conditions: [] as number[],
   });
   const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
     { value: string; label: string }[]
@@ -317,6 +319,7 @@ function ViewWorkFlowPage() {
           is_sequential: Boolean(t.is_sequential),
           is_authorization: Boolean(t.is_authorization),
           type_authorization: t.type_authorization ?? null,
+          conditions: Array.isArray(t.conditions) ? t.conditions : [],
         }))
       );
     } catch (err) {
@@ -517,10 +520,11 @@ function ViewWorkFlowPage() {
       type_authorization_label: newTaskForm.is_authorization
         ? authorizationTypeOptions.find((o) => o.value === newTaskForm.type_authorization)?.label ?? null
         : null,
+      conditions: newTaskForm.conditions,
     };
 
     setEditedTasks([...editedTasks, newTask]);
-    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '' });
+    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', conditions: [] });
     setAddTaskModalOpened(false);
   };
 
@@ -577,6 +581,12 @@ function ViewWorkFlowPage() {
         conditions: f.conditions.filter((c) => !optionIds.includes(c)),
       }))
     );
+    setEditedTasks((prev) =>
+      prev.map((t) => ({
+        ...t,
+        conditions: (t.conditions || []).filter((c) => !optionIds.includes(c)),
+      }))
+    );
   };
 
   const setFieldConditions = (fieldId: number, ids: number[]) => {
@@ -608,6 +618,9 @@ function ViewWorkFlowPage() {
     );
     setEditedFiles((prev) =>
       prev.map((f) => ({ ...f, conditions: f.conditions.filter((c) => c !== optionId) }))
+    );
+    setEditedTasks((prev) =>
+      prev.map((t) => ({ ...t, conditions: (t.conditions || []).filter((c) => c !== optionId) }))
     );
   };
 
@@ -706,6 +719,7 @@ function ViewWorkFlowPage() {
         const originalTask = originalTasks.find(ot => ot.id === task.id);
         if (!originalTask) return false;
         const originalIdx = originalTasks.findIndex(ot => ot.id === task.id);
+        const condKey = (arr: number[]) => [...(arr || [])].sort((a, b) => a - b).join(',');
         return (
           originalTask.task !== task.task ||
           originalTask.active !== task.active ||
@@ -715,6 +729,7 @@ function ViewWorkFlowPage() {
           Boolean(originalTask.is_sequential) !== Boolean(task.is_sequential) ||
           Boolean(originalTask.is_authorization) !== Boolean(task.is_authorization) ||
           (originalTask.type_authorization ?? null) !== (task.type_authorization ?? null) ||
+          condKey(originalTask.conditions) !== condKey(task.conditions) ||
           originalIdx !== idx // cambió el orden
         );
       });
@@ -816,6 +831,7 @@ function ViewWorkFlowPage() {
         display_order?: number;
         is_authorization?: boolean;
         type_authorization?: number | null;
+        condition_option_ids?: number[];
         action: 'create' | 'update' | 'delete';
       }
 
@@ -891,6 +907,7 @@ function ViewWorkFlowPage() {
             display_order: editedTasks.findIndex((t) => t.id === task.id),
             is_authorization: task.is_authorization,
             type_authorization: task.is_authorization ? (task.type_authorization ?? null) : null,
+            condition_option_ids: task.conditions,
             action: 'create' as const,
           })),
           ...updatedTasks.map((task) => ({
@@ -904,6 +921,7 @@ function ViewWorkFlowPage() {
             display_order: editedTasks.findIndex((t) => t.id === task.id),
             is_authorization: task.is_authorization,
             type_authorization: task.is_authorization ? (task.type_authorization ?? null) : null,
+            condition_option_ids: task.conditions,
             action: 'update' as const,
           })),
           ...deletedTaskIds.map((id) => ({
@@ -1584,6 +1602,11 @@ function ViewWorkFlowPage() {
                                             {task.type_authorization_label || 'Autorización'}
                                           </Badge>
                                         )}
+                                        {task.conditions.length > 0 && (
+                                          <Badge color='grape' variant='light' size='sm' styles={{ root: { textTransform: 'none' } }}>
+                                            Si: {conditionLabelsView(task.conditions)}
+                                          </Badge>
+                                        )}
                                       </Group>
                                     )}
                                   </div>
@@ -1686,6 +1709,27 @@ function ViewWorkFlowPage() {
                                         : undefined
                                     }
                                     maw={400}
+                                  />
+                                )}
+
+                                {isEditing && allOptionsData.length > 0 && (
+                                  <MultiSelect
+                                    mt='sm'
+                                    label='Ejecutar esta tarea solo si se elige'
+                                    placeholder='Siempre (sin condición)'
+                                    data={allOptionsData}
+                                    value={(editedTasks[index]?.conditions || []).map((c) => c.toString())}
+                                    onChange={(value) => {
+                                      const newTasks = [...editedTasks];
+                                      newTasks[index] = {
+                                        ...newTasks[index],
+                                        conditions: value.map((v) => parseInt(v)),
+                                      };
+                                      setEditedTasks(newTasks);
+                                    }}
+                                    clearable
+                                    searchable
+                                    leftSection={<IconTag size={16} />}
                                   />
                                 )}
 
@@ -2382,7 +2426,7 @@ function ViewWorkFlowPage() {
           opened={addTaskModalOpened}
           onClose={() => {
             setAddTaskModalOpened(false);
-            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '' });
+            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', conditions: [] });
           }}
           title={
             <Group gap='sm'>
@@ -2535,12 +2579,28 @@ function ViewWorkFlowPage() {
               />
             )}
 
+            {allOptionsData.length > 0 && (
+              <MultiSelect
+                mt='sm'
+                label='Ejecutar esta tarea solo si se elige'
+                placeholder='Siempre (sin condición)'
+                data={allOptionsData}
+                value={newTaskForm.conditions.map((c) => c.toString())}
+                onChange={(value) =>
+                  setNewTaskForm({ ...newTaskForm, conditions: value.map((v) => parseInt(v)) })
+                }
+                clearable
+                searchable
+                leftSection={<IconTag size={16} />}
+              />
+            )}
+
             <Group justify='flex-end' gap='sm' mt='md'>
               <Button
                 variant='outline'
                 onClick={() => {
                   setAddTaskModalOpened(false);
-                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '' });
+                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', conditions: [] });
                 }}
                 className='cursor-pointer transition-colors duration-200'
               >
