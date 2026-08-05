@@ -1,12 +1,12 @@
 /*
-  Seed de PERMISOS para Dashboard Solicitante y Dashboard Solicitado
+  Seed de PERMISOS para Dashboard solicitudes y Dashboard personal
   (idempotente, APPEND-ONLY). SQL Server.
 
   Que hace:
     1. Reutiliza el proceso 'Solicitudes' (o lo crea si no existe).
     2. Crea dos subprocesos:
-         - Dashboard Solicitante -> /process/request-general/dashboard-solicitante
-         - Dashboard Solicitado  -> /process/request-general/dashboard-solicitado
+         - Dashboard solicitudes -> /process/request-general/dashboard-solicitante
+         - Dashboard personal    -> /process/request-general/dashboard-solicitado
     3. Otorga ambos subprocesos a un usuario admin de prueba en CADA empresa
        donde ya tenga company_user. Solo inserta filas faltantes.
 
@@ -16,10 +16,10 @@
 DECLARE @AdminEmail NVARCHAR(255) = 'automatizacion@gsslatam.com';
 DECLARE @ProcessName NVARCHAR(255) = N'Solicitudes';
 
-DECLARE @SubSolicitanteName NVARCHAR(255) = N'Dashboard Solicitante';
+DECLARE @SubSolicitanteName NVARCHAR(255) = N'Dashboard solicitudes';
 DECLARE @SubSolicitanteUrl NVARCHAR(255) = N'/process/request-general/dashboard-solicitante';
 
-DECLARE @SubSolicitadoName NVARCHAR(255) = N'Dashboard Solicitado';
+DECLARE @SubSolicitadoName NVARCHAR(255) = N'Dashboard personal';
 DECLARE @SubSolicitadoUrl NVARCHAR(255) = N'/process/request-general/dashboard-solicitado';
 
 /* 1) Process contenedor */
@@ -36,7 +36,7 @@ BEGIN
   SET @ProcessId = SCOPE_IDENTITY();
 END
 
-/* 2) Subproceso Dashboard Solicitante */
+/* 2) Subproceso Dashboard solicitudes */
 DECLARE @SubSolicitanteId INT = (
   SELECT TOP 1 id_subprocess
   FROM [dbo].[subprocess]
@@ -57,7 +57,7 @@ BEGIN
   WHERE id_subprocess = @SubSolicitanteId;
 END
 
-/* 3) Subproceso Dashboard Solicitado */
+/* 3) Subproceso Dashboard personal */
 DECLARE @SubSolicitadoId INT = (
   SELECT TOP 1 id_subprocess
   FROM [dbo].[subprocess]

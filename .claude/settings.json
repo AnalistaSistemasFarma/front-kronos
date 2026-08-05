@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(grep -nE \"IconRefresh|\\(^|[^a-zA-Z]\\)Stack\\(,|\\\\s|$\\)|IconCheck\" app/\\\\\\(hub\\\\\\)/process/request-general/view-request/page.tsx)"
-    ]
-  }
-}

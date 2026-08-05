@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense, useCallback } from 'react';
+import { useState, useEffect, Suspense, useCallback, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -37,6 +37,11 @@ import {
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { notifySubprocessAssignmentsChanged } from '@/lib/process/subprocessAssignmentsEvents';
+import {
+  DASHBOARD_SOLICITANTE_URL,
+  DASHBOARD_SOLICITADO_URL,
+  isHubHiddenRequestDashboardSubprocess,
+} from '@/lib/request-general/dashboardAccess';
 
 interface User {
   id: string;
@@ -85,7 +90,9 @@ function UserManagement() {
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState('');
   const [filters, setFilters] = useState({
     search: '',
     role: '',
@@ -97,6 +104,7 @@ function UserManagement() {
     total: 0,
     pages: 0,
   });
+  const hasLoadedOnce = useRef(false);
 
   // Modal states
   const [createModalOpened, setCreateModalOpened] = useState(false);
@@ -144,9 +152,30 @@ function UserManagement() {
     allSubprocesses.find((s) => s.subprocess_url === '/process/authorization')?.id_subprocess ??
     null;
 
+  // Debounce del buscador (igual que help-desk): no fetch en cada tecla
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const next = searchInput.trim();
+      setFilters((prev) => {
+        if (prev.search === next) return prev;
+        return { ...prev, search: next };
+      });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  const prevSearchRef = useRef(filters.search);
+  useEffect(() => {
+    if (prevSearchRef.current === filters.search) return;
+    prevSearchRef.current = filters.search;
+    setPagination((prev) => (prev.page === 1 ? prev : { ...prev, page: 1 }));
+  }, [filters.search]);
+
   const fetchUsers = useCallback(async () => {
     try {
-      setLoading(true);
+      if (hasLoadedOnce.current) setRefreshing(true);
+      else setLoading(true);
+
       const params = new URLSearchParams({
         page: pagination.page.toString(),
         limit: pagination.limit.toString(),
@@ -170,6 +199,8 @@ function UserManagement() {
         total: data.pagination.total,
         pages: data.pagination.pages,
       }));
+      setError(null);
+      hasLoadedOnce.current = true;
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error ? err.message : 'Unable to load users. Please try again.';
@@ -177,6 +208,7 @@ function UserManagement() {
       console.error('Error fetching users:', err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [filters.search, filters.role, filters.status, pagination.page, pagination.limit]);
 
@@ -186,7 +218,7 @@ function UserManagement() {
       router.push('/login');
       return;
     }
-    fetchUsers();
+    void fetchUsers();
   }, [session, status, router, fetchUsers]);
 
   // Load department catalog for the MultiSelect (used in create/edit modals)
@@ -209,12 +241,12 @@ function UserManagement() {
     loadDepartments();
   }, [session, status]);
 
-  const handleFilterChange = (field: string, value: string) => {
+  const handleFilterChange = (field: 'role' | 'status', value: string) => {
     setFilters((prev) => ({
       ...prev,
       [field]: value,
     }));
-    setPagination((prev) => ({ ...prev, page: 1 })); // Reset to first page
+    setPagination((prev) => ({ ...prev, page: 1 }));
   };
 
   const handleCreateUser = async () => {
@@ -645,7 +677,7 @@ function UserManagement() {
     document.body.removeChild(link);
   };
 
-  if (status === 'loading' || loading) {
+  if (status === 'loading' || (loading && !hasLoadedOnce.current)) {
     return (
       <div className='min-h-screen flex items-center justify-center'>
         <Loader size='lg' />
@@ -733,8 +765,8 @@ function UserManagement() {
             label='Buscar'
             placeholder='Nombre o email'
             leftSection={<IconSearch size={16} />}
-            value={filters.search}
-            onChange={(e) => handleFilterChange('search', e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.currentTarget.value)}
           />
           <Select
             label='Rol'
@@ -762,7 +794,23 @@ function UserManagement() {
       </Paper>
 
       {/* Users Table */}
-      <Paper shadow='sm' radius='md' withBorder>
+      <Paper shadow='sm' radius='md' withBorder style={{ position: 'relative' }}>
+        {refreshing ? (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 2,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'color-mix(in srgb, var(--mantine-color-body) 70%, transparent)',
+              borderRadius: 'inherit',
+            }}
+          >
+            <Loader size='sm' />
+          </div>
+        ) : null}
         <div className='overflow-x-auto'>
           <Table stickyHeader>
             <Table.Thead>
@@ -1168,6 +1216,21 @@ function UserManagement() {
                                     URL: {subprocess.subprocess_url}
                                   </div>
                                 )}
+                                {isHubHiddenRequestDashboardSubprocess(subprocess) ? (
+                                  <Badge size='xs' variant='light' color='teal' mt={4}>
+                                    {subprocess.subprocess_url === DASHBOARD_SOLICITADO_URL ||
+                                    (subprocess.subprocess_url ?? '').includes(
+                                      'dashboard-solicitado'
+                                    )
+                                      ? 'Da acceso a Dashboard personal en el menú'
+                                      : subprocess.subprocess_url === DASHBOARD_SOLICITANTE_URL ||
+                                          (subprocess.subprocess_url ?? '').includes(
+                                            'dashboard-solicitante'
+                                          )
+                                        ? 'Da acceso a Dashboard solicitudes en el menú'
+                                        : 'Da acceso al dashboard en el menú'}
+                                  </Badge>
+                                ) : null}
                               </div>
                               <Group gap='xs'>
                                 {subprocess.id_subprocess === authSubprocessId &&

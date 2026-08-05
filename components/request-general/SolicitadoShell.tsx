@@ -243,7 +243,7 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
 
   if (error) {
     return (
-      <Alert icon={<IconAlertCircle size={16} />} title='Mis procesos' color='red' m='md'>
+      <Alert icon={<IconAlertCircle size={16} />} title='Dashboard personal' color='red' m='md'>
         {error}
       </Alert>
     );
