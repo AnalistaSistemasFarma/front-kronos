@@ -28,6 +28,7 @@ export async function GET(req) {
         pc.id as id_process_category,
         pc.assigned as assignedUserId,
         assignedUser.name as assignedUserName,
+        assignedUser.id as IDassignedUserID,
         rg.subject_request, 
         rg.resolution as resolutioncase,
         rg.date_resolution,

@@ -5,15 +5,18 @@ import { resolveSapsendTask } from '../../../../lib/sapsend/resolveWorkflowTask.
 import {
   fireAndForgetNotification,
   notifyActivityResolved,
+  notifyRequestClosed,
 } from '../../../../lib/notificationEvents.js';
 
-// Endpoint ENTRANTE: SAPSEND llama a SynerLink con { id_request } para marcar como resuelta la tarea
-// del workflow "Liquidación de Impuestos". Autenticado por x-api-key (secreto compartido), sin sesión
-// (es una máquina). Idempotente: resuelve todas las instancias abiertas, deja una nota y avanza el flujo.
+// Endpoint ENTRANTE: contraparte del `updatePay` de SAPSEND. Cuando SAPSEND marca los treasury_requests
+// como 'Pago Realizado', llama a SynerLink con { id_request } para resolver la tarea del workflow
+// "Programación de Pago", dejar la nota "Pago Realizado Correctamente", avanzar el flujo y CERRAR la
+// solicitud completa (es la última etapa del flujo de tesorería).
+// Autenticado por x-api-key (secreto compartido), sin sesión. Idempotente.
 
-const TAG = '[sapsend/tax-settlement]';
-const TASK_NAME = 'Liquidación de Impuestos';
-const TEXT = 'Liquidación de Impuestos Realizada Correctamente';
+const TAG = '[sapsend/payment-scheduling]';
+const TASK_NAME = 'Programación de Pago';
+const TEXT = 'Pago Realizado Correctamente';
 
 export async function POST(req) {
   try {
@@ -36,7 +39,7 @@ export async function POST(req) {
     console.log(`${TAG} ▶ POST id_request=${id_request}`);
 
     const outcome = await withMssqlPool((pool) =>
-      resolveSapsendTask(pool, { id_request, taskName: TASK_NAME, text: TEXT })
+      resolveSapsendTask(pool, { id_request, taskName: TASK_NAME, text: TEXT, closeRequest: true })
     );
 
     if (outcome.notFound) {
@@ -58,10 +61,23 @@ export async function POST(req) {
       );
     }
 
+    // Notificación de cierre de la solicitud al solicitante (solo en la transición a cerrada).
+    if (outcome.requestClosed) {
+      fireAndForgetNotification(
+        notifyRequestClosed({
+          requestId: id_request,
+          subject: outcome.subject,
+          requesterUserId: outcome.requesterUserId,
+          statusId: 2,
+        })
+      );
+    }
+
     return NextResponse.json(
       {
         success: true,
         resolved: outcome.resolved,
+        requestClosed: !!outcome.requestClosed,
         ...(outcome.alreadyResolved ? { alreadyResolved: true } : {}),
       },
       { status: 200 }

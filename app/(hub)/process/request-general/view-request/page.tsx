@@ -1557,36 +1557,30 @@ function ViewRequestPage() {
         }
       >
         <Stack gap={6}>
-          {isSent && (
+          {isSent && userId == "cmgqz404x0000ct9k1j8xdet1" && (
             <Text size='sm'>
               Solicitud de tesorería creada
               {request.numero_sapsend ? ` · N° ${request.numero_sapsend}` : ''}
               {request.id_treasury_requests ? ` (ID ${request.id_treasury_requests})` : ''}.
             </Text>
           )}
-          {request.sapsend_status_request && (
-            <Text size='sm'>
-              Estado en SAPSEND: <strong>{request.sapsend_status_request}</strong>
-              {request.sapsend_auth_status === 'conflict' ? ' (modificada en SAPSEND)' : ''}.
-            </Text>
-          )}
-          {request.sapsend_auth_status === 'failed' && request.sapsend_auth_error && (
+          {request.sapsend_auth_status === 'failed' && request.sapsend_auth_error && userId == "cmgqz404x0000ct9k1j8xdet1" && (
             <Text size='sm' c='red'>
               Autorización no aplicada en SAPSEND: {request.sapsend_auth_error}
             </Text>
           )}
-          {!isSent && request.sapsend_error && (
+          {!isSent && request.sapsend_error && userId == "cmgqz404x0000ct9k1j8xdet1" && (
             <Text size='sm' c='red'>
               {request.sapsend_error}
             </Text>
           )}
-          {request.sapsend_files_error && (
+          {request.sapsend_files_error && userId == "cmgqz404x0000ct9k1j8xdet1" && (
             <Text size='sm' c='red'>
               Archivos: {request.sapsend_files_error}
             </Text>
           )}
           <Group gap='xs'>
-            {!isSent && (
+            {!isSent && userId == "cmgqz404x0000ct9k1j8xdet1" && (
               <Button
                 size='xs'
                 color='blue'
@@ -1597,6 +1591,7 @@ function ViewRequestPage() {
                 Reenviar a SAPSEND
               </Button>
             )}
+            {userId == "cmgqz404x0000ct9k1j8xdet1" && (
             <Button
               size='xs'
               variant='light'
@@ -1607,6 +1602,7 @@ function ViewRequestPage() {
             >
               Reenviar archivos a SAPSEND
             </Button>
+            )}
           </Group>
         </Stack>
       </Alert>
