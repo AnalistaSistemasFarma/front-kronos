@@ -21,7 +21,7 @@ export async function GET() {
     const allowed = await hasRequestDashboardAccess(session.user.email, 'solicitante');
     if (!allowed) {
       return NextResponse.json(
-        { error: 'Sin permiso para el Dashboard Solicitante' },
+        { error: 'Sin permiso para el Dashboard solicitudes' },
         { status: 403 }
       );
     }

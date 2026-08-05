@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -13,6 +14,7 @@ import {
   DASHBOARD_SOLICITANTE_URL,
   DASHBOARD_SOLICITADO_URL,
 } from './dashboardAccess';
+import { SUBPROCESS_ASSIGNMENTS_CHANGED } from '../process/subprocessAssignmentsEvents';
 
 export interface RequestRoleNavContextValue {
   hasSolicitanteAccess: boolean;
@@ -22,6 +24,7 @@ export interface RequestRoleNavContextValue {
   loadingSolicitadoAccess: boolean;
   solicitanteUrl: string;
   solicitadoUrl: string;
+  refreshRoleNav: () => Promise<void>;
 }
 
 const RequestRoleNavContext = createContext<RequestRoleNavContextValue | null>(null);
@@ -43,7 +46,7 @@ export function RequestRoleNavProvider({ children }: { children: ReactNode }) {
   const [hasSolicitadoAccess, setHasSolicitadoAccess] = useState(false);
   const [loadingRoleNav, setLoadingRoleNav] = useState(true);
 
-  useEffect(() => {
+  const refreshRoleNav = useCallback(async () => {
     if (status === 'loading') return;
 
     if (status !== 'authenticated' || !session?.user?.email) {
@@ -53,22 +56,33 @@ export function RequestRoleNavProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    let cancelled = false;
     setLoadingRoleNav(true);
-
-    void Promise.all([fetchRoleAccess('solicitante'), fetchRoleAccess('solicitado')]).then(
-      ([solicitante, solicitado]) => {
-        if (cancelled) return;
-        setHasSolicitanteAccess(solicitante);
-        setHasSolicitadoAccess(solicitado);
-        setLoadingRoleNav(false);
-      }
-    );
-
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const [solicitante, solicitado] = await Promise.all([
+        fetchRoleAccess('solicitante'),
+        fetchRoleAccess('solicitado'),
+      ]);
+      setHasSolicitanteAccess(solicitante);
+      setHasSolicitadoAccess(solicitado);
+    } finally {
+      setLoadingRoleNav(false);
+    }
   }, [session?.user?.email, status]);
+
+  useEffect(() => {
+    void refreshRoleNav();
+  }, [refreshRoleNav]);
+
+  // Si se asigna/quita el módulo en Administración → Usuarios, refrescar el menú
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+
+    const onAssignmentsChanged = () => void refreshRoleNav();
+    window.addEventListener(SUBPROCESS_ASSIGNMENTS_CHANGED, onAssignmentsChanged);
+    return () => {
+      window.removeEventListener(SUBPROCESS_ASSIGNMENTS_CHANGED, onAssignmentsChanged);
+    };
+  }, [status, refreshRoleNav]);
 
   const value = useMemo(
     () => ({
@@ -78,8 +92,9 @@ export function RequestRoleNavProvider({ children }: { children: ReactNode }) {
       loadingSolicitadoAccess: loadingRoleNav,
       solicitanteUrl: DASHBOARD_SOLICITANTE_URL,
       solicitadoUrl: DASHBOARD_SOLICITADO_URL,
+      refreshRoleNav,
     }),
-    [hasSolicitanteAccess, hasSolicitadoAccess, loadingRoleNav]
+    [hasSolicitanteAccess, hasSolicitadoAccess, loadingRoleNav, refreshRoleNav]
   );
 
   return (

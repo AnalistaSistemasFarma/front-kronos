@@ -117,7 +117,7 @@ export default function Header() {
           }
           onClick={() => setIsMobileMenuOpen(false)}
         >
-          Solicitante
+          Dashboard solicitudes
         </Link>
       )}
       {showSolicitadoNav && (
@@ -131,7 +131,7 @@ export default function Header() {
           }
           onClick={() => setIsMobileMenuOpen(false)}
         >
-          Mis procesos
+          Dashboard personal
         </Link>
       )}
     </>
@@ -166,7 +166,7 @@ export default function Header() {
               {sectionCtx && !showSolicitadoNav && !showSolicitanteNav ? (
                 <UnstyledButton
                   onClick={() => goToSection(isDashboardAdmin ? 'dashboard' : 'process')}
-                  aria-label={isDashboardAdmin ? 'Ir al dashboard' : 'Ir a procesos'}
+                  aria-label={isDashboardAdmin ? 'Ir al Dashboard Admin' : 'Ir a procesos'}
                 >
                   <Image
                     src={logoSrc}
@@ -199,7 +199,7 @@ export default function Header() {
                         className={navLinkClass('dashboard')}
                         onClick={() => goToSection('dashboard')}
                       >
-                        Dashboard
+                        Dashboard Admin
                       </button>
                     )}
                     <button
@@ -219,7 +219,7 @@ export default function Header() {
                         prefetch
                         className={navLinkClass('dashboard')}
                       >
-                        Dashboard
+                        Dashboard Admin
                       </Link>
                     )}
                     <Link href={PROCESS_HUB_URL} prefetch className={navLinkClass('process')}>
@@ -297,7 +297,7 @@ export default function Header() {
                   className={`block w-full text-left text-base font-medium ${navLinkClass('dashboard')}`}
                   onClick={() => goToSection('dashboard')}
                 >
-                  Dashboard
+                  Dashboard Admin
                 </button>
               )}
               <button
@@ -318,7 +318,7 @@ export default function Header() {
                   className={`block px-3 py-2 rounded-md text-base font-medium ${navLinkClass('dashboard')}`}
                   onClick={() => setIsMobileMenuOpen(false)}
                 >
-                  Dashboard
+                  Dashboard Admin
                 </Link>
               )}
               <Link
