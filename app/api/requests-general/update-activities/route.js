@@ -196,6 +196,32 @@ export async function POST(req) {
         );
       }
 
+      // Nota en la bitácora de la solicitud cuando se resuelve una tarea de AUTORIZACIÓN, a nombre del
+      // autorizador (id_assigned): "Solicitud Autorizada" / "Solicitud Rechazada: <motivo>". No rompe la
+      // respuesta si falla (la tarea ya se actualizó).
+      if (isAuthorizationTask && (Number(nextStatus) === 2 || Number(nextStatus) === 3)) {
+        try {
+          const reason = resolution ? String(resolution).trim() : '';
+          const noteText =
+            Number(nextStatus) === 2
+              ? 'Solicitud Autorizada'
+              : reason
+                ? `Solicitud Rechazada: ${reason}`
+                : 'Solicitud Rechazada';
+
+          await new sql.Request(pool)
+            .input('note', sql.Text, noteText)
+            .input('id_request', sql.Int, prevRow?.id_request_general)
+            .input('created_by', sql.NVarChar, id_assigned)
+            .query(`
+              INSERT INTO notes (note, id_request, created_by)
+              VALUES (@note, @id_request, @created_by)
+            `);
+        } catch (noteErr) {
+          console.error(`${TAG} ✖ Error insertando la nota de autorización:`, noteErr);
+        }
+      }
+
       // Creación diferida (lazy) de la siguiente tarea secuencial: cuando esta tarea se cierra
       // (Resuelto=2 o Cancelado=3), si la siguiente tarea del orden es secuencial y aún no existe
       // en la solicitud, se instancia ahora y se notifica a su(s) responsable(s).
