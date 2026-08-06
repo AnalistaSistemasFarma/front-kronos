@@ -2,6 +2,7 @@
 
 import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useMemo, useState } from 'react';
+import { getChartDevicePixelRatio } from '../../lib/charts/defaults';
 
 /** Breakpoints alineados a Mantine sm (~576px) y md (~768px) */
 export function useChartViewport() {
@@ -16,17 +17,27 @@ export function useChartViewport() {
   );
 
   const [resizeTick, setResizeTick] = useState(0);
+  const [pixelRatio, setPixelRatio] = useState(() => getChartDevicePixelRatio());
 
   useEffect(() => {
     let frame = 0;
-    const onResize = () => {
+    const syncViewport = () => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => setResizeTick((t) => t + 1));
+      frame = requestAnimationFrame(() => {
+        setPixelRatio(getChartDevicePixelRatio());
+        setResizeTick((t) => t + 1);
+      });
     };
-    window.addEventListener('resize', onResize, { passive: true });
+
+    window.addEventListener('resize', syncViewport, { passive: true });
+    // Zoom del navegador (Ctrl +/-) suele disparar visualViewport, no solo resize
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', syncViewport, { passive: true });
+
     return () => {
       cancelAnimationFrame(frame);
-      window.removeEventListener('resize', onResize);
+      window.removeEventListener('resize', syncViewport);
+      vv?.removeEventListener('resize', syncViewport);
     };
   }, []);
 
@@ -36,5 +47,7 @@ export function useChartViewport() {
     isCompact,
     layoutEpoch,
     resizeTick,
+    /** DPR actual (incluye zoom); ChartBox lo usa para redibujar nítido */
+    pixelRatio,
   };
 }
