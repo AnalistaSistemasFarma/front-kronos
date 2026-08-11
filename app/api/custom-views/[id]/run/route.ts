@@ -10,6 +10,7 @@ import {
   isValidColumnRef,
   MAX_VIEW_ROWS,
 } from '../../../../../lib/custom-views/access';
+import { buildFilterConditions, type FilterDef } from '../../../../../lib/custom-views/filters';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +24,7 @@ export const dynamic = 'force-dynamic';
  *
  * El id puede ser el id numérico o el slug de la vista.
  */
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
@@ -37,10 +38,22 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ error: 'Usuario no encontrado' }, { status: 404 });
     }
 
+    // Valores de filtros que envía el consumidor (opcional).
+    let filterValues: Record<string, unknown> = {};
+    try {
+      const raw = (await req.json()) as { filterValues?: unknown } | null;
+      if (raw && typeof raw.filterValues === 'object' && raw.filterValues !== null) {
+        filterValues = raw.filterValues as Record<string, unknown>;
+      }
+    } catch {
+      // Sin cuerpo o JSON inválido: se ejecuta sin valores (se aplican defaults).
+    }
+
     const { id } = await params;
     const numeric = Number(id);
     const view = await prisma.savedView.findFirst({
       where: Number.isFinite(numeric) ? { id_saved_view: numeric } : { slug: id },
+      include: { filters: { orderBy: { sort_order: 'asc' } } },
     });
     if (!view || view.visibility !== 'published') {
       return NextResponse.json(
@@ -70,8 +83,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       );
     }
 
-    // Alcance de empresa.
-    let whereClause = '1 = 1';
+    // Alcance de empresa (se une con AND a las condiciones de filtros).
+    let scopeClause = '1 = 1';
     if (view.scope_mode === 'company' && view.company_column) {
       if (!isValidColumnRef(view.company_column)) {
         return NextResponse.json(
@@ -82,22 +95,53 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       const companyIds =
         user.role === 'admin' ? null : await getUserCompanyIds(user.id);
       if (companyIds && companyIds.length === 0) {
-        whereClause = '1 = 0';
+        scopeClause = '1 = 0';
       } else if (companyIds) {
-        whereClause = `${view.company_column} IN (${companyIds.join(',')})`;
+        scopeClause = `${view.company_column} IN (${companyIds.join(',')})`;
       }
     }
+
+    // Condiciones de filtros parametrizadas (solo desde las definiciones guardadas).
+    const filterDefs = (view.filters ?? []) as FilterDef[];
+    let filterClause = '';
+    let filterParams: Record<string, unknown> = {};
+    try {
+      const built = buildFilterConditions(filterDefs, filterValues);
+      filterClause = built.clause;
+      filterParams = built.params;
+    } catch (filterError) {
+      return NextResponse.json(
+        {
+          error: 'Filtros inválidos.',
+          detail: filterError instanceof Error ? filterError.message : String(filterError),
+        },
+        { status: 400 }
+      );
+    }
+
+    const whereClause = [filterClause, scopeClause].filter((c) => c && c.length > 0).join(' AND ');
 
     const cap = Math.min(view.row_limit || 1000, MAX_VIEW_ROWS);
     const inner = view.sql_text.replace(/;\s*$/, '');
     const wrapped = `SELECT TOP (${cap}) * FROM (\n${inner}\n) AS _v WHERE ${whereClause}`;
 
     try {
-      const { columns, rows, rowCount } = await runReadOnlyQuery(wrapped);
+      const { columns, rows, rowCount } = await runReadOnlyQuery(wrapped, filterParams);
       return NextResponse.json(
         {
           ok: true,
           view: { id: view.id_saved_view, slug: view.slug, name: view.name },
+          filters: filterDefs.map((f) => ({
+            id_saved_view_filter: f.id_saved_view_filter,
+            column_name: f.column_name,
+            label: f.label,
+            filter_type: f.filter_type,
+            operator: f.operator,
+            options_json: f.options_json,
+            default_value: f.default_value,
+            required: f.required,
+            sort_order: f.sort_order,
+          })),
           columns,
           rows,
           rowCount,

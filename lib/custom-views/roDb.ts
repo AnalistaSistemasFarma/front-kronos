@@ -96,11 +96,23 @@ export interface RoQueryResult {
 /**
  * Ejecuta una consulta de SOLO LECTURA con el usuario read-only y timeout acotado.
  * NO valida el SQL: el llamador DEBE validar antes con el candado + whitelist.
+ *
+ * @param text   Texto SQL (ya validado y, si aplica, con placeholders @nombre).
+ * @param params Parámetros a inyectar con request.input(nombre, valor). Los VALORES
+ *               del consumidor SIEMPRE deben pasar por aquí (nunca interpolados).
  */
-export async function runReadOnlyQuery(text: string): Promise<RoQueryResult> {
+export async function runReadOnlyQuery(
+  text: string,
+  params?: Record<string, unknown>
+): Promise<RoQueryResult> {
   const pool = await getRoPool();
   const request = pool.request();
   // El timeout ya está fijado a nivel de pool (requestTimeout en parseViewsDatabaseUrl).
+  if (params) {
+    for (const [name, value] of Object.entries(params)) {
+      request.input(name, value);
+    }
+  }
   const result = await request.query(text);
   const rows = (result.recordset ?? []) as Record<string, unknown>[];
   const columns =

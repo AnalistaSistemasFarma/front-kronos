@@ -16,12 +16,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useSession } from 'next-auth/react';
 import {
+  ActionIcon,
   Alert,
+  Autocomplete,
   Badge,
   Button,
+  Checkbox,
   Group,
   Loader,
   NumberInput,
+  Paper,
   Select,
   Table,
   Text,
@@ -39,7 +43,9 @@ import {
   IconCircleCheck,
   IconDatabase,
   IconExternalLink,
+  IconFilter,
   IconPlayerPlay,
+  IconPlus,
   IconTable,
   IconTrash,
 } from '@tabler/icons-react';
@@ -99,6 +105,33 @@ interface PreviewResult {
 }
 type Feedback = { type: 'success' | 'error'; text: string } | null;
 
+/** Borrador de filtro parametrizable definido por el autor (Incremento 3). */
+interface FilterDraft {
+  column_name: string;
+  label: string;
+  filter_type: string;
+  operator: string;
+  options_text: string;
+  default_value: string;
+  required: boolean;
+}
+
+const FILTER_TYPE_OPTIONS = [
+  { value: 'text', label: 'Texto' },
+  { value: 'select', label: 'Lista (select)' },
+  { value: 'date', label: 'Fecha' },
+  { value: 'daterange', label: 'Rango de fechas' },
+  { value: 'number', label: 'Número' },
+];
+const FILTER_OP_OPTIONS = [
+  { value: 'eq', label: 'Igual (=)' },
+  { value: 'like', label: 'Contiene (LIKE)' },
+  { value: 'in', label: 'En lista (IN)' },
+  { value: 'between', label: 'Entre (BETWEEN)' },
+  { value: 'gte', label: 'Mayor o igual (>=)' },
+  { value: 'lte', label: 'Menor o igual (<=)' },
+];
+
 const ICON_OPTIONS = [
   { value: 'table', label: 'Tabla' },
   { value: 'database', label: 'Base de datos' },
@@ -133,6 +166,9 @@ export default function CustomViewsBuilderPage() {
   const [rowLimit, setRowLimit] = useState<number | string>(1000);
   const [visibility, setVisibility] = useState<string>('draft');
   const [saving, setSaving] = useState(false);
+
+  // filtros parametrizables (Incremento 3)
+  const [filterDrafts, setFilterDrafts] = useState<FilterDraft[]>([]);
 
   const [views, setViews] = useState<SavedViewRow[]>([]);
 
@@ -236,6 +272,60 @@ export default function CustomViewsBuilderPage() {
     }
   }, [sql]);
 
+  // ----------------------------------------------------------- filtros (autor)
+
+  const addFilter = useCallback(() => {
+    setFilterDrafts((prev) => [
+      ...prev,
+      {
+        column_name: '',
+        label: '',
+        filter_type: 'text',
+        operator: 'eq',
+        options_text: '',
+        default_value: '',
+        required: false,
+      },
+    ]);
+  }, []);
+
+  const updateFilter = useCallback(
+    (index: number, patch: Partial<FilterDraft>) => {
+      setFilterDrafts((prev) => prev.map((f, i) => (i === index ? { ...f, ...patch } : f)));
+    },
+    []
+  );
+
+  const removeFilter = useCallback((index: number) => {
+    setFilterDrafts((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  /** Convierte los borradores de filtro al payload que espera el backend. */
+  const buildFilterPayload = useCallback(
+    () =>
+      filterDrafts
+        .filter((f) => f.column_name.trim() && f.label.trim())
+        .map((f, i) => ({
+          column_name: f.column_name.trim(),
+          label: f.label.trim(),
+          filter_type: f.filter_type,
+          operator: f.operator,
+          options_json:
+            f.filter_type === 'select' && f.options_text.trim()
+              ? JSON.stringify(
+                  f.options_text
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                )
+              : null,
+          default_value: f.default_value.trim() || null,
+          required: f.required,
+          sort_order: i,
+        })),
+    [filterDrafts]
+  );
+
   const saveView = useCallback(async () => {
     if (!name.trim()) {
       setFeedback({ type: 'error', text: 'Indique un nombre para la vista.' });
@@ -257,6 +347,7 @@ export default function CustomViewsBuilderPage() {
           company_column: scopeMode === 'company' ? companyColumn.trim() : null,
           row_limit: Number(rowLimit) || 1000,
           visibility,
+          filters: buildFilterPayload(),
         }),
       });
       const data = await res.json();
@@ -270,6 +361,7 @@ export default function CustomViewsBuilderPage() {
         });
         setName('');
         setDescription('');
+        setFilterDrafts([]);
         await loadViews();
       } else {
         setFeedback({
@@ -282,7 +374,7 @@ export default function CustomViewsBuilderPage() {
     } finally {
       setSaving(false);
     }
-  }, [name, description, sql, icon, sortOrder, scopeMode, companyColumn, rowLimit, visibility, loadViews]);
+  }, [name, description, sql, icon, sortOrder, scopeMode, companyColumn, rowLimit, visibility, buildFilterPayload, loadViews]);
 
   const move = useCallback(
     async (index: number, dir: -1 | 1) => {
@@ -561,6 +653,103 @@ export default function CustomViewsBuilderPage() {
                 onChange={(v) => setVisibility(v ?? 'draft')}
               />
             </div>
+
+            {/* Filtros parametrizables (Incremento 3) */}
+            <div style={{ marginTop: 16 }}>
+              <Group justify='space-between' mb='xs'>
+                <Group gap={6}>
+                  <IconFilter size={16} />
+                  <Text fw={600}>Filtros parametrizables</Text>
+                </Group>
+                <Button
+                  size='compact-sm'
+                  variant='light'
+                  leftSection={<IconPlus size={14} />}
+                  onClick={addFilter}
+                >
+                  Agregar filtro
+                </Button>
+              </Group>
+              <Text size='xs' c='dimmed' mb='sm'>
+                El consumidor podrá filtrar la vista por estas columnas del resultado. Ejecute una
+                vista previa para sugerir columnas.
+              </Text>
+
+              {filterDrafts.length === 0 ? (
+                <Text size='sm' c='dimmed'>
+                  Sin filtros. La vista se consultará sin panel de filtros.
+                </Text>
+              ) : (
+                filterDrafts.map((f, i) => (
+                  <Paper key={i} withBorder p='sm' radius='md' mb='xs'>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr 1fr 1fr',
+                        gap: 10,
+                        alignItems: 'flex-end',
+                      }}
+                    >
+                      <Autocomplete
+                        label='Columna del resultado'
+                        required
+                        data={preview?.columns ?? []}
+                        value={f.column_name}
+                        onChange={(v) => updateFilter(i, { column_name: v })}
+                        placeholder='p. ej. estado'
+                      />
+                      <TextInput
+                        label='Etiqueta'
+                        required
+                        value={f.label}
+                        onChange={(e) => updateFilter(i, { label: e.currentTarget.value })}
+                        placeholder='p. ej. Estado'
+                      />
+                      <Select
+                        label='Tipo'
+                        data={FILTER_TYPE_OPTIONS}
+                        value={f.filter_type}
+                        onChange={(v) => updateFilter(i, { filter_type: v ?? 'text' })}
+                      />
+                      <Select
+                        label='Operador'
+                        data={FILTER_OP_OPTIONS}
+                        value={f.operator}
+                        onChange={(v) => updateFilter(i, { operator: v ?? 'eq' })}
+                      />
+                      {f.filter_type === 'select' && (
+                        <TextInput
+                          label='Opciones (separadas por coma)'
+                          value={f.options_text}
+                          onChange={(e) => updateFilter(i, { options_text: e.currentTarget.value })}
+                          placeholder='Abierto, Cerrado, Pendiente'
+                          style={{ gridColumn: '1 / span 2' }}
+                        />
+                      )}
+                      <TextInput
+                        label='Valor por defecto'
+                        value={f.default_value}
+                        onChange={(e) => updateFilter(i, { default_value: e.currentTarget.value })}
+                        placeholder='Opcional'
+                      />
+                      <Group gap='sm' wrap='nowrap'>
+                        <Checkbox
+                          label='Requerido'
+                          checked={f.required}
+                          onChange={(e) => updateFilter(i, { required: e.currentTarget.checked })}
+                        />
+                        <Tooltip label='Quitar filtro'>
+                          <ActionIcon color='red' variant='light' onClick={() => removeFilter(i)}>
+                            <IconTrash size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      </Group>
+                    </div>
+                  </Paper>
+                ))
+              )}
+            </div>
+
             <Group mt='md'>
               <Button onClick={saveView} loading={saving} color='teal'>
                 {visibility === 'published' ? 'Publicar vista' : 'Guardar borrador'}

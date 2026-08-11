@@ -11,6 +11,7 @@ import {
   CUSTOM_VIEWS_PROCESS_ID,
   MAX_VIEW_ROWS,
 } from '../../../lib/custom-views/access';
+import { normalizeFilterDefs, type FilterDef } from '../../../lib/custom-views/filters';
 
 export const dynamic = 'force-dynamic';
 
@@ -154,6 +155,20 @@ export async function POST(req: Request) {
       );
     }
 
+    // Definiciones de filtros parametrizables (Incremento 3).
+    let filterDefs: FilterDef[];
+    try {
+      filterDefs = normalizeFilterDefs(body.filters);
+    } catch (filterError) {
+      return NextResponse.json(
+        {
+          error: 'Definición de filtros inválida.',
+          detail: filterError instanceof Error ? filterError.message : String(filterError),
+        },
+        { status: 400 }
+      );
+    }
+
     const slug = await uniqueSlug(name);
 
     const created = await prisma.savedView.create({
@@ -171,7 +186,20 @@ export async function POST(req: Request) {
         row_limit: rowLimit,
         visibility,
         published_at: visibility === 'published' ? new Date() : null,
+        filters: {
+          create: filterDefs.map((f, i) => ({
+            column_name: f.column_name,
+            label: f.label,
+            filter_type: f.filter_type,
+            operator: f.operator,
+            options_json: f.options_json,
+            default_value: f.default_value,
+            required: f.required,
+            sort_order: Number.isFinite(f.sort_order) ? f.sort_order : i,
+          })),
+        },
       },
+      include: { filters: { orderBy: { sort_order: 'asc' } } },
     });
 
     // Al publicar: crear (idempotente) el subprocess-módulo de la vista.
