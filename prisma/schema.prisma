@@ -390,8 +390,28 @@ model SavedView {
   published_at     DateTime?
 
   columns          SavedViewColumn[]
+  filters          SavedViewFilter[]
 
   @@map("saved_view")
+}
+
+// Filtros parametrizables de una vista publicada (Incremento 3, §3).
+// Los define el autor; el consumidor los usa desde la galería. El backend
+// construye un WHERE externo parametrizado SOLO a partir de estas definiciones.
+model SavedViewFilter {
+  id_saved_view_filter Int       @id @default(autoincrement())
+  id_saved_view        Int
+  column_name          String    @db.NVarChar(128)
+  label                String    @db.NVarChar(150)
+  filter_type          String    @db.NVarChar(20)
+  operator             String    @db.NVarChar(20)
+  options_json         String?   @db.NVarChar(Max)
+  default_value        String?   @db.NVarChar(500)
+  required             Boolean   @default(false)
+  sort_order           Int       @default(0)
+  savedView            SavedView @relation(fields: [id_saved_view], references: [id_saved_view], onDelete: Cascade)
+
+  @@map("saved_view_filter")
 }
 
 model SavedViewColumn {

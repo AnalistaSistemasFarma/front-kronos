@@ -10,6 +10,7 @@ import {
   CUSTOM_VIEWS_PROCESS_ID,
   MAX_VIEW_ROWS,
 } from '../../../../lib/custom-views/access';
+import { normalizeFilterDefs, type FilterDef } from '../../../../lib/custom-views/filters';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +41,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const { id } = await params;
     const view = await prisma.savedView.findUnique({
       where: { id_saved_view: Number(id) },
-      include: { columns: { orderBy: { sort_order: 'asc' } } },
+      include: {
+        columns: { orderBy: { sort_order: 'asc' } },
+        filters: { orderBy: { sort_order: 'asc' } },
+      },
     });
     if (!view) {
       return NextResponse.json({ error: 'Vista no encontrada' }, { status: 404 });
@@ -160,9 +164,47 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       }
     }
 
-    const updated = await prisma.savedView.update({
-      where: { id_saved_view: viewId },
-      data,
+    // Filtros parametrizables (Incremento 3): si el cuerpo trae "filters",
+    // se reemplazan por completo (borra previos + reinserta) en transacción.
+    let filterDefs: FilterDef[] | null = null;
+    if ('filters' in body) {
+      try {
+        filterDefs = normalizeFilterDefs(body.filters);
+      } catch (filterError) {
+        return NextResponse.json(
+          {
+            error: 'Definición de filtros inválida.',
+            detail: filterError instanceof Error ? filterError.message : String(filterError),
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const up = await tx.savedView.update({
+        where: { id_saved_view: viewId },
+        data,
+      });
+      if (filterDefs !== null) {
+        await tx.savedViewFilter.deleteMany({ where: { id_saved_view: viewId } });
+        if (filterDefs.length > 0) {
+          await tx.savedViewFilter.createMany({
+            data: filterDefs.map((f, i) => ({
+              id_saved_view: viewId,
+              column_name: f.column_name,
+              label: f.label,
+              filter_type: f.filter_type,
+              operator: f.operator,
+              options_json: f.options_json,
+              default_value: f.default_value,
+              required: f.required,
+              sort_order: Number.isFinite(f.sort_order) ? f.sort_order : i,
+            })),
+          });
+        }
+      }
+      return up;
     });
 
     // Reconciliar el subprocess-módulo con la visibilidad resultante.
