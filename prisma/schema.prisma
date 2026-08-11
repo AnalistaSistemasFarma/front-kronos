@@ -363,3 +363,77 @@ model sysdiagrams {
 
   @@unique([principal_id, name], map: "UK_principal_name")
 }
+
+// ===================================================================
+// Constructor de Vistas SQL (Fase 1) — modelos de las tablas ya
+// existentes en la BD (saved_view, saved_view_column, catalog_source,
+// catalog_field). Ver propuesta técnica §3.
+// ===================================================================
+
+model SavedView {
+  id_saved_view    Int       @id @default(autoincrement())
+  name             String    @db.NVarChar(150)
+  slug             String    @unique @db.NVarChar(160)
+  description      String?   @db.NVarChar(1000)
+  sql_text         String    @db.NVarChar(Max)
+  id_process       Int?
+  scope_mode       String    @default("company") @db.NVarChar(20)
+  company_id_fixed Int?
+  company_column   String?   @db.NVarChar(128)
+  visibility       String    @default("published") @db.NVarChar(20)
+  icon             String?   @db.NVarChar(60)
+  sort_order       Int       @default(0)
+  owner_user_id    String    @db.NVarChar(1000)
+  row_limit        Int       @default(1000)
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+  published_at     DateTime?
+
+  columns          SavedViewColumn[]
+
+  @@map("saved_view")
+}
+
+model SavedViewColumn {
+  id_saved_view_column Int       @id @default(autoincrement())
+  id_saved_view        Int
+  column_key           String    @db.NVarChar(128)
+  label                String    @db.NVarChar(150)
+  data_type            String?   @db.NVarChar(30)
+  sort_order           Int       @default(0)
+  savedView            SavedView @relation(fields: [id_saved_view], references: [id_saved_view], onDelete: Cascade)
+
+  @@map("saved_view_column")
+}
+
+model CatalogSource {
+  id_catalog_source Int            @id @default(autoincrement())
+  id_process        Int?
+  object_name       String         @db.NVarChar(128)
+  object_type       String         @default("table") @db.NVarChar(20)
+  label             String         @db.NVarChar(150)
+  description       String?        @db.NVarChar(500)
+  company_column    String?        @db.NVarChar(128)
+  icon              String?        @db.NVarChar(60)
+  sort_order        Int            @default(0)
+  is_active         Boolean        @default(true)
+  fields            CatalogField[]
+
+  @@unique([object_name])
+  @@map("catalog_source")
+}
+
+model CatalogField {
+  id_catalog_field  Int           @id @default(autoincrement())
+  id_catalog_source Int
+  column_name       String        @db.NVarChar(128)
+  label             String        @db.NVarChar(150)
+  data_type         String?       @db.NVarChar(30)
+  is_pii            Boolean       @default(false)
+  is_active         Boolean       @default(true)
+  sort_order        Int           @default(0)
+  source            CatalogSource @relation(fields: [id_catalog_source], references: [id_catalog_source], onDelete: Cascade)
+
+  @@map("catalog_field")
+}
+
