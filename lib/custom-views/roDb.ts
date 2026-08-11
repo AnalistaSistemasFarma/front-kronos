@@ -100,7 +100,7 @@ export interface RoQueryResult {
 export async function runReadOnlyQuery(text: string): Promise<RoQueryResult> {
   const pool = await getRoPool();
   const request = pool.request();
-  request.timeout = RO_REQUEST_TIMEOUT_MS;
+  // El timeout ya está fijado a nivel de pool (requestTimeout en parseViewsDatabaseUrl).
   const result = await request.query(text);
   const rows = (result.recordset ?? []) as Record<string, unknown>[];
   const columns =

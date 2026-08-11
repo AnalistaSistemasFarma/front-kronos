@@ -1,3 +1,5 @@
+import type { PrismaClient } from '../../app/generated/prisma';
+
 /**
  * Candado de SOLO LECTURA compartido (front + MCP) para el Constructor de Vistas SQL.
  *
@@ -288,7 +290,7 @@ export function assertWhitelist(sql: string, allowed: Set<string>): void {
  */
 export async function assertReadOnlyAgainstCatalog(
   sql: string,
-  prisma: { catalogSource: { findMany: (args: unknown) => Promise<Array<{ object_name: string }>> } }
+  prisma: PrismaClient
 ): Promise<void> {
   assertReadOnlySql(sql);
   const sources = await prisma.catalogSource.findMany({
