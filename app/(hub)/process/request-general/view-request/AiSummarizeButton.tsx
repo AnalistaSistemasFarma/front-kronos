@@ -115,6 +115,7 @@ export default function AiSummarizeButton({
         length: 'medium',
         sharedContext: SHARED_CONTEXT,
         expectedInputLanguages: ['es'],
+        expectedContextLanguages: ['es'],
         outputLanguage: 'es',
         monitor(m) {
           m.addEventListener('downloadprogress', (e) => {
