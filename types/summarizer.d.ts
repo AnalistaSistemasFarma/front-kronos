@@ -27,6 +27,7 @@ interface SummarizerCreateOptions {
   length?: 'short' | 'medium' | 'long';
   sharedContext?: string;
   expectedInputLanguages?: string[];
+  expectedContextLanguages?: string[];
   outputLanguage?: string;
   monitor?: (m: SummarizerCreateMonitor) => void;
 }
