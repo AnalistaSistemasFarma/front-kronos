@@ -71,6 +71,7 @@ import {
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import AiSummarizeButton from './AiSummarizeButton';
 
 interface Request {
   id: number;
@@ -1890,6 +1891,12 @@ function ViewRequestPage() {
                       {request.description}
                     </Text>
                   </Card>
+
+                  {/* Resumen con IA local (Summarizer API on-device). Solo se
+                      muestra si el navegador soporta la API. */}
+                  <Group mt='sm'>
+                    <AiSummarizeButton request={request} notes={notes} tasks={taskRQ} />
+                  </Group>
                 </div>
 
                 <Divider />
