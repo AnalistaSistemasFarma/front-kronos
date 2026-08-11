@@ -4,6 +4,8 @@ import { useState, useEffect, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import {
   Title,
   Paper,
@@ -53,7 +55,7 @@ import {
   IconCircleDot,
   IconCircle,
   IconUserCheck,
-  IconTag,
+  IconDownload,
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
@@ -499,6 +501,59 @@ function ViewerRequestGeneralPage() {
     }
   };
 
+  async function exportToExcel() {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Solicitudes');
+
+    type TicketKeys = keyof Ticket;
+
+    const columnMapOrdered: { key: TicketKeys; header: string; width: number }[] = [
+      { key: 'id', header: 'ID', width: 10 },
+      { key: 'subject', header: 'Asunto', width: 40 },
+      { key: 'company', header: 'Empresa', width: 28 },
+      { key: 'category', header: 'Categoría', width: 22 },
+      { key: 'status', header: 'Estado', width: 16 },
+      { key: 'created_at', header: 'Fecha de Solicitud', width: 24 },
+      { key: 'requester', header: 'Solicitante', width: 24 },
+      { key: 'user', header: 'Asignado', width: 24 },
+    ];
+
+    worksheet.columns = columnMapOrdered;
+
+    const formatDate = (raw: string) => {
+      if (!raw) return '';
+      const date = new Date(raw);
+      if (isNaN(date.getTime())) return raw;
+      const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
+      return new Intl.DateTimeFormat('es-CO', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      }).format(adjusted);
+    };
+
+    tickets.forEach((item) => {
+      const row: Record<string, unknown> = {};
+      columnMapOrdered.forEach((col) => {
+        row[col.key] =
+          col.key === 'created_at' ? formatDate(item.created_at) : item[col.key];
+      });
+      worksheet.addRow(row);
+    });
+
+    worksheet.getRow(1).font = { bold: true };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+
+    saveAs(blob, 'InformeSolicitudesObservadas.xlsx');
+  }
+
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
     { title: 'Solicitudes Generales', href: '#' },
@@ -669,6 +724,20 @@ function ViewerRequestGeneralPage() {
                     </Group>
                   );
                 })()}
+              </Card>
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
+                <Group>
+                  <Button
+                    onClick={() => exportToExcel()}
+                    size='lg'
+                    leftSection={<IconDownload size={18} />}
+                    className='bg-green-500 hover:bg-green-700'
+                  >
+                    Descargar XLSX
+                  </Button>
+                </Group>
               </Card>
             </Grid.Col>
           </Grid>
