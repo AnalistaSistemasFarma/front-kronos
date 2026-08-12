@@ -48,6 +48,7 @@ import {
   IconPlus,
   IconTable,
   IconTrash,
+  IconWand,
 } from '@tabler/icons-react';
 
 /** Interfaz mínima del editor Monaco (evita depender de los tipos de monaco-editor). */
@@ -96,6 +97,11 @@ interface SavedViewRow {
   visibility: string;
   sort_order: number;
   row_limit: number;
+}
+interface ProcessFlowOption {
+  id_process_category: number;
+  process: string;
+  companies: string[];
 }
 interface PreviewResult {
   columns: string[];
@@ -151,6 +157,12 @@ export default function CustomViewsBuilderPage() {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
+  // Selector "Flujo de trabajo" (pivote guiado)
+  const [processes, setProcesses] = useState<ProcessFlowOption[]>([]);
+  const [processesLoading, setProcessesLoading] = useState(true);
+  const [selectedProcess, setSelectedProcess] = useState<string | null>(null);
+  const [generatingPivot, setGeneratingPivot] = useState(false);
+
   const [sql, setSql] = useState<string>('SELECT TOP 100 *\nFROM vw_requests_general');
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -190,6 +202,19 @@ export default function CustomViewsBuilderPage() {
     }
   }, []);
 
+  const loadProcesses = useCallback(async () => {
+    setProcessesLoading(true);
+    try {
+      const res = await fetch('/api/custom-views/catalog/processes', { cache: 'no-store' });
+      const data = await res.json();
+      if (res.ok) setProcesses(data.processes ?? []);
+    } catch {
+      /* silencioso: el árbol de catálogo sigue funcionando sin el selector */
+    } finally {
+      setProcessesLoading(false);
+    }
+  }, []);
+
   const loadViews = useCallback(async () => {
     try {
       const res = await fetch('/api/custom-views', { cache: 'no-store' });
@@ -203,7 +228,45 @@ export default function CustomViewsBuilderPage() {
   useEffect(() => {
     loadCatalog();
     loadViews();
-  }, [loadCatalog, loadViews]);
+    loadProcesses();
+  }, [loadCatalog, loadViews, loadProcesses]);
+
+  /** Al elegir un flujo: pide al servidor el SQL pivoteado y lo carga en el editor. */
+  const onSelectProcess = useCallback(async (value: string | null) => {
+    setSelectedProcess(value);
+    if (!value) return;
+    setGeneratingPivot(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(
+        `/api/custom-views/catalog/process-pivot?processId=${encodeURIComponent(value)}`,
+        { cache: 'no-store' }
+      );
+      const data = await res.json();
+      if (res.ok && typeof data.sql === 'string') {
+        setSql(data.sql);
+        const ed = editorRef.current;
+        if (ed) ed.setValue(data.sql);
+        setFeedback({
+          type: 'success',
+          text: `SQL generado para el flujo "${data.processName || value}" (${
+            data.fieldCount ?? 0
+          } campo(s)). Revíselo y ejecute la vista previa.`,
+        });
+      } else {
+        setFeedback({
+          type: 'error',
+          text: `${data.error ?? 'No se pudo generar el SQL del flujo.'}${
+            data.detail ? ' — ' + data.detail : ''
+          }`,
+        });
+      }
+    } catch {
+      setFeedback({ type: 'error', text: 'Error de red al generar el SQL del flujo.' });
+    } finally {
+      setGeneratingPivot(false);
+    }
+  }, []);
 
   // ----------------------------------------------------------------- editor
 
@@ -465,6 +528,36 @@ export default function CustomViewsBuilderPage() {
             overflow: 'auto',
           }}
         >
+          {/* Selector guiado: generar SQL pivoteado desde un flujo de trabajo */}
+          <div style={{ marginBottom: 14 }}>
+            <Group gap={6} mb={6}>
+              <IconWand size={18} />
+              <Text fw={600}>Flujo de trabajo</Text>
+            </Group>
+            <Select
+              placeholder={
+                processesLoading ? 'Cargando flujos…' : 'Elija un flujo para generar la vista'
+              }
+              data={processes.map((p) => ({
+                value: String(p.id_process_category),
+                label: p.companies.length
+                  ? `${p.process} — ${p.companies.join(', ')}`
+                  : p.process,
+              }))}
+              value={selectedProcess}
+              onChange={onSelectProcess}
+              disabled={processesLoading || generatingPivot}
+              searchable
+              clearable
+              nothingFoundMessage='Sin flujos activos'
+              rightSection={generatingPivot ? <Loader size='xs' /> : undefined}
+            />
+            <Text size='xs' c='dimmed' mt={4}>
+              Genera una vista con una fila por solicitud y los campos del formulario como
+              columnas. Los campos tipo Tabla se excluyen.
+            </Text>
+          </div>
+
           <Group gap={6} mb='xs'>
             <IconDatabase size={18} />
             <Text fw={600}>Catálogo</Text>

@@ -163,6 +163,18 @@ export function assertReadOnlySql(sql: string): void {
   }
 }
 
+/**
+ * ¿El identificador (alias/columna generado) NO dispara el candado de solo
+ * lectura? Función PURA. Útil para el generador de pivotes: garantiza que un
+ * alias derivado de datos (p. ej. la etiqueta de un campo) no coincida con una
+ * palabra clave prohibida ("Set", "Delete") ni con un prefijo peligroso
+ * (sp_/xp_/fn_). Comparte la MISMA fuente de verdad (FORBIDDEN_RE /
+ * DANGEROUS_PREFIX_RE) que la validación real, evitando divergencias.
+ */
+export function isReadOnlySafeIdentifier(token: string): boolean {
+  return !FORBIDDEN_RE.test(token) && !DANGEROUS_PREFIX_RE.test(token);
+}
+
 /** Normaliza un identificador de objeto: quita corchetes, comillas y esquema; minúsculas. */
 export function normalizeObjectName(token: string): string {
   // Toma la última parte tras el punto (esquema.objeto -> objeto) y limpia [] y "".
