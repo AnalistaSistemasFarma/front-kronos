@@ -17,9 +17,26 @@ import {
   Alert,
   LoadingOverlay,
   Badge,
+  ColorSwatch,
+  SegmentedControl,
+  SimpleGrid,
+  UnstyledButton,
+  rem,
 } from '@mantine/core';
-import { IconCheck, IconX, IconUpload, IconUser, IconMail, IconLock } from '@tabler/icons-react';
+import {
+  IconCheck,
+  IconX,
+  IconUpload,
+  IconUser,
+  IconMail,
+  IconLock,
+  IconPalette,
+  IconSun,
+  IconMoon,
+} from '@tabler/icons-react';
 import Header from '../../components/Header';
+import { useTheme } from '../../components/providers';
+import { PALETTES } from '../../lib/theme/palettes';
 
 interface UserProfile {
   id: string;
@@ -198,6 +215,45 @@ export default function ProfileSettingsPage() {
     setErrorMessage('');
   };
 
+  // Apariencia: paleta de color y modo claro/oscuro
+  const { theme, setThemeMode, palette, setPalette } = useTheme();
+
+  const persistAppearance = async (
+    nextPalette: string,
+    nextColorScheme: 'light' | 'dark',
+  ) => {
+    try {
+      const submitData = new FormData();
+      submitData.append('name', formData.name);
+      submitData.append('email', formData.email);
+      if (formData.image) submitData.append('image', formData.image);
+      submitData.append('themePalette', nextPalette);
+      submitData.append('colorScheme', nextColorScheme);
+
+      const response = await fetch('/api/profile', { method: 'PUT', body: submitData });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        setErrorMessage(error.error || 'Error al guardar la apariencia');
+        return;
+      }
+      setErrorMessage('');
+      setSuccessMessage('Apariencia actualizada');
+    } catch {
+      setErrorMessage('Error al guardar la apariencia');
+    }
+  };
+
+  const handlePaletteSelect = (key: string) => {
+    setPalette(key); // se aplica al instante en toda la app
+    void persistAppearance(key, theme);
+  };
+
+  const handleColorSchemeChange = (value: string) => {
+    const mode: 'light' | 'dark' = value === 'dark' ? 'dark' : 'light';
+    setThemeMode(mode); // se aplica al instante en toda la app
+    void persistAppearance(palette, mode);
+  };
+
   if (status === 'loading' || loading) {
     return (
       <>
@@ -288,6 +344,98 @@ export default function ProfileSettingsPage() {
                 </Group>
               </Stack>
             </form>
+          </Card>
+
+          {/* Appearance Section */}
+          <Card withBorder padding='lg' radius='md'>
+            <Title order={3} mb='md'>
+              <Group gap='xs'>
+                <IconPalette size={20} />
+                Apariencia
+              </Group>
+            </Title>
+
+            <Stack gap='lg'>
+              <div>
+                <Text fw={600} size='sm' mb={4}>
+                  Paleta de colores
+                </Text>
+                <Text size='xs' c='dimmed' mb='sm'>
+                  Elija el color de acento de la aplicación. El cambio se aplica de
+                  inmediato y queda guardado en su perfil.
+                </Text>
+                <SimpleGrid cols={{ base: 2, xs: 4 }} spacing='sm'>
+                  {PALETTES.map((p) => {
+                    const active = palette === p.key;
+                    return (
+                      <UnstyledButton
+                        key={p.key}
+                        onClick={() => handlePaletteSelect(p.key)}
+                        aria-pressed={active}
+                        aria-label={`Paleta ${p.label}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: rem(8),
+                          padding: rem(8),
+                          borderRadius: 'var(--mantine-radius-md)',
+                          border: active
+                            ? '2px solid var(--mantine-primary-color-filled)'
+                            : '1px solid var(--app-border, var(--mantine-color-default-border))',
+                          background: active
+                            ? 'var(--mantine-primary-color-light)'
+                            : 'transparent',
+                        }}
+                      >
+                        <ColorSwatch
+                          color={p.swatch}
+                          size={22}
+                          withShadow={false}
+                        >
+                          {active ? <IconCheck size={14} color='#fff' /> : null}
+                        </ColorSwatch>
+                        <Text size='sm' fw={active ? 600 : 400}>
+                          {p.label}
+                        </Text>
+                      </UnstyledButton>
+                    );
+                  })}
+                </SimpleGrid>
+              </div>
+
+              <div>
+                <Text fw={600} size='sm' mb={4}>
+                  Modo de color
+                </Text>
+                <Text size='xs' c='dimmed' mb='sm'>
+                  Alterne entre tema claro y oscuro.
+                </Text>
+                <SegmentedControl
+                  value={theme}
+                  onChange={handleColorSchemeChange}
+                  data={[
+                    {
+                      value: 'light',
+                      label: (
+                        <Group gap={6} justify='center' wrap='nowrap'>
+                          <IconSun size={16} />
+                          <span>Claro</span>
+                        </Group>
+                      ),
+                    },
+                    {
+                      value: 'dark',
+                      label: (
+                        <Group gap={6} justify='center' wrap='nowrap'>
+                          <IconMoon size={16} />
+                          <span>Oscuro</span>
+                        </Group>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+            </Stack>
           </Card>
 
           {/* Change Password Section */}
