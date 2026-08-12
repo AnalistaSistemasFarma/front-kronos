@@ -10,7 +10,7 @@
  * (parametrizadas) las inyecta el backend.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   Alert,
@@ -20,6 +20,7 @@ import {
   Loader,
   MultiSelect,
   NumberInput,
+  Pagination,
   Paper,
   Select,
   Table,
@@ -34,6 +35,8 @@ import {
   IconFilter,
   IconRefresh,
 } from '@tabler/icons-react';
+
+const PAGE_SIZE_OPTIONS = ['25', '50', '100', '200'];
 
 interface FilterDef {
   id_saved_view_filter: number;
@@ -51,7 +54,10 @@ interface RunResult {
   columns: string[];
   rows: Record<string, unknown>[];
   rowCount: number;
-  truncated: boolean;
+  /** Total de filas del resultado completo (para la paginación). */
+  total: number;
+  page: number;
+  pageSize: number;
   view: { id: number; slug: string; name: string };
   filters?: FilterDef[];
 }
@@ -106,11 +112,15 @@ export default function CustomViewGalleryPage() {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterDef[]>([]);
   const [filterValues, setFilterValues] = useState<Record<string, unknown>>({});
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [exporting, setExporting] = useState(false);
+  const [exportNote, setExportNote] = useState<string | null>(null);
   // Solo inicializamos los valores por defecto una vez (primera corrida).
   const initializedRef = useRef(false);
 
   const run = useCallback(
-    async (values?: Record<string, unknown>) => {
+    async (values: Record<string, unknown> | undefined, pageArg: number, sizeArg: number) => {
       if (!slug) return;
       setLoading(true);
       setError(null);
@@ -118,11 +128,12 @@ export default function CustomViewGalleryPage() {
         const res = await fetch(`/api/custom-views/${encodeURIComponent(slug)}/run`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filterValues: values ?? {} }),
+          body: JSON.stringify({ filterValues: values ?? {}, page: pageArg, pageSize: sizeArg }),
         });
         const data = await res.json();
         if (res.ok) {
           setResult(data as RunResult);
+          setPage(data.page ?? pageArg);
           const defs: FilterDef[] = (data.filters ?? []) as FilterDef[];
           setFilters(defs);
           if (!initializedRef.current) {
@@ -147,60 +158,154 @@ export default function CustomViewGalleryPage() {
   );
 
   useEffect(() => {
-    run();
-  }, [run]);
+    // Primera corrida al montar / al cambiar de vista con el tamaño de página por
+    // defecto (50). El resto se dispara por acciones del usuario (filtros, cambio
+    // de página, cambio de tamaño de página) — no por este efecto.
+    run(undefined, 1, 50);
+  }, [slug, run]);
 
+  // Aplicar filtros SIEMPRE vuelve a la página 1.
   const applyFilters = useCallback(() => {
-    run(filterValues);
-  }, [run, filterValues]);
+    setPage(1);
+    run(filterValues, 1, pageSize);
+  }, [run, filterValues, pageSize]);
+
+  const goToPage = useCallback(
+    (p: number) => {
+      setPage(p);
+      run(filterValues, p, pageSize);
+    },
+    [run, filterValues, pageSize]
+  );
+
+  const changePageSize = useCallback(
+    (size: number) => {
+      setPageSize(size);
+      setPage(1);
+      run(filterValues, 1, size);
+    },
+    [run, filterValues]
+  );
 
   const setValue = useCallback((key: string, value: unknown) => {
     setFilterValues((prev) => ({ ...prev, [key]: value }));
   }, []);
 
+  const totalPages = useMemo(
+    () => (result && result.total > 0 ? Math.ceil(result.total / pageSize) : 0),
+    [result, pageSize]
+  );
+
+  /**
+   * Trae TODAS las filas del resultado (no solo la página visible) desde el
+   * servidor, aplicando los mismos filtros. El backend acota a un tope de
+   * seguridad; si se alcanza, `truncated=true`.
+   */
+  const fetchAllRows = useCallback(async (): Promise<{
+    columns: string[];
+    rows: Record<string, unknown>[];
+    truncated: boolean;
+    exportCap?: number;
+  } | null> => {
+    if (!slug) return null;
+    const res = await fetch(`/api/custom-views/${encodeURIComponent(slug)}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filterValues, export: true }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(`${data.error ?? 'Error al exportar.'}${data.detail ? ' — ' + data.detail : ''}`);
+    }
+    return {
+      columns: (data.columns ?? []) as string[],
+      rows: (data.rows ?? []) as Record<string, unknown>[],
+      truncated: !!data.truncated,
+      exportCap: data.exportCap as number | undefined,
+    };
+  }, [slug, filterValues]);
+
   const exportExcel = useCallback(async () => {
     if (!result) return;
-    const ExcelJS = (await import('exceljs')).default;
-    const { saveAs } = await import('file-saver');
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet('Datos');
-    ws.addRow(result.columns);
-    const header = ws.getRow(1);
-    header.eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF113562' } };
-    });
-    for (const r of result.rows) {
-      ws.addRow(result.columns.map((c) => formatCell(r[c])));
+    setExporting(true);
+    setExportNote(null);
+    setError(null);
+    try {
+      const all = await fetchAllRows();
+      if (!all) return;
+      const ExcelJS = (await import('exceljs')).default;
+      const { saveAs } = await import('file-saver');
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Datos');
+      ws.addRow(all.columns);
+      const header = ws.getRow(1);
+      header.eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF113562' } };
+      });
+      for (const r of all.rows) {
+        ws.addRow(all.columns.map((c) => formatCell(r[c])));
+      }
+      ws.columns.forEach((col) => {
+        col.width = 22;
+      });
+      if (all.truncated) {
+        const note = wb.addWorksheet('Aviso');
+        note.addRow([
+          `Export truncado al tope de seguridad de ${all.exportCap ?? ''} filas. El resultado completo es mayor; refine los filtros para exportar el resto.`,
+        ]);
+      }
+      const buffer = await wb.xlsx.writeBuffer();
+      const stamp = new Date().toISOString().slice(0, 10);
+      saveAs(
+        new Blob([buffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+        `${result.view.slug}-${stamp}.xlsx`
+      );
+      setExportNote(
+        all.truncated
+          ? `Exportadas ${all.rows.length} filas (TRUNCADO al tope de ${all.exportCap}). Refine los filtros para el resto.`
+          : `Exportadas ${all.rows.length} filas.`
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al exportar a Excel.');
+    } finally {
+      setExporting(false);
     }
-    ws.columns.forEach((col) => {
-      col.width = 22;
-    });
-    const buffer = await wb.xlsx.writeBuffer();
-    const stamp = new Date().toISOString().slice(0, 10);
-    saveAs(
-      new Blob([buffer], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      }),
-      `${result.view.slug}-${stamp}.xlsx`
-    );
-  }, [result]);
+  }, [result, fetchAllRows]);
 
   const exportCsv = useCallback(async () => {
     if (!result) return;
-    const { saveAs } = await import('file-saver');
-    const BOM = String.fromCharCode(0xfeff);
-    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
-    const lines = [
-      result.columns.map(esc).join(','),
-      ...result.rows.map((r) => result.columns.map((c) => esc(formatCell(r[c]))).join(',')),
-    ];
-    const stamp = new Date().toISOString().slice(0, 10);
-    saveAs(
-      new Blob([BOM + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }),
-      `${result.view.slug}-${stamp}.csv`
-    );
-  }, [result]);
+    setExporting(true);
+    setExportNote(null);
+    setError(null);
+    try {
+      const all = await fetchAllRows();
+      if (!all) return;
+      const { saveAs } = await import('file-saver');
+      const BOM = String.fromCharCode(0xfeff);
+      const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+      const lines = [
+        all.columns.map(esc).join(','),
+        ...all.rows.map((r) => all.columns.map((c) => esc(formatCell(r[c]))).join(',')),
+      ];
+      const stamp = new Date().toISOString().slice(0, 10);
+      saveAs(
+        new Blob([BOM + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }),
+        `${result.view.slug}-${stamp}.csv`
+      );
+      setExportNote(
+        all.truncated
+          ? `Exportadas ${all.rows.length} filas (TRUNCADO al tope de ${all.exportCap}). Refine los filtros para el resto.`
+          : `Exportadas ${all.rows.length} filas.`
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al exportar a CSV.');
+    } finally {
+      setExporting(false);
+    }
+  }, [result, fetchAllRows]);
 
   /** Renderiza el control adecuado para un filtro según su tipo/operador. */
   function renderFilterControl(f: FilterDef) {
@@ -302,7 +407,7 @@ export default function CustomViewGalleryPage() {
           <Button
             variant='light'
             leftSection={<IconRefresh size={16} />}
-            onClick={() => run(filterValues)}
+            onClick={() => run(filterValues, page, pageSize)}
             loading={loading}
           >
             Actualizar
@@ -311,7 +416,8 @@ export default function CustomViewGalleryPage() {
             color='green'
             leftSection={<IconFileSpreadsheet size={16} />}
             onClick={exportExcel}
-            disabled={!result || result.rows.length === 0}
+            loading={exporting}
+            disabled={!result || (result.total ?? 0) === 0}
           >
             Exportar a Excel
           </Button>
@@ -319,7 +425,8 @@ export default function CustomViewGalleryPage() {
             variant='light'
             leftSection={<IconFileTypeCsv size={16} />}
             onClick={exportCsv}
-            disabled={!result || result.rows.length === 0}
+            loading={exporting}
+            disabled={!result || (result.total ?? 0) === 0}
           >
             CSV
           </Button>
@@ -350,15 +457,41 @@ export default function CustomViewGalleryPage() {
         </Alert>
       )}
 
+      {exportNote && (
+        <Alert color='green' mb='md' withCloseButton onClose={() => setExportNote(null)}>
+          {exportNote}
+        </Alert>
+      )}
+
       {loading && !result ? (
         <Group>
           <Loader size='sm' /> <Text>Ejecutando vista…</Text>
         </Group>
       ) : result ? (
         <>
-          <Group mb='xs'>
-            <Badge color='blue'>{result.rowCount} fila(s)</Badge>
-            {result.truncated && <Badge color='orange'>Resultado truncado al tope</Badge>}
+          <Group mb='xs' justify='space-between'>
+            <Group gap='xs'>
+              <Badge color='blue'>{result.total} resultado(s)</Badge>
+              {totalPages > 1 && (
+                <Text size='sm' c='dimmed'>
+                  Página {page} de {totalPages}
+                </Text>
+              )}
+              {loading && <Loader size='xs' />}
+            </Group>
+            <Group gap='xs'>
+              <Text size='sm' c='dimmed'>
+                Filas por página
+              </Text>
+              <Select
+                size='xs'
+                w={90}
+                data={PAGE_SIZE_OPTIONS}
+                value={String(pageSize)}
+                onChange={(v) => changePageSize(Number(v) || 50)}
+                allowDeselect={false}
+              />
+            </Group>
           </Group>
           <div
             style={{
@@ -387,6 +520,18 @@ export default function CustomViewGalleryPage() {
               </Table.Tbody>
             </Table>
           </div>
+          {totalPages > 1 && (
+            <Group justify='center' mt='md'>
+              <Pagination
+                total={totalPages}
+                value={page}
+                onChange={goToPage}
+                disabled={loading}
+                withEdges
+                siblings={1}
+              />
+            </Group>
+          )}
         </>
       ) : null}
     </div>
