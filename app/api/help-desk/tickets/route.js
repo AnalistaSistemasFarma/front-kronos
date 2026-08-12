@@ -16,6 +16,7 @@ import {
   REQUESTER_JOINS,
   REQUESTER_NAME_SQL,
   REQUESTER_SEARCH_FILTER_SQL,
+  TECHNICIAN_PERSON_FILTER_SQL,
 } from '../../../../lib/help-desk/requesterSql';
 
 export const dynamic = 'force-dynamic';
@@ -111,7 +112,7 @@ export async function GET(req) {
     if (technician === 'unassigned') {
       query += ` AND (c.id_technical IS NULL OR c.id_technical = 0)`;
     } else if (technician) {
-      query += ` AND c.id_technical = @technician`;
+      query += ` AND ${TECHNICIAN_PERSON_FILTER_SQL}`;
     }
     if (date_from && date_to) query += ` AND c.creation_date BETWEEN @date_from AND @date_to`;
 
