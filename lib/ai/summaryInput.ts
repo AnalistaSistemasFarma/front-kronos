@@ -80,3 +80,29 @@ export function buildSummaryInput(
 
   return bloques.join('\n\n').trim();
 }
+
+// ---------------------------------------------------------------------------
+// Prompts para la Prompt API (LanguageModel / Gemini Nano on-device).
+//
+// A diferencia de la Summarizer API (extractiva, repite el texto), la Prompt
+// API acepta un prompt con tono, lo que permite un resumen más humano y
+// cercano. Se extraen aquí como constante + builder puro para poder probarlos
+// sin navegador.
+// ---------------------------------------------------------------------------
+
+/** Instrucción de sistema: fija el tono cálido/humano del resumen. */
+export const SUMMARY_SYSTEM_PROMPT =
+  'Eres un asistente que le resume solicitudes internas a un equipo ' +
+  'administrativo. Resume en español, en 2 a 4 frases, con un tono cálido, ' +
+  'cercano y humano, como si le contaras a un compañero de qué se trata la ' +
+  'solicitud, qué necesita la persona y en qué va. Interpreta la intención y ' +
+  'el estado; NO copies el texto literal, NO uses viñetas ni encabezados. Sé ' +
+  'claro, natural y breve.';
+
+/**
+ * Arma el prompt de usuario para la Prompt API a partir del texto ya
+ * consolidado de la solicitud (el mismo que produce `buildSummaryInput`).
+ */
+export function buildSummaryPrompt(text: string): string {
+  return `Resume esta solicitud de forma humana y cercana:\n\n${text}`;
+}
