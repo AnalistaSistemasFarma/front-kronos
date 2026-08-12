@@ -1,6 +1,7 @@
 import { APP_THEME_STORAGE_KEY } from '../../lib/theme/constants';
 import {
   DEFAULT_PALETTE_KEY,
+  PALETTE_APPEARANCE,
   PALETTE_KEY_SET,
   PALETTE_STORAGE_KEY,
 } from '../../lib/theme/palettes';
@@ -10,6 +11,7 @@ function buildInitScript(): string {
   const light = JSON.stringify(lightTokens);
   const dark = JSON.stringify(darkTokens);
   const paletteKeys = JSON.stringify(Array.from(PALETTE_KEY_SET));
+  const appearance = JSON.stringify(PALETTE_APPEARANCE);
 
   return `(function(){
 try{
@@ -45,7 +47,25 @@ var map={
   '--foreground':tokens.text,
   '--surface':tokens.surface
 };
-for(var p in map){if(map[p])r.style.setProperty(p,map[p]);}
+for(var q in map){if(map[q])r.style.setProperty(q,map[q]);}
+var APP=${appearance};
+var pa=(APP[p]||APP['${DEFAULT_PALETTE_KEY}'])[t];
+if(pa){
+  var pmap={
+    '--app-bg':pa.bg,
+    '--background':pa.bg,
+    '--mantine-color-body':pa.bg,
+    '--app-surface':pa.surface,
+    '--surface':pa.surface,
+    '--app-surface-raised':pa.surfaceRaised,
+    '--surface-muted':pa.surfaceRaised,
+    '--app-header':pa.header,
+    '--app-accent':pa.accent,
+    '--app-accent-hover':pa.accentHover,
+    '--mantine-color-anchor':pa.accent
+  };
+  for(var m in pmap){if(pmap[m])r.style.setProperty(m,pmap[m]);}
+}
 }catch(e){}
 })();`;
 }

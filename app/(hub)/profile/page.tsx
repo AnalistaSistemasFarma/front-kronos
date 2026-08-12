@@ -34,9 +34,8 @@ import {
   IconSun,
   IconMoon,
 } from '@tabler/icons-react';
-import Header from '../../components/Header';
-import { useTheme } from '../../components/providers';
-import { PALETTES } from '../../lib/theme/palettes';
+import { useTheme } from '../../../components/providers';
+import { PALETTES } from '../../../lib/theme/palettes';
 
 interface UserProfile {
   id: string;
@@ -256,19 +255,14 @@ export default function ProfileSettingsPage() {
 
   if (status === 'loading' || loading) {
     return (
-      <>
-        <Header />
-        <Container size='md' py='xl'>
-          <LoadingOverlay visible />
-        </Container>
-      </>
+      <Container size='md' py='xl'>
+        <LoadingOverlay visible />
+      </Container>
     );
   }
 
   return (
-    <>
-      <Header />
-      <Container size='md' py='xl'>
+    <Container size='md' py='xl'>
         <Title order={2} mb='lg'>
           Configuración del Perfil
         </Title>
@@ -496,6 +490,5 @@ export default function ProfileSettingsPage() {
           </Card>
         </Stack>
       </Container>
-    </>
   );
 }
