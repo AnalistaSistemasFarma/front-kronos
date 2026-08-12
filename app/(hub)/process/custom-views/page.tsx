@@ -45,6 +45,7 @@ import {
   IconExternalLink,
   IconFilter,
   IconPlayerPlay,
+  IconPencil,
   IconPlus,
   IconTable,
   IconTrash,
@@ -92,11 +93,18 @@ interface SavedViewRow {
   slug: string;
   description: string | null;
   icon: string | null;
+  id_process: number | null;
   scope_mode: string;
   company_column: string | null;
   visibility: string;
   sort_order: number;
   row_limit: number;
+}
+/** Módulo de primer nivel (tabla process) para el selector "Ubicar en". */
+interface ModuleOption {
+  id_process: number;
+  process: string;
+  process_url: string | null;
 }
 interface ProcessFlowOption {
   id_process_category: number;
@@ -148,6 +156,11 @@ const ICON_OPTIONS = [
   { value: 'clipboard-list', label: 'Checklist' },
 ];
 
+/** Módulo por defecto "Vistas personalizadas" (id_process 13). */
+const DEFAULT_MODULE_ID = 13;
+/** Valor centinela del selector "Ubicar en" para crear una categoría nueva. */
+const NEW_CATEGORY_VALUE = '__new__';
+
 // -------------------------------------------------------------------- página
 
 export default function CustomViewsBuilderPage() {
@@ -178,6 +191,15 @@ export default function CustomViewsBuilderPage() {
   const [rowLimit, setRowLimit] = useState<number | string>(1000);
   const [visibility, setVisibility] = useState<string>('draft');
   const [saving, setSaving] = useState(false);
+
+  // Edición en su lugar de una vista existente (null = crear nueva).
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [loadingEdit, setLoadingEdit] = useState(false);
+
+  // "Ubicar en": módulo de primer nivel destino (o nueva categoría).
+  const [modules, setModules] = useState<ModuleOption[]>([]);
+  const [targetModule, setTargetModule] = useState<string>(String(DEFAULT_MODULE_ID));
+  const [newCategoryName, setNewCategoryName] = useState('');
 
   // filtros parametrizables (Incremento 3)
   const [filterDrafts, setFilterDrafts] = useState<FilterDraft[]>([]);
@@ -225,11 +247,116 @@ export default function CustomViewsBuilderPage() {
     }
   }, []);
 
+  const loadModules = useCallback(async () => {
+    try {
+      const res = await fetch('/api/custom-views/catalog/modules', { cache: 'no-store' });
+      const data = await res.json();
+      if (res.ok) setModules(data.modules ?? []);
+    } catch {
+      /* silencioso: el selector cae al módulo por defecto */
+    }
+  }, []);
+
   useEffect(() => {
     loadCatalog();
     loadViews();
     loadProcesses();
-  }, [loadCatalog, loadViews, loadProcesses]);
+    loadModules();
+  }, [loadCatalog, loadViews, loadProcesses, loadModules]);
+
+  /** Limpia el formulario y sale del modo edición (crear vista nueva). */
+  const resetForm = useCallback(() => {
+    setEditingId(null);
+    setName('');
+    setDescription('');
+    setIcon('table');
+    setSortOrder(0);
+    setScopeMode('all');
+    setCompanyColumn('');
+    setRowLimit(1000);
+    setVisibility('draft');
+    setFilterDrafts([]);
+    setTargetModule(String(DEFAULT_MODULE_ID));
+    setNewCategoryName('');
+  }, []);
+
+  /** Carga una vista existente en el formulario/editor para editarla EN SU LUGAR. */
+  const startEdit = useCallback(async (id: number) => {
+    setLoadingEdit(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`/api/custom-views/${id}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok || !data.view) {
+        setFeedback({ type: 'error', text: data.error ?? 'No se pudo cargar la vista.' });
+        return;
+      }
+      const v = data.view as {
+        id_saved_view: number;
+        name: string;
+        description: string | null;
+        sql_text: string;
+        icon: string | null;
+        id_process: number | null;
+        scope_mode: string;
+        company_column: string | null;
+        sort_order: number;
+        row_limit: number;
+        visibility: string;
+        filters?: Array<{
+          column_name: string;
+          label: string;
+          filter_type: string;
+          operator: string;
+          options_json: string | null;
+          default_value: string | null;
+          required: boolean;
+        }>;
+      };
+      setEditingId(v.id_saved_view);
+      setName(v.name ?? '');
+      setDescription(v.description ?? '');
+      setIcon(v.icon ?? 'table');
+      setSortOrder(v.sort_order ?? 0);
+      setScopeMode(v.scope_mode ?? 'all');
+      setCompanyColumn(v.company_column ?? '');
+      setRowLimit(v.row_limit ?? 1000);
+      setVisibility(v.visibility === 'archived' ? 'draft' : v.visibility ?? 'draft');
+      setTargetModule(String(v.id_process ?? DEFAULT_MODULE_ID));
+      setNewCategoryName('');
+      setSql(v.sql_text ?? '');
+      const ed = editorRef.current;
+      if (ed) ed.setValue(v.sql_text ?? '');
+      setFilterDrafts(
+        (v.filters ?? []).map((f) => ({
+          column_name: f.column_name,
+          label: f.label,
+          filter_type: f.filter_type,
+          operator: f.operator,
+          options_text: (() => {
+            if (!f.options_json) return '';
+            try {
+              const arr = JSON.parse(f.options_json);
+              return Array.isArray(arr) ? arr.map((o) => String(o)).join(', ') : '';
+            } catch {
+              return '';
+            }
+          })(),
+          default_value: f.default_value ?? '',
+          required: !!f.required,
+        }))
+      );
+      setFeedback({
+        type: 'success',
+        text: `Editando "${v.name}". Cambie lo que necesite y presione Guardar.`,
+      });
+      if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch {
+      setFeedback({ type: 'error', text: 'Error de red al cargar la vista.' });
+    } finally {
+      setLoadingEdit(false);
+    }
+  }, []);
 
   /** Al elegir un flujo: pide al servidor el SQL pivoteado y lo carga en el editor. */
   const onSelectProcess = useCallback(async (value: string | null) => {
@@ -394,38 +521,58 @@ export default function CustomViewsBuilderPage() {
       setFeedback({ type: 'error', text: 'Indique un nombre para la vista.' });
       return;
     }
+    const creatingCategory = targetModule === NEW_CATEGORY_VALUE;
+    if (creatingCategory && !newCategoryName.trim()) {
+      setFeedback({ type: 'error', text: 'Indique el nombre de la nueva categoría.' });
+      return;
+    }
     setSaving(true);
     setFeedback(null);
+
+    // "Ubicar en": módulo existente o nueva categoría (default 13).
+    const moduleFields: Record<string, unknown> = creatingCategory
+      ? { newCategoryName: newCategoryName.trim() }
+      : { targetProcessId: Number(targetModule) || DEFAULT_MODULE_ID };
+
+    const payload = {
+      name: name.trim(),
+      description: description.trim() || null,
+      sql_text: sql,
+      icon,
+      sort_order: Number(sortOrder) || 0,
+      scope_mode: scopeMode,
+      company_column: scopeMode === 'company' ? companyColumn.trim() : null,
+      row_limit: Number(rowLimit) || 1000,
+      visibility,
+      filters: buildFilterPayload(),
+      ...moduleFields,
+    };
+
     try {
-      const res = await fetch('/api/custom-views', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim() || null,
-          sql_text: sql,
-          icon,
-          sort_order: Number(sortOrder) || 0,
-          scope_mode: scopeMode,
-          company_column: scopeMode === 'company' ? companyColumn.trim() : null,
-          row_limit: Number(rowLimit) || 1000,
-          visibility,
-          filters: buildFilterPayload(),
-        }),
-      });
+      const isEditing = editingId !== null;
+      const res = await fetch(
+        isEditing ? `/api/custom-views/${editingId}` : '/api/custom-views',
+        {
+          method: isEditing ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }
+      );
       const data = await res.json();
       if (res.ok) {
+        const vname = data.view?.name ?? name.trim();
         setFeedback({
           type: 'success',
-          text:
-            visibility === 'published'
-              ? `Vista "${data.view.name}" publicada (slug: ${data.view.slug}). Módulo creado para asignar en Usuarios.`
-              : `Borrador "${data.view.name}" guardado.`,
+          text: isEditing
+            ? `Vista "${vname}" actualizada${
+                visibility === 'published' ? ' (publicada)' : ' (borrador)'
+              }.`
+            : visibility === 'published'
+              ? `Vista "${vname}" publicada (slug: ${data.view?.slug ?? ''}). Asígnela en Usuarios para que aparezca en el menú.`
+              : `Borrador "${vname}" guardado.`,
         });
-        setName('');
-        setDescription('');
-        setFilterDrafts([]);
-        await loadViews();
+        resetForm();
+        await Promise.all([loadViews(), loadModules()]);
       } else {
         setFeedback({
           type: 'error',
@@ -437,7 +584,24 @@ export default function CustomViewsBuilderPage() {
     } finally {
       setSaving(false);
     }
-  }, [name, description, sql, icon, sortOrder, scopeMode, companyColumn, rowLimit, visibility, buildFilterPayload, loadViews]);
+  }, [
+    name,
+    description,
+    sql,
+    icon,
+    sortOrder,
+    scopeMode,
+    companyColumn,
+    rowLimit,
+    visibility,
+    buildFilterPayload,
+    loadViews,
+    loadModules,
+    editingId,
+    targetModule,
+    newCategoryName,
+    resetForm,
+  ]);
 
   const move = useCallback(
     async (index: number, dir: -1 | 1) => {
@@ -691,9 +855,27 @@ export default function CustomViewsBuilderPage() {
 
           {/* Guardar / publicar */}
           <div style={{ border: '1px solid var(--mantine-color-gray-3)', borderRadius: 8, padding: 16 }}>
-            <Text fw={600} mb='sm'>
-              Guardar / Publicar
-            </Text>
+            <Group justify='space-between' mb='sm'>
+              <Group gap={8}>
+                <Text fw={600}>{editingId !== null ? 'Editar vista' : 'Guardar / Publicar'}</Text>
+                {editingId !== null && (
+                  <Badge color='indigo' variant='light'>
+                    Editando #{editingId}
+                  </Badge>
+                )}
+                {loadingEdit && <Loader size='xs' />}
+              </Group>
+              {editingId !== null && (
+                <Button
+                  size='compact-sm'
+                  variant='subtle'
+                  color='gray'
+                  onClick={resetForm}
+                >
+                  Nueva vista / Cancelar edición
+                </Button>
+              )}
+            </Group>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <TextInput
                 label='Nombre'
@@ -745,6 +927,29 @@ export default function CustomViewsBuilderPage() {
                 value={visibility}
                 onChange={(v) => setVisibility(v ?? 'draft')}
               />
+              <Select
+                label='Ubicar en (módulo del menú)'
+                description='Módulo de primer nivel donde aparecerá la vista al publicarla'
+                data={[
+                  ...modules.map((m) => ({
+                    value: String(m.id_process),
+                    label: m.process,
+                  })),
+                  { value: NEW_CATEGORY_VALUE, label: '➕ Nueva categoría…' },
+                ]}
+                value={targetModule}
+                onChange={(v) => setTargetModule(v ?? String(DEFAULT_MODULE_ID))}
+                searchable
+              />
+              {targetModule === NEW_CATEGORY_VALUE && (
+                <TextInput
+                  label='Nombre de la nueva categoría'
+                  required
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.currentTarget.value)}
+                  placeholder='Ej. Reportes de Tesorería'
+                />
+              )}
             </div>
 
             {/* Filtros parametrizables (Incremento 3) */}
@@ -845,8 +1050,19 @@ export default function CustomViewsBuilderPage() {
 
             <Group mt='md'>
               <Button onClick={saveView} loading={saving} color='teal'>
-                {visibility === 'published' ? 'Publicar vista' : 'Guardar borrador'}
+                {editingId !== null
+                  ? visibility === 'published'
+                    ? 'Actualizar y publicar'
+                    : 'Actualizar vista'
+                  : visibility === 'published'
+                    ? 'Publicar vista'
+                    : 'Guardar borrador'}
               </Button>
+              {editingId !== null && (
+                <Button variant='default' onClick={resetForm}>
+                  Cancelar
+                </Button>
+              )}
             </Group>
           </div>
 
@@ -924,6 +1140,14 @@ export default function CustomViewsBuilderPage() {
                               </Button>
                             </Tooltip>
                           )}
+                          <Button
+                            variant='light'
+                            size='compact-xs'
+                            onClick={() => startEdit(v.id_saved_view)}
+                            leftSection={<IconPencil size={14} />}
+                          >
+                            Editar
+                          </Button>
                           <Button
                             variant='light'
                             color='red'
