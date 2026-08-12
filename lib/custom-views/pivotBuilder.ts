@@ -14,16 +14,22 @@
  * del usuario), y está diseñado para PASAR el candado `assertReadOnlyAgainstCatalog`:
  *   - Solo referencia (FROM/JOIN): vw_requests_general, process_category_request_general,
  *     request_form_value, process_form_field_option — todas whitelisteadas en catalog_source.
- *   - Los alias de columna se sanean para no coincidir con palabras clave
- *     prohibidas ni prefijos peligrosos (ver `safeAlias`).
+ *   - Cada columna de campo usa la ETIQUETA REAL del campo (con espacios y tildes)
+ *     como encabezado, entre corchetes: `AS [Tipo de documento]` (ver `prettyAlias`).
  *
  * Los campos de tipo "Tabla" (field_type = 'table', JSON multi-fila en value_text)
  * se EXCLUYEN del pivote y se anotan en un comentario del SQL.
  *
- * Funciones PURAS (sin BD): `sanitizeAliasBase`, `safeAlias`, `buildPivotSql`.
+ * CAVEAT del candado: el escáner de palabras clave (`assertReadOnlySql`) busca
+ * palabras reservadas (DELETE/UPDATE/INSERT/SET/…) por límite de palabra en TODO
+ * el texto, incluidos los alias entre corchetes. Como ahora el alias conserva
+ * espacios, una etiqueta que contenga una palabra reservada como palabra suelta
+ * (p. ej. "Set de firmas") podría disparar un FALSO POSITIVO y hacer fallar la
+ * previsualización/guardado de ESA vista. Es un riesgo acotado (etiquetas en
+ * español rara vez son palabras reservadas en inglés); no rompe el resto.
+ *
+ * Funciones PURAS (sin BD): `cleanFieldLabel`, `prettyAlias`, `buildPivotSql`.
  */
-
-import { isReadOnlySafeIdentifier } from '../sql/readonly';
 
 /** field_type de un campo de tipo tabla (JSON multi-fila); se excluye del pivote. */
 export const TABLE_FIELD_TYPE = 'table';
@@ -53,47 +59,39 @@ const BASE_COLUMNS: BaseColumn[] = [
 ];
 
 /**
- * Convierte una etiqueta de campo en la BASE de un identificador SQL:
- * sin tildes, solo [A-Za-z0-9_], espacios/separadores → '_', sin '_' repetidos
- * ni al inicio/fin. Si empieza por dígito, se antepone 'c_'. Vacío → 'campo'.
- *
- * Nota: al colapsar separadores a '_' (que ES un carácter de palabra `\w`), se
- * neutralizan las palabras clave prohibidas EMBEBIDAS (p. ej. "Set de datos" →
- * "Set_de_datos": no hay límite `\b` alrededor de "Set"). El único caso residual
- * —que el alias completo sea una palabra prohibida o un prefijo peligroso— lo
- * resuelve `safeAlias`.
+ * Limpia la ETIQUETA de un campo para usarla como encabezado de columna LEGIBLE.
+ * Conserva espacios, tildes y signos (¿ ?). Limpieza mínima:
+ *  - saltos de línea / espacios múltiples → un solo espacio, y trim,
+ *  - quita un paréntesis de EJEMPLO al final: "(Ej: ...)", "(ej. ...)", etc.,
+ *  - escapa ']' como ']]' para no romper el identificador entre corchetes de
+ *    SQL Server (`[...]`).
+ * Puede devolver cadena vacía (el llamador aplica un fallback).
  */
-export function sanitizeAliasBase(label: string): string {
-  const noAccents = (label ?? '')
-    .normalize('NFD')
-    .replace(new RegExp('[\\u0300-\\u036f]', 'g'), '');
-  let token = noAccents
-    .replace(/[^A-Za-z0-9]+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  if (!token) token = 'campo';
-  if (/^[0-9]/.test(token)) token = `c_${token}`;
-  return token;
+export function cleanFieldLabel(label: string): string {
+  return (label ?? '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    // Quita un sufijo de ejemplo entre paréntesis: "(Ej: ...)", "(ej. ...)".
+    .replace(/\s*\(\s*ej[:.\s][^)]*\)\s*$/i, '')
+    .trim()
+    // Escapa ']' para que el corchete de cierre no termine el identificador antes.
+    .replace(/]/g, ']]');
 }
 
 /**
- * Devuelve un alias SQL SEGURO y ÚNICO para un campo:
- *  1) sanea la etiqueta a un identificador válido,
- *  2) si coincide con una palabra prohibida / prefijo peligroso del candado,
- *     lo neutraliza anteponiendo 'c_' (rompe el límite de palabra),
- *  3) evita colisiones con `used` agregando sufijo _2, _3, …
- *
- * `used` acumula los alias ya usados en MINÚSCULAS (se muta).
+ * Devuelve el alias LEGIBLE y ÚNICO para una columna de campo (para usar entre
+ * corchetes: `AS [<alias>]`). Usa la etiqueta real limpia; si queda vacía, usa
+ * `Campo <id>`. Deduplica contra `used` (alias ya usados, en MINÚSCULAS; se muta)
+ * agregando sufijo " 2", " 3", …
  */
-export function safeAlias(label: string, used: Set<string>): string {
-  let base = sanitizeAliasBase(label);
-  if (!isReadOnlySafeIdentifier(base)) {
-    base = `c_${base}`;
-  }
+export function prettyAlias(label: string, used: Set<string>, fieldId: number): string {
+  let base = cleanFieldLabel(label);
+  if (!base) base = `Campo ${fieldId}`;
   let candidate = base;
   let n = 2;
   while (used.has(candidate.toLowerCase())) {
-    candidate = `${base}_${n++}`;
+    candidate = `${base} ${n++}`;
   }
   used.add(candidate.toLowerCase());
   return candidate;
@@ -133,7 +131,7 @@ export function buildPivotSql(args: BuildPivotArgs): string {
   const used = new Set<string>(BASE_COLUMNS.map((c) => c.alias.toLowerCase()));
 
   const pivotColumns = pivotable.map((f) => {
-    const alias = safeAlias(f.field_label, used);
+    const alias = prettyAlias(f.field_label, used, f.id);
     return `  MAX(CASE WHEN rfv.id_form_field = ${f.id} THEN COALESCE(pffo.option_label, rfv.value_text) END) AS [${alias}]`;
   });
 
