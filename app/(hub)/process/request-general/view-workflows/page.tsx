@@ -57,6 +57,13 @@ import {
 import Link from 'next/link';
 import { getFileLabelError } from '../../../../../lib/onedriveName';
 import { SAP_SOURCES } from '../../../../../lib/requests-general/sapSources';
+import {
+  TABLE_FIELD_TYPE,
+  parseTableConfig,
+  serializeTableConfig,
+  type TableColumn,
+} from '../../../../../lib/requests-general/tableField';
+import TableColumnsEditor from '../_components/TableColumnsEditor';
 import toast from 'react-hot-toast';
 
 interface WorkFlow {
@@ -115,6 +122,8 @@ interface FormFieldDef {
   required: boolean;
   options: FieldOptionDef[];
   conditions: number[];
+  // Solo para field_type === 'table': definición de columnas de la tabla.
+  columns: TableColumn[];
 }
 
 const FIELD_TYPE_LABELS: Record<string, string> = {
@@ -122,6 +131,7 @@ const FIELD_TYPE_LABELS: Record<string, string> = {
   text: 'Texto',
   number: 'Número',
   date: 'Fecha',
+  [TABLE_FIELD_TYPE]: 'Tabla',
   ...Object.fromEntries(Object.entries(SAP_SOURCES).map(([key, s]) => [key, s.label])),
 };
 
@@ -134,6 +144,7 @@ const FIELD_TYPE_SELECT_DATA = [
       { value: 'text', label: 'Texto' },
       { value: 'number', label: 'Número' },
       { value: 'date', label: 'Fecha' },
+      { value: TABLE_FIELD_TYPE, label: 'Tabla' },
     ],
   },
   {
@@ -386,6 +397,7 @@ function ViewWorkFlowPage() {
             required: boolean | number;
             options: { id: number; option_label: string }[];
             conditions: number[];
+            config_json?: string | null;
           }) => ({
             id: f.id,
             field_label: f.field_label,
@@ -393,6 +405,10 @@ function ViewWorkFlowPage() {
             required: Boolean(f.required),
             options: f.options || [],
             conditions: f.conditions || [],
+            columns:
+              (f.field_type || 'select') === TABLE_FIELD_TYPE
+                ? parseTableConfig(f.config_json).columns
+                : [],
           })
         )
       );
@@ -560,8 +576,15 @@ function ViewWorkFlowPage() {
       required: true,
       options: [],
       conditions: [],
+      columns: [],
     };
     setEditedFormFields([...editedFormFields, newField]);
+  };
+
+  const setFieldColumns = (fieldId: number, columns: TableColumn[]) => {
+    setEditedFormFields((prev) =>
+      prev.map((f) => (f.id === fieldId ? { ...f, columns } : f))
+    );
   };
 
   const handleRemoveFormField = (fieldId: number) => {
@@ -781,12 +804,16 @@ function ViewWorkFlowPage() {
           return oo && oo.option_label !== o.option_label;
         });
         const conditionsChanged = !sameIdSet(orig.conditions, f.conditions);
+        const columnsChanged =
+          f.field_type === TABLE_FIELD_TYPE &&
+          serializeTableConfig(orig.columns || []) !== serializeTableConfig(f.columns || []);
         return (
           labelChanged ||
           newOpts.length > 0 ||
           deletedOpts.length > 0 ||
           updatedOpts.length > 0 ||
-          conditionsChanged
+          conditionsChanged ||
+          columnsChanged
         );
       });
 
@@ -857,8 +884,28 @@ function ViewWorkFlowPage() {
         required?: boolean;
         condition_option_ids?: number[];
         options?: OptionToProcess[];
+        config_json?: string | null;
         action: 'create' | 'update' | 'delete';
       }
+
+      // Serializa la definición de columnas de un campo tabla a config_json
+      // (o null si el campo no es de tipo tabla).
+      const fieldConfigJson = (field: FormFieldDef): string | null =>
+        field.field_type === TABLE_FIELD_TYPE
+          ? serializeTableConfig(
+              (field.columns || [])
+                .filter((c) => c.label.trim())
+                .map((c) => ({
+                  key: c.key,
+                  label: c.label.trim(),
+                  type: c.type,
+                  required: Boolean(c.required),
+                  ...(c.type === 'select'
+                    ? { options: (c.options || []).filter((o) => o.trim()) }
+                    : {}),
+                }))
+            )
+          : null;
 
       interface RequestBody {
         id_process: number;
@@ -969,6 +1016,7 @@ function ViewWorkFlowPage() {
             required: field.required,
             condition_option_ids: field.conditions,
             options: buildOptionActions(field),
+            config_json: fieldConfigJson(field),
             action: 'create' as const,
           })),
           ...updatedFormFields.map((field) => {
@@ -979,6 +1027,9 @@ function ViewWorkFlowPage() {
               required: field.required,
               condition_option_ids: field.conditions,
               options: buildOptionActions(field, orig),
+              ...(field.field_type === TABLE_FIELD_TYPE
+                ? { config_json: fieldConfigJson(field) }
+                : {}),
               action: 'update' as const,
             };
           }),
@@ -2059,6 +2110,11 @@ function ViewWorkFlowPage() {
                             </Button>
                           </Group>
                         </>
+                      ) : field.field_type === TABLE_FIELD_TYPE ? (
+                        <TableColumnsEditor
+                          columns={field.columns}
+                          onChange={(cols) => setFieldColumns(field.id, cols)}
+                        />
                       ) : (
                         <Text size='sm' c='dimmed'>
                           Campo de {(FIELD_TYPE_LABELS[field.field_type] || 'lista').toLowerCase()}:{' '}
