@@ -39,6 +39,7 @@ import {
   Box,
   MultiSelect,
   ThemeIcon,
+  Table,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -72,6 +73,11 @@ import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 import AiSummarizeButton from './AiSummarizeButton';
+import {
+  TABLE_FIELD_TYPE,
+  parseTableConfig,
+  parseTableValue,
+} from '../../../../../lib/requests-general/tableField';
 
 interface Request {
   id: number;
@@ -256,7 +262,14 @@ function ViewRequestPage() {
   const [loadingUsers, setLoadingUsers] = useState(false);
 
   const [requestFormValues, setRequestFormValues] = useState<
-    { id: number; field_label: string; option_label: string | null; value_text: string | null }[]
+    {
+      id: number;
+      field_label: string;
+      field_type?: string | null;
+      config_json?: string | null;
+      option_label: string | null;
+      value_text: string | null;
+    }[]
   >([]);
 
   useEffect(() => {
@@ -2102,18 +2115,67 @@ function ViewRequestPage() {
               Información adicional
             </Title>
             <Grid>
-              {requestFormValues.map((fv) => (
-                <Grid.Col span={{ base: 12, md: 6 }} key={fv.id}>
-                  <Card withBorder radius='md' p='md'>
-                    <Text size='xs' c='dimmed' fw={500} className='uppercase'>
-                      {fv.field_label}
-                    </Text>
-                    <Text size='md' fw={600} mt={4}>
-                      {fv.option_label || fv.value_text || '—'}
-                    </Text>
-                  </Card>
-                </Grid.Col>
-              ))}
+              {requestFormValues.map((fv) => {
+                if (fv.field_type === TABLE_FIELD_TYPE) {
+                  const columns = parseTableConfig(fv.config_json).columns;
+                  const rows = parseTableValue(fv.value_text).rows;
+                  const renderCellValue = (value: unknown) => {
+                    if (value === true) return 'Sí';
+                    if (value === false) return 'No';
+                    if (value === undefined || value === null || value === '') return '—';
+                    return String(value);
+                  };
+                  return (
+                    <Grid.Col span={12} key={fv.id}>
+                      <Card withBorder radius='md' p='md'>
+                        <Text size='xs' c='dimmed' fw={500} className='uppercase' mb='xs'>
+                          {fv.field_label}
+                        </Text>
+                        {columns.length === 0 || rows.length === 0 ? (
+                          <Text size='sm' c='dimmed'>
+                            Sin datos.
+                          </Text>
+                        ) : (
+                          <ScrollArea>
+                            <Table withTableBorder withColumnBorders striped>
+                              <Table.Thead>
+                                <Table.Tr>
+                                  {columns.map((col) => (
+                                    <Table.Th key={col.key}>{col.label}</Table.Th>
+                                  ))}
+                                </Table.Tr>
+                              </Table.Thead>
+                              <Table.Tbody>
+                                {rows.map((row, ri) => (
+                                  <Table.Tr key={ri}>
+                                    {columns.map((col) => (
+                                      <Table.Td key={col.key}>
+                                        {renderCellValue(row[col.key])}
+                                      </Table.Td>
+                                    ))}
+                                  </Table.Tr>
+                                ))}
+                              </Table.Tbody>
+                            </Table>
+                          </ScrollArea>
+                        )}
+                      </Card>
+                    </Grid.Col>
+                  );
+                }
+                return (
+                  <Grid.Col span={{ base: 12, md: 6 }} key={fv.id}>
+                    <Card withBorder radius='md' p='md'>
+                      <Text size='xs' c='dimmed' fw={500} className='uppercase'>
+                        {fv.field_label}
+                      </Text>
+                      <Text size='md' fw={600} mt={4}>
+                        {fv.option_label || fv.value_text || '—'}
+                      </Text>
+                    </Card>
+                  </Grid.Col>
+                );
+              })}
             </Grid>
           </Card>
         )}

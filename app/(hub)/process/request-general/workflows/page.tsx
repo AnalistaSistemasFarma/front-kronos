@@ -58,6 +58,13 @@ import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import { getFileLabelError } from '../../../../../lib/onedriveName';
 import { SAP_SOURCES } from '../../../../../lib/requests-general/sapSources';
+import {
+  TABLE_FIELD_TYPE,
+  TABLE_COLUMN_TYPES,
+  serializeTableConfig,
+  newColumnKey,
+  type TableColumn,
+} from '../../../../../lib/requests-general/tableField';
 
 interface WorkFlow {
   id: number;
@@ -168,6 +175,7 @@ function RequestBoard() {
     text: 'Texto',
     number: 'Número',
     date: 'Fecha',
+    [TABLE_FIELD_TYPE]: 'Tabla',
     ...Object.fromEntries(
       Object.entries(SAP_SOURCES).map(([key, s]) => [key, s.label])
     ),
@@ -181,6 +189,7 @@ function RequestBoard() {
         { value: 'text', label: 'Texto' },
         { value: 'number', label: 'Número' },
         { value: 'date', label: 'Fecha' },
+        { value: TABLE_FIELD_TYPE, label: 'Tabla' },
       ],
     },
     {
@@ -200,6 +209,8 @@ function RequestBoard() {
       required: boolean;
       options: Array<{ tempId: string; option_label: string }>;
       condition_option_temps: string[];
+      // Solo para field_type === 'table': definición de columnas de la tabla.
+      columns: TableColumn[];
     }>
   >([]);
   const [fieldForm, setFieldForm] = useState({
@@ -208,6 +219,11 @@ function RequestBoard() {
     required: true,
   });
   const [optionInputs, setOptionInputs] = useState<Record<string, string>>({});
+  // Inputs de nueva opción para columnas select dentro de un campo tabla,
+  // indexados por `${fieldTempId}:${colKey}`.
+  const [tableColOptionInputs, setTableColOptionInputs] = useState<
+    Record<string, string>
+  >({});
 
   const addFormField = () => {
     if (!fieldForm.field_label.trim()) return;
@@ -220,9 +236,105 @@ function RequestBoard() {
         required: fieldForm.required,
         options: [],
         condition_option_temps: [],
+        columns: [],
       },
     ]);
     setFieldForm({ field_label: '', field_type: 'select', required: true });
+  };
+
+  // === Gestión de columnas para campos de tipo "Tabla" ===
+  const addTableColumn = (fieldTempId: string) => {
+    setFormFields((prev) =>
+      prev.map((f) =>
+        f.tempId === fieldTempId
+          ? {
+              ...f,
+              columns: [
+                ...f.columns,
+                {
+                  key: newColumnKey(f.columns),
+                  label: '',
+                  type: 'text',
+                  required: false,
+                },
+              ],
+            }
+          : f
+      )
+    );
+  };
+
+  const updateTableColumn = (
+    fieldTempId: string,
+    colKey: string,
+    patch: Partial<TableColumn>
+  ) => {
+    setFormFields((prev) =>
+      prev.map((f) =>
+        f.tempId === fieldTempId
+          ? {
+              ...f,
+              columns: f.columns.map((c) =>
+                c.key === colKey ? { ...c, ...patch } : c
+              ),
+            }
+          : f
+      )
+    );
+  };
+
+  const removeTableColumn = (fieldTempId: string, colKey: string) => {
+    setFormFields((prev) =>
+      prev.map((f) =>
+        f.tempId === fieldTempId
+          ? { ...f, columns: f.columns.filter((c) => c.key !== colKey) }
+          : f
+      )
+    );
+  };
+
+  const addTableColumnOption = (
+    fieldTempId: string,
+    colKey: string,
+    option: string
+  ) => {
+    const opt = option.trim();
+    if (!opt) return;
+    setFormFields((prev) =>
+      prev.map((f) =>
+        f.tempId === fieldTempId
+          ? {
+              ...f,
+              columns: f.columns.map((c) =>
+                c.key === colKey
+                  ? { ...c, options: [...(c.options || []), opt] }
+                  : c
+              ),
+            }
+          : f
+      )
+    );
+  };
+
+  const removeTableColumnOption = (
+    fieldTempId: string,
+    colKey: string,
+    index: number
+  ) => {
+    setFormFields((prev) =>
+      prev.map((f) =>
+        f.tempId === fieldTempId
+          ? {
+              ...f,
+              columns: f.columns.map((c) =>
+                c.key === colKey
+                  ? { ...c, options: (c.options || []).filter((_, i) => i !== index) }
+                  : c
+              ),
+            }
+          : f
+      )
+    );
   };
 
   const removeFormField = (fieldTempId: string) => {
@@ -898,7 +1010,9 @@ function RequestBoard() {
             .filter(
               (f) =>
                 f.field_label.trim() &&
-                (f.field_type !== 'select' || f.options.length > 0)
+                (f.field_type !== 'select' || f.options.length > 0) &&
+                (f.field_type !== TABLE_FIELD_TYPE ||
+                  f.columns.some((c) => c.label.trim()))
             )
             .map((f) => ({
               tempId: f.tempId,
@@ -910,6 +1024,22 @@ function RequestBoard() {
                 option_label: o.option_label,
               })),
               condition_option_temps: f.condition_option_temps,
+              config_json:
+                f.field_type === TABLE_FIELD_TYPE
+                  ? serializeTableConfig(
+                      f.columns
+                        .filter((c) => c.label.trim())
+                        .map((c) => ({
+                          key: c.key,
+                          label: c.label.trim(),
+                          type: c.type,
+                          required: Boolean(c.required),
+                          ...(c.type === 'select'
+                            ? { options: (c.options || []).filter((o) => o.trim()) }
+                            : {}),
+                        }))
+                    )
+                  : null,
             })),
           cost_center_pc: formData.costCenter || null,
           id_user: formData.assignedProcess ? formData.assignedProcess : userId,
@@ -2198,6 +2328,190 @@ function RequestBoard() {
                                 </Button>
                               </Group>
                             </>
+                          ) : field.field_type === TABLE_FIELD_TYPE ? (
+                            <Stack gap='sm'>
+                              <Text size='sm' c='dimmed'>
+                                Defina las columnas de la tabla. Al crear la solicitud, el usuario
+                                agregará filas respetando el tipo de cada columna.
+                              </Text>
+
+                              {field.columns.length === 0 ? (
+                                <Text size='sm' c='dimmed'>
+                                  Aún sin columnas. Agregue al menos una.
+                                </Text>
+                              ) : (
+                                field.columns.map((col) => (
+                                  <Card key={col.key} withBorder radius='sm' p='sm'>
+                                    <Grid align='flex-end' gutter='xs'>
+                                      <Grid.Col span={{ base: 12, md: 4 }}>
+                                        <TextInput
+                                          label='Columna'
+                                          placeholder='Ej. Cantidad'
+                                          value={col.label}
+                                          onChange={(e) =>
+                                            updateTableColumn(field.tempId, col.key, {
+                                              label: e.target.value,
+                                            })
+                                          }
+                                        />
+                                      </Grid.Col>
+                                      <Grid.Col span={{ base: 8, md: 4 }}>
+                                        <Select
+                                          label='Tipo'
+                                          data={TABLE_COLUMN_TYPES}
+                                          value={col.type}
+                                          onChange={(value) =>
+                                            updateTableColumn(field.tempId, col.key, {
+                                              type: (value || 'text') as TableColumn['type'],
+                                              ...(value === 'select'
+                                                ? { options: col.options || [] }
+                                                : { options: undefined }),
+                                            })
+                                          }
+                                          allowDeselect={false}
+                                          comboboxProps={{ withinPortal: true }}
+                                        />
+                                      </Grid.Col>
+                                      <Grid.Col span={{ base: 3, md: 3 }}>
+                                        <Checkbox
+                                          label='Obligatoria'
+                                          checked={col.required}
+                                          onChange={(e) =>
+                                            updateTableColumn(field.tempId, col.key, {
+                                              required: e.currentTarget.checked,
+                                            })
+                                          }
+                                          mb={8}
+                                        />
+                                      </Grid.Col>
+                                      <Grid.Col span={{ base: 1, md: 1 }}>
+                                        <ActionIcon
+                                          color='red'
+                                          variant='subtle'
+                                          onClick={() =>
+                                            removeTableColumn(field.tempId, col.key)
+                                          }
+                                          title='Quitar columna'
+                                          mb={8}
+                                        >
+                                          <IconTrash size={16} />
+                                        </ActionIcon>
+                                      </Grid.Col>
+                                    </Grid>
+
+                                    {col.type === 'select' && (
+                                      <div style={{ marginTop: 8 }}>
+                                        <Group gap='xs' mb='xs'>
+                                          {(col.options || []).length === 0 ? (
+                                            <Text size='xs' c='dimmed'>
+                                              Sin opciones aún.
+                                            </Text>
+                                          ) : (
+                                            (col.options || []).map((opt, idx) => (
+                                              <Badge
+                                                key={`${col.key}-${idx}`}
+                                                variant='light'
+                                                color='blue'
+                                                rightSection={
+                                                  <ActionIcon
+                                                    size='xs'
+                                                    variant='transparent'
+                                                    color='red'
+                                                    onClick={() =>
+                                                      removeTableColumnOption(
+                                                        field.tempId,
+                                                        col.key,
+                                                        idx
+                                                      )
+                                                    }
+                                                    title='Quitar opción'
+                                                  >
+                                                    <IconX size={12} />
+                                                  </ActionIcon>
+                                                }
+                                                styles={{ root: { textTransform: 'none' } }}
+                                              >
+                                                {opt}
+                                              </Badge>
+                                            ))
+                                          )}
+                                        </Group>
+                                        <Group gap='xs'>
+                                          <TextInput
+                                            size='xs'
+                                            placeholder='Nueva opción'
+                                            value={
+                                              tableColOptionInputs[
+                                                `${field.tempId}:${col.key}`
+                                              ] || ''
+                                            }
+                                            onChange={(e) =>
+                                              setTableColOptionInputs((prev) => ({
+                                                ...prev,
+                                                [`${field.tempId}:${col.key}`]: e.target.value,
+                                              }))
+                                            }
+                                            onKeyDown={(e) => {
+                                              if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                addTableColumnOption(
+                                                  field.tempId,
+                                                  col.key,
+                                                  tableColOptionInputs[
+                                                    `${field.tempId}:${col.key}`
+                                                  ] || ''
+                                                );
+                                                setTableColOptionInputs((prev) => ({
+                                                  ...prev,
+                                                  [`${field.tempId}:${col.key}`]: '',
+                                                }));
+                                              }
+                                            }}
+                                            style={{ flex: 1 }}
+                                          />
+                                          <Button
+                                            size='xs'
+                                            variant='light'
+                                            onClick={() => {
+                                              addTableColumnOption(
+                                                field.tempId,
+                                                col.key,
+                                                tableColOptionInputs[
+                                                  `${field.tempId}:${col.key}`
+                                                ] || ''
+                                              );
+                                              setTableColOptionInputs((prev) => ({
+                                                ...prev,
+                                                [`${field.tempId}:${col.key}`]: '',
+                                              }));
+                                            }}
+                                            disabled={
+                                              !(
+                                                tableColOptionInputs[
+                                                  `${field.tempId}:${col.key}`
+                                                ] || ''
+                                              ).trim()
+                                            }
+                                          >
+                                            Opción
+                                          </Button>
+                                        </Group>
+                                      </div>
+                                    )}
+                                  </Card>
+                                ))
+                              )}
+
+                              <Button
+                                variant='light'
+                                size='xs'
+                                leftSection={<IconPlus size={16} />}
+                                onClick={() => addTableColumn(field.tempId)}
+                                style={{ alignSelf: 'flex-start' }}
+                              >
+                                Agregar columna
+                              </Button>
+                            </Stack>
                           ) : (
                             <Text size='sm' c='dimmed' mb='sm'>
                               Campo de {(FIELD_TYPE_LABELS[field.field_type] || 'lista').toLowerCase()}:{' '}

@@ -202,9 +202,9 @@ export async function POST(req) {
 
             const insertFieldQuery = `
               INSERT INTO process_form_field
-              (id_process_category, field_label, field_type, required, active, display_order)
+              (id_process_category, field_label, field_type, required, active, display_order, config_json)
               OUTPUT INSERTED.id
-              VALUES (@id_process, @field_label, @field_type, @required, 1, @display_order);
+              VALUES (@id_process, @field_label, @field_type, @required, 1, @display_order, @config_json);
             `;
 
             const fieldResult = await new sql.Request(transaction)
@@ -213,6 +213,7 @@ export async function POST(req) {
               .input("field_type", sql.NVarChar(30), field.field_type || "select")
               .input("required", sql.Bit, field.required ? 1 : 0)
               .input("display_order", sql.Int, fieldOrder++)
+              .input("config_json", sql.NVarChar(sql.MAX), field.config_json ?? null)
               .query(insertFieldQuery);
 
             const fieldId = fieldResult.recordset[0].id;
