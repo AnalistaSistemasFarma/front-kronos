@@ -162,7 +162,9 @@ function ViewerRequestGeneralPage() {
       router.push('/login');
       return;
     }
-    fetchFormData();
+    const ac = new AbortController();
+    void fetchFormData(ac.signal);
+    return () => ac.abort();
   }, [session, status, router]);
 
   useEffect(() => {
@@ -360,12 +362,16 @@ function ViewerRequestGeneralPage() {
     }
   };
 
-  const fetchFormData = async () => {
+  const fetchFormData = async (signal?: AbortSignal) => {
     try {
       setFormDataLoading(true);
       setFormDataError(null);
 
-      const response = await fetch(`/api/requests-general/consult-request`);
+      const response = await fetch(`/api/requests-general/consult-request`, { signal });
+
+      if (signal?.aborted || response.status === 499) {
+        return;
+      }
 
       if (response.ok) {
         const data: ConsultResponse = await response.json();
@@ -388,15 +394,23 @@ function ViewerRequestGeneralPage() {
         if (data.assignedUsers) {
           setAssignedUsers(data.assignedUsers.map((u) => ({ value: u.name, label: u.name })));
         }
-      } else {
+      } else if (response.status !== 499) {
         console.error('Frontend - fetchFormData failed with status:', response.status);
         setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
       }
     } catch (err) {
+      if (
+        signal?.aborted ||
+        (err instanceof Error && (err.name === 'AbortError' || err.message === 'aborted'))
+      ) {
+        return;
+      }
       console.error('Error fetching form data:', err);
       setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
     } finally {
-      setFormDataLoading(false);
+      if (!signal?.aborted) {
+        setFormDataLoading(false);
+      }
     }
   };
 

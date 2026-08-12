@@ -99,7 +99,7 @@ function periodCacheKey(dateFilter: DashboardDateFilter, selectedMonthDate: Date
 export function DashboardDataProvider({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const { isDashboardAdmin, loadingDashboardAdmin } = useDashboardAdmin();
+  const { isDashboardAdmin, loadingDashboardAdmin, revokeDashboardAdmin } = useDashboardAdmin();
 
   const [tasks, setTasks] = useState<DashboardTask[]>([]);
   const [teamRosterTasks, setTeamRosterTasks] = useState<DashboardTask[]>([]);
@@ -170,12 +170,28 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
         setTasksError(null);
 
         const [tasksResponse, requestsResponse] = await Promise.all([
-          fetch(buildTasksUrl(dateFilter, selectedMonthDate), { credentials: 'same-origin' }),
-          fetch(buildRequestsUrl(dateFilter, selectedMonthDate), { credentials: 'same-origin' }),
+          fetch(buildTasksUrl(dateFilter, selectedMonthDate), {
+            credentials: 'same-origin',
+            cache: 'no-store',
+          }),
+          fetch(buildRequestsUrl(dateFilter, selectedMonthDate), {
+            credentials: 'same-origin',
+            cache: 'no-store',
+          }),
         ]);
 
         if (tasksResponse.status === 401 || requestsResponse.status === 401) {
           throw new Error('Sesión no válida. Recarga la página o vuelve a iniciar sesión.');
+        }
+        // 403 = sin permiso de dashboard analítico; no es un fallo de carga.
+        if (tasksResponse.status === 403 || requestsResponse.status === 403) {
+          revokeDashboardAdmin();
+          setTasks([]);
+          setRequests([]);
+          setTeamRosterTasks([]);
+          setCategoryMembers({});
+          setTasksError(null);
+          return;
         }
         if (!tasksResponse.ok) {
           const errBody = await tasksResponse.json().catch(() => ({}));
@@ -216,14 +232,17 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
           setAppliedRange(null);
         }
       } catch (err) {
-        console.error('Error fetching tasks:', err);
-        setTasksError(err instanceof Error ? err.message : 'Error desconocido al cargar los datos');
+        const message = err instanceof Error ? err.message : 'Error desconocido al cargar los datos';
+        if (message !== 'Sin permiso') {
+          console.error('Error fetching tasks:', err);
+        }
+        setTasksError(message === 'Sin permiso' ? null : message);
       } finally {
         setTasksLoading(false);
         setTasksRefreshing(false);
       }
     },
-    [dateFilter, selectedMonthDate]
+    [dateFilter, selectedMonthDate, revokeDashboardAdmin]
   );
 
   const fetchTickets = useCallback(
@@ -251,9 +270,16 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
           url = `${url}?${params}`;
         }
 
-        const res = await fetch(url, { credentials: 'same-origin' });
+        const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
         if (res.status === 401) {
           throw new Error('Sesión no válida. Recarga la página o vuelve a iniciar sesión.');
+        }
+        if (res.status === 403) {
+          if (gen !== ticketsFetchGen.current) return;
+          revokeDashboardAdmin();
+          setCases([]);
+          setTicketsError(null);
+          return;
         }
         if (!res.ok) {
           const errBody = await res.json().catch(() => ({}));
@@ -285,7 +311,7 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
         setTicketsRefreshing(false);
       }
     },
-    [dateFilter, selectedMonthDate]
+    [dateFilter, selectedMonthDate, revokeDashboardAdmin]
   );
 
   useEffect(() => {

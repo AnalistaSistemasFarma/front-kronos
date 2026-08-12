@@ -4,11 +4,14 @@ import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { useAppSection } from '../../lib/navigation/AppSectionContext';
 import { isHubInstantSwapRoute } from '../../lib/navigation/AppSectionContext';
+import { useDashboardAdmin } from '../../lib/dashboard/DashboardAdminContext';
 import DashboardShell from '../dashboard/DashboardShell';
 import ProcessView from '../process/ProcessView';
+import ProcessAiContextBridge from '../process/ProcessAiContextBridge';
 
 function HubPanels() {
   const { activeSection } = useAppSection();
+  const { isDashboardAdmin, loadingDashboardAdmin } = useDashboardAdmin();
 
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -19,18 +22,25 @@ function HubPanels() {
   const panelClass = (active: boolean) =>
     active ? 'hub-section hub-section--active' : 'hub-section';
 
+  // Solo montar el shell admin cuando la sección activa es dashboard.
+  // Así /process no dispara view-tasks/cases (evita 403 a usuarios sin permiso
+  // y también el prefetch oculto).
+  const showDashboard =
+    !loadingDashboardAdmin && isDashboardAdmin && activeSection === 'dashboard';
+  const showProcess = activeSection === 'process' || !showDashboard;
+
   return (
     <div className='hub-sections'>
-      <div
-        className={panelClass(activeSection === 'dashboard')}
-        aria-hidden={activeSection !== 'dashboard'}
-      >
-        <DashboardShell />
-      </div>
-      <div
-        className={panelClass(activeSection === 'process')}
-        aria-hidden={activeSection !== 'process'}
-      >
+      {showDashboard ? (
+        <div
+          className={panelClass(activeSection === 'dashboard')}
+          aria-hidden={activeSection !== 'dashboard'}
+        >
+          <DashboardShell />
+        </div>
+      ) : null}
+      <div className={panelClass(showProcess)} aria-hidden={!showProcess}>
+        <ProcessAiContextBridge />
         <ProcessView />
       </div>
     </div>

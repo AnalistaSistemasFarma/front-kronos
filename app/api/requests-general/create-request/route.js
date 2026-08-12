@@ -59,8 +59,19 @@ export async function POST(req) {
       reqInsert.input("descripcion", sql.NVarChar(1000), descripcion);
       reqInsert.input("subject", sql.NVarChar(255), subject);
       reqInsert.input("company", sql.Int, company);
-      reqInsert.input("createdby", sql.NVarChar(255), createdby);
-      reqInsert.input("url", sql.NVarChar(1000), url);
+      // id_requester se guarda como NVARCHAR: hay que enviar string, no number.
+      reqInsert.input(
+        "createdby",
+        sql.NVarChar(255),
+        createdby == null || createdby === ""
+          ? null
+          : String(createdby),
+      );
+      reqInsert.input(
+        "url",
+        sql.NVarChar(1000),
+        url == null ? null : String(url),
+      );
 
       const insertResult = await reqInsert.query(insertRequest);
 

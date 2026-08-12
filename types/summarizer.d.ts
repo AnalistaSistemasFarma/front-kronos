@@ -83,15 +83,36 @@ interface LanguageModelCreateOptions {
   temperature?: number;
   topK?: number;
   monitor?: (m: SummarizerCreateMonitor) => void;
+  signal?: AbortSignal;
+}
+
+/** Opciones de prompt (streaming / salida estructurada). */
+interface LanguageModelPromptOptions {
+  responseConstraint?: Record<string, unknown>;
+  omitResponseConstraintInput?: boolean;
+  signal?: AbortSignal;
 }
 
 interface LanguageModelSession {
-  prompt(input: string): Promise<string>;
+  prompt(
+    input: string | LanguageModelInitialPrompt[],
+    options?: LanguageModelPromptOptions,
+  ): Promise<string>;
+  /** Streaming: ReadableStream o AsyncIterable según versión de Chrome. */
+  promptStreaming?(
+    input: string | LanguageModelInitialPrompt[],
+    options?: LanguageModelPromptOptions,
+  ): ReadableStream<string> | AsyncIterable<string>;
   destroy(): void;
+  readonly contextUsage?: number;
+  readonly contextWindow?: number;
 }
 
 interface LanguageModelStatic {
-  availability(): Promise<SummarizerAvailability>;
+  availability(options?: {
+    expectedInputs?: LanguageModelExpected[];
+    expectedOutputs?: LanguageModelExpected[];
+  }): Promise<SummarizerAvailability>;
   create(options?: LanguageModelCreateOptions): Promise<LanguageModelSession>;
 }
 

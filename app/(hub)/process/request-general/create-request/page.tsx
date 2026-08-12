@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useEffect, useRef, useMemo, Suspense } from 'react';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
 import { useSession } from 'next-auth/react';
@@ -9,6 +9,7 @@ import { useGetMicrosoftToken } from '../../../../../components/microsoft-365/us
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import Link from 'next/link';
+import { useRegisterAiPageContext } from '../../../../../lib/ai/AiAssistantContext';
 import {
   Title,
   Paper,
@@ -81,6 +82,10 @@ import {
 import SapOptionSelect from './SapOptionSelect';
 import TableFieldInput from './TableFieldInput';
 import toast from 'react-hot-toast';
+import {
+  ASSISTANT_DRAFT_STORAGE_KEY,
+  type RequestDraftPayload,
+} from '../../../../../lib/ai/assistantPrompt';
 
 interface RequestTask {
   id: number;
@@ -246,14 +251,69 @@ function RequestBoard() {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
+  useRegisterAiPageContext({
+    pageLabel: 'Solicitudes generales',
+    pageKind: 'create-request',
+    facts: {
+      listadas: tickets.length,
+      filtro_estado: filters.status || 'todas',
+      modal_crear: modalOpened ? 'abierto' : 'cerrado',
+      asunto_borrador: formData.subject || null,
+      proceso_borrador: formData.process || null,
+    },
+  });
+
   useEffect(() => {
     if (status === 'loading') return;
     if (!session) {
       router.push('/login');
       return;
     }
-    fetchFormData();
+    const ac = new AbortController();
+    void fetchFormData(ac.signal);
+    return () => ac.abort();
   }, [session, status, router]);
+
+  // Asistente: si viene un borrador, abre el modal prellenado (asunto/desc/empresa/proceso).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const fromAi = searchParams.get('aiDraft') === '1';
+    if (!fromAi) return;
+
+    try {
+      const raw = sessionStorage.getItem(ASSISTANT_DRAFT_STORAGE_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as RequestDraftPayload;
+      sessionStorage.removeItem(ASSISTANT_DRAFT_STORAGE_KEY);
+
+      setFormData((prev) => ({
+        ...prev,
+        subject: draft.subject || prev.subject,
+        descripcion: draft.description || prev.descripcion,
+        company:
+          draft.companyId != null ? String(draft.companyId) : prev.company,
+        category:
+          draft.categoryId != null ? String(draft.categoryId) : prev.category,
+        process:
+          draft.processId != null ? String(draft.processId) : prev.process,
+      }));
+      setModalOpened(true);
+      toast.success(
+        'Borrador del asistente aplicado. Revisa y completa si falta algo.',
+      );
+
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete('aiDraft');
+      const qs = params.toString();
+      router.replace(
+        qs
+          ? `/process/request-general/create-request?${qs}`
+          : '/process/request-general/create-request',
+      );
+    } catch {
+      toast.error('No se pudo aplicar el borrador del asistente.');
+    }
+  }, [searchParams, router]);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -529,7 +589,7 @@ function RequestBoard() {
       params.append('idUser', userIdToUse.toString());
 
       if (filtersToUse.id) params.append('id', filtersToUse.id);
-      if (filtersToUse.status) params.append('status', filtersToUse.status);
+      // El estado se filtra en cliente para que las tarjetas de totales no pierdan el conteo real.
       if (filtersToUse.company) params.append('company', filtersToUse.company);
       if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
       if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
@@ -631,21 +691,40 @@ function RequestBoard() {
     }
   };
 
-  const fetchFormData = async () => {
+  const fetchFormData = async (signal?: AbortSignal) => {
     try {
       setFormDataLoading(true);
       setFormDataError(null);
 
-      const response = await fetch(`/api/requests-general/consult-request`);
+      const load = async () =>
+        fetch(`/api/requests-general/consult-request`, { signal, cache: 'no-store' });
+
+      let response = await load();
+
+      // Reintento ante 500 transitorio del pool SQL (ENOTOPEN en HMR/dev).
+      if (!signal?.aborted && response.status === 500) {
+        await new Promise((r) => setTimeout(r, 200));
+        if (!signal?.aborted) {
+          response = await load();
+        }
+      }
+
+      // Abort / Client Closed Request: no es error de datos (Strict Mode, navegación).
+      if (signal?.aborted || response.status === 499) {
+        return;
+      }
 
       if (response.ok) {
         const data: ConsultResponse = await response.json();
+        if (signal?.aborted) return;
+
         setCompany(
           data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
         );
 
         const defaultCompanyId = '3';
         await fetchCategoriesByCompanyOnLoad(defaultCompanyId, data.processCategories);
+        if (signal?.aborted) return;
 
         setFormData((prev) => ({
           ...prev,
@@ -666,15 +745,26 @@ function RequestBoard() {
         if (data.assignedUsers) {
           setAssignedUsers(data.assignedUsers.map((u) => ({ value: u.name, label: u.name })));
         }
-      } else {
+      } else if (response.status !== 499) {
         console.error('Frontend - fetchFormData failed with status:', response.status);
         setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
       }
     } catch (err) {
+      if (
+        signal?.aborted ||
+        (err instanceof Error && (err.name === 'AbortError' || err.message === 'aborted')) ||
+        (typeof DOMException !== 'undefined' &&
+          err instanceof DOMException &&
+          err.name === 'AbortError')
+      ) {
+        return;
+      }
       console.error('Error fetching form data:', err);
       setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
     } finally {
-      setFormDataLoading(false);
+      if (!signal?.aborted) {
+        setFormDataLoading(false);
+      }
     }
   };
 
@@ -1077,6 +1167,15 @@ function RequestBoard() {
     }
   };
 
+  const filterByStatus = (value: string) => {
+    setFilters((prev) => ({ ...prev, status: value }));
+  };
+
+  const displayedTickets = useMemo(() => {
+    if (!filters.status) return tickets;
+    return tickets.filter((t) => String(t.id_status_case) === String(filters.status));
+  }, [tickets, filters.status]);
+
   if (status === 'loading' || loading) {
     return (
       <div
@@ -1147,14 +1246,6 @@ function RequestBoard() {
   const getGlobalTasksProgress = () => {
     const allTasks = Object.values(tasksByRequest).flat();
     return getTasksProgress(allTasks);
-  };
-
-  const filterByStatus = (value: string) => {
-    const nf = { ...filters, status: value };
-    setFilters(nf);
-    if (userId) {
-      fetchTicketsWithUserId(userId, nf);
-    }
   };
 
   const breadcrumbItems = [
@@ -1556,7 +1647,7 @@ function RequestBoard() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {tickets.length === 0 ? (
+                {displayedTickets.length === 0 ? (
                   <Table.Tr>
                     <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
@@ -1571,7 +1662,7 @@ function RequestBoard() {
                     </Table.Td>
                   </Table.Tr>
                 ) : (
-                  tickets.map((ticket) => (
+                  displayedTickets.map((ticket) => (
                     <Table.Tr
                       key={ticket.id}
                       className='cursor-pointer transition-colors'

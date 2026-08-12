@@ -23,6 +23,7 @@ import { PROCESS_HUB_URL } from '../../lib/navigation/AppSectionContext';
 import { SolicitadoTabProvider } from '../../lib/request-general/SolicitadoTabContext';
 import SolicitadoNav from './SolicitadoNav';
 import SolicitadoPeriodLabel from './SolicitadoPageHeading';
+import SolicitadoAiContextBridge from './SolicitadoAiContextBridge';
 import DashboardDateToolbar from '../dashboard/DashboardDateToolbar';
 import {
   getDashboardDateRange,
@@ -105,7 +106,7 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [allRequests, setAllRequests] = useState<DashboardRequestRow[]>([]);
   const [allActivities, setAllActivities] = useState<DashboardActivityRow[]>([]);
-  const [dateFilter, setDateFilter] = useState<DashboardDateFilter>('month');
+  const [dateFilter, setDateFilter] = useState<DashboardDateFilter>('all');
   const [selectedMonthDate, setSelectedMonthDate] = useState(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   );
@@ -252,6 +253,7 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
   return (
     <SolicitadoDataContext.Provider value={value}>
       <SolicitadoTabProvider>
+        <SolicitadoAiContextBridge />
         <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
           <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
             <SolicitadoPeriodLabel />

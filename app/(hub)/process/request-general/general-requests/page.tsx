@@ -365,6 +365,11 @@ function RequestGeneralPage() {
 
       const response = await fetch(`/api/requests-general/consult-request`);
 
+      // 499 = petición abortada (remount / navegación); no es error real de datos.
+      if (response.status === 499) {
+        return;
+      }
+
       if (response.ok) {
         const data: ConsultResponse = await response.json();
         setCompany(
@@ -386,11 +391,14 @@ function RequestGeneralPage() {
         if (data.assignedUsers) {
           setAssignedUsers(data.assignedUsers.map((u) => ({ value: u.name, label: u.name })));
         }
-      } else {
+      } else if (response.status !== 499) {
         console.error('Frontend - fetchFormData failed with status:', response.status);
         setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
       }
     } catch (err) {
+      if (err instanceof Error && (err.name === 'AbortError' || err.message === 'aborted')) {
+        return;
+      }
       console.error('Error fetching form data:', err);
       setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
     } finally {

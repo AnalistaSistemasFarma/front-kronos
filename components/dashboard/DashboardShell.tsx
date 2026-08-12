@@ -13,6 +13,7 @@ import TicketsHubView from './TicketsHubView';
 import SolicitudesSubNav from './SolicitudesSubNav';
 import TicketsSubNav from './TicketsSubNav';
 import DashboardAdminGate from './DashboardAdminGate';
+import DashboardAiContextBridge from './DashboardAiContextBridge';
 
 const MemoSolicitudesHub = memo(SolicitudesHubView);
 const MemoActividades = memo(ActividadesAnalyticsView);
@@ -82,6 +83,7 @@ export default function DashboardShell() {
         <DashboardTabProvider>
           <SolicitudesSubProvider>
             <TicketsSubProvider>
+              <DashboardAiContextBridge />
               <RoutePrefetcher />
               <DashboardStickyChrome />
               <DashboardViews />

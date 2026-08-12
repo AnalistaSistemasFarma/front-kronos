@@ -234,7 +234,7 @@ function ViewTicketPage() {
   const cameFromTicketsPanel = ticketsList.length > 0;
   const backPanelUrl =
     cameFromTicketsPanel || canManageTickets ? ticketsPanelUrl : getRequesterPanelUrl();
-  const [userId, setUserId] = useState<number | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
 
@@ -397,57 +397,71 @@ function ViewTicketPage() {
     }
   }, [ticket?.id_category, ticket?.id_subcategory, isEditing]);
 
-  const getUserIdByName = async (userName: string): Promise<number | null> => {
-    if (!session || status !== 'authenticated') {
-      console.error('No hay sesión activa para realizar esta operación');
-      return null;
-    }
-
-    if (!userName || userName.trim() === '') {
-      console.error('El nombre de usuario es requerido');
-      return null;
-    }
-
-    try {
-      setLoadingUserId(true);
-
-      const params = new URLSearchParams({
-        userName: userName.trim(),
-      });
-
-      const response = await fetch(`/api/requests-general/get-user-id?${params}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Error al obtener ID de usuario:', errorData.error);
-        return null;
-      }
-
-      const data = await response.json();
-      return data.success ? data.userId : null;
-    } catch (error) {
-      console.error('Error en la llamada al endpoint:', error);
-      return null;
-    } finally {
-      setLoadingUserId(false);
-    }
-  };
-
+  // created_by en notes es NVARCHAR ([user].id cuid). Preferir sesión; evitar loops/aborts.
   useEffect(() => {
-    if (status === 'authenticated' && userName && !userId) {
-      getUserIdByName(userName).then((id) => {
-        if (id) {
-          setUserId(id);
-          console.log('ID de usuario obtenido:', id);
-        }
-      });
+    if (status !== 'authenticated') return;
+
+    if (session?.user?.id) {
+      setUserId(String(session.user.id));
+      setLoadingUserId(false);
+      return;
     }
-  }, [status, userName, userId, getUserIdByName]);
+
+    const name = session?.user?.name?.trim() || '';
+    const email = session?.user?.email?.trim() || '';
+    if (!name && !email) return;
+
+    const ac = new AbortController();
+    let cancelled = false;
+
+    (async () => {
+      try {
+        setLoadingUserId(true);
+        const params = new URLSearchParams();
+        if (name) params.set('userName', name);
+        if (email) params.set('email', email);
+
+        const response = await fetch(
+          `/api/requests-general/get-user-id?${params}`,
+          { signal: ac.signal },
+        );
+
+        if (!response.ok) {
+          // 499 = abortado en servidor; no ensuciar la consola
+          if (response.status !== 499) {
+            const errorData = await response.json().catch(() => ({}));
+            if (errorData?.code !== 'ABORTED') {
+              console.warn(
+                'No se pudo resolver el ID de usuario:',
+                errorData.error || response.status,
+              );
+            }
+          }
+          return;
+        }
+
+        const data = await response.json();
+        if (!cancelled && data.success && data.userId != null) {
+          setUserId(String(data.userId));
+        }
+      } catch (error) {
+        if ((error as Error)?.name === 'AbortError') return;
+        console.warn('Error resolviendo ID de usuario:', error);
+      } finally {
+        if (!cancelled) setLoadingUserId(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [
+    status,
+    session?.user?.id,
+    session?.user?.name,
+    session?.user?.email,
+  ]);
 
   const fetchUsersWithEmails = async () => {
     try {

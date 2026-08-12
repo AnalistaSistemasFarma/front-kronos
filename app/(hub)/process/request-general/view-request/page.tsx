@@ -73,6 +73,7 @@ import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 import AiSummarizeButton from './AiSummarizeButton';
+import { useRegisterAiPageContext } from '../../../../../lib/ai/AiAssistantContext';
 import {
   TABLE_FIELD_TYPE,
   parseTableConfig,
@@ -379,6 +380,26 @@ function ViewRequestPage() {
 
     return () => controller.abort();
   }, [request?.id]);
+
+  // Demo asistente: expone asunto/descripción al chat flotante.
+  useRegisterAiPageContext(
+    request
+      ? {
+          pageLabel: `Solicitud #${request.id}`,
+          pageKind: 'view-request',
+          requestId: String(request.id),
+          requestSubject: request.subject,
+          requestDescription: request.description,
+          requestCompany: request.company,
+          requestStatus: request.status,
+          facts: {
+            proceso: request.process,
+            categoría: request.category,
+            solicitante: request.requester,
+          },
+        }
+      : null,
+  );
 
   const fetchFormValues = async (requestId: number, signal?: AbortSignal) => {
     try {

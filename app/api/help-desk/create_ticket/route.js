@@ -5,6 +5,41 @@ import {
   notifyTicketToTechnicians,
 } from '../../../../lib/notificationEvents.js';
 
+/**
+ * [case].requester es INT (legacy: id_company_user).
+ * El asistente / sesión pueden mandar el cuid de [user].id → lo resolvemos.
+ */
+async function resolveRequesterCompanyUserId(transaction, requester, companyId) {
+  if (requester == null || requester === '') return null;
+
+  const asNum = Number(requester);
+  if (
+    Number.isFinite(asNum) &&
+    Number.isInteger(asNum) &&
+    asNum > 0 &&
+    String(requester).trim() === String(asNum)
+  ) {
+    return asNum;
+  }
+
+  const userKey = String(requester).trim();
+  const lookup = new sql.Request(transaction);
+  lookup.input('userId', sql.NVarChar(255), userKey);
+  const companyNum = Number(companyId);
+  const hasCompany = Number.isFinite(companyNum) && companyNum > 0;
+  if (hasCompany) lookup.input('companyId', sql.Int, companyNum);
+
+  const result = await lookup.query(`
+    SELECT TOP 1 cu.id_company_user
+    FROM company_user cu
+    WHERE CAST(cu.id_user AS NVARCHAR(255)) = @userId
+    ${hasCompany ? 'ORDER BY CASE WHEN cu.id_company = @companyId THEN 0 ELSE 1 END, cu.id_company_user' : 'ORDER BY cu.id_company_user'}
+  `);
+
+  const id = result.recordset?.[0]?.id_company_user;
+  return id != null ? Number(id) : null;
+}
+
 export async function POST(req) {
   try {
     const body = await req.json();
@@ -45,6 +80,23 @@ export async function POST(req) {
     try {
       await transaction.begin();
 
+      const requesterId = await resolveRequesterCompanyUserId(
+        transaction,
+        requester,
+        company,
+      );
+      if (requesterId == null) {
+        await transaction.rollback();
+        return new Response(
+          JSON.stringify({
+            error: 'No se pudo identificar el solicitante',
+            details:
+              'Tu usuario no tiene company_user asociado, o el id enviado no es válido. Revisa la sesión e inténtalo de nuevo.',
+          }),
+          { status: 400 },
+        );
+      }
+
       const insertCaseQuery = `
         INSERT INTO [case] (
           [description],
@@ -80,7 +132,7 @@ export async function POST(req) {
       request.input('description', sql.Text, description);
       request.input('asunto', sql.NVarChar(1000), asunto);
       request.input('technician', sql.Int, technician || null);
-      request.input('requester', sql.Int, requester);
+      request.input('requester', sql.Int, requesterId);
       request.input('site', sql.NVarChar(1000), site);
       request.input('department', sql.Int, department);
       request.input('requestType', sql.NVarChar(50), requestType);

@@ -11,6 +11,7 @@ import {
   type DashboardCounts,
   type DashboardRequestRow,
 } from '../../../../../components/request-general/RequestRoleDashboard';
+import { useRegisterAiPageContext } from '../../../../../lib/ai/AiAssistantContext';
 
 const EMPTY_COUNTS: DashboardCounts = {
   total: 0,
@@ -83,6 +84,37 @@ export default function DashboardSolicitantePage() {
       cancelled = true;
     };
   }, [session, status, router]);
+
+  const screenSummary = error
+    ? `### En esta página\n**Dashboard solicitudes** — error: ${error}`
+    : loading
+      ? '### En esta página\n**Dashboard solicitudes** — cargando tus datos…'
+      : [
+          '### En esta página',
+          'Estás en **Dashboard solicitudes**: resumen de lo que **tú pediste** (no lo asignado a ti).',
+          '',
+          '#### Tus solicitudes',
+          `- Total: **${requestCounts.total}**`,
+          `- Abiertas: **${requestCounts.abierto}** · En progreso: **${requestCounts.enProgreso}**`,
+          `- Resueltas: **${requestCounts.resuelto}** · Canceladas: **${requestCounts.cancelado}**`,
+          '',
+          '#### Actividades asociadas',
+          `- Total: **${activityCounts.total}** (abiertas: ${activityCounts.abierto}, en progreso: ${activityCounts.enProgreso}, resueltas: ${activityCounts.resuelto})`,
+          '',
+          'Puedo listar abiertas, detallar un **#id** o ayudarte a crear otra solicitud.',
+        ].join('\n');
+
+  useRegisterAiPageContext({
+    pageLabel: 'Dashboard solicitudes',
+    pageKind: 'dashboard-solicitante',
+    extra: screenSummary,
+    facts: {
+      solicitudes_total: requestCounts.total,
+      solicitudes_abiertas: requestCounts.abierto,
+      actividades_total: activityCounts.total,
+      cargando: loading,
+    },
+  });
 
   if (status === 'loading' || loading) {
     return (

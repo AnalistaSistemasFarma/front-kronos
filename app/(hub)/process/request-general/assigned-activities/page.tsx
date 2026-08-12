@@ -106,8 +106,10 @@ function RequestBoard() {
       router.push('/login');
       return;
     }
-    fetchCompanies();
-    fetchFormData();
+    const ac = new AbortController();
+    void fetchCompanies(ac.signal);
+    void fetchFormData(ac.signal);
+    return () => ac.abort();
   }, [session, status, router]);
 
   useEffect(() => {
@@ -232,11 +234,15 @@ function RequestBoard() {
     }
   };
 
-  const fetchCompanies = async () => {
+  const fetchCompanies = async (signal?: AbortSignal) => {
     try {
       setLoading(true);
 
-      const response = await fetch(`/api/requests-general/consult-request`);
+      const response = await fetch(`/api/requests-general/consult-request`, { signal });
+
+      if (signal?.aborted || response.status === 499) {
+        return;
+      }
 
       if (response.ok) {
         const data = await response.json();
@@ -252,20 +258,32 @@ function RequestBoard() {
           console.error('Frontend - fetchCompanies: companies data is not an array or missing');
           setCompany([]);
         }
-      } else {
+      } else if (response.status !== 499) {
         console.error('Frontend - fetchCompanies failed with status:', response.status);
       }
     } catch (err) {
+      if (
+        signal?.aborted ||
+        (err instanceof Error && (err.name === 'AbortError' || err.message === 'aborted'))
+      ) {
+        return;
+      }
       console.error('Error fetching companies:', err);
       setError('Unable to load companies. Please try again.');
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   };
 
-  const fetchFormData = async () => {
+  const fetchFormData = async (signal?: AbortSignal) => {
     try {
-      const response = await fetch(`/api/requests-general/consult-request`);
+      const response = await fetch(`/api/requests-general/consult-request`, { signal });
+
+      if (signal?.aborted || response.status === 499) {
+        return;
+      }
 
       if (response.ok) {
         const data = await response.json();
@@ -274,10 +292,16 @@ function RequestBoard() {
             data.assignedUsers.map((u: { name: string }) => ({ value: u.name, label: u.name }))
           );
         }
-      } else {
+      } else if (response.status !== 499) {
         console.error('Frontend - fetchFormData failed with status:', response.status);
       }
     } catch (err) {
+      if (
+        signal?.aborted ||
+        (err instanceof Error && (err.name === 'AbortError' || err.message === 'aborted'))
+      ) {
+        return;
+      }
       console.error('Error fetching form data:', err);
     }
   };

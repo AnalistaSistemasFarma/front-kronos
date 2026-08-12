@@ -1,7 +1,11 @@
 'use client';
 
+import { Suspense } from 'react';
 import Header from '../Header';
 import AppHubShell from './AppHubShell';
+import AiAssistantChatHost from '../ai/AiAssistantChatHost';
+import AiRouteContextBridge from '../ai/AiRouteContextBridge';
+import { AiAssistantProvider } from '../../lib/ai/AiAssistantContext';
 import { AppSectionProvider } from '../../lib/navigation/AppSectionContext';
 import { DashboardAdminProvider } from '../../lib/dashboard/DashboardAdminContext';
 import { ProcessDataProvider } from '../../lib/process/ProcessDataContext';
@@ -13,8 +17,14 @@ export default function HubLayoutClient({ children }: { children: React.ReactNod
       <RequestRoleNavProvider>
         <AppSectionProvider>
           <ProcessDataProvider>
-            <Header />
-            <AppHubShell>{children}</AppHubShell>
+            <AiAssistantProvider>
+              <Suspense fallback={null}>
+                <AiRouteContextBridge />
+              </Suspense>
+              <Header />
+              <AppHubShell>{children}</AppHubShell>
+              <AiAssistantChatHost />
+            </AiAssistantProvider>
           </ProcessDataProvider>
         </AppSectionProvider>
       </RequestRoleNavProvider>

@@ -41,20 +41,23 @@ export async function GET(req) {
 
     const { searchParams } = new URL(req.url);
     const userName = searchParams.get('userName');
+    const emailParam = searchParams.get('email');
+    const sessionEmail = session.user.email?.trim() || '';
+    const lookupEmail = (emailParam || sessionEmail || '').trim();
 
-    if (!userName || userName.trim() === '') {
+    if ((!userName || userName.trim() === '') && !lookupEmail) {
       logAuditEvent(
         'MISSING_PARAMETER',
         session.user.email,
         null,
         ipAddress,
         false,
-        'Missing userName parameter'
+        'Missing userName/email parameter'
       );
       return NextResponse.json(
         {
           success: false,
-          error: 'Nombre de usuario es requerido',
+          error: 'Nombre de usuario o email es requerido',
           code: 'MISSING_USERNAME',
         },
         { status: 400 }
@@ -62,14 +65,44 @@ export async function GET(req) {
     }
 
     const result = await withMssqlPool(async (pool) => {
-      return pool
-        .request()
-        .input('userName', sql.NVarChar(255), userName.trim())
-        .query(`
-          SELECT id
-          FROM [user]
-          WHERE [name] = @userName
-        `);
+      // 1) Por email (más confiable; mismo criterio que Help Desk)
+      if (lookupEmail) {
+        const byEmail = await pool
+          .request()
+          .input('email', sql.NVarChar(255), lookupEmail)
+          .query(`
+            SELECT TOP 1 id
+            FROM [user]
+            WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(@email)))
+          `);
+        if (byEmail.recordset.length > 0) return byEmail;
+      }
+
+      // 2) Por nombre exacto
+      if (userName?.trim()) {
+        const byName = await pool
+          .request()
+          .input('userName', sql.NVarChar(255), userName.trim())
+          .query(`
+            SELECT TOP 1 id
+            FROM [user]
+            WHERE [name] = @userName
+          `);
+        if (byName.recordset.length > 0) return byName;
+
+        // 3) Por nombre case-insensitive / trim
+        const byNameLoose = await pool
+          .request()
+          .input('userName', sql.NVarChar(255), userName.trim())
+          .query(`
+            SELECT TOP 1 id
+            FROM [user]
+            WHERE LOWER(LTRIM(RTRIM([name]))) = LOWER(LTRIM(RTRIM(@userName)))
+          `);
+        if (byNameLoose.recordset.length > 0) return byNameLoose;
+      }
+
+      return { recordset: [] };
     });
 
     const duration = Date.now() - startTime;
@@ -113,16 +146,31 @@ export async function GET(req) {
     );
   } catch (error) {
     const duration = Date.now() - startTime;
-    const errorMessage = error.message || 'Error desconocido';
+    const errorMessage = error?.message || 'Error desconocido';
+    const isAbort =
+      error?.name === 'AbortError' ||
+      /aborted|AbortError|ECONNRESET|ECANCELED/i.test(String(errorMessage));
 
     logAuditEvent(
-      'DATABASE_ERROR',
+      isAbort ? 'REQUEST_ABORTED' : 'DATABASE_ERROR',
       session?.user?.email || 'unknown',
       null,
       ipAddress,
       false,
       `Error after ${duration}ms: ${errorMessage}`
     );
+
+    // El cliente canceló la petición (Strict Mode / remount): no es un fallo real.
+    if (isAbort) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Solicitud cancelada',
+          code: 'ABORTED',
+        },
+        { status: 499 }
+      );
+    }
 
     console.error('Error en get-user-id endpoint:', error);
 

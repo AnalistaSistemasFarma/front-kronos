@@ -118,17 +118,23 @@ export async function getPool(): Promise<sql.ConnectionPool> {
   }
 }
 
-/** Ejecuta una consulta reintentando una vez si el pool quedó cerrado (ENOTOPEN). */
+/** Ejecuta una consulta reintentando si el pool quedó cerrado (ENOTOPEN / ECONNCLOSED). */
 export async function withMssqlPool<T>(
   fn: (pool: sql.ConnectionPool) => Promise<T>
 ): Promise<T> {
-  try {
-    return await fn(await getPool());
-  } catch (error) {
-    if (!isRetryablePoolError(error)) throw error;
-    invalidateGlobalPool();
-    return fn(await getPool());
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await fn(await getPool());
+    } catch (error) {
+      lastError = error;
+      if (!isRetryablePoolError(error) || attempt === 2) throw error;
+      invalidateGlobalPool();
+      // Breve pausa para dejar cerrar el pool viejo en carreras de HMR/dev.
+      await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
+    }
   }
+  throw lastError;
 }
 
 /** @deprecated Preferir getPool(). Mantener compatibilidad con imports existentes. */

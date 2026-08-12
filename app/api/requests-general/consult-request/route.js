@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 
+function isAbortedError(error) {
+  if (!error || typeof error !== 'object') return false;
+  return error.name === 'AbortError' || error.message === 'aborted';
+}
+
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
@@ -81,6 +86,10 @@ export async function GET(req) {
       { status: 200 }
     );
   } catch (err) {
+    // Cliente canceló la petición (Strict Mode / navegación / chat cargando a la vez).
+    if (isAbortedError(err)) {
+      return new NextResponse(null, { status: 499 });
+    }
     console.error('Error en el procesamiento de la solicitud:', err);
     return NextResponse.json(
       { error: 'Error procesando la solicitud', details: err.message },
