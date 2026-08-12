@@ -91,7 +91,8 @@ describe('buildPivotSql', () => {
     // Estructura de pivote EAV.
     expect(sql).toContain('COALESCE(pffo.option_label, rfv.value_text)');
     expect(sql).toContain('GROUP BY');
-    expect(sql).toContain('ORDER BY r.NumeroSolicitud DESC');
+    // Sin ORDER BY de nivel superior: rompería la tabla derivada del motor de vistas.
+    expect(sql).not.toMatch(/ORDER\s+BY/i);
   });
 
   it('EXCLUYE los campos tipo Tabla y los anota en un comentario', () => {

@@ -153,6 +153,11 @@ export function buildPivotSql(args: BuildPivotArgs): string {
     header.push(`-- Campos de tipo Tabla EXCLUIDOS (multi-fila, no pivotables): ${names}.`);
   }
 
+  // NOTA: sin ORDER BY de nivel superior. El motor de vistas envuelve esta
+  // consulta como derivada (`SELECT TOP (n) * FROM ( <sql> ) AS _q`), y SQL Server
+  // PROHÍBE ORDER BY sin TOP dentro de una tabla derivada. El orden se aplica
+  // aparte al consultar la vista.
+
   // Sin campos pivotables: solo columnas base (evita joins EAV innecesarios).
   if (pivotColumns.length === 0) {
     return [
@@ -162,7 +167,6 @@ export function buildPivotSql(args: BuildPivotArgs): string {
       'FROM vw_requests_general r',
       'INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = r.NumeroSolicitud',
       `WHERE pcrg.id_process_category = ${processId}`,
-      'ORDER BY r.NumeroSolicitud DESC',
     ].join('\n');
   }
 
@@ -176,6 +180,5 @@ export function buildPivotSql(args: BuildPivotArgs): string {
     'LEFT JOIN process_form_field_option pffo ON pffo.id = rfv.id_option',
     `WHERE pcrg.id_process_category = ${processId}`,
     `GROUP BY ${groupByCols}`,
-    'ORDER BY r.NumeroSolicitud DESC',
   ].join('\n');
 }
