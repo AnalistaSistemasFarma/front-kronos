@@ -57,3 +57,44 @@ interface SummarizerStatic {
 // `typeof Summarizer === 'undefined'` antes de usarlo (typeof no lanza aunque
 // el identificador no exista).
 declare const Summarizer: SummarizerStatic | undefined;
+
+// ---------------------------------------------------------------------------
+// Prompt API (LanguageModel) — mismo modelo Gemini Nano on-device, pero acepta
+// un prompt con tono (resumen más humano). También ausente en las libs de TS.
+// Referencia: https://developer.chrome.com/docs/ai/prompt-api
+// ---------------------------------------------------------------------------
+
+/** Mensaje inicial del contexto de la sesión (system / user / assistant). */
+interface LanguageModelInitialPrompt {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+/** Expectativa de idiomas por tipo de entrada/salida. */
+interface LanguageModelExpected {
+  type: 'text' | 'image' | 'audio';
+  languages?: string[];
+}
+
+interface LanguageModelCreateOptions {
+  initialPrompts?: LanguageModelInitialPrompt[];
+  expectedInputs?: LanguageModelExpected[];
+  expectedOutputs?: LanguageModelExpected[];
+  temperature?: number;
+  topK?: number;
+  monitor?: (m: SummarizerCreateMonitor) => void;
+}
+
+interface LanguageModelSession {
+  prompt(input: string): Promise<string>;
+  destroy(): void;
+}
+
+interface LanguageModelStatic {
+  availability(): Promise<SummarizerAvailability>;
+  create(options?: LanguageModelCreateOptions): Promise<LanguageModelSession>;
+}
+
+// Igual que Summarizer: puede no existir en runtime; verificar SIEMPRE con
+// `typeof LanguageModel === 'undefined'` antes de usarlo.
+declare const LanguageModel: LanguageModelStatic | undefined;

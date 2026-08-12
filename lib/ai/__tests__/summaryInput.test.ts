@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { buildSummaryInput } from '../summaryInput';
+import {
+  buildSummaryInput,
+  buildSummaryPrompt,
+  SUMMARY_SYSTEM_PROMPT,
+} from '../summaryInput';
 
 // Pruebas del helper PURO que arma el texto a resumir con la IA local.
 // No toca DOM ni navegador: solo verifica el armado de secciones y el
@@ -39,5 +43,22 @@ describe('buildSummaryInput', () => {
     const out = buildSummaryInput({ subject: 'A' }, [{ note: 'sin autor' }], []);
     expect(out).toContain('- sin autor');
     expect(out).not.toContain('()');
+  });
+});
+
+describe('buildSummaryPrompt', () => {
+  it('antepone la instrucción humana al texto de la solicitud', () => {
+    const out = buildSummaryPrompt('Asunto: Pago');
+    expect(out).toContain('Resume esta solicitud de forma humana y cercana:');
+    expect(out).toContain('Asunto: Pago');
+    expect(out.indexOf('humana')).toBeLessThan(out.indexOf('Asunto: Pago'));
+  });
+});
+
+describe('SUMMARY_SYSTEM_PROMPT', () => {
+  it('fija tono cálido/humano en español y prohíbe copiar literal', () => {
+    expect(SUMMARY_SYSTEM_PROMPT).toContain('español');
+    expect(SUMMARY_SYSTEM_PROMPT).toMatch(/c[aá]lido/i);
+    expect(SUMMARY_SYSTEM_PROMPT).toContain('NO copies el texto literal');
   });
 });
