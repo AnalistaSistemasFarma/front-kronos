@@ -52,6 +52,8 @@ model User {
   phone          String?
   identification String?
   id_user_sapsend Int?
+  themePalette   String?        @default("gss")
+  colorScheme    String?        @default("light")
   accounts                Account[]
   companyUsers            CompanyUser[]
   departmentUsers         DepartmentUser[]

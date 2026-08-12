@@ -1,6 +1,7 @@
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../lib/prisma';
+import { isValidPaletteKey } from '../../../lib/theme/palettes';
 import { authOptions } from '../auth/[...nextauth]/route';
 
 // GET /api/profile - Get current user profile
@@ -19,6 +20,8 @@ export async function GET(request: NextRequest) {
         email: true,
         image: true,
         createdAt: true,
+        themePalette: true,
+        colorScheme: true,
       },
     });
 
@@ -45,6 +48,20 @@ export async function PUT(request: NextRequest) {
     const name = formData.get('name') as string;
     const email = formData.get('email') as string;
     const imageUrl = formData.get('image') as string;
+    const themePaletteRaw = formData.get('themePalette');
+    const colorSchemeRaw = formData.get('colorScheme');
+
+    // Validate appearance fields against the allowed catalog
+    if (themePaletteRaw !== null && !isValidPaletteKey(themePaletteRaw)) {
+      return NextResponse.json({ error: 'Invalid theme palette' }, { status: 400 });
+    }
+    if (
+      colorSchemeRaw !== null &&
+      colorSchemeRaw !== 'light' &&
+      colorSchemeRaw !== 'dark'
+    ) {
+      return NextResponse.json({ error: 'Invalid color scheme' }, { status: 400 });
+    }
 
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -85,10 +102,14 @@ export async function PUT(request: NextRequest) {
       name?: string;
       email?: string;
       image?: string;
+      themePalette?: string;
+      colorScheme?: string;
     } = {};
-    if (name !== undefined) updateData.name = name;
-    if (email !== undefined) updateData.email = email;
-    if (imageUrl !== undefined) updateData.image = imageUrl;
+    if (formData.has('name')) updateData.name = name;
+    if (formData.has('email')) updateData.email = email;
+    if (formData.has('image')) updateData.image = imageUrl;
+    if (themePaletteRaw !== null) updateData.themePalette = themePaletteRaw as string;
+    if (colorSchemeRaw !== null) updateData.colorScheme = colorSchemeRaw as string;
 
     // Update user
     const user = await prisma.user.update({
@@ -100,14 +121,23 @@ export async function PUT(request: NextRequest) {
         email: true,
         image: true,
         createdAt: true,
+        themePalette: true,
+        colorScheme: true,
       },
     });
 
     // Log the action
     const changes = [];
-    if (name !== currentUser.name) changes.push(`name: ${currentUser.name} -> ${name}`);
-    if (email !== currentUser.email) changes.push(`email: ${currentUser.email} -> ${email}`);
-    if (imageUrl !== currentUser.image) changes.push(`image: ${currentUser.image} -> ${imageUrl}`);
+    if (formData.has('name') && name !== currentUser.name)
+      changes.push(`name: ${currentUser.name} -> ${name}`);
+    if (formData.has('email') && email !== currentUser.email)
+      changes.push(`email: ${currentUser.email} -> ${email}`);
+    if (formData.has('image') && imageUrl !== currentUser.image)
+      changes.push(`image: ${currentUser.image} -> ${imageUrl}`);
+    if (themePaletteRaw !== null && themePaletteRaw !== currentUser.themePalette)
+      changes.push(`themePalette: ${currentUser.themePalette} -> ${themePaletteRaw}`);
+    if (colorSchemeRaw !== null && colorSchemeRaw !== currentUser.colorScheme)
+      changes.push(`colorScheme: ${currentUser.colorScheme} -> ${colorSchemeRaw}`);
 
     await prisma.userAuditLog.create({
       data: {

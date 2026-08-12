@@ -1,9 +1,15 @@
 import { APP_THEME_STORAGE_KEY } from '../../lib/theme/constants';
+import {
+  DEFAULT_PALETTE_KEY,
+  PALETTE_KEY_SET,
+  PALETTE_STORAGE_KEY,
+} from '../../lib/theme/palettes';
 import { darkTokens, lightTokens } from '../../lib/theme/tokens';
 
 function buildInitScript(): string {
   const light = JSON.stringify(lightTokens);
   const dark = JSON.stringify(darkTokens);
+  const paletteKeys = JSON.stringify(Array.from(PALETTE_KEY_SET));
 
   return `(function(){
 try{
@@ -16,6 +22,10 @@ r.setAttribute('data-theme',t);
 r.setAttribute('data-mantine-color-scheme',t);
 r.classList.toggle('dark',t==='dark');
 r.style.colorScheme=t;
+var pk='${PALETTE_STORAGE_KEY}';
+var p=localStorage.getItem(pk);
+if(${paletteKeys}.indexOf(p)===-1)p='${DEFAULT_PALETTE_KEY}';
+r.setAttribute('data-palette',p);
 var map={
   '--app-bg':tokens.bg,
   '--app-surface':tokens.surface,
