@@ -11,6 +11,7 @@ import {
   MAX_VIEW_ROWS,
 } from '../../../../lib/custom-views/access';
 import { normalizeFilterDefs, type FilterDef } from '../../../../lib/custom-views/filters';
+import { resolveModuleProcessId } from '../../../../lib/custom-views/modules';
 
 export const dynamic = 'force-dynamic';
 
@@ -164,6 +165,26 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       }
     }
 
+    // Módulo de primer nivel: si el autor eligió/creó uno, se reubica la vista.
+    let nextIdProcess = current.id_process ?? CUSTOM_VIEWS_PROCESS_ID;
+    if ('targetProcessId' in body || 'newCategoryName' in body) {
+      try {
+        nextIdProcess = await resolveModuleProcessId(prisma, {
+          targetProcessId: body.targetProcessId,
+          newCategoryName: body.newCategoryName,
+        });
+        data.id_process = nextIdProcess;
+      } catch (moduleError) {
+        return NextResponse.json(
+          {
+            error: 'No se pudo resolver el módulo destino.',
+            detail: moduleError instanceof Error ? moduleError.message : String(moduleError),
+          },
+          { status: 400 }
+        );
+      }
+    }
+
     // Filtros parametrizables (Incremento 3): si el cuerpo trae "filters",
     // se reemplazan por completo (borra previos + reinserta) en transacción.
     let filterDefs: FilterDef[] | null = null;
@@ -220,14 +241,15 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         await prisma.subprocess.create({
           data: {
             subprocess: updated.name,
-            id_process: CUSTOM_VIEWS_PROCESS_ID,
+            id_process: nextIdProcess,
             subprocess_url: url,
           },
         });
-      } else if (typeof data.name === 'string') {
+      } else {
+        // Reconcilia nombre y módulo (reubicación) del subproceso existente.
         await prisma.subprocess.update({
           where: { id_subprocess: existing.id_subprocess },
-          data: { subprocess: updated.name },
+          data: { subprocess: updated.name, id_process: nextIdProcess },
         });
       }
     }
