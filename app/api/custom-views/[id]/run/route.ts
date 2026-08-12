@@ -8,19 +8,31 @@ import {
   canRunView,
   getUserCompanyIds,
   isValidColumnRef,
-  MAX_VIEW_ROWS,
+  EXPORT_MAX_ROWS,
 } from '../../../../../lib/custom-views/access';
 import { buildFilterConditions, type FilterDef } from '../../../../../lib/custom-views/filters';
+import {
+  normalizePageParams,
+  buildPageSql,
+  buildCountSql,
+  buildExportSql,
+} from '../../../../../lib/custom-views/pagination';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/custom-views/[id]/run
  *
- * Carga la vista PUBLICADA, revalida el candado de solo lectura + whitelist,
- * y la ejecuta con el usuario READ-ONLY, envolviendo:
- *   SELECT TOP (row_limit) * FROM ( <sql> ) AS _v WHERE <scope>
- * inyectando el alcance de empresa del consumidor según scope_mode. §4.2 / §5.3 / §7.
+ * Carga la vista PUBLICADA, revalida el candado de solo lectura + whitelist, y la
+ * ejecuta con el usuario READ-ONLY inyectando el alcance de empresa del consumidor
+ * (scope_mode) + los filtros parametrizados. §4.2 / §5.3 / §7.
+ *
+ * DISPLAY (default): SIN tope de filas. Pagina del lado servidor con OFFSET/FETCH
+ * y devuelve el TOTAL (COUNT_BIG). Body: { filterValues?, page?=1, pageSize?=50 }.
+ * Respuesta: { rows, total, page, pageSize, columns, filters, view }.
+ *
+ * EXPORT: body { export: true, filterValues? }. Trae TODAS las filas en una sola
+ * corrida hasta EXPORT_MAX_ROWS (tope de seguridad); si se alcanza, `truncated=true`.
  *
  * El id puede ser el id numérico o el slug de la vista.
  */
@@ -38,12 +50,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: 'Usuario no encontrado' }, { status: 404 });
     }
 
-    // Valores de filtros que envía el consumidor (opcional).
+    // Cuerpo: valores de filtros + paginación (o modo export).
     let filterValues: Record<string, unknown> = {};
+    let pageInput: unknown = undefined;
+    let pageSizeInput: unknown = undefined;
+    let isExport = false;
     try {
-      const raw = (await req.json()) as { filterValues?: unknown } | null;
+      const raw = (await req.json()) as
+        | { filterValues?: unknown; page?: unknown; pageSize?: unknown; export?: unknown }
+        | null;
       if (raw && typeof raw.filterValues === 'object' && raw.filterValues !== null) {
         filterValues = raw.filterValues as Record<string, unknown>;
+      }
+      if (raw) {
+        pageInput = raw.page;
+        pageSizeInput = raw.pageSize;
+        isExport = raw.export === true;
       }
     } catch {
       // Sin cuerpo o JSON inválido: se ejecuta sin valores (se aplican defaults).
@@ -120,32 +142,78 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
 
     const whereClause = [filterClause, scopeClause].filter((c) => c && c.length > 0).join(' AND ');
-
-    const cap = Math.min(view.row_limit || 1000, MAX_VIEW_ROWS);
     const inner = view.sql_text.replace(/;\s*$/, '');
-    const wrapped = `SELECT TOP (${cap}) * FROM (\n${inner}\n) AS _v WHERE ${whereClause}`;
+
+    const filtersOut = filterDefs.map((f) => ({
+      id_saved_view_filter: f.id_saved_view_filter,
+      column_name: f.column_name,
+      label: f.label,
+      filter_type: f.filter_type,
+      operator: f.operator,
+      options_json: f.options_json,
+      default_value: f.default_value,
+      required: f.required,
+      sort_order: f.sort_order,
+    }));
+
+    // ---- EXPORT: una sola corrida, TODO hasta el tope de seguridad ----------
+    if (isExport) {
+      const exportSql = buildExportSql(inner, whereClause, EXPORT_MAX_ROWS);
+      try {
+        const { columns, rows, rowCount } = await runReadOnlyQuery(exportSql, filterParams);
+        return NextResponse.json(
+          {
+            ok: true,
+            export: true,
+            view: { id: view.id_saved_view, slug: view.slug, name: view.name },
+            columns,
+            rows,
+            rowCount,
+            total: rowCount,
+            truncated: rowCount >= EXPORT_MAX_ROWS,
+            exportCap: EXPORT_MAX_ROWS,
+          },
+          { headers: { 'Cache-Control': 'no-store, max-age=0' } }
+        );
+      } catch (execError) {
+        return NextResponse.json(
+          {
+            error: 'Error al exportar la vista.',
+            detail: execError instanceof Error ? execError.message : String(execError),
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // ---- DISPLAY: paginación del lado servidor (sin tope de filas) ----------
+    const { page, pageSize, offset } = normalizePageParams(pageInput, pageSizeInput);
+    const countSql = buildCountSql(inner, whereClause);
+    const pageSql = buildPageSql(inner, whereClause);
 
     try {
-      const { columns, rows, rowCount } = await runReadOnlyQuery(wrapped, filterParams);
+      const countRes = await runReadOnlyQuery(countSql, filterParams);
+      const total = Number(
+        (countRes.rows[0] as Record<string, unknown> | undefined)?.total ?? 0
+      );
+
+      const { columns, rows, rowCount } = await runReadOnlyQuery(pageSql, {
+        ...filterParams,
+        __off: offset,
+        __ps: pageSize,
+      });
+
       return NextResponse.json(
         {
           ok: true,
           view: { id: view.id_saved_view, slug: view.slug, name: view.name },
-          filters: filterDefs.map((f) => ({
-            id_saved_view_filter: f.id_saved_view_filter,
-            column_name: f.column_name,
-            label: f.label,
-            filter_type: f.filter_type,
-            operator: f.operator,
-            options_json: f.options_json,
-            default_value: f.default_value,
-            required: f.required,
-            sort_order: f.sort_order,
-          })),
+          filters: filtersOut,
           columns,
           rows,
           rowCount,
-          truncated: rowCount >= cap,
+          total,
+          page,
+          pageSize,
         },
         { headers: { 'Cache-Control': 'no-store, max-age=0' } }
       );
