@@ -66,3 +66,98 @@ export function applyPaletteToDocument(key: string) {
   const resolved = isValidPaletteKey(key) ? key : DEFAULT_PALETTE_KEY;
   document.documentElement.setAttribute('data-palette', resolved);
 }
+
+export type PaletteMode = 'light' | 'dark';
+
+/** Variables de superficie/acento derivadas de la paleta para un modo dado */
+export interface PaletteVars {
+  /** Fondo de la app (near-white/near-black con un lavado MUY sutil del hue) */
+  bg: string;
+  /** Superficie de tarjetas */
+  surface: string;
+  /** Superficie elevada */
+  surfaceRaised: string;
+  /** Fondo del header */
+  header: string;
+  /** Acento accesible (WCAG AA >= 4.5:1 contra bg de este modo) */
+  accent: string;
+  /** Acento en hover */
+  accentHover: string;
+}
+
+/**
+ * Apariencia por paleta y por modo. Generado con mezcla lineal del hue de la
+ * paleta sobre bases neutras (light: near-white; dark: navy near-black) para
+ * un tinte apenas perceptible, y acentos calibrados a WCAG AA (>= 4.5:1)
+ * contra el fondo de cada modo. El acento claro sale del tono ~6-9 de la tupla
+ * Mantine (oscurecido a mano cuando la tupla no alcanzaba AA: sunset/forest/
+ * cherry/mint); el oscuro sale del tono ~3-4. Verificado en
+ * lib/theme/__tests__/paletteContrast.test.ts.
+ */
+export const PALETTE_APPEARANCE: Record<string, { light: PaletteVars; dark: PaletteVars }> = {
+  gss: {
+    light: { bg: '#e7ebf1', surface: '#fbfbfd', surfaceRaised: '#fcfdfe', header: '#fbfbfd', accent: '#1864ab', accentHover: '#155693' },
+    dark: { bg: '#161e33', surface: '#1f2944', surfaceRaised: '#283355', header: '#131a29', accent: '#4dabf7', accentHover: '#66b7f8' },
+  },
+  ocean: {
+    light: { bg: '#e6eef3', surface: '#fafdfd', surfaceRaised: '#fcfefe', header: '#fafdfd', accent: '#0b7285', accentHover: '#096272' },
+    dark: { bg: '#142235', surface: '#1e2d46', surfaceRaised: '#263857', header: '#121e2b', accent: '#3bc9db', accentHover: '#56d1e0' },
+  },
+  sunset: {
+    light: { bg: '#eeeced', surface: '#fffcfa', surfaceRaised: '#fffdfc', header: '#fffcfa', accent: '#9a3412', accentHover: '#842d0f' },
+    dark: { bg: '#201f2c', surface: '#292a3d', surfaceRaised: '#32354f', header: '#1d1b23', accent: '#ffa94d', accentHover: '#ffb566' },
+  },
+  forest: {
+    light: { bg: '#e6eeef', surface: '#fafdfb', surfaceRaised: '#fcfefd', header: '#fafdfb', accent: '#166534', accentHover: '#13572d' },
+    dark: { bg: '#15232f', surface: '#1f2e41', surfaceRaised: '#273952', header: '#121f26', accent: '#69db7c', accentHover: '#7ee08e' },
+  },
+  orchid: {
+    light: { bg: '#ebeaf5', surface: '#fdfbff', surfaceRaised: '#fefdff', header: '#fdfbff', accent: '#9c36b5', accentHover: '#862e9c' },
+    dark: { bg: '#1b1d37', surface: '#252949', surfaceRaised: '#2d335a', header: '#18192e', accent: '#da77f2', accentHover: '#df8af4' },
+  },
+  graphite: {
+    light: { bg: '#e8ecf0', surface: '#fbfcfc', surfaceRaised: '#fdfdfd', header: '#fbfcfc', accent: '#495057', accentHover: '#3f454b' },
+    dark: { bg: '#181f31', surface: '#212a42', surfaceRaised: '#2a3553', header: '#151b27', accent: '#ced4da', accentHover: '#d5dadf' },
+  },
+  cherry: {
+    light: { bg: '#edeaee', surface: '#fefbfb', surfaceRaised: '#fffcfc', header: '#fefbfb', accent: '#c92a2a', accentHover: '#ad2424' },
+    dark: { bg: '#1f1d2e', surface: '#28283f', surfaceRaised: '#313250', header: '#1c1924', accent: '#ff8787', accentHover: '#ff9898' },
+  },
+  mint: {
+    light: { bg: '#e6eef1', surface: '#fafdfd', surfaceRaised: '#fcfefe', header: '#fafdfd', accent: '#0f766e', accentHover: '#0d655f' },
+    dark: { bg: '#152233', surface: '#1e2d44', surfaceRaised: '#273855', header: '#121e29', accent: '#38d9a9', accentHover: '#54deb5' },
+  },
+};
+
+/** Devuelve las variables de apariencia de una paleta+modo, con fallback al default */
+export function getPaletteAppearance(key: unknown, mode: PaletteMode): PaletteVars {
+  const entry = PALETTE_APPEARANCE[isValidPaletteKey(key) ? key : DEFAULT_PALETTE_KEY];
+  return entry[mode];
+}
+
+/** Mapa nombre-de-variable-CSS -> valor, para una apariencia dada */
+export function paletteVarsToCss(v: PaletteVars): Record<string, string> {
+  return {
+    '--app-bg': v.bg,
+    '--background': v.bg,
+    '--mantine-color-body': v.bg,
+    '--app-surface': v.surface,
+    '--surface': v.surface,
+    '--app-surface-raised': v.surfaceRaised,
+    '--surface-muted': v.surfaceRaised,
+    '--app-header': v.header,
+    '--app-accent': v.accent,
+    '--app-accent-hover': v.accentHover,
+    '--mantine-color-anchor': v.accent,
+  };
+}
+
+/** Aplica el tinte + acento de la paleta activa como estilos inline en :root */
+export function applyPaletteAppearanceToDocument(key: string, mode: PaletteMode) {
+  if (typeof document === 'undefined') return;
+  const vars = paletteVarsToCss(getPaletteAppearance(key, mode));
+  const root = document.documentElement;
+  for (const [k, val] of Object.entries(vars)) {
+    root.style.setProperty(k, val);
+  }
+}

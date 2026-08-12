@@ -19,6 +19,7 @@ import {
 import {
   DEFAULT_PALETTE_KEY,
   PALETTE_STORAGE_KEY,
+  applyPaletteAppearanceToDocument,
   applyPaletteToDocument,
   isValidPaletteKey,
   readStoredPalette,
@@ -85,11 +86,14 @@ function ThemeProvider({ children }: { children: ReactNode }) {
     applyAppThemeToDocument(theme);
   }, [theme, mounted]);
 
+  // Debe correr DESPUÉS del efecto de tema: el tinte/acento de la paleta
+  // sobrescribe las variables base de superficie/acento por modo.
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem(PALETTE_STORAGE_KEY, palette);
     applyPaletteToDocument(palette);
-  }, [palette, mounted]);
+    applyPaletteAppearanceToDocument(palette, theme);
+  }, [palette, theme, mounted]);
 
   const setThemeMode = (mode: AppTheme) => setTheme(mode);
   const toggleTheme = () => {
