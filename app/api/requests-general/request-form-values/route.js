@@ -22,6 +22,8 @@ export async function GET(req) {
           rfv.id,
           rfv.id_form_field,
           ff.field_label,
+          ff.field_type,
+          ff.config_json,
           rfv.id_option,
           o.option_label,
           rfv.value_text

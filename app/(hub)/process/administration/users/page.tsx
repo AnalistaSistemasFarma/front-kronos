@@ -37,6 +37,11 @@ import {
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { notifySubprocessAssignmentsChanged } from '@/lib/process/subprocessAssignmentsEvents';
+import {
+  DASHBOARD_SOLICITANTE_URL,
+  DASHBOARD_SOLICITADO_URL,
+  isHubHiddenRequestDashboardSubprocess,
+} from '@/lib/request-general/dashboardAccess';
 
 interface User {
   id: string;
@@ -1211,6 +1216,21 @@ function UserManagement() {
                                     URL: {subprocess.subprocess_url}
                                   </div>
                                 )}
+                                {isHubHiddenRequestDashboardSubprocess(subprocess) ? (
+                                  <Badge size='xs' variant='light' color='teal' mt={4}>
+                                    {subprocess.subprocess_url === DASHBOARD_SOLICITADO_URL ||
+                                    (subprocess.subprocess_url ?? '').includes(
+                                      'dashboard-solicitado'
+                                    )
+                                      ? 'Da acceso a Dashboard personal en el menú'
+                                      : subprocess.subprocess_url === DASHBOARD_SOLICITANTE_URL ||
+                                          (subprocess.subprocess_url ?? '').includes(
+                                            'dashboard-solicitante'
+                                          )
+                                        ? 'Da acceso a Dashboard solicitudes en el menú'
+                                        : 'Da acceso al dashboard en el menú'}
+                                  </Badge>
+                                ) : null}
                               </div>
                               <Group gap='xs'>
                                 {subprocess.id_subprocess === authSubprocessId &&

@@ -36,7 +36,7 @@ export const SAP_SOURCES: Record<string, SapSource> = {
     labelField: 'ItemName',
     searchFields: ['ItemName', 'ItemCode'],
     selectFields: ['ItemCode', 'ItemName'],
-    fixedFilter: "Frozen eq 'tNO'",
+    fixedFilter: "Valid eq 'tYES' and Frozen eq 'tNO'",
   },
   sap_business_partners: {
     label: 'Socio de negocio (SAP)',
@@ -45,6 +45,7 @@ export const SAP_SOURCES: Record<string, SapSource> = {
     labelField: 'CardName',
     searchFields: ['CardName', 'CardCode'],
     selectFields: ['CardCode', 'CardName'],
+    fixedFilter: "Valid eq 'tYES' and Frozen eq 'tNO'",
   },
 };
 

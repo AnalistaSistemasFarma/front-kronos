@@ -58,6 +58,12 @@ import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import { getFileLabelError } from '../../../../../lib/onedriveName';
 import { SAP_SOURCES } from '../../../../../lib/requests-general/sapSources';
+import {
+  TABLE_FIELD_TYPE,
+  serializeTableConfig,
+  type TableColumn,
+} from '../../../../../lib/requests-general/tableField';
+import TableColumnsEditor from '../_components/TableColumnsEditor';
 
 interface WorkFlow {
   id: number;
@@ -168,6 +174,7 @@ function RequestBoard() {
     text: 'Texto',
     number: 'Número',
     date: 'Fecha',
+    [TABLE_FIELD_TYPE]: 'Tabla',
     ...Object.fromEntries(
       Object.entries(SAP_SOURCES).map(([key, s]) => [key, s.label])
     ),
@@ -181,6 +188,7 @@ function RequestBoard() {
         { value: 'text', label: 'Texto' },
         { value: 'number', label: 'Número' },
         { value: 'date', label: 'Fecha' },
+        { value: TABLE_FIELD_TYPE, label: 'Tabla' },
       ],
     },
     {
@@ -200,6 +208,8 @@ function RequestBoard() {
       required: boolean;
       options: Array<{ tempId: string; option_label: string }>;
       condition_option_temps: string[];
+      // Solo para field_type === 'table': definición de columnas de la tabla.
+      columns: TableColumn[];
     }>
   >([]);
   const [fieldForm, setFieldForm] = useState({
@@ -220,9 +230,17 @@ function RequestBoard() {
         required: fieldForm.required,
         options: [],
         condition_option_temps: [],
+        columns: [],
       },
     ]);
     setFieldForm({ field_label: '', field_type: 'select', required: true });
+  };
+
+  // === Gestión de columnas para campos de tipo "Tabla" ===
+  const setFieldColumns = (fieldTempId: string, columns: TableColumn[]) => {
+    setFormFields((prev) =>
+      prev.map((f) => (f.tempId === fieldTempId ? { ...f, columns } : f))
+    );
   };
 
   const removeFormField = (fieldTempId: string) => {
@@ -898,7 +916,9 @@ function RequestBoard() {
             .filter(
               (f) =>
                 f.field_label.trim() &&
-                (f.field_type !== 'select' || f.options.length > 0)
+                (f.field_type !== 'select' || f.options.length > 0) &&
+                (f.field_type !== TABLE_FIELD_TYPE ||
+                  f.columns.some((c) => c.label.trim()))
             )
             .map((f) => ({
               tempId: f.tempId,
@@ -910,6 +930,22 @@ function RequestBoard() {
                 option_label: o.option_label,
               })),
               condition_option_temps: f.condition_option_temps,
+              config_json:
+                f.field_type === TABLE_FIELD_TYPE
+                  ? serializeTableConfig(
+                      f.columns
+                        .filter((c) => c.label.trim())
+                        .map((c) => ({
+                          key: c.key,
+                          label: c.label.trim(),
+                          type: c.type,
+                          required: Boolean(c.required),
+                          ...(c.type === 'select'
+                            ? { options: (c.options || []).filter((o) => o.trim()) }
+                            : {}),
+                        }))
+                    )
+                  : null,
             })),
           cost_center_pc: formData.costCenter || null,
           id_user: formData.assignedProcess ? formData.assignedProcess : userId,
@@ -2198,6 +2234,11 @@ function RequestBoard() {
                                 </Button>
                               </Group>
                             </>
+                          ) : field.field_type === TABLE_FIELD_TYPE ? (
+                            <TableColumnsEditor
+                              columns={field.columns}
+                              onChange={(cols) => setFieldColumns(field.tempId, cols)}
+                            />
                           ) : (
                             <Text size='sm' c='dimmed' mb='sm'>
                               Campo de {(FIELD_TYPE_LABELS[field.field_type] || 'lista').toLowerCase()}:{' '}

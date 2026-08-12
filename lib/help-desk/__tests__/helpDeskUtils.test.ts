@@ -119,8 +119,8 @@ describe('SAP sources — campos del workflow que se resuelven contra SAP', () =
   });
 
   it('la fuente de artículos excluye artículos congelados (regla de negocio)', () => {
-    // Solo deben ofrecerse artículos activos (Frozen eq tNO) en el selector.
-    expect(SAP_SOURCES.sap_items.fixedFilter).toBe("Frozen eq 'tNO'");
+    // Solo deben ofrecerse artículos activos (Valid eq tYES y Frozen eq tNO) en el selector.
+    expect(SAP_SOURCES.sap_items.fixedFilter).toBe("Valid eq 'tYES' and Frozen eq 'tNO'");
     expect(SAP_SOURCES.sap_items.entity).toBe('Items');
     expect(SAP_SOURCES.sap_items.valueField).toBe('ItemCode');
   });

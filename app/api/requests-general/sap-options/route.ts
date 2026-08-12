@@ -74,11 +74,14 @@ export async function GET(request: NextRequest) {
       const e = escapeOData(q);
       const searchClause =
         '(' + def.searchFields.map((f) => `contains(${f},'${e}')`).join(' or ') + ')';
+      // Un ÚNICO $filter: búsqueda + filtro fijo de la fuente. (Antes se enviaban dos parámetros
+      // $filter en la URL y el Service Layer se quedaba solo con el último, descartando la búsqueda
+      // y devolviendo siempre las mismas filas.)
       const filter = def.fixedFilter
         ? `${searchClause} and ${def.fixedFilter}`
         : searchClause;
       const select = def.selectFields.join(',');
-      const path = `${def.entity}?$filter=${encodeURIComponent(filter)}&$select=${select}&$top=20&$filter=Valid eq 'tYES' and Frozen eq 'tNO'`;
+      const path = `${def.entity}?$filter=${encodeURIComponent(filter)}&$select=${select}&$top=20`;
 
       const data = await sapGet<{ value?: SapRow[] }>(sap, path);
       const options = (data.value ?? []).map((row) => {

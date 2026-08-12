@@ -20,8 +20,8 @@ const appDark: MantineColorsTuple = [
   '#151c2e',
 ];
 
-const shared = {
-  primaryColor: 'blue' as const,
+const makeShared = (primaryColor: string) => ({
+  primaryColor,
   defaultRadius: 'md' as const,
   fontFamily:
     'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -32,25 +32,31 @@ const shared = {
   },
   autoContrast: true,
   luminanceThreshold: 0.35,
-};
-
-export const lightMantineTheme = createTheme({
-  ...shared,
-  white: '#ffffff',
-  black: '#1a1d21',
-  colors: {
-    dark: appDark,
-  },
 });
 
-export const darkMantineTheme = createTheme({
-  ...shared,
-  white: '#f0f4ff',
-  black: '#121824',
-  colors: {
-    dark: appDark,
-  },
-});
+/** Construye el tema claro inyectando el color primario de la paleta activa */
+export function buildLightTheme(primaryColor: string = 'blue') {
+  return createTheme({
+    ...makeShared(primaryColor),
+    white: '#ffffff',
+    black: '#1a1d21',
+    colors: {
+      dark: appDark,
+    },
+  });
+}
+
+/** Construye el tema oscuro inyectando el color primario de la paleta activa */
+export function buildDarkTheme(primaryColor: string = 'blue') {
+  return createTheme({
+    ...makeShared(primaryColor),
+    white: '#f0f4ff',
+    black: '#121824',
+    colors: {
+      dark: appDark,
+    },
+  });
+}
 
 export const appCssVariablesResolver: CSSVariablesResolver = (theme) => {
   const base = defaultCssVariablesResolver(theme);

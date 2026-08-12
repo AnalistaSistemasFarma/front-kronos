@@ -63,15 +63,19 @@ export async function hasRequestDashboardAccess(
 
   const url = kind === 'solicitante' ? DASHBOARD_SOLICITANTE_URL : DASHBOARD_SOLICITADO_URL;
 
-  const row = await prisma.subprocessUserCompany.findFirst({
-    where: {
-      companyUser: { user: { email } },
-      subprocess: { subprocess_url: url },
-    },
-    select: { id_subprocess_user_company: true },
-  });
+  // Permiso = asignación del subproceso en subprocess_user_company
+  // (la misma tabla que usa Administración → Usuarios).
+  const rows = await prisma.$queryRaw<Array<{ id: number }>>`
+    SELECT TOP 1 suc.id_subprocess_user_company AS id
+    FROM [subprocess_user_company] suc
+    INNER JOIN [company_user] cu ON cu.id_company_user = suc.id_company_user
+    INNER JOIN [user] u ON u.id = cu.id_user
+    INNER JOIN [subprocess] s ON s.id_subprocess = suc.id_subprocess
+    WHERE LOWER(LTRIM(RTRIM(u.email))) = LOWER(LTRIM(RTRIM(${email})))
+      AND LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, '')))) = LOWER(LTRIM(RTRIM(${url})))
+  `;
 
-  return Boolean(row);
+  return Boolean(rows[0]?.id);
 }
 
 /**

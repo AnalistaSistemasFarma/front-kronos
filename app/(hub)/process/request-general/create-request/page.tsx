@@ -63,12 +63,23 @@ import {
   IconTag,
   IconDownload,
   IconLink,
+  IconTrash,
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 import { sanitizeOneDriveName } from '../../../../../lib/onedriveName';
 import { isSapField } from '../../../../../lib/requests-general/sapSources';
+import {
+  TABLE_FIELD_TYPE,
+  parseTableConfig,
+  serializeTableValue,
+  validateTableRows,
+  isRowEmpty,
+  type TableColumn,
+  type TableRow,
+} from '../../../../../lib/requests-general/tableField';
 import SapOptionSelect from './SapOptionSelect';
+import TableFieldInput from './TableFieldInput';
 import toast from 'react-hot-toast';
 
 interface RequestTask {
@@ -215,9 +226,14 @@ function RequestBoard() {
       required: boolean;
       options: { id: number; option_label: string }[];
       conditions: number[];
+      config_json?: string | null;
     }[]
   >([]);
-  const [fieldValues, setFieldValues] = useState<Record<number, number | string>>({});
+  // Los campos tipo tabla guardan su valor como TableRow[] (filas); el resto
+  // guarda un id de opción (number) o un valor libre (string).
+  const [fieldValues, setFieldValues] = useState<
+    Record<number, number | string | TableRow[]>
+  >({});
 
   const [filters, setFilters] = useState({
     id: '',
@@ -396,6 +412,7 @@ function RequestBoard() {
             required: boolean | number;
             options: { id: number; option_label: string }[];
             conditions: number[];
+            config_json?: string | null;
           }) => ({
             id: f.id,
             field_label: f.field_label,
@@ -403,6 +420,7 @@ function RequestBoard() {
             required: Boolean(f.required),
             options: f.options || [],
             conditions: f.conditions || [],
+            config_json: f.config_json ?? null,
           })
         )
       );
@@ -751,6 +769,18 @@ function RequestBoard() {
 
     for (const field of visibleFields) {
       const val = fieldValues[field.id];
+      if (field.field_type === TABLE_FIELD_TYPE) {
+        const columns = parseTableConfig(field.config_json).columns;
+        const rows = Array.isArray(val) ? (val as TableRow[]) : [];
+        const tableError = validateTableRows(
+          columns,
+          rows,
+          field.required,
+          field.field_label
+        );
+        if (tableError) errors[`field_${field.id}`] = tableError;
+        continue;
+      }
       const empty = val === undefined || val === null || val === '';
       if (field.required && empty) {
         errors[`field_${field.id}`] =
@@ -802,10 +832,22 @@ function RequestBoard() {
             formValues: visibleFields
               .filter((f) => {
                 const v = fieldValues[f.id];
+                if (f.field_type === TABLE_FIELD_TYPE) {
+                  const columns = parseTableConfig(f.config_json).columns;
+                  const rows = Array.isArray(v) ? (v as TableRow[]) : [];
+                  return rows.some((r) => !isRowEmpty(r, columns));
+                }
                 return v !== undefined && v !== null && v !== '';
               })
               .map((f) => {
                 const v = fieldValues[f.id];
+                if (f.field_type === TABLE_FIELD_TYPE) {
+                  const columns = parseTableConfig(f.config_json).columns;
+                  const rows = (Array.isArray(v) ? (v as TableRow[]) : []).filter(
+                    (r) => !isRowEmpty(r, columns)
+                  );
+                  return { id_field: f.id, value_text: serializeTableValue(rows) };
+                }
                 return f.field_type === 'select'
                   ? { id_field: f.id, id_option: v }
                   : { id_field: f.id, value_text: String(v) };
@@ -1940,9 +1982,31 @@ function RequestBoard() {
                     // "Valor a Pagar"/monto: no hay field_type de moneda, se detecta por label.
                     // Muestra separador de miles (400.000) y guarda el número limpio (400000).
                     const isMoneyField = /valor a pagar|monto/i.test(field.field_label);
+                    const isTableField = field.field_type === TABLE_FIELD_TYPE;
                     return (
-                      <Grid.Col span={{ base: 12, md: 6 }} key={field.id}>
-                        {isMoneyField ? (
+                      <Grid.Col
+                        span={{ base: 12, md: isTableField ? 12 : 6 }}
+                        key={field.id}
+                      >
+                        {isTableField ? (
+                          <TableFieldInput
+                            label={field.field_label}
+                            required={field.required}
+                            columns={parseTableConfig(field.config_json).columns}
+                            rows={Array.isArray(rawValue) ? (rawValue as TableRow[]) : []}
+                            onChange={(newRows) => {
+                              setFieldValues((prev) => {
+                                const next = { ...prev };
+                                if (newRows.length > 0) next[field.id] = newRows;
+                                else delete next[field.id];
+                                return next;
+                              });
+                              clearFieldError();
+                            }}
+                            companyId={Number(formData.company) || undefined}
+                            error={formErrors[`field_${field.id}`]}
+                          />
+                        ) : isMoneyField ? (
                           <NumberInput
                             label={field.field_label}
                             placeholder='Ingrese el valor'
