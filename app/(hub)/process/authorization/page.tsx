@@ -47,11 +47,13 @@ import {
   IconThumbUp,
   IconThumbDown,
   IconFileText,
+  IconEye,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
+import AuthorizationDetailModal from './AuthorizationDetailModal';
 
 interface AuthorizationRequest {
-  id: number; // id_task_request (task_request_general.id) — usado para selección y update-activities
+  id: number;
   id_request_general: number;
   subject: string;
   company: string;
@@ -62,7 +64,6 @@ interface AuthorizationRequest {
   status: 'pendiente' | 'autorizado' | 'rechazado' | 'cancelado';
 }
 
-// Forma cruda de cada registro devuelto por /api/authorization/authorization-activities
 interface RawActivity {
   id_task_request: number;
   id_request_general: number;
@@ -80,7 +81,6 @@ interface RawActivity {
   creator_request: string | null;
 }
 
-// Valores numéricos de id_status que espera la API (status_case)
 const STATUS_OPTIONS = [
   { value: '0', label: 'Todos' },
   { value: '4', label: 'Pendiente' },
@@ -149,7 +149,6 @@ function AuthorizationBoard() {
     const router = useRouter();
     const isMobile = useMediaQuery('(max-width: 768px)');
 
-    // Estado UI
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const userName = session?.user?.name || '';
@@ -170,13 +169,18 @@ function AuthorizationBoard() {
 
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
-    // Modales
     const [rejectModalOpened, setRejectModalOpened] = useState(false);
     const [authorizeModalOpened, setAuthorizeModalOpened] = useState(false);
     const [rejectReason, setRejectReason] = useState('');
     const [rejectReasonError, setRejectReasonError] = useState(false);
-    // target: id puntual, o null = acción masiva sobre la selección
     const [actionTarget, setActionTarget] = useState<number | null>(null);
+
+    const [detailModalOpened, setDetailModalOpened] = useState(false);
+    const [detailRequest, setDetailRequest] = useState<AuthorizationRequest | null>(null);
+    const openDetailModal = (req: AuthorizationRequest) => {
+        setDetailRequest(req);
+        setDetailModalOpened(true);
+    };
 
     const [departmentUser, setDepartmentUser] = useState<{
     departments: Array<{
@@ -210,12 +214,8 @@ function AuthorizationBoard() {
         }
     }, [status, session, userName, userId, userIdInitialized, router]);
 
-    // ---- Derivados ----
-    // El filtrado (id, estado, empresa, fechas) y la validación de departamentos se hacen en el
-    // backend (query de authorization-activities); aquí solo mostramos lo recibido.
     const filteredRequests = requests;
 
-    // Solo las pendientes son seleccionables para acciones masivas
     const selectableRequests = useMemo(
         () => filteredRequests.filter((r) => r.status === 'pendiente'),
         [filteredRequests]
@@ -309,7 +309,6 @@ function AuthorizationBoard() {
 
             setRequests(mapped);
 
-            // Poblar opciones de empresa solo cuando no hay filtro de empresa (lista completa).
             if (!f.company) {
                 const seen = new Map<number, string>();
                 mapped.forEach((m) => {
@@ -345,7 +344,6 @@ function AuthorizationBoard() {
         } 
     };
 
-    // ---- Handlers (stubs) ----
     const handleFilterChange = (field: string, value: string) => {
         setFilters((prev) => ({ ...prev, [field]: value }));
     };
@@ -395,7 +393,6 @@ function AuthorizationBoard() {
     const targetIds = (): number[] =>
         actionTarget !== null ? [actionTarget] : Array.from(selectedIds);
 
-    // Envía una actualización de estado por tarea a update-activities. Devuelve true si OK.
     const updateActivityStatus = async (
         taskId: number,
         idStatus: number,
@@ -497,7 +494,6 @@ function AuthorizationBoard() {
         );
     }
 
-    // ---- Render de una fila (tabla, escritorio) ----
     const renderRow = (req: AuthorizationRequest) => {
         const isPending = req.status === 'pendiente';
         return (
@@ -567,40 +563,47 @@ function AuthorizationBoard() {
             </Badge>
             </Table.Td>
             <Table.Td>
-            {isPending ? (
-                <Group gap='xs' wrap='nowrap'>
-                <Tooltip label='Autorizar'>
-                    <ActionIcon
+            <Group gap='xs' wrap='nowrap'>
+                <Tooltip label='Ver detalle'>
+                <ActionIcon
                     variant='light'
-                    color='green'
-                    onClick={() => openAuthorizeModal(req.id)}
-                    aria-label='Autorizar'
-                    >
-                    <IconThumbUp size={16} />
-                    </ActionIcon>
+                    color='blue'
+                    onClick={() => openDetailModal(req)}
+                    aria-label='Ver detalle'
+                >
+                    <IconEye size={16} />
+                </ActionIcon>
                 </Tooltip>
-                <Tooltip label='Rechazar'>
+                {isPending && (
+                <>
+                    <Tooltip label='Autorizar'>
                     <ActionIcon
-                    variant='light'
-                    color='red'
-                    onClick={() => openRejectModal(req.id)}
-                    aria-label='Rechazar'
+                        variant='light'
+                        color='green'
+                        onClick={() => openAuthorizeModal(req.id)}
+                        aria-label='Autorizar'
                     >
-                    <IconThumbDown size={16} />
+                        <IconThumbUp size={16} />
                     </ActionIcon>
-                </Tooltip>
-                </Group>
-            ) : (
-                <Text size='xs' c='dimmed'>
-                —
-                </Text>
-            )}
+                    </Tooltip>
+                    <Tooltip label='Rechazar'>
+                    <ActionIcon
+                        variant='light'
+                        color='red'
+                        onClick={() => openRejectModal(req.id)}
+                        aria-label='Rechazar'
+                    >
+                        <IconThumbDown size={16} />
+                    </ActionIcon>
+                    </Tooltip>
+                </>
+                )}
+            </Group>
             </Table.Td>
         </Table.Tr>
         );
     };
 
-    // ---- Render de una tarjeta (móvil) ----
     const renderCard = (req: AuthorizationRequest) => {
         const isPending = req.status === 'pendiente';
         return (
@@ -654,6 +657,18 @@ function AuthorizationBoard() {
                 {formatDate(req.created_at)}
                 </Text>
             </Group>
+
+            <Button
+                size='xs'
+                variant='light'
+                color='blue'
+                mt='xs'
+                fullWidth
+                leftSection={<IconEye size={14} />}
+                onClick={() => openDetailModal(req)}
+            >
+                Ver detalle
+            </Button>
 
             {isPending && (
                 <Group grow mt='xs'>
@@ -953,7 +968,6 @@ function AuthorizationBoard() {
                 </Text>
                 </Stack>
             ) : isMobile ? (
-                // Vista móvil: tarjetas
                 <Stack gap='sm'>
                 {selectableRequests.length > 0 && (
                     <Checkbox
@@ -966,7 +980,6 @@ function AuthorizationBoard() {
                 {filteredRequests.map(renderCard)}
                 </Stack>
             ) : (
-                // Vista escritorio: tabla
                 <div className='overflow-x-auto'>
                 <Table striped highlightOnHover verticalSpacing='sm'>
                     <Table.Thead>
@@ -1062,6 +1075,13 @@ function AuthorizationBoard() {
             </Group>
             </Stack>
         </Modal>
+
+        {/* Modal de detalle (solo lectura) */}
+        <AuthorizationDetailModal
+            opened={detailModalOpened}
+            onClose={() => setDetailModalOpened(false)}
+            request={detailRequest}
+        />
         </div>
     );
     }

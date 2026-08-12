@@ -36,6 +36,7 @@ import {
   Tooltip,
   RingProgress,
   Loader,
+  Pagination,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -70,6 +71,8 @@ import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 import { createPrerenderSearchParamsForClientPage } from 'next/dist/server/request/search-params';
+
+const ITEMS_PER_PAGE = 100;
 
 interface Ticket {
   id: number;
@@ -160,13 +163,25 @@ function RequestBoard() {
 
   const [filters, setFilters] = useState({
     id: '',
-    status: '1',
+    status: '0',
     company: '',
     date_from: '',
     date_to: '',
     assigned_to: '',
     process: '',
   });
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Paginación en cliente: al cambiar el conjunto de tickets (nuevo fetch / filtros) vuelve a página 1.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [tickets]);
+
+  const totalPages = Math.max(1, Math.ceil(tickets.length / ITEMS_PER_PAGE));
+  const pageItems = tickets.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   useEffect(() => {
@@ -598,12 +613,12 @@ function RequestBoard() {
                 withBorder
                 role='button'
                 aria-label='Mostrar todas las solicitudes'
-                onClick={() => filterByStatus('')}
+                onClick={() => filterByStatus('0')}
                 style={{
                   cursor: 'pointer',
                   backgroundColor: 'var(--mantine-color-blue-light)',
                   borderColor:
-                    filters.status === ''
+                    filters.status === '0'
                       ? 'var(--mantine-color-blue-filled)'
                       : 'transparent',
                   borderWidth: 2,
@@ -843,7 +858,7 @@ function RequestBoard() {
                   onClick={() => {
                     const clearedFilters = {
                       id: '',
-                      status: '',
+                      status: '0',
                       company: '',
                       date_from: '',
                       date_to: '',
@@ -903,7 +918,7 @@ function RequestBoard() {
                     </Table.Td>
                   </Table.Tr>
                 ) : (
-                  tickets.map((ticket) => (
+                  pageItems.map((ticket) => (
                     <Table.Tr
                       key={ticket.id}
                       className='cursor-pointer transition-colors'
@@ -1047,6 +1062,12 @@ function RequestBoard() {
               </Table.Tbody>
             </Table>
           </div>
+
+          {totalPages > 1 && (
+            <Group justify='center' mt='md'>
+              <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} />
+            </Group>
+          )}
         </Card>
       </div>
     </div>
