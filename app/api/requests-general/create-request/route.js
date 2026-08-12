@@ -183,7 +183,7 @@ export async function POST(req) {
             .input("id_request", sql.Int, newRequestId)
             .input("id_field", sql.Int, fv.id_field)
             .input("id_option", sql.Int, fv.id_option ?? null)
-            .input("value_text", sql.NVarChar(1000), fv.value_text ?? null)
+            .input("value_text", sql.NVarChar(sql.MAX), fv.value_text ?? null)
             .query(`
               INSERT INTO request_form_value
               (id_request_general, id_form_field, id_option, value_text)
