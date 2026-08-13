@@ -14,8 +14,11 @@ import {
   Card,
   SimpleGrid,
   Stack,
+  Button,
+  Modal,
 } from '@mantine/core';
-import { IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
+import { useDisclosure } from '@mantine/hooks';
+import { IconAlertTriangle, IconInfoCircle, IconListDetails } from '@tabler/icons-react';
 
 /**
  * Asistente de Pagos (multiempresa) — SOLO LECTURA.
@@ -36,9 +39,21 @@ interface CompanyAccess {
   ready: boolean;
 }
 
+interface SupplierInvoice {
+  docEntry: number;
+  docNum: number;
+  docDate: string;
+  docDueDate: string;
+  docTotal: number;
+  paidToDate: number;
+  pendingAmount: number;
+  docCurrency: string;
+}
+
 interface SupplierGroup {
   cardCode: string;
   cardName: string;
+  invoices: SupplierInvoice[];
   invoiceCount: number;
   totalPending: number;
   hasBankData: boolean;
@@ -58,6 +73,17 @@ const currency = new Intl.NumberFormat('es-CO', {
   maximumFractionDigits: 0,
 });
 
+/** Formato numérico con separador de miles es-CO (sin símbolo de moneda). */
+const amount = new Intl.NumberFormat('es-CO', {
+  maximumFractionDigits: 0,
+});
+
+/** Recorta un ISO/fecha SAP a YYYY-MM-DD. Devuelve '-' si viene vacío. */
+function formatDate(value: string): string {
+  if (!value) return '-';
+  return value.slice(0, 10);
+}
+
 export default function PaymentAssistantPage() {
   const { data: session } = useSession();
 
@@ -69,6 +95,15 @@ export default function PaymentAssistantPage() {
   const [loadingProposal, setLoadingProposal] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
   const [proposalError, setProposalError] = useState<string | null>(null);
+
+  // Proveedor cuyo detalle de facturas está abierto en el modal.
+  const [detailGroup, setDetailGroup] = useState<SupplierGroup | null>(null);
+  const [detailOpened, { open: openDetail, close: closeDetail }] = useDisclosure(false);
+
+  const showDetail = (group: SupplierGroup) => {
+    setDetailGroup(group);
+    openDetail();
+  };
 
   useEffect(() => {
     if (session) loadAccess();
@@ -229,12 +264,13 @@ export default function PaymentAssistantPage() {
                   <Table.Th style={{ textAlign: 'right' }}>N.° facturas</Table.Th>
                   <Table.Th style={{ textAlign: 'right' }}>Total pendiente</Table.Th>
                   <Table.Th>Banco</Table.Th>
+                  <Table.Th style={{ textAlign: 'right' }}>Detalle</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {proposal.groups.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={5} style={{ textAlign: 'center' }}>
+                    <Table.Td colSpan={6} style={{ textAlign: 'center' }}>
                       No hay facturas de proveedor abiertas para esta empresa.
                     </Table.Td>
                   </Table.Tr>
@@ -258,6 +294,17 @@ export default function PaymentAssistantPage() {
                           </Badge>
                         )}
                       </Table.Td>
+                      <Table.Td style={{ textAlign: 'right' }}>
+                        <Button
+                          size="xs"
+                          variant="light"
+                          leftSection={<IconListDetails size={14} />}
+                          onClick={() => showDetail(g)}
+                          disabled={(g.invoices?.length ?? 0) === 0}
+                        >
+                          Ver detalle
+                        </Button>
+                      </Table.Td>
                     </Table.Tr>
                   ))
                 )}
@@ -266,6 +313,65 @@ export default function PaymentAssistantPage() {
           </Table.ScrollContainer>
         </Stack>
       )}
+
+      <Modal
+        opened={detailOpened}
+        onClose={closeDetail}
+        title={`Facturas de ${detailGroup?.cardName || detailGroup?.cardCode || ''}`}
+        size="xl"
+      >
+        {detailGroup && (
+          <Stack gap="sm">
+            <Table.ScrollContainer minWidth={720}>
+              <Table striped highlightOnHover withTableBorder>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>N.° factura</Table.Th>
+                    <Table.Th>Fecha</Table.Th>
+                    <Table.Th>Vencimiento</Table.Th>
+                    <Table.Th style={{ textAlign: 'right' }}>Total</Table.Th>
+                    <Table.Th style={{ textAlign: 'right' }}>Pagado</Table.Th>
+                    <Table.Th style={{ textAlign: 'right' }}>Pendiente</Table.Th>
+                    <Table.Th>Moneda</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {detailGroup.invoices.map((inv) => (
+                    <Table.Tr key={inv.docEntry}>
+                      <Table.Td>{inv.docNum}</Table.Td>
+                      <Table.Td>{formatDate(inv.docDate)}</Table.Td>
+                      <Table.Td>{formatDate(inv.docDueDate)}</Table.Td>
+                      <Table.Td style={{ textAlign: 'right' }}>
+                        {amount.format(inv.docTotal)}
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: 'right' }}>
+                        {amount.format(inv.paidToDate)}
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: 'right' }}>
+                        {amount.format(inv.pendingAmount)}
+                      </Table.Td>
+                      <Table.Td>{inv.docCurrency || '-'}</Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+                <Table.Tfoot>
+                  <Table.Tr>
+                    <Table.Td colSpan={5} style={{ textAlign: 'right', fontWeight: 700 }}>
+                      Total pendiente
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: 'right', fontWeight: 700 }}>
+                      {amount.format(
+                        detailGroup.invoices.reduce((sum, inv) => sum + inv.pendingAmount, 0)
+                      )}
+                    </Table.Td>
+                    <Table.Td />
+                  </Table.Tr>
+                </Table.Tfoot>
+              </Table>
+            </Table.ScrollContainer>
+          </Stack>
+        )}
+      </Modal>
     </div>
   );
 }
