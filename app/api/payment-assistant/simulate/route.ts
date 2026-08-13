@@ -6,10 +6,15 @@ import { getDispersionConfig } from '../../../../lib/payment-assistant/dispersio
 import {
   getOpenSupplierInvoices,
   getSupplierBankAccounts,
+  getSupplierIdentity,
   buildPaymentProposal,
   type SupplierBankAccount,
 } from '../../../../lib/payments/proposal';
-import { proposalToDisfon } from '../../../../lib/payments/disfonMapping';
+import {
+  proposalToDisfon,
+  deriveBeneficiaryIdentity,
+  type BeneficiaryIdentity,
+} from '../../../../lib/payments/disfonMapping';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -73,6 +78,22 @@ export async function GET(request: NextRequest) {
       }
       const proposal = buildPaymentProposal(invoices, bankByCardCode);
 
+      // 1b) Identificación del beneficiario (SOLO LECTURA): documento tributario
+      //     de cada proveedor (BusinessPartners/FederalTaxID). Se deriva el tipo
+      //     y número con una heurística provisional (ver deriveBeneficiaryIdentity).
+      const identities: Record<string, BeneficiaryIdentity> = {};
+      const identityResults = await Promise.allSettled(
+        cardCodes.map(async (cardCode) => ({
+          cardCode,
+          identity: await getSupplierIdentity(sap, cardCode),
+        }))
+      );
+      for (const result of identityResults) {
+        if (result.status !== 'fulfilled') continue;
+        const derived = deriveBeneficiaryIdentity(result.value.identity.federalTaxID);
+        if (derived) identities[result.value.cardCode] = derived;
+      }
+
       // 2) Configuración de dispersión de la empresa (cabecera DISFON).
       const config = await getDispersionConfig(access.idCompany);
 
@@ -103,12 +124,13 @@ export async function GET(request: NextRequest) {
         `${String(now.getMonth() + 1).padStart(2, '0')}` +
         `${String(now.getDate()).padStart(2, '0')}`;
 
-      // 4) Mapeo a DISFON (función pura). Las identidades se poblarán aguas
-      //    arriba (BusinessPartners/FederalTaxID); hoy van vacías -> warnings.
+      // 4) Mapeo a DISFON (función pura). Las identidades se pobla­ron aguas
+      //    arriba (BusinessPartners/FederalTaxID); los proveedores sin documento
+      //    generan un warning dentro del mapeo.
       const { fileText, warnings, detailCount } = proposalToDisfon(
         config,
         proposal.groups,
-        { fechaAplicacion }
+        { fechaAplicacion, identities }
       );
 
       return NextResponse.json({

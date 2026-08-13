@@ -16,9 +16,23 @@ import {
   Stack,
   Button,
   Modal,
+  Code,
+  ScrollArea,
+  CopyButton,
+  TextInput,
+  Divider,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconAlertTriangle, IconInfoCircle, IconListDetails } from '@tabler/icons-react';
+import {
+  IconAlertTriangle,
+  IconInfoCircle,
+  IconListDetails,
+  IconFileText,
+  IconSettings,
+  IconCopy,
+  IconCheck,
+  IconDeviceFloppy,
+} from '@tabler/icons-react';
 
 /**
  * Asistente de Pagos (multiempresa) — SOLO LECTURA.
@@ -67,6 +81,58 @@ interface Proposal {
   suppliersMissingBank: string[];
 }
 
+interface SimulateSummary {
+  supplierCount: number;
+  invoiceCount: number;
+  grandTotalPending: number;
+  detailCount: number;
+  suppliersMissingBank: number;
+}
+
+interface SimulateResult {
+  companyId: number;
+  companyName: string;
+  preview: string;
+  warnings: string[];
+  summary: SimulateSummary;
+}
+
+/** Configuración de dispersión (cabecera DISFON) editable desde el formulario. */
+interface DispersionConfig {
+  idCompany: number;
+  cuentaDispersora: string;
+  tipoCuenta: string;
+  nit: string;
+  tipoMovimiento: string;
+  codigoCiudad: string;
+  codigoOficina: string;
+  tipoId: string;
+  nombreEmpresa: string | null;
+}
+
+/** Estado del formulario de configuración (todos los campos como texto). */
+interface ConfigForm {
+  cuentaDispersora: string;
+  tipoCuenta: string;
+  nit: string;
+  tipoMovimiento: string;
+  codigoCiudad: string;
+  codigoOficina: string;
+  tipoId: string;
+  nombreEmpresa: string;
+}
+
+const EMPTY_CONFIG_FORM: ConfigForm = {
+  cuentaDispersora: '',
+  tipoCuenta: '1',
+  nit: '',
+  tipoMovimiento: '002',
+  codigoCiudad: '0000',
+  codigoOficina: '000',
+  tipoId: 'N',
+  nombreEmpresa: '',
+};
+
 const currency = new Intl.NumberFormat('es-CO', {
   style: 'currency',
   currency: 'COP',
@@ -103,6 +169,112 @@ export default function PaymentAssistantPage() {
   const showDetail = (group: SupplierGroup) => {
     setDetailGroup(group);
     openDetail();
+  };
+
+  // --- Simulación DISFON --------------------------------------------------
+  const [simOpened, { open: openSim, close: closeSim }] = useDisclosure(false);
+  const [simLoading, setSimLoading] = useState(false);
+  const [simError, setSimError] = useState<string | null>(null);
+  const [simResult, setSimResult] = useState<SimulateResult | null>(null);
+
+  const runSimulation = async () => {
+    if (!selectedCompany) return;
+    try {
+      openSim();
+      setSimLoading(true);
+      setSimError(null);
+      setSimResult(null);
+
+      const res = await fetch(
+        `/api/payment-assistant/simulate?companyId=${encodeURIComponent(selectedCompany)}`
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'No se pudo generar la simulacion');
+      setSimResult(data as SimulateResult);
+    } catch (err) {
+      setSimError(err instanceof Error ? err.message : 'Error inesperado');
+    } finally {
+      setSimLoading(false);
+    }
+  };
+
+  // --- Configuración de dispersión ---------------------------------------
+  const [cfgOpened, { open: openCfg, close: closeCfg }] = useDisclosure(false);
+  const [cfgLoading, setCfgLoading] = useState(false);
+  const [cfgSaving, setCfgSaving] = useState(false);
+  const [cfgForm, setCfgForm] = useState<ConfigForm>(EMPTY_CONFIG_FORM);
+  const [cfgFeedback, setCfgFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(
+    null
+  );
+
+  const setCfgField = (field: keyof ConfigForm, value: string) =>
+    setCfgForm((prev) => ({ ...prev, [field]: value }));
+
+  const openConfig = async () => {
+    if (!selectedCompany) return;
+    openCfg();
+    setCfgFeedback(null);
+    setCfgForm(EMPTY_CONFIG_FORM);
+    try {
+      setCfgLoading(true);
+      const res = await fetch(
+        `/api/payment-assistant/dispersion-config?companyId=${encodeURIComponent(selectedCompany)}`
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'No se pudo cargar la configuracion');
+      const cfg: DispersionConfig | null = data.config ?? null;
+      if (cfg) {
+        setCfgForm({
+          cuentaDispersora: cfg.cuentaDispersora ?? '',
+          tipoCuenta: cfg.tipoCuenta || '1',
+          nit: cfg.nit ?? '',
+          tipoMovimiento: cfg.tipoMovimiento || '002',
+          codigoCiudad: cfg.codigoCiudad || '0000',
+          codigoOficina: cfg.codigoOficina || '000',
+          tipoId: cfg.tipoId || 'N',
+          nombreEmpresa: cfg.nombreEmpresa ?? '',
+        });
+      }
+    } catch (err) {
+      setCfgFeedback({
+        type: 'error',
+        msg: err instanceof Error ? err.message : 'Error inesperado',
+      });
+    } finally {
+      setCfgLoading(false);
+    }
+  };
+
+  const saveConfig = async (): Promise<boolean> => {
+    if (!selectedCompany) return false;
+    try {
+      setCfgSaving(true);
+      setCfgFeedback(null);
+      const res = await fetch('/api/payment-assistant/dispersion-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: Number(selectedCompany), ...cfgForm }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'No se pudo guardar la configuracion');
+      setCfgFeedback({ type: 'success', msg: 'Configuracion guardada correctamente.' });
+      return true;
+    } catch (err) {
+      setCfgFeedback({
+        type: 'error',
+        msg: err instanceof Error ? err.message : 'Error inesperado',
+      });
+      return false;
+    } finally {
+      setCfgSaving(false);
+    }
+  };
+
+  const saveConfigAndSimulate = async () => {
+    const ok = await saveConfig();
+    if (!ok) return;
+    closeCfg();
+    runSimulation();
   };
 
   useEffect(() => {
@@ -187,7 +359,8 @@ export default function PaymentAssistantPage() {
       </Group>
 
       <Alert color="blue" icon={<IconInfoCircle size={16} />} mb="md">
-        Simulacion y ejecucion de pagos: proximamente. Esta vista es solo de consulta.
+        Puede <b>simular</b> el archivo DISFON y <b>configurar</b> la dispersion por empresa. La
+        simulacion es solo una previsualizacion: no ejecuta pagos ni escribe en SAP.
       </Alert>
 
       <Group mb="md">
@@ -221,6 +394,23 @@ export default function PaymentAssistantPage() {
 
       {!loadingProposal && !proposalError && selectedCompany && proposal && (
         <Stack gap="md">
+          <Group>
+            <Button
+              leftSection={<IconFileText size={16} />}
+              onClick={runSimulation}
+              disabled={proposal.groups.length === 0}
+            >
+              Simular
+            </Button>
+            <Button
+              variant="default"
+              leftSection={<IconSettings size={16} />}
+              onClick={openConfig}
+            >
+              Configuracion de dispersion
+            </Button>
+          </Group>
+
           <SimpleGrid cols={{ base: 1, sm: 3 }}>
             <Card withBorder padding="md" radius="md">
               <Text size="xs" c="dimmed" tt="uppercase">
@@ -313,6 +503,238 @@ export default function PaymentAssistantPage() {
           </Table.ScrollContainer>
         </Stack>
       )}
+
+      {/* Modal de SIMULACIÓN DISFON */}
+      <Modal opened={simOpened} onClose={closeSim} title="Simulacion del archivo DISFON" size="xl">
+        <Stack gap="md">
+          <Alert color="blue" icon={<IconInfoCircle size={16} />}>
+            Esta es una <b>simulacion</b>: se genera el archivo DISFON para previsualizarlo, pero{' '}
+            <b>no se paga, no se guarda y no se envia nada al banco</b>.
+          </Alert>
+
+          {simLoading && (
+            <Group justify="center" my="md">
+              <Loader />
+            </Group>
+          )}
+
+          {simError && (
+            <Alert color="red" icon={<IconAlertTriangle size={16} />} title="No se pudo simular">
+              {simError}
+            </Alert>
+          )}
+
+          {!simLoading && !simError && simResult && (
+            <>
+              <SimpleGrid cols={{ base: 2, sm: 4 }}>
+                <div>
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Renglones
+                  </Text>
+                  <Text fw={700}>{simResult.summary.detailCount}</Text>
+                </div>
+                <div>
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Proveedores
+                  </Text>
+                  <Text fw={700}>{simResult.summary.supplierCount}</Text>
+                </div>
+                <div>
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Facturas
+                  </Text>
+                  <Text fw={700}>{simResult.summary.invoiceCount}</Text>
+                </div>
+                <div>
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Total
+                  </Text>
+                  <Text fw={700}>{currency.format(simResult.summary.grandTotalPending)}</Text>
+                </div>
+              </SimpleGrid>
+
+              {simResult.warnings.length > 0 && (
+                <Alert
+                  color="yellow"
+                  icon={<IconAlertTriangle size={16} />}
+                  title={`Validaciones (${simResult.warnings.length})`}
+                >
+                  <Stack gap={4}>
+                    {simResult.warnings.map((w, i) => (
+                      <Text key={i} size="sm">
+                        • {w}
+                      </Text>
+                    ))}
+                  </Stack>
+                </Alert>
+              )}
+
+              <div>
+                <Group justify="space-between" align="center" mb="xs">
+                  <Text fw={600}>Vista previa del archivo DISFON</Text>
+                  {simResult.preview && (
+                    <CopyButton value={simResult.preview}>
+                      {({ copied, copy }) => (
+                        <Button
+                          size="xs"
+                          variant="light"
+                          color={copied ? 'teal' : 'blue'}
+                          leftSection={
+                            copied ? <IconCheck size={14} /> : <IconCopy size={14} />
+                          }
+                          onClick={copy}
+                        >
+                          {copied ? 'Copiado' : 'Copiar'}
+                        </Button>
+                      )}
+                    </CopyButton>
+                  )}
+                </Group>
+                {simResult.preview ? (
+                  <ScrollArea.Autosize mah={360} type="auto">
+                    <Code block style={{ whiteSpace: 'pre', fontSize: 12 }}>
+                      {simResult.preview}
+                    </Code>
+                  </ScrollArea.Autosize>
+                ) : (
+                  <Text c="dimmed" size="sm">
+                    Sin contenido para previsualizar (revise las validaciones y la configuracion de
+                    dispersion).
+                  </Text>
+                )}
+              </div>
+            </>
+          )}
+        </Stack>
+      </Modal>
+
+      {/* Modal de CONFIGURACIÓN DE DISPERSIÓN */}
+      <Modal
+        opened={cfgOpened}
+        onClose={closeCfg}
+        title="Configuracion de dispersion"
+        size="lg"
+      >
+        <Stack gap="md">
+          {cfgFeedback && (
+            <Alert
+              color={cfgFeedback.type === 'success' ? 'green' : 'red'}
+              icon={
+                cfgFeedback.type === 'success' ? (
+                  <IconCheck size={16} />
+                ) : (
+                  <IconAlertTriangle size={16} />
+                )
+              }
+            >
+              {cfgFeedback.msg}
+            </Alert>
+          )}
+
+          <Text size="sm" c="dimmed">
+            Datos de la empresa dispersora para la cabecera del archivo DISFON. Se guardan en la
+            base propia del Asistente (no en SAP).
+          </Text>
+
+          {cfgLoading ? (
+            <Group justify="center" my="md">
+              <Loader />
+            </Group>
+          ) : (
+            <>
+              <TextInput
+                label="Cuenta dispersora"
+                placeholder="Numero de cuenta"
+                value={cfgForm.cuentaDispersora}
+                onChange={(e) => setCfgField('cuentaDispersora', e.currentTarget.value)}
+                required
+              />
+              <Group grow>
+                <Select
+                  label="Tipo de cuenta"
+                  data={[
+                    { value: '1', label: '1 - Corriente' },
+                    { value: '2', label: '2 - Ahorros' },
+                    { value: '5', label: '5 - Rotativo' },
+                  ]}
+                  value={cfgForm.tipoCuenta}
+                  onChange={(v) => setCfgField('tipoCuenta', v || '1')}
+                  allowDeselect={false}
+                />
+                <Select
+                  label="Tipo de identificacion"
+                  data={[
+                    { value: 'N', label: 'N - NIT' },
+                    { value: 'L', label: 'L - Cedula' },
+                    { value: 'I', label: 'I - Extranjero' },
+                  ]}
+                  value={cfgForm.tipoId}
+                  onChange={(v) => setCfgField('tipoId', v || 'N')}
+                  allowDeselect={false}
+                />
+              </Group>
+              <Group grow>
+                <TextInput
+                  label="NIT"
+                  placeholder="NIT con digito de verificacion"
+                  value={cfgForm.nit}
+                  onChange={(e) => setCfgField('nit', e.currentTarget.value)}
+                  required
+                />
+                <TextInput
+                  label="Tipo de movimiento"
+                  placeholder="002"
+                  value={cfgForm.tipoMovimiento}
+                  onChange={(e) => setCfgField('tipoMovimiento', e.currentTarget.value)}
+                />
+              </Group>
+              <Group grow>
+                <TextInput
+                  label="Codigo de ciudad"
+                  placeholder="0000"
+                  value={cfgForm.codigoCiudad}
+                  onChange={(e) => setCfgField('codigoCiudad', e.currentTarget.value)}
+                />
+                <TextInput
+                  label="Codigo de oficina"
+                  placeholder="000"
+                  value={cfgForm.codigoOficina}
+                  onChange={(e) => setCfgField('codigoOficina', e.currentTarget.value)}
+                />
+              </Group>
+              <TextInput
+                label="Nombre de la empresa"
+                placeholder="Nombre de la empresa dispersora"
+                value={cfgForm.nombreEmpresa}
+                onChange={(e) => setCfgField('nombreEmpresa', e.currentTarget.value)}
+              />
+
+              <Divider />
+
+              <Group justify="flex-end">
+                <Button variant="default" onClick={closeCfg} disabled={cfgSaving}>
+                  Cerrar
+                </Button>
+                <Button
+                  leftSection={<IconDeviceFloppy size={16} />}
+                  onClick={saveConfig}
+                  loading={cfgSaving}
+                >
+                  Guardar
+                </Button>
+                <Button
+                  variant="light"
+                  leftSection={<IconFileText size={16} />}
+                  onClick={saveConfigAndSimulate}
+                  disabled={cfgSaving}
+                >
+                  Guardar y simular
+                </Button>
+              </Group>
+            </>
+          )}
+        </Stack>
+      </Modal>
 
       <Modal
         opened={detailOpened}

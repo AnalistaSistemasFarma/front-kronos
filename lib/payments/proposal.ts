@@ -131,6 +131,33 @@ export async function getOpenSupplierInvoices(
   });
 }
 
+/** Identificación tributaria de un proveedor leída de SAP (solo lo esencial). */
+export interface SupplierIdentity {
+  /** Documento tal como lo devuelve SAP (`FederalTaxID`). Vacío si no hay. */
+  federalTaxID: string;
+}
+
+/** Forma cruda del socio de negocio para leer su identificación. */
+interface RawBusinessPartnerIdentity {
+  CardCode?: string;
+  FederalTaxID?: string;
+}
+
+/**
+ * Lee la identificación tributaria de un proveedor desde `BusinessPartners`
+ * (`FederalTaxID`). SOLO LECTURA. Devuelve `{ federalTaxID: '' }` si el campo no
+ * viene, para que el llamador lo trate como "sin identificación" (warning) en
+ * vez de romper.
+ */
+export async function getSupplierIdentity(
+  session: SapSession,
+  cardCode: string
+): Promise<SupplierIdentity> {
+  const path = `BusinessPartners('${escapeOData(cardCode)}')?$select=CardCode,FederalTaxID`;
+  const bp = await sapGet<RawBusinessPartnerIdentity>(session, path);
+  return { federalTaxID: bp?.FederalTaxID ?? '' };
+}
+
 /** Forma cruda de una cuenta bancaria de socio de negocio (SL). */
 interface RawBPBankAccount {
   BankCode?: string;

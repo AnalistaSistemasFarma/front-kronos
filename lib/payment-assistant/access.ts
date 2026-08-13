@@ -117,6 +117,25 @@ export async function getCompanyEndpointForUser(
   return company;
 }
 
+/**
+ * Verifica que un usuario tenga acceso al Asistente de Pagos en una empresa.
+ *
+ * El módulo es de UN SOLO NIVEL de permiso (un único subproceso
+ * `PAYMENT_ASSISTANT_URL`): quien tiene acceso a la empresa puede consultar y,
+ * por ahora, también editar la configuración de dispersión de esa empresa. Por
+ * eso este chequeo hace las veces de "nivel write" para la configuración: no
+ * exige endpoint SAP activo (la config no consulta SAP), solo pertenencia a la
+ * empresa dentro del módulo. Si más adelante se separa lectura/escritura, este
+ * es el punto para endurecerlo.
+ */
+export async function userCanAccessCompany(
+  userEmail: string,
+  companyId: number
+): Promise<boolean> {
+  const access = await getPaymentAssistantAccess(userEmail);
+  return access.some((a) => a.idCompany === companyId);
+}
+
 /** Proyecta el acceso a la forma segura para el navegador (sin credenciales). */
 export function toPublicAccess(
   access: PaymentAssistantCompanyAccess[]
