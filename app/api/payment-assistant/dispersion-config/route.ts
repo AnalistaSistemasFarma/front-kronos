@@ -100,6 +100,8 @@ async function upsert(request: NextRequest) {
     const tipoId = (str(b.tipoId) || 'N').toUpperCase();
     const nombreEmpresaRaw = str(b.nombreEmpresa);
     const nombreEmpresa = nombreEmpresaRaw === '' ? null : nombreEmpresaRaw;
+    const carpetaSalidaRaw = str(b.carpetaSalida);
+    const carpetaSalida = carpetaSalidaRaw === '' ? null : carpetaSalidaRaw;
 
     // Validaciones de campos obligatorios y dominios.
     const errors: string[] = [];
@@ -124,6 +126,7 @@ async function upsert(request: NextRequest) {
       codigoOficina,
       tipoId,
       nombreEmpresa,
+      carpetaSalida,
     };
 
     const config = await upsertDispersionConfig(companyId, input);

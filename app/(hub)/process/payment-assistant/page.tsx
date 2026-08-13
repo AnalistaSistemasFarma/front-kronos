@@ -36,6 +36,7 @@ import {
   IconBuildingBank,
   IconWorld,
   IconTableExport,
+  IconServer,
 } from '@tabler/icons-react';
 import { exportProposalTabExcel } from '@/lib/payments/exportProposalExcel';
 
@@ -117,6 +118,7 @@ interface DispersionConfig {
   codigoOficina: string;
   tipoId: string;
   nombreEmpresa: string | null;
+  carpetaSalida: string | null;
 }
 
 /** Estado del formulario de configuración (todos los campos como texto). */
@@ -129,6 +131,7 @@ interface ConfigForm {
   codigoOficina: string;
   tipoId: string;
   nombreEmpresa: string;
+  carpetaSalida: string;
 }
 
 const EMPTY_CONFIG_FORM: ConfigForm = {
@@ -140,7 +143,18 @@ const EMPTY_CONFIG_FORM: ConfigForm = {
   codigoOficina: '000',
   tipoId: 'N',
   nombreEmpresa: '',
+  carpetaSalida: '',
 };
+
+/** Resultado de generar el archivo DISFON en el servidor. */
+interface GenerateResult {
+  ok: boolean;
+  path: string;
+  bytes: number;
+  lines: number;
+  detailCount: number;
+  warnings: string[];
+}
 
 const currency = new Intl.NumberFormat('es-CO', {
   style: 'currency',
@@ -223,6 +237,34 @@ export default function PaymentAssistantPage() {
     }
   };
 
+  // --- Generación del archivo DISFON en el servidor ----------------------
+  const [genOpened, { open: openGen, close: closeGen }] = useDisclosure(false);
+  const [genLoading, setGenLoading] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  const [genResult, setGenResult] = useState<GenerateResult | null>(null);
+
+  const generateDisfon = async () => {
+    if (!selectedCompany) return;
+    try {
+      openGen();
+      setGenLoading(true);
+      setGenError(null);
+      setGenResult(null);
+
+      const res = await fetch(
+        `/api/payment-assistant/generate-disfon?companyId=${encodeURIComponent(selectedCompany)}`,
+        { method: 'POST' }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'No se pudo generar el archivo DISFON');
+      setGenResult(data as GenerateResult);
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : 'Error inesperado');
+    } finally {
+      setGenLoading(false);
+    }
+  };
+
   // --- Configuración de dispersión ---------------------------------------
   const [cfgOpened, { open: openCfg, close: closeCfg }] = useDisclosure(false);
   const [cfgLoading, setCfgLoading] = useState(false);
@@ -258,6 +300,7 @@ export default function PaymentAssistantPage() {
           codigoOficina: cfg.codigoOficina || '000',
           tipoId: cfg.tipoId || 'N',
           nombreEmpresa: cfg.nombreEmpresa ?? '',
+          carpetaSalida: cfg.carpetaSalida ?? '',
         });
       }
     } catch (err) {
@@ -481,7 +524,21 @@ export default function PaymentAssistantPage() {
                 >
                   Descargar a Excel
                 </Button>
+                <Button
+                  color="teal"
+                  leftSection={<IconServer size={16} />}
+                  onClick={generateDisfon}
+                  disabled={nationalGroups.length === 0}
+                >
+                  Generar archivo DISFON en el servidor
+                </Button>
               </Group>
+
+              <Alert color="blue" icon={<IconInfoCircle size={16} />}>
+                &quot;Generar archivo DISFON en el servidor&quot; crea el archivo y lo deja en la
+                carpeta del servidor configurada. El cifrado PGP y el envio al banco (MFT) se agregan
+                despues.
+              </Alert>
 
               <SimpleGrid cols={{ base: 1, sm: 3 }}>
                 <Card withBorder padding="md" radius="md">
@@ -778,6 +835,100 @@ export default function PaymentAssistantPage() {
         </Stack>
       </Modal>
 
+      {/* Modal de GENERACIÓN del archivo DISFON en el servidor */}
+      <Modal
+        opened={genOpened}
+        onClose={closeGen}
+        title="Generar archivo DISFON en el servidor"
+        size="lg"
+      >
+        <Stack gap="md">
+          <Alert color="blue" icon={<IconInfoCircle size={16} />}>
+            Genera el archivo DISFON y lo deja en la <b>carpeta del servidor</b> configurada. El
+            cifrado PGP y el envio al banco (MFT) se agregan despues.
+          </Alert>
+
+          {genLoading && (
+            <Group justify="center" my="md">
+              <Loader />
+            </Group>
+          )}
+
+          {genError && (
+            <Alert color="red" icon={<IconAlertTriangle size={16} />} title="No se pudo generar">
+              {genError}
+            </Alert>
+          )}
+
+          {!genLoading && !genError && genResult && (
+            <>
+              <Alert color="green" icon={<IconCheck size={16} />} title="Archivo generado">
+                El archivo DISFON quedo escrito en el servidor.
+              </Alert>
+
+              <div>
+                <Text size="xs" c="dimmed" tt="uppercase">
+                  Ruta en el servidor
+                </Text>
+                <Group gap="xs" align="center" wrap="nowrap">
+                  <Code style={{ fontSize: 12, wordBreak: 'break-all' }}>{genResult.path}</Code>
+                  <CopyButton value={genResult.path}>
+                    {({ copied, copy }) => (
+                      <Button
+                        size="xs"
+                        variant="light"
+                        color={copied ? 'teal' : 'blue'}
+                        leftSection={copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                        onClick={copy}
+                      >
+                        {copied ? 'Copiado' : 'Copiar'}
+                      </Button>
+                    )}
+                  </CopyButton>
+                </Group>
+              </div>
+
+              <SimpleGrid cols={{ base: 3 }}>
+                <div>
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Renglones
+                  </Text>
+                  <Text fw={700}>{genResult.detailCount}</Text>
+                </div>
+                <div>
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Lineas
+                  </Text>
+                  <Text fw={700}>{genResult.lines}</Text>
+                </div>
+                <div>
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Tamano (bytes)
+                  </Text>
+                  <Text fw={700}>{amount.format(genResult.bytes)}</Text>
+                </div>
+              </SimpleGrid>
+
+              {genResult.warnings.length > 0 && (
+                <Alert
+                  color="yellow"
+                  icon={<IconAlertTriangle size={16} />}
+                  title={`Validaciones (${genResult.warnings.length})`}
+                >
+                  <Stack gap={4}>
+                    {genResult.warnings.map((w, i) => (
+                      <Text key={i} size="sm">
+                        • {w}
+                      </Text>
+                    ))}
+                  </Stack>
+                </Alert>
+              )}
+            </>
+          )}
+        </Stack>
+      </Modal>
+
       {/* Modal de CONFIGURACIÓN DE DISPERSIÓN */}
       <Modal
         opened={cfgOpened}
@@ -877,6 +1028,13 @@ export default function PaymentAssistantPage() {
                 placeholder="Nombre de la empresa dispersora"
                 value={cfgForm.nombreEmpresa}
                 onChange={(e) => setCfgField('nombreEmpresa', e.currentTarget.value)}
+              />
+              <TextInput
+                label="Carpeta de salida del archivo DISFON (ruta en el servidor)"
+                placeholder="Ej.: /var/disfon/salida  o  D:\\DISFON\\SALIDA"
+                description="Carpeta del servidor donde se dejará el archivo DISFON para que el banco lo recoja (H2H/MFT)."
+                value={cfgForm.carpetaSalida}
+                onChange={(e) => setCfgField('carpetaSalida', e.currentTarget.value)}
               />
 
               <Divider />
