@@ -53,23 +53,25 @@ export async function GET(request: NextRequest) {
       // 1) Facturas de proveedor abiertas (SOLO LECTURA).
       const invoices = await getOpenSupplierInvoices(sap);
 
-      // 2) Cuentas bancarias por proveedor (una consulta por cardCode unico).
+      // 2) Cuentas bancarias + pais por proveedor (una consulta por cardCode unico).
       const cardCodes = [...new Set(invoices.map((i) => i.cardCode).filter(Boolean))];
       const bankByCardCode: Record<string, SupplierBankAccount[]> = {};
+      const countryByCardCode: Record<string, string> = {};
       const bankResults = await Promise.allSettled(
         cardCodes.map(async (cardCode) => ({
           cardCode,
-          accounts: await getSupplierBankAccounts(sap, cardCode),
+          data: await getSupplierBankAccounts(sap, cardCode),
         }))
       );
       for (const result of bankResults) {
         if (result.status === 'fulfilled') {
-          bankByCardCode[result.value.cardCode] = result.value.accounts;
+          bankByCardCode[result.value.cardCode] = result.value.data.accounts;
+          countryByCardCode[result.value.cardCode] = result.value.data.country;
         }
       }
 
-      // 3) Armado de la propuesta (funcion pura).
-      const proposal = buildPaymentProposal(invoices, bankByCardCode);
+      // 3) Armado de la propuesta (funcion pura), con clasificacion nacional/exterior.
+      const proposal = buildPaymentProposal(invoices, bankByCardCode, countryByCardCode);
 
       return NextResponse.json({
         companyId: access.idCompany,

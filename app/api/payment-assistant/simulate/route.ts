@@ -61,22 +61,32 @@ export async function GET(request: NextRequest) {
     });
 
     try {
-      // 1) Propuesta de pago (SOLO LECTURA): facturas abiertas + cuentas bancarias.
+      // 1) Propuesta de pago (SOLO LECTURA): facturas abiertas + cuentas bancarias + pais.
       const invoices = await getOpenSupplierInvoices(sap);
       const cardCodes = [...new Set(invoices.map((i) => i.cardCode).filter(Boolean))];
       const bankByCardCode: Record<string, SupplierBankAccount[]> = {};
+      const countryByCardCode: Record<string, string> = {};
       const bankResults = await Promise.allSettled(
         cardCodes.map(async (cardCode) => ({
           cardCode,
-          accounts: await getSupplierBankAccounts(sap, cardCode),
+          data: await getSupplierBankAccounts(sap, cardCode),
         }))
       );
       for (const result of bankResults) {
         if (result.status === 'fulfilled') {
-          bankByCardCode[result.value.cardCode] = result.value.accounts;
+          bankByCardCode[result.value.cardCode] = result.value.data.accounts;
+          countryByCardCode[result.value.cardCode] = result.value.data.country;
         }
       }
-      const proposal = buildPaymentProposal(invoices, bankByCardCode);
+      const proposal = buildPaymentProposal(invoices, bankByCardCode, countryByCardCode);
+
+      // La simulacion DISFON aplica SOLO a pagos NACIONALES (a terceros). Los
+      // pagos al exterior no van por DISFON (dispersion nacional del Banco de
+      // Bogota); se excluyen del archivo y de los totales de esta simulacion.
+      const nationalGroups = proposal.nationalGroups;
+      const nationalInvoiceCount = nationalGroups.reduce((sum, g) => sum + g.invoiceCount, 0);
+      const nationalTotalPending = nationalGroups.reduce((sum, g) => sum + g.totalPending, 0);
+      const nationalMissingBank = nationalGroups.filter((g) => !g.hasBankData).length;
 
       // 1b) Identificación del beneficiario (SOLO LECTURA): documento tributario
       //     de cada proveedor (BusinessPartners/FederalTaxID). Se deriva el tipo
@@ -108,11 +118,11 @@ export async function GET(request: NextRequest) {
               'Configúrela para poder generar el archivo DISFON.',
           ],
           summary: {
-            supplierCount: proposal.supplierCount,
-            invoiceCount: proposal.invoiceCount,
-            grandTotalPending: proposal.grandTotalPending,
+            supplierCount: nationalGroups.length,
+            invoiceCount: nationalInvoiceCount,
+            grandTotalPending: nationalTotalPending,
             detailCount: 0,
-            suppliersMissingBank: proposal.suppliersMissingBank.length,
+            suppliersMissingBank: nationalMissingBank,
           },
         });
       }
@@ -129,7 +139,7 @@ export async function GET(request: NextRequest) {
       //    generan un warning dentro del mapeo.
       const { fileText, warnings, detailCount } = proposalToDisfon(
         config,
-        proposal.groups,
+        nationalGroups,
         { fechaAplicacion, identities }
       );
 
@@ -139,11 +149,11 @@ export async function GET(request: NextRequest) {
         preview: fileText,
         warnings,
         summary: {
-          supplierCount: proposal.supplierCount,
-          invoiceCount: proposal.invoiceCount,
-          grandTotalPending: proposal.grandTotalPending,
+          supplierCount: nationalGroups.length,
+          invoiceCount: nationalInvoiceCount,
+          grandTotalPending: nationalTotalPending,
           detailCount,
-          suppliersMissingBank: proposal.suppliersMissingBank.length,
+          suppliersMissingBank: nationalMissingBank,
         },
       });
     } finally {

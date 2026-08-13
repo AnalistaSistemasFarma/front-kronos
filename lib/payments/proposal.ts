@@ -59,11 +59,25 @@ export interface SupplierGroup {
   /** Cuenta por defecto: la marcada isDefault, o la primera si no hay marca. */
   defaultBankAccount: SupplierBankAccount | null;
   hasBankData: boolean;
+  /** País del proveedor según SAP (`BusinessPartners.Country`, p.ej. 'CO'). Vacío si no hay. */
+  country: string;
+  /**
+   * `true` cuando el pago es al EXTERIOR (no va por DISFON / dispersión nacional
+   * del Banco de Bogotá). Clasificación PROVISIONAL (a confirmar con Nicolás):
+   * es exterior si el país existe y no es 'CO', O si alguna factura tiene moneda
+   * distinta de 'COP'. Sin país ni moneda extranjera → nacional.
+   */
+  isForeign: boolean;
 }
 
 /** Propuesta de pago completa: proveedores, totales y faltantes de banco. */
 export interface PaymentProposal {
+  /** Todos los grupos (nacionales + exterior), por compatibilidad. */
   groups: SupplierGroup[];
+  /** Grupos NACIONALES (a terceros): conservan el flujo DISFON. */
+  nationalGroups: SupplierGroup[];
+  /** Grupos del EXTERIOR: no van por DISFON (mecanismo por definir). */
+  foreignGroups: SupplierGroup[];
   supplierCount: number;
   invoiceCount: number;
   /** Suma de totalPending de todos los grupos (en pesos). */
@@ -168,14 +182,22 @@ interface RawBPBankAccount {
 /** Forma cruda del socio de negocio con sus cuentas bancarias expandidas. */
 interface RawBusinessPartner {
   CardCode?: string;
+  Country?: string;
   DefaultBankCode?: string;
   DefaultAccount?: string;
   BPBankAccounts?: RawBPBankAccount[];
 }
 
+/** Cuentas bancarias de un proveedor + su país (para clasificar nacional/exterior). */
+export interface SupplierBankData {
+  accounts: SupplierBankAccount[];
+  /** País del proveedor (`BusinessPartners.Country`, p.ej. 'CO'). Vacío si no hay. */
+  country: string;
+}
+
 /**
  * Lee las cuentas bancarias de un proveedor desde `BusinessPartners`, expandien-
- * do la colección `BPBankAccounts`. SOLO LECTURA.
+ * do la colección `BPBankAccounts`, y su país (`Country`). SOLO LECTURA.
  *
  * NOTA (por verificar contra la metadata real de SAP): los nombres exactos de
  * los campos de la cuenta bancaria (`BankCode`, `AccountNo`, `Branch`) y de los
@@ -187,8 +209,8 @@ interface RawBusinessPartner {
 export async function getSupplierBankAccounts(
   session: SapSession,
   cardCode: string
-): Promise<SupplierBankAccount[]> {
-  const path = `BusinessPartners('${escapeOData(cardCode)}')?$select=CardCode,DefaultBankCode,DefaultAccount&$expand=BPBankAccounts`;
+): Promise<SupplierBankData> {
+  const path = `BusinessPartners('${escapeOData(cardCode)}')?$select=CardCode,Country,DefaultBankCode,DefaultAccount&$expand=BPBankAccounts`;
 
   const bp = await sapGet<RawBusinessPartner>(session, path);
   const accounts = bp?.BPBankAccounts ?? [];
@@ -197,7 +219,7 @@ export async function getSupplierBankAccounts(
   const defaultAccount = bp?.DefaultAccount ?? '';
   const hasDefaultRef = Boolean(defaultBankCode || defaultAccount);
 
-  return accounts.map((a) => {
+  const mapped = accounts.map((a) => {
     const bankCode = a.BankCode ?? '';
     const accountNo = a.AccountNo ?? '';
     // Solo se marca isDefault cuando el BP declara una cuenta por defecto y
@@ -214,23 +236,42 @@ export async function getSupplierBankAccounts(
       isDefault,
     };
   });
+
+  return { accounts: mapped, country: bp?.Country ?? '' };
 }
 
 /**
- * Arma la propuesta de pago a partir de las facturas abiertas y el mapa de
- * cuentas bancarias por proveedor. FUNCIÓN PURA: no consulta SAP, no toca la
- * red y es determinística. Es el corazón del módulo y la que se prueba a fondo.
+ * Determina si un proveedor es de pago al EXTERIOR. Clasificación PROVISIONAL
+ * (a confirmar con Nicolás): es exterior si el `country` existe y no es 'CO', O
+ * si alguna de sus facturas tiene moneda distinta de 'COP'. Sin país ni moneda
+ * extranjera → nacional.
+ */
+export function classifyIsForeign(country: string, invoices: SupplierInvoice[]): boolean {
+  const c = (country ?? '').trim().toUpperCase();
+  if (c && c !== 'CO') return true;
+  if (invoices.some((inv) => (inv.docCurrency ?? '').trim().toUpperCase() !== 'COP' && (inv.docCurrency ?? '').trim() !== ''))
+    return true;
+  return false;
+}
+
+/**
+ * Arma la propuesta de pago a partir de las facturas abiertas, el mapa de
+ * cuentas bancarias por proveedor y (opcional) el mapa de país por proveedor.
+ * FUNCIÓN PURA: no consulta SAP, no toca la red y es determinística. Es el
+ * corazón del módulo y la que se prueba a fondo.
  *
  *  - Agrupa las facturas por `cardCode`.
  *  - Por proveedor calcula `totalPending` (suma de pendingAmount), elige la
- *    cuenta por defecto (la marcada isDefault, o la primera si no hay marca) y
- *    determina `hasBankData`.
+ *    cuenta por defecto (la marcada isDefault, o la primera si no hay marca),
+ *    determina `hasBankData` y clasifica nacional vs exterior (`isForeign`).
  *  - Ordena los grupos por `cardName` y arma los totales globales, además de la
- *    lista de proveedores sin datos bancarios (`suppliersMissingBank`).
+ *    lista de proveedores sin datos bancarios (`suppliersMissingBank`) y las
+ *    colecciones `nationalGroups` / `foreignGroups`.
  */
 export function buildPaymentProposal(
   invoices: SupplierInvoice[],
-  bankByCardCode: Record<string, SupplierBankAccount[]>
+  bankByCardCode: Record<string, SupplierBankAccount[]>,
+  countryByCardCode: Record<string, string> = {}
 ): PaymentProposal {
   // Agrupar facturas por proveedor, preservando el orden de aparición.
   const byCard = new Map<string, SupplierInvoice[]>();
@@ -253,6 +294,9 @@ export function buildPaymentProposal(
     // El nombre se toma de la primera factura del proveedor.
     const cardName = groupInvoices[0]?.cardName ?? '';
 
+    const country = countryByCardCode[cardCode] ?? '';
+    const isForeign = classifyIsForeign(country, groupInvoices);
+
     groups.push({
       cardCode,
       cardName,
@@ -262,6 +306,8 @@ export function buildPaymentProposal(
       bankAccounts,
       defaultBankAccount,
       hasBankData,
+      country,
+      isForeign,
     });
 
     if (!hasBankData) suppliersMissingBank.push(cardCode);
@@ -270,11 +316,16 @@ export function buildPaymentProposal(
   // Ordenar los grupos por nombre de proveedor (comparación estable por locale).
   groups.sort((a, b) => a.cardName.localeCompare(b.cardName));
 
+  const nationalGroups = groups.filter((g) => !g.isForeign);
+  const foreignGroups = groups.filter((g) => g.isForeign);
+
   const grandTotalPending = groups.reduce((sum, g) => sum + g.totalPending, 0);
   const invoiceCount = invoices.length;
 
   return {
     groups,
+    nationalGroups,
+    foreignGroups,
     supplierCount: groups.length,
     invoiceCount,
     grandTotalPending,
