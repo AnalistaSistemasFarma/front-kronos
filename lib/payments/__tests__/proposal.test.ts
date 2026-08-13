@@ -198,3 +198,74 @@ describe('buildPaymentProposal', () => {
     expect(proposal.suppliersMissingBank.sort()).toEqual(['P001', 'P003']);
   });
 });
+
+describe('buildPaymentProposal — clasificación nacional vs exterior', () => {
+  /** Helper: factura con moneda explícita (para casos de moneda extranjera). */
+  function invCur(
+    cardCode: string,
+    cardName: string,
+    docEntry: number,
+    docTotal: number,
+    docCurrency: string
+  ): SupplierInvoice {
+    return { ...inv(cardCode, cardName, docEntry, docTotal, 0), docCurrency };
+  }
+
+  it('clasifica como NACIONAL cuando país es CO y moneda COP', () => {
+    const invoices = [inv('P001', 'Nacional SA', 1, 100_000, 0)];
+    const proposal = buildPaymentProposal(invoices, {}, { P001: 'CO' });
+
+    const g = proposal.groups[0];
+    expect(g.isForeign).toBe(false);
+    expect(g.country).toBe('CO');
+    expect(proposal.nationalGroups.map((x) => x.cardCode)).toEqual(['P001']);
+    expect(proposal.foreignGroups).toHaveLength(0);
+  });
+
+  it('clasifica como EXTERIOR cuando el país no es CO', () => {
+    const invoices = [inv('X001', 'Foreign Corp', 1, 100_000, 0)];
+    const proposal = buildPaymentProposal(invoices, {}, { X001: 'US' });
+
+    const g = proposal.groups[0];
+    expect(g.isForeign).toBe(true);
+    expect(g.country).toBe('US');
+    expect(proposal.foreignGroups.map((x) => x.cardCode)).toEqual(['X001']);
+    expect(proposal.nationalGroups).toHaveLength(0);
+  });
+
+  it('clasifica como EXTERIOR cuando alguna factura tiene moneda distinta de COP', () => {
+    const invoices = [invCur('X002', 'USD Supplier', 1, 100_000, 'USD')];
+    // Sin país en el mapa: la clasificación cae en la moneda.
+    const proposal = buildPaymentProposal(invoices, {});
+
+    const g = proposal.groups[0];
+    expect(g.isForeign).toBe(true);
+    expect(proposal.foreignGroups.map((x) => x.cardCode)).toEqual(['X002']);
+  });
+
+  it('trata país vacío + moneda COP como NACIONAL', () => {
+    const invoices = [inv('P002', 'Sin País', 1, 50_000, 0)];
+    const proposal = buildPaymentProposal(invoices, {});
+
+    expect(proposal.groups[0].isForeign).toBe(false);
+    expect(proposal.nationalGroups).toHaveLength(1);
+  });
+
+  it('parte los grupos en nationalGroups y foreignGroups a la vez', () => {
+    const invoices = [
+      inv('P001', 'Alfa Nacional', 1, 100_000, 0),
+      inv('X001', 'Beta Exterior', 2, 200_000, 0),
+      invCur('X002', 'Gamma USD', 3, 300_000, 'USD'),
+    ];
+    const proposal = buildPaymentProposal(
+      invoices,
+      {},
+      { P001: 'CO', X001: 'PA', X002: 'CO' }
+    );
+
+    expect(proposal.nationalGroups.map((g) => g.cardCode)).toEqual(['P001']);
+    expect(proposal.foreignGroups.map((g) => g.cardCode).sort()).toEqual(['X001', 'X002']);
+    // groups sigue conteniendo todos (compatibilidad).
+    expect(proposal.groups).toHaveLength(3);
+  });
+});

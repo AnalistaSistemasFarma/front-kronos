@@ -21,6 +21,7 @@ import {
   CopyButton,
   TextInput,
   Divider,
+  Tabs,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import {
@@ -32,6 +33,8 @@ import {
   IconCopy,
   IconCheck,
   IconDeviceFloppy,
+  IconBuildingBank,
+  IconWorld,
 } from '@tabler/icons-react';
 
 /**
@@ -71,10 +74,14 @@ interface SupplierGroup {
   invoiceCount: number;
   totalPending: number;
   hasBankData: boolean;
+  country: string;
+  isForeign: boolean;
 }
 
 interface Proposal {
   groups: SupplierGroup[];
+  nationalGroups: SupplierGroup[];
+  foreignGroups: SupplierGroup[];
   supplierCount: number;
   invoiceCount: number;
   grandTotalPending: number;
@@ -148,6 +155,22 @@ const amount = new Intl.NumberFormat('es-CO', {
 function formatDate(value: string): string {
   if (!value) return '-';
   return value.slice(0, 10);
+}
+
+/** Monedas distintas presentes en las facturas de un proveedor. '-' si no hay. */
+function groupCurrencies(group: SupplierGroup): string {
+  const set = [...new Set(group.invoices.map((i) => i.docCurrency).filter(Boolean))];
+  return set.length > 0 ? set.join(', ') : '-';
+}
+
+/** Resumen agregado de una colección de grupos (para el encabezado de cada pestaña). */
+function summarize(groups: SupplierGroup[]) {
+  return {
+    supplierCount: groups.length,
+    invoiceCount: groups.reduce((sum, g) => sum + g.invoiceCount, 0),
+    totalPending: groups.reduce((sum, g) => sum + g.totalPending, 0),
+    missingBank: groups.filter((g) => !g.hasBankData).map((g) => g.cardCode),
+  };
 }
 
 export default function PaymentAssistantPage() {
@@ -334,6 +357,19 @@ export default function PaymentAssistantPage() {
     [companies]
   );
 
+  // Grupos nacionales vs exterior (el backend ya los clasifica; con fallback por
+  // si un endpoint viejo aún no envía las colecciones separadas).
+  const nationalGroups = useMemo<SupplierGroup[]>(
+    () => proposal?.nationalGroups ?? proposal?.groups?.filter((g) => !g.isForeign) ?? [],
+    [proposal]
+  );
+  const foreignGroups = useMemo<SupplierGroup[]>(
+    () => proposal?.foreignGroups ?? proposal?.groups?.filter((g) => g.isForeign) ?? [],
+    [proposal]
+  );
+  const nationalSummary = useMemo(() => summarize(nationalGroups), [nationalGroups]);
+  const foreignSummary = useMemo(() => summarize(foreignGroups), [foreignGroups]);
+
   if (loadingAccess) {
     return (
       <Group justify="center" mt="xl">
@@ -359,8 +395,9 @@ export default function PaymentAssistantPage() {
       </Group>
 
       <Alert color="blue" icon={<IconInfoCircle size={16} />} mb="md">
-        Puede <b>simular</b> el archivo DISFON y <b>configurar</b> la dispersion por empresa. La
-        simulacion es solo una previsualizacion: no ejecuta pagos ni escribe en SAP.
+        Los pagos se separan en <b>nacionales (a terceros)</b> —con simulacion DISFON y
+        configuracion de dispersion— y <b>al exterior</b>, que van por otro medio (mecanismo en
+        definicion). La simulacion es solo una previsualizacion: no ejecuta pagos ni escribe en SAP.
       </Alert>
 
       <Group mb="md">
@@ -393,115 +430,214 @@ export default function PaymentAssistantPage() {
       )}
 
       {!loadingProposal && !proposalError && selectedCompany && proposal && (
-        <Stack gap="md">
-          <Group>
-            <Button
-              leftSection={<IconFileText size={16} />}
-              onClick={runSimulation}
-              disabled={proposal.groups.length === 0}
-            >
-              Simular
-            </Button>
-            <Button
-              variant="default"
-              leftSection={<IconSettings size={16} />}
-              onClick={openConfig}
-            >
-              Configuracion de dispersion
-            </Button>
-          </Group>
+        <Tabs defaultValue="nacionales" keepMounted={false}>
+          <Tabs.List mb="md">
+            <Tabs.Tab value="nacionales" leftSection={<IconBuildingBank size={16} />}>
+              Pagos nacionales (a terceros)
+            </Tabs.Tab>
+            <Tabs.Tab value="exterior" leftSection={<IconWorld size={16} />}>
+              Pagos al exterior
+            </Tabs.Tab>
+          </Tabs.List>
 
-          <SimpleGrid cols={{ base: 1, sm: 3 }}>
-            <Card withBorder padding="md" radius="md">
-              <Text size="xs" c="dimmed" tt="uppercase">
-                Proveedores
-              </Text>
-              <Text size="xl" fw={700}>
-                {proposal.supplierCount}
-              </Text>
-            </Card>
-            <Card withBorder padding="md" radius="md">
-              <Text size="xs" c="dimmed" tt="uppercase">
-                Facturas abiertas
-              </Text>
-              <Text size="xl" fw={700}>
-                {proposal.invoiceCount}
-              </Text>
-            </Card>
-            <Card withBorder padding="md" radius="md">
-              <Text size="xs" c="dimmed" tt="uppercase">
-                Total pendiente
-              </Text>
-              <Text size="xl" fw={700}>
-                {currency.format(proposal.grandTotalPending)}
-              </Text>
-            </Card>
-          </SimpleGrid>
+          {/* --- Pestaña NACIONALES: flujo completo (propuesta + simular + config) --- */}
+          <Tabs.Panel value="nacionales">
+            <Stack gap="md">
+              <Group>
+                <Button
+                  leftSection={<IconFileText size={16} />}
+                  onClick={runSimulation}
+                  disabled={nationalGroups.length === 0}
+                >
+                  Simular
+                </Button>
+                <Button
+                  variant="default"
+                  leftSection={<IconSettings size={16} />}
+                  onClick={openConfig}
+                >
+                  Configuracion de dispersion
+                </Button>
+              </Group>
 
-          {proposal.suppliersMissingBank.length > 0 && (
-            <Alert color="yellow" icon={<IconAlertTriangle size={16} />}>
-              {proposal.suppliersMissingBank.length} proveedor(es) sin datos bancarios. No podran
-              incluirse en la dispersion de fondos hasta completar su cuenta.
-            </Alert>
-          )}
+              <SimpleGrid cols={{ base: 1, sm: 3 }}>
+                <Card withBorder padding="md" radius="md">
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Proveedores
+                  </Text>
+                  <Text size="xl" fw={700}>
+                    {nationalSummary.supplierCount}
+                  </Text>
+                </Card>
+                <Card withBorder padding="md" radius="md">
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Facturas abiertas
+                  </Text>
+                  <Text size="xl" fw={700}>
+                    {nationalSummary.invoiceCount}
+                  </Text>
+                </Card>
+                <Card withBorder padding="md" radius="md">
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Total pendiente
+                  </Text>
+                  <Text size="xl" fw={700}>
+                    {currency.format(nationalSummary.totalPending)}
+                  </Text>
+                </Card>
+              </SimpleGrid>
 
-          <Table.ScrollContainer minWidth={640}>
-            <Table striped highlightOnHover withTableBorder>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Proveedor</Table.Th>
-                  <Table.Th>Codigo</Table.Th>
-                  <Table.Th style={{ textAlign: 'right' }}>N.° facturas</Table.Th>
-                  <Table.Th style={{ textAlign: 'right' }}>Total pendiente</Table.Th>
-                  <Table.Th>Banco</Table.Th>
-                  <Table.Th style={{ textAlign: 'right' }}>Detalle</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {proposal.groups.length === 0 ? (
-                  <Table.Tr>
-                    <Table.Td colSpan={6} style={{ textAlign: 'center' }}>
-                      No hay facturas de proveedor abiertas para esta empresa.
-                    </Table.Td>
-                  </Table.Tr>
-                ) : (
-                  proposal.groups.map((g) => (
-                    <Table.Tr key={g.cardCode}>
-                      <Table.Td>{g.cardName || '-'}</Table.Td>
-                      <Table.Td>{g.cardCode}</Table.Td>
-                      <Table.Td style={{ textAlign: 'right' }}>{g.invoiceCount}</Table.Td>
-                      <Table.Td style={{ textAlign: 'right' }}>
-                        {currency.format(g.totalPending)}
-                      </Table.Td>
-                      <Table.Td>
-                        {g.hasBankData ? (
-                          <Badge color="green" variant="light">
-                            OK
-                          </Badge>
-                        ) : (
-                          <Badge color="red" variant="light">
-                            sin datos bancarios
-                          </Badge>
-                        )}
-                      </Table.Td>
-                      <Table.Td style={{ textAlign: 'right' }}>
-                        <Button
-                          size="xs"
-                          variant="light"
-                          leftSection={<IconListDetails size={14} />}
-                          onClick={() => showDetail(g)}
-                          disabled={(g.invoices?.length ?? 0) === 0}
-                        >
-                          Ver detalle
-                        </Button>
-                      </Table.Td>
+              {nationalSummary.missingBank.length > 0 && (
+                <Alert color="yellow" icon={<IconAlertTriangle size={16} />}>
+                  {nationalSummary.missingBank.length} proveedor(es) sin datos bancarios. No podran
+                  incluirse en la dispersion de fondos hasta completar su cuenta.
+                </Alert>
+              )}
+
+              <Table.ScrollContainer minWidth={640}>
+                <Table striped highlightOnHover withTableBorder>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Proveedor</Table.Th>
+                      <Table.Th>Codigo</Table.Th>
+                      <Table.Th style={{ textAlign: 'right' }}>N.° facturas</Table.Th>
+                      <Table.Th style={{ textAlign: 'right' }}>Total pendiente</Table.Th>
+                      <Table.Th>Banco</Table.Th>
+                      <Table.Th style={{ textAlign: 'right' }}>Detalle</Table.Th>
                     </Table.Tr>
-                  ))
-                )}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
-        </Stack>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {nationalGroups.length === 0 ? (
+                      <Table.Tr>
+                        <Table.Td colSpan={6} style={{ textAlign: 'center' }}>
+                          No hay pagos nacionales para esta empresa.
+                        </Table.Td>
+                      </Table.Tr>
+                    ) : (
+                      nationalGroups.map((g) => (
+                        <Table.Tr key={g.cardCode}>
+                          <Table.Td>{g.cardName || '-'}</Table.Td>
+                          <Table.Td>{g.cardCode}</Table.Td>
+                          <Table.Td style={{ textAlign: 'right' }}>{g.invoiceCount}</Table.Td>
+                          <Table.Td style={{ textAlign: 'right' }}>
+                            {currency.format(g.totalPending)}
+                          </Table.Td>
+                          <Table.Td>
+                            {g.hasBankData ? (
+                              <Badge color="green" variant="light">
+                                OK
+                              </Badge>
+                            ) : (
+                              <Badge color="red" variant="light">
+                                sin datos bancarios
+                              </Badge>
+                            )}
+                          </Table.Td>
+                          <Table.Td style={{ textAlign: 'right' }}>
+                            <Button
+                              size="xs"
+                              variant="light"
+                              leftSection={<IconListDetails size={14} />}
+                              onClick={() => showDetail(g)}
+                              disabled={(g.invoices?.length ?? 0) === 0}
+                            >
+                              Ver detalle
+                            </Button>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))
+                    )}
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+            </Stack>
+          </Tabs.Panel>
+
+          {/* --- Pestaña EXTERIOR: listado read-only (sin DISFON) --- */}
+          <Tabs.Panel value="exterior">
+            <Stack gap="md">
+              <Alert color="blue" icon={<IconInfoCircle size={16} />}>
+                Los pagos al exterior van por otro medio (no DISFON). Mecanismo en definicion.
+              </Alert>
+
+              <SimpleGrid cols={{ base: 1, sm: 3 }}>
+                <Card withBorder padding="md" radius="md">
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Proveedores
+                  </Text>
+                  <Text size="xl" fw={700}>
+                    {foreignSummary.supplierCount}
+                  </Text>
+                </Card>
+                <Card withBorder padding="md" radius="md">
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Facturas abiertas
+                  </Text>
+                  <Text size="xl" fw={700}>
+                    {foreignSummary.invoiceCount}
+                  </Text>
+                </Card>
+                <Card withBorder padding="md" radius="md">
+                  <Text size="xs" c="dimmed" tt="uppercase">
+                    Total pendiente
+                  </Text>
+                  <Text size="xl" fw={700}>
+                    {currency.format(foreignSummary.totalPending)}
+                  </Text>
+                </Card>
+              </SimpleGrid>
+
+              <Table.ScrollContainer minWidth={640}>
+                <Table striped highlightOnHover withTableBorder>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Proveedor</Table.Th>
+                      <Table.Th>Codigo</Table.Th>
+                      <Table.Th>Pais</Table.Th>
+                      <Table.Th>Moneda</Table.Th>
+                      <Table.Th style={{ textAlign: 'right' }}>N.° facturas</Table.Th>
+                      <Table.Th style={{ textAlign: 'right' }}>Total pendiente</Table.Th>
+                      <Table.Th style={{ textAlign: 'right' }}>Detalle</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {foreignGroups.length === 0 ? (
+                      <Table.Tr>
+                        <Table.Td colSpan={7} style={{ textAlign: 'center' }}>
+                          No hay pagos al exterior para esta empresa.
+                        </Table.Td>
+                      </Table.Tr>
+                    ) : (
+                      foreignGroups.map((g) => (
+                        <Table.Tr key={g.cardCode}>
+                          <Table.Td>{g.cardName || '-'}</Table.Td>
+                          <Table.Td>{g.cardCode}</Table.Td>
+                          <Table.Td>{g.country || '-'}</Table.Td>
+                          <Table.Td>{groupCurrencies(g)}</Table.Td>
+                          <Table.Td style={{ textAlign: 'right' }}>{g.invoiceCount}</Table.Td>
+                          <Table.Td style={{ textAlign: 'right' }}>
+                            {currency.format(g.totalPending)}
+                          </Table.Td>
+                          <Table.Td style={{ textAlign: 'right' }}>
+                            <Button
+                              size="xs"
+                              variant="light"
+                              leftSection={<IconListDetails size={14} />}
+                              onClick={() => showDetail(g)}
+                              disabled={(g.invoices?.length ?? 0) === 0}
+                            >
+                              Ver detalle
+                            </Button>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))
+                    )}
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+            </Stack>
+          </Tabs.Panel>
+        </Tabs>
       )}
 
       {/* Modal de SIMULACIÓN DISFON */}

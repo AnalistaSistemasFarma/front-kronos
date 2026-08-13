@@ -67,6 +67,8 @@ function group(
     bankAccounts,
     defaultBankAccount,
     hasBankData: bankAccounts.length > 0,
+    country: 'CO',
+    isForeign: false,
   };
 }
 
