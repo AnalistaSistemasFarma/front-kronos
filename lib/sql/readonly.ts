@@ -250,7 +250,7 @@ function extractCteNames(cleaned: string): Set<string> {
   const names = new Set<string>();
   if (!/^WITH\b/i.test(cleaned)) return names;
   // Captura "nombre AS (" al inicio de cada CTE. Tolerante a lista de columnas.
-  // eslint-disable-next-line security/detect-unsafe-regex -- se ejecuta sobre SQL interno ya saneado; patrón acotado
+  // eslint-disable-next-line security/detect-unsafe-regex -- opera sobre SQL acotado; NO alterar el matching del candado de solo-lectura
   const re = /(?:\bWITH\b|,)\s*([A-Za-z0-9_$#@\[\]"`]+)\s*(?:\([^)]*\))?\s+AS\s*\(/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(cleaned)) !== null) {
