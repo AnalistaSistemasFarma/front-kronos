@@ -127,12 +127,10 @@ export async function POST(request: NextRequest) {
             });
             continue;
           }
-          // Si la fila no trae descripcion, se completa con el nombre del articulo
-          // (recortado al maximo del campo en SAP para no provocar un 400).
-          if (!record.U_Descripcion && nombreArticulo) {
-            const maxDesc = fieldSizes.U_Descripcion;
-            record.U_Descripcion = maxDesc ? nombreArticulo.slice(0, maxDesc) : nombreArticulo;
-          }
+          // La descripcion la impone el sistema con el nombre del articulo en SAP
+          // (se ignora lo que venga en el Excel) para no tener divergencias.
+          const maxDesc = fieldSizes.U_Descripcion;
+          record.U_Descripcion = maxDesc ? nombreArticulo.slice(0, maxDesc) : nombreArticulo;
           if (await registroExiste(sap, entity, record.U_Referencia as string, registro)) {
             duplicated.push({ row: rowNum, registro, reason: 'Ya existe en SAP para este producto' });
             continue;
