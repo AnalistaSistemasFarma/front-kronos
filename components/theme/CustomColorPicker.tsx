@@ -16,7 +16,7 @@ import { normalizeHex } from '../../lib/theme/colorMath';
 import {
   parseCustomPaletteHex,
   toCustomPaletteKey,
-} from '../../lib/theme/customPalette';
+} from '../../lib/theme/customPalette'; 
 import { PALETTES } from '../../lib/theme/palettes';
 
 interface CustomColorPickerProps {
