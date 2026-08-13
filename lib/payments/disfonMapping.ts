@@ -35,6 +35,33 @@ export interface BeneficiaryIdentity {
   numeroId: string;
 }
 
+/**
+ * Deriva la identificación del beneficiario (tipo + número) a partir del
+ * `FederalTaxID` que SAP guarda en el socio de negocio.
+ *
+ * HEURÍSTICA PROVISIONAL (a confirmar la clasificación real con tesorería):
+ *   - `numeroId` = solo los dígitos del `FederalTaxID`.
+ *   - Se asume NIT (`tipoId = 'N'`) cuando el documento aparenta ser de persona
+ *     jurídica: trae dígito de verificación con guion (formato "NNNNNNNNN-D"),
+ *     o tiene 10+ dígitos, o empieza por 8/9 (rangos típicos de NIT en Colombia).
+ *   - En caso contrario se asume cédula de ciudadanía (`tipoId = 'C'`).
+ *
+ * Esta clasificación es una APROXIMACIÓN para la simulación; el tipo real de
+ * documento debe confirmarse con la fuente autorizada antes de un pago real.
+ * Devuelve `null` si el `FederalTaxID` no trae dígitos (sin identificación).
+ */
+export function deriveBeneficiaryIdentity(
+  federalTaxID: string | null | undefined
+): BeneficiaryIdentity | null {
+  const raw = (federalTaxID ?? '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return null;
+
+  const hasCheckDigit = /-\s*\d\s*$/.test(raw);
+  const looksLikeNit = hasCheckDigit || digits.length >= 10 || /^[89]/.test(digits);
+  return { tipoId: looksLikeNit ? 'N' : 'C', numeroId: digits };
+}
+
 /** Configuración de la empresa dispersora usada para armar la cabecera. */
 export interface DisfonEmpresaConfig {
   cuentaDispersora: string;
