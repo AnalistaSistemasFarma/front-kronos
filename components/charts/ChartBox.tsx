@@ -19,7 +19,6 @@ import {
   shouldUseClickOnlyTooltip,
 } from '../../lib/charts/clickOnlyTooltip';
 import { mergeChartOptionsForTheme } from '../../lib/charts/chartColorScheme';
-import { getChartDevicePixelRatio } from '../../lib/charts/defaults';
 import { useTheme } from '../providers';
 import { useChartViewport } from '../dashboard/useChartViewport';
 import '../../lib/charts/register';
@@ -76,7 +75,7 @@ export function ChartBox<T extends ChartType = ChartType>({
 }: ChartBoxProps<T>) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { isCompact, layoutEpoch, resizeTick } = useChartViewport();
+  const { isCompact, layoutEpoch, resizeTick, pixelRatio } = useChartViewport();
   const [ready, setReady] = useState(false);
   const [animKey, setAnimKey] = useState(entranceKey);
   const [showFullValues, setShowFullValues] = useState(false);
@@ -117,7 +116,11 @@ export function ChartBox<T extends ChartType = ChartType>({
 
   const resizeChart = useCallback(() => {
     requestAnimationFrame(() => {
-      chartRef.current?.resize();
+      const chart = chartRef.current;
+      if (!chart) return;
+      // Quitar cualquier DPR congelado para que Chart.js use el del zoom actual
+      delete (chart.options as { devicePixelRatio?: number }).devicePixelRatio;
+      chart.resize();
     });
   }, []);
 
@@ -158,6 +161,7 @@ export function ChartBox<T extends ChartType = ChartType>({
     minWidth,
     layoutEpoch,
     resizeTick,
+    pixelRatio,
     layoutRevision,
     isCompact,
     ready,
@@ -236,13 +240,9 @@ export function ChartBox<T extends ChartType = ChartType>({
     },
   } as ChartOptions<T>;
 
-  const mergedOptions = mergeChartOptionsForTheme(
-    {
-      ...baseOptions,
-      devicePixelRatio: getChartDevicePixelRatio(),
-    },
-    isDark
-  );
+  // Sin devicePixelRatio fijo: Chart.js usa window.devicePixelRatio en vivo
+  // (mejor nitidez al hacer zoom, tooltip canvas igual que antes).
+  const mergedOptions = mergeChartOptionsForTheme(baseOptions, isDark);
 
   const displayData = useMemo(
     () => (showFullValues ? data : zeroChartData(data)),
