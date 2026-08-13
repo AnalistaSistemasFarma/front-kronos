@@ -28,8 +28,17 @@ BEGIN
     [codigo_ciudad]    VARCHAR(4)    NOT NULL DEFAULT '0000',
     [codigo_oficina]   VARCHAR(3)    NOT NULL DEFAULT '000',
     [tipo_id]          VARCHAR(1)    NOT NULL DEFAULT 'N',   -- N NIT / L cédula / I extranjero
-    [nombre_empresa]   VARCHAR(100)  NULL
+    [nombre_empresa]   VARCHAR(100)  NULL,
+    [carpeta_salida]   VARCHAR(500)  NULL                    -- ruta del servidor donde se deja el DISFON (H2H/MFT)
   );
+END
+
+/* 1b) Migración idempotente: agregar carpeta_salida si la tabla ya existía sin
+      esa columna (ambientes creados antes de esta funcionalidad). */
+IF OBJECT_ID('dbo.payment_dispersion_config', 'U') IS NOT NULL
+   AND COL_LENGTH('dbo.payment_dispersion_config', 'carpeta_salida') IS NULL
+BEGIN
+  ALTER TABLE [dbo].[payment_dispersion_config] ADD [carpeta_salida] VARCHAR(500) NULL;
 END
 
 /* 2) Insertar una fila de EJEMPLO (PLACEHOLDER) para Farmalógica, si no existe

@@ -35,6 +35,12 @@ export interface DispersionConfig {
   tipoId: string;
   /** Nombre de la empresa dispersora (puede ser null). */
   nombreEmpresa: string | null;
+  /**
+   * Carpeta del SERVIDOR donde se deja el archivo DISFON generado (ruta local
+   * del servidor). El banco lo recoge de ahí por H2H/MFT. Puede ser null si aún
+   * no se ha configurado.
+   */
+  carpetaSalida: string | null;
 }
 
 /** Fila cruda tal como la devuelve el $queryRaw (nombres de columna de la BD). */
@@ -48,6 +54,7 @@ interface RawDispersionRow {
   codigo_oficina: string;
   tipo_id: string;
   nombre_empresa: string | null;
+  carpeta_salida: string | null;
 }
 
 /**
@@ -63,7 +70,7 @@ export async function getDispersionConfig(
     rows = await prisma.$queryRaw<RawDispersionRow[]>`
       SELECT TOP 1
         id_company, cuenta_dispersora, tipo_cuenta, nit, tipo_movimiento,
-        codigo_ciudad, codigo_oficina, tipo_id, nombre_empresa
+        codigo_ciudad, codigo_oficina, tipo_id, nombre_empresa, carpeta_salida
       FROM [dbo].[payment_dispersion_config]
       WHERE id_company = ${idCompany}
     `;
@@ -86,6 +93,7 @@ export async function getDispersionConfig(
     codigoOficina: r.codigo_oficina ?? '000',
     tipoId: r.tipo_id ?? 'N',
     nombreEmpresa: r.nombre_empresa ?? null,
+    carpetaSalida: r.carpeta_salida ?? null,
   };
 }
 
@@ -99,6 +107,8 @@ export interface DispersionConfigInput {
   codigoOficina: string;
   tipoId: string;
   nombreEmpresa: string | null;
+  /** Carpeta del servidor donde se deja el archivo DISFON (puede ser null). */
+  carpetaSalida: string | null;
 }
 
 /**
@@ -123,6 +133,7 @@ export async function upsertDispersionConfig(
     codigoOficina,
     tipoId,
     nombreEmpresa,
+    carpetaSalida,
   } = input;
 
   const updated = await prisma.$executeRaw`
@@ -134,7 +145,8 @@ export async function upsertDispersionConfig(
         codigo_ciudad     = ${codigoCiudad},
         codigo_oficina    = ${codigoOficina},
         tipo_id           = ${tipoId},
-        nombre_empresa    = ${nombreEmpresa}
+        nombre_empresa    = ${nombreEmpresa},
+        carpeta_salida    = ${carpetaSalida}
     WHERE id_company = ${idCompany}
   `;
 
@@ -142,10 +154,10 @@ export async function upsertDispersionConfig(
     await prisma.$executeRaw`
       INSERT INTO [dbo].[payment_dispersion_config]
         (id_company, cuenta_dispersora, tipo_cuenta, nit, tipo_movimiento,
-         codigo_ciudad, codigo_oficina, tipo_id, nombre_empresa)
+         codigo_ciudad, codigo_oficina, tipo_id, nombre_empresa, carpeta_salida)
       VALUES
         (${idCompany}, ${cuentaDispersora}, ${tipoCuenta}, ${nit}, ${tipoMovimiento},
-         ${codigoCiudad}, ${codigoOficina}, ${tipoId}, ${nombreEmpresa})
+         ${codigoCiudad}, ${codigoOficina}, ${tipoId}, ${nombreEmpresa}, ${carpetaSalida})
     `;
   }
 
