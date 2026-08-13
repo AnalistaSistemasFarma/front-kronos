@@ -35,7 +35,9 @@ import {
   IconDeviceFloppy,
   IconBuildingBank,
   IconWorld,
+  IconTableExport,
 } from '@tabler/icons-react';
+import { exportProposalTabExcel } from '@/lib/payments/exportProposalExcel';
 
 /**
  * Asistente de Pagos (multiempresa) — SOLO LECTURA.
@@ -370,6 +372,19 @@ export default function PaymentAssistantPage() {
   const nationalSummary = useMemo(() => summarize(nationalGroups), [nationalGroups]);
   const foreignSummary = useMemo(() => summarize(foreignGroups), [foreignGroups]);
 
+  // Nombre de la empresa seleccionada (para el nombre del archivo exportado).
+  const selectedCompanyName = useMemo(
+    () => companies.find((c) => String(c.idCompany) === selectedCompany)?.companyName ?? 'empresa',
+    [companies, selectedCompany]
+  );
+
+  // Descarga a Excel de la propuesta de la pestaña activa (a nivel de factura).
+  const handleExport = (tab: 'nacional' | 'exterior') => {
+    const groups = tab === 'nacional' ? nationalGroups : foreignGroups;
+    if (groups.length === 0) return;
+    void exportProposalTabExcel({ groups, companyName: selectedCompanyName, tab });
+  };
+
   if (loadingAccess) {
     return (
       <Group justify="center" mt="xl">
@@ -457,6 +472,14 @@ export default function PaymentAssistantPage() {
                   onClick={openConfig}
                 >
                   Configuracion de dispersion
+                </Button>
+                <Button
+                  variant="light"
+                  leftSection={<IconTableExport size={16} />}
+                  onClick={() => handleExport('nacional')}
+                  disabled={nationalGroups.length === 0}
+                >
+                  Descargar a Excel
                 </Button>
               </Group>
 
@@ -559,6 +582,17 @@ export default function PaymentAssistantPage() {
               <Alert color="blue" icon={<IconInfoCircle size={16} />}>
                 Los pagos al exterior van por otro medio (no DISFON). Mecanismo en definicion.
               </Alert>
+
+              <Group>
+                <Button
+                  variant="light"
+                  leftSection={<IconTableExport size={16} />}
+                  onClick={() => handleExport('exterior')}
+                  disabled={foreignGroups.length === 0}
+                >
+                  Descargar a Excel
+                </Button>
+              </Group>
 
               <SimpleGrid cols={{ base: 1, sm: 3 }}>
                 <Card withBorder padding="md" radius="md">
