@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { proposalToDisfon, type DisfonEmpresaConfig } from '../disfonMapping';
+import {
+  proposalToDisfon,
+  deriveBeneficiaryIdentity,
+  type DisfonEmpresaConfig,
+} from '../disfonMapping';
 import { LINE_LEN } from '../disfon';
 import type { SupplierGroup, SupplierInvoice, SupplierBankAccount } from '../proposal';
 
@@ -172,5 +176,37 @@ describe('proposalToDisfon', () => {
     const res = proposalToDisfon(config, [], opts);
     expect(res.fileText).toBe('');
     expect(res.detailCount).toBe(0);
+  });
+});
+
+describe('deriveBeneficiaryIdentity (heurística provisional)', () => {
+  it('devuelve null cuando no hay documento', () => {
+    expect(deriveBeneficiaryIdentity('')).toBeNull();
+    expect(deriveBeneficiaryIdentity(null)).toBeNull();
+    expect(deriveBeneficiaryIdentity(undefined)).toBeNull();
+    expect(deriveBeneficiaryIdentity('   ')).toBeNull();
+  });
+
+  it('clasifica como NIT cuando trae dígito de verificación con guion', () => {
+    const id = deriveBeneficiaryIdentity('900123456-7');
+    expect(id).toEqual({ tipoId: 'N', numeroId: '9001234567' });
+  });
+
+  it('clasifica como NIT cuando empieza por 8 o 9', () => {
+    expect(deriveBeneficiaryIdentity('800123456')?.tipoId).toBe('N');
+    expect(deriveBeneficiaryIdentity('900987654')?.tipoId).toBe('N');
+  });
+
+  it('clasifica como NIT cuando tiene 10+ dígitos', () => {
+    expect(deriveBeneficiaryIdentity('1234567890')?.tipoId).toBe('N');
+  });
+
+  it('clasifica como cédula un documento corto que no aparenta NIT', () => {
+    const id = deriveBeneficiaryIdentity('52123456');
+    expect(id).toEqual({ tipoId: 'C', numeroId: '52123456' });
+  });
+
+  it('conserva solo los dígitos en numeroId', () => {
+    expect(deriveBeneficiaryIdentity('CC 52.123.456')?.numeroId).toBe('52123456');
   });
 });

@@ -10,7 +10,10 @@ import { prisma } from '../prisma';
  * creada por `prisma/seeds/payment-dispersion-config.sql`.
  *
  * La tabla NO está en el schema de Prisma (se administra por seed SQL), por eso
- * se lee con `prisma.$queryRaw`. SOLO LECTURA.
+ * se lee con `prisma.$queryRaw` y se escribe con `prisma.$executeRaw`.
+ *
+ * IMPORTANTE: la ÚNICA escritura permitida del Asistente de Pagos es sobre esta
+ * tabla propia en KRONOSDB_PRUEBAS. NUNCA se escribe en SAP.
  */
 
 /** Configuración de dispersión de una empresa, ya tipada. */
@@ -84,4 +87,67 @@ export async function getDispersionConfig(
     tipoId: r.tipo_id ?? 'N',
     nombreEmpresa: r.nombre_empresa ?? null,
   };
+}
+
+/** Campos editables de la configuración de dispersión (sin id_company). */
+export interface DispersionConfigInput {
+  cuentaDispersora: string;
+  tipoCuenta: string;
+  nit: string;
+  tipoMovimiento: string;
+  codigoCiudad: string;
+  codigoOficina: string;
+  tipoId: string;
+  nombreEmpresa: string | null;
+}
+
+/**
+ * Inserta o actualiza (UPSERT por `id_company`) la configuración de dispersión
+ * de una empresa en `payment_dispersion_config`. Escritura PARAMETRIZADA con
+ * `prisma.$executeRaw` (tagged template → sin inyección). Es la ÚNICA escritura
+ * del módulo y va SOLO a la tabla propia en KRONOSDB_PRUEBAS; NUNCA toca SAP.
+ *
+ * Estrategia: se intenta UPDATE; si no afectó filas (empresa nueva), se hace el
+ * INSERT. Devuelve la configuración ya persistida (re-leída con getDispersionConfig).
+ */
+export async function upsertDispersionConfig(
+  idCompany: number,
+  input: DispersionConfigInput
+): Promise<DispersionConfig | null> {
+  const {
+    cuentaDispersora,
+    tipoCuenta,
+    nit,
+    tipoMovimiento,
+    codigoCiudad,
+    codigoOficina,
+    tipoId,
+    nombreEmpresa,
+  } = input;
+
+  const updated = await prisma.$executeRaw`
+    UPDATE [dbo].[payment_dispersion_config]
+    SET cuenta_dispersora = ${cuentaDispersora},
+        tipo_cuenta       = ${tipoCuenta},
+        nit               = ${nit},
+        tipo_movimiento   = ${tipoMovimiento},
+        codigo_ciudad     = ${codigoCiudad},
+        codigo_oficina    = ${codigoOficina},
+        tipo_id           = ${tipoId},
+        nombre_empresa    = ${nombreEmpresa}
+    WHERE id_company = ${idCompany}
+  `;
+
+  if (updated === 0) {
+    await prisma.$executeRaw`
+      INSERT INTO [dbo].[payment_dispersion_config]
+        (id_company, cuenta_dispersora, tipo_cuenta, nit, tipo_movimiento,
+         codigo_ciudad, codigo_oficina, tipo_id, nombre_empresa)
+      VALUES
+        (${idCompany}, ${cuentaDispersora}, ${tipoCuenta}, ${nit}, ${tipoMovimiento},
+         ${codigoCiudad}, ${codigoOficina}, ${tipoId}, ${nombreEmpresa})
+    `;
+  }
+
+  return getDispersionConfig(idCompany);
 }
