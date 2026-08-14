@@ -18,6 +18,8 @@ import {
   type BeneficiaryIdentity,
 } from '../../../../lib/payments/disfonMapping';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
+import { getPool, sql } from '../../../../lib/mssqlPool';
+import { isPaymentRunApproved } from '../../../../lib/payment-assistant/paymentRun';
 
 /**
  * GENERACIÓN del archivo DISFON en el SERVIDOR (Asistente de Pagos).
@@ -88,6 +90,53 @@ export async function POST(request: NextRequest) {
     if (!access || !access.endpoint) {
       return NextResponse.json(
         { error: 'No tiene acceso a esta empresa o no esta configurada.' },
+        { status: 403 }
+      );
+    }
+
+    // 0) GATE DE AUTORIZACIÓN: la generación del DISFON queda BLOQUEADA hasta que la corrida de
+    //    pago esté APROBADA (tarea de autorización en id_status = 2). Se exige `runId` y se valida
+    //    que pertenezca a esta empresa. Cualquier otro estado (pendiente/rechazada/inexistente)
+    //    responde 403 sin escribir el archivo.
+    const runIdRaw = request.nextUrl.searchParams.get('runId');
+    const runId = Number(runIdRaw);
+    if (!runIdRaw || !Number.isFinite(runId)) {
+      return NextResponse.json(
+        { error: 'Debe enviar la corrida a autorización antes de generar el archivo (runId requerido).' },
+        { status: 400 }
+      );
+    }
+    const gatePool = await getPool();
+    const runRow = await gatePool
+      .request()
+      .input('runId', sql.Int, runId)
+      .input('companyId', sql.Int, access.idCompany)
+      .query(`
+        SELECT TOP 1 pr.id, pr.id_request_general
+        FROM payment_run pr
+        WHERE pr.id = @runId AND pr.id_company = @companyId
+      `);
+    const run = runRow.recordset[0];
+    if (!run) {
+      return NextResponse.json(
+        { error: 'La corrida indicada no existe para esta empresa.' },
+        { status: 404 }
+      );
+    }
+    const authRow = await gatePool
+      .request()
+      .input('rid', sql.Int, run.id_request_general)
+      .query(`
+        SELECT TOP 1 trg.id_status
+        FROM task_request_general trg
+        INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+        WHERE trg.id_request_general = @rid AND tpc.is_authorization = 1
+        ORDER BY trg.id DESC
+      `);
+    const authStatus = authRow.recordset[0]?.id_status ?? null;
+    if (!isPaymentRunApproved(authStatus)) {
+      return NextResponse.json(
+        { error: 'La corrida no está autorizada. No es posible generar el archivo DISFON.' },
         { status: 403 }
       );
     }

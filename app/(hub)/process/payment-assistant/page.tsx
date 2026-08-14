@@ -37,6 +37,7 @@ import {
   IconWorld,
   IconTableExport,
   IconServer,
+  IconSend,
 } from '@tabler/icons-react';
 import { exportProposalTabExcel } from '@/lib/payments/exportProposalExcel';
 
@@ -146,6 +147,17 @@ const EMPTY_CONFIG_FORM: ConfigForm = {
   carpetaSalida: '',
 };
 
+/** Estado de la corrida de pago (autorización) de la empresa seleccionada. */
+type RunStatus = 'pendiente' | 'aprobada' | 'rechazada';
+interface RunInfo {
+  runId: number;
+  requestId: number;
+  total: number | null;
+  status: RunStatus;
+  idStatus: number | null;
+  createdAt: string | null;
+}
+
 /** Resultado de generar el archivo DISFON en el servidor. */
 interface GenerateResult {
   ok: boolean;
@@ -245,6 +257,7 @@ export default function PaymentAssistantPage() {
 
   const generateDisfon = async () => {
     if (!selectedCompany) return;
+    if (!runInfo || runInfo.status !== 'aprobada') return;
     try {
       openGen();
       setGenLoading(true);
@@ -252,7 +265,9 @@ export default function PaymentAssistantPage() {
       setGenResult(null);
 
       const res = await fetch(
-        `/api/payment-assistant/generate-disfon?companyId=${encodeURIComponent(selectedCompany)}`,
+        `/api/payment-assistant/generate-disfon?companyId=${encodeURIComponent(
+          selectedCompany
+        )}&runId=${encodeURIComponent(runInfo.runId)}`,
         { method: 'POST' }
       );
       const data = await res.json().catch(() => ({}));
@@ -264,6 +279,52 @@ export default function PaymentAssistantPage() {
       setGenLoading(false);
     }
   };
+
+  // --- Autorización de la corrida de pago ---------------------------------
+  // Reutiliza el motor de Autorizaciones: al ENVIAR se crea una solicitud con una tarea de
+  // autorización que cae en /process/authorization. El botón de generar DISFON queda bloqueado
+  // hasta que esa autorización esté APROBADA.
+  const [runInfo, setRunInfo] = useState<RunInfo | null>(null);
+  const [runLoading, setRunLoading] = useState(false);
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const loadRunStatus = async (companyId: string) => {
+    try {
+      setRunLoading(true);
+      const res = await fetch(
+        `/api/payment-assistant/run-status?companyId=${encodeURIComponent(companyId)}`
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'No se pudo consultar el estado de la corrida');
+      setRunInfo((data.run as RunInfo) ?? null);
+    } catch {
+      setRunInfo(null);
+    } finally {
+      setRunLoading(false);
+    }
+  };
+
+  const submitRun = async () => {
+    if (!selectedCompany) return;
+    try {
+      setSubmitLoading(true);
+      setSubmitError(null);
+      const res = await fetch(
+        `/api/payment-assistant/submit-run?companyId=${encodeURIComponent(selectedCompany)}`,
+        { method: 'POST' }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'No se pudo enviar la corrida a autorización');
+      await loadRunStatus(selectedCompany);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Error inesperado');
+    } finally {
+      setSubmitLoading(false);
+    }
+  };
+
+  const runApproved = runInfo?.status === 'aprobada';
 
   // --- Configuración de dispersión ---------------------------------------
   const [cfgOpened, { open: openCfg, close: closeCfg }] = useDisclosure(false);
@@ -390,8 +451,14 @@ export default function PaymentAssistantPage() {
 
   const handleCompanyChange = (value: string | null) => {
     setSelectedCompany(value);
-    if (value) loadProposal(value);
-    else setProposal(null);
+    setRunInfo(null);
+    setSubmitError(null);
+    if (value) {
+      loadProposal(value);
+      loadRunStatus(value);
+    } else {
+      setProposal(null);
+    }
   };
 
   const companyOptions = useMemo(
@@ -525,20 +592,88 @@ export default function PaymentAssistantPage() {
                   Descargar a Excel
                 </Button>
                 <Button
+                  color="grape"
+                  leftSection={<IconSend size={16} />}
+                  onClick={submitRun}
+                  loading={submitLoading}
+                  disabled={nationalGroups.length === 0 || runInfo?.status === 'pendiente'}
+                >
+                  Enviar a autorización
+                </Button>
+                <Button
                   color="teal"
                   leftSection={<IconServer size={16} />}
                   onClick={generateDisfon}
-                  disabled={nationalGroups.length === 0}
+                  disabled={nationalGroups.length === 0 || !runApproved}
                 >
                   Generar archivo DISFON en el servidor
                 </Button>
               </Group>
 
-              <Alert color="blue" icon={<IconInfoCircle size={16} />}>
-                &quot;Generar archivo DISFON en el servidor&quot; crea el archivo y lo deja en la
-                carpeta del servidor configurada. El cifrado PGP y el envio al banco (MFT) se agregan
-                despues.
-              </Alert>
+              {submitError && (
+                <Alert color="red" icon={<IconAlertTriangle size={16} />} title="No se pudo enviar">
+                  {submitError}
+                </Alert>
+              )}
+
+              {/* Estado de la corrida (autorización). El DISFON solo se habilita si está APROBADA. */}
+              {runLoading ? (
+                <Alert color="gray" icon={<Loader size={14} />}>
+                  Consultando el estado de la corrida...
+                </Alert>
+              ) : runInfo ? (
+                <Alert
+                  color={
+                    runInfo.status === 'aprobada'
+                      ? 'green'
+                      : runInfo.status === 'rechazada'
+                        ? 'red'
+                        : 'yellow'
+                  }
+                  icon={
+                    runInfo.status === 'aprobada' ? (
+                      <IconCheck size={16} />
+                    ) : (
+                      <IconAlertTriangle size={16} />
+                    )
+                  }
+                  title={
+                    <Group gap="xs">
+                      <Text fw={600}>Corrida #{runInfo.runId}</Text>
+                      <Badge
+                        color={
+                          runInfo.status === 'aprobada'
+                            ? 'green'
+                            : runInfo.status === 'rechazada'
+                              ? 'red'
+                              : 'yellow'
+                        }
+                        variant="filled"
+                      >
+                        {runInfo.status === 'aprobada'
+                          ? 'Aprobada'
+                          : runInfo.status === 'rechazada'
+                            ? 'Rechazada'
+                            : 'En autorización (pendiente)'}
+                      </Badge>
+                    </Group>
+                  }
+                >
+                  {runInfo.status === 'pendiente' &&
+                    'La corrida está en autorización. El archivo DISFON se habilitará cuando sea aprobada en el módulo de Autorizaciones.'}
+                  {runInfo.status === 'aprobada' &&
+                    'Corrida aprobada. Ya puede generar el archivo DISFON en el servidor.'}
+                  {runInfo.status === 'rechazada' &&
+                    'La corrida fue rechazada. Puede volver a enviarla a autorización.'}
+                </Alert>
+              ) : (
+                <Alert color="blue" icon={<IconInfoCircle size={16} />}>
+                  Envíe la corrida a autorización para habilitar la generación del archivo DISFON.
+                  &quot;Generar archivo DISFON en el servidor&quot; crea el archivo y lo deja en la
+                  carpeta del servidor configurada (el cifrado PGP y el envío al banco por MFT se
+                  agregan después).
+                </Alert>
+              )}
 
               <SimpleGrid cols={{ base: 1, sm: 3 }}>
                 <Card withBorder padding="md" radius="md">
