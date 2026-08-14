@@ -6,6 +6,7 @@ import { useSession } from 'next-auth/react';
 import {
   Title,
   Text,
+  Checkbox,
   Badge,
   Button,
   Group,
@@ -88,6 +89,7 @@ function RequestBoard() {
     process: '',
     costCenter: '',
     assignedProcess: '',
+    isExternal: false,
   });
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
@@ -648,6 +650,7 @@ function RequestBoard() {
           task: tasksToSend.length > 0 ? tasksToSend : null,
           cost_center_pc: formData.costCenter || null,
           id_user: formData.assignedProcess ? formData.assignedProcess : userId,
+          is_external: formData.isExternal,
         }),
       });
 
@@ -666,6 +669,7 @@ function RequestBoard() {
         descripcion: '',
         costCenter: '',
         assignedProcess: '',
+        isExternal: false,
       });
       setTasks([]);
       setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
@@ -1141,6 +1145,7 @@ function RequestBoard() {
               descripcion: '',
               costCenter: '',
               assignedProcess: '',
+              isExternal: false,
             });
           }}
           title={
@@ -1437,6 +1442,28 @@ function RequestBoard() {
                           input: 'min-h-[48px] text-base',
                         }}
                       />
+                    </Grid.Col>
+
+                    {/* Formulario externo: expone este flujo en una página pública SIN login. */}
+                    <Grid.Col span={{ base: 12 }}>
+                      <Checkbox
+                        label='Formulario externo (acceso sin login)'
+                        description='Expone el formulario de este flujo en una página pública, con solo los campos parametrizados, para enviar la solicitud sin iniciar sesión.'
+                        checked={formData.isExternal}
+                        onChange={(e) =>
+                          setFormData({ ...formData, isExternal: e.currentTarget.checked })
+                        }
+                        disabled={formDataLoading}
+                      />
+                      {formData.isExternal && (
+                        <Text size='sm' c='dimmed' mt='xs'>
+                          La URL pública del formulario será{' '}
+                          <Text span fw={600}>
+                            /formulario-externo/&lt;id&gt;
+                          </Text>{' '}
+                          y estará disponible al guardar el flujo.
+                        </Text>
+                      )}
                     </Grid.Col>
                   </Grid>
                 </div>
