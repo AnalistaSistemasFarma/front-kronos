@@ -2,7 +2,15 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/health-records/access';
-import { crearRegistro, registroExiste, sanitizeRecord } from '../../../../lib/health-records/records';
+import {
+  getArticuloNombre,
+  crearRegistro,
+  getFieldSizes,
+  getNombresExistentes,
+  normalizeName,
+  registroExiste,
+  sanitizeRecord,
+} from '../../../../lib/health-records/records';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -12,7 +20,7 @@ import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer'
  * reporte { ok, duplicated, failed }. Todo server-side, una sola sesion SAP.
  */
 
-const REQUIRED = ['U_Referencia', 'U_Descripcion', 'U_Registro_Sanitario'] as const;
+const REQUIRED = ['U_Referencia', 'U_Registro_Sanitario'] as const;
 const MAX_ROWS = 2000;
 
 export async function POST(request: NextRequest) {
@@ -26,6 +34,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const companyId = Number(body.companyId);
     const rows: Record<string, unknown>[] = Array.isArray(body.rows) ? body.rows : [];
+    // Simulacion: corre TODAS las validaciones pero NO crea nada en SAP.
+    const dryRun = body.dryRun === true;
 
     if (!companyId) return NextResponse.json({ error: 'Falta companyId' }, { status: 400 });
     if (rows.length === 0) return NextResponse.json({ error: 'No hay filas para cargar' }, { status: 400 });
@@ -49,9 +59,25 @@ export async function POST(request: NextRequest) {
       companyDB: company.endpoint.companyDB,
     });
 
+    // Tamaños de los campos en SAP, para validar el largo antes de crear
+    // (así la simulación detecta "demasiado largo" sin intentar el POST).
+    const fieldSizes = await getFieldSizes(sap, entity);
+
+    // Nombres (Titular/Fabricante) ya existentes en SAP, indexados por su forma
+    // normalizada, para advertir variantes por tildes/mayúsculas que fragmentan
+    // reportes.
+    const NAME_FIELDS = ['U_Titular', 'U_Fabricante'];
+    const nombresExistentes = await getNombresExistentes(sap, entity, NAME_FIELDS);
+    const FIELD_LABEL: Record<string, string> = { U_Titular: 'Titular', U_Fabricante: 'Fabricante' };
+    const vistosNombres: Record<string, Map<string, string>> = {
+      U_Titular: new Map(),
+      U_Fabricante: new Map(),
+    };
+
     const ok: { row: number; registro: string; docNum: number }[] = [];
     const duplicated: { row: number; registro: string; reason: string }[] = [];
     const failed: { row: number; registro: string; error: string }[] = [];
+    const warnings: { row: number; field: string; value: string; similar: string }[] = [];
     const seen = new Set<string>();
 
     try {
@@ -66,21 +92,83 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        if (seen.has(registro)) {
-          duplicated.push({ row: rowNum, registro, reason: 'Duplicado dentro del archivo' });
+        // Validar el largo de cada campo contra su tamaño en SAP (evita el 400).
+        const rec = record as Record<string, string | undefined>;
+        const largo = Object.entries(fieldSizes).find(
+          ([field, max]) => (rec[field]?.length ?? 0) > max
+        );
+        if (largo) {
+          const [field, max] = largo;
+          failed.push({
+            row: rowNum,
+            registro,
+            error: `El campo ${field} supera el máximo de ${max} caracteres (tiene ${rec[field]!.length})`,
+          });
+          continue;
+        }
+
+        // Un mismo RS puede repetirse en productos distintos; el duplicado se
+        // evalua por la pareja (Referencia + Registro Sanitario).
+        const dupKey = `${record.U_Referencia}||${registro}`;
+        if (seen.has(dupKey)) {
+          duplicated.push({ row: rowNum, registro, reason: 'Duplicado dentro del archivo (mismo producto y registro)' });
           continue;
         }
 
         try {
-          if (await registroExiste(sap, entity, registro)) {
-            duplicated.push({ row: rowNum, registro, reason: 'Ya existe en SAP' });
+          // El articulo (Referencia) debe existir en SAP; de paso traemos su
+          // nombre para completar la descripcion (el cargue masivo no la trae).
+          const nombreArticulo = await getArticuloNombre(sap, record.U_Referencia as string);
+          if (nombreArticulo === null) {
+            failed.push({
+              row: rowNum,
+              registro,
+              error: `El articulo '${record.U_Referencia}' no existe en SAP`,
+            });
             continue;
           }
-          seen.add(registro);
+          // La descripcion la impone el sistema con el nombre del articulo en SAP
+          // (se ignora lo que venga en el Excel) para no tener divergencias.
+          const maxDesc = fieldSizes.U_Descripcion;
+          record.U_Descripcion = maxDesc ? nombreArticulo.slice(0, maxDesc) : nombreArticulo;
+          if (await registroExiste(sap, entity, record.U_Referencia as string, registro)) {
+            duplicated.push({ row: rowNum, registro, reason: 'Ya existe en SAP para este producto' });
+            continue;
+          }
+          seen.add(dupKey);
+
+          // Advertencia (no bloquea): Titular/Fabricante que difiere de uno ya
+          // existente (o de otra fila del archivo) solo por tildes/mayúsculas.
+          for (const field of NAME_FIELDS) {
+            const value = rec[field];
+            if (!value) continue;
+            const norm = normalizeName(value);
+            const existentes = nombresExistentes[field]?.get(norm);
+            if (existentes && !existentes.has(value)) {
+              warnings.push({
+                row: rowNum,
+                field: FIELD_LABEL[field],
+                value,
+                similar: [...existentes].slice(0, 3).join(' | '),
+              });
+            } else {
+              const prev = vistosNombres[field].get(norm);
+              if (prev && prev !== value) {
+                warnings.push({ row: rowNum, field: FIELD_LABEL[field], value, similar: prev });
+              }
+            }
+            if (!vistosNombres[field].has(norm)) vistosNombres[field].set(norm, value);
+          }
+
+          if (dryRun) {
+            // Simulacion: pasa todas las validaciones, pero NO se crea.
+            ok.push({ row: rowNum, registro, docNum: 0 });
+            continue;
+          }
           const docNum = await crearRegistro(sap, company.endpoint, record, userName, 'Creado por cargue masivo');
           ok.push({ row: rowNum, registro, docNum });
         } catch (err) {
-          const msg = err instanceof SapError ? err.message : err instanceof Error ? err.message : 'Error';
+          const msg = err instanceof SapError ? err.friendly : err instanceof Error ? err.message : 'Error';
           failed.push({ row: rowNum, registro, error: msg });
         }
       }
@@ -89,10 +177,18 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
-      summary: { total: rows.length, creados: ok.length, duplicados: duplicated.length, fallidos: failed.length },
+      dryRun,
+      summary: {
+        total: rows.length,
+        creados: ok.length,
+        duplicados: duplicated.length,
+        fallidos: failed.length,
+        advertencias: warnings.length,
+      },
       ok,
       duplicated,
       failed,
+      warnings,
     });
   } catch (error) {
     if (error instanceof SapError) {

@@ -33,20 +33,26 @@ export const STANDARD_FIELDS: StandardField[] = [
   { label: 'Codigo', field: 'ItemCode', type: 'string', editable: false, requiredOnCreate: true, inExcel: true },
   // RN: la descripcion NO es editable en la actualizacion (solo se captura al crear).
   { label: 'Descripcion', field: 'ItemName', type: 'string', editable: false, requiredOnCreate: true, inExcel: true },
-  { label: 'Grupo de articulos', field: 'ItemsGroupCode', type: 'int', editable: true, requiredOnCreate: true, inExcel: true },
-  { label: 'Nombre extranjero', field: 'ForeignName', type: 'string', editable: true, inExcel: true },
-  { label: 'Tipo de articulo', field: 'ItemType', type: 'itemType', editable: true, inExcel: true },
+  // RN: en la ACTUALIZACIÓN se permite editar el Código de barras (BarCode) y el
+  // Proveedor principal (Mainsupplier = CardCode del proveedor). El resto queda de
+  // solo lectura (SAP solo admite esos cambios por ahora).
+  { label: 'Grupo de articulos', field: 'ItemsGroupCode', type: 'int', editable: false, requiredOnCreate: true, inExcel: true },
+  { label: 'Nombre extranjero', field: 'ForeignName', type: 'string', editable: false, inExcel: true },
+  { label: 'Tipo de articulo', field: 'ItemType', type: 'itemType', editable: false, inExcel: true },
   { label: 'Codigo de barras / GTIN', field: 'BarCode', type: 'string', editable: true, inExcel: true },
-  { label: 'Es de ventas', field: 'SalesItem', type: 'flag', editable: true, inExcel: true },
-  { label: 'Es de compras', field: 'PurchaseItem', type: 'flag', editable: true, inExcel: true },
-  { label: 'Es de inventario', field: 'InventoryItem', type: 'flag', editable: true, inExcel: true },
-  { label: 'Activo (valido)', field: 'Valid', type: 'flag', editable: true },
-  { label: 'Inactivo (congelado)', field: 'Frozen', type: 'flag', editable: true },
-  { label: 'Proveedor principal', field: 'Mainsupplier', type: 'string', editable: true, inExcel: true },
-  { label: 'Unidad de venta', field: 'SalesUnit', type: 'string', editable: true, inExcel: true },
-  { label: 'Unidad de compra', field: 'PurchaseUnit', type: 'string', editable: true, inExcel: true },
-  { label: 'Unidad de inventario', field: 'InventoryUOM', type: 'string', editable: true, inExcel: true },
+  { label: 'Es de ventas', field: 'SalesItem', type: 'flag', editable: false, inExcel: true },
+  { label: 'Es de compras', field: 'PurchaseItem', type: 'flag', editable: false, inExcel: true },
+  { label: 'Es de inventario', field: 'InventoryItem', type: 'flag', editable: false, inExcel: true },
+  { label: 'Activo (valido)', field: 'Valid', type: 'flag', editable: false },
+  { label: 'Inactivo (congelado)', field: 'Frozen', type: 'flag', editable: false },
+  { label: 'Proveedor principal (CardCode)', field: 'Mainsupplier', type: 'string', editable: true, inExcel: true },
+  { label: 'Unidad de venta', field: 'SalesUnit', type: 'string', editable: false, inExcel: true },
+  { label: 'Unidad de compra', field: 'PurchaseUnit', type: 'string', editable: false, inExcel: true },
+  { label: 'Unidad de inventario', field: 'InventoryUOM', type: 'string', editable: false, inExcel: true },
 ];
+
+/** Campos permitidos en la ACTUALIZACIÓN (solo estos se envían/aceptan al editar). */
+export const EDITABLE_ON_UPDATE = STANDARD_FIELDS.filter((f) => f.editable).map((f) => f.field);
 
 /** Nombres de los campos estandar (para whitelist en el servidor). */
 export const STANDARD_FIELD_NAMES = STANDARD_FIELDS.map((f) => f.field);
@@ -80,6 +86,13 @@ export interface CustomField {
   label: string;
   /** Nombre OData del campo U_* en la base SAP de la empresa. */
   field: string;
+  /**
+   * Editable tras la creacion (en EditModal). Por defecto los custom son de
+   * solo lectura; solo los marcados con editable:true se pueden modificar y
+   * enviar en la actualizacion. Editar VALORES de UDF por Service Layer esta
+   * permitido (es dato, no estructura).
+   */
+  editable?: boolean;
 }
 
 /**
@@ -101,8 +114,11 @@ export interface CustomField {
  * espacios no importan) via getCompanyCustomFields().
  */
 export const COMPANY_CUSTOM_FIELDS: Record<string, CustomField[]> = {
-  // ONE LATAM PHARMA — familia U_IT_* (la mas rica).
-  'ONE LATAM PHARMA': [
+  // ONELATAMPHARMA — familia U_IT_* (la mas rica). La clave DEBE coincidir con
+  // el nombre real de la empresa en BD (company.company = 'ONELATAMPHARMA', sin
+  // espacios); si no coincide, getCompanyCustomFields() no aplica y los campos
+  // caen al modo humanizado de solo lectura.
+  'ONELATAMPHARMA': [
     { label: 'CUM', field: 'U_IT_CUM' },
     { label: 'ATC', field: 'U_IT_ATC' },
     { label: 'Descripcion ATC', field: 'U_IT_DescAtc' },
@@ -111,7 +127,10 @@ export const COMPANY_CUSTOM_FIELDS: Record<string, CustomField[]> = {
     { label: 'Regulado', field: 'U_IT_Regulado' },
     { label: 'Via de administracion', field: 'U_IT_Via_Adm' },
     { label: 'IUM', field: 'U_IT_IUM' },
-    { label: 'Temperatura', field: 'U_IT_Temperatura' },
+    { label: 'Temperatura', field: 'U_IT_Temperatura', editable: true },
+    { label: 'Agotado', field: 'U_IT_Agotado', editable: true },
+    { label: 'Clasificación de producto', field: 'U_ClasificacionProducto', editable: true },
+    { label: 'Condición de almacenamiento', field: 'U_IT_Condicion_Almacenamiento', editable: true },
     { label: 'SKU proveedor', field: 'U_IT_SKU_Proveedor' },
     { label: 'Registro sanitario', field: 'U_IT_Registro_Sanitario' },
     { label: 'Vida util', field: 'U_IT_Vida_Util' },
@@ -185,6 +204,17 @@ export function getCompanyCustomFields(companyName: string): CustomField[] {
     if (normalizeCompanyName(key) === target) return fields;
   }
   return [];
+}
+
+/**
+ * Nombres de los campos custom EDITABLES de una empresa (editable === true).
+ * Se usa como whitelist en la actualizacion: solo estos UDF se aceptan/envian
+ * al editar, ademas de los estandar editables (EDITABLE_ON_UPDATE).
+ */
+export function getEditableCustomFields(companyName: string): string[] {
+  return getCompanyCustomFields(companyName)
+    .filter((c) => c.editable === true)
+    .map((c) => c.field);
 }
 
 /**

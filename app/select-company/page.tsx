@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { Select, Button, Paper, Title, Stack, Loader, Alert } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
 import { useUserContext } from '../../lib/user-context';
 import TextLogo from '../../components/TextLogo';
+import { DEFAULT_POST_LOGIN_URL } from '../../lib/auth/logout';
 
 interface Company {
   id: number;
@@ -22,6 +23,10 @@ export default function SelectCompany() {
   const [error, setError] = useState<string | null>(null);
   const [selectedValue, setSelectedValue] = useState<string>('');
 
+  const goToDefaultHome = useCallback(() => {
+    router.push(DEFAULT_POST_LOGIN_URL);
+  }, [router]);
+
   useEffect(() => {
     if (status === 'loading') return;
     if (!session) {
@@ -29,31 +34,35 @@ export default function SelectCompany() {
       return;
     }
     if (selectedCompany) {
-      router.push('/dashboard/solicitudes');
+      goToDefaultHome();
       return;
     }
-    fetchCompanies();
-  }, [session, status, selectedCompany, router]);
 
-  const fetchCompanies = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch('/api/companies');
-      if (!response.ok) {
-        throw new Error('Failed to fetch companies');
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        const response = await fetch('/api/companies');
+        if (!response.ok) throw new Error('Failed to fetch companies');
+        const data: Company[] = await response.json();
+        if (cancelled) return;
+        setCompanies(data);
+        if (data.length === 0) {
+          setError('No companies available. Please contact support.');
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setError('Unable to load companies. Please try again.');
+        console.error('Error fetching companies:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      const data: Company[] = await response.json();
-      setCompanies(data);
-      if (data.length === 0) {
-        setError('No companies available. Please contact support.');
-      }
-    } catch (err) {
-      setError('Unable to load companies. Please try again.');
-      console.error('Error fetching companies:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session, status, selectedCompany, router, goToDefaultHome]);
 
   const handleSelect = (value: string | null) => {
     setSelectedValue(value || '');
@@ -63,7 +72,7 @@ export default function SelectCompany() {
     const company = companies.find((c) => c.id.toString() === selectedValue);
     if (company) {
       setSelectedCompany(company);
-      router.push('/dashboard/solicitudes');
+      goToDefaultHome();
     }
   };
 

@@ -26,6 +26,38 @@ export class SapError extends Error {
     this.detail = detail;
     this.companyId = companyId;
   }
+
+  /**
+   * Mensaje legible que devuelve SAP en el cuerpo del error
+   * (error.message.value). Si no se puede extraer, cae al message generico.
+   * Evita mostrarle al usuario solo "fallo (400)".
+   */
+  get friendly(): string {
+    return extractSapMessage(this.detail) ?? this.message;
+  }
+}
+
+/**
+ * Extrae el mensaje legible del cuerpo de error del Service Layer
+ * (SAP responde { error: { message: { value: "..." } } }). Devuelve null si no
+ * se puede extraer. Se usa para que el `message` del SapError YA traiga la causa
+ * real (no depende de getters ni de instanceof en el consumidor).
+ */
+function extractSapMessage(detail: string): string | null {
+  try {
+    const d = JSON.parse(detail);
+    const value = d?.error?.message?.value ?? d?.error?.message;
+    if (value) return String(value);
+  } catch {
+    /* el detalle no es JSON */
+  }
+  return null;
+}
+
+/** Construye el message del error incluyendo la causa real de SAP si existe. */
+function sapErrorMessage(fallback: string, detail: string): string {
+  const sap = extractSapMessage(detail);
+  return sap ? sap : fallback;
 }
 
 export interface SapCredentials {
@@ -114,7 +146,7 @@ export async function sapGet<T = unknown>(
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new SapError(`SAP GET ${path} fallo (${response.status})`, response.status, detail);
+    throw new SapError(sapErrorMessage(`SAP GET ${path} fallo (${response.status})`, detail), response.status, detail);
   }
 
   return response.json() as Promise<T>;
@@ -177,7 +209,7 @@ export async function sapPost<T = unknown>(
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new SapError(`SAP POST ${path} fallo (${response.status})`, response.status, detail);
+    throw new SapError(sapErrorMessage(`SAP POST ${path} fallo (${response.status})`, detail), response.status, detail);
   }
 
   return response.json() as Promise<T>;
@@ -218,7 +250,27 @@ export async function sapPatch(
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new SapError(`SAP PATCH ${path} fallo (${response.status})`, response.status, detail);
+    throw new SapError(sapErrorMessage(`SAP PATCH ${path} fallo (${response.status})`, detail), response.status, detail);
+  }
+}
+
+/** Elimina un recurso del Service Layer (DELETE entity(key)). */
+export async function sapDelete(session: SapSession, path: string): Promise<void> {
+  const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
+
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: { Cookie: `B1SESSION=${session.sessionId}` },
+    // @ts-expect-error - Node.js fetch admite un agent
+    agent: sapAgent,
+  });
+
+  if (response.status === 401) {
+    throw new SapError('Sesion SAP expirada o invalida', 401);
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new SapError(sapErrorMessage(`SAP DELETE ${path} fallo (${response.status})`, detail), response.status, detail);
   }
 }
 

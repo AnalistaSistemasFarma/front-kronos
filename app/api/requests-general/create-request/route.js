@@ -1,19 +1,18 @@
-import sql from "mssql";
-import sqlConfig from "../../../../dbconfig.js";
 import {
   fireAndForgetNotification,
   notifyNewRequest,
 } from "../../../../lib/notificationEvents.js";
+import { syncRequestToSapsend } from "../../../../lib/sapsend/treasury.js";
+import { createGeneralRequest } from "../../../../lib/requests-general/createGeneralRequest.js";
 
 export async function POST(req) {
   try {
     const body = await req.json();
 
-  const {
+    const {
       company,
       subject,
       descripcion,
-      category,
       process,
       createdby,
       url,
@@ -27,152 +26,19 @@ export async function POST(req) {
       );
     }
 
-    const pool = await sql.connect(sqlConfig);
-    const transaction = new sql.Transaction(pool);
-
+    let result;
     try {
-      await transaction.begin();
-
-      const insertRequest = `
-        INSERT INTO requests_general (
-          description,
-          subject_request,
-          id_company,
-          id_requester,
-          status_req,
-          url
-        )
-        OUTPUT INSERTED.id
-        VALUES (
-          @descripcion,
-          @subject,
-          @company,
-          @createdby,
-          1,
-          @url
-        );
-      `;
-
-      const reqInsert = new sql.Request(transaction);
-
-      reqInsert.input("descripcion", sql.NVarChar(1000), descripcion);
-      reqInsert.input("subject", sql.NVarChar(255), subject);
-      reqInsert.input("company", sql.Int, company);
-      reqInsert.input("createdby", sql.NVarChar(255), createdby);
-      reqInsert.input("url", sql.NVarChar(1000), url);
-
-      const insertResult = await reqInsert.query(insertRequest);
-
-      const newRequestId = insertResult.recordset[0].id;
-
-      const insertProcess = `
-        INSERT INTO process_category_request_general
-        (id_request_general, id_process_category)
-        VALUES (@id_request, @process);
-      `;
-
-      await new sql.Request(transaction)
-        .input("id_request", sql.Int, newRequestId)
-        .input("process", sql.Int, process)
-        .query(insertProcess);
-
-      const getTasksQuery = `
-        SELECT
-          tpc.id AS id_task,
-          utrg.id_user,
-          u.email
-        FROM user_task_request_general utrg
-        INNER JOIN task_process_category tpc
-          ON tpc.id = utrg.id_task
-        INNER JOIN [user] u
-          ON u.id = utrg.id_user
-        WHERE tpc.id_process_category = @process;
-      `;
-
-      const tasksResult = await new sql.Request(transaction)
-        .input("process", sql.Int, process)
-        .query(getTasksQuery);
-
-      const insertTaskQuery = `
-        INSERT INTO task_request_general
-        (id_request_general, id_task, id_status, id_assigned)
-        VALUES (@id_request, @id_task, 4, @id_user);
-      `;
-
-      for (const row of tasksResult.recordset) {
-
-        await new sql.Request(transaction)
-          .input("id_request", sql.Int, newRequestId)
-          .input("id_task", sql.Int, row.id_task)
-          .input("id_user", sql.NVarChar, row.id_user)
-          .query(insertTaskQuery);
-
-      }
-
-      // Guardar respuestas de los campos condicionales del formulario
-      if (Array.isArray(formValues)) {
-        for (const fv of formValues) {
-          if (!fv || fv.id_field == null) continue;
-
-          await new sql.Request(transaction)
-            .input("id_request", sql.Int, newRequestId)
-            .input("id_field", sql.Int, fv.id_field)
-            .input("id_option", sql.Int, fv.id_option ?? null)
-            .input("value_text", sql.NVarChar(1000), fv.value_text ?? null)
-            .query(`
-              INSERT INTO request_form_value
-              (id_request_general, id_form_field, id_option, value_text)
-              VALUES (@id_request, @id_field, @id_option, @value_text)
-            `);
-        }
-      }
-
-      const processUserResult = await new sql.Request(transaction)
-        .input("process", sql.Int, process)
-        .query(`
-          SELECT u.email
-          FROM user_process_category_request_general upcrg
-          INNER JOIN process_category pc ON pc.id = upcrg.id_process_category
-          INNER JOIN [user] u ON u.id = upcrg.id_user
-          WHERE pc.id = @process
-        `);
-
-      const processEmail = processUserResult.recordset[0]?.email || null;
-
-      const taskEmails = [
-        ...new Set(tasksResult.recordset.map(t => t.email))
-      ];
-
-      await transaction.commit();
-
-      fireAndForgetNotification(
-        notifyNewRequest({
-          requestId: newRequestId,
-          subject,
-          processEmail,
-          taskEmails,
-          requestUrl: url,
-        })
-      );
-
-      return new Response(
-        JSON.stringify({
-          message: "Solicitud creada correctamente",
-          id_request: newRequestId,
-          notifications: {
-            processEmail,
-            taskEmails
-          }
-        }),
-        { status: 201 }
-      );
-
+      result = await createGeneralRequest({
+        company,
+        subject,
+        descripcion,
+        process,
+        createdby,
+        url,
+        formValues,
+      });
     } catch (dbError) {
-
-      await transaction.rollback();
-
       console.error("Error en transacción:", dbError);
-
       return new Response(
         JSON.stringify({
           error: "Error al crear la solicitud",
@@ -182,8 +48,35 @@ export async function POST(req) {
       );
     }
 
-  } catch (err) {
+    const { id_request: newRequestId, processEmail, taskEmails } = result;
 
+    fireAndForgetNotification(
+      notifyNewRequest({
+        requestId: newRequestId,
+        subject,
+        processEmail,
+        taskEmails,
+        requestUrl: url,
+      })
+    );
+
+    // Integración SAPSEND: si es una solicitud de pago de tesorería, crea la solicitud de
+    // tesorería en SAPSEND. No bloquea ni hace fallar la creación (el gate y el registro de
+    // estado/errores viven dentro de syncRequestToSapsend).
+    fireAndForgetNotification(syncRequestToSapsend(newRequestId));
+
+    return new Response(
+      JSON.stringify({
+        message: "Solicitud creada correctamente",
+        id_request: newRequestId,
+        notifications: {
+          processEmail,
+          taskEmails,
+        },
+      }),
+      { status: 201 }
+    );
+  } catch (err) {
     console.error("Error general:", err);
 
     return new Response(

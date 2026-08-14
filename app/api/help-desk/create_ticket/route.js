@@ -104,6 +104,8 @@ export async function POST(req) {
       await categoryCaseRequest.query(insertCategoryCaseQuery);
       await transaction.commit();
 
+      // Notificar a los técnicos que se creó un caso nuevo (restaurado: el
+      // PR #146 lo había eliminado y dejó sin aviso el nuevo workflow).
       fireAndForgetNotification(
         notifyTicketToTechnicians({
           caseId: newCaseId,

@@ -15,7 +15,8 @@ export async function POST(req) {
       cost_center_pc,
       cost_center_t,
       cost,
-      id_user
+      id_user,
+      is_external
     } = body;
 
 
@@ -57,7 +58,8 @@ export async function POST(req) {
           id_category_request,
           active,
           id_status,
-          cost_center
+          cost_center,
+          is_external
         )
         OUTPUT INSERTED.id
         VALUES
@@ -66,7 +68,8 @@ export async function POST(req) {
           @id_category,
           0,
           6,
-          @cost_center_pc
+          @cost_center_pc,
+          @is_external
         );
       `;
 
@@ -75,6 +78,8 @@ export async function POST(req) {
       processRequest.input("process", sql.NVarChar(1000), process);
       processRequest.input("id_category", sql.Int, id_category);
       processRequest.input("cost_center_pc", sql.NVarChar(1000), cost_center_pc || null);
+      // Formulario externo (acceso sin login). Por defecto 0 (interno).
+      processRequest.input("is_external", sql.Bit, is_external ? 1 : 0);
 
       const processResult =
         await processRequest.query(insertProcessQuery);
@@ -102,6 +107,8 @@ export async function POST(req) {
         5️⃣ INSERT TASKS (LOOP)
         ========================= */
 
+        let taskOrder = 0;
+        const insertedTasks = []; // { taskId, condition_option_temps } — condiciones diferidas
         for (const t of task) {
 
           const insertTaskQuery = `
@@ -111,7 +118,11 @@ export async function POST(req) {
               id_process_category,
               active,
               cost,
-              cost_center
+              cost_center,
+              is_sequential,
+              display_order,
+              is_authorization,
+              type_authorization
               )
               OUTPUT INSERTED.id
               VALUES
@@ -120,7 +131,11 @@ export async function POST(req) {
               @id_process,
               1,
               @cost,
-              @cost_center
+              @cost_center,
+              @is_sequential,
+              @display_order,
+              @is_authorization,
+              @type_authorization
               );
           `;
 
@@ -130,10 +145,31 @@ export async function POST(req) {
           taskRequest.input("id_process", sql.Int, processId);
           taskRequest.input("cost", sql.Numeric(12,0), t.cost || 0);
           taskRequest.input("cost_center", sql.NVarChar(1000), t.cost_center || null);
+          taskRequest.input("is_sequential", sql.Bit, t.is_sequential ? 1 : 0);
+          taskRequest.input(
+            "display_order",
+            sql.Int,
+            t.display_order !== undefined && t.display_order !== null ? t.display_order : taskOrder++
+          );
+          taskRequest.input("is_authorization", sql.Bit, t.is_authorization ? 1 : 0);
+          taskRequest.input(
+            "type_authorization",
+            sql.Int,
+            t.is_authorization ? (t.type_authorization ?? null) : null
+          );
 
           const taskResult = await taskRequest.query(insertTaskQuery);
 
           const taskId = taskResult.recordset[0].id;
+
+          // Las condiciones por opción se insertan en una pasada posterior (las opciones
+          // aún no existen aquí). Se guarda el taskId + sus tempIds de condición.
+          insertedTasks.push({
+            taskId,
+            condition_option_temps: Array.isArray(t.condition_option_temps)
+              ? t.condition_option_temps
+              : [],
+          });
 
 
           /* =========================
@@ -171,9 +207,9 @@ export async function POST(req) {
 
             const insertFieldQuery = `
               INSERT INTO process_form_field
-              (id_process_category, field_label, field_type, required, active, display_order)
+              (id_process_category, field_label, field_type, required, active, display_order, config_json)
               OUTPUT INSERTED.id
-              VALUES (@id_process, @field_label, @field_type, @required, 1, @display_order);
+              VALUES (@id_process, @field_label, @field_type, @required, 1, @display_order, @config_json);
             `;
 
             const fieldResult = await new sql.Request(transaction)
@@ -182,6 +218,7 @@ export async function POST(req) {
               .input("field_type", sql.NVarChar(30), field.field_type || "select")
               .input("required", sql.Bit, field.required ? 1 : 0)
               .input("display_order", sql.Int, fieldOrder++)
+              .input("config_json", sql.NVarChar(sql.MAX), field.config_json ?? null)
               .query(insertFieldQuery);
 
             const fieldId = fieldResult.recordset[0].id;
@@ -232,6 +269,25 @@ export async function POST(req) {
               .query(`
                 INSERT INTO field_condition_option (id_form_field, id_option)
                 VALUES (@id_form_field, @id_option);
+              `);
+          }
+        }
+
+      /* =========================
+        7️⃣.1 INSERT CONDICIONES DE TAREAS (opciones ya resueltas en optionTempToId)
+        Una tarea con condiciones solo se instancia si se elige alguna de sus opciones.
+        ========================= */
+
+        for (const tk of insertedTasks) {
+          for (const temp of tk.condition_option_temps) {
+            const optId = optionTempToId[temp] ?? null;
+            if (!optId) continue;
+            await new sql.Request(transaction)
+              .input("id_task", sql.Int, tk.taskId)
+              .input("id_option", sql.Int, optId)
+              .query(`
+                INSERT INTO task_condition_option (id_task, id_option)
+                VALUES (@id_task, @id_option);
               `);
           }
         }

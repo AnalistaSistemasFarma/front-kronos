@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireDashboardAdminApi } from '../../../../lib/dashboard/dashboardAccess';
+import { requireDashboardAdminOrIntegrationApi } from '../../../../lib/dashboard/dashboardAccess';
 import { getPool } from '../../../../lib/mssqlPool';
 import {
   parseViewTasksFilters,
@@ -17,7 +17,7 @@ import {
  */
 export async function GET(req: Request) {
   try {
-    const auth = await requireDashboardAdminApi();
+    const auth = await requireDashboardAdminOrIntegrationApi(req);
     if (!auth.ok) return auth.response;
 
     const filters = parseViewTasksFilters(new URL(req.url).searchParams);

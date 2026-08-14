@@ -51,10 +51,15 @@ model User {
   role           String         @default("user")
   phone          String?
   identification String?
-  accounts       Account[]
-  companyUsers   CompanyUser[]
-  sessions       Session[]
-  auditLogs      UserAuditLog[]
+  id_user_sapsend Int?
+  themePalette   String?        @default("gss")
+  colorScheme    String?        @default("light")
+  accounts                Account[]
+  companyUsers            CompanyUser[]
+  departmentUsers         DepartmentUser[]
+  userTypesAuthorizations UserTypesAuthorization[]
+  sessions                Session[]
+  auditLogs               UserAuditLog[]
 
   @@map("user")
 }
@@ -150,11 +155,40 @@ model Active {
 }
 
 model Department {
-  id_department Int    @id @default(autoincrement())
-  department    String @unique
-  cases         Case[]
+  id_department   Int              @id @default(autoincrement())
+  department      String           @unique
+  cases           Case[]
+  departmentUsers DepartmentUser[]
 
   @@map("department")
+}
+
+model DepartmentUser {
+  id            Int        @id @default(autoincrement())
+  id_user       String
+  id_department Int
+  user          User       @relation(fields: [id_user], references: [id])
+  department    Department @relation(fields: [id_department], references: [id_department])
+
+  @@map("department_user")
+}
+
+model TypesAuthorization {
+  id                 Int                      @id @default(autoincrement())
+  type_authorization String
+  userTypes          UserTypesAuthorization[]
+
+  @@map("types_authorization")
+}
+
+model UserTypesAuthorization {
+  id                 Int                @id @default(autoincrement())
+  type_authorization Int
+  id_user            String
+  typeAuthorization  TypesAuthorization @relation(fields: [type_authorization], references: [id])
+  user               User               @relation(fields: [id_user], references: [id])
+
+  @@map("user_types_authorization")
 }
 
 model Category {
@@ -262,6 +296,9 @@ model sap_endpoints {
   // por eso se mapea aqui en vez de asumir un nombre fijo. Null = la empresa no tiene el modulo.
   health_records_entity         String?
   health_records_log_collection String?
+  // Nombre del UDO de bitácora de cambios de artículos en la base SAP de esta
+  // empresa (ej. ART_CHG_LOG en OLP). Null = la empresa no registra el log.
+  articles_log_object           String?
   company                       Company  @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
 }
 
@@ -328,3 +365,97 @@ model sysdiagrams {
 
   @@unique([principal_id, name], map: "UK_principal_name")
 }
+
+// ===================================================================
+// Constructor de Vistas SQL (Fase 1) — modelos de las tablas ya
+// existentes en la BD (saved_view, saved_view_column, catalog_source,
+// catalog_field). Ver propuesta técnica §3.
+// ===================================================================
+
+model SavedView {
+  id_saved_view    Int       @id @default(autoincrement())
+  name             String    @db.NVarChar(150)
+  slug             String    @unique @db.NVarChar(160)
+  description      String?   @db.NVarChar(1000)
+  sql_text         String    @db.NVarChar(Max)
+  id_process       Int?
+  scope_mode       String    @default("company") @db.NVarChar(20)
+  company_id_fixed Int?
+  company_column   String?   @db.NVarChar(128)
+  visibility       String    @default("published") @db.NVarChar(20)
+  icon             String?   @db.NVarChar(60)
+  sort_order       Int       @default(0)
+  owner_user_id    String    @db.NVarChar(1000)
+  row_limit        Int       @default(1000)
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+  published_at     DateTime?
+
+  columns          SavedViewColumn[]
+  filters          SavedViewFilter[]
+
+  @@map("saved_view")
+}
+
+// Filtros parametrizables de una vista publicada (Incremento 3, §3).
+// Los define el autor; el consumidor los usa desde la galería. El backend
+// construye un WHERE externo parametrizado SOLO a partir de estas definiciones.
+model SavedViewFilter {
+  id_saved_view_filter Int       @id @default(autoincrement())
+  id_saved_view        Int
+  column_name          String    @db.NVarChar(128)
+  label                String    @db.NVarChar(150)
+  filter_type          String    @db.NVarChar(20)
+  operator             String    @db.NVarChar(20)
+  options_json         String?   @db.NVarChar(Max)
+  default_value        String?   @db.NVarChar(500)
+  required             Boolean   @default(false)
+  sort_order           Int       @default(0)
+  savedView            SavedView @relation(fields: [id_saved_view], references: [id_saved_view], onDelete: Cascade)
+
+  @@map("saved_view_filter")
+}
+
+model SavedViewColumn {
+  id_saved_view_column Int       @id @default(autoincrement())
+  id_saved_view        Int
+  column_key           String    @db.NVarChar(128)
+  label                String    @db.NVarChar(150)
+  data_type            String?   @db.NVarChar(30)
+  sort_order           Int       @default(0)
+  savedView            SavedView @relation(fields: [id_saved_view], references: [id_saved_view], onDelete: Cascade)
+
+  @@map("saved_view_column")
+}
+
+model CatalogSource {
+  id_catalog_source Int            @id @default(autoincrement())
+  id_process        Int?
+  object_name       String         @db.NVarChar(128)
+  object_type       String         @default("table") @db.NVarChar(20)
+  label             String         @db.NVarChar(150)
+  description       String?        @db.NVarChar(500)
+  company_column    String?        @db.NVarChar(128)
+  icon              String?        @db.NVarChar(60)
+  sort_order        Int            @default(0)
+  is_active         Boolean        @default(true)
+  fields            CatalogField[]
+
+  @@unique([object_name])
+  @@map("catalog_source")
+}
+
+model CatalogField {
+  id_catalog_field  Int           @id @default(autoincrement())
+  id_catalog_source Int
+  column_name       String        @db.NVarChar(128)
+  label             String        @db.NVarChar(150)
+  data_type         String?       @db.NVarChar(30)
+  is_pii            Boolean       @default(false)
+  is_active         Boolean       @default(true)
+  sort_order        Int           @default(0)
+  source            CatalogSource @relation(fields: [id_catalog_source], references: [id_catalog_source], onDelete: Cascade)
+
+  @@map("catalog_field")
+}
+

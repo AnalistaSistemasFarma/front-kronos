@@ -18,7 +18,6 @@ import {
   CHART_AXIS_FONT_SIZE,
   chartFontFamily,
   chartLabelColor,
-  getChartDevicePixelRatio,
 } from './defaults';
 
 let registered = false;
@@ -49,7 +48,8 @@ export function registerCharts(): void {
     lineHeight: 1.3,
   };
   ChartJS.defaults.color = chartLabelColor;
-  ChartJS.defaults.devicePixelRatio = getChartDevicePixelRatio();
+  // No fijar devicePixelRatio: Chart.js debe leer window.devicePixelRatio
+  // en cada resize (si se congela aquí, zoom = canvas borroso).
 
   registered = true;
 }

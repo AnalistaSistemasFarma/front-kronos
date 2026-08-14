@@ -37,8 +37,9 @@ import {
   ScrollArea,
   Modal,
   Box,
-  Table,
   MultiSelect,
+  ThemeIcon,
+  Table,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -49,6 +50,7 @@ import {
   IconAlertCircle,
   IconArrowLeft,
   IconCheck,
+  IconRefresh,
   IconX,
   IconFlag,
   IconTicket,
@@ -64,10 +66,18 @@ import {
   IconFileSpreadsheet,
   IconPhoto,
   IconEye,
+  IconLock,
+  IconArrowBackUp,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import AiSummarizeButton from './AiSummarizeButton';
+import {
+  TABLE_FIELD_TYPE,
+  parseTableConfig,
+  parseTableValue,
+} from '../../../../../lib/requests-general/tableField';
 
 interface Request {
   id: number;
@@ -96,6 +106,17 @@ interface Request {
   idProceso: number;
   id_assigned_category: number;
   id_assigned_process_category: number;
+  id_treasury_requests?: number | null;
+  numero_sapsend?: number | null;
+  sapsend_status?: string | null;
+  sapsend_error?: string | null;
+  sapsend_synced_at?: string | null;
+  sapsend_status_request?: string | null;
+  sapsend_auth_status?: string | null;
+  sapsend_auth_error?: string | null;
+  sapsend_auth_synced_at?: string | null;
+  sapsend_files_synced_at?: string | null;
+  sapsend_files_error?: string | null;
 }
 
 interface Option {
@@ -130,6 +151,9 @@ interface ViewTasksRequestGeneral {
   id_requester: number;
   name_requester: string;
   status_req: number;
+  is_sequential?: boolean;
+  locked?: boolean;
+  display_order?: number;
 }
 
 interface CompanyData {
@@ -174,7 +198,11 @@ function ViewRequestPage() {
   const router = useRouter();
   const id = searchParams.get('id');
   const from = searchParams.get('from') || searchParams.get('mode') || 'create-request';
+  const RETURNED_STATUS_ID = 7;
+  const OPEN_STATUS_ID = 1;
   const [request, setRequest] = useState<Request | null>(null);
+  const [sapsendResending, setSapsendResending] = useState(false);
+  const [sapsendFilesSending, setSapsendFilesSending] = useState(false);
   const [companies, setCompanies] = useState<Option[]>([]);
   const [categories, setCategories] = useState<Option[]>([]);
   const [processCategories, setProcessCategories] = useState<
@@ -198,6 +226,7 @@ function ViewRequestPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loadingPermissions, setLoadingPermissions] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const notesViewportRef = useRef<HTMLDivElement>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [originalRequest, setOriginalRequest] = useState<Request | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -221,6 +250,10 @@ function ViewRequestPage() {
     notificarPorCorreo: false,
   });
   const [modalTasksOpened, setModalTasksOpened] = useState(false);
+  const [reopenModalOpened, setReopenModalOpened] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
+  const [reopenSubmitting, setReopenSubmitting] = useState(false);
+  const [reopenError, setReopenError] = useState('');
   const [availableUsers, setAvailableUsers] = useState<UserEmail[]>([]);
   const [assignableUsers, setAssignableUsers] = useState<UserEmail[]>([]);
   const [updatingAssigneeId, setUpdatingAssigneeId] = useState<number | null>(null);
@@ -229,7 +262,14 @@ function ViewRequestPage() {
   const [loadingUsers, setLoadingUsers] = useState(false);
 
   const [requestFormValues, setRequestFormValues] = useState<
-    { id: number; field_label: string; option_label: string | null; value_text: string | null }[]
+    {
+      id: number;
+      field_label: string;
+      field_type?: string | null;
+      config_json?: string | null;
+      option_label: string | null;
+      value_text: string | null;
+    }[]
   >([]);
 
   useEffect(() => {
@@ -277,6 +317,17 @@ function ViewRequestPage() {
           executor_final: data.executor_final,
           resolution: data.resolutioncase || null,
           date_resolution: data.date_resolution || null,
+          id_treasury_requests: data.id_treasury_requests,
+          numero_sapsend: data.numero_sapsend,
+          sapsend_status: data.sapsend_status,
+          sapsend_error: data.sapsend_error,
+          sapsend_synced_at: data.sapsend_synced_at,
+          sapsend_status_request: data.sapsend_status_request,
+          sapsend_auth_status: data.sapsend_auth_status,
+          sapsend_auth_error: data.sapsend_auth_error,
+          sapsend_auth_synced_at: data.sapsend_auth_synced_at,
+          sapsend_files_synced_at: data.sapsend_files_synced_at,
+          sapsend_files_error: data.sapsend_files_error,
         };
 
         // Base: datos de la lista (forma que el formulario espera). Si no hay, usar la API.
@@ -346,8 +397,8 @@ function ViewRequestPage() {
   };
 
   useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (notesViewportRef.current) {
+      notesViewportRef.current.scrollTop = notesViewportRef.current.scrollHeight;
     }
   }, [notes]);
 
@@ -377,7 +428,6 @@ function ViewRequestPage() {
     }
   };
 
-  // Cargar usuarios al montar el componente
   useEffect(() => {
     fetchUsersWithEmails();
   }, []);
@@ -982,14 +1032,17 @@ function ViewRequestPage() {
         }
       }
 
+      const isReturning = Number(resolutionData.estado) === RETURNED_STATUS_ID;
+      const motivo = resolutionData.resolucion?.trim() || '';
+
       const updateData = {
         id: request?.id,
         id_technical: userId,
         process_category: request?.id_process_category ? Number(request.id_process_category) : null,
-        status: resolutionData.estado !== '' 
+        status: resolutionData.estado !== ''
           ? Number(resolutionData.estado)
           : Number(request?.id_status_case),
-        resolucion: resolutionData.resolucion || null,
+        resolucion: isReturning ? null : (resolutionData.resolucion || null),
       };
 
       const response = await fetch('/api/requests-general/update-request', {
@@ -1022,7 +1075,25 @@ function ViewRequestPage() {
       }
 
       if (resolutionData.estado) {
-        setRequest((prev) => (prev ? { ...prev, status: resolutionData.estado } : null));
+        const chosenStatus = Number(resolutionData.estado);
+        const statusLabel =
+          chosenStatus === RETURNED_STATUS_ID
+            ? 'Devuelta'
+            : chosenStatus === 2
+            ? 'Resuelto'
+            : chosenStatus === 3
+            ? 'Cancelado'
+            : (request?.status ?? '');
+        setRequest((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: statusLabel,
+                id_status_case: chosenStatus,
+                status_req: chosenStatus,
+              }
+            : null
+        );
       }
 
       setOriginalRequest(request);
@@ -1033,15 +1104,7 @@ function ViewRequestPage() {
       }
 
       if (resolutionData.estado) {
-        const closedStatus = Number(resolutionData.estado);
-        if (isClosedStatusId(closedStatus)) {
-          showClosureNotification({
-            type: 'request',
-            id: request?.id,
-            subject: request?.subject,
-            status: closedStatus === 3 ? 'cancelled' : 'resolved',
-          });
-        }
+        const chosenStatus = Number(resolutionData.estado);
 
         setResolutionData({
           ...resolutionData,
@@ -1050,7 +1113,21 @@ function ViewRequestPage() {
           notificarPorCorreo: false,
         });
         setShowResolution(false);
-        await addSystemNote('Se ha cerrado la solicitud');
+
+        if (isReturning) {
+          // Devolver: nota con el motivo, sin notificación de cierre.
+          await addSystemNote(`Solicitud devuelta. Motivo: ${motivo}`);
+        } else {
+          if (isClosedStatusId(chosenStatus)) {
+            showClosureNotification({
+              type: 'request',
+              id: request?.id,
+              subject: request?.subject,
+              status: chosenStatus === 3 ? 'cancelled' : 'resolved',
+            });
+          }
+          await addSystemNote('Se ha cerrado la solicitud');
+        }
       }
     } catch (error) {
       console.error('Error updating request:', error);
@@ -1060,6 +1137,65 @@ function ViewRequestPage() {
       });
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handleReopenRequest = async () => {
+    const motivo = reopenReason.trim();
+    if (!motivo) {
+      setReopenError('El motivo de la reapertura es obligatorio.');
+      return;
+    }
+    if (!request?.id || !userId) return;
+
+    setReopenSubmitting(true);
+    setReopenError('');
+    try {
+      const response = await fetch('/api/requests-general/update-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: request.id,
+          id_technical: userId,
+          process_category: request.id_process_category
+            ? Number(request.id_process_category)
+            : null,
+          status: OPEN_STATUS_ID,
+          resolucion: null,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Error al reabrir la solicitud');
+      }
+
+      await addSystemNote(`Solicitud reabierta. Motivo: ${motivo}`);
+
+      setRequest((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: 'En progreso',
+              id_status_case: OPEN_STATUS_ID,
+              status_req: OPEN_STATUS_ID,
+            }
+          : null
+      );
+
+      setReopenModalOpened(false);
+      setReopenReason('');
+      setUpdateMessage({
+        type: 'success',
+        text: 'Solicitud reabierta correctamente',
+      });
+    } catch (error) {
+      console.error('Error reopening request:', error);
+      setReopenError(
+        error instanceof Error ? error.message : 'Error al reabrir la solicitud'
+      );
+    } finally {
+      setReopenSubmitting(false);
     }
   };
 
@@ -1074,6 +1210,10 @@ function ViewRequestPage() {
   const isRequestResolved = () => {
     const statusText = request?.status?.toLowerCase() ?? '';
     const statusId = Number(request?.id_status_case ?? request?.status_req);
+    // Una solicitud DEVUELTA no se considera cerrada: se puede editar / reabrir.
+    if (statusId === RETURNED_STATUS_ID || statusText.includes('devuel')) {
+      return false;
+    }
     const closedByStatus =
       statusId === 2 ||
       statusId === 3 ||
@@ -1132,8 +1272,39 @@ function ViewRequestPage() {
       hasNotedUpload.current = true;
       void addSystemNote('Se cargaron archivos a la solicitud.');
       void fetchFolderContents();
+      // SAPSEND: reenviar los adjuntos recién subidos (silencioso; el servidor aplica el gate).
+      void triggerSapsendFiles(false);
     }
   }, [attachedFiles]);
+
+  // Reenvía a SAPSEND los adjuntos de la solicitud (los lee desde OneDrive el servidor).
+  const triggerSapsendFiles = async (showToast: boolean) => {
+    if (!request?.id) return;
+    if (showToast) setSapsendFilesSending(true);
+    try {
+      const res = await fetch('/api/requests-general/sapsend-files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: request.id }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!showToast) return;
+      if (res.status === 202 || data?.pending) {
+        toast('La solicitud aún no está en SAPSEND; intenta de nuevo en un momento.', { icon: '⏳' });
+      } else if (res.ok && data?.ok) {
+        toast.success(
+          data.sent > 0 ? `Archivos enviados a SAPSEND (${data.sent})` : 'Sin archivos para enviar'
+        );
+      } else {
+        toast.error(data?.error || 'No se pudieron enviar los archivos a SAPSEND');
+      }
+    } catch (err) {
+      console.error('Error enviando archivos a SAPSEND:', err);
+      if (showToast) toast.error('Error de red al enviar archivos a SAPSEND');
+    } finally {
+      if (showToast) setSapsendFilesSending(false);
+    }
+  };
 
   const addSystemNote = async (text: string) => {
     if (!request?.id || !userId) return;
@@ -1221,6 +1392,8 @@ function ViewRequestPage() {
         return 'blue';
       case 'resuelto':
         return 'green';
+      case 'cancelado':
+        return 'red';
       default:
         return 'red';
     }
@@ -1234,8 +1407,10 @@ function ViewRequestPage() {
         return 'En Progreso';
       case 'resuelto':
         return 'Resuelto';
+      case 'cancelado':
+        return 'Cancelado';
       default:
-        return 'red';
+        return status || 'Desconocido';
     }
   };
 
@@ -1244,9 +1419,13 @@ function ViewRequestPage() {
       case 'pendiente':
         return 'orange';
       case 'en progreso':
+      case 'abierto':
         return 'blue';
       case 'completada':
         return 'green';
+      case 'devuelta':
+      case 'devuelto':
+        return 'orange';
       default:
         return 'gray';
     }
@@ -1258,6 +1437,8 @@ function ViewRequestPage() {
         return '/process/request-general/general-requests';
       case 'assigned-requests':
         return '/process/request-general/assigned-requests';
+      case 'viewer-request':
+        return '/process/request-general/viewer-request';
       case 'create-request':
       default:
         return '/process/request-general/create-request';
@@ -1331,6 +1512,117 @@ function ViewRequestPage() {
     );
   }
 
+  const handleSapsendResend = async () => {
+    if (!request) return;
+    setSapsendResending(true);
+    try {
+      const res = await fetch('/api/requests-general/sapsend-resend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: request.id }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) {
+        setRequest((prev) =>
+          prev
+            ? {
+                ...prev,
+                sapsend_status: 'sent',
+                sapsend_error: null,
+                id_treasury_requests: data.id_treasury_requests ?? prev.id_treasury_requests,
+                numero_sapsend: data.numero ?? prev.numero_sapsend,
+              }
+            : prev
+        );
+        toast.success('Solicitud enviada a SAPSEND correctamente');
+      } else {
+        const msg = data?.error || 'No se pudo enviar a SAPSEND';
+        setRequest((prev) =>
+          prev ? { ...prev, sapsend_status: 'failed', sapsend_error: msg } : prev
+        );
+        toast.error(msg);
+      }
+    } catch (err) {
+      console.error('Error reenviando a SAPSEND:', err);
+      toast.error('Error de red al reenviar a SAPSEND');
+    } finally {
+      setSapsendResending(false);
+    }
+  };
+
+  const renderSapsendStatus = () => {
+    if (!request?.sapsend_status) return null;
+    const status = request.sapsend_status;
+    const isSent = status === 'sent';
+    const color = isSent ? 'green' : status === 'pending' ? 'yellow' : 'red';
+    const label = isSent ? 'Enviado' : status === 'pending' ? 'Pendiente' : 'No enviado';
+    return (
+      <Alert
+        color={color}
+        variant='light'
+        mb='4'
+        title={
+          <Group gap='xs'>
+            <Text fw={600}>SAPSEND — Tesorería</Text>
+            <Badge color={color} variant='light' size='sm'>
+              {label}
+            </Badge>
+          </Group>
+        }
+      >
+        <Stack gap={6}>
+          {isSent && userId == "cmgqz404x0000ct9k1j8xdet1" && (
+            <Text size='sm'>
+              Solicitud de tesorería creada
+              {request.numero_sapsend ? ` · N° ${request.numero_sapsend}` : ''}
+              {request.id_treasury_requests ? ` (ID ${request.id_treasury_requests})` : ''}.
+            </Text>
+          )}
+          {request.sapsend_auth_status === 'failed' && request.sapsend_auth_error && userId == "cmgqz404x0000ct9k1j8xdet1" && (
+            <Text size='sm' c='red'>
+              Autorización no aplicada en SAPSEND: {request.sapsend_auth_error}
+            </Text>
+          )}
+          {!isSent && request.sapsend_error && userId == "cmgqz404x0000ct9k1j8xdet1" && (
+            <Text size='sm' c='red'>
+              {request.sapsend_error}
+            </Text>
+          )}
+          {request.sapsend_files_error && userId == "cmgqz404x0000ct9k1j8xdet1" && (
+            <Text size='sm' c='red'>
+              Archivos: {request.sapsend_files_error}
+            </Text>
+          )}
+          <Group gap='xs'>
+            {!isSent && userId == "cmgqz404x0000ct9k1j8xdet1" && (
+              <Button
+                size='xs'
+                color='blue'
+                leftSection={<IconRefresh size={14} />}
+                loading={sapsendResending}
+                onClick={handleSapsendResend}
+              >
+                Reenviar a SAPSEND
+              </Button>
+            )}
+            {userId == "cmgqz404x0000ct9k1j8xdet1" && (
+            <Button
+              size='xs'
+              variant='light'
+              color='blue'
+              leftSection={<IconRefresh size={14} />}
+              loading={sapsendFilesSending}
+              onClick={() => triggerSapsendFiles(true)}
+            >
+              Reenviar archivos a SAPSEND
+            </Button>
+            )}
+          </Group>
+        </Stack>
+      </Alert>
+    );
+  };
+
   return (
     <div className='min-h-screen bg-gray-50'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
@@ -1363,23 +1655,25 @@ function ViewRequestPage() {
               Esta solicitud ha sido resuelta y no se puede modificar.
             </Alert>
           )}
+
+          {renderSapsendStatus()}
         </Card>
 
         <div className='flex flex-col lg:flex-row gap-6'>
-          <div className='flex-1 order-2 lg:order-1'>
+          <div className='flex-1 order-2 lg:order-1 lg:sticky lg:top-6 self-start'>
             <Card
               shadow='sm'
               p='xl'
               radius='md'
               withBorder
-              className='bg-white h-full flex flex-col'
+              className='bg-white flex flex-col'
             >
               <Title order={3} mb='md' className='flex items-center gap-2'>
                 <IconNote size={20} />
                 Historial de Interacciones
               </Title>
 
-              <ScrollArea h={400} className='flex-1 mb-4' offsetScrollbars>
+              <ScrollArea h='calc(100vh - 420px)' className='mb-4' offsetScrollbars viewportRef={notesViewportRef}>
                 <div className='space-y-4 p-2'>
                   {notes.length > 0 ? (
                     notes.map((note) => {
@@ -1610,6 +1904,12 @@ function ViewRequestPage() {
                       {request.description}
                     </Text>
                   </Card>
+
+                  {/* Resumen con IA local (Summarizer API on-device). Solo se
+                      muestra si el navegador soporta la API. */}
+                  <Group mt='sm'>
+                    <AiSummarizeButton request={request} notes={notes} tasks={taskRQ} />
+                  </Group>
                 </div>
 
                 <Divider />
@@ -1734,6 +2034,7 @@ function ViewRequestPage() {
                         data={[
                           { value: '2', label: 'Resuelto' },
                           { value: '3', label: 'Cancelado' },
+                          { value: '7', label: 'Devolver' },
                         ]}
                         value={resolutionData.estado}
                         onChange={(val) =>
@@ -1814,18 +2115,67 @@ function ViewRequestPage() {
               Información adicional
             </Title>
             <Grid>
-              {requestFormValues.map((fv) => (
-                <Grid.Col span={{ base: 12, md: 6 }} key={fv.id}>
-                  <Card withBorder radius='md' p='md'>
-                    <Text size='xs' c='dimmed' fw={500} className='uppercase'>
-                      {fv.field_label}
-                    </Text>
-                    <Text size='md' fw={600} mt={4}>
-                      {fv.option_label || fv.value_text || '—'}
-                    </Text>
-                  </Card>
-                </Grid.Col>
-              ))}
+              {requestFormValues.map((fv) => {
+                if (fv.field_type === TABLE_FIELD_TYPE) {
+                  const columns = parseTableConfig(fv.config_json).columns;
+                  const rows = parseTableValue(fv.value_text).rows;
+                  const renderCellValue = (value: unknown) => {
+                    if (value === true) return 'Sí';
+                    if (value === false) return 'No';
+                    if (value === undefined || value === null || value === '') return '—';
+                    return String(value);
+                  };
+                  return (
+                    <Grid.Col span={12} key={fv.id}>
+                      <Card withBorder radius='md' p='md'>
+                        <Text size='xs' c='dimmed' fw={500} className='uppercase' mb='xs'>
+                          {fv.field_label}
+                        </Text>
+                        {columns.length === 0 || rows.length === 0 ? (
+                          <Text size='sm' c='dimmed'>
+                            Sin datos.
+                          </Text>
+                        ) : (
+                          <ScrollArea>
+                            <Table withTableBorder withColumnBorders striped>
+                              <Table.Thead>
+                                <Table.Tr>
+                                  {columns.map((col) => (
+                                    <Table.Th key={col.key}>{col.label}</Table.Th>
+                                  ))}
+                                </Table.Tr>
+                              </Table.Thead>
+                              <Table.Tbody>
+                                {rows.map((row, ri) => (
+                                  <Table.Tr key={ri}>
+                                    {columns.map((col) => (
+                                      <Table.Td key={col.key}>
+                                        {renderCellValue(row[col.key])}
+                                      </Table.Td>
+                                    ))}
+                                  </Table.Tr>
+                                ))}
+                              </Table.Tbody>
+                            </Table>
+                          </ScrollArea>
+                        )}
+                      </Card>
+                    </Grid.Col>
+                  );
+                }
+                return (
+                  <Grid.Col span={{ base: 12, md: 6 }} key={fv.id}>
+                    <Card withBorder radius='md' p='md'>
+                      <Text size='xs' c='dimmed' fw={500} className='uppercase'>
+                        {fv.field_label}
+                      </Text>
+                      <Text size='md' fw={600} mt={4}>
+                        {fv.option_label || fv.value_text || '—'}
+                      </Text>
+                    </Card>
+                  </Grid.Col>
+                );
+              })}
             </Grid>
           </Card>
         )}
@@ -1853,57 +2203,61 @@ function ViewRequestPage() {
                   Descargar todos
                 </Button>
               </Group>
-              {folderContents.map((file: FolderFile) => (
-                <Card key={file.id} withBorder p='sm' bg='gray.0'>
-                  <Flex align='center' gap='sm'>
-                    <Box c='blue'>
-                      {file.name.toLowerCase().endsWith('.pdf') && <IconFileText size={20} />}
-                      {(file.name.toLowerCase().endsWith('.doc') ||
-                        file.name.toLowerCase().endsWith('.docx')) && <IconFileText size={20} />}
-                      {(file.name.toLowerCase().endsWith('.xls') ||
-                        file.name.toLowerCase().endsWith('.xlsx')) && (
-                        <IconFileSpreadsheet size={20} />
-                      )}
-                      {(file.name.toLowerCase().endsWith('.png') ||
-                        file.name.toLowerCase().endsWith('.jpg') ||
-                        file.name.toLowerCase().endsWith('.jpeg')) && <IconPhoto size={20} />}
-                      {!file.name
-                        .toLowerCase()
-                        .match(/\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg)$/) && <IconFile size={20} />}
-                    </Box>
-                    <Box style={{ flex: 1 }}>
-                      <Text size='sm' fw={500} lineClamp={1}>
-                        {file.name}
-                      </Text>
-                      <Text size='xs' c='dimmed'>
-                        {file.size ? formatFileSize(file.size) : 'Tamaño desconocido'}
-                      </Text>
-                      {file.lastModifiedDateTime && (
-                        <Text size='xs' c='dimmed'>
-                          Subido: {new Date(file.lastModifiedDateTime).toLocaleDateString('es-CO')}
-                        </Text>
-                      )}
-                    </Box>
-                    <Group gap='xs'>
-                      <Badge color='teal' size='sm'>
-                        Almacenado
-                      </Badge>
-                      <ActionIcon
-                        variant='subtle'
-                        color='blue'
-                        size='sm'
-                        component='a'
-                        href={file.webUrl}
-                        target='_blank'
-                        rel='noopener noreferrer'
-                        aria-label={`Descargar archivo ${file.name}`}
-                      >
-                        <IconEye size={16} />
-                      </ActionIcon>
-                    </Group>
-                  </Flex>
-                </Card>
-              ))}
+              <ScrollArea.Autosize mah={360} offsetScrollbars type='auto'>
+                <Stack gap='sm'>
+                  {folderContents.map((file: FolderFile) => (
+                    <Card key={file.id} withBorder p='sm' bg='gray.0'>
+                      <Flex align='center' gap='sm'>
+                        <Box c='blue'>
+                          {file.name.toLowerCase().endsWith('.pdf') && <IconFileText size={20} />}
+                          {(file.name.toLowerCase().endsWith('.doc') ||
+                            file.name.toLowerCase().endsWith('.docx')) && <IconFileText size={20} />}
+                          {(file.name.toLowerCase().endsWith('.xls') ||
+                            file.name.toLowerCase().endsWith('.xlsx')) && (
+                            <IconFileSpreadsheet size={20} />
+                          )}
+                          {(file.name.toLowerCase().endsWith('.png') ||
+                            file.name.toLowerCase().endsWith('.jpg') ||
+                            file.name.toLowerCase().endsWith('.jpeg')) && <IconPhoto size={20} />}
+                          {!file.name
+                            .toLowerCase()
+                            .match(/\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg)$/) && <IconFile size={20} />}
+                        </Box>
+                        <Box style={{ flex: 1 }}>
+                          <Text size='sm' fw={500} lineClamp={1}>
+                            {file.name}
+                          </Text>
+                          <Text size='xs' c='dimmed'>
+                            {file.size ? formatFileSize(file.size) : 'Tamaño desconocido'}
+                          </Text>
+                          {file.lastModifiedDateTime && (
+                            <Text size='xs' c='dimmed'>
+                              Subido: {new Date(file.lastModifiedDateTime).toLocaleDateString('es-CO')}
+                            </Text>
+                          )}
+                        </Box>
+                        <Group gap='xs'>
+                          <Badge color='teal' size='sm'>
+                            Almacenado
+                          </Badge>
+                          <ActionIcon
+                            variant='subtle'
+                            color='blue'
+                            size='sm'
+                            component='a'
+                            href={file.webUrl}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            aria-label={`Descargar archivo ${file.name}`}
+                          >
+                            <IconEye size={16} />
+                          </ActionIcon>
+                        </Group>
+                      </Flex>
+                    </Card>
+                  ))}
+                </Stack>
+              </ScrollArea.Autosize>
             </Stack>
           )}
 
@@ -1964,6 +2318,22 @@ function ViewRequestPage() {
                   </Button>
                 </>
               )}
+              {Number(request.id_status_case ?? request.status_req) === RETURNED_STATUS_ID &&
+                (canEdit ||
+                  String(request.id_requester ?? '') === String(userId ?? '')) &&
+                !loadingPermissions && (
+                  <Button
+                    color='orange'
+                    onClick={() => {
+                      setReopenReason('');
+                      setReopenError('');
+                      setReopenModalOpened(true);
+                    }}
+                    leftSection={<IconArrowBackUp size={16} />}
+                  >
+                    Reabrir solicitud
+                  </Button>
+                )}
               {isRequestResolved() && (
                 <Text size='sm' color='dimmed'>
                   Las solicitudes completadas no se pueden modificar.
@@ -1973,7 +2343,10 @@ function ViewRequestPage() {
                 String(userId || '') && (
                 <Button
                   color='blue'
-                  onClick={() => setModalTasksOpened(true)}
+                  onClick={() => {
+                    setModalTasksOpened(true);
+                    fetchTasksRG(request.id);
+                  }}
                   leftSection={<IconTicket size={16} />}
                 >
                   Ver Tareas
@@ -2004,6 +2377,57 @@ function ViewRequestPage() {
         </Card>
 
         <Modal
+          opened={reopenModalOpened}
+          onClose={() => {
+            if (!reopenSubmitting) setReopenModalOpened(false);
+          }}
+          title={
+            <Text fw={600} size="lg">
+              Reabrir solicitud #{request?.id}
+            </Text>
+          }
+          centered
+        >
+          <Stack gap="md">
+            <Text size="sm" c="dimmed">
+              La solicitud volverá a estado &quot;En progreso&quot;. Indica el motivo de la
+              reapertura; quedará registrado como nota.
+            </Text>
+            <Textarea
+              label="Motivo de la reapertura"
+              placeholder="Escribe el motivo..."
+              autosize
+              minRows={3}
+              value={reopenReason}
+              onChange={(e) => {
+                setReopenReason(e.currentTarget.value);
+                if (reopenError) setReopenError('');
+              }}
+              error={reopenError || undefined}
+              withAsterisk
+            />
+            <Group justify="flex-end">
+              <Button
+                variant="outline"
+                color="gray"
+                onClick={() => setReopenModalOpened(false)}
+                disabled={reopenSubmitting}
+              >
+                Cancelar
+              </Button>
+              <Button
+                color="orange"
+                leftSection={<IconArrowBackUp size={16} />}
+                onClick={handleReopenRequest}
+                loading={reopenSubmitting}
+              >
+                Reabrir
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+
+        <Modal
           opened={modalTasksOpened}
           onClose={() => setModalTasksOpened(false)}
           title={
@@ -2020,91 +2444,178 @@ function ViewRequestPage() {
               <Text>Cargando tareas...</Text>
             </div>
           ) : taskRQ.length > 0 ? (
-            <Table striped highlightOnHover withTableBorder>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Tarea</Table.Th>
-                  <Table.Th>Asignado</Table.Th>
-                  <Table.Th>Estado</Table.Th>
-                  <Table.Th>Fecha Inicio</Table.Th>
-                  <Table.Th>Fecha Fin</Table.Th>
-                  <Table.Th>Resolución</Table.Th>
-                  <Table.Th>Acción</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {taskRQ.map((task) => (
-                  <Table.Tr key={task.id}>
-                    <Table.Td>{task.task}</Table.Td>
-                    <Table.Td>
-                      {task.status?.toLowerCase() === 'resuelto' ? (
-                        task.name
-                      ) : (
-                        <Select
-                          data={assignableUsers}
-                          value={task.id_assigned ? String(task.id_assigned) : null}
-                          onChange={(value) => handleUpdateTaskAssigned(task.id, value)}
-                          searchable
-                          allowDeselect={false}
-                          disabled={updatingAssigneeId === task.id}
-                          size="xs"
-                          comboboxProps={{ withinPortal: true }}
-                        />
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge color={getStatusColorTask(task.status)} size="sm">
-                        {getStatusTask(task.status)}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {task.start_date
-                        ? new Intl.DateTimeFormat('es-CO', {
-                            day: 'numeric',
-                            month: 'long',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            hour12: true,
-                          }).format(
-                            new Date(
-                              new Date(task.start_date).getTime()
-                            )
-                          )
-                        : 'N/A'}
-                    </Table.Td>
-                    <Table.Td>
-                      {task.end_date
-                        ? new Intl.DateTimeFormat('es-CO', {
-                            day: 'numeric',
-                            month: 'long',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            hour12: true,
-                          }).format(
-                            new Date(
-                              new Date(task.end_date).getTime()
-                            )
-                          )
-                        : 'N/A'}
-                    </Table.Td>
-                    <Table.Td>
-                      {task.resolution}
-                    </Table.Td>
-                    <Table.Td>
-                      <ActionIcon
-                        variant="subtle"
-                        color="blue"
-                        onClick={() => handleViewTask(task)}
+<ScrollArea.Autosize mah="65vh" offsetScrollbars>
+              <Stack gap={0}>
+              {[...taskRQ]
+                .sort((a, b) => {
+                  const da = a.display_order ?? 0;
+                  const db = b.display_order ?? 0;
+                  if (da !== db) return da - db;
+                  return a.id_task - b.id_task;
+                })
+                .map((task, index, arr) => {
+                  const isLast = index === arr.length - 1;
+                  const statusLower = task.status?.toLowerCase();
+                  const isResolved = task.id_status === 2 || statusLower === 'resuelto';
+                  const isCancelled = task.id_status === 3 || statusLower === 'cancelado';
+                  const isLocked = !!task.locked;
+                  const bulletColor = isResolved
+                    ? 'green'
+                    : isCancelled
+                    ? 'red'
+                    : isLocked
+                    ? 'gray'
+                    : 'blue';
+                  const fmtDate = (d?: string) =>
+                    d
+                      ? new Intl.DateTimeFormat('es-CO', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: true,
+                        }).format(new Date(d).getTime() + 5 * 60 * 60 * 1000 )
+                      : 'N/A';
+                  return (
+                    <Flex key={task.id} gap="md" align="stretch">
+                      <Flex direction="column" align="center" style={{ flexShrink: 0 }}>
+                        <ThemeIcon
+                          radius="xl"
+                          size={36}
+                          color={bulletColor}
+                          variant={isLocked ? 'light' : 'filled'}
+                        >
+                          {isResolved ? (
+                            <IconCheck size={18} />
+                          ) : isCancelled ? (
+                            <IconX size={18} />
+                          ) : isLocked ? (
+                            <IconLock size={16} />
+                          ) : (
+                            <Text fw={700} size="sm" c="white">
+                              {index + 1}
+                            </Text>
+                          )}
+                        </ThemeIcon>
+                        {!isLast && (
+                          <Box
+                            style={{
+                              flex: 1,
+                              width: 2,
+                              minHeight: 20,
+                              backgroundColor: isResolved
+                                ? 'var(--mantine-color-green-5)'
+                                : 'var(--mantine-color-default-border)',
+                            }}
+                          />
+                        )}
+                      </Flex>
+                      <Paper
+                        withBorder
+                        p="sm"
+                        radius="md"
+                        mb="sm"
+                        style={{ flex: 1, minWidth: 0, opacity: isLocked ? 0.75 : 1 }}
                       >
-                        <IconEye size={16} />
-                      </ActionIcon>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
+                        <Group justify="space-between" align="flex-start" wrap="nowrap">
+                          <Box style={{ flex: 1, minWidth: 0 }}>
+                            <Group gap={8} mb={6}>
+                              <Text fw={600}>{task.task}</Text>
+                              <Badge
+                                color={getStatusColorTask(task.status)}
+                                size="sm"
+                                styles={{
+                                  root: { maxWidth: 'unset' },
+                                  label: { overflow: 'visible' },
+                                }}
+                              >
+                                {getStatusTask(task.status)}
+                              </Badge>
+                              <Badge
+                                color={task.is_sequential ? 'grape' : 'gray'}
+                                variant="light"
+                                size="sm"
+                              >
+                                {task.is_sequential ? 'Secuencial' : 'Paralela'}
+                              </Badge>
+                              {isLocked && (
+                                <Badge
+                                  color="orange"
+                                  variant="light"
+                                  size="sm"
+                                  leftSection={<IconLock size={12} />}
+                                >
+                                  Bloqueada
+                                </Badge>
+                              )}
+                            </Group>
+                            <Group gap={6} align="center" mb={8} wrap="nowrap">
+                              <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+                                Asignado:
+                              </Text>
+                              {isResolved ? (
+                                <Text size="sm">{task.name}</Text>
+                              ) : (
+                                <Select
+                                  data={assignableUsers}
+                                  value={task.id_assigned ? String(task.id_assigned) : null}
+                                  onChange={(value) => handleUpdateTaskAssigned(task.id, value)}
+                                  searchable
+                                  allowDeselect={false}
+                                  disabled={updatingAssigneeId === task.id}
+                                  size="xs"
+                                  comboboxProps={{ withinPortal: true }}
+                                  style={{ minWidth: 220 }}
+                                />
+                              )}
+                            </Group>
+                            <Group gap="lg">
+                              <Text size="xs" c="dimmed">
+                                Inicio: {fmtDate(task.start_date)}
+                              </Text>
+                              <Text size="xs" c="dimmed">
+                                Fin: {fmtDate(task.end_date)}
+                              </Text>
+                            </Group>
+                            {task.resolution && (
+                              <Text size="sm" mt={6}>
+                                <Text span fw={500}>
+                                  Resolución:{' '}
+                                </Text>
+                                {task.resolution}
+                              </Text>
+                            )}
+                            {isLocked && (
+                              <Group gap={4} mt={8} wrap="nowrap">
+                                <IconLock size={13} color="var(--mantine-color-orange-6)" />
+                                <Text size="xs" c="orange">
+                                  Esperando que se resuelva la tarea anterior.
+                                </Text>
+                              </Group>
+                            )}
+                          </Box>
+                          <ActionIcon
+                            variant="subtle"
+                            color="blue"
+                            onClick={() => handleViewTask(task)}
+                            disabled={isLocked}
+                            title={
+                              isLocked
+                                ? 'Bloqueada: primero debe resolverse la tarea anterior'
+                                : 'Ver / resolver tarea'
+                            }
+                            style={{ flexShrink: 0 }}
+                          >
+                            <IconEye size={18} />
+                          </ActionIcon>
+                        </Group>
+                      </Paper>
+                    </Flex>
+                  );
+                })}
+              </Stack>
+            </ScrollArea.Autosize>
           ) : (
             <div className="text-center py-8">
               <Text color="gray">No hay tareas asignadas a esta solicitud</Text>

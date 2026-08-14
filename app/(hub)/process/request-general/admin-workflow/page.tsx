@@ -6,6 +6,7 @@ import { useSession } from 'next-auth/react';
 import {
   Title,
   Text,
+  Checkbox,
   Badge,
   Button,
   Group,
@@ -88,6 +89,7 @@ function RequestBoard() {
     process: '',
     costCenter: '',
     assignedProcess: '',
+    isExternal: false,
   });
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
@@ -648,6 +650,7 @@ function RequestBoard() {
           task: tasksToSend.length > 0 ? tasksToSend : null,
           cost_center_pc: formData.costCenter || null,
           id_user: formData.assignedProcess ? formData.assignedProcess : userId,
+          is_external: formData.isExternal,
         }),
       });
 
@@ -666,6 +669,7 @@ function RequestBoard() {
         descripcion: '',
         costCenter: '',
         assignedProcess: '',
+        isExternal: false,
       });
       setTasks([]);
       setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
@@ -798,16 +802,16 @@ function RequestBoard() {
         </Anchor>
       </Link>
     ) : (
-      <span key={index} className='text-gray-500'>
+      <span key={index} className='text-[var(--mantine-color-dimmed)]'>
         {item.title}
       </span>
     )
   );
 
   return (
-    <div className='min-h-screen bg-gray-50'>
+    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -816,12 +820,12 @@ function RequestBoard() {
             <div>
               <Title
                 order={1}
-                className='text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3'
+                className='text-3xl font-bold mb-2 flex items-center gap-3'
               >
                 <IconTicket size={32} className='text-blue-600' />
                 Flujos de Trabajo Asignados
               </Title>
-              <Text size='lg' c='gray.6'>
+              <Text size='lg' c='dimmed'>
                 Gestión de Flujos de Trabajo asignados a ti
               </Text>
             </div>
@@ -838,7 +842,7 @@ function RequestBoard() {
 
           <Grid>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
+              <Card p='md' radius='md' withBorder style={{ backgroundColor: 'var(--mantine-color-blue-light)' }}>
                 <Group>
                   <IconTicket size={24} className='text-blue-600' />
                   <div>
@@ -853,9 +857,9 @@ function RequestBoard() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-gray-50 border-blue-200'>
+              <Card p='md' radius='md' withBorder style={{ backgroundColor: 'var(--mantine-color-default)' }}>
                 <Group>
-                  <IconProgress size={24} className='text-gray-500' />
+                  <IconProgress size={24} style={{ color: 'var(--mantine-color-dimmed)' }} />
                   <div>
                     <Text size='xs' c='blue.6'>
                       En Borrador
@@ -871,7 +875,7 @@ function RequestBoard() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-yellow-50 border-blue-200'>
+              <Card p='md' radius='md' withBorder style={{ backgroundColor: 'var(--mantine-color-yellow-light)' }}>
                 <Group>
                   <IconProgress size={24} className='text-yellow-500' />
                   <div>
@@ -889,7 +893,7 @@ function RequestBoard() {
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
+              <Card p='md' radius='md' withBorder style={{ backgroundColor: 'var(--mantine-color-green-light)' }}>
                 <Group>
                   <IconCheck size={24} className='text-green-600' />
                   <div>
@@ -921,7 +925,7 @@ function RequestBoard() {
           </Alert>
         )}
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mb='6'>
           <Group justify='space-between' mb='md'>
             <Title order={3} className='flex items-center gap-2'>
               <IconFilter size={20} />
@@ -950,7 +954,7 @@ function RequestBoard() {
                     leftSection={<IconBuilding size={16} />}
                     size='md'
                     classNames={{
-                      label: 'text-sm font-medium text-gray-700 mb-2',
+                      label: 'text-sm font-medium mb-2',
                       input: 'min-h-[44px] text-base',
                     }}
                   />
@@ -966,7 +970,7 @@ function RequestBoard() {
                     leftSection={<IconBuilding size={16} />}
                     size='md'
                     classNames={{
-                      label: 'text-sm font-medium text-gray-700 mb-2',
+                      label: 'text-sm font-medium mb-2',
                       input: 'min-h-[44px] text-base',
                     }}
                   />
@@ -982,7 +986,7 @@ function RequestBoard() {
                     leftSection={<IconBuilding size={16} />}
                     size='md'
                     classNames={{
-                      label: 'text-sm font-medium text-gray-700 mb-2',
+                      label: 'text-sm font-medium mb-2',
                       input: 'min-h-[44px] text-base',
                     }}
                   />
@@ -1001,7 +1005,7 @@ function RequestBoard() {
                     leftSection={<IconFlag size={16} />}
                     size='md'
                     classNames={{
-                      label: 'text-sm font-medium text-gray-700 mb-2',
+                      label: 'text-sm font-medium mb-2',
                       input: 'min-h-[44px] text-base',
                     }}
                   />
@@ -1036,7 +1040,7 @@ function RequestBoard() {
           </Collapse>
         </Card>
 
-        <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden'>
+        <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
           <Title order={3} mb='md' className='flex items-center gap-2'>
@@ -1059,13 +1063,13 @@ function RequestBoard() {
               <Table.Tbody>
                 {workFlows.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={8} className='text-center py-12 text-gray-500'>
+                    <Table.Td colSpan={8} className='text-center py-12 text-[var(--mantine-color-dimmed)]'>
                       <div className='flex flex-col items-center gap-3'>
-                        <IconTicket size={48} className='text-gray-300' />
+                        <IconTicket size={48} style={{ color: 'var(--mantine-color-dimmed)' }} />
                         <Text size='lg' fw={500}>
                           No se encontraron flujos de trabajo asignados
                         </Text>
-                        <Text size='sm' c='gray.5'>
+                        <Text size='sm' c='dimmed'>
                           No tienes flujos de trabajo asignados actualmente
                         </Text>
                       </div>
@@ -1075,7 +1079,7 @@ function RequestBoard() {
                   workFlows.map((workflow) => (
                     <Table.Tr
                       key={workflow.id}
-                      className='cursor-pointer hover:bg-gray-50 transition-colors'
+                      className='cursor-pointer transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(workflow));
                         window.open(
@@ -1090,7 +1094,7 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4} className='flex'>
-                          <IconBuilding size={12} className='text-gray-400' />
+                          <IconBuilding size={12} style={{ color: 'var(--mantine-color-dimmed)' }} />
                           <Text size='sm' className='max-w-xs truncate'>
                             {workflow.company}
                           </Text>
@@ -1102,13 +1106,13 @@ function RequestBoard() {
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text size='sm' c='gray.7'>
+                        <Text size='sm' c='dimmed'>
                           {workflow.process}
                         </Text>
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4}>
-                          <IconUserCheck size={14} className='text-gray-400' />
+                          <IconUserCheck size={14} style={{ color: 'var(--mantine-color-dimmed)' }} />
                           <Text size='sm'>{workflow.assigned_process_category}</Text>
                         </Group>
                       </Table.Td>
@@ -1141,6 +1145,7 @@ function RequestBoard() {
               descripcion: '',
               costCenter: '',
               assignedProcess: '',
+              isExternal: false,
             });
           }}
           title={
@@ -1149,10 +1154,10 @@ function RequestBoard() {
                 <IconPlus size={20} className='text-blue-600' />
               </div>
               <div>
-                <Text size='lg' fw={600} className='text-gray-900'>
+                <Text size='lg' fw={600}>
                   Crear Flujo de Trabajo
                 </Text>
-                <Text size='xs' c='gray.5'>
+                <Text size='xs' c='dimmed'>
                   Complete los campos obligatorios marcados con *
                 </Text>
               </div>
@@ -1192,7 +1197,7 @@ function RequestBoard() {
                         ? 'bg-blue-600 border-blue-600 text-white'
                         : currentStep > step
                         ? 'bg-green-500 border-green-500 text-white'
-                        : 'bg-white border-gray-300 text-gray-400'
+                        : 'bg-[var(--mantine-color-body)] border-[var(--mantine-color-default-border)] text-[var(--mantine-color-dimmed)]'
                     }`}
                   >
                     {currentStep > step ? <IconCheck size={18} /> : step}
@@ -1206,7 +1211,7 @@ function RequestBoard() {
                           ? 'text-blue-600'
                           : currentStep > step
                           ? 'text-green-600'
-                          : 'text-gray-400'
+                          : 'text-[var(--mantine-color-dimmed)]'
                       }
                     >
                       {step === 1
@@ -1215,7 +1220,7 @@ function RequestBoard() {
                         ? 'Categoría y Proceso'
                         : 'Tareas'}
                     </Text>
-                    <Text size='xs' c='gray.5'>
+                    <Text size='xs' c='dimmed'>
                       {step === 1 ? 'Paso 1 de 3' : step === 2 ? 'Paso 2 de 3' : 'Paso 3 de 3'}
                     </Text>
                   </div>
@@ -1223,7 +1228,7 @@ function RequestBoard() {
                 {step < 3 && (
                   <div
                     className={`flex-1 h-0.5 mx-4 transition-colors duration-200 ${
-                      currentStep > step ? 'bg-green-500' : 'bg-gray-200'
+                      currentStep > step ? 'bg-green-500' : 'bg-[var(--mantine-color-default-border)]'
                     }`}
                   />
                 )}
@@ -1235,17 +1240,23 @@ function RequestBoard() {
             {/* Paso 1: Información General */}
             {currentStep === 1 && (
               <div className='space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-300'>
-                <div className='bg-white rounded-lg border border-gray-200 p-6'>
+                <div
+                  className='rounded-lg border p-6'
+                  style={{
+                    backgroundColor: 'var(--mantine-color-body)',
+                    borderColor: 'var(--mantine-color-default-border)',
+                  }}
+                >
                   <div className='mb-4'>
                     <Group gap='sm' mb={3}>
                       <div className='flex items-center justify-center w-8 h-8 rounded-md bg-blue-50'>
                         <IconFileDescription size={16} className='text-blue-600' />
                       </div>
-                      <Text fw={600} size='md' className='text-gray-900'>
+                      <Text fw={600} size='md'>
                         Paso 1: Información General
                       </Text>
                     </Group>
-                    <Text size='sm' c='gray.6'>
+                    <Text size='sm' c='dimmed'>
                       Seleccione la empresa solicitante para comenzar el flujo de trabajo.
                     </Text>
                   </div>
@@ -1264,7 +1275,7 @@ function RequestBoard() {
                         disabled={formDataLoading}
                         size='lg'
                         classNames={{
-                          label: 'text-sm font-medium text-gray-700 mb-2',
+                          label: 'text-sm font-medium mb-2',
                           input: 'min-h-[48px] text-base',
                         }}
                       />
@@ -1277,17 +1288,23 @@ function RequestBoard() {
             {/* Paso 2: Categoría y Proceso */}
             {currentStep === 2 && (
               <div className='space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-300'>
-                <div className='bg-white rounded-lg border border-gray-200 p-6 space-y-6'>
+                <div
+                  className='rounded-lg border p-6 space-y-6'
+                  style={{
+                    backgroundColor: 'var(--mantine-color-body)',
+                    borderColor: 'var(--mantine-color-default-border)',
+                  }}
+                >
                   <div className='mb-2'>
                     <Group gap='sm' mb={3}>
                       <div className='flex items-center justify-center w-8 h-8 rounded-md bg-blue-50'>
                         <IconTag size={16} className='text-blue-600' />
                       </div>
-                      <Text fw={600} size='md' className='text-gray-900'>
+                      <Text fw={600} size='md'>
                         Paso 2: Categoría y Proceso
                       </Text>
                     </Group>
-                    <Text size='sm' c='gray.6'>
+                    <Text size='sm' c='dimmed'>
                       Configure la categoría, proceso y asignados para este flujo de trabajo.
                     </Text>
                   </div>
@@ -1312,7 +1329,7 @@ function RequestBoard() {
                             disabled={!formData.company || formDataLoading}
                             size='lg'
                             classNames={{
-                              label: 'text-sm font-medium text-gray-700 mb-2',
+                              label: 'text-sm font-medium mb-2',
                               input: 'min-h-[48px] text-base',
                             }}
                           />
@@ -1343,7 +1360,7 @@ function RequestBoard() {
                         disabled
                         size='lg'
                         classNames={{
-                          label: 'text-sm font-medium text-gray-700 mb-2',
+                          label: 'text-sm font-medium mb-2',
                           input: 'min-h-[48px] bg-gray-50 text-gray-600 text-base',
                         }}
                       />
@@ -1368,7 +1385,7 @@ function RequestBoard() {
                         disabled={!formData.category || formDataLoading}
                         size='lg'
                         classNames={{
-                          label: 'text-sm font-medium text-gray-700 mb-2',
+                          label: 'text-sm font-medium mb-2',
                           input: 'min-h-[48px] text-base',
                         }}
                       />
@@ -1390,7 +1407,7 @@ function RequestBoard() {
                         disabled={!formData.process || formDataLoading}
                         size='lg'
                         classNames={{
-                          label: 'text-sm font-medium text-gray-700 mb-2',
+                          label: 'text-sm font-medium mb-2',
                           input: 'min-h-[48px] text-base',
                         }}
                       />
@@ -1421,10 +1438,32 @@ function RequestBoard() {
                         disabled={formDataLoading}
                         size='lg'
                         classNames={{
-                          label: 'text-sm font-medium text-gray-700 mb-2',
+                          label: 'text-sm font-medium mb-2',
                           input: 'min-h-[48px] text-base',
                         }}
                       />
+                    </Grid.Col>
+
+                    {/* Formulario externo: expone este flujo en una página pública SIN login. */}
+                    <Grid.Col span={{ base: 12 }}>
+                      <Checkbox
+                        label='Formulario externo (acceso sin login)'
+                        description='Expone el formulario de este flujo en una página pública, con solo los campos parametrizados, para enviar la solicitud sin iniciar sesión.'
+                        checked={formData.isExternal}
+                        onChange={(e) =>
+                          setFormData({ ...formData, isExternal: e.currentTarget.checked })
+                        }
+                        disabled={formDataLoading}
+                      />
+                      {formData.isExternal && (
+                        <Text size='sm' c='dimmed' mt='xs'>
+                          La URL pública del formulario será{' '}
+                          <Text span fw={600}>
+                            /formulario-externo/&lt;id&gt;
+                          </Text>{' '}
+                          y estará disponible al guardar el flujo.
+                        </Text>
+                      )}
                     </Grid.Col>
                   </Grid>
                 </div>
@@ -1434,18 +1473,24 @@ function RequestBoard() {
             {/* Paso 3: Tareas */}
             {currentStep === 3 && (
               <div className='space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-300'>
-                <div className='bg-white rounded-lg border border-gray-200 p-6 space-y-6'>
+                <div
+                  className='rounded-lg border p-6 space-y-6'
+                  style={{
+                    backgroundColor: 'var(--mantine-color-body)',
+                    borderColor: 'var(--mantine-color-default-border)',
+                  }}
+                >
                   <div className='flex items-center justify-between mb-2'>
                     <div>
                       <Group gap='sm' mb={3}>
                         <div className='flex items-center justify-center w-8 h-8 rounded-md bg-blue-50'>
                           <IconListCheck size={16} className='text-blue-600' />
                         </div>
-                        <Text fw={600} size='md' className='text-gray-900'>
+                        <Text fw={600} size='md'>
                           Paso 3: Tareas
                         </Text>
                       </Group>
-                      <Text size='sm' c='gray.6'>
+                      <Text size='sm' c='dimmed'>
                         Agregue las tareas que componen este flujo de trabajo (opcional).
                       </Text>
                     </div>
@@ -1459,8 +1504,8 @@ function RequestBoard() {
                   </div>
 
                   {/* Formulario para agregar tarea - Mejorado */}
-                  <div key={taskFormKey} className='bg-gray-50 rounded-lg p-6'>
-                    <Text fw={600} size='sm' mb={4} className='text-gray-700'>
+                  <div key={taskFormKey} className='rounded-lg p-6' style={{ backgroundColor: 'var(--mantine-color-default)' }}>
+                    <Text fw={600} size='sm' mb={4} c='dimmed'>
                       Agregar Nueva Tarea
                     </Text>
                     <Grid>
@@ -1472,7 +1517,7 @@ function RequestBoard() {
                           onChange={(e) => setTaskForm({ ...taskForm, tarea: e.target.value })}
                           size='lg'
                           classNames={{
-                            label: 'text-sm font-medium text-gray-700 mb-2',
+                            label: 'text-sm font-medium mb-2',
                             input: 'min-h-[48px] text-base',
                           }}
                         />
@@ -1490,7 +1535,7 @@ function RequestBoard() {
                           clearable
                           size='lg'
                           classNames={{
-                            label: 'text-sm font-medium text-gray-700 mb-2',
+                            label: 'text-sm font-medium mb-2',
                             input: 'min-h-[48px] text-base',
                           }}
                         />
@@ -1511,7 +1556,7 @@ function RequestBoard() {
                           hideControls
                           size='lg'
                           classNames={{
-                            label: 'text-sm font-medium text-gray-700 mb-2',
+                            label: 'text-sm font-medium mb-2',
                             input: 'min-h-[48px] text-base',
                           }}
                         />
@@ -1541,7 +1586,7 @@ function RequestBoard() {
                           }
                           size='lg'
                           classNames={{
-                            label: 'text-sm font-medium text-gray-700 mb-2',
+                            label: 'text-sm font-medium mb-2',
                             input: 'min-h-[48px] text-base',
                           }}
                         />
@@ -1568,24 +1613,27 @@ function RequestBoard() {
 
                   {/* Tabla de tareas agregadas - Mejorada */}
                   {tasks.length > 0 && (
-                    <div className='border border-gray-200 rounded-lg overflow-hidden'>
+                    <div
+                      className='border rounded-lg overflow-hidden'
+                      style={{ borderColor: 'var(--mantine-color-default-border)' }}
+                    >
                       <Table highlightOnHover className='w-full'>
-                        <Table.Thead className='bg-gray-50'>
+                        <Table.Thead style={{ backgroundColor: 'var(--mantine-color-default)' }}>
                           <Table.Tr>
-                            <Table.Th className='py-4 px-5 text-sm font-semibold text-gray-700 uppercase tracking-wider'>
+                            <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider'>
                               Tarea
                             </Table.Th>
-                            <Table.Th className='py-4 px-5 text-sm font-semibold text-gray-700 uppercase tracking-wider'>
+                            <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider'>
                               Asignado
                             </Table.Th>
-                            <Table.Th className='py-4 px-5 text-sm font-semibold text-gray-700 uppercase tracking-wider'>
+                            <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider'>
                               Costo
                             </Table.Th>
-                            <Table.Th className='py-4 px-5 text-sm font-semibold text-gray-700 uppercase tracking-wider'>
+                            <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider'>
                               Centro de Costo
                             </Table.Th>
                             <Table.Th
-                              className='py-4 px-5 text-sm font-semibold text-gray-700 uppercase tracking-wider text-center'
+                              className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'
                               style={{ width: 100 }}
                             >
                               Acciones
@@ -1599,14 +1647,14 @@ function RequestBoard() {
                               className='hover:bg-blue-50/50 transition-colors duration-150'
                             >
                               <Table.Td className='py-4 px-5'>
-                                <Text size='base' fw={500} className='text-gray-900'>
+                                <Text size='base' fw={500}>
                                   {task.tarea}
                                 </Text>
                               </Table.Td>
                               <Table.Td className='py-4 px-5'>
                                 <Group gap={4}>
-                                  <IconUser size={16} className='text-gray-400' />
-                                  <Text size='base' className='text-gray-700'>
+                                  <IconUser size={16} style={{ color: 'var(--mantine-color-dimmed)' }} />
+                                  <Text size='base' c='dimmed'>
                                     {getAssignedName(task.asignado)}
                                   </Text>
                                 </Group>
@@ -1621,7 +1669,7 @@ function RequestBoard() {
                                 </Text>
                               </Table.Td>
                               <Table.Td className='py-4 px-5'>
-                                <Text size='base' className='text-gray-700'>
+                                <Text size='base' c='dimmed'>
                                   {task.centroCosto || '-'}
                                 </Text>
                               </Table.Td>
@@ -1645,16 +1693,16 @@ function RequestBoard() {
                   )}
 
                   {tasks.length === 0 && (
-                    <div className='text-center py-12 border-2 border-dashed border-gray-200 rounded-lg'>
+                    <div className='text-center py-12 border-2 border-dashed rounded-lg' style={{ borderColor: 'var(--mantine-color-default-border)' }}>
                       <div className='flex flex-col items-center gap-4'>
-                        <div className='flex items-center justify-center w-16 h-16 rounded-full bg-gray-100'>
-                          <IconList size={32} className='text-gray-400' />
+                        <div className='flex items-center justify-center w-16 h-16 rounded-full' style={{ backgroundColor: 'var(--mantine-color-default)' }}>
+                          <IconList size={32} style={{ color: 'var(--mantine-color-dimmed)' }} />
                         </div>
                         <div>
-                          <Text size='md' fw={600} className='text-gray-700'>
+                          <Text size='md' fw={600} c='dimmed'>
                             No hay tareas agregadas
                           </Text>
-                          <Text size='sm' c='gray.5' mt={2}>
+                          <Text size='sm' c='dimmed' mt={2}>
                             Las tareas son opcionales. Puede agregar tareas o continuar sin ellas.
                           </Text>
                         </div>
@@ -1682,7 +1730,7 @@ function RequestBoard() {
                 }
               }}
               size='md'
-              className='cursor-pointer hover:bg-gray-50 transition-colors duration-200'
+              className='cursor-pointer transition-colors duration-200'
             >
               {currentStep === 1 ? 'Cancelar' : 'Anterior'}
             </Button>
@@ -1752,10 +1800,10 @@ function RequestBoard() {
                 <IconTag size={20} className='text-blue-600' />
               </div>
               <div>
-                <Text fw={600} size='lg' className='text-gray-900'>
+                <Text fw={600} size='lg'>
                   Crear Nueva Categoría
                 </Text>
-                <Text size='xs' c='gray.5'>
+                <Text size='xs' c='dimmed'>
                   Complete los campos obligatorios
                 </Text>
               </div>
@@ -1780,7 +1828,7 @@ function RequestBoard() {
                 leftSection={<IconTag size={16} />}
                 size='lg'
                 classNames={{
-                  label: 'text-sm font-medium text-gray-700 mb-2',
+                  label: 'text-sm font-medium mb-2',
                   input: 'min-h-[48px] text-base',
                 }}
               />
@@ -1795,13 +1843,13 @@ function RequestBoard() {
                 searchable
                 size='lg'
                 classNames={{
-                  label: 'text-sm font-medium text-gray-700 mb-2',
+                  label: 'text-sm font-medium mb-2',
                   input: 'min-h-[48px] text-base',
                 }}
               />
             </div>
 
-            <div className='bg-blue-50 rounded-lg p-4'>
+            <div className='rounded-lg p-4' style={{ backgroundColor: 'var(--mantine-color-blue-light)' }}>
               <Group gap='sm'>
                 <IconBuilding size={16} className='text-blue-600' />
                 <Text size='sm' c='blue.7'>
@@ -1821,7 +1869,7 @@ function RequestBoard() {
                   setNewCategoryName('');
                   setNewCategoryAssigned('');
                 }}
-                className='cursor-pointer hover:bg-gray-50 transition-colors duration-200'
+                className='cursor-pointer transition-colors duration-200'
               >
                 Cancelar
               </Button>
@@ -1851,10 +1899,10 @@ function RequestBoard() {
                 <IconProgress size={20} className='text-blue-600' />
               </div>
               <div>
-                <Text fw={600} size='lg' className='text-gray-900'>
+                <Text fw={600} size='lg'>
                   Crear Nuevo Proceso
                 </Text>
-                <Text size='xs' c='gray.5'>
+                <Text size='xs' c='dimmed'>
                   Complete los campos obligatorios
                 </Text>
               </div>
@@ -1879,13 +1927,13 @@ function RequestBoard() {
                 leftSection={<IconProgress size={16} />}
                 size='lg'
                 classNames={{
-                  label: 'text-sm font-medium text-gray-700 mb-2',
+                  label: 'text-sm font-medium mb-2',
                   input: 'min-h-[48px] text-base',
                 }}
               />
             </div>
 
-            <div className='bg-blue-50 rounded-lg p-4'>
+            <div className='rounded-lg p-4' style={{ backgroundColor: 'var(--mantine-color-blue-light)' }}>
               <Group gap='sm'>
                 <IconTag size={16} className='text-blue-600' />
                 <Text size='sm' c='blue.7'>
@@ -1904,7 +1952,7 @@ function RequestBoard() {
                   setProcessModalOpened(false);
                   setNewProcessName('');
                 }}
-                className='cursor-pointer hover:bg-gray-50 transition-colors duration-200'
+                className='cursor-pointer transition-colors duration-200'
               >
                 Cancelar
               </Button>

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/articles/access';
 import { crearArticulo, itemExiste, sanitizeItem } from '../../../../lib/articles/articles';
+import { registrarCambioArticulo } from '../../../../lib/articles/log';
 import { REQUIRED_ON_CREATE } from '../../../../lib/articles/fields';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
@@ -75,6 +76,12 @@ export async function POST(request: NextRequest) {
           }
           seen.add(itemCode);
           await crearArticulo(sap, item);
+          await registrarCambioArticulo(sap, company.endpoint.logObject, {
+            itemCode,
+            action: 'crear',
+            changes: item,
+            userEmail: session.user.email,
+          });
           ok.push({ row: rowNum, itemCode });
         } catch (err) {
           const msg = err instanceof SapError ? err.message : err instanceof Error ? err.message : 'Error';

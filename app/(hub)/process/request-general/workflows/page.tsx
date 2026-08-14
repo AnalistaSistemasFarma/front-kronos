@@ -51,9 +51,19 @@ import {
   IconTrash,
   IconList,
   IconListCheck,
+  IconChevronUp,
+  IconChevronDown,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
+import { getFileLabelError } from '../../../../../lib/onedriveName';
+import { SAP_SOURCES } from '../../../../../lib/requests-general/sapSources';
+import {
+  TABLE_FIELD_TYPE,
+  serializeTableConfig,
+  type TableColumn,
+} from '../../../../../lib/requests-general/tableField';
+import TableColumnsEditor from '../_components/TableColumnsEditor';
 
 interface WorkFlow {
   id: number;
@@ -90,6 +100,7 @@ function RequestBoard() {
     process: '',
     costCenter: '',
     assignedProcess: '',
+    isExternal: false,
   });
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
@@ -124,6 +135,10 @@ function RequestBoard() {
       asignado: string;
       costo: number;
       centroCosto: string;
+      secuencial: boolean;
+      esAutorizacion: boolean;
+      tipoAutorizacion: string;
+      condition_option_temps: string[];
     }>
   >([]);
   const [taskForm, setTaskForm] = useState({
@@ -131,24 +146,78 @@ function RequestBoard() {
     asignado: '',
     costo: '',
     centroCosto: '',
+    secuencial: false,
+    esAutorizacion: false,
+    tipoAutorizacion: '',
+    condition_option_temps: [] as string[],
   });
+  const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
+
+  const moveTask = (index: number, dir: -1 | 1) => {
+    setTasks((prev) => {
+      const next = [...prev];
+      const target = index + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
 
   const [taskFormKey, setTaskFormKey] = useState(0);
 
   const newTempId = (prefix: string) =>
     `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-  // Campos condicionales parametrizados por proceso (solo Select por ahora)
+  const FIELD_TYPE_LABELS: Record<string, string> = {
+    select: 'Lista',
+    text: 'Texto',
+    number: 'Número',
+    date: 'Fecha',
+    [TABLE_FIELD_TYPE]: 'Tabla',
+    ...Object.fromEntries(
+      Object.entries(SAP_SOURCES).map(([key, s]) => [key, s.label])
+    ),
+  };
+
+  const fieldTypeSelectData = [
+    {
+      group: 'Básico',
+      items: [
+        { value: 'select', label: 'Lista (opciones)' },
+        { value: 'text', label: 'Texto' },
+        { value: 'number', label: 'Número' },
+        { value: 'date', label: 'Fecha' },
+        { value: TABLE_FIELD_TYPE, label: 'Tabla' },
+      ],
+    },
+    {
+      group: 'SAP',
+      items: Object.entries(SAP_SOURCES).map(([key, s]) => ({
+        value: key,
+        label: s.label,
+      })),
+    },
+  ];
+
   const [formFields, setFormFields] = useState<
     Array<{
       tempId: string;
       field_label: string;
+      field_type: string;
       required: boolean;
       options: Array<{ tempId: string; option_label: string }>;
-      condition_option_temps: string[]; // opciones de campos anteriores que activan este campo
+      condition_option_temps: string[];
+      // Solo para field_type === 'table': definición de columnas de la tabla.
+      columns: TableColumn[];
     }>
   >([]);
-  const [fieldForm, setFieldForm] = useState({ field_label: '', required: true });
+  const [fieldForm, setFieldForm] = useState({
+    field_label: '',
+    field_type: 'select',
+    required: true,
+  });
   const [optionInputs, setOptionInputs] = useState<Record<string, string>>({});
 
   const addFormField = () => {
@@ -158,12 +227,21 @@ function RequestBoard() {
       {
         tempId: newTempId('f'),
         field_label: fieldForm.field_label.trim(),
+        field_type: fieldForm.field_type,
         required: fieldForm.required,
         options: [],
         condition_option_temps: [],
+        columns: [],
       },
     ]);
-    setFieldForm({ field_label: '', required: true });
+    setFieldForm({ field_label: '', field_type: 'select', required: true });
+  };
+
+  // === Gestión de columnas para campos de tipo "Tabla" ===
+  const setFieldColumns = (fieldTempId: string, columns: TableColumn[]) => {
+    setFormFields((prev) =>
+      prev.map((f) => (f.tempId === fieldTempId ? { ...f, columns } : f))
+    );
   };
 
   const removeFormField = (fieldTempId: string) => {
@@ -172,7 +250,6 @@ function RequestBoard() {
     setFormFields(
       formFields
         .filter((f) => f.tempId !== fieldTempId)
-        // Limpiar condiciones de otros campos que apuntaban a opciones de este campo
         .map((f) => ({
           ...f,
           condition_option_temps: f.condition_option_temps.filter((t) => !optionIds.includes(t)),
@@ -182,6 +259,12 @@ function RequestBoard() {
       prev.map((f) => ({
         ...f,
         condition_option_temps: f.condition_option_temps.filter((t) => !optionIds.includes(t)),
+      }))
+    );
+    setTasks((prev) =>
+      prev.map((t) => ({
+        ...t,
+        condition_option_temps: t.condition_option_temps.filter((c) => !optionIds.includes(c)),
       }))
     );
   };
@@ -227,9 +310,14 @@ function RequestBoard() {
         condition_option_temps: f.condition_option_temps.filter((t) => t !== optionTempId),
       }))
     );
+    setTasks((prev) =>
+      prev.map((t) => ({
+        ...t,
+        condition_option_temps: t.condition_option_temps.filter((c) => c !== optionTempId),
+      }))
+    );
   };
 
-  // Lista plana de TODAS las opciones (para condicionar archivos)
   const conditionOptions = formFields.flatMap((f) =>
     f.options.map((o) => ({
       value: o.tempId,
@@ -237,7 +325,6 @@ function RequestBoard() {
     }))
   );
 
-  // Opciones de campos ANTERIORES a uno dado (para condicionar campos, evita ciclos)
   const optionsBeforeField = (fieldTempId: string) => {
     const idx = formFields.findIndex((f) => f.tempId === fieldTempId);
     return formFields.slice(0, idx).flatMap((f) =>
@@ -256,7 +343,6 @@ function RequestBoard() {
       .join(', ');
   };
 
-  // Archivos requeridos parametrizados por proceso
   const [requiresFiles, setRequiresFiles] = useState(false);
   const [requiredFiles, setRequiredFiles] = useState<
     Array<{
@@ -274,6 +360,7 @@ function RequestBoard() {
 
   const addRequiredFile = () => {
     if (!fileForm.file_label.trim()) return;
+    if (getFileLabelError(fileForm.file_label)) return;
 
     setRequiredFiles([
       ...requiredFiles,
@@ -294,6 +381,7 @@ function RequestBoard() {
 
   const addTask = () => {
     if (!taskForm.tarea.trim()) return;
+    if (taskForm.esAutorizacion && !taskForm.tipoAutorizacion) return;
 
     setTasks([
       ...tasks,
@@ -303,10 +391,23 @@ function RequestBoard() {
         asignado: taskForm.asignado,
         costo: parseFloat(taskForm.costo) || 0,
         centroCosto: taskForm.centroCosto,
+        secuencial: taskForm.secuencial,
+        esAutorizacion: taskForm.esAutorizacion,
+        tipoAutorizacion: taskForm.esAutorizacion ? taskForm.tipoAutorizacion : '',
+        condition_option_temps: taskForm.condition_option_temps,
       },
     ]);
 
-    setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+    setTaskForm({
+      tarea: '',
+      asignado: '',
+      costo: '',
+      centroCosto: '',
+      secuencial: false,
+      esAutorizacion: false,
+      tipoAutorizacion: '',
+      condition_option_temps: [],
+    });
 
     setTaskFormKey(prev => prev + 1);
   };
@@ -512,6 +613,21 @@ function RequestBoard() {
     fetchCompanies();
     fetchConsultsWorkFlows();
   }, [session, status, router]);
+
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    fetch('/api/requests-general/authorization-types', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: { id: number; type_authorization: string }[]) => {
+        setAuthorizationTypeOptions(
+          (data || []).map((t) => ({
+            value: t.id.toString(),
+            label: t.type_authorization,
+          }))
+        );
+      })
+      .catch((err) => console.error('Error cargando tipos de autorización:', err));
+  }, [status]);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -760,12 +876,19 @@ function RequestBoard() {
     try {
       setCreateLoading(true);
 
-      const tasksToSend = tasks.map((task) => ({
+      const tasksToSend = tasks.map((task, index) => ({
         id: task.id,
         task: task.tarea,
         id_user: task.asignado || null,
         cost: task.costo || 0,
         cost_center: task.centroCosto || null,
+        is_sequential: task.secuencial,
+        display_order: index,
+        is_authorization: task.esAutorizacion,
+        type_authorization: task.esAutorizacion
+          ? Number(task.tipoAutorizacion) || null
+          : null,
+        condition_option_temps: task.condition_option_temps,
       }));
 
       console.log('asignados tareas ' + tasksToSend);
@@ -791,19 +914,43 @@ function RequestBoard() {
                 }))
               : [],
           formFields: formFields
-            .filter((f) => f.field_label.trim() && f.options.length > 0)
+            .filter(
+              (f) =>
+                f.field_label.trim() &&
+                (f.field_type !== 'select' || f.options.length > 0) &&
+                (f.field_type !== TABLE_FIELD_TYPE ||
+                  f.columns.some((c) => c.label.trim()))
+            )
             .map((f) => ({
               tempId: f.tempId,
               field_label: f.field_label,
+              field_type: f.field_type,
               required: f.required,
               options: f.options.map((o) => ({
                 tempId: o.tempId,
                 option_label: o.option_label,
               })),
               condition_option_temps: f.condition_option_temps,
+              config_json:
+                f.field_type === TABLE_FIELD_TYPE
+                  ? serializeTableConfig(
+                      f.columns
+                        .filter((c) => c.label.trim())
+                        .map((c) => ({
+                          key: c.key,
+                          label: c.label.trim(),
+                          type: c.type,
+                          required: Boolean(c.required),
+                          ...(c.type === 'select'
+                            ? { options: (c.options || []).filter((o) => o.trim()) }
+                            : {}),
+                        }))
+                    )
+                  : null,
             })),
           cost_center_pc: formData.costCenter || null,
           id_user: formData.assignedProcess ? formData.assignedProcess : userId,
+          is_external: formData.isExternal,
         }),
       });
 
@@ -822,14 +969,15 @@ function RequestBoard() {
         descripcion: '',
         costCenter: '',
         assignedProcess: '',
+        isExternal: false,
       });
       setTasks([]);
-      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', condition_option_temps: [] });
       setRequiresFiles(false);
       setRequiredFiles([]);
       setFileForm({ file_label: '', required: true, condition_option_temps: [] });
       setFormFields([]);
-      setFieldForm({ field_label: '', required: true });
+      setFieldForm({ field_label: '', field_type: 'select', required: true });
       setOptionInputs({});
       setAssignedCategoryInfo(null);
 
@@ -1242,12 +1390,12 @@ function RequestBoard() {
             setCurrentStep(1);
             setFormErrors({});
             setTasks([]);
-            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', condition_option_temps: [] });
             setRequiresFiles(false);
             setRequiredFiles([]);
             setFileForm({ file_label: '', required: true, condition_option_temps: [] });
             setFormFields([]);
-            setFieldForm({ field_label: '', required: true });
+            setFieldForm({ field_label: '', field_type: 'select', required: true });
             setOptionInputs({});
             setFormData({
               company: '',
@@ -1257,6 +1405,7 @@ function RequestBoard() {
               descripcion: '',
               costCenter: '',
               assignedProcess: '',
+              isExternal: false,
             });
           }}
           title={
@@ -1554,6 +1703,29 @@ function RequestBoard() {
                         }}
                       />
                     </Grid.Col>
+
+                    {/* Formulario externo: expone este flujo en una página pública SIN login. */}
+                    <Grid.Col span={{ base: 12 }}>
+                      <Checkbox
+                        label='Formulario externo (acceso sin login)'
+                        description='Expone el formulario de este flujo en una página pública, con solo los campos parametrizados, para enviar la solicitud sin iniciar sesión.'
+                        checked={formData.isExternal}
+                        onChange={(e) =>
+                          setFormData({ ...formData, isExternal: e.currentTarget.checked })
+                        }
+                        disabled={formDataLoading}
+                      />
+                      {formData.isExternal && (
+                        <Text size='sm' c='dimmed' mt='xs'>
+                          La URL pública del formulario será{' '}
+                          <Text span fw={600}>
+                            /formulario-externo/&lt;id&gt;
+                          </Text>{' '}
+                          y estará disponible al guardar el flujo (podrá copiarla desde la edición
+                          del flujo).
+                        </Text>
+                      )}
+                    </Grid.Col>
                   </Grid>
                 </div>
               </div>
@@ -1690,7 +1862,10 @@ function RequestBoard() {
                           fullWidth
                           h={48}
                           mt={26}
-                          disabled={!taskForm.tarea.trim()}
+                          disabled={
+                            !taskForm.tarea.trim() ||
+                            (taskForm.esAutorizacion && !taskForm.tipoAutorizacion)
+                          }
                           className='cursor-pointer hover:bg-blue-700 transition-colors duration-200'
                           size='lg'
                         >
@@ -1698,6 +1873,64 @@ function RequestBoard() {
                         </Button>
                       </Grid.Col>
                     </Grid>
+
+                    <Checkbox
+                      mt='md'
+                      label='Secuencial: esta tarea requiere que la anterior esté resuelta'
+                      checked={taskForm.secuencial}
+                      onChange={(e) => setTaskForm({ ...taskForm, secuencial: e.currentTarget.checked })}
+                    />
+
+                    <Checkbox
+                      mt='sm'
+                      label='Tarea de autorización'
+                      checked={taskForm.esAutorizacion}
+                      onChange={(e) =>
+                        setTaskForm({
+                          ...taskForm,
+                          esAutorizacion: e.currentTarget.checked,
+                          tipoAutorizacion: e.currentTarget.checked ? taskForm.tipoAutorizacion : '',
+                        })
+                      }
+                    />
+
+                    {taskForm.esAutorizacion && (
+                      <Select
+                        mt='sm'
+                        label='Tipo de autorización'
+                        placeholder='Seleccione el tipo'
+                        data={authorizationTypeOptions}
+                        value={taskForm.tipoAutorizacion}
+                        onChange={(value) =>
+                          setTaskForm({ ...taskForm, tipoAutorizacion: value || '' })
+                        }
+                        searchable
+                        withAsterisk
+                        error={
+                          taskForm.esAutorizacion && !taskForm.tipoAutorizacion
+                            ? 'Selecciona el tipo de autorización'
+                            : undefined
+                        }
+                        maw={400}
+                      />
+                    )}
+
+                    {conditionOptions.length > 0 && (
+                      <MultiSelect
+                        mt='sm'
+                        label='Ejecutar esta tarea solo si se elige'
+                        placeholder='Siempre (sin condición)'
+                        data={conditionOptions}
+                        value={taskForm.condition_option_temps}
+                        onChange={(value) =>
+                          setTaskForm({ ...taskForm, condition_option_temps: value })
+                        }
+                        clearable
+                        searchable
+                        leftSection={<IconTag size={16} />}
+                        maw={500}
+                      />
+                    )}
                   </div>
 
                   {/* Tabla de tareas agregadas - Mejorada */}
@@ -1721,24 +1954,42 @@ function RequestBoard() {
                             <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider'>
                               Centro de Costo
                             </Table.Th>
+                            <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'>
+                              Secuencial
+                            </Table.Th>
+                            <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'>
+                              Autorización
+                            </Table.Th>
                             <Table.Th
                               className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'
-                              style={{ width: 100 }}
+                              style={{ width: 140 }}
                             >
                               Acciones
                             </Table.Th>
                           </Table.Tr>
                         </Table.Thead>
                         <Table.Tbody>
-                          {tasks.map((task) => (
+                          {tasks.map((task, index) => (
                             <Table.Tr
                               key={task.id}
                               className='hover:bg-blue-50/50 transition-colors duration-150'
                             >
                               <Table.Td className='py-4 px-5'>
-                                <Text size='base' fw={500}>
-                                  {task.tarea}
-                                </Text>
+                                <Group gap={6} wrap='nowrap'>
+                                  <Badge size='sm' variant='light' color='gray' radius='sm'>
+                                    {index + 1}
+                                  </Badge>
+                                  <div>
+                                    <Text size='base' fw={500}>
+                                      {task.tarea}
+                                    </Text>
+                                    {task.condition_option_temps.length > 0 && (
+                                      <Badge size='xs' variant='light' color='grape' mt={2} styles={{ root: { textTransform: 'none' } }}>
+                                        Si: {conditionLabels(task.condition_option_temps)}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </Group>
                               </Table.Td>
                               <Table.Td className='py-4 px-5'>
                                 <Group gap={4}>
@@ -1763,16 +2014,55 @@ function RequestBoard() {
                                 </Text>
                               </Table.Td>
                               <Table.Td className='py-4 px-5 text-center'>
-                                <ActionIcon
-                                  color='red'
-                                  variant='subtle'
-                                  size={40}
-                                  onClick={() => removeTask(task.id)}
-                                  title='Eliminar tarea'
-                                  className='cursor-pointer hover:bg-red-50 transition-colors duration-150'
-                                >
-                                  <IconTrash size={18} />
-                                </ActionIcon>
+                                {task.secuencial ? (
+                                  <Badge color='indigo' variant='light' size='sm'>
+                                    Secuencial
+                                  </Badge>
+                                ) : (
+                                  <Text size='sm' c='dimmed'>—</Text>
+                                )}
+                              </Table.Td>
+                              <Table.Td className='py-4 px-5 text-center'>
+                                {task.esAutorizacion ? (
+                                  <Badge color='teal' variant='light' size='sm'>
+                                    {authorizationTypeOptions.find(
+                                      (o) => o.value === task.tipoAutorizacion
+                                    )?.label || 'Autorización'}
+                                  </Badge>
+                                ) : (
+                                  <Text size='sm' c='dimmed'>—</Text>
+                                )}
+                              </Table.Td>
+                              <Table.Td className='py-4 px-5'>
+                                <Group gap={4} justify='center' wrap='nowrap'>
+                                  <ActionIcon
+                                    variant='subtle'
+                                    color='gray'
+                                    onClick={() => moveTask(index, -1)}
+                                    disabled={index === 0}
+                                    title='Subir'
+                                  >
+                                    <IconChevronUp size={18} />
+                                  </ActionIcon>
+                                  <ActionIcon
+                                    variant='subtle'
+                                    color='gray'
+                                    onClick={() => moveTask(index, 1)}
+                                    disabled={index === tasks.length - 1}
+                                    title='Bajar'
+                                  >
+                                    <IconChevronDown size={18} />
+                                  </ActionIcon>
+                                  <ActionIcon
+                                    color='red'
+                                    variant='subtle'
+                                    onClick={() => removeTask(task.id)}
+                                    title='Eliminar tarea'
+                                    className='cursor-pointer hover:bg-red-50 transition-colors duration-150'
+                                  >
+                                    <IconTrash size={18} />
+                                  </ActionIcon>
+                                </Group>
                               </Table.Td>
                             </Table.Tr>
                           ))}
@@ -1818,8 +2108,9 @@ function RequestBoard() {
                       </Text>
                     </Group>
                     <Text size='sm' c='dimmed'>
-                      Defina campos tipo lista (ej. &quot;Tipo de cliente&quot;) cuyas opciones
-                      pueden condicionar qué archivos se piden al crear la solicitud.
+                      Defina campos tipo lista, texto, número o fecha (ej. &quot;Tipo de cliente&quot;,
+                      &quot;Valor estimado&quot;). Las opciones de los campos tipo lista pueden condicionar
+                      qué otros campos o archivos se piden al crear la solicitud.
                     </Text>
                   </div>
 
@@ -1828,7 +2119,7 @@ function RequestBoard() {
                       Agregar Campo
                     </Text>
                     <Grid align='flex-end'>
-                      <Grid.Col span={{ base: 12, md: 8 }}>
+                      <Grid.Col span={{ base: 12, md: 5 }}>
                         <TextInput
                           label='Nombre del campo *'
                           placeholder='Ej. Tipo de cliente'
@@ -1840,6 +2131,22 @@ function RequestBoard() {
                               addFormField();
                             }
                           }}
+                          size='lg'
+                          classNames={{
+                            label: 'text-sm font-medium mb-2',
+                            input: 'min-h-[48px] text-base',
+                          }}
+                        />
+                      </Grid.Col>
+                      <Grid.Col span={{ base: 12, md: 3 }}>
+                        <Select
+                          label='Tipo de campo'
+                          data={fieldTypeSelectData}
+                          value={fieldForm.field_type}
+                          onChange={(value) =>
+                            setFieldForm({ ...fieldForm, field_type: value || 'select' })
+                          }
+                          allowDeselect={false}
                           size='lg'
                           classNames={{
                             label: 'text-sm font-medium mb-2',
@@ -1879,6 +2186,9 @@ function RequestBoard() {
                           <Group justify='space-between' mb='sm'>
                             <Group gap='xs'>
                               <Text fw={600}>{field.field_label}</Text>
+                              <Badge color='grape' variant='light' size='sm'>
+                                {FIELD_TYPE_LABELS[field.field_type] || 'Lista'}
+                              </Badge>
                               <Badge color={field.required ? 'red' : 'gray'} variant='light' size='sm'>
                                 {field.required ? 'Obligatorio' : 'Opcional'}
                               </Badge>
@@ -1893,61 +2203,77 @@ function RequestBoard() {
                             </ActionIcon>
                           </Group>
 
-                          <Group gap='xs' mb='sm'>
-                            {field.options.length === 0 ? (
-                              <Text size='sm' c='dimmed'>
-                                Aún sin opciones. Agregue al menos una para poder condicionar archivos.
-                              </Text>
-                            ) : (
-                              field.options.map((o) => (
-                                <Badge
-                                  key={o.tempId}
-                                  variant='light'
-                                  color='blue'
-                                  size='lg'
-                                  rightSection={
-                                    <ActionIcon
-                                      size='xs'
-                                      variant='transparent'
-                                      color='red'
-                                      onClick={() => removeOption(field.tempId, o.tempId)}
-                                      title='Quitar opción'
+                          {field.field_type === 'select' ? (
+                            <>
+                              <Group gap='xs' mb='sm'>
+                                {field.options.length === 0 ? (
+                                  <Text size='sm' c='dimmed'>
+                                    Aún sin opciones. Agregue al menos una para poder condicionar archivos.
+                                  </Text>
+                                ) : (
+                                  field.options.map((o) => (
+                                    <Badge
+                                      key={o.tempId}
+                                      variant='light'
+                                      color='blue'
+                                      size='lg'
+                                      rightSection={
+                                        <ActionIcon
+                                          size='xs'
+                                          variant='transparent'
+                                          color='red'
+                                          onClick={() => removeOption(field.tempId, o.tempId)}
+                                          title='Quitar opción'
+                                        >
+                                          <IconX size={12} />
+                                        </ActionIcon>
+                                      }
+                                      styles={{ root: { textTransform: 'none' } }}
                                     >
-                                      <IconX size={12} />
-                                    </ActionIcon>
-                                  }
-                                  styles={{ root: { textTransform: 'none' } }}
-                                >
-                                  {o.option_label}
-                                </Badge>
-                              ))
-                            )}
-                          </Group>
+                                      {o.option_label}
+                                    </Badge>
+                                  ))
+                                )}
+                              </Group>
 
-                          <Group gap='xs'>
-                            <TextInput
-                              placeholder='Nueva opción (ej. Contado)'
-                              value={optionInputs[field.tempId] || ''}
-                              onChange={(e) =>
-                                setOptionInputs((prev) => ({ ...prev, [field.tempId]: e.target.value }))
-                              }
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  addOption(field.tempId);
-                                }
-                              }}
-                              style={{ flex: 1 }}
+                              <Group gap='xs'>
+                                <TextInput
+                                  placeholder='Nueva opción (ej. Contado)'
+                                  value={optionInputs[field.tempId] || ''}
+                                  onChange={(e) =>
+                                    setOptionInputs((prev) => ({ ...prev, [field.tempId]: e.target.value }))
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      addOption(field.tempId);
+                                    }
+                                  }}
+                                  style={{ flex: 1 }}
+                                />
+                                <Button
+                                  variant='light'
+                                  onClick={() => addOption(field.tempId)}
+                                  leftSection={<IconPlus size={16} />}
+                                  disabled={!(optionInputs[field.tempId] || '').trim()}
+                                >
+                                  Opción
+                                </Button>
+                              </Group>
+                            </>
+                          ) : field.field_type === TABLE_FIELD_TYPE ? (
+                            <TableColumnsEditor
+                              columns={field.columns}
+                              onChange={(cols) => setFieldColumns(field.tempId, cols)}
                             />
-                            <Button
-                              variant='light'
-                              onClick={() => addOption(field.tempId)}
-                              leftSection={<IconPlus size={16} />}
-                              disabled={!(optionInputs[field.tempId] || '').trim()}
-                            >
-                              Opción
-                            </Button>
-                          </Group>
+                          ) : (
+                            <Text size='sm' c='dimmed' mb='sm'>
+                              Campo de {(FIELD_TYPE_LABELS[field.field_type] || 'lista').toLowerCase()}:{' '}
+                              {SAP_SOURCES[field.field_type]
+                                ? 'el usuario buscará y seleccionará un registro desde SAP al crear la solicitud.'
+                                : 'el usuario ingresará el valor al crear la solicitud (sin opciones predefinidas).'}
+                            </Text>
+                          )}
 
                           {optionsBeforeField(field.tempId).length > 0 && (
                             <MultiSelect
@@ -2037,6 +2363,7 @@ function RequestBoard() {
                                   addRequiredFile();
                                 }
                               }}
+                              error={getFileLabelError(fileForm.file_label)}
                               size='lg'
                               classNames={{
                                 label: 'text-sm font-medium mb-2',
@@ -2086,7 +2413,7 @@ function RequestBoard() {
                               color='blue'
                               fullWidth
                               h={48}
-                              disabled={!fileForm.file_label.trim()}
+                              disabled={!fileForm.file_label.trim() || !!getFileLabelError(fileForm.file_label)}
                               className='cursor-pointer hover:bg-blue-700 transition-colors duration-200'
                               size='lg'
                             >
@@ -2192,7 +2519,7 @@ function RequestBoard() {
                   setCurrentStep(1);
                   setFormErrors({});
                   setTasks([]);
-                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', condition_option_temps: [] });
                 }
               }}
               size='md'

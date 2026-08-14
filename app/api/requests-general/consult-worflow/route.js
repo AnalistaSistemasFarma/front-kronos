@@ -1,15 +1,12 @@
-import sql from 'mssql';
-import sqlConfig from '../../../../dbconfig';
+import { sql, getPool } from '../../../../lib/mssqlPool';
 import { NextResponse } from 'next/server';
 
 export async function GET(req) {
-  let pool;
-
   try {
     const { searchParams } = new URL(req.url);
     const companyId = searchParams.get('companyId');
 
-    pool = await sql.connect(sqlConfig);
+    const pool = await getPool();
 
     let queryCategories = `
       SELECT 
@@ -34,9 +31,10 @@ export async function GET(req) {
     queryCategories += ` ORDER BY cr.category`;
 
     const queryProcessCategories = `
-      SELECT 
+      SELECT
         upcrg.id_process_category as id_process,
         pc.process,
+        pc.is_external,
         u.id AS id_assigned,
         u.name AS assigned_process
       FROM user_process_category_request_general upcrg
@@ -93,10 +91,5 @@ export async function GET(req) {
       },
       { status: 500 }
     );
-
-  } finally {
-    if (pool) {
-      await pool.close();
-    }
   }
 }

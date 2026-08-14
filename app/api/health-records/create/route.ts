@@ -52,11 +52,12 @@ export async function POST(request: NextRequest) {
       const existe = await registroExiste(
         sap,
         company.endpoint.healthRecordsEntity!,
+        record.U_Referencia ?? '',
         record.U_Registro_Sanitario
       );
       if (existe) {
         return NextResponse.json(
-          { error: `Ya existe el registro sanitario ${record.U_Registro_Sanitario}` },
+          { error: `Ya existe el registro sanitario ${record.U_Registro_Sanitario} para este producto` },
           { status: 409 }
         );
       }

@@ -11,6 +11,12 @@ import { effectiveCompanyFilter, type CompanyFilter } from '../scope.js';
 import { getPrisma, Prisma, queryReadOnly } from '../db.js';
 import { executeWrite, type TxClient } from '../write.js';
 import type { AuditLogger } from '../audit.js';
+import {
+  GraphClient,
+  loadGraphConfig,
+  requestFolderPath,
+  type GraphFile,
+} from '../graph.js';
 
 interface ToolContext {
   scope: AuthScope;
@@ -131,6 +137,39 @@ function trimRequestLabels(row: Record<string, unknown>): void {
   }
 }
 
+/**
+ * Cliente MS Graph (OneDrive) compartido, inicializado de forma perezosa a
+ * partir de las MISMAS credenciales que usa el front-kronos para subir los
+ * adjuntos. Si el entorno no trae credenciales de Graph, queda `null` y las
+ * tools de adjuntos degradan a solo metadatos de BD (comportamiento previo).
+ */
+let graphClientSingleton: GraphClient | null | undefined;
+function getGraphClient(): GraphClient | null {
+  if (graphClientSingleton === undefined) {
+    const cfg = loadGraphConfig();
+    graphClientSingleton = cfg ? new GraphClient(cfg) : null;
+  }
+  return graphClientSingleton;
+}
+
+/** Tamaño máximo para devolver contenido base64 inline en get_attachment. */
+const MAX_INLINE_BASE64_BYTES = 4 * 1024 * 1024; // 4 MB
+
+/** Normaliza un GraphFile para la salida de las tools. */
+function graphFileToOutput(f: GraphFile) {
+  return {
+    file_id: f.id,
+    name: f.name,
+    size: f.size,
+    mime_type: f.mimeType,
+    created: f.createdDateTime,
+    modified: f.lastModifiedDateTime,
+    download_url: f.downloadUrl,
+    web_url: f.webUrl,
+  };
+}
+
+
 export const ENTITY_METADATA = {
   requests: {
     description:
@@ -196,11 +235,31 @@ export const ENTITY_METADATA = {
     companyColumn: null,
     fields: ['id_category', 'category', 'subcategories'],
   },
+  request_tasks: {
+    description:
+      'Tareas/actividades del workflow de las solicitudes (task_request_general). Una fila por actividad, con sus tiempos (start_date, end_date, date_resolution). Consulta masiva via kronos_list_request_tasks, sin pedir solicitud por solicitud.',
+    companyColumn: 'requests_general.id_company (via id_request_general)',
+    fields: [
+      'id', 'id_request', 'id_task', 'task', 'id_status', 'status',
+      'id_assigned', 'assignedTo', 'start_date', 'end_date',
+      'date_resolution', 'resolution', 'id_company', 'company',
+    ],
+  },
   users: {
     description:
       'Usuarios. Solo se devuelven los pertenecientes a las empresas del alcance. Campos sensibles excluidos (password, tokens).',
     companyColumn: 'company_user.id_company (vía relación)',
     fields: Object.keys(USER_SAFE_SELECT),
+  },
+  attachments: {
+    description:
+      'Adjuntos/documentos de una solicitud. El CONTENIDO binario NO se guarda en la base de datos: los archivos se suben a OneDrive (MS Graph) en la carpeta determinística SAPSEND/TEC/SG/Request-<id>. kronos_list_attachments devuelve DOS cosas: (a) "required_files" = la DEFINICIÓN de qué archivos exige el proceso (file_process_category: etiqueta, obligatoriedad, condición) y (b) "files" = los archivos REALES cargados en OneDrive (name, size, tipo, fechas, file_id y download_url temporal). kronos_get_attachment resuelve el archivo real (download_url y, opcional, base64) o la definición del proceso.',
+    companyColumn: 'requests_general.id_company (via id_request_general)',
+    fields: [
+      'required_files[]: attachment_ref, id_file_process_category, file_label, required, active, conditional, condition_option',
+      'files[]: file_id, name, size, mime_type, created, modified, download_url, web_url',
+      'onedrive_folder', 'folder_url', 'onedrive_available',
+    ],
   },
 } as const;
 
@@ -213,12 +272,15 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 16,
+  totalTools: 21,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
     'kronos_get_request',
     'kronos_list_request_notes',
+    'kronos_list_request_tasks',
+    'kronos_list_attachments',
+    'kronos_get_attachment',
     'kronos_list_tickets',
     'kronos_get_ticket',
     'kronos_list_processes',
@@ -229,9 +291,9 @@ export const TOOL_CAPABILITIES = {
     'kronos_list_users',
     'kronos_search',
   ],
-  write: ['kronos_categorize_case', 'kronos_categorize_request', 'kronos_create_request'],
+  write: ['kronos_categorize_case', 'kronos_categorize_request', 'kronos_create_request', 'kronos_add_note', 'kronos_resolve_task'],
   writeNote:
-    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general) y creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones). Todas transaccionales, parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las 12 tools de lectura.',
+    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general), creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones), notas de bitácora (kronos_add_note) y resolución de actividades del workflow (kronos_resolve_task: cierra task_request_general con id_status=2 + date_resolution/end_date + id_executor_final, respetando el gate secuencial y avanzando el flujo). Todas transaccionales, parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las tools de lectura.',
 } as const;
 
 export function registerTools(server: McpServer, ctx: ToolContext): void {
@@ -242,7 +304,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_metadata',
-    'Describe las entidades y campos disponibles, el alcance (empresas) de la API key actual, y las capacidades del servidor (12 tools de lectura + 3 de escritura: 2 de categorización y 1 de creación de solicitudes).',
+    'Describe las entidades y campos disponibles, el alcance (empresas) de la API key actual, y las capacidades del servidor (16 tools de lectura + 4 de escritura: 2 de categorización y 1 de creación de solicitudes).',
     {},
     async () =>
       withAudit(ctx, 'kronos_metadata', {}, async () => ({
@@ -432,6 +494,361 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
         `);
         return { result: { count: rows.length, limit, offset, data: rows }, rows: rows.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_request_tasks  (task_request_general, masivo)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_request_tasks',
+    'Lista en bloque las tareas/actividades del workflow de las solicitudes (tabla task_request_general), de forma eficiente y paginada, para NO pedir solicitud por solicitud con kronos_get_request. Filtra SIEMPRE por las empresas del alcance. Permite acotar por solicitud (requestId) y empresa (companyId). Devuelve los tiempos (start_date, end_date, date_resolution) de cada actividad.',
+    {
+      requestId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Acota a las tareas de una solicitud (task_request_general.id_request_general).'),
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a consultar; se interseca con el alcance de la key.'),
+      limit: z.number().int().optional(),
+      offset: z.number().int().optional(),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_request_tasks', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const limit = clampLimit(ctx, args.limit);
+        const offset = clampOffset(args.offset);
+
+        // El alcance por empresa se aplica ligando la tarea con su solicitud.
+        const where: Prisma.Sql[] = [companyClause('rg.id_company', filter)];
+        if (args.requestId !== undefined) {
+          where.push(Prisma.sql`trg.id_request_general = ${args.requestId}`);
+        }
+        const whereSql = Prisma.join(where, ' AND ');
+
+        const rows = await queryReadOnly<unknown>(Prisma.sql`
+          SELECT trg.id, trg.id_request_general AS id_request, trg.id_task,
+                 tpc.task AS task, trg.id_status, sc.status,
+                 trg.id_assigned, u.name AS assignedTo,
+                 trg.start_date, trg.end_date, trg.date_resolution, trg.resolution,
+                 rg.id_company, c.company
+          FROM task_request_general trg
+          INNER JOIN requests_general rg ON rg.id = trg.id_request_general
+          INNER JOIN company c ON c.id_company = rg.id_company
+          LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task
+          LEFT JOIN status_case sc ON sc.id_status_case = trg.id_status
+          LEFT JOIN [user] u ON u.id = trg.id_assigned
+          WHERE ${whereSql}
+          ORDER BY trg.id_request_general DESC, trg.id ASC
+          OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+        `);
+        return { result: { count: rows.length, limit, offset, data: rows }, rows: rows.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_list_attachments  (adjuntos/documentos de una solicitud)
+  //
+  // MODELO DE DATOS (importante): en SynerLink/Kronos el CONTENIDO de los
+  // archivos NO se guarda en la base de datos. Los documentos se cargan a
+  // OneDrive/SharePoint (MS Graph). En la BD solo hay:
+  //   - file_process_category: DEFINICIÓN de qué archivos requiere cada proceso
+  //     (etiqueta, obligatoriedad, condición vía file_condition_option).
+  //   - requests_general.url: PUNTERO de texto libre a la carpeta/URL donde se
+  //     guardaron los documentos de esa solicitud (opcional; muchas vacío).
+  // Por eso esta tool devuelve METADATOS: los archivos requeridos por el proceso
+  // de la solicitud + el puntero de carpeta de la solicitud. No existe un id ni
+  // un binario por archivo efectivamente cargado.
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_list_attachments',
+    'Lista los adjuntos/documentos de una solicitud. Devuelve DOS bloques: (1) "required_files" = la DEFINICIÓN de los archivos que exige el proceso (etiqueta, obligatorio/opcional, condición), y (2) "files" = los archivos REALES cargados en OneDrive (MS Graph) para esa solicitud, en la carpeta SAPSEND/TEC/SG/Request-<id>, con name, size, mime_type, fechas, file_id y download_url (enlace temporal de descarga directa). Use el file_id o el name en kronos_get_attachment para traer un archivo puntual. Filtra SIEMPRE por las empresas del alcance. No hay adjuntos a nivel de tarea en el modelo actual.',
+    {
+      requestId: z
+        .number()
+        .int()
+        .describe('id de la solicitud (requests_general.id) cuyos adjuntos se listan.'),
+      taskId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Opcional. id de una tarea del workflow (task_request_general.id). El modelo actual NO guarda adjuntos por tarea; si se pasa, se devuelve una nota indicándolo, junto con los adjuntos de la solicitud.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_list_attachments', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, null);
+
+        // 1. La solicitud existe y pertenece al alcance. Resolvemos su proceso
+        //    (vía la tabla puente process_category_request_general, que es la
+        //    fuente autoritativa del proceso — la columna directa
+        //    requests_general.id_process_category está poblada solo en parte) y
+        //    su puntero de carpeta (url) en una sola consulta.
+        const reqRows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+          SELECT rg.id, rg.subject_request AS subject,
+                 pcrg.id_process_category AS id_process_category,
+                 pc.process AS process, rg.url AS folder_url,
+                 rg.id_company, c.company
+          FROM requests_general rg
+          INNER JOIN company c ON c.id_company = rg.id_company
+          LEFT JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+          LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+          WHERE rg.id = ${args.requestId} AND ${companyClause('rg.id_company', filter)}
+        `);
+        const request = reqRows[0];
+        if (!request) return { result: null, rows: 0 };
+
+        const idProcessCategory = request.id_process_category as number | null;
+
+        // 2. Definición de archivos requeridos por el proceso de la solicitud,
+        //    con su condición (si el archivo solo se pide para cierta opción).
+        let files: Record<string, unknown>[] = [];
+        if (idProcessCategory != null) {
+          files = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+            SELECT fpc.id AS id_file_process_category, fpc.file_label,
+                   fpc.required, fpc.active, fpc.display_order,
+                   fco.id_option AS condition_option_id,
+                   pffo.option_label AS condition_option_label
+            FROM file_process_category fpc
+            LEFT JOIN file_condition_option fco ON fco.id_file_process_category = fpc.id
+            LEFT JOIN process_form_field_option pffo ON pffo.id = fco.id_option
+            WHERE fpc.id_process_category = ${idProcessCategory} AND fpc.active = 1
+            ORDER BY ISNULL(fpc.display_order, 2147483647), fpc.id
+          `);
+        }
+
+        const attachments = files.map((f) => ({
+          // Ref estable (no es un id de archivo cargado; identifica la definición
+          // del archivo requerido dentro de esta solicitud).
+          attachment_ref: `${args.requestId}:${f.id_file_process_category}`,
+          id_request: args.requestId,
+          id_file_process_category: f.id_file_process_category,
+          file_label: f.file_label,
+          required: f.required,
+          active: f.active,
+          conditional: f.condition_option_id != null,
+          condition_option: f.condition_option_id != null
+            ? { id_option: f.condition_option_id, label: f.condition_option_label }
+            : null,
+          // El binario no está en la BD; se resuelve por la carpeta de la solicitud.
+          folder_url: request.folder_url ?? null,
+          content_available: false,
+        }));
+
+        const taskNote = args.taskId !== undefined
+          ? 'El modelo de datos de Kronos/SynerLink no almacena adjuntos por tarea (task_request_general no tiene columnas de archivo). Se devuelven los adjuntos de la solicitud.'
+          : undefined;
+
+        // 3. Archivos REALES en OneDrive (vía MS Graph), en la carpeta
+        //    determinística de la solicitud: SAPSEND/TEC/SG/Request-<id>.
+        //    Reutiliza las credenciales app-only del front. Si Graph no está
+        //    configurado o falla, se degrada a solo metadatos (no rompe la tool).
+        const graph = getGraphClient();
+        let realFiles: ReturnType<typeof graphFileToOutput>[] = [];
+        let graphError: string | undefined;
+        const folderPath = requestFolderPath(args.requestId);
+        if (graph) {
+          try {
+            const files = await graph.listFolderFiles(folderPath);
+            realFiles = files.map(graphFileToOutput);
+          } catch (err) {
+            graphError = (err as Error).message;
+          }
+        }
+
+        return {
+          result: {
+            id_request: args.requestId,
+            subject: request.subject,
+            process: typeof request.process === 'string' ? (request.process as string).trim() : request.process,
+            id_company: request.id_company,
+            company: request.company,
+            folder_url: request.folder_url ?? null,
+            // Carpeta REAL en OneDrive (convención del front-kronos).
+            onedrive_folder: folderPath,
+            storage_note:
+              'Los documentos reales se cargan a OneDrive (MS Graph), no a la base de datos. "required_files" son las definiciones de archivos que exige el proceso; "files" son los archivos REALES cargados en la carpeta OneDrive de la solicitud (con download_url temporal y file_id para kronos_get_attachment).',
+            ...(taskNote ? { task_note: taskNote } : {}),
+            // Definiciones exigidas por el proceso (comportamiento histórico).
+            required_files_count: attachments.length,
+            required_files: attachments,
+            // Archivos reales en OneDrive.
+            onedrive_available: graph != null,
+            ...(graphError ? { onedrive_error: graphError } : {}),
+            files_count: realFiles.length,
+            files: realFiles,
+          },
+          rows: realFiles.length || attachments.length,
+        };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_get_attachment  (puntero de un adjunto puntual)
+  //
+  // Como el binario NO está en la BD (vive en OneDrive/SharePoint), esta tool
+  // NO devuelve base64. Devuelve el PUNTERO resolvable (carpeta de la solicitud)
+  // más los metadatos del archivo requerido, y un aviso explícito de que el
+  // contenido debe obtenerse desde OneDrive/SharePoint. El attachment_ref tiene
+  // el formato "<requestId>:<id_file_process_category>" que entrega
+  // kronos_list_attachments.
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_get_attachment',
+    'Obtiene un adjunto de una solicitud. Tiene DOS modos: (A) ARCHIVO REAL de OneDrive: pase "requestId" + "fileId" (el file_id que entrega kronos_list_attachments en "files"), o "requestId" + "fileName"; devuelve metadatos del archivo real y un download_url temporal (descarga directa sin auth), y opcionalmente el contenido en base64 si es pequeño y se pide includeContent=true. (B) DEFINICIÓN del archivo requerido por el proceso: pase "attachmentRef" con formato "<requestId>:<id_file_process_category>"; devuelve la definición (etiqueta, obligatoriedad, condición) y el puntero de carpeta, sin binario. Filtra SIEMPRE por las empresas del alcance.',
+    {
+      attachmentRef: z
+        .string()
+        .regex(/^\d+:\d+$/, 'attachmentRef debe tener el formato "<requestId>:<id_file_process_category>".')
+        .optional()
+        .describe('Modo B (definición del proceso): "<requestId>:<id_file_process_category>" (de kronos_list_attachments.required_files).'),
+      requestId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Modo A (archivo real): id de la solicitud (requests_general.id).'),
+      fileId: z
+        .string()
+        .optional()
+        .describe('Modo A: file_id (driveItem id) del archivo real, tal como lo entrega kronos_list_attachments en "files".'),
+      fileName: z
+        .string()
+        .optional()
+        .describe('Modo A alternativo: nombre exacto del archivo dentro de la carpeta OneDrive de la solicitud (se resuelve el file_id automáticamente).'),
+      includeContent: z
+        .boolean()
+        .optional()
+        .describe('Modo A: si es true y el archivo pesa <= 4 MB, incluye el contenido en base64. Por defecto false (se usa download_url).'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_get_attachment', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, null);
+
+        // ---- Modo A: ARCHIVO REAL de OneDrive (requestId + fileId/fileName) ----
+        if (args.attachmentRef === undefined && args.requestId !== undefined) {
+          const requestId = args.requestId;
+          // Validar que la solicitud pertenece al alcance de empresa.
+          const reqRows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+            SELECT rg.id, rg.subject_request AS subject, rg.id_company, c.company
+            FROM requests_general rg
+            INNER JOIN company c ON c.id_company = rg.id_company
+            WHERE rg.id = ${requestId} AND ${companyClause('rg.id_company', filter)}
+          `);
+          const reqRow = reqRows[0];
+          if (!reqRow) return { result: null, rows: 0 };
+
+          const graph = getGraphClient();
+          if (!graph) {
+            throw new Error('MS Graph no está configurado en este MCP; no se puede resolver el archivo real de OneDrive.');
+          }
+
+          const folderPath = requestFolderPath(requestId);
+          let file: GraphFile | null = null;
+
+          if (args.fileId) {
+            file = await graph.getItemById(args.fileId);
+          } else if (args.fileName) {
+            const files = await graph.listFolderFiles(folderPath);
+            file = files.find((f) => f.name === args.fileName) ?? null;
+          } else {
+            throw new Error('En modo archivo real debe indicar "fileId" o "fileName".');
+          }
+
+          if (!file) return { result: null, rows: 0 };
+
+          let contentBase64: string | null = null;
+          let contentNote: string | undefined;
+          if (args.includeContent) {
+            if (file.size != null && file.size <= MAX_INLINE_BASE64_BYTES) {
+              const buf = await graph.downloadContent(file.id);
+              contentBase64 = buf.toString('base64');
+            } else {
+              contentNote = `El archivo supera el límite de ${MAX_INLINE_BASE64_BYTES} bytes para contenido inline; use download_url.`;
+            }
+          }
+
+          return {
+            result: {
+              mode: 'onedrive_file',
+              id_request: requestId,
+              subject: reqRow.subject,
+              id_company: reqRow.id_company,
+              company: reqRow.company,
+              onedrive_folder: folderPath,
+              file: graphFileToOutput(file),
+              content_available: contentBase64 != null,
+              content_base64: contentBase64,
+              ...(contentNote ? { content_note: contentNote } : {}),
+              storage_note:
+                'Archivo real obtenido de OneDrive (MS Graph). "download_url" es un enlace temporal de descarga directa (sin autenticación); expira. Para el binario también puede pedir includeContent=true en archivos pequeños.',
+            },
+            rows: 1,
+          };
+        }
+
+        if (args.attachmentRef === undefined) {
+          throw new Error('Debe indicar "attachmentRef" (definición) o "requestId" + "fileId"/"fileName" (archivo real).');
+        }
+
+        // ---- Modo B: DEFINICIÓN del archivo requerido por el proceso ----
+        const [reqStr, fileStr] = args.attachmentRef.split(':');
+        const requestId = Number.parseInt(reqStr ?? '', 10);
+        const idFilePc = Number.parseInt(fileStr ?? '', 10);
+
+        // La solicitud existe y está en el alcance; el archivo requerido existe y
+        // pertenece al proceso de esa solicitud. Todo en una consulta.
+        // El proceso de la solicitud se resuelve por la tabla puente
+        // process_category_request_general (fuente autoritativa), no por la
+        // columna directa requests_general.id_process_category.
+        const rows = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+          SELECT rg.id AS id_request, rg.subject_request AS subject,
+                 rg.url AS folder_url, rg.id_company, c.company,
+                 pc.process AS process,
+                 fpc.id AS id_file_process_category, fpc.file_label,
+                 fpc.required, fpc.active,
+                 fco.id_option AS condition_option_id,
+                 pffo.option_label AS condition_option_label
+          FROM requests_general rg
+          INNER JOIN company c ON c.id_company = rg.id_company
+          INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+          LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+          INNER JOIN file_process_category fpc
+            ON fpc.id = ${idFilePc} AND fpc.id_process_category = pcrg.id_process_category
+          LEFT JOIN file_condition_option fco ON fco.id_file_process_category = fpc.id
+          LEFT JOIN process_form_field_option pffo ON pffo.id = fco.id_option
+          WHERE rg.id = ${requestId} AND ${companyClause('rg.id_company', filter)}
+        `);
+        const row = rows[0];
+        if (!row) return { result: null, rows: 0 };
+
+        return {
+          result: {
+            attachment_ref: args.attachmentRef,
+            id_request: row.id_request,
+            subject: row.subject,
+            process: typeof row.process === 'string' ? (row.process as string).trim() : row.process,
+            id_company: row.id_company,
+            company: row.company,
+            id_file_process_category: row.id_file_process_category,
+            file_label: row.file_label,
+            required: row.required,
+            active: row.active,
+            conditional: row.condition_option_id != null,
+            condition_option: row.condition_option_id != null
+              ? { id_option: row.condition_option_id, label: row.condition_option_label }
+              : null,
+            // Puntero resolvable al almacén real del documento.
+            folder_url: row.folder_url ?? null,
+            content_available: false,
+            content_base64: null,
+            storage_note:
+              'El contenido del archivo NO se almacena en la base de datos de Kronos/SynerLink; los documentos se cargan a OneDrive/SharePoint (MS Graph). Use folder_url para localizar el documento en OneDrive/SharePoint. Este MCP no tiene acceso al almacén de archivos, por lo que no puede devolver el binario.',
+          },
+          rows: 1,
+        };
       })
   );
 
@@ -1078,4 +1495,461 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         return { result, rows: 1 };
       })
   );
+
+  // ---------------------------------------------------------------------------
+  // kronos_add_note  (ESCRITURA) — agrega una nota a la bitácora de una solicitud
+  // ---------------------------------------------------------------------------
+  // Replica EXACTAMENTE la ruta de la app (POST /api/requests-general/notes):
+  //   INSERT INTO notes (note, id_request, created_by) ...  (creation_date por
+  //   default de la BD). Transaccional, parametrizada, validada por alcance de
+  //   empresa y auditada. El candado assertReadOnlySql queda intacto: esta tool
+  //   escribe por el camino dedicado executeWrite (src/write.ts).
+  //
+  // Notificación por correo (opcional): reutiliza el MISMO servicio de correo de
+  // la app (API_EMAIL -> POST {base}/sapsend/sendMessage con el contrato
+  // { userEmail, title, table, outro, logoUrl }). NO se inventa un mailer/SMTP
+  // nuevo. La URL del servicio se toma de process.env.KRONOS_MCP_API_EMAIL (o
+  // API_EMAIL como respaldo). Si no está configurada, la nota SÍ se inserta y se
+  // devuelve emailSent:false con el motivo. El correo se dispara FUERA de la
+  // transacción (I/O de red) para no sostener la transacción de BD.
+  server.tool(
+    'kronos_add_note',
+    'ESCRITURA. Agrega una nota/seguimiento a la bitácora de una solicitud general (tabla notes: note + id_request + created_by; creation_date por default). Acotada a las empresas del alcance de la key. Opcionalmente (notifyByEmail=true) dispara la MISMA notificación por correo de la app a los participantes del proceso (solicitante + responsables del proceso + asignados de las tareas). Transaccional, parametrizada y auditada. Use kronos_get_request para ubicar la solicitud y kronos_list_users para el autor.',
+    {
+      requestId: z.number().int().describe('requests_general.id de la solicitud a la que se agrega la nota.'),
+      note: z.string().min(1).describe('Texto de la nota (no vacío).'),
+      notifyByEmail: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe('Si es true, notifica por correo a los participantes del proceso (igual que el check de la app).'),
+      authorUserId: z
+        .string()
+        .optional()
+        .describe('user.id que figura como autor de la nota (created_by). Por defecto Nicolás Rivera.'),
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a acotar; se interseca con el alcance de la key.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_add_note', args, async () => {
+        const DEFAULT_AUTHOR = 'cmgicd6470000ekpi1a33o581'; // Nicolás Rivera
+        const authorUserId =
+          args.authorUserId && args.authorUserId.trim() ? args.authorUserId.trim() : DEFAULT_AUTHOR;
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const scopeClause = companyClause('rg.id_company', filter);
+
+        // Escritura transaccional (inserción de la nota + recolección de datos
+        // para el correo). El correo se envía DESPUÉS del commit.
+        const tx = await executeWrite(async (t: TxClient) => {
+          // a. La solicitud existe y pertenece al alcance. Recuperamos datos
+          //    de contexto para el cuerpo del correo (mismos campos que la app).
+          const reqRow = await t.$queryRaw<
+            {
+              id: number;
+              id_company: number;
+              subject: string | null;
+              created_at: Date | null;
+              company: string | null;
+              category: string | null;
+              process: string | null;
+            }[]
+          >(Prisma.sql`
+            SELECT TOP 1 rg.id, rg.id_company, rg.subject_request AS subject, rg.created_at,
+                   c.company AS company, cr.category AS category, pc.process AS process
+            FROM requests_general rg
+            INNER JOIN company c ON c.id_company = rg.id_company
+            LEFT JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+            LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+            LEFT JOIN category_request cr ON cr.id = pc.id_category_request
+            WHERE rg.id = ${args.requestId} AND ${scopeClause}
+          `);
+          const request = reqRow[0];
+          if (!request) {
+            throw new Error('solicitud inexistente o fuera de alcance');
+          }
+
+          // b. El autor existe.
+          const okUser = await t.$queryRaw<{ ok: number }[]>(Prisma.sql`
+            SELECT TOP 1 1 AS ok FROM [user] u WHERE u.id = ${authorUserId}
+          `);
+          if (okUser.length === 0) {
+            throw new Error('usuario autor de la nota inexistente');
+          }
+
+          // c. Insertar la nota, IGUAL que POST /api/requests-general/notes.
+          const inserted = await t.$queryRaw<{ id_note: number; creation_date: Date | null }[]>(
+            Prisma.sql`
+              INSERT INTO notes (note, id_request, created_by)
+              OUTPUT INSERTED.id_note, INSERTED.creation_date
+              VALUES (${args.note.trim()}, ${args.requestId}, ${authorUserId})
+            `
+          );
+          const noteRow = inserted[0];
+          if (!noteRow) {
+            throw new Error('no se pudo insertar la nota');
+          }
+
+          // d. Si se pidió correo, recolectar destinatarios (participantes del
+          //    proceso): solicitante + responsables del proceso + asignados de
+          //    las tareas de la solicitud. Se filtran correos vacíos/duplicados.
+          let recipients: string[] = [];
+          if (args.notifyByEmail) {
+            const rows = await t.$queryRaw<{ email: string | null }[]>(Prisma.sql`
+              SELECT u.email
+              FROM [user] u
+              INNER JOIN requests_general rg ON rg.id_requester = u.id
+              WHERE rg.id = ${args.requestId}
+              UNION
+              SELECT u.email
+              FROM user_process_category_request_general upcrg
+              INNER JOIN process_category_request_general pcrg
+                ON pcrg.id_process_category = upcrg.id_process_category
+              INNER JOIN [user] u ON u.id = upcrg.id_user
+              WHERE pcrg.id_request_general = ${args.requestId}
+              UNION
+              SELECT u.email
+              FROM task_request_general trg
+              INNER JOIN [user] u ON u.id = trg.id_assigned
+              WHERE trg.id_request_general = ${args.requestId}
+            `);
+            recipients = Array.from(
+              new Set(rows.map((r) => (r.email ?? '').trim()).filter((e) => e.length > 0))
+            );
+          }
+
+          return {
+            request,
+            id_note: noteRow.id_note,
+            creation_date: noteRow.creation_date,
+            recipients,
+          };
+        });
+
+        // -----------------------------------------------------------------------
+        // Notificación por correo (fuera de la transacción). Reutiliza el mismo
+        // servicio de la app; NO inventa mailer/SMTP. Nunca tumba la respuesta:
+        // la nota ya quedó insertada.
+        // -----------------------------------------------------------------------
+        let emailSent = false;
+        let emailInfo: Record<string, unknown> = {};
+        if (args.notifyByEmail) {
+          const apiEmailBase = (process.env.KRONOS_MCP_API_EMAIL ?? process.env.API_EMAIL ?? '').trim();
+          if (!apiEmailBase) {
+            emailInfo = {
+              skipped: true,
+              reason:
+                'Servicio de correo no configurado (defina KRONOS_MCP_API_EMAIL en mcp/.env para reutilizar el mailer de la app). La nota se insertó igual.',
+              recipients: tx.recipients,
+            };
+          } else if (tx.recipients.length === 0) {
+            emailInfo = { skipped: true, reason: 'no hay destinatarios con correo válido', recipients: [] };
+          } else {
+            try {
+              const targetUrl = `${apiEmailBase.replace(/\/+$/, '')}/sapsend/sendMessage`;
+              const createdAt = tx.request.created_at
+                ? new Date(tx.request.created_at).toISOString().split('T')[0]
+                : 'N/A';
+              const table = [
+                {
+                  'ID de la Solicitud': tx.request.id,
+                  Asunto: tx.request.subject ?? '',
+                  'Categoría': tx.request.category ?? '',
+                  Proceso: tx.request.process ?? '',
+                  Empresa: tx.request.company ?? '',
+                  'Fecha de Creación': createdAt,
+                },
+              ];
+              const safeNote = args.note
+                .trim()
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+              const outro =
+                `<div style="margin-top:20px;padding:15px;border-radius:8px;background:#f8f9fa;border:1px solid #e0e0e0;">` +
+                `<h3 style="margin:0 0 10px 0;font-size:16px;">Nota agregada</h3>` +
+                `<p style="margin:0;white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word;line-height:1.6;font-size:14px;">${safeNote}</p></div>` +
+                `<p style="margin-top:20px;">Este es un mensaje automático del sistema de Solicitudes Generales. Se ha agregado una nueva nota a la solicitud #${tx.request.id}.</p>`;
+              const payload = {
+                userEmail: tx.recipients.join('; '),
+                title: `Nueva Nota en la Solicitud #${tx.request.id} - ${tx.request.subject ?? ''}`,
+                table,
+                outro,
+                logoUrl: 'https://farmalogica.com.co/imagenes/logos/logo20.png',
+              };
+              const res = await fetch(targetUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: AbortSignal.timeout(20000),
+              });
+              const bodyText = await res.text();
+              if (res.status >= 200 && res.status < 300) {
+                emailSent = true;
+                emailInfo = { recipients: tx.recipients, status: res.status };
+              } else {
+                emailInfo = {
+                  error: 'el servicio de correo rechazó el envío',
+                  status: res.status,
+                  details: bodyText.slice(0, 500),
+                  recipients: tx.recipients,
+                };
+              }
+            } catch (err) {
+              emailInfo = {
+                error: 'fallo al invocar el servicio de correo',
+                details: (err as Error).message,
+                recipients: tx.recipients,
+              };
+            }
+          }
+        }
+
+        return {
+          result: {
+            id_note: tx.id_note,
+            id_request: args.requestId,
+            id_company: tx.request.id_company,
+            created_by: authorUserId,
+            creation_date: tx.creation_date,
+            notifyByEmail: Boolean(args.notifyByEmail),
+            emailSent,
+            email: args.notifyByEmail ? emailInfo : undefined,
+          },
+          rows: 1,
+        };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_resolve_task  (ESCRITURA) — resuelve/cierra una tarea del workflow
+  // ---------------------------------------------------------------------------
+  // Replica la ruta de la app (POST /api/requests-general/update-activities):
+  // marca la actividad como Resuelta (id_status = 2), fija la resolución y los
+  // tiempos de cierre (date_resolution / end_date = GETDATE()) y deja registrado
+  // quién la ejecutó finalmente (id_executor_final). Todo transaccional,
+  // parametrizado, validado por alcance de empresa y auditado. El candado
+  // assertReadOnlySql queda intacto: escribe por el camino dedicado executeWrite.
+  //
+  // GATE SECUENCIAL: si la plantilla de la tarea (task_process_category) es
+  // secuencial (is_sequential = 1), la tarea inmediatamente anterior del flujo
+  // (por display_order, luego id_task) DEBE estar cerrada (id_status en 2 =
+  // Resuelto o 3 = Cancelado) antes de poder resolver esta. Si no lo está, se
+  // rechaza (mismo comportamiento que la app).
+  //
+  // CREACIÓN DIFERIDA: al cerrar la tarea, si todas sus instancias quedan
+  // cerradas y la SIGUIENTE tarea secuencial del flujo aún no existe como
+  // instancia de esta solicitud, se instancia (id_status = 4 = Sin Empezar)
+  // para sus responsables y se registran las notificaciones en la app, igual
+  // que la app al avanzar el workflow.
+  server.tool(
+    'kronos_resolve_task',
+    'ESCRITURA. Resuelve/cierra una actividad del workflow de una solicitud (tabla task_request_general): la marca como Resuelta (id_status = 2), guarda la resolución y fija date_resolution/end_date = GETDATE(), y registra el ejecutor final (id_executor_final). Respeta el gate secuencial (si la plantilla es secuencial, la actividad anterior debe estar cerrada) y, al cerrar, instancia la siguiente actividad secuencial del flujo si corresponde (Sin Empezar) con sus notificaciones. Acotada a las empresas del alcance de la key. Transaccional, parametrizada y auditada. Use kronos_list_request_tasks o kronos_get_request para ubicar la actividad (task_request_general.id) y kronos_list_users para el ejecutor.',
+    {
+      taskId: z
+        .number()
+        .int()
+        .describe('task_request_general.id de la actividad del workflow a resolver.'),
+      resolution: z
+        .string()
+        .min(1)
+        .describe('Texto de la resolución/observación con que se cierra la actividad (no vacío).'),
+      executorUserId: z
+        .string()
+        .optional()
+        .describe('user.id que se registra como ejecutor final (id_executor_final). Por defecto se conserva el asignado actual (id_assigned).'),
+      companyId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Empresa a acotar; se interseca con el alcance de la key.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_resolve_task', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, args.companyId ?? null);
+        const scopeClause = companyClause('rg.id_company', filter);
+        const resolutionText = args.resolution.trim();
+
+        const result = await executeWrite(async (t: TxClient) => {
+          // 1. La actividad existe, pertenece a una solicitud del alcance, y
+          //    recuperamos sus datos de contexto (incluida la plantilla).
+          const taskRows = await t.$queryRaw<
+            {
+              id: number;
+              id_request_general: number;
+              id_task: number;
+              id_status: number | null;
+              id_assigned: string | null;
+              id_company: number;
+              id_process_category: number | null;
+              is_sequential: boolean | null;
+              display_order: number | null;
+            }[]
+          >(Prisma.sql`
+            SELECT TOP 1 trg.id, trg.id_request_general, trg.id_task, trg.id_status,
+                   trg.id_assigned, rg.id_company,
+                   tpc.id_process_category, tpc.is_sequential, tpc.display_order
+            FROM task_request_general trg
+            INNER JOIN requests_general rg ON rg.id = trg.id_request_general
+            LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task
+            WHERE trg.id = ${args.taskId} AND ${scopeClause}
+          `);
+          const task = taskRows[0];
+          if (!task) {
+            throw new Error('actividad inexistente o fuera de alcance');
+          }
+          if (task.id_status === 2 || task.id_status === 3) {
+            throw new Error('la actividad ya está cerrada (resuelta o cancelada)');
+          }
+
+          // 2. Ejecutor final: el indicado o, por defecto, el asignado actual.
+          let executor = args.executorUserId && args.executorUserId.trim()
+            ? args.executorUserId.trim()
+            : task.id_assigned;
+          if (args.executorUserId && args.executorUserId.trim()) {
+            const okUser = await t.$queryRaw<{ ok: number }[]>(Prisma.sql`
+              SELECT TOP 1 1 AS ok FROM [user] u WHERE u.id = ${executor}
+            `);
+            if (okUser.length === 0) {
+              throw new Error('usuario ejecutor final inexistente');
+            }
+          }
+
+          // 3. Gate secuencial: si la plantilla es secuencial, la actividad
+          //    inmediatamente anterior del flujo (por display_order, luego
+          //    id_task) debe estar cerrada (2 Resuelto o 3 Cancelado) en esta
+          //    misma solicitud.
+          if (task.is_sequential && task.id_process_category != null) {
+            const prevRows = await t.$queryRaw<{ id_status: number | null }[]>(Prisma.sql`
+              SELECT TOP 1 prev.id_status
+              FROM task_request_general prev
+              INNER JOIN task_process_category ptpc ON ptpc.id = prev.id_task
+              WHERE prev.id_request_general = ${task.id_request_general}
+                AND ptpc.id_process_category = ${task.id_process_category}
+                AND (
+                      ISNULL(ptpc.display_order, 2147483647) < ISNULL(${task.display_order}, 2147483647)
+                   OR (ISNULL(ptpc.display_order, 2147483647) = ISNULL(${task.display_order}, 2147483647)
+                       AND prev.id_task < ${task.id_task})
+                    )
+              ORDER BY ISNULL(ptpc.display_order, 2147483647) DESC, prev.id_task DESC
+            `);
+            const prev = prevRows[0];
+            if (prev && prev.id_status !== 2 && prev.id_status !== 3) {
+              throw new Error(
+                'gate secuencial: la actividad anterior del flujo aún no está resuelta/cancelada; no se puede cerrar esta actividad todavía'
+              );
+            }
+          }
+
+          // 4. Cerrar la actividad, igual que la app (update-activities).
+          const updated = await t.$executeRaw(Prisma.sql`
+            UPDATE task_request_general
+            SET id_status = 2,
+                resolution = ${resolutionText},
+                date_resolution = GETDATE(),
+                end_date = GETDATE(),
+                id_executor_final = ${executor}
+            WHERE id = ${args.taskId}
+          `);
+          if (updated === 0) {
+            throw new Error('no se pudo actualizar la actividad');
+          }
+
+          // 5. Creación diferida de la siguiente actividad secuencial del flujo.
+          //    Solo si esta plantilla es secuencial, TODAS sus instancias de
+          //    esta solicitud quedaron cerradas, y la siguiente plantilla
+          //    secuencial aún no está instanciada en esta solicitud.
+          const created: { id_task: number; assignees: string[] }[] = [];
+          if (task.is_sequential && task.id_process_category != null) {
+            const openSame = await t.$queryRaw<{ pend: number }[]>(Prisma.sql`
+              SELECT COUNT(*) AS pend
+              FROM task_request_general trg
+              WHERE trg.id_request_general = ${task.id_request_general}
+                AND trg.id_task = ${task.id_task}
+                AND trg.id_status NOT IN (2, 3)
+            `);
+            const stillOpen = Number(openSame[0]?.pend ?? 0);
+            if (stillOpen === 0) {
+              // Siguiente plantilla secuencial del proceso (por display_order,
+              // luego id) que NO tenga aún instancia en esta solicitud.
+              const nextTemplates = await t.$queryRaw<{ id_task: number }[]>(Prisma.sql`
+                SELECT ntpc.id AS id_task
+                FROM task_process_category ntpc
+                WHERE ntpc.id_process_category = ${task.id_process_category}
+                  AND ntpc.active = 1
+                  AND ntpc.is_sequential = 1
+                  AND (
+                        ISNULL(ntpc.display_order, 2147483647) > ISNULL(${task.display_order}, 2147483647)
+                     OR (ISNULL(ntpc.display_order, 2147483647) = ISNULL(${task.display_order}, 2147483647)
+                         AND ntpc.id > ${task.id_task})
+                      )
+                  AND NOT EXISTS (
+                        SELECT 1 FROM task_request_general etrg
+                        WHERE etrg.id_request_general = ${task.id_request_general}
+                          AND etrg.id_task = ntpc.id
+                      )
+                ORDER BY ISNULL(ntpc.display_order, 2147483647) ASC, ntpc.id ASC
+              `);
+              const nextTemplate = nextTemplates[0];
+              if (nextTemplate) {
+                const assignees = await t.$queryRaw<{ id_user: string; email: string | null }[]>(
+                  Prisma.sql`
+                    SELECT utrg.id_user, u.email
+                    FROM user_task_request_general utrg
+                    INNER JOIN [user] u ON u.id = utrg.id_user
+                    WHERE utrg.id_task = ${nextTemplate.id_task}
+                  `
+                );
+                for (const a of assignees) {
+                  await t.$executeRaw(Prisma.sql`
+                    INSERT INTO task_request_general (id_request_general, id_task, id_status, id_assigned)
+                    VALUES (${task.id_request_general}, ${nextTemplate.id_task}, 4, ${a.id_user})
+                  `);
+                }
+                // Notificaciones en la app (campana) para los nuevos asignados.
+                const activitiesUrl = `/process/request-general/view-activities?id=${task.id_request_general}&from=assigned-activities`;
+                const emails = Array.from(
+                  new Set(assignees.map((a) => (a.email ?? '').trim()).filter((e) => e.length > 0))
+                );
+                for (const email of emails) {
+                  await t.$executeRaw(Prisma.sql`
+                    INSERT INTO notifications (email, title, body, url)
+                    VALUES (${email}, ${'Actividad asignada · SynerLink'}, ${`Tienes una nueva actividad en la solicitud #${task.id_request_general}`}, ${activitiesUrl})
+                  `);
+                }
+                created.push({
+                  id_task: nextTemplate.id_task,
+                  assignees: assignees.map((a) => a.id_user),
+                });
+              }
+            }
+          }
+
+          return {
+            id: task.id,
+            id_request: task.id_request_general,
+            id_company: task.id_company,
+            id_task: task.id_task,
+            id_executor_final: executor,
+            nextTasksCreated: created,
+          };
+        });
+
+        return {
+          result: {
+            id_task_request: result.id,
+            id_request: result.id_request,
+            id_company: result.id_company,
+            id_status: 2,
+            resolution: resolutionText,
+            id_executor_final: result.id_executor_final,
+            nextTasksCreated: result.nextTasksCreated,
+          },
+          rows: 1,
+        };
+      })
+  );
+
 }

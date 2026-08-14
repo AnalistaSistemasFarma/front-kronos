@@ -46,6 +46,33 @@ interface ItemGroup {
   name: string;
 }
 
+/** Entrada de la bitácora de cambios (forma pública, sin importar código server). */
+interface ArticleLog {
+  code: string;
+  itemCode: string;
+  action: string;
+  changes: Record<string, unknown> | string | null;
+  userEmail: string;
+  changedAt: string;
+}
+
+/** Formatea la fecha ISO del log a algo legible (YYYY-MM-DD HH:mm). */
+function formatLogDate(iso: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Resume los campos cambiados de un registro de log para mostrarlos compactos. */
+function summarizeChanges(changes: ArticleLog['changes']): string {
+  if (changes == null) return '';
+  if (typeof changes === 'string') return changes;
+  const parts = Object.entries(changes).map(([k, v]) => `${k}: ${v == null ? '' : String(v)}`);
+  return parts.join(' · ');
+}
+
 const FLAG_OPTIONS = [
   { value: FLAG_YES, label: 'Si' },
   { value: FLAG_NO, label: 'No' },
@@ -89,8 +116,10 @@ function resolveCustomFields(
   const result: CustomField[] = [];
   const seen = new Set<string>();
   for (const cf of mapped) {
-    // Solo se muestran los del mapa que tienen valor en el item.
-    if (item[cf.field] != null && String(item[cf.field]).trim() !== '') {
+    // Los EDITABLES siempre se muestran (aunque esten vacios, para poder
+    // capturarlos); los de solo lectura solo si tienen valor en el item.
+    const hasValue = item[cf.field] != null && String(item[cf.field]).trim() !== '';
+    if (cf.editable === true || hasValue) {
       result.push(cf);
       seen.add(cf.field);
     }
@@ -119,6 +148,7 @@ function formatReadValue(key: string, raw: unknown): string {
   if (itemType) return itemType.label;
 
   // Fechas ISO -> YYYY-MM-DD.
+  // eslint-disable-next-line security/detect-unsafe-regex -- Falso positivo de safe-regex por el cuantificador anidado `(T.*)?`: el `?` acota `.*` a una sola ejecucion, por lo que NO hay backtracking catastrofico (verificado lineal: 1M chars en ~2 ms). Ademas el input es un valor de campo de SAP, corto y acotado.
   const isoDate = /^(\d{4}-\d{2}-\d{2})(T.*)?$/.exec(value);
   if (isoDate) return isoDate[1];
 
@@ -159,6 +189,9 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [logs, setLogs] = useState<ArticleLog[]>([]);
+  const [logsEnabled, setLogsEnabled] = useState(false);
+  const [logsLoading, setLogsLoading] = useState(false);
 
   useEffect(() => {
     if (!article) {
@@ -169,6 +202,8 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
       setGroups([]);
       setLoadError(null);
       setError(null);
+      setLogs([]);
+      setLogsEnabled(false);
       return;
     }
 
@@ -207,6 +242,23 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
         setGroups(loadedGroups);
         setForm(initial);
         setOriginal(initial);
+
+        // Historial de cambios (no bloquea el detalle; carga aparte).
+        setLogsLoading(true);
+        try {
+          const logRes = await fetch(
+            `/api/articles/logs?companyId=${article.companyId}&itemCode=${encodeURIComponent(itemCode)}`
+          );
+          const logData = await logRes.json().catch(() => ({}));
+          if (!cancelled && logRes.ok) {
+            setLogs(Array.isArray(logData.logs) ? logData.logs : []);
+            setLogsEnabled(Boolean(logData.enabled));
+          }
+        } catch {
+          /* el historial es informativo; no rompe la vista del artículo */
+        } finally {
+          if (!cancelled) setLogsLoading(false);
+        }
       } catch {
         if (!cancelled) setLoadError('Error de red al cargar el detalle del articulo');
       } finally {
@@ -225,9 +277,13 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
   /** Calcula los cambios (campos editables que difieren del original). */
   const computeChanges = (): Record<string, string> => {
     const changes: Record<string, string> = {};
+    // Campos estándar editables (Código de barras, Proveedor principal, Frozen…)
     const editableNames = STANDARD_FIELDS.filter((f) => f.editable).map((f) => f.field);
-    const allFields = [...editableNames, ...customFields.map((c) => c.field)];
-    for (const f of allFields) {
+    // Más los campos personalizados marcados editables de la empresa (UDF).
+    for (const cf of customFields) {
+      if (cf.editable === true) editableNames.push(cf.field);
+    }
+    for (const f of editableNames) {
       if ((form[f] ?? '') !== (original[f] ?? '')) changes[f] = form[f] ?? '';
     }
     return changes;
@@ -390,16 +446,21 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
               <Divider label="Campos personalizados" labelPosition="left" />
               {customFields.length > 0 ? (
                 <SimpleGrid cols={{ base: 1, sm: 2 }}>
-                  {customFields.map((cf) => (
-                    <TextInput
-                      key={cf.field}
-                      label={cf.label}
-                      value={form[cf.field] ?? ''}
-                      onChange={(e) => set(cf.field, e.currentTarget.value)}
-                      disabled={!canWrite}
-                      styles={!canWrite ? LOCKED_FIELD_STYLES : undefined}
-                    />
-                  ))}
+                  {customFields.map((cf) => {
+                    // Los UDF marcados editables se editan como texto libre; el
+                    // resto queda de solo lectura.
+                    const disabled = !canWrite || cf.editable !== true;
+                    return (
+                      <TextInput
+                        key={cf.field}
+                        label={cf.label}
+                        value={form[cf.field] ?? ''}
+                        onChange={(e) => set(cf.field, e.currentTarget.value)}
+                        disabled={disabled}
+                        styles={disabled ? LOCKED_FIELD_STYLES : undefined}
+                      />
+                    );
+                  })}
                 </SimpleGrid>
               ) : (
                 <Text size="xs" c="dimmed">
@@ -429,6 +490,53 @@ export default function EditModal({ article, canWrite, onClose, onUpdated }: Pro
                     </Accordion.Panel>
                   </Accordion.Item>
                 </Accordion>
+              )}
+
+              <Divider label="Historial de cambios" labelPosition="left" mt="xs" />
+              {logsLoading ? (
+                <Group gap="xs">
+                  <Loader size="xs" />
+                  <Text size="xs" c="dimmed">Cargando historial…</Text>
+                </Group>
+              ) : !logsEnabled ? (
+                <Text size="xs" c="dimmed">
+                  Esta empresa no registra bitácora de cambios de artículos.
+                </Text>
+              ) : logs.length === 0 ? (
+                <Text size="xs" c="dimmed">
+                  Aún no hay cambios registrados para este artículo.
+                </Text>
+              ) : (
+                <Table withRowBorders={false} verticalSpacing={4} fz="sm">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th style={{ whiteSpace: 'nowrap' }}>Fecha</Table.Th>
+                      <Table.Th>Acción</Table.Th>
+                      <Table.Th>Usuario</Table.Th>
+                      <Table.Th>Cambios</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {logs.map((log) => (
+                      <Table.Tr key={log.code}>
+                        <Table.Td style={{ whiteSpace: 'nowrap', verticalAlign: 'top', color: '#666' }}>
+                          {formatLogDate(log.changedAt)}
+                        </Table.Td>
+                        <Table.Td style={{ verticalAlign: 'top' }}>
+                          <Badge size="sm" variant="light" color={log.action === 'crear' ? 'green' : 'blue'}>
+                            {log.action}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td style={{ verticalAlign: 'top', wordBreak: 'break-word' }}>
+                          {log.userEmail}
+                        </Table.Td>
+                        <Table.Td style={{ wordBreak: 'break-word' }}>
+                          {summarizeChanges(log.changes)}
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
               )}
             </>
           )}

@@ -30,6 +30,7 @@ import {
   ActionIcon,
   Checkbox,
   MultiSelect,
+  CopyButton,
 } from '@mantine/core';
 import {
   IconBuilding,
@@ -50,8 +51,21 @@ import {
   IconUser,
   IconFileDescription,
   IconTag,
+  IconChevronUp,
+  IconChevronDown,
+  IconEye,
 } from '@tabler/icons-react';
 import Link from 'next/link';
+import { getFileLabelError } from '../../../../../lib/onedriveName';
+import { SAP_SOURCES } from '../../../../../lib/requests-general/sapSources';
+import {
+  TABLE_FIELD_TYPE,
+  parseTableConfig,
+  serializeTableConfig,
+  type TableColumn,
+} from '../../../../../lib/requests-general/tableField';
+import TableColumnsEditor from '../_components/TableColumnsEditor';
+import toast from 'react-hot-toast';
 
 interface WorkFlow {
   id: number;
@@ -66,6 +80,7 @@ interface WorkFlow {
   assigned_process_category: string;
   company: string;
   id_assigned_process_category: string;
+  is_external?: boolean;
 }
 
 interface Task {
@@ -76,6 +91,11 @@ interface Task {
   cost_center: string;
   assigned_user: string;
   id_assigned_user: string;
+  is_sequential: boolean;
+  is_authorization: boolean;
+  type_authorization: number | null;
+  type_authorization_label?: string | null;
+  conditions: number[];
 }
 
 interface Note {
@@ -100,10 +120,40 @@ interface FieldOptionDef {
 interface FormFieldDef {
   id: number;
   field_label: string;
+  field_type: string;
   required: boolean;
   options: FieldOptionDef[];
   conditions: number[];
+  // Solo para field_type === 'table': definición de columnas de la tabla.
+  columns: TableColumn[];
 }
+
+const FIELD_TYPE_LABELS: Record<string, string> = {
+  select: 'Lista',
+  text: 'Texto',
+  number: 'Número',
+  date: 'Fecha',
+  [TABLE_FIELD_TYPE]: 'Tabla',
+  ...Object.fromEntries(Object.entries(SAP_SOURCES).map(([key, s]) => [key, s.label])),
+};
+
+// Datos agrupados para el Select "Tipo": básicos + fuentes SAP curadas.
+const FIELD_TYPE_SELECT_DATA = [
+  {
+    group: 'Básico',
+    items: [
+      { value: 'select', label: 'Lista (opciones)' },
+      { value: 'text', label: 'Texto' },
+      { value: 'number', label: 'Número' },
+      { value: 'date', label: 'Fecha' },
+      { value: TABLE_FIELD_TYPE, label: 'Tabla' },
+    ],
+  },
+  {
+    group: 'SAP',
+    items: Object.entries(SAP_SOURCES).map(([key, s]) => ({ value: key, label: s.label })),
+  },
+];
 
 // Solo estos usuarios (rol admin) pueden modificar el campo "Activo" del flujo
 const ADMIN_USER_IDS = [
@@ -146,7 +196,6 @@ function ViewWorkFlowPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [canEdit, setCanEdit] = useState(false);
 
-  // Estados para edición
   const [editedWorkflow, setEditedWorkflow] = useState<WorkFlow | null>(null);
   const [editedTasks, setEditedTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<{ value: string; label: string }[]>([]);
@@ -158,18 +207,36 @@ function ViewWorkFlowPage() {
   const [loadingUserId, setLoadingUserId] = useState(false);
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
+  const [createLoading, setCreateLoading] = useState(false);
 
-  // Solo los administradores autorizados pueden modificar el campo "Activo"
   const canEditActive = userId != null && ADMIN_USER_IDS.includes(String(userId));
 
-  // Estados para el modal de agregar tareas
   const [addTaskModalOpened, setAddTaskModalOpened] = useState(false);
+  const [observersModalOpened, setObserversModalOpened] = useState(false);
+  const [observers, setObservers] = useState<string[]>([]);
   const [newTaskForm, setNewTaskForm] = useState({
     task: '',
     id_assigned_user: '',
     cost: 0,
     cost_center: '',
+    is_sequential: false,
+    is_authorization: false,
+    type_authorization: '',
+    conditions: [] as number[],
   });
+  const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
+
+  const moveEditedTask = (index: number, dir: -1 | 1) => {
+    setEditedTasks((prev) => {
+      const next = [...prev];
+      const target = index + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
 
   useEffect(() => {
     const storedWorkflow = sessionStorage.getItem('selectedRequest');
@@ -194,10 +261,10 @@ function ViewWorkFlowPage() {
     }
   }, [workflow?.id]);
 
-  // Cargar usuarios y estados al montar el componente
   useEffect(() => {
     fetchUsers();
     fetchStatusOptions();
+    fetchAuthorizationTypes();
     fetchNotes();
   }, []);
 
@@ -259,7 +326,15 @@ function ViewWorkFlowPage() {
       }
 
       const data = await response.json();
-      setTasks(data);
+      setTasks(
+        data.map((t: Task & { is_sequential: boolean | number; is_authorization: boolean | number }) => ({
+          ...t,
+          is_sequential: Boolean(t.is_sequential),
+          is_authorization: Boolean(t.is_authorization),
+          type_authorization: t.type_authorization ?? null,
+          conditions: Array.isArray(t.conditions) ? t.conditions : [],
+        }))
+      );
     } catch (err) {
       console.error('Error fetching tasks:', err);
       setTasks([]);
@@ -320,15 +395,22 @@ function ViewWorkFlowPage() {
           (f: {
             id: number;
             field_label: string;
+            field_type?: string;
             required: boolean | number;
             options: { id: number; option_label: string }[];
             conditions: number[];
+            config_json?: string | null;
           }) => ({
             id: f.id,
             field_label: f.field_label,
+            field_type: f.field_type || 'select',
             required: Boolean(f.required),
             options: f.options || [],
             conditions: f.conditions || [],
+            columns:
+              (f.field_type || 'select') === TABLE_FIELD_TYPE
+                ? parseTableConfig(f.config_json).columns
+                : [],
           })
         )
       );
@@ -360,8 +442,26 @@ function ViewWorkFlowPage() {
     }
   };
 
+  const fetchAuthorizationTypes = async () => {
+    try {
+      const response = await fetch('/api/requests-general/authorization-types', {
+        cache: 'no-store',
+      });
+      if (response.ok) {
+        const data: { id: number; type_authorization: string }[] = await response.json();
+        setAuthorizationTypeOptions(
+          (data || []).map((t) => ({
+            value: t.id.toString(),
+            label: t.type_authorization,
+          }))
+        );
+      }
+    } catch (err) {
+      console.error('Error fetching authorization types:', err);
+    }
+  };
+
   const fetchStatusOptions = async () => {
-    // Estados disponibles según la base de datos
     setStatusOptions([
       { value: '1', label: 'Activo' },
       { value: '2', label: 'Pendiente' },
@@ -418,22 +518,31 @@ function ViewWorkFlowPage() {
     }
   };
 
-  // Funciones para manejar tareas nuevas
   const handleAddTask = () => {
     if (!newTaskForm.task.trim()) return;
+    if (newTaskForm.is_authorization && !newTaskForm.type_authorization) return;
 
     const newTask: Task = {
-      id: Date.now() * -1, // ID negativo para identificar que es nueva
+      id: Date.now() * -1,
       task: newTaskForm.task,
       active: 1,
       cost: newTaskForm.cost || 0,
       cost_center: newTaskForm.cost_center,
       assigned_user: users.find(u => u.value === newTaskForm.id_assigned_user)?.label || '',
       id_assigned_user: newTaskForm.id_assigned_user,
+      is_sequential: newTaskForm.is_sequential,
+      is_authorization: newTaskForm.is_authorization,
+      type_authorization: newTaskForm.is_authorization
+        ? Number(newTaskForm.type_authorization) || null
+        : null,
+      type_authorization_label: newTaskForm.is_authorization
+        ? authorizationTypeOptions.find((o) => o.value === newTaskForm.type_authorization)?.label ?? null
+        : null,
+      conditions: newTaskForm.conditions,
     };
 
     setEditedTasks([...editedTasks, newTask]);
-    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '' });
+    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', conditions: [] });
     setAddTaskModalOpened(false);
   };
 
@@ -441,10 +550,9 @@ function ViewWorkFlowPage() {
     setEditedTasks(editedTasks.filter(t => t.id !== taskId));
   };
 
-  // Funciones para manejar archivos requeridos
   const handleAddFile = () => {
     const newFile: FileDef = {
-      id: Date.now() * -1, // ID negativo = nuevo
+      id: Date.now() * -1, 
       file_label: '',
       required: true,
       conditions: [],
@@ -462,16 +570,23 @@ function ViewWorkFlowPage() {
     setEditedFiles(next);
   };
 
-  // Funciones para manejar campos condicionales
   const handleAddFormField = () => {
     const newField: FormFieldDef = {
       id: Date.now() * -1,
       field_label: '',
+      field_type: 'select',
       required: true,
       options: [],
       conditions: [],
+      columns: [],
     };
     setEditedFormFields([...editedFormFields, newField]);
+  };
+
+  const setFieldColumns = (fieldId: number, columns: TableColumn[]) => {
+    setEditedFormFields((prev) =>
+      prev.map((f) => (f.id === fieldId ? { ...f, columns } : f))
+    );
   };
 
   const handleRemoveFormField = (fieldId: number) => {
@@ -489,6 +604,12 @@ function ViewWorkFlowPage() {
       prev.map((f) => ({
         ...f,
         conditions: f.conditions.filter((c) => !optionIds.includes(c)),
+      }))
+    );
+    setEditedTasks((prev) =>
+      prev.map((t) => ({
+        ...t,
+        conditions: (t.conditions || []).filter((c) => !optionIds.includes(c)),
       }))
     );
   };
@@ -523,9 +644,11 @@ function ViewWorkFlowPage() {
     setEditedFiles((prev) =>
       prev.map((f) => ({ ...f, conditions: f.conditions.filter((c) => c !== optionId) }))
     );
+    setEditedTasks((prev) =>
+      prev.map((t) => ({ ...t, conditions: (t.conditions || []).filter((c) => c !== optionId) }))
+    );
   };
 
-  // Todas las opciones (de editedFormFields) para condicionar archivos
   const allOptionsData = editedFormFields.flatMap((f) =>
     f.options.map((o) => ({
       value: o.id.toString(),
@@ -533,7 +656,6 @@ function ViewWorkFlowPage() {
     }))
   );
 
-  // Opciones de campos ANTERIORES (para condicionar un campo, evita ciclos)
   const optionsBeforeFieldData = (fieldId: number) => {
     const idx = editedFormFields.findIndex((f) => f.id === fieldId);
     return editedFormFields.slice(0, idx).flatMap((f) =>
@@ -544,7 +666,6 @@ function ViewWorkFlowPage() {
     );
   };
 
-  // Etiqueta(s) de condición para modo vista (usa los campos guardados)
   const conditionLabelsView = (optionIds: number[]) => {
     if (!optionIds || optionIds.length === 0) return 'Siempre';
     const labels = [];
@@ -592,6 +713,17 @@ function ViewWorkFlowPage() {
   const handleSaveChanges = async () => {
     if (!editedWorkflow) return;
 
+    const invalidFile = editedFiles.find(
+      (f) => f.file_label.trim() && getFileLabelError(f.file_label)
+    );
+    if (invalidFile) {
+      setUpdateMessage({
+        type: 'error',
+        text: `El documento "${invalidFile.file_label}" tiene caracteres no permitidos para OneDrive (\\ / : * ? " < > | # %).`,
+      });
+      return;
+    }
+
     setIsSaving(true);
     try {
       const processChanged = 
@@ -599,7 +731,8 @@ function ViewWorkFlowPage() {
         originalRequest?.description !== editedWorkflow.description ||
         originalRequest?.active !== editedWorkflow.active ||
         originalRequest?.id_status_process !== editedWorkflow.id_status_process ||
-        originalRequest?.id_assigned_process_category !== editedWorkflow.id_assigned_process_category;
+        originalRequest?.id_assigned_process_category !== editedWorkflow.id_assigned_process_category ||
+        Boolean(originalRequest?.is_external) !== Boolean(editedWorkflow.is_external);
 
       const newTasks = editedTasks.filter(task => task.id < 0);
       
@@ -607,16 +740,23 @@ function ViewWorkFlowPage() {
         .filter(origTask => !editedTasks.find(et => et.id === origTask.id))
         .map(t => t.id);
       
-      const updatedTasks = editedTasks.filter(task => {
+      const updatedTasks = editedTasks.filter((task, idx) => {
         if (task.id < 0) return false;
         const originalTask = originalTasks.find(ot => ot.id === task.id);
         if (!originalTask) return false;
+        const originalIdx = originalTasks.findIndex(ot => ot.id === task.id);
+        const condKey = (arr: number[]) => [...(arr || [])].sort((a, b) => a - b).join(',');
         return (
           originalTask.task !== task.task ||
           originalTask.active !== task.active ||
           originalTask.cost !== task.cost ||
           originalTask.cost_center !== task.cost_center ||
-          originalTask.id_assigned_user !== task.id_assigned_user
+          originalTask.id_assigned_user !== task.id_assigned_user ||
+          Boolean(originalTask.is_sequential) !== Boolean(task.is_sequential) ||
+          Boolean(originalTask.is_authorization) !== Boolean(task.is_authorization) ||
+          (originalTask.type_authorization ?? null) !== (task.type_authorization ?? null) ||
+          condKey(originalTask.conditions) !== condKey(task.conditions) ||
+          originalIdx !== idx // cambió el orden
         );
       });
 
@@ -628,7 +768,6 @@ function ViewWorkFlowPage() {
         .filter((origFile) => !editedFiles.find((ef) => ef.id === origFile.id))
         .map((f) => f.id);
 
-      // Compara dos listas de ids como conjuntos (sin importar el orden)
       const sameIdSet = (a: number[], b: number[]) =>
         a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');
 
@@ -646,7 +785,6 @@ function ViewWorkFlowPage() {
       const filesChanged =
         newFiles.length > 0 || deletedFileIds.length > 0 || updatedFiles.length > 0;
 
-      // Diff de campos condicionales (con opciones anidadas)
       const newFormFields = editedFormFields.filter(
         (f) => f.id < 0 && f.field_label.trim()
       );
@@ -669,19 +807,22 @@ function ViewWorkFlowPage() {
           return oo && oo.option_label !== o.option_label;
         });
         const conditionsChanged = !sameIdSet(orig.conditions, f.conditions);
+        const columnsChanged =
+          f.field_type === TABLE_FIELD_TYPE &&
+          serializeTableConfig(orig.columns || []) !== serializeTableConfig(f.columns || []);
         return (
           labelChanged ||
           newOpts.length > 0 ||
           deletedOpts.length > 0 ||
           updatedOpts.length > 0 ||
-          conditionsChanged
+          conditionsChanged ||
+          columnsChanged
         );
       });
 
       const formFieldsChanged =
         newFormFields.length > 0 || deletedFieldIds.length > 0 || updatedFormFields.length > 0;
 
-      // Construye las opciones (create/update/delete) de un campo para el payload
       const buildOptionActions = (field: FormFieldDef, orig?: FormFieldDef) => {
         const actions: {
           id?: number;
@@ -716,6 +857,11 @@ function ViewWorkFlowPage() {
         cost?: number;
         cost_center?: string;
         id_user_assigned?: string;
+        is_sequential?: boolean;
+        display_order?: number;
+        is_authorization?: boolean;
+        type_authorization?: number | null;
+        condition_option_ids?: number[];
         action: 'create' | 'update' | 'delete';
       }
 
@@ -737,11 +883,32 @@ function ViewWorkFlowPage() {
       interface FormFieldToProcess {
         id?: number;
         field_label?: string;
+        field_type?: string;
         required?: boolean;
         condition_option_ids?: number[];
         options?: OptionToProcess[];
+        config_json?: string | null;
         action: 'create' | 'update' | 'delete';
       }
+
+      // Serializa la definición de columnas de un campo tabla a config_json
+      // (o null si el campo no es de tipo tabla).
+      const fieldConfigJson = (field: FormFieldDef): string | null =>
+        field.field_type === TABLE_FIELD_TYPE
+          ? serializeTableConfig(
+              (field.columns || [])
+                .filter((c) => c.label.trim())
+                .map((c) => ({
+                  key: c.key,
+                  label: c.label.trim(),
+                  type: c.type,
+                  required: Boolean(c.required),
+                  ...(c.type === 'select'
+                    ? { options: (c.options || []).filter((o) => o.trim()) }
+                    : {}),
+                }))
+            )
+          : null;
 
       interface RequestBody {
         id_process: number;
@@ -750,6 +917,7 @@ function ViewWorkFlowPage() {
         active?: number;
         id_status?: number;
         id_user_assigned?: string;
+        is_external?: number;
         updateProcess: boolean;
         updateTasks: boolean;
         updateFiles: boolean;
@@ -773,6 +941,7 @@ function ViewWorkFlowPage() {
         requestBody.active = editedWorkflow.active;
         requestBody.id_status = editedWorkflow.id_status_process;
         requestBody.id_user_assigned = editedWorkflow.id_assigned_process_category;
+        requestBody.is_external = editedWorkflow.is_external ? 1 : 0;
         requestBody.updateProcess = true;
       } else {
         requestBody.updateProcess = false;
@@ -786,6 +955,11 @@ function ViewWorkFlowPage() {
             cost: task.cost,
             cost_center: task.cost_center,
             id_user_assigned: task.id_assigned_user,
+            is_sequential: task.is_sequential,
+            display_order: editedTasks.findIndex((t) => t.id === task.id),
+            is_authorization: task.is_authorization,
+            type_authorization: task.is_authorization ? (task.type_authorization ?? null) : null,
+            condition_option_ids: task.conditions,
             action: 'create' as const,
           })),
           ...updatedTasks.map((task) => ({
@@ -795,9 +969,13 @@ function ViewWorkFlowPage() {
             cost: task.cost,
             cost_center: task.cost_center,
             id_user_assigned: task.id_assigned_user,
+            is_sequential: task.is_sequential,
+            display_order: editedTasks.findIndex((t) => t.id === task.id),
+            is_authorization: task.is_authorization,
+            type_authorization: task.is_authorization ? (task.type_authorization ?? null) : null,
+            condition_option_ids: task.conditions,
             action: 'update' as const,
           })),
-          // Tareas eliminadas
           ...deletedTaskIds.map((id) => ({
             id,
             action: 'delete' as const,
@@ -839,9 +1017,11 @@ function ViewWorkFlowPage() {
         const fieldsToProcess: FormFieldToProcess[] = [
           ...newFormFields.map((field) => ({
             field_label: field.field_label,
+            field_type: field.field_type,
             required: field.required,
             condition_option_ids: field.conditions,
             options: buildOptionActions(field),
+            config_json: fieldConfigJson(field),
             action: 'create' as const,
           })),
           ...updatedFormFields.map((field) => {
@@ -852,6 +1032,9 @@ function ViewWorkFlowPage() {
               required: field.required,
               condition_option_ids: field.conditions,
               options: buildOptionActions(field, orig),
+              ...(field.field_type === TABLE_FIELD_TYPE
+                ? { config_json: fieldConfigJson(field) }
+                : {}),
               action: 'update' as const,
             };
           }),
@@ -921,6 +1104,73 @@ function ViewWorkFlowPage() {
       });
     }finally {
       setIsSaving(false);
+    }
+  };
+
+  const openObserversModal = async () => {
+    if (!workflow) return;
+    setObserversModalOpened(true);
+    try {
+      const res = await fetch(
+        `/api/requests-general/assign-viewer?id_process_category=${workflow.id}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setObservers(Array.isArray(data.observers) ? data.observers : []);
+      }
+    } catch (err) {
+      console.error('Error al cargar observadores:', err);
+    }
+  };
+
+  const handleAsignViewer = async () => {
+    if (!workflow) return;
+
+    if (observers.length === 0) {
+      toast.error('Selecciona al menos un usuario.');
+      return;
+    }
+
+    try {
+      setCreateLoading(true);
+      setError(null);
+
+      let response: Response;
+      try {
+        response = await fetch('/api/requests-general/assign-viewer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            observers,
+            id_process_category: workflow.id,
+          }),
+        });
+      } catch (networkErr) {
+        console.error('Error de red al asignar el observador:', networkErr);
+        setError('No se pudo asignar el observador. Intente de nuevo.');
+        toast.error('No se pudo asignar el observador. Intente de nuevo.');
+        return;
+      }
+
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const errorData = await response.json();
+          detail = errorData.error || '';
+        } catch {
+        }
+        console.error('Fallo al asignar el observador:', detail);
+        setError('No se pudo asignar el observador. Intente de nuevo.');
+        toast.error('No se pudo asignar el observador. Intente de nuevo.');
+        return;
+      }
+
+      toast.success('Observadores asignados correctamente.');
+      setObserversModalOpened(false);
+    } finally {
+      setCreateLoading(false);
     }
   };
 
@@ -1066,6 +1316,13 @@ function ViewWorkFlowPage() {
             </div>
 
             <Group>
+              <Button
+                variant='light'
+                leftSection={<IconEye size={16} />}
+                onClick={openObserversModal}
+              >
+                Observadores{observers.length > 0 ? ` (${observers.length})` : ''}
+              </Button>
               <Badge color={getActiveColor(workflow.active)} size='lg' radius='sm' variant='light'>
                 {getActiveText(workflow.active)}
               </Badge>
@@ -1262,6 +1519,72 @@ function ViewWorkFlowPage() {
                       )}
                     </Stack>
                   </Card>
+
+                  {/* Formulario externo: expone este flujo en una página pública SIN login. */}
+                  <Card withBorder radius='md' p='md'>
+                    <Stack gap='sm'>
+                      <Text size='sm' c='dimmed' fw={500}>
+                        Formulario externo
+                      </Text>
+                      {isEditing ? (
+                        <Switch
+                          checked={Boolean(editedWorkflow?.is_external)}
+                          onChange={(e) =>
+                            setEditedWorkflow((prev) =>
+                              prev ? { ...prev, is_external: e.target.checked } : prev
+                            )
+                          }
+                          label='Acceso sin login (página pública)'
+                          color='green'
+                        />
+                      ) : (
+                        <Group gap='xs'>
+                          {workflow.is_external ? (
+                            <Badge color='green' size='lg' variant='light'>
+                              Habilitado
+                            </Badge>
+                          ) : (
+                            <Badge color='gray' size='lg' variant='light'>
+                              Deshabilitado
+                            </Badge>
+                          )}
+                        </Group>
+                      )}
+                      {(isEditing ? editedWorkflow?.is_external : workflow.is_external) && (
+                        <Stack gap={4}>
+                          <Text size='xs' c='dimmed'>
+                            URL pública del formulario (sin login):
+                          </Text>
+                          <Group gap='xs' wrap='nowrap'>
+                            <Text
+                              size='sm'
+                              style={{ wordBreak: 'break-all', fontFamily: 'monospace' }}
+                            >
+                              {`/formulario-externo/${workflow.id}`}
+                            </Text>
+                            <CopyButton
+                              value={
+                                typeof window !== 'undefined'
+                                  ? `${window.location.origin}/formulario-externo/${workflow.id}`
+                                  : `/formulario-externo/${workflow.id}`
+                              }
+                            >
+                              {({ copied, copy }) => (
+                                <Button
+                                  size='xs'
+                                  variant='light'
+                                  color={copied ? 'green' : 'blue'}
+                                  onClick={copy}
+                                >
+                                  {copied ? 'Copiada' : 'Copiar'}
+                                </Button>
+                              )}
+                            </CopyButton>
+                          </Group>
+                        </Stack>
+                      )}
+                    </Stack>
+                  </Card>
                 </Stack>
               </Card>
             </Stack>
@@ -1387,23 +1710,150 @@ function ViewWorkFlowPage() {
                                         placeholder='Nombre de la tarea'
                                       />
                                     ) : (
-                                      <Text size='md' fw={600} className='mb-1'>
-                                        {task.task}
-                                      </Text>
+                                      <Group gap='xs'>
+                                        <Text size='md' fw={600} className='mb-1'>
+                                          {task.task}
+                                        </Text>
+                                        {task.is_sequential && (
+                                          <Badge color='indigo' variant='light' size='sm'>
+                                            Secuencial
+                                          </Badge>
+                                        )}
+                                        {task.is_authorization && (
+                                          <Badge color='teal' variant='light' size='sm'>
+                                            {task.type_authorization_label || 'Autorización'}
+                                          </Badge>
+                                        )}
+                                        {task.conditions.length > 0 && (
+                                          <Badge color='grape' variant='light' size='sm' styles={{ root: { textTransform: 'none' } }}>
+                                            Si: {conditionLabelsView(task.conditions)}
+                                          </Badge>
+                                        )}
+                                      </Group>
                                     )}
                                   </div>
                                   {isEditing && (
-                                    <ActionIcon
-                                      color='red'
-                                      variant='subtle'
-                                      size='lg'
-                                      onClick={() => handleRemoveTask(task.id)}
-                                      title='Eliminar tarea'
-                                    >
-                                      <IconTrash size={18} />
-                                    </ActionIcon>
+                                    <Group gap={4} wrap='nowrap'>
+                                      <ActionIcon
+                                        variant='subtle'
+                                        color='gray'
+                                        onClick={() => moveEditedTask(index, -1)}
+                                        disabled={index === 0}
+                                        title='Subir'
+                                      >
+                                        <IconChevronUp size={18} />
+                                      </ActionIcon>
+                                      <ActionIcon
+                                        variant='subtle'
+                                        color='gray'
+                                        onClick={() => moveEditedTask(index, 1)}
+                                        disabled={index === editedTasks.length - 1}
+                                        title='Bajar'
+                                      >
+                                        <IconChevronDown size={18} />
+                                      </ActionIcon>
+                                      <ActionIcon
+                                        color='red'
+                                        variant='subtle'
+                                        size='lg'
+                                        onClick={() => handleRemoveTask(task.id)}
+                                        title='Eliminar tarea'
+                                      >
+                                        <IconTrash size={18} />
+                                      </ActionIcon>
+                                    </Group>
                                   )}
                                 </Group>
+
+                                {isEditing && (
+                                  <Checkbox
+                                    label='Secuencial: requiere que la tarea anterior esté resuelta'
+                                    checked={editedTasks[index]?.is_sequential || false}
+                                    onChange={(e) => {
+                                      const newTasks = [...editedTasks];
+                                      newTasks[index] = {
+                                        ...newTasks[index],
+                                        is_sequential: e.currentTarget.checked,
+                                      };
+                                      setEditedTasks(newTasks);
+                                    }}
+                                  />
+                                )}
+
+                                {isEditing && (
+                                  <Checkbox
+                                    label='Tarea de autorización'
+                                    checked={editedTasks[index]?.is_authorization || false}
+                                    onChange={(e) => {
+                                      const checked = e.currentTarget.checked;
+                                      const newTasks = [...editedTasks];
+                                      newTasks[index] = {
+                                        ...newTasks[index],
+                                        is_authorization: checked,
+                                        type_authorization: checked
+                                          ? newTasks[index].type_authorization
+                                          : null,
+                                        type_authorization_label: checked
+                                          ? newTasks[index].type_authorization_label
+                                          : null,
+                                      };
+                                      setEditedTasks(newTasks);
+                                    }}
+                                  />
+                                )}
+
+                                {isEditing && editedTasks[index]?.is_authorization && (
+                                  <Select
+                                    label='Tipo de autorización'
+                                    placeholder='Seleccione el tipo'
+                                    data={authorizationTypeOptions}
+                                    value={
+                                      editedTasks[index]?.type_authorization != null
+                                        ? String(editedTasks[index].type_authorization)
+                                        : null
+                                    }
+                                    onChange={(value) => {
+                                      const newTasks = [...editedTasks];
+                                      newTasks[index] = {
+                                        ...newTasks[index],
+                                        type_authorization: value ? Number(value) : null,
+                                        type_authorization_label:
+                                          authorizationTypeOptions.find((o) => o.value === value)?.label ?? null,
+                                      };
+                                      setEditedTasks(newTasks);
+                                    }}
+                                    searchable
+                                    withAsterisk
+                                    error={
+                                      editedTasks[index]?.is_authorization &&
+                                      editedTasks[index]?.type_authorization == null
+                                        ? 'Selecciona el tipo de autorización'
+                                        : undefined
+                                    }
+                                    maw={400}
+                                  />
+                                )}
+
+                                {isEditing && allOptionsData.length > 0 && (
+                                  <MultiSelect
+                                    mt='sm'
+                                    label='Ejecutar esta tarea solo si se elige'
+                                    placeholder='Siempre (sin condición)'
+                                    data={allOptionsData}
+                                    value={(editedTasks[index]?.conditions || []).map((c) => c.toString())}
+                                    onChange={(value) => {
+                                      const newTasks = [...editedTasks];
+                                      newTasks[index] = {
+                                        ...newTasks[index],
+                                        conditions: value.map((v) => parseInt(v)),
+                                      };
+                                      setEditedTasks(newTasks);
+                                    }}
+                                    clearable
+                                    searchable
+                                    leftSection={<IconTag size={16} />}
+                                  />
+                                )}
 
                                 <Grid mt='sm'>
                                   <Grid.Col span={{ base: 12, sm: 4 }}>
@@ -1627,6 +2077,27 @@ function ViewWorkFlowPage() {
                           }}
                           style={{ flex: 1 }}
                         />
+                        {field.id < 0 ? (
+                          <Select
+                            label='Tipo'
+                            data={FIELD_TYPE_SELECT_DATA}
+                            value={editedFormFields[fieldIndex]?.field_type || 'select'}
+                            onChange={(value) => {
+                              const next = [...editedFormFields];
+                              next[fieldIndex] = {
+                                ...next[fieldIndex],
+                                field_type: value || 'select',
+                              };
+                              setEditedFormFields(next);
+                            }}
+                            allowDeselect={false}
+                            w={150}
+                          />
+                        ) : (
+                          <Badge color='grape' variant='light' size='lg' mb={6}>
+                            {FIELD_TYPE_LABELS[field.field_type] || 'Lista'}
+                          </Badge>
+                        )}
                         <Checkbox
                           label='Obligatorio'
                           checked={editedFormFields[fieldIndex]?.required || false}
@@ -1652,61 +2123,77 @@ function ViewWorkFlowPage() {
                         </ActionIcon>
                       </Group>
 
-                      <Group gap='xs'>
-                        {field.options.length === 0 ? (
-                          <Text size='sm' c='dimmed'>
-                            Sin opciones aún.
-                          </Text>
-                        ) : (
-                          field.options.map((o) => (
-                            <Badge
-                              key={o.id}
-                              variant='light'
-                              color='blue'
-                              size='lg'
-                              styles={{ root: { textTransform: 'none' } }}
-                              rightSection={
-                                <ActionIcon
-                                  size='xs'
-                                  variant='transparent'
-                                  color='red'
-                                  onClick={() => handleRemoveOption(field.id, o.id)}
-                                  title='Quitar opción'
+                      {field.field_type === 'select' ? (
+                        <>
+                          <Group gap='xs'>
+                            {field.options.length === 0 ? (
+                              <Text size='sm' c='dimmed'>
+                                Sin opciones aún.
+                              </Text>
+                            ) : (
+                              field.options.map((o) => (
+                                <Badge
+                                  key={o.id}
+                                  variant='light'
+                                  color='blue'
+                                  size='lg'
+                                  styles={{ root: { textTransform: 'none' } }}
+                                  rightSection={
+                                    <ActionIcon
+                                      size='xs'
+                                      variant='transparent'
+                                      color='red'
+                                      onClick={() => handleRemoveOption(field.id, o.id)}
+                                      title='Quitar opción'
+                                    >
+                                      <IconX size={12} />
+                                    </ActionIcon>
+                                  }
                                 >
-                                  <IconX size={12} />
-                                </ActionIcon>
-                              }
-                            >
-                              {o.option_label}
-                            </Badge>
-                          ))
-                        )}
-                      </Group>
+                                  {o.option_label}
+                                </Badge>
+                              ))
+                            )}
+                          </Group>
 
-                      <Group gap='xs'>
-                        <TextInput
-                          placeholder='Nueva opción (ej. Contado)'
-                          value={optionInputs[field.id] || ''}
-                          onChange={(e) =>
-                            setOptionInputs((prev) => ({ ...prev, [field.id]: e.target.value }))
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleAddOption(field.id);
-                            }
-                          }}
-                          style={{ flex: 1 }}
+                          <Group gap='xs'>
+                            <TextInput
+                              placeholder='Nueva opción (ej. Contado)'
+                              value={optionInputs[field.id] || ''}
+                              onChange={(e) =>
+                                setOptionInputs((prev) => ({ ...prev, [field.id]: e.target.value }))
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleAddOption(field.id);
+                                }
+                              }}
+                              style={{ flex: 1 }}
+                            />
+                            <Button
+                              variant='light'
+                              onClick={() => handleAddOption(field.id)}
+                              leftSection={<IconPlus size={16} />}
+                              disabled={!(optionInputs[field.id] || '').trim()}
+                            >
+                              Opción
+                            </Button>
+                          </Group>
+                        </>
+                      ) : field.field_type === TABLE_FIELD_TYPE ? (
+                        <TableColumnsEditor
+                          columns={field.columns}
+                          onChange={(cols) => setFieldColumns(field.id, cols)}
                         />
-                        <Button
-                          variant='light'
-                          onClick={() => handleAddOption(field.id)}
-                          leftSection={<IconPlus size={16} />}
-                          disabled={!(optionInputs[field.id] || '').trim()}
-                        >
-                          Opción
-                        </Button>
-                      </Group>
+                      ) : (
+                        <Text size='sm' c='dimmed'>
+                          Campo de {(FIELD_TYPE_LABELS[field.field_type] || 'lista').toLowerCase()}:{' '}
+                          {SAP_SOURCES[field.field_type]
+                            ? 'el usuario buscará y seleccionará un registro desde SAP al crear la solicitud.'
+                            : 'el usuario ingresará el valor al crear la solicitud (sin opciones predefinidas).'}
+                        </Text>
+                      )}
 
                       {optionsBeforeFieldData(field.id).length > 0 && (
                         <MultiSelect
@@ -1733,6 +2220,9 @@ function ViewWorkFlowPage() {
                           </Text>
                         </Group>
                         <Group gap='xs'>
+                          <Badge color='grape' variant='light' size='sm'>
+                            {FIELD_TYPE_LABELS[field.field_type] || 'Lista'}
+                          </Badge>
                           {field.conditions.length > 0 && (
                             <Badge
                               color='grape'
@@ -1857,6 +2347,7 @@ function ViewWorkFlowPage() {
                             newFiles[index] = { ...newFiles[index], file_label: e.target.value };
                             setEditedFiles(newFiles);
                           }}
+                          error={getFileLabelError(editedFiles[index]?.file_label || '')}
                           style={{ flex: 1 }}
                         />
                         <Checkbox
@@ -1985,12 +2476,84 @@ function ViewWorkFlowPage() {
           </Group>
         </Card>
 
+        <Modal
+          opened={observersModalOpened}
+          onClose={() => setObserversModalOpened(false)}
+          title={
+            <Group gap='sm'>
+              <div className='flex items-center justify-center w-10 h-10 rounded-lg bg-blue-100'>
+                <IconEye size={20} className='text-blue-600' />
+              </div>
+              <div>
+                <Text size='lg' fw={600}>
+                  Agregar Observadores
+                </Text>
+                <Text size='xs' c='dimmed'>
+                  Selecciona los usuarios que seguirán este flujo de trabajo
+                </Text>
+              </div>
+            </Group>
+          }
+          size='lg'
+          radius='lg'
+          overlayProps={{ blur: 4 }}
+          centered
+        >
+          <Stack gap='lg'>
+            <MultiSelect
+              label='Observadores'
+              placeholder='Selecciona usuarios'
+              data={users}
+              value={observers}
+              onChange={setObservers}
+              leftSection={<IconUser size={16} />}
+              searchable
+              clearable
+              hidePickedOptions
+              nothingFoundMessage='No hay usuarios'
+              size='md'
+            />
+
+            {observers.length > 0 && (
+              <Group gap={6}>
+                {observers.map((id) => {
+                  const u = users.find((x) => x.value === id);
+                  return (
+                    <Badge
+                      key={id}
+                      variant='light'
+                      color='blue'
+                      leftSection={<IconUser size={12} />}
+                    >
+                      {u?.label ?? id}
+                    </Badge>
+                  );
+                })}
+              </Group>
+            )}
+
+            <Group justify='flex-end' gap='sm' mt='md'>
+              <Button variant='outline' onClick={() => setObservers([])}>
+                Limpiar
+              </Button>
+              <Button
+                onClick={() => handleAsignViewer()}
+                leftSection={<IconCheck size={16} />}
+                loading={createLoading}
+                disabled={createLoading}
+              >
+                Listo
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+
         {/* Modal para agregar nueva tarea */}
         <Modal
           opened={addTaskModalOpened}
           onClose={() => {
             setAddTaskModalOpened(false);
-            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '' });
+            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', conditions: [] });
           }}
           title={
             <Group gap='sm'>
@@ -2103,12 +2666,68 @@ function ViewWorkFlowPage() {
               </Grid.Col>
             </Grid>
 
+            <Checkbox
+              label='Secuencial: requiere que la tarea anterior esté resuelta'
+              checked={newTaskForm.is_sequential}
+              onChange={(e) => setNewTaskForm({ ...newTaskForm, is_sequential: e.currentTarget.checked })}
+            />
+
+            <Checkbox
+              mt='sm'
+              label='Tarea de autorización'
+              checked={newTaskForm.is_authorization}
+              onChange={(e) =>
+                setNewTaskForm({
+                  ...newTaskForm,
+                  is_authorization: e.currentTarget.checked,
+                  type_authorization: e.currentTarget.checked ? newTaskForm.type_authorization : '',
+                })
+              }
+            />
+
+            {newTaskForm.is_authorization && (
+              <Select
+                mt='sm'
+                label='Tipo de autorización'
+                placeholder='Seleccione el tipo'
+                data={authorizationTypeOptions}
+                value={newTaskForm.type_authorization}
+                onChange={(value) =>
+                  setNewTaskForm({ ...newTaskForm, type_authorization: value || '' })
+                }
+                searchable
+                withAsterisk
+                error={
+                  newTaskForm.is_authorization && !newTaskForm.type_authorization
+                    ? 'Selecciona el tipo de autorización'
+                    : undefined
+                }
+                maw={400}
+              />
+            )}
+
+            {allOptionsData.length > 0 && (
+              <MultiSelect
+                mt='sm'
+                label='Ejecutar esta tarea solo si se elige'
+                placeholder='Siempre (sin condición)'
+                data={allOptionsData}
+                value={newTaskForm.conditions.map((c) => c.toString())}
+                onChange={(value) =>
+                  setNewTaskForm({ ...newTaskForm, conditions: value.map((v) => parseInt(v)) })
+                }
+                clearable
+                searchable
+                leftSection={<IconTag size={16} />}
+              />
+            )}
+
             <Group justify='flex-end' gap='sm' mt='md'>
               <Button
                 variant='outline'
                 onClick={() => {
                   setAddTaskModalOpened(false);
-                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '' });
+                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', conditions: [] });
                 }}
                 className='cursor-pointer transition-colors duration-200'
               >
@@ -2116,7 +2735,10 @@ function ViewWorkFlowPage() {
               </Button>
               <Button
                 onClick={handleAddTask}
-                disabled={!newTaskForm.task.trim()}
+                disabled={
+                  !newTaskForm.task.trim() ||
+                  (newTaskForm.is_authorization && !newTaskForm.type_authorization)
+                }
                 className='bg-blue-600 hover:bg-blue-700 cursor-pointer transition-colors duration-200'
               >
                 Agregar Tarea

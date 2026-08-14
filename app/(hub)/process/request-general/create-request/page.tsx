@@ -18,6 +18,7 @@ import {
   Anchor,
   Table,
   TextInput,
+  NumberInput,
   Select,
   Button,
   Group,
@@ -62,9 +63,23 @@ import {
   IconTag,
   IconDownload,
   IconLink,
+  IconTrash,
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import { sanitizeOneDriveName } from '../../../../../lib/onedriveName';
+import { isSapField } from '../../../../../lib/requests-general/sapSources';
+import {
+  TABLE_FIELD_TYPE,
+  parseTableConfig,
+  serializeTableValue,
+  validateTableRows,
+  isRowEmpty,
+  type TableColumn,
+  type TableRow,
+} from '../../../../../lib/requests-general/tableField';
+import SapOptionSelect from './SapOptionSelect';
+import TableFieldInput from './TableFieldInput';
 import toast from 'react-hot-toast';
 
 interface RequestTask {
@@ -160,7 +175,6 @@ function RequestBoard() {
     url: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
-  // Bloqueo síncrono de doble-submit (el estado createLoading se actualiza async)
   const isSubmittingRef = useRef(false);
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
@@ -198,24 +212,28 @@ function RequestBoard() {
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
   const [folderContents, setFolderContents] = useState([]);
 
-  // Archivos requeridos parametrizados del proceso seleccionado
   const [requiredFiles, setRequiredFiles] = useState<
     { id: number; file_label: string; required: boolean; conditions: number[] }[]
   >([]);
   const [filesByDoc, setFilesByDoc] = useState<Record<number, UploadedFile[]>>({});
   const [loadingProcessFiles, setLoadingProcessFiles] = useState(false);
 
-  // Campos condicionales del proceso seleccionado y respuestas del cliente
   const [formFields, setFormFields] = useState<
     {
       id: number;
       field_label: string;
+      field_type: string;
       required: boolean;
       options: { id: number; option_label: string }[];
       conditions: number[];
+      config_json?: string | null;
     }[]
   >([]);
-  const [fieldValues, setFieldValues] = useState<Record<number, number>>({});
+  // Los campos tipo tabla guardan su valor como TableRow[] (filas); el resto
+  // guarda un id de opción (number) o un valor libre (string).
+  const [fieldValues, setFieldValues] = useState<
+    Record<number, number | string | TableRow[]>
+  >({});
 
   const [filters, setFilters] = useState({
     id: '',
@@ -339,7 +357,6 @@ function RequestBoard() {
       setFormFields([]);
       setFieldValues({});
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.process]);
 
   const fetchProcessFiles = async (processId: string) => {
@@ -391,15 +408,19 @@ function RequestBoard() {
           (f: {
             id: number;
             field_label: string;
+            field_type?: string;
             required: boolean | number;
             options: { id: number; option_label: string }[];
             conditions: number[];
+            config_json?: string | null;
           }) => ({
             id: f.id,
             field_label: f.field_label,
+            field_type: f.field_type || 'select',
             required: Boolean(f.required),
             options: f.options || [],
             conditions: f.conditions || [],
+            config_json: f.config_json ?? null,
           })
         )
       );
@@ -411,9 +432,6 @@ function RequestBoard() {
     }
   };
 
-  // Visibilidad anidada: una sola pasada por orden. Un campo es visible si no tiene
-  // condiciones, o si alguna de sus opciones condicionantes ya está elegida en un campo
-  // visible anterior (DAG: las condiciones solo apuntan a campos previos).
   const computeVisibility = () => {
     const selected = new Set<number>();
     const visibleFields: typeof formFields = [];
@@ -422,8 +440,10 @@ function RequestBoard() {
         field.conditions.length === 0 || field.conditions.some((c) => selected.has(c));
       if (visible) {
         visibleFields.push(field);
+        // Solo los campos tipo lista aportan una opción al conjunto que condiciona a otros
+        // campos/archivos; texto/número/fecha guardan un valor libre (sin id de opción).
         const val = fieldValues[field.id];
-        if (val) selected.add(val);
+        if (field.field_type === 'select' && typeof val === 'number') selected.add(val);
       }
     }
     return { visibleFields, selectedOptionIds: selected };
@@ -431,13 +451,11 @@ function RequestBoard() {
 
   const { visibleFields, selectedOptionIds } = computeVisibility();
 
-  // Un documento se muestra/exige si no tiene condiciones, o si alguna está elegida (OR)
   const isFileVisible = (doc: { conditions: number[] }) =>
     doc.conditions.length === 0 || doc.conditions.some((c) => selectedOptionIds.has(c));
 
   const visibleRequiredFiles = requiredFiles.filter(isFileVisible);
 
-  // Limpia las respuestas de campos que quedaron ocultos (no enviar respuestas obsoletas)
   useEffect(() => {
     const selected = new Set<number>();
     const visibleIds = new Set<number>();
@@ -447,7 +465,7 @@ function RequestBoard() {
       if (visible) {
         visibleIds.add(field.id);
         const val = fieldValues[field.id];
-        if (val) selected.add(val);
+        if (field.field_type === 'select' && typeof val === 'number') selected.add(val);
       }
     }
     const toRemove = Object.keys(fieldValues)
@@ -749,14 +767,29 @@ function RequestBoard() {
       errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
     }
 
-    // Validar campos condicionales obligatorios (solo los VISIBLES)
     for (const field of visibleFields) {
-      if (field.required && !fieldValues[field.id]) {
-        errors[`field_${field.id}`] = `Debe seleccionar: ${field.field_label}`;
+      const val = fieldValues[field.id];
+      if (field.field_type === TABLE_FIELD_TYPE) {
+        const columns = parseTableConfig(field.config_json).columns;
+        const rows = Array.isArray(val) ? (val as TableRow[]) : [];
+        const tableError = validateTableRows(
+          columns,
+          rows,
+          field.required,
+          field.field_label
+        );
+        if (tableError) errors[`field_${field.id}`] = tableError;
+        continue;
+      }
+      const empty = val === undefined || val === null || val === '';
+      if (field.required && empty) {
+        errors[`field_${field.id}`] =
+          field.field_type === 'select'
+            ? `Debe seleccionar: ${field.field_label}`
+            : `Debe completar: ${field.field_label}`;
       }
     }
 
-    // Validar solo los documentos obligatorios VISIBLES según las condiciones
     for (const doc of visibleRequiredFiles) {
       if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
         errors[`file_${doc.id}`] = `Debe adjuntar el documento: ${doc.file_label}`;
@@ -774,7 +807,6 @@ function RequestBoard() {
   };
 
   const handleCreateTicket = async () => {
-    // Bloqueo síncrono: cierra la ventana de carrera del doble clic (createLoading es async).
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
 
@@ -782,9 +814,6 @@ function RequestBoard() {
       setCreateLoading(true);
       setError(null);
 
-      // --- Fase A: crear la solicitud ---
-      // El modal de creación NO tiene ninguna ruta de reintento: un solo POST por intento.
-      // Así es imposible re-disparar una creación y duplicar la solicitud.
       let response: Response;
       try {
         response = await fetch('/api/requests-general/create-request', {
@@ -801,12 +830,31 @@ function RequestBoard() {
             createdby: userId,
             url: formData.url,
             formValues: visibleFields
-              .filter((f) => fieldValues[f.id])
-              .map((f) => ({ id_field: f.id, id_option: fieldValues[f.id] })),
+              .filter((f) => {
+                const v = fieldValues[f.id];
+                if (f.field_type === TABLE_FIELD_TYPE) {
+                  const columns = parseTableConfig(f.config_json).columns;
+                  const rows = Array.isArray(v) ? (v as TableRow[]) : [];
+                  return rows.some((r) => !isRowEmpty(r, columns));
+                }
+                return v !== undefined && v !== null && v !== '';
+              })
+              .map((f) => {
+                const v = fieldValues[f.id];
+                if (f.field_type === TABLE_FIELD_TYPE) {
+                  const columns = parseTableConfig(f.config_json).columns;
+                  const rows = (Array.isArray(v) ? (v as TableRow[]) : []).filter(
+                    (r) => !isRowEmpty(r, columns)
+                  );
+                  return { id_field: f.id, value_text: serializeTableValue(rows) };
+                }
+                return f.field_type === 'select'
+                  ? { id_field: f.id, id_option: v }
+                  : { id_field: f.id, value_text: String(v) };
+              }),
           }),
         });
       } catch (networkErr) {
-        // La solicitud NO se creó: el modal queda abierto para reintentar de forma segura.
         console.error('Error de red al crear la solicitud:', networkErr);
         setError('No se pudo crear la solicitud. Intente de nuevo.');
         toast.error('No se pudo crear la solicitud. Intente de nuevo.');
@@ -819,7 +867,6 @@ function RequestBoard() {
           const errorData = await response.json();
           detail = errorData.error || '';
         } catch {
-          // respuesta sin cuerpo JSON
         }
         console.error('Fallo al crear la solicitud:', detail);
         setError('No se pudo crear la solicitud. Intente de nuevo.');
@@ -829,11 +876,6 @@ function RequestBoard() {
 
       const newTicket = await response.json();
       const requestId = Number(newTicket.id_request);
-      // A partir de aquí la solicitud EXISTE en BD: pase lo que pase, NO se recrea y el modal
-      // se cierra al final.
-
-      // --- Fase B: subir los archivos a la carpeta de la solicitud ya creada ---
-      // Documentos parametrizados visibles (con etiqueta) + archivos libres adicionales
       const filesToUpload: { file: File; label?: string }[] = [
         ...visibleRequiredFiles.flatMap((doc) =>
           (filesByDoc[doc.id] || []).map((f) => ({ file: f.file, label: doc.file_label }))
@@ -851,9 +893,15 @@ function RequestBoard() {
 
           const folderName = `Request-${requestId}`;
           await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
+
+          // SAPSEND: reenviar los adjuntos (si es solicitud de tesorería). No bloquea; el servidor
+          // aplica el gate y lee los archivos desde OneDrive.
+          fetch('/api/requests-general/sapsend-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: requestId }),
+          }).catch((e) => console.error('Error enviando archivos a SAPSEND:', e));
         } catch (uploadErr) {
-          // La solicitud YA quedó creada: no se reintenta aquí. La recarga de archivos se hace
-          // desde la vista de la solicitud. Se informa y se cierra el modal igual.
           uploadOk = false;
           console.error('Error al subir archivos:', uploadErr);
           toast.error(
@@ -864,7 +912,6 @@ function RequestBoard() {
         }
       }
 
-      // --- Fase C: notificación por correo (best-effort, no bloquea el cierre) ---
       try {
         await sendRequestEmailNotification(
           requestId,
@@ -875,7 +922,6 @@ function RequestBoard() {
         console.error('Error en notificación por correo:', notifyErr);
       }
 
-      // --- Cierre: la solicitud existe, así que siempre limpiamos y cerramos el modal ---
       if (uploadOk) {
         toast.success(`Solicitud #${requestId} creada correctamente.`);
       }
@@ -932,7 +978,9 @@ function RequestBoard() {
 
       if (files && files.length > 0) {
         const uploadNames = files.map((file) =>
-          file.label ? `${file.label} - ${file.file.name}` : file.file.name
+          sanitizeOneDriveName(
+            file.label ? `${file.label} - ${file.file.name}` : file.file.name
+          )
         );
 
         const uploadPromises = files.map((file: { file: File; label?: string }, index) =>
@@ -948,8 +996,6 @@ function RequestBoard() {
           )
         );
 
-        // allSettled (no all): si un archivo falla, no abortamos los demás y reportamos
-        // exactamente cuáles fallaron en lugar de perder esa información.
         const results = await Promise.allSettled(uploadPromises);
 
         const failed: string[] = [];
@@ -1057,6 +1103,9 @@ function RequestBoard() {
         return 'gray';
       case 'resuelto':
         return 'blue';
+      case 'devuelta':
+      case 'devuelto':
+        return 'orange';
       default:
         return 'gray';
     }
@@ -1392,6 +1441,7 @@ function RequestBoard() {
                       { value: '1', label: 'Abierto' },
                       { value: '3', label: 'Cancelado' },
                       { value: '2', label: 'Resuelto' },
+                      { value: '7', label: 'Devuelta' },
                     ]}
                     value={filters.status}
                     onChange={(value) => handleFilterChange('status', value || '')}
@@ -1913,34 +1963,156 @@ function RequestBoard() {
               <Stack gap='md'>
                 <Text fw={600}>Información adicional</Text>
                 <Grid>
-                  {visibleFields.map((field) => (
-                    <Grid.Col span={{ base: 12, md: 6 }} key={field.id}>
-                      <Select
-                        label={field.field_label}
-                        placeholder='Seleccione una opción'
-                        required={field.required}
-                        data={field.options.map((o) => ({
-                          value: o.id.toString(),
-                          label: o.option_label,
-                        }))}
-                        value={fieldValues[field.id] ? fieldValues[field.id].toString() : null}
-                        onChange={(value) => {
-                          setFieldValues((prev) => {
-                            const next = { ...prev };
-                            if (value) next[field.id] = parseInt(value);
-                            else delete next[field.id];
-                            return next;
-                          });
-                          if (formErrors[`field_${field.id}`]) {
-                            setFormErrors((prev) => ({ ...prev, [`field_${field.id}`]: '' }));
-                          }
-                        }}
-                        error={formErrors[`field_${field.id}`]}
-                        clearable
-                        leftSection={<IconTag size={16} />}
-                      />
-                    </Grid.Col>
-                  ))}
+                  {visibleFields.map((field) => {
+                    const rawValue = fieldValues[field.id];
+                    const clearFieldError = () => {
+                      if (formErrors[`field_${field.id}`]) {
+                        setFormErrors((prev) => ({ ...prev, [`field_${field.id}`]: '' }));
+                      }
+                    };
+                    const setTextValue = (v: string) => {
+                      setFieldValues((prev) => {
+                        const next = { ...prev };
+                        if (v) next[field.id] = v;
+                        else delete next[field.id];
+                        return next;
+                      });
+                      clearFieldError();
+                    };
+                    // "Valor a Pagar"/monto: no hay field_type de moneda, se detecta por label.
+                    // Muestra separador de miles (400.000) y guarda el número limpio (400000).
+                    const isMoneyField = /valor a pagar|monto/i.test(field.field_label);
+                    const isTableField = field.field_type === TABLE_FIELD_TYPE;
+                    return (
+                      <Grid.Col
+                        span={{ base: 12, md: isTableField ? 12 : 6 }}
+                        key={field.id}
+                      >
+                        {isTableField ? (
+                          <TableFieldInput
+                            label={field.field_label}
+                            required={field.required}
+                            columns={parseTableConfig(field.config_json).columns}
+                            rows={Array.isArray(rawValue) ? (rawValue as TableRow[]) : []}
+                            onChange={(newRows) => {
+                              setFieldValues((prev) => {
+                                const next = { ...prev };
+                                if (newRows.length > 0) next[field.id] = newRows;
+                                else delete next[field.id];
+                                return next;
+                              });
+                              clearFieldError();
+                            }}
+                            companyId={Number(formData.company) || undefined}
+                            error={formErrors[`field_${field.id}`]}
+                          />
+                        ) : isMoneyField ? (
+                          <NumberInput
+                            label={field.field_label}
+                            placeholder='Ingrese el valor'
+                            required={field.required}
+                            value={
+                              rawValue === undefined || rawValue === ''
+                                ? ''
+                                : (rawValue as number | string)
+                            }
+                            onChange={(value) => {
+                              setFieldValues((prev) => {
+                                const next = { ...prev };
+                                if (value === '' || value === null || value === undefined)
+                                  delete next[field.id];
+                                else next[field.id] = value;
+                                return next;
+                              });
+                              clearFieldError();
+                            }}
+                            thousandSeparator='.'
+                            decimalSeparator=','
+                            decimalScale={0}
+                            allowNegative={false}
+                            hideControls
+                            min={0}
+                            error={formErrors[`field_${field.id}`]}
+                            leftSection={<IconTag size={16} />}
+                          />
+                        ) : field.field_type === 'select' ? (
+                          <Select
+                            label={field.field_label}
+                            placeholder='Seleccione una opción'
+                            required={field.required}
+                            data={field.options.map((o) => ({
+                              value: o.id.toString(),
+                              label: o.option_label,
+                            }))}
+                            value={
+                              typeof rawValue === 'number' ? rawValue.toString() : null
+                            }
+                            onChange={(value) => {
+                              setFieldValues((prev) => {
+                                const next = { ...prev };
+                                if (value) next[field.id] = parseInt(value);
+                                else delete next[field.id];
+                                return next;
+                              });
+                              clearFieldError();
+                            }}
+                            error={formErrors[`field_${field.id}`]}
+                            clearable
+                            leftSection={<IconTag size={16} />}
+                          />
+                        ) : isSapField(field.field_type) ? (
+                          <SapOptionSelect
+                            source={field.field_type}
+                            companyId={Number(formData.company) || undefined}
+                            label={field.field_label}
+                            required={field.required}
+                            value={typeof rawValue === 'string' ? rawValue : undefined}
+                            onChange={setTextValue}
+                            error={formErrors[`field_${field.id}`]}
+                          />
+                        ) : field.field_type === 'number' ? (
+                          <NumberInput
+                            label={field.field_label}
+                            placeholder='Ingrese un valor'
+                            required={field.required}
+                            value={rawValue === undefined ? '' : (rawValue as number | string)}
+                            onChange={(value) => {
+                              setFieldValues((prev) => {
+                                const next = { ...prev };
+                                if (value === '' || value === null || value === undefined)
+                                  delete next[field.id];
+                                else next[field.id] = value;
+                                return next;
+                              });
+                              clearFieldError();
+                            }}
+                            error={formErrors[`field_${field.id}`]}
+                            leftSection={<IconTag size={16} />}
+                          />
+                        ) : field.field_type === 'date' ? (
+                          <TextInput
+                            type='date'
+                            label={field.field_label}
+                            required={field.required}
+                            value={typeof rawValue === 'string' ? rawValue : ''}
+                            onChange={(e) => setTextValue(e.currentTarget.value)}
+                            error={formErrors[`field_${field.id}`]}
+                            leftSection={<IconTag size={16} />}
+                          />
+                        ) : (
+                          <TextInput
+                            label={field.field_label}
+                            placeholder='Ingrese el valor'
+                            required={field.required}
+                            value={typeof rawValue === 'string' ? rawValue : ''}
+                            onChange={(e) => setTextValue(e.currentTarget.value)}
+                            error={formErrors[`field_${field.id}`]}
+                            leftSection={<IconTag size={16} />}
+                          />
+                        )}
+                      </Grid.Col>
+                    );
+                  })}
                 </Grid>
                 <Divider />
               </Stack>

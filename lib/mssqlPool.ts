@@ -1,8 +1,26 @@
 import sql from 'mssql';
 import dbconfig from '../dbconfig';
 
-const buildMssqlConfig = dbconfig.buildMssqlConfig as () => sql.config;
-const getDatabaseConfigKey = dbconfig.getDatabaseConfigKey as () => string;
+// `dbconfig` puede ser un objeto de configuración plano (dbconfig.js) o exponer helpers.
+// Soportamos ambos: si trae buildMssqlConfig/getDatabaseConfigKey los usamos; si no,
+// tratamos el propio objeto como la config de mssql y derivamos una clave estable.
+const dbAny = dbconfig as unknown as {
+  buildMssqlConfig?: () => sql.config;
+  getDatabaseConfigKey?: () => string;
+  server?: string;
+  database?: string;
+  user?: string;
+};
+
+const buildMssqlConfig: () => sql.config =
+  typeof dbAny.buildMssqlConfig === 'function'
+    ? dbAny.buildMssqlConfig
+    : () => dbconfig as unknown as sql.config;
+
+const getDatabaseConfigKey: () => string =
+  typeof dbAny.getDatabaseConfigKey === 'function'
+    ? dbAny.getDatabaseConfigKey
+    : () => `${dbAny.server ?? ''}/${dbAny.database ?? ''}/${dbAny.user ?? ''}`;
 
 /**
  * Tipos .input() de la misma instancia de mssql que el pool activo.
@@ -38,6 +56,17 @@ export function isMssqlNotOpenError(error: unknown): boolean {
     'code' in error &&
     (error as { code: string }).code === 'ENOTOPEN'
   );
+}
+
+/**
+ * Errores de conexión recuperables reintentando con un pool nuevo: la conexión no está abierta
+ * (ENOTOPEN) o se cerró mientras la operación estaba en vuelo (ECONNCLOSED, típico si el pool
+ * global se recicla durante una espera larga).
+ */
+export function isRetryablePoolError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = (error as { code: string }).code;
+  return code === 'ENOTOPEN' || code === 'ECONNCLOSED';
 }
 
 /**
@@ -96,7 +125,7 @@ export async function withMssqlPool<T>(
   try {
     return await fn(await getPool());
   } catch (error) {
-    if (!isMssqlNotOpenError(error)) throw error;
+    if (!isRetryablePoolError(error)) throw error;
     invalidateGlobalPool();
     return fn(await getPool());
   }

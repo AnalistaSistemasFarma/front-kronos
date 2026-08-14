@@ -13,6 +13,7 @@ export async function POST(req) {
       active,
       id_status,
       cost_center,
+      is_external,
       id_user_assigned,
       // Datos de tareas (opcionales)
       tasks,
@@ -35,7 +36,7 @@ export async function POST(req) {
     }
 
     // Determinar qué actualizar basándose en los flags o en la presencia de datos
-    const shouldUpdateProcess = updateProcess !== false && (process !== undefined || id_user_assigned !== undefined);
+    const shouldUpdateProcess = updateProcess !== false && (process !== undefined || id_user_assigned !== undefined || is_external !== undefined);
     const shouldUpdateTasks = updateTasks !== false && tasks && Array.isArray(tasks) && tasks.length > 0;
     const shouldUpdateFiles = updateFiles !== false && files && Array.isArray(files) && files.length > 0;
     const shouldUpdateFormFields = updateFormFields !== false && formFields && Array.isArray(formFields) && formFields.length > 0;
@@ -112,6 +113,12 @@ export async function POST(req) {
           processRequest.input('cost_center', sql.NVarChar(1000), cost_center || null);
         }
 
+        // Formulario externo (acceso sin login)
+        if (is_external !== undefined) {
+          updateFields.push('is_external = @is_external');
+          processRequest.input('is_external', sql.Bit, is_external ? 1 : 0);
+        }
+
         // Ejecutar actualización del proceso si hay campos para actualizar
         if (updateFields.length > 0) {
           const updateProcessQuery = `
@@ -149,10 +156,14 @@ export async function POST(req) {
         results.process = { success: true };
       }
 
+      // Condiciones (M:N) de tareas: se recolectan aquí y se aplican en una pasada posterior,
+      // cuando ya existen todas las opciones nuevas (optionTempToId poblado).
+      const taskConditionSets = []; // { taskId, condition_option_ids }
+
       // Actualizar tareas si es necesario
       if (shouldUpdateTasks) {
         for (const task of tasks) {
-          const { id, task: taskName, active: taskActive, cost, cost_center: taskCostCenter, id_user_assigned: taskUserAssigned, action } = task;
+          const { id, task: taskName, active: taskActive, cost, cost_center: taskCostCenter, id_user_assigned: taskUserAssigned, is_sequential: taskIsSequential, display_order: taskDisplayOrder, is_authorization: taskIsAuthorization, type_authorization: taskTypeAuthorization, condition_option_ids: taskConditionOptionIds, action } = task;
 
           if (action === 'create') {
             // Crear nueva tarea
@@ -162,9 +173,9 @@ export async function POST(req) {
 
             const insertTaskQuery = `
               INSERT INTO task_process_category
-              (task, id_process_category, active, cost, cost_center)
+              (task, id_process_category, active, cost, cost_center, is_sequential, display_order, is_authorization, type_authorization)
               OUTPUT INSERTED.id
-              VALUES (@task, @id_process, @active, @cost, @cost_center)
+              VALUES (@task, @id_process, @active, @cost, @cost_center, @is_sequential, @display_order, @is_authorization, @type_authorization)
             `;
 
             const taskRequest = new sql.Request(transaction);
@@ -173,9 +184,18 @@ export async function POST(req) {
             taskRequest.input('active', sql.Int, taskActive !== undefined ? taskActive : 1);
             taskRequest.input('cost', sql.Numeric(12, 0), cost || 0);
             taskRequest.input('cost_center', sql.NVarChar(1000), taskCostCenter || null);
+            taskRequest.input('is_sequential', sql.Bit, taskIsSequential ? 1 : 0);
+            taskRequest.input('display_order', sql.Int, taskDisplayOrder ?? null);
+            taskRequest.input('is_authorization', sql.Bit, taskIsAuthorization ? 1 : 0);
+            taskRequest.input('type_authorization', sql.Int, taskIsAuthorization ? (taskTypeAuthorization ?? null) : null);
 
             const taskResult = await taskRequest.query(insertTaskQuery);
             const newTaskId = taskResult.recordset[0].id;
+
+            taskConditionSets.push({
+              taskId: newTaskId,
+              condition_option_ids: Array.isArray(taskConditionOptionIds) ? taskConditionOptionIds : [],
+            });
 
             // Asignar usuario a la tarea si existe
             if (taskUserAssigned) {
@@ -201,7 +221,11 @@ export async function POST(req) {
                 task = @task,
                 active = @active,
                 cost = @cost,
-                cost_center = @cost_center
+                cost_center = @cost_center,
+                is_sequential = @is_sequential,
+                display_order = @display_order,
+                is_authorization = @is_authorization,
+                type_authorization = @type_authorization
               WHERE id = @id
             `;
 
@@ -211,8 +235,17 @@ export async function POST(req) {
             taskRequest.input('active', sql.Int, taskActive !== undefined ? taskActive : 1);
             taskRequest.input('cost', sql.Numeric(12, 0), cost || 0);
             taskRequest.input('cost_center', sql.NVarChar(1000), taskCostCenter || null);
+            taskRequest.input('is_sequential', sql.Bit, taskIsSequential ? 1 : 0);
+            taskRequest.input('display_order', sql.Int, taskDisplayOrder ?? null);
+            taskRequest.input('is_authorization', sql.Bit, taskIsAuthorization ? 1 : 0);
+            taskRequest.input('type_authorization', sql.Int, taskIsAuthorization ? (taskTypeAuthorization ?? null) : null);
 
             await taskRequest.query(updateTaskQuery);
+
+            taskConditionSets.push({
+              taskId: id,
+              condition_option_ids: Array.isArray(taskConditionOptionIds) ? taskConditionOptionIds : [],
+            });
 
             // Actualizar usuario asignado
             // Primero eliminar asignación anterior
@@ -252,6 +285,11 @@ export async function POST(req) {
             await new sql.Request(transaction)
               .input('id_task', sql.Int, id)
               .query(deleteUserTaskQuery);
+
+            // Eliminar las condiciones por opción de la tarea
+            await new sql.Request(transaction)
+              .input('id_task', sql.Int, id)
+              .query(`DELETE FROM task_condition_option WHERE id_task = @id_task`);
 
             // Luego eliminar la tarea
             const deleteTaskQuery = `
@@ -308,12 +346,15 @@ export async function POST(req) {
               await new sql.Request(transaction)
                 .input('id', sql.Int, opt.id)
                 .query(`DELETE FROM file_condition_option WHERE id_option = @id`);
+              await new sql.Request(transaction)
+                .input('id', sql.Int, opt.id)
+                .query(`DELETE FROM task_condition_option WHERE id_option = @id`);
             }
           }
         };
 
         for (const field of formFields) {
-          const { id, field_label, field_type, required, action, options, condition_option_ids } = field;
+          const { id, field_label, field_type, required, action, options, condition_option_ids, config_json } = field;
 
           if (action === 'create') {
             if (!field_label || !field_label.trim()) continue;
@@ -323,11 +364,12 @@ export async function POST(req) {
               .input('field_label', sql.NVarChar(255), field_label)
               .input('field_type', sql.NVarChar(30), field_type || 'select')
               .input('required', sql.Bit, required ? 1 : 0)
+              .input('config_json', sql.NVarChar(sql.MAX), config_json ?? null)
               .query(`
                 INSERT INTO process_form_field
-                (id_process_category, field_label, field_type, required, active)
+                (id_process_category, field_label, field_type, required, active, config_json)
                 OUTPUT INSERTED.id
-                VALUES (@id_process, @field_label, @field_type, @required, 1)
+                VALUES (@id_process, @field_label, @field_type, @required, 1, @config_json)
               `);
 
             const newFieldId = fieldResult.recordset[0].id;
@@ -339,11 +381,22 @@ export async function POST(req) {
             results.formFields.push({ action: 'create', id: newFieldId, success: true });
 
           } else if (action === 'update' && id) {
-            await new sql.Request(transaction)
-              .input('id', sql.Int, id)
-              .input('field_label', sql.NVarChar(255), field_label)
-              .input('required', sql.Bit, required ? 1 : 0)
-              .query(`UPDATE process_form_field SET field_label = @field_label, required = @required WHERE id = @id`);
+            // config_json solo se sobrescribe si viene en el payload (undefined = no tocar),
+            // para no borrar la definición de columnas de una tabla al editar otros campos.
+            if (config_json !== undefined) {
+              await new sql.Request(transaction)
+                .input('id', sql.Int, id)
+                .input('field_label', sql.NVarChar(255), field_label)
+                .input('required', sql.Bit, required ? 1 : 0)
+                .input('config_json', sql.NVarChar(sql.MAX), config_json ?? null)
+                .query(`UPDATE process_form_field SET field_label = @field_label, required = @required, config_json = @config_json WHERE id = @id`);
+            } else {
+              await new sql.Request(transaction)
+                .input('id', sql.Int, id)
+                .input('field_label', sql.NVarChar(255), field_label)
+                .input('required', sql.Bit, required ? 1 : 0)
+                .query(`UPDATE process_form_field SET field_label = @field_label, required = @required WHERE id = @id`);
+            }
 
             await processOptions(id, options);
             fieldConditionSets.push({
@@ -360,6 +413,9 @@ export async function POST(req) {
             await new sql.Request(transaction)
               .input('id', sql.Int, id)
               .query(`DELETE FROM file_condition_option WHERE id_option IN (SELECT id FROM process_form_field_option WHERE id_form_field = @id)`);
+            await new sql.Request(transaction)
+              .input('id', sql.Int, id)
+              .query(`DELETE FROM task_condition_option WHERE id_option IN (SELECT id FROM process_form_field_option WHERE id_form_field = @id)`);
             await new sql.Request(transaction)
               .input('id', sql.Int, id)
               .query(`DELETE FROM field_condition_option WHERE id_form_field = @id`);
@@ -390,6 +446,21 @@ export async function POST(req) {
             .input('id_form_field', sql.Int, fc.fieldId)
             .input('id_option', sql.Int, optId)
             .query(`INSERT INTO field_condition_option (id_form_field, id_option) VALUES (@id_form_field, @id_option)`);
+        }
+      }
+
+      // Aplica (reemplaza) el conjunto de condiciones de cada tarea procesada
+      for (const tc of taskConditionSets) {
+        await new sql.Request(transaction)
+          .input('id_task', sql.Int, tc.taskId)
+          .query(`DELETE FROM task_condition_option WHERE id_task = @id_task`);
+        for (const raw of tc.condition_option_ids) {
+          const optId = resolveOptionId(raw);
+          if (!optId) continue;
+          await new sql.Request(transaction)
+            .input('id_task', sql.Int, tc.taskId)
+            .input('id_option', sql.Int, optId)
+            .query(`INSERT INTO task_condition_option (id_task, id_option) VALUES (@id_task, @id_option)`);
         }
       }
 
