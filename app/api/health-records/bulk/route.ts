@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/health-records/access';
 import {
-  articuloExiste,
+  getArticuloNombre,
   crearRegistro,
   getFieldSizes,
   getNombresExistentes,
@@ -116,8 +116,10 @@ export async function POST(request: NextRequest) {
         }
 
         try {
-          // El articulo (Referencia) debe existir en SAP antes de asignarle un RS.
-          if (!(await articuloExiste(sap, record.U_Referencia as string))) {
+          // El articulo (Referencia) debe existir en SAP; de paso traemos su
+          // nombre para completar la descripcion (el cargue masivo no la trae).
+          const nombreArticulo = await getArticuloNombre(sap, record.U_Referencia as string);
+          if (nombreArticulo === null) {
             failed.push({
               row: rowNum,
               registro,
@@ -125,6 +127,10 @@ export async function POST(request: NextRequest) {
             });
             continue;
           }
+          // La descripcion la impone el sistema con el nombre del articulo en SAP
+          // (se ignora lo que venga en el Excel) para no tener divergencias.
+          const maxDesc = fieldSizes.U_Descripcion;
+          record.U_Descripcion = maxDesc ? nombreArticulo.slice(0, maxDesc) : nombreArticulo;
           if (await registroExiste(sap, entity, record.U_Referencia as string, registro)) {
             duplicated.push({ row: rowNum, registro, reason: 'Ya existe en SAP para este producto' });
             continue;

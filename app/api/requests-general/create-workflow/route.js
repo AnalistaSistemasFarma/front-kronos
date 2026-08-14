@@ -15,7 +15,8 @@ export async function POST(req) {
       cost_center_pc,
       cost_center_t,
       cost,
-      id_user
+      id_user,
+      is_external
     } = body;
 
 
@@ -57,7 +58,8 @@ export async function POST(req) {
           id_category_request,
           active,
           id_status,
-          cost_center
+          cost_center,
+          is_external
         )
         OUTPUT INSERTED.id
         VALUES
@@ -66,7 +68,8 @@ export async function POST(req) {
           @id_category,
           0,
           6,
-          @cost_center_pc
+          @cost_center_pc,
+          @is_external
         );
       `;
 
@@ -75,6 +78,8 @@ export async function POST(req) {
       processRequest.input("process", sql.NVarChar(1000), process);
       processRequest.input("id_category", sql.Int, id_category);
       processRequest.input("cost_center_pc", sql.NVarChar(1000), cost_center_pc || null);
+      // Formulario externo (acceso sin login). Por defecto 0 (interno).
+      processRequest.input("is_external", sql.Bit, is_external ? 1 : 0);
 
       const processResult =
         await processRequest.query(insertProcessQuery);
