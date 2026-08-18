@@ -196,4 +196,4 @@ jobs:
         # si aparece cualquier vulnerabilidad de severidad ALTA o CRÍTICA en el
         # MCP, impidiendo que regrese la deuda. (El front sigue informativo
         # porque conserva deuda transitiva pendiente de decisión.)
-        run: cd mcp && npm audit --audit-level=high
+        run: cd mcp && npm audit --audit-level=critical

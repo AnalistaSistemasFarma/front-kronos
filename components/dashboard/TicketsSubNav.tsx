@@ -1,7 +1,7 @@
 'use client';
 
 import { Group, Paper, Text, ThemeIcon, UnstyledButton } from '@mantine/core';
-import { IconCategory2, IconTicket } from '@tabler/icons-react';
+import { IconCategory2, IconStack2, IconTicket } from '@tabler/icons-react';
 import { useTicketsSub, type TicketsSubView } from '../../lib/dashboard/TicketsSubContext';
 import { useDashboardChartPalette } from './useDashboardChartPalette';
 
@@ -22,6 +22,12 @@ const subItems: {
     label: 'Categorías y empresas',
     description: 'Demanda por origen',
     icon: IconCategory2,
+  },
+  {
+    view: 'subcategorias',
+    label: 'Subcategorías',
+    description: 'Tipo de ticket por empresa',
+    icon: IconStack2,
   },
 ];
 
