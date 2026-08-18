@@ -210,7 +210,11 @@ export async function getSupplierBankAccounts(
   session: SapSession,
   cardCode: string
 ): Promise<SupplierBankData> {
-  const path = `BusinessPartners('${escapeOData(cardCode)}')?$select=CardCode,Country,DefaultBankCode,DefaultAccount&$expand=BPBankAccounts`;
+  // BPBankAccounts (OCRB) NO es una navigation property expandible en esta
+  // Service Layer ($expand=BPBankAccounts -> 400 "invalid navigation property").
+  // La colección SÍ viene inline al pedirla dentro de $select. Antes usábamos
+  // $expand y el SL devolvía error, por lo que TODO proveedor salía "sin cuenta".
+  const path = `BusinessPartners('${escapeOData(cardCode)}')?$select=CardCode,Country,DefaultBankCode,DefaultAccount,BPBankAccounts`;
 
   const bp = await sapGet<RawBusinessPartner>(session, path);
   const accounts = bp?.BPBankAccounts ?? [];
