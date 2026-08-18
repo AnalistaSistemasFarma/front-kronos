@@ -16,6 +16,7 @@ import {
 } from './ticketAnalytics';
 
 export const ALL_CATEGORIES_VALUE = '__all_categories__';
+export const ALL_SUBCATEGORIES_VALUE = '__all_subcategories__';
 export const ALL_COMPANIES_VALUE = '__all_companies__';
 
 export function getCategoryLabel(c: HelpDeskCase): string {
@@ -33,6 +34,11 @@ export function listCategories(cases: HelpDeskCase[]): string[] {
   return [...names].sort((a, b) => a.localeCompare(b, 'es'));
 }
 
+export function listSubcategories(cases: HelpDeskCase[]): string[] {
+  const names = new Set(cases.map(getSubcategoryLabel));
+  return [...names].sort((a, b) => a.localeCompare(b, 'es'));
+}
+
 export function listCompanies(cases: HelpDeskCase[]): string[] {
   const names = new Set(cases.map(getCompanyLabel));
   return [...names].sort((a, b) => a.localeCompare(b, 'es'));
@@ -44,6 +50,14 @@ export function filterCasesByCategory(
 ): HelpDeskCase[] {
   if (category === ALL_CATEGORIES_VALUE) return cases;
   return cases.filter((c) => getCategoryLabel(c) === category);
+}
+
+export function filterCasesBySubcategory(
+  cases: HelpDeskCase[],
+  subcategory: string
+): HelpDeskCase[] {
+  if (subcategory === ALL_SUBCATEGORIES_VALUE) return cases;
+  return cases.filter((c) => getSubcategoryLabel(c) === subcategory);
 }
 
 export function filterCasesByCompany(
@@ -102,6 +116,49 @@ export function buildCategoryCompanyRows(
 
       return {
         category,
+        company,
+        total: list.length,
+        counts: countByStatus(list),
+        avgIntervalDays: computeAverageIntervalDays(list),
+        lastTicketDate: dates[0] ?? null,
+      };
+    })
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limit);
+}
+
+export interface SubcategoryCompanyRow {
+  subcategory: string;
+  company: string;
+  total: number;
+  counts: TicketStatusCounts;
+  avgIntervalDays: number | null;
+  lastTicketDate: Date | null;
+}
+
+export function buildSubcategoryCompanyRows(
+  cases: HelpDeskCase[],
+  limit = 20
+): SubcategoryCompanyRow[] {
+  const groups = new Map<string, HelpDeskCase[]>();
+
+  for (const c of cases) {
+    const key = `${getSubcategoryLabel(c)}|||${getCompanyLabel(c)}`;
+    const list = groups.get(key) ?? [];
+    list.push(c);
+    groups.set(key, list);
+  }
+
+  return [...groups.entries()]
+    .map(([key, list]) => {
+      const [subcategory, company] = key.split('|||');
+      const dates = list
+        .map((c) => parseCalendarDate(c.creation_date))
+        .filter((d): d is Date => d != null)
+        .sort((a, b) => b.getTime() - a.getTime());
+
+      return {
+        subcategory,
         company,
         total: list.length,
         counts: countByStatus(list),
@@ -185,6 +242,33 @@ export function buildCategoryFrequencyMetrics(
   }
 
   return [...byCategory.entries()]
+    .map(([name, list]) => {
+      const counts = countByStatus(list);
+      return {
+        name,
+        total: counts.total,
+        avgIntervalDays: computeAverageIntervalDays(list),
+        openBacklog: counts.abierto + counts.enProgreso,
+        counts,
+      };
+    })
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limit);
+}
+
+export function buildSubcategoryFrequencyMetrics(
+  cases: HelpDeskCase[],
+  limit = 10
+): EntityFrequencyMetric[] {
+  const bySubcategory = new Map<string, HelpDeskCase[]>();
+  for (const c of cases) {
+    const subcategory = getSubcategoryLabel(c);
+    const list = bySubcategory.get(subcategory) ?? [];
+    list.push(c);
+    bySubcategory.set(subcategory, list);
+  }
+
+  return [...bySubcategory.entries()]
     .map(([name, list]) => {
       const counts = countByStatus(list);
       return {
