@@ -190,10 +190,10 @@ jobs:
             }
           ' >> "$GITHUB_STEP_SUMMARY" || echo "_No se pudo generar el resumen de npm audit (mcp)._" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Auditoría de dependencias MCP (npm audit — BLOQUEANTE, high+)
-        # Fase 3 (ratchet): el árbol del MCP quedó SANEADO (0 vulnerabilidades)
-        # tras `npm audit fix`. Por eso este paso YA es BLOQUEANTE: falla el job
-        # si aparece cualquier vulnerabilidad de severidad ALTA o CRÍTICA en el
-        # MCP, impidiendo que regrese la deuda. (El front sigue informativo
-        # porque conserva deuda transitiva pendiente de decisión.)
-        run: cd mcp && npm audit --audit-level=high
+      - name: Auditoría de dependencias MCP (npm audit — BLOQUEANTE, critical)
+        # Umbral BLOQUEANTE en CRÍTICO (decisión de Nicolás, 2026-08-18): el job
+        # falla solo si aparece una vulnerabilidad CRÍTICA en el MCP. Se bajó de
+        # ALTA a CRÍTICA porque una advertencia transitiva de severidad alta ajena
+        # al código (DeepmergeTS vía @prisma/config) estaba bloqueando todos los
+        # PRs. Las de severidad ALTA quedan informativas (revisar y sanear aparte).
+        run: cd mcp && npm audit --audit-level=critical
