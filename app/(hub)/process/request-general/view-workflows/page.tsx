@@ -30,6 +30,7 @@ import {
   ActionIcon,
   Checkbox,
   MultiSelect,
+  CopyButton,
 } from '@mantine/core';
 import {
   IconBuilding,
@@ -79,6 +80,7 @@ interface WorkFlow {
   assigned_process_category: string;
   company: string;
   id_assigned_process_category: string;
+  is_external?: boolean;
 }
 
 interface Task {
@@ -729,7 +731,8 @@ function ViewWorkFlowPage() {
         originalRequest?.description !== editedWorkflow.description ||
         originalRequest?.active !== editedWorkflow.active ||
         originalRequest?.id_status_process !== editedWorkflow.id_status_process ||
-        originalRequest?.id_assigned_process_category !== editedWorkflow.id_assigned_process_category;
+        originalRequest?.id_assigned_process_category !== editedWorkflow.id_assigned_process_category ||
+        Boolean(originalRequest?.is_external) !== Boolean(editedWorkflow.is_external);
 
       const newTasks = editedTasks.filter(task => task.id < 0);
       
@@ -914,6 +917,7 @@ function ViewWorkFlowPage() {
         active?: number;
         id_status?: number;
         id_user_assigned?: string;
+        is_external?: number;
         updateProcess: boolean;
         updateTasks: boolean;
         updateFiles: boolean;
@@ -937,6 +941,7 @@ function ViewWorkFlowPage() {
         requestBody.active = editedWorkflow.active;
         requestBody.id_status = editedWorkflow.id_status_process;
         requestBody.id_user_assigned = editedWorkflow.id_assigned_process_category;
+        requestBody.is_external = editedWorkflow.is_external ? 1 : 0;
         requestBody.updateProcess = true;
       } else {
         requestBody.updateProcess = false;
@@ -1510,6 +1515,72 @@ function ViewWorkFlowPage() {
                               Solo un administrador puede modificar este campo.
                             </Text>
                           )}
+                        </Stack>
+                      )}
+                    </Stack>
+                  </Card>
+
+                  {/* Formulario externo: expone este flujo en una página pública SIN login. */}
+                  <Card withBorder radius='md' p='md'>
+                    <Stack gap='sm'>
+                      <Text size='sm' c='dimmed' fw={500}>
+                        Formulario externo
+                      </Text>
+                      {isEditing ? (
+                        <Switch
+                          checked={Boolean(editedWorkflow?.is_external)}
+                          onChange={(e) =>
+                            setEditedWorkflow((prev) =>
+                              prev ? { ...prev, is_external: e.target.checked } : prev
+                            )
+                          }
+                          label='Acceso sin login (página pública)'
+                          color='green'
+                        />
+                      ) : (
+                        <Group gap='xs'>
+                          {workflow.is_external ? (
+                            <Badge color='green' size='lg' variant='light'>
+                              Habilitado
+                            </Badge>
+                          ) : (
+                            <Badge color='gray' size='lg' variant='light'>
+                              Deshabilitado
+                            </Badge>
+                          )}
+                        </Group>
+                      )}
+                      {(isEditing ? editedWorkflow?.is_external : workflow.is_external) && (
+                        <Stack gap={4}>
+                          <Text size='xs' c='dimmed'>
+                            URL pública del formulario (sin login):
+                          </Text>
+                          <Group gap='xs' wrap='nowrap'>
+                            <Text
+                              size='sm'
+                              style={{ wordBreak: 'break-all', fontFamily: 'monospace' }}
+                            >
+                              {`/formulario-externo/${workflow.id}`}
+                            </Text>
+                            <CopyButton
+                              value={
+                                typeof window !== 'undefined'
+                                  ? `${window.location.origin}/formulario-externo/${workflow.id}`
+                                  : `/formulario-externo/${workflow.id}`
+                              }
+                            >
+                              {({ copied, copy }) => (
+                                <Button
+                                  size='xs'
+                                  variant='light'
+                                  color={copied ? 'green' : 'blue'}
+                                  onClick={copy}
+                                >
+                                  {copied ? 'Copiada' : 'Copiar'}
+                                </Button>
+                              )}
+                            </CopyButton>
+                          </Group>
                         </Stack>
                       )}
                     </Stack>

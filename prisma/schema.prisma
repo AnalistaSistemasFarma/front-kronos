@@ -51,6 +51,13 @@ model User {
   role           String         @default("user")
   phone          String?
   identification String?
+  // NIT del proveedor. Solo lo tienen los usuarios con role = "supplier" (proveedores
+  // externos que ingresan por /proveedor/login). Es el identificador con el que se
+  // scopea TODA su información del lado del servidor. Nullable porque los usuarios
+  // internos no tienen NIT. La unicidad se garantiza con un índice ÚNICO FILTRADO
+  // (WHERE nit IS NOT NULL) creado en la migración; no se declara @unique aquí porque
+  // SQL Server solo admite un único NULL en un índice único no filtrado.
+  nit            String?
   id_user_sapsend Int?
   themePalette   String?        @default("gss")
   colorScheme    String?        @default("light")

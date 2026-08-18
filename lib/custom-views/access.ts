@@ -105,5 +105,6 @@ export async function uniqueSlug(name: string, excludeId?: number): Promise<stri
 
 /** Valida que company_column sea un identificador SQL simple (anti-inyección). */
 export function isValidColumnRef(col: string): boolean {
+  // eslint-disable-next-line security/detect-unsafe-regex -- regex lineal simple de identificador SQL (opcional .columna), entrada acotada, sin backtracking catastrófico
   return /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(col.trim());
 }
