@@ -16,7 +16,7 @@ import { assertOwnership } from '../../../../../lib/proveedor/isolation';
  *  - Si la solicitud no existe o no es suya → 404 (no se filtra su existencia).
  *  - Las respuestas del formulario se leen SOLO tras confirmar la propiedad.
  */
-export async function GET(_req, { params }) {
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const ident = await getSupplierIdentityFromSession();
     if (!ident) {
