@@ -18,6 +18,7 @@ import {
 export const ALL_CATEGORIES_VALUE = '__all_categories__';
 export const ALL_SUBCATEGORIES_VALUE = '__all_subcategories__';
 export const ALL_COMPANIES_VALUE = '__all_companies__';
+export const ALL_ACTIVITIES_VALUE = '__all_activities__';
 
 export function getCategoryLabel(c: HelpDeskCase): string {
   const name = c.category?.trim();
@@ -27,6 +28,11 @@ export function getCategoryLabel(c: HelpDeskCase): string {
 export function getSubcategoryLabel(c: HelpDeskCase): string {
   const name = c.subcategory?.trim();
   return name && name.length > 0 ? name : 'Sin subcategoría';
+}
+
+export function getActivityLabel(c: HelpDeskCase): string {
+  const name = c.activity?.trim();
+  return name && name.length > 0 ? name : 'Sin actividad';
 }
 
 export function listCategories(cases: HelpDeskCase[]): string[] {
@@ -41,6 +47,11 @@ export function listSubcategories(cases: HelpDeskCase[]): string[] {
 
 export function listCompanies(cases: HelpDeskCase[]): string[] {
   const names = new Set(cases.map(getCompanyLabel));
+  return [...names].sort((a, b) => a.localeCompare(b, 'es'));
+}
+
+export function listActivities(cases: HelpDeskCase[]): string[] {
+  const names = new Set(cases.map(getActivityLabel));
   return [...names].sort((a, b) => a.localeCompare(b, 'es'));
 }
 
@@ -66,6 +77,14 @@ export function filterCasesByCompany(
 ): HelpDeskCase[] {
   if (company === ALL_COMPANIES_VALUE) return cases;
   return cases.filter((c) => getCompanyLabel(c) === company);
+}
+
+export function filterCasesByActivity(
+  cases: HelpDeskCase[],
+  activity: string
+): HelpDeskCase[] {
+  if (activity === ALL_ACTIVITIES_VALUE) return cases;
+  return cases.filter((c) => getActivityLabel(c) === activity);
 }
 
 export function aggregateCountByField(
@@ -160,6 +179,53 @@ export function buildSubcategoryCompanyRows(
       return {
         subcategory,
         company,
+        total: list.length,
+        counts: countByStatus(list),
+        avgIntervalDays: computeAverageIntervalDays(list),
+        lastTicketDate: dates[0] ?? null,
+      };
+    })
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limit);
+}
+
+export interface SubcategoryActivityRow {
+  subcategory: string;
+  activity: string;
+  total: number;
+  counts: TicketStatusCounts;
+  avgIntervalDays: number | null;
+  lastTicketDate: Date | null;
+}
+
+/**
+ * Consolidado actividad × subcategoría: por cada par subcategoría·actividad,
+ * total de tickets, estados, frecuencia y último ticket. Ordenado por volumen.
+ */
+export function buildSubcategoryActivityRows(
+  cases: HelpDeskCase[],
+  limit = 20
+): SubcategoryActivityRow[] {
+  const groups = new Map<string, HelpDeskCase[]>();
+
+  for (const c of cases) {
+    const key = `${getSubcategoryLabel(c)}|||${getActivityLabel(c)}`;
+    const list = groups.get(key) ?? [];
+    list.push(c);
+    groups.set(key, list);
+  }
+
+  return [...groups.entries()]
+    .map(([key, list]) => {
+      const [subcategory, activity] = key.split('|||');
+      const dates = list
+        .map((c) => parseCalendarDate(c.creation_date))
+        .filter((d): d is Date => d != null)
+        .sort((a, b) => b.getTime() - a.getTime());
+
+      return {
+        subcategory,
+        activity,
         total: list.length,
         counts: countByStatus(list),
         avgIntervalDays: computeAverageIntervalDays(list),
@@ -269,6 +335,33 @@ export function buildSubcategoryFrequencyMetrics(
   }
 
   return [...bySubcategory.entries()]
+    .map(([name, list]) => {
+      const counts = countByStatus(list);
+      return {
+        name,
+        total: counts.total,
+        avgIntervalDays: computeAverageIntervalDays(list),
+        openBacklog: counts.abierto + counts.enProgreso,
+        counts,
+      };
+    })
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limit);
+}
+
+export function buildActivityFrequencyMetrics(
+  cases: HelpDeskCase[],
+  limit = 10
+): EntityFrequencyMetric[] {
+  const byActivity = new Map<string, HelpDeskCase[]>();
+  for (const c of cases) {
+    const activity = getActivityLabel(c);
+    const list = byActivity.get(activity) ?? [];
+    list.push(c);
+    byActivity.set(activity, list);
+  }
+
+  return [...byActivity.entries()]
     .map(([name, list]) => {
       const counts = countByStatus(list);
       return {
