@@ -5,10 +5,12 @@ import { useTicketsSub } from '../../lib/dashboard/TicketsSubContext';
 import TicketsAnalyticsView from './TicketsAnalyticsView';
 import TicketsCategoryCompanyView from '@/components/dashboard/TicketsCategoryCompanyView';
 import TicketsSubcategoryCompanyView from '@/components/dashboard/TicketsSubcategoryCompanyView';
+import TicketsSubcategoryActivityView from '@/components/dashboard/TicketsSubcategoryActivityView';
 
 const MemoOperativo = memo(TicketsAnalyticsView);
 const MemoCategorias = memo(TicketsCategoryCompanyView);
 const MemoSubcategorias = memo(TicketsSubcategoryCompanyView);
+const MemoActividades = memo(TicketsSubcategoryActivityView);
 
 const panelClass = (active: boolean) =>
   active ? 'dashboard-panel dashboard-panel--active' : 'dashboard-panel';
@@ -35,6 +37,12 @@ function TicketsPanels() {
         aria-hidden={subView !== 'subcategorias'}
       >
         <MemoSubcategorias />
+      </div>
+      <div
+        className={panelClass(subView === 'actividades')}
+        aria-hidden={subView !== 'actividades'}
+      >
+        <MemoActividades />
       </div>
     </div>
   );

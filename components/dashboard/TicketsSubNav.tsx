@@ -1,7 +1,7 @@
 'use client';
 
 import { Group, Paper, Text, ThemeIcon, UnstyledButton } from '@mantine/core';
-import { IconCategory2, IconStack2, IconTicket } from '@tabler/icons-react';
+import { IconCategory2, IconListCheck, IconStack2, IconTicket } from '@tabler/icons-react';
 import { useTicketsSub, type TicketsSubView } from '../../lib/dashboard/TicketsSubContext';
 import { useDashboardChartPalette } from './useDashboardChartPalette';
 
@@ -28,6 +28,12 @@ const subItems: {
     label: 'Subcategorías',
     description: 'Tipo de ticket por empresa',
     icon: IconStack2,
+  },
+  {
+    view: 'actividades',
+    label: 'Actividades',
+    description: 'Actividades por subcategoría',
+    icon: IconListCheck,
   },
 ];
 
