@@ -487,28 +487,17 @@ function ViewRequestPage() {
 
       setIsAdmin(hasAdminRole);
 
-      // El "solicitado" (asignado al proceso) es quien gestiona y puede editar.
-      // NO se incluye `usuario` (rg.[user] = creador/solicitante): el solicitante
-      // no debe poder editar la solicitud.
       const normalize = (value?: string | null) => (value || '').trim().toLowerCase();
       const currentUser = normalize(userName);
 
-      // El solicitante (creador) NUNCA puede editar, sin importar su rol (admin, etc.).
+      // El solicitante (creador) puede editar su propia solicitud mientras no
+      // esté resuelta (regla anterior lo bloqueaba; retirada 2026-08-19 por
+      // indicación de Nicolás — caso #5633).
       const isRequester =
         (session.user?.id &&
           request.id_requester &&
           String(session.user.id) === String(request.id_requester)) ||
         (currentUser !== '' && normalize(request.requester) === currentUser);
-
-      if (isRequester) {
-        setCanEdit(false);
-        console.log('Permission check: solicitante — edición bloqueada', {
-          userName,
-          requester: request.requester,
-          id_requester: request.id_requester,
-        });
-        return;
-      }
 
       // El "solicitado" (asignado al proceso) es quien gestiona y puede editar.
       const assignedCandidates = [request.user, request.assignedUserName].map(normalize);
@@ -516,13 +505,14 @@ function ViewRequestPage() {
       const isAssignedUser =
         currentUser !== '' && assignedCandidates.some((name) => name !== '' && name === currentUser);
 
-      const hasEditPermission = hasAdminRole || isAssignedUser;
+      const hasEditPermission = hasAdminRole || isAssignedUser || Boolean(isRequester);
 
       setCanEdit(hasEditPermission);
       console.log('Permission check:', {
         userName,
         assignedCandidates,
         isAssignedUser,
+        isRequester,
         hasAdminRole,
         canEdit: hasEditPermission,
       });
