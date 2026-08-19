@@ -13,6 +13,7 @@ export async function POST(req) {
       active,
       id_status,
       cost_center,
+      is_external,
       id_user_assigned,
       // Datos de tareas (opcionales)
       tasks,
@@ -35,7 +36,7 @@ export async function POST(req) {
     }
 
     // Determinar qué actualizar basándose en los flags o en la presencia de datos
-    const shouldUpdateProcess = updateProcess !== false && (process !== undefined || id_user_assigned !== undefined);
+    const shouldUpdateProcess = updateProcess !== false && (process !== undefined || id_user_assigned !== undefined || is_external !== undefined);
     const shouldUpdateTasks = updateTasks !== false && tasks && Array.isArray(tasks) && tasks.length > 0;
     const shouldUpdateFiles = updateFiles !== false && files && Array.isArray(files) && files.length > 0;
     const shouldUpdateFormFields = updateFormFields !== false && formFields && Array.isArray(formFields) && formFields.length > 0;
@@ -110,6 +111,12 @@ export async function POST(req) {
         if (cost_center !== undefined) {
           updateFields.push('cost_center = @cost_center');
           processRequest.input('cost_center', sql.NVarChar(1000), cost_center || null);
+        }
+
+        // Formulario externo (acceso sin login)
+        if (is_external !== undefined) {
+          updateFields.push('is_external = @is_external');
+          processRequest.input('is_external', sql.Bit, is_external ? 1 : 0);
         }
 
         // Ejecutar actualización del proceso si hay campos para actualizar

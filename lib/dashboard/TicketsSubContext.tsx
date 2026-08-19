@@ -11,14 +11,18 @@ import {
 } from 'react';
 import { usePathname } from 'next/navigation';
 
-export type TicketsSubView = 'operativo' | 'categorias';
+export type TicketsSubView = 'operativo' | 'categorias' | 'subcategorias' | 'actividades';
 
 export const TICKETS_SUB_URL: Record<TicketsSubView, string> = {
   operativo: '/dashboard/tickets',
   categorias: '/dashboard/tickets/categorias',
+  subcategorias: '/dashboard/tickets/subcategorias',
+  actividades: '/dashboard/tickets/actividades',
 };
 
 export function pathnameToTicketsSub(pathname: string): TicketsSubView {
+  if (pathname.includes('/tickets/actividades')) return 'actividades';
+  if (pathname.includes('/tickets/subcategorias')) return 'subcategorias';
   if (pathname.includes('/tickets/categorias')) return 'categorias';
   return 'operativo';
 }

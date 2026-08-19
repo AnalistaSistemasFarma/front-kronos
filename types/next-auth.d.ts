@@ -9,6 +9,8 @@ declare module 'next-auth' {
       email?: string | null;
       image?: string | null;
       role?: string;
+      /** NIT del proveedor (solo presente cuando role === 'supplier'). */
+      nit?: string;
       themePalette?: string;
       colorScheme?: string;
     };
@@ -18,6 +20,8 @@ declare module 'next-auth' {
 declare module 'next-auth/jwt' {
   interface JWT {
     role?: string;
+    /** NIT del proveedor (solo presente cuando role === 'supplier'). */
+    nit?: string;
     themePalette?: string;
     colorScheme?: string;
   }

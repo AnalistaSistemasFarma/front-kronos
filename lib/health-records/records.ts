@@ -87,6 +87,22 @@ export async function articuloExiste(session: SapSession, itemCode: string): Pro
   return (data.value?.length ?? 0) > 0;
 }
 
+/**
+ * Devuelve el nombre (ItemName) del articulo con ese ItemCode, o null si no
+ * existe en SAP. Se usa en el cargue masivo para, ademas de validar que el
+ * articulo exista, completar U_Descripcion (que la plantilla no trae).
+ */
+export async function getArticuloNombre(session: SapSession, itemCode: string): Promise<string | null> {
+  const filter = encodeURIComponent(`ItemCode eq '${escapeOData(itemCode)}'`);
+  const data = await sapGet<{ value?: { ItemName?: string }[] }>(
+    session,
+    `Items?$filter=${filter}&$select=ItemCode,ItemName&$top=1`
+  );
+  const item = data.value?.[0];
+  if (!item) return null;
+  return (item.ItemName ?? '').trim();
+}
+
 /** Elimina un registro sanitario por su clave (DocEntry). */
 export async function eliminarRegistro(
   session: SapSession,
