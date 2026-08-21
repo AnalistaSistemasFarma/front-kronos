@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import {
   Loader,
@@ -11,12 +12,17 @@ import {
   Badge,
   Group,
   Button,
+  Anchor,
 } from '@mantine/core';
-import { IconSearch, IconPlus } from '@tabler/icons-react';
+import { IconSearch, IconPlus, IconListCheck } from '@tabler/icons-react';
+import Link from 'next/link';
 import CreateDocumentModal from './CreateDocumentModal';
+import { isClosedState } from '../../../../lib/document-management/workflowStates';
 
 /**
- * Gestión Documental — listado de documentos VIGENTES (Fase 1).
+ * Gestión Documental — listado de documentos (Fase 1: carga inicial directo
+ * en "Vigente"; Fase 2: agrega el flujo de aprobación de 14 estados, ver
+ * /process/document-management/[id] y /process/document-management/mis-tareas).
  *
  * Consolida los documentos de TODAS las empresas a las que el usuario tiene
  * acceso de lectura, con el mismo patrón multiempresa de Registros
@@ -24,6 +30,13 @@ import CreateDocumentModal from './CreateDocumentModal';
  * /api/document-management/documents) que resuelven el permiso en el
  * servidor.
  */
+
+function statusColor(status: string): string {
+  if (status === 'Vigente') return 'green';
+  if (isClosedState(status)) return 'red';
+  if (status === 'Reasignación' || status === 'Reelaboración') return 'yellow';
+  return 'blue';
+}
 
 interface CompanyAccess {
   idCompany: number;
@@ -62,6 +75,7 @@ interface DocumentType {
 
 export default function DocumentManagementPage() {
   const { data: session } = useSession();
+  const router = useRouter();
 
   const [companies, setCompanies] = useState<CompanyAccess[]>([]);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
@@ -151,12 +165,22 @@ export default function DocumentManagementPage() {
   return (
     <div style={{ padding: '1rem' }}>
       <Group justify="space-between" align="center">
-        <h2 style={{ margin: 0 }}>Gestión Documental — Documentos vigentes</h2>
-        {writable.length > 0 && (
-          <Button leftSection={<IconPlus size={16} />} onClick={() => setCreateOpen(true)}>
-            Cargar documento
+        <h2 style={{ margin: 0 }}>Gestión Documental — Documentos</h2>
+        <Group gap="xs">
+          <Button
+            variant="default"
+            leftSection={<IconListCheck size={16} />}
+            component={Link}
+            href="/process/document-management/mis-tareas"
+          >
+            Mis tareas
           </Button>
-        )}
+          {writable.length > 0 && (
+            <Button leftSection={<IconPlus size={16} />} onClick={() => setCreateOpen(true)}>
+              Cargar documento
+            </Button>
+          )}
+        </Group>
       </Group>
 
       <CreateDocumentModal
@@ -207,15 +231,23 @@ export default function DocumentManagementPage() {
               </Table.Tr>
             ) : (
               filtered.map((d) => (
-                <Table.Tr key={d.id_document}>
+                <Table.Tr
+                  key={d.id_document}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => router.push(`/process/document-management/${d.id_document}`)}
+                >
                   <Table.Td>
                     <Badge variant="light">{d.company.company}</Badge>
                   </Table.Td>
-                  <Table.Td>{d.code}</Table.Td>
+                  <Table.Td>
+                    <Anchor component={Link} href={`/process/document-management/${d.id_document}`} size="sm">
+                      {d.code}
+                    </Anchor>
+                  </Table.Td>
                   <Table.Td>{d.title}</Table.Td>
                   <Table.Td>{d.documentType?.name ?? '-'}</Table.Td>
                   <Table.Td>
-                    <Badge color="green" variant="light">
+                    <Badge color={statusColor(d.current_status)} variant="light">
                       {d.current_status}
                     </Badge>
                   </Table.Td>
