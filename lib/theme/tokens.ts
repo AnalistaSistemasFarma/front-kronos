@@ -133,5 +133,9 @@ export function tokensToCssVariables(tokens: AppThemeTokens): Record<string, str
     '--surface': tokens.surface,
     '--surface-muted': tokens.surfaceRaised,
     '--border-subtle': tokens.border,
+    '--mantine-color-body': tokens.bg,
+    '--mantine-color-text': tokens.text,
+    '--mantine-color-dimmed': tokens.textMuted,
+    '--mantine-color-default-color': tokens.text,
   };
 }

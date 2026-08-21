@@ -6,8 +6,17 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Menu, Avatar, Loader, ActionIcon, UnstyledButton } from '@mantine/core';
-import { IconMoon, IconSun, IconMenu2, IconX } from '@tabler/icons-react';
-import { useState, useEffect, useContext } from 'react';
+import {
+  IconMoon,
+  IconSun,
+  IconMenu2,
+  IconX,
+  IconChevronDown,
+  IconChartBar,
+  IconClipboardList,
+  IconUserCheck,
+} from '@tabler/icons-react';
+import { useState, useEffect, useContext, useMemo } from 'react';
 import { useTheme } from './providers';
 import NotificationBell from './NotificationBell';
 import {
@@ -49,6 +58,7 @@ export default function Header() {
   const showDashboardNav = !loadingDashboardAdmin && isDashboardAdmin;
   const showSolicitanteNav = !loadingRoleNav && hasSolicitanteAccess;
   const showSolicitadoNav = !loadingRoleNav && hasSolicitadoAccess;
+  const [dashMenuOpen, setDashMenuOpen] = useState(false);
   const isSolicitanteActive = pathname.startsWith(solicitanteUrl);
   const isSolicitadoActive = pathname.startsWith(solicitadoUrl);
   const isRoleDashActive = isSolicitanteActive || isSolicitadoActive;
@@ -60,11 +70,6 @@ export default function Header() {
       : isDashboardAdmin
         ? DASHBOARD_TAB_URL.solicitudes
         : PROCESS_HUB_URL;
-
-  const roleLinkClass = (active: boolean) =>
-    `app-nav-link px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-      active ? 'app-nav-link--active' : ''
-    }`;
 
   const handleSignOut = () => {
     const search = typeof window !== 'undefined' ? window.location.search : '';
@@ -83,7 +88,61 @@ export default function Header() {
 
   useEffect(() => {
     setIsMobileMenuOpen(false);
+    setDashMenuOpen(false);
   }, [pathname]);
+
+  const dashboardItems = useMemo(() => {
+    const items: Array<{
+      key: 'admin' | 'solicitante' | 'solicitado';
+      label: string;
+      href: string;
+      active: boolean;
+      icon: typeof IconChartBar;
+    }> = [];
+
+    if (showDashboardNav) {
+      items.push({
+        key: 'admin',
+        label: 'Admin del equipo',
+        href: DASHBOARD_TAB_URL.solicitudes,
+        active: !isRoleDashActive && activeSection === 'dashboard',
+        icon: IconChartBar,
+      });
+    }
+    if (showSolicitanteNav) {
+      items.push({
+        key: 'solicitante',
+        label: 'Solicitudes',
+        href: solicitanteUrl,
+        active: isSolicitanteActive,
+        icon: IconClipboardList,
+      });
+    }
+    if (showSolicitadoNav) {
+      items.push({
+        key: 'solicitado',
+        label: 'Personal',
+        href: solicitadoUrl,
+        active: isSolicitadoActive,
+        icon: IconUserCheck,
+      });
+    }
+    return items;
+  }, [
+    showDashboardNav,
+    showSolicitanteNav,
+    showSolicitadoNav,
+    solicitanteUrl,
+    solicitadoUrl,
+    isSolicitanteActive,
+    isSolicitadoActive,
+    isRoleDashActive,
+    activeSection,
+  ]);
+
+  const isDashboardGroupActive = dashboardItems.some((item) => item.active);
+  const hasManyDashboards = dashboardItems.length > 1;
+  const singleDashboard = dashboardItems.length === 1 ? dashboardItems[0] : null;
 
   const goToSection = (section: AppSection) => {
     if (section === 'dashboard' && !isDashboardAdmin) return;
@@ -104,38 +163,24 @@ export default function Header() {
   const logoSrc =
     theme === 'dark' ? '/Logo_Principal_Blanco_Ancho.svg' : '/Logo_Principal.svg';
 
-  const roleNavLinks = (mobile = false) => (
-    <>
-      {showSolicitanteNav && (
-        <Link
-          href={solicitanteUrl}
-          prefetch
-          className={
-            mobile
-              ? `block w-full text-left text-base font-medium ${roleLinkClass(isSolicitanteActive)}`
-              : roleLinkClass(isSolicitanteActive)
-          }
-          onClick={() => setIsMobileMenuOpen(false)}
-        >
-          Dashboard solicitudes
-        </Link>
-      )}
-      {showSolicitadoNav && (
-        <Link
-          href={solicitadoUrl}
-          prefetch
-          className={
-            mobile
-              ? `block w-full text-left text-base font-medium ${roleLinkClass(isSolicitadoActive)}`
-              : roleLinkClass(isSolicitadoActive)
-          }
-          onClick={() => setIsMobileMenuOpen(false)}
-        >
-          Dashboard personal
-        </Link>
-      )}
-    </>
-  );
+  const dashTriggerClass = `app-nav-link app-nav-dash px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
+    isDashboardGroupActive ? 'app-nav-link--active' : ''
+  }`;
+
+  const openDashboardItem = (item: (typeof dashboardItems)[number]) => {
+    setDashMenuOpen(false);
+    setIsMobileMenuOpen(false);
+    if (item.key === 'admin') {
+      goToSection('dashboard');
+      return;
+    }
+    router.push(item.href);
+  };
+
+  const dashItemIcon = (item: (typeof dashboardItems)[number]) => {
+    const Icon = item.icon;
+    return <Icon size={18} stroke={1.8} className='app-macos-menu__icon' />;
+  };
 
   return (
     <>
@@ -190,43 +235,77 @@ export default function Header() {
             </div>
 
             <nav className='hidden md:flex flex-1 justify-center'>
-              <div className='flex items-center space-x-4'>
-                {sectionCtx ? (
-                  <>
-                    {showDashboardNav && (
-                      <button
-                        type='button'
-                        className={navLinkClass('dashboard')}
-                        onClick={() => goToSection('dashboard')}
-                      >
-                        Dashboard Admin
-                      </button>
-                    )}
+              <div className='flex items-center gap-1'>
+                {dashboardItems.length > 0 &&
+                  (hasManyDashboards ? (
+                    <Menu
+                      opened={dashMenuOpen}
+                      onChange={setDashMenuOpen}
+                      position='bottom-start'
+                      offset={6}
+                      withinPortal
+                      shadow='none'
+                      radius={12}
+                      width={240}
+                      classNames={{ dropdown: 'app-macos-menu', item: 'app-macos-menu__item' }}
+                      styles={{
+                        dropdown: {
+                          background: 'transparent',
+                          backdropFilter: 'blur(40px) saturate(180%)',
+                          WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+                          boxShadow: 'none',
+                        },
+                      }}
+                    >
+                      <Menu.Target>
+                        <button
+                          type='button'
+                          className={dashTriggerClass}
+                          aria-haspopup='menu'
+                          aria-expanded={dashMenuOpen}
+                        >
+                          Dashboard
+                          <IconChevronDown
+                            size={13}
+                            className={`app-nav-chevron ${dashMenuOpen ? 'app-nav-chevron--open' : ''}`}
+                            aria-hidden
+                          />
+                        </button>
+                      </Menu.Target>
+                      <Menu.Dropdown>
+                        {dashboardItems.map((item) => (
+                          <Menu.Item
+                            key={item.key}
+                            leftSection={dashItemIcon(item)}
+                            onClick={() => openDashboardItem(item)}
+                            data-active={item.active || undefined}
+                          >
+                            {item.label}
+                          </Menu.Item>
+                        ))}
+                      </Menu.Dropdown>
+                    </Menu>
+                  ) : (
                     <button
                       type='button'
-                      className={navLinkClass('process')}
-                      onClick={() => goToSection('process')}
+                      className={dashTriggerClass}
+                      onClick={() => singleDashboard && openDashboardItem(singleDashboard)}
                     >
-                      Procesos
+                      Dashboard
                     </button>
-                    {roleNavLinks(false)}
-                  </>
+                  ))}
+                {sectionCtx ? (
+                  <button
+                    type='button'
+                    className={navLinkClass('process')}
+                    onClick={() => goToSection('process')}
+                  >
+                    Procesos
+                  </button>
                 ) : (
-                  <>
-                    {showDashboardNav && (
-                      <Link
-                        href={DASHBOARD_TAB_URL.solicitudes}
-                        prefetch
-                        className={navLinkClass('dashboard')}
-                      >
-                        Dashboard Admin
-                      </Link>
-                    )}
-                    <Link href={PROCESS_HUB_URL} prefetch className={navLinkClass('process')}>
-                      Procesos
-                    </Link>
-                    {roleNavLinks(false)}
-                  </>
+                  <Link href={PROCESS_HUB_URL} prefetch className={navLinkClass('process')}>
+                    Procesos
+                  </Link>
                 )}
               </div>
             </nav>
@@ -245,7 +324,14 @@ export default function Header() {
               {status === 'loading' ? (
                 <Loader size='sm' />
               ) : session ? (
-                <Menu>
+                <Menu
+                  position='bottom-end'
+                  offset={6}
+                  withinPortal
+                  shadow='none'
+                  radius={12}
+                  classNames={{ dropdown: 'app-macos-menu', item: 'app-macos-menu__item' }}
+                >
                   <Menu.Target>
                     <button
                       className='flex items-center space-x-2 px-3 py-2 rounded-md transition-colors hover:opacity-90'
@@ -289,48 +375,69 @@ export default function Header() {
         aria-label='Navegación móvil'
       >
         <nav className='px-4 py-4 space-y-2'>
-          {sectionCtx ? (
-            <>
-              {showDashboardNav && (
+          {dashboardItems.length > 0 && (
+            <div>
+              {hasManyDashboards ? (
+                <>
+                  <button
+                    type='button'
+                    className={`flex w-full items-center justify-between text-left text-base font-medium ${dashTriggerClass}`}
+                    aria-expanded={dashMenuOpen}
+                    onClick={() => setDashMenuOpen((open) => !open)}
+                  >
+                    Dashboard
+                    <IconChevronDown
+                      size={16}
+                      className={`app-nav-chevron ${dashMenuOpen ? 'app-nav-chevron--open' : ''}`}
+                      aria-hidden
+                    />
+                  </button>
+                  {dashMenuOpen && (
+                    <ul className='app-macos-menu app-macos-menu--inline'>
+                      {dashboardItems.map((item) => (
+                        <li key={item.key}>
+                          <button
+                            type='button'
+                            className='app-macos-menu__item'
+                            data-active={item.active || undefined}
+                            onClick={() => openDashboardItem(item)}
+                          >
+                            {dashItemIcon(item)}
+                            {item.label}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : (
                 <button
                   type='button'
-                  className={`block w-full text-left text-base font-medium ${navLinkClass('dashboard')}`}
-                  onClick={() => goToSection('dashboard')}
+                  className={`block w-full text-left text-base font-medium ${dashTriggerClass}`}
+                  onClick={() => singleDashboard && openDashboardItem(singleDashboard)}
                 >
-                  Dashboard Admin
+                  Dashboard
                 </button>
               )}
-              <button
-                type='button'
-                className={`block w-full text-left text-base font-medium ${navLinkClass('process')}`}
-                onClick={() => goToSection('process')}
-              >
-                Procesos
-              </button>
-              {roleNavLinks(true)}
-            </>
+            </div>
+          )}
+          {sectionCtx ? (
+            <button
+              type='button'
+              className={`block w-full text-left text-base font-medium ${navLinkClass('process')}`}
+              onClick={() => goToSection('process')}
+            >
+              Procesos
+            </button>
           ) : (
-            <>
-              {showDashboardNav && (
-                <Link
-                  href={DASHBOARD_TAB_URL.solicitudes}
-                  prefetch
-                  className={`block px-3 py-2 rounded-md text-base font-medium ${navLinkClass('dashboard')}`}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  Dashboard Admin
-                </Link>
-              )}
-              <Link
-                href={PROCESS_HUB_URL}
-                prefetch
-                className={`block px-3 py-2 rounded-md text-base font-medium ${navLinkClass('process')}`}
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                Procesos
-              </Link>
-              {roleNavLinks(true)}
-            </>
+            <Link
+              href={PROCESS_HUB_URL}
+              prefetch
+              className={`block px-3 py-2 rounded-md text-base font-medium ${navLinkClass('process')}`}
+              onClick={() => setIsMobileMenuOpen(false)}
+            >
+              Procesos
+            </Link>
           )}
         </nav>
       </div>

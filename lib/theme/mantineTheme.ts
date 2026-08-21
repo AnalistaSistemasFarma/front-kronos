@@ -35,25 +35,33 @@ const makeShared = (primaryColor: string) => ({
 });
 
 /** Construye el tema claro inyectando el color primario de la paleta activa */
-export function buildLightTheme(primaryColor: string = 'blue') {
+export function buildLightTheme(
+  primaryColor: string = 'blue',
+  customColors?: MantineColorsTuple,
+) {
   return createTheme({
     ...makeShared(primaryColor),
     white: '#ffffff',
     black: '#1a1d21',
     colors: {
       dark: appDark,
+      ...(customColors ? { custom: customColors } : {}),
     },
   });
 }
 
 /** Construye el tema oscuro inyectando el color primario de la paleta activa */
-export function buildDarkTheme(primaryColor: string = 'blue') {
+export function buildDarkTheme(
+  primaryColor: string = 'blue',
+  customColors?: MantineColorsTuple,
+) {
   return createTheme({
     ...makeShared(primaryColor),
     white: '#f0f4ff',
     black: '#121824',
     colors: {
       dark: appDark,
+      ...(customColors ? { custom: customColors } : {}),
     },
   });
 }
