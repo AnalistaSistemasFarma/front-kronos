@@ -473,10 +473,16 @@ model CatalogField {
 // inicial histórica de documentos, directo en estado "Vigente" (sin pasar
 // por flujo de aprobación todavía). Los 14 estados del ciclo de vida
 // documental (En creación, ... Eliminado) y el flujo de tareas que los
-// mueve son Fase 2: se instanciarán como tareas del motor de workflow YA
+// mueve son Fase 2: se instanciaron como tareas del motor de workflow YA
 // existente en este repo, que vive en SQL CRUDO (tablas process_category /
-// task_process_category / task_request_general, ver app/api/requests-general
-// y lib/workflow) y NO está modelado en este schema.
+// task_process_category / requests_general / task_request_general, ver
+// app/api/requests-general y lib/workflow) y NO está modelado en este
+// schema — se referencia por Int suelto (ver DocumentVersion.id_request_general
+// más abajo, mismo patrón que Document.id_process). El grafo de qué acción
+// mueve de un estado a otro vive en código (lib/document-management/
+// workflowStates.ts), no en estas tablas: ver el comentario de ese archivo
+// para el porqué (el motor genérico solo avanza linealmente por
+// display_order y no soporta ramas decididas en vivo ni retrocesos).
 //
 // Decisión de modelado (documentada también en el PR): estas 3 tablas SÍ
 // van en Prisma, no en SQL crudo, por 3 razones:
@@ -577,6 +583,13 @@ model DocumentVersion {
   created_by           String   @db.NVarChar(1000)
   created_at           DateTime @default(now())
   comments             String?  @db.NVarChar(1000)
+  // Fase 2 — Referencia BLANDA a requests_general.id (motor SQL crudo de
+  // "solicitudes generales", ver nota de módulo arriba y lib/document-management/
+  // workflowEngine.ts). Null mientras la versión todavía no tiene flujo de
+  // aprobación arrancado (por ejemplo, versiones migradas directo a "Vigente"
+  // en la carga inicial de Fase 1). Sin relation(): esa tabla no está modelada
+  // en Prisma, igual criterio que Document.id_process.
+  id_request_general  Int?
 
   document Document @relation(fields: [id_document], references: [id_document], onDelete: Cascade)
 
