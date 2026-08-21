@@ -67,6 +67,7 @@ model User {
   userTypesAuthorizations UserTypesAuthorization[]
   sessions                Session[]
   auditLogs               UserAuditLog[]
+  documentsOwned          Document[]               @relation("DocumentOwner")
 
   @@map("user")
 }
@@ -88,6 +89,7 @@ model Company {
   sap_endpoints   sap_endpoints[]
   cargoAliases    CargoAlias[]
   cargoJerarquias CargoJerarquia[]
+  documents       Document[]
 
   @@map("company")
 }
@@ -464,5 +466,121 @@ model CatalogField {
   source            CatalogSource @relation(fields: [id_catalog_source], references: [id_catalog_source], onDelete: Cascade)
 
   @@map("catalog_field")
+}
+
+// ===================================================================
+// Módulo Gestión Documental (Fase 1) — infraestructura para la carga
+// inicial histórica de documentos, directo en estado "Vigente" (sin pasar
+// por flujo de aprobación todavía). Los 14 estados del ciclo de vida
+// documental (En creación, ... Eliminado) y el flujo de tareas que los
+// mueve son Fase 2: se instanciarán como tareas del motor de workflow YA
+// existente en este repo, que vive en SQL CRUDO (tablas process_category /
+// task_process_category / task_request_general, ver app/api/requests-general
+// y lib/workflow) y NO está modelado en este schema.
+//
+// Decisión de modelado (documentada también en el PR): estas 3 tablas SÍ
+// van en Prisma, no en SQL crudo, por 3 razones:
+//   1. Es el único mecanismo de este repo con migraciones versionadas y
+//      aplicadas por CI/CD (ver .github/workflows, "prisma generate" en el
+//      pase a producción); las tablas del motor de solicitudes generales
+//      preexisten en la BD y no se crean desde ninguna migración de este
+//      repo, así que ese camino no es reproducible para tablas NUEVAS.
+//   2. Ya hay precedente de catálogos nuevos en Prisma que se integran con
+//      el motor SQL crudo por REFERENCIA BLANDA (un Int sin relation()):
+//      ver SavedView.id_process / CatalogSource.id_process arriba. Se repite
+//      el mismo patrón aquí con Document.id_process.
+//   3. Cuando llegue la Fase 2, basta con seguir enlazando por ese Int
+//      (id_process → process_category.id) desde código servidor con SQL
+//      crudo (mssqlPool), igual que ya hacen otros módulos Prisma de este
+//      repo (p.ej. lib/access-control.ts usa prisma.$queryRaw sobre [user]).
+//
+// Acceso multiempresa: NO se crea una tabla de roles documentales nueva
+// (autor/revisor/aprobador). Se reusa subprocess_user_company con dos
+// subprocesos dedicados (lectura / escritura), exactamente igual que el
+// módulo de Registros Sanitarios — ver lib/document-management/access.ts.
+// ===================================================================
+
+// Catálogo de tipos de documento. Es GLOBAL (no por empresa): la nomenclatura
+// de políticas/procedimientos aplica igual en todo el grupo.
+model DocumentType {
+  id_document_type Int        @id @default(autoincrement())
+  name             String     @db.NVarChar(150)
+  // Prefijo de nomenclatura usado al construir Document.code (p.ej. "POL", "PRO").
+  code_prefix      String     @db.NVarChar(20)
+  // Proceso GGC asociado (p.ej. "GGC-08-PT-012"). Texto libre: todavía no hay
+  // catálogo de procesos GGC modelado en este repo.
+  ggc_process      String?    @db.NVarChar(150)
+  is_active        Boolean    @default(true)
+  created_at       DateTime   @default(now())
+  documents        Document[]
+
+  @@unique([code_prefix])
+  @@map("document_type")
+}
+
+// Documento vigente (encabezado). Multiempresa vía id_company. La carga
+// inicial (Fase 1) crea el Document + su primera DocumentVersion ya en
+// estado "Vigente"; no hay todavía transición de estados.
+model Document {
+  id_document        Int       @id @default(autoincrement())
+  code               String    @db.NVarChar(50)
+  title              String    @db.NVarChar(300)
+  id_document_type   Int
+  id_company         Int
+  // Referencia BLANDA a process_category (motor SQL crudo, ver nota de
+  // módulo arriba). Sin relation(): esa tabla no está modelada en Prisma.
+  // Null = el documento aún no está ligado a un proceso de aprobación.
+  id_process         Int?
+  owner_user_id      String    @db.NVarChar(1000)
+  due_review_date    DateTime?
+  is_restricted      Boolean   @default(false)
+  current_status     String    @default("Vigente") @db.NVarChar(30)
+  // Referencia BLANDA a DocumentVersion.id_document_version (sin relation()):
+  // declararla como relación real crearía una segunda ruta de FK entre
+  // Document y DocumentVersion además de la relación 1:N `versions`
+  // (cascade), lo que SQL Server rechaza como ciclo de FK. Se mantiene
+  // consistente desde la capa de aplicación (lib/document-management), justo
+  // después de insertar la versión.
+  current_version_id Int?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  documentType DocumentType      @relation(fields: [id_document_type], references: [id_document_type], onDelete: NoAction, onUpdate: NoAction)
+  company      Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  owner        User              @relation("DocumentOwner", fields: [owner_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  versions     DocumentVersion[]
+
+  @@unique([id_company, code])
+  @@index([id_company, current_status])
+  @@index([id_document_type])
+  @@map("document")
+}
+
+// Una fila por versión subida a OneDrive. La migración histórica desde el
+// SGD (Fase 1, paso posterior a esta infraestructura) solo trae la versión
+// VIGENTE de cada documento como version_number = 1; el historial completo
+// de versiones anteriores queda en el SGD y no se migra.
+model DocumentVersion {
+  id_document_version Int      @id @default(autoincrement())
+  id_document          Int
+  version_number       Int
+  status               String   @default("Vigente") @db.NVarChar(30)
+  // Id del item en Microsoft Graph (drive item), para poder descargarlo /
+  // reemplazarlo sin volver a resolver la ruta.
+  onedrive_item_id     String?  @db.NVarChar(300)
+  // Ruta completa dentro del drive:
+  // GESTION-DOCUMENTAL/<EMPRESA>/<TIPO>/<CODIGO>/v<version>/<archivo>
+  onedrive_path        String   @db.NVarChar(1000)
+  // Referencia BLANDA a User.id (sin relation() para no sumar una segunda FK
+  // Document/DocumentVersion → User en la misma migración manual; ver nota
+  // de owner_user_id arriba, que sí es relación real vía "DocumentOwner").
+  created_by           String   @db.NVarChar(1000)
+  created_at           DateTime @default(now())
+  comments             String?  @db.NVarChar(1000)
+
+  document Document @relation(fields: [id_document], references: [id_document], onDelete: Cascade)
+
+  @@unique([id_document, version_number])
+  @@map("document_version")
 }
 
