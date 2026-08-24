@@ -2,6 +2,7 @@
 
 import { MantineProvider } from '@mantine/core';
 import { SessionProvider, useSession } from 'next-auth/react';
+import { usePathname } from 'next/navigation';
 import {
   ReactNode,
   createContext,
@@ -13,6 +14,8 @@ import {
 import {
   APP_THEME_STORAGE_KEY,
   applyAppThemeToDocument,
+  applyLandingAppearanceToDocument,
+  isPublicLandingPath,
   readStoredAppTheme,
   type AppTheme,
 } from '../lib/theme/constants';
@@ -25,6 +28,10 @@ import {
   readStoredPalette,
   resolvePrimaryColor,
 } from '../lib/theme/palettes';
+import {
+  mantineTupleFromHex,
+  parseCustomPaletteHex,
+} from '../lib/theme/customPalette';
 import { UserProvider } from '../lib/user-context';
 import { SapProvider } from '../lib/sap-context';
 import {
@@ -32,6 +39,7 @@ import {
   buildDarkTheme,
   buildLightTheme,
 } from '../lib/theme/mantineTheme';
+import { runThemeTransition } from '../lib/theme/motion';
 
 interface ThemeContextType {
   theme: AppTheme;
@@ -56,9 +64,13 @@ export function useTheme() {
 
 function ThemeProvider({ children }: { children: ReactNode }) {
   const { data: session } = useSession();
+  const pathname = usePathname();
+  const isLanding = isPublicLandingPath(pathname);
   const [theme, setTheme] = useState<AppTheme>('light');
   const [palette, setPaletteState] = useState<string>(DEFAULT_PALETTE_KEY);
   const [mounted, setMounted] = useState(false);
+  const visualTheme: AppTheme = isLanding ? 'light' : theme;
+  const visualPalette = isLanding ? DEFAULT_PALETTE_KEY : palette;
 
   // Estado inicial desde localStorage (antes de que llegue la sesión)
   useEffect(() => {
@@ -83,31 +95,48 @@ function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem(APP_THEME_STORAGE_KEY, theme);
+    if (isLanding) {
+      applyLandingAppearanceToDocument();
+      return;
+    }
+    document.documentElement.removeAttribute('data-landing');
     applyAppThemeToDocument(theme);
-  }, [theme, mounted]);
+  }, [theme, mounted, isLanding]);
 
   // Debe correr DESPUÉS del efecto de tema: el tinte/acento de la paleta
   // sobrescribe las variables base de superficie/acento por modo.
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem(PALETTE_STORAGE_KEY, palette);
+    if (isLanding) {
+      applyLandingAppearanceToDocument();
+      return;
+    }
     applyPaletteToDocument(palette);
     applyPaletteAppearanceToDocument(palette, theme);
-  }, [palette, theme, mounted]);
+  }, [palette, theme, mounted, isLanding]);
 
-  const setThemeMode = (mode: AppTheme) => setTheme(mode);
+  const setThemeMode = (mode: AppTheme) => {
+    if (mode === theme) return;
+    runThemeTransition(() => setTheme(mode));
+  };
   const toggleTheme = () => {
-    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+    runThemeTransition(() => {
+      setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+    });
   };
   const setPalette = (key: string) => {
     if (isValidPaletteKey(key)) setPaletteState(key);
   };
 
-  const primaryColor = resolvePrimaryColor(palette);
-  const mantineTheme = useMemo(
-    () => (theme === 'dark' ? buildDarkTheme(primaryColor) : buildLightTheme(primaryColor)),
-    [theme, primaryColor],
-  );
+  const primaryColor = resolvePrimaryColor(visualPalette);
+  const mantineTheme = useMemo(() => {
+    const hex = parseCustomPaletteHex(visualPalette);
+    const customColors = hex ? mantineTupleFromHex(hex) : undefined;
+    return visualTheme === 'dark'
+      ? buildDarkTheme(primaryColor, customColors)
+      : buildLightTheme(primaryColor, customColors);
+  }, [visualTheme, primaryColor, visualPalette]);
 
   return (
     <ThemeContext.Provider
@@ -115,7 +144,7 @@ function ThemeProvider({ children }: { children: ReactNode }) {
     >
       <MantineProvider
         theme={mantineTheme}
-        forceColorScheme={theme}
+        forceColorScheme={visualTheme}
         cssVariablesResolver={appCssVariablesResolver}
         defaultColorScheme='light'
       >
