@@ -37,9 +37,14 @@ export function chartLegendFont(compact = false) {
   };
 }
 
+/**
+ * DPR vivo del navegador (incluye zoom).
+ * NO asignar esto a Chart.options.devicePixelRatio: si se fija, Chart.js
+ * deja de leer window.devicePixelRatio y el canvas queda borroso al hacer zoom.
+ */
 export function getChartDevicePixelRatio(): number {
   if (typeof window === 'undefined') return 1;
-  return Math.min(window.devicePixelRatio || 1, 2);
+  return window.devicePixelRatio || 1;
 }
 
 export function baseChartOptions<T extends 'bar' | 'line' | 'pie' | 'doughnut'>(
@@ -48,7 +53,6 @@ export function baseChartOptions<T extends 'bar' | 'line' | 'pie' | 'doughnut'>(
   return {
     responsive: true,
     maintainAspectRatio: false,
-    devicePixelRatio: getChartDevicePixelRatio(),
     animation: { duration: 750, easing: 'easeOutQuart' },
     plugins: {
       legend: {

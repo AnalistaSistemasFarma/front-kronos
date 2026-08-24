@@ -1,3 +1,9 @@
+import {
+  appearanceFromHex,
+  isCustomPaletteKey,
+  parseCustomPaletteHex,
+} from './customPalette';
+
 /**
  * Catálogo de paletas de color seleccionables por el usuario.
  * Cada paleta mapea a un color base de Mantine (primaryColor) y expone un
@@ -38,11 +44,14 @@ const PALETTE_KEYS = PALETTES.map((p) => p.key);
 export const PALETTE_KEY_SET: ReadonlySet<string> = new Set(PALETTE_KEYS);
 
 export function isValidPaletteKey(key: unknown): key is string {
-  return typeof key === 'string' && PALETTE_KEY_SET.has(key);
+  if (typeof key !== 'string') return false;
+  if (PALETTE_KEY_SET.has(key)) return true;
+  return isCustomPaletteKey(key);
 }
 
 /** Resuelve una clave de paleta a su color base de Mantine, con fallback al default */
 export function resolvePrimaryColor(key: unknown): string {
+  if (typeof key === 'string' && parseCustomPaletteHex(key)) return 'custom';
   const found = PALETTES.find((p) => p.key === key);
   if (found) return found.primaryColor;
   const fallback = PALETTES.find((p) => p.key === DEFAULT_PALETTE_KEY);
@@ -131,7 +140,12 @@ export const PALETTE_APPEARANCE: Record<string, { light: PaletteVars; dark: Pale
 
 /** Devuelve las variables de apariencia de una paleta+modo, con fallback al default */
 export function getPaletteAppearance(key: unknown, mode: PaletteMode): PaletteVars {
-  const entry = PALETTE_APPEARANCE[isValidPaletteKey(key) ? key : DEFAULT_PALETTE_KEY];
+  const customHex = typeof key === 'string' ? parseCustomPaletteHex(key) : null;
+  if (customHex) {
+    return appearanceFromHex(customHex)[mode];
+  }
+  const entry =
+    PALETTE_APPEARANCE[typeof key === 'string' && PALETTE_KEY_SET.has(key) ? key : DEFAULT_PALETTE_KEY];
   return entry[mode];
 }
 
