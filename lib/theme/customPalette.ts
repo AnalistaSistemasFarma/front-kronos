@@ -20,7 +20,8 @@ export function toCustomPaletteKey(hex: string): string | null {
 }
 
 function tuneAccent(hex: string, bg: string, mode: PaletteMode): string {
-  let [h, s, l] = hexToHsl(hex);
+  const [h, ...hsl] = hexToHsl(hex);
+  let [s, l] = hsl;
   s = Math.max(38, Math.min(82, s));
   if (mode === 'light') {
     l = Math.min(l, 42);
