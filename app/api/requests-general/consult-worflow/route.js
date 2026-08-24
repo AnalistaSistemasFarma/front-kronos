@@ -31,9 +31,10 @@ export async function GET(req) {
     queryCategories += ` ORDER BY cr.category`;
 
     const queryProcessCategories = `
-      SELECT 
+      SELECT
         upcrg.id_process_category as id_process,
         pc.process,
+        pc.is_external,
         u.id AS id_assigned,
         u.name AS assigned_process
       FROM user_process_category_request_general upcrg

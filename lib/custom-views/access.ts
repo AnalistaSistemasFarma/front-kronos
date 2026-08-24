@@ -8,8 +8,21 @@ import { getAssignedSubprocessIdsForUser } from '../process/subprocessAssignment
 
 export const CREATE_SUBPROCESS_NAME = 'Constructor de Vistas';
 export const CUSTOM_VIEWS_PROCESS_ID = 13;
-/** Tope global de filas, acota el row_limit de cada vista. */
+/** Tope global de filas, acota el row_limit guardado de cada vista (al guardar). */
 export const MAX_VIEW_ROWS = 5000;
+
+/**
+ * Tope de SEGURIDAD para el EXPORT (no para el display). El display pagina del
+ * lado servidor sin tope; el export trae TODO hasta este techo para no reventar
+ * memoria. Si el resultado lo supera, se trunca y se avisa. Ver §5.4.
+ */
+export const EXPORT_MAX_ROWS = 50000;
+
+/** Tamaño de página por defecto del visor de una vista publicada. */
+export const DEFAULT_PAGE_SIZE = 50;
+
+/** Tamaño de página máximo aceptado (evita pedir páginas gigantes). */
+export const MAX_PAGE_SIZE = 200;
 
 /** URL del subproceso individual de una vista publicada (galería/consulta). */
 export function viewSubprocessUrl(slug: string): string {
@@ -92,6 +105,6 @@ export async function uniqueSlug(name: string, excludeId?: number): Promise<stri
 
 /** Valida que company_column sea un identificador SQL simple (anti-inyección). */
 export function isValidColumnRef(col: string): boolean {
-  // eslint-disable-next-line security/detect-unsafe-regex -- patrón lineal acotado (validador de identificador SQL)
+  // eslint-disable-next-line security/detect-unsafe-regex -- regex lineal simple de identificador SQL (opcional .columna), entrada acotada, sin backtracking catastrófico
   return /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(col.trim());
 }

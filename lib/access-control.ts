@@ -49,20 +49,19 @@ export async function checkAdminPrivileges(userEmail: string): Promise<boolean> 
       return true;
     }
 
-    const adminSubprocess = await prisma.subprocessUserCompany.findFirst({
-      where: {
-        companyUser: {
-          user: {
-            email,
-          },
-        },
-        subprocess: {
-          subprocess_url: ADMIN_USERS_SUBPROCESS_URL,
-        },
-      },
-    });
+    // Misma fuente que Administración → Usuarios (subprocess_user_company)
+    const rows = await prisma.$queryRaw<Array<{ id: number }>>`
+      SELECT TOP 1 suc.id_subprocess_user_company AS id
+      FROM [subprocess_user_company] suc
+      INNER JOIN [company_user] cu ON cu.id_company_user = suc.id_company_user
+      INNER JOIN [user] u ON u.id = cu.id_user
+      INNER JOIN [subprocess] s ON s.id_subprocess = suc.id_subprocess
+      WHERE LOWER(LTRIM(RTRIM(u.email))) = LOWER(LTRIM(RTRIM(${email})))
+        AND LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, '')))) =
+            LOWER(LTRIM(RTRIM(${ADMIN_USERS_SUBPROCESS_URL})))
+    `;
 
-    return !!adminSubprocess;
+    return Boolean(rows[0]?.id);
   } catch (error) {
     console.error('Error checking admin privileges:', error);
     return false;

@@ -35,6 +35,7 @@ import {
   IconMoon,
 } from '@tabler/icons-react';
 import { useTheme } from '../../../components/providers';
+import { CustomColorPicker } from '../../../components/theme/CustomColorPicker';
 import { PALETTES } from '../../../lib/theme/palettes';
 
 interface UserProfile {
@@ -247,6 +248,10 @@ export default function ProfileSettingsPage() {
     void persistAppearance(key, theme);
   };
 
+  const handlePalettePreview = (key: string) => {
+    setPalette(key);
+  };
+
   const handleColorSchemeChange = (value: string) => {
     const mode: 'light' | 'dark' = value === 'dark' ? 'dark' : 'light';
     setThemeMode(mode); // se aplica al instante en toda la app
@@ -396,6 +401,12 @@ export default function ProfileSettingsPage() {
                   })}
                 </SimpleGrid>
               </div>
+
+              <CustomColorPicker
+                palette={palette}
+                onSelect={handlePaletteSelect}
+                onPreview={handlePalettePreview}
+              />
 
               <div>
                 <Text fw={600} size='sm' mb={4}>

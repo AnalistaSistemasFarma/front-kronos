@@ -8,10 +8,10 @@ import {
   uniqueSlug,
   isValidColumnRef,
   viewSubprocessUrl,
-  CUSTOM_VIEWS_PROCESS_ID,
   MAX_VIEW_ROWS,
 } from '../../../lib/custom-views/access';
 import { normalizeFilterDefs, type FilterDef } from '../../../lib/custom-views/filters';
+import { resolveModuleProcessId } from '../../../lib/custom-views/modules';
 
 export const dynamic = 'force-dynamic';
 
@@ -169,6 +169,23 @@ export async function POST(req: Request) {
       );
     }
 
+    // Módulo de primer nivel donde se ubica la vista (existente, nuevo o default).
+    let idProcess: number;
+    try {
+      idProcess = await resolveModuleProcessId(prisma, {
+        targetProcessId: body.targetProcessId,
+        newCategoryName: body.newCategoryName,
+      });
+    } catch (moduleError) {
+      return NextResponse.json(
+        {
+          error: 'No se pudo resolver el módulo destino.',
+          detail: moduleError instanceof Error ? moduleError.message : String(moduleError),
+        },
+        { status: 400 }
+      );
+    }
+
     const slug = await uniqueSlug(name);
 
     const created = await prisma.savedView.create({
@@ -177,7 +194,7 @@ export async function POST(req: Request) {
         slug,
         description,
         sql_text: sqlText,
-        id_process: CUSTOM_VIEWS_PROCESS_ID,
+        id_process: idProcess,
         scope_mode: scopeMode,
         company_column: scopeMode === 'company' ? companyColumn : null,
         icon,
@@ -216,7 +233,7 @@ export async function POST(req: Request) {
         const sub = await prisma.subprocess.create({
           data: {
             subprocess: name,
-            id_process: CUSTOM_VIEWS_PROCESS_ID,
+            id_process: idProcess,
             subprocess_url: url,
           },
           select: { id_subprocess: true },
