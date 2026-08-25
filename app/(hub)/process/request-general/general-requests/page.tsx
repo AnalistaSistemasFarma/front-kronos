@@ -92,6 +92,10 @@ interface CategoryData {
   category: string;
 }
 
+interface CategoriesNew {
+  category: string;
+}
+
 interface ProcessCategoryData {
   id_process: number;
   process: string;
@@ -100,11 +104,17 @@ interface ProcessCategoryData {
   email?: string;
 }
 
+interface ProcessCategoriesNew {
+  process: string;
+}
+
 interface ConsultResponse {
   companies: CompanyData[];
   categories: CategoryData[];
   processCategories: ProcessCategoryData[];
   assignedUsers: { id: string; name: string }[];
+  categoriesNew: CategoriesNew[];
+  processCategoriesNew: ProcessCategoriesNew[];
 }
 
 function RequestGeneralPage() {
@@ -134,6 +144,7 @@ function RequestGeneralPage() {
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
   const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
+  const [processes, setProcesses] = useState<{ value: string; label: string }[]>([]);
   const [processCategories, setProcessCategories] = useState<
     { value: string; label: string; id_category_request: number; email?: string }[]
   >([]);
@@ -153,6 +164,8 @@ function RequestGeneralPage() {
     date_from: '',
     date_to: '',
     assigned_to: '',
+    category: '',
+    process: '',
   });
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -276,6 +289,8 @@ function RequestGeneralPage() {
       if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
       if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
       if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
+      if (filtersToUse.process) params.append('process', filtersToUse.process);
+      if (filtersToUse.category) params.append('category', filtersToUse.category);
 
       const url = `/api/requests-general/general-requests?${params.toString()}`;
 
@@ -389,13 +404,11 @@ function RequestGeneralPage() {
           ...prev,
           company: "3",
         }));
-        setCategories(data.categories.map((c) => ({ value: c.id.toString(), label: c.category })));
-        setProcessCategories(
-          data.processCategories.map((p) => ({
-            value: p.id_process.toString(),
-            label: p.process,
-            id_category_request: p.id_category_request,
-            email: p.email,
+        setCategories(data.categoriesNew.map((c) => ({ value: c.category, label: c.category })));
+        setProcesses(
+          data.processCategoriesNew.map((p) => ({
+            value: p.process.toString(),
+            label: p.process
           }))
         );
         if (data.assignedUsers) {
@@ -751,6 +764,29 @@ function RequestGeneralPage() {
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Categoria'
+                    placeholder='Todas las categorias'
+                    clearable
+                    data={categories}
+                    value={filters.category}
+                    onChange={(value) => handleFilterChange('category', value || '')}
+                    leftSection={<IconBuilding size={16} />}
+                    data-testid='category-filter'
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Proceso'
+                    placeholder='Todas los procesos'
+                    clearable
+                    data={processes}
+                    value={filters.process}
+                    onChange={(value) => handleFilterChange('process', value || '')}
+                    leftSection={<IconBuilding size={16} />}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <TextInput
                     label='Fecha Desde'
                     type='date'
@@ -794,6 +830,8 @@ function RequestGeneralPage() {
                       date_from: '',
                       date_to: '',
                       assigned_to: '',
+                      process: '',
+                      category: '',
                     };
                     setFilters(clearedFilters);
 

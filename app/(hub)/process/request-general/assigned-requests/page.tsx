@@ -381,10 +381,10 @@ function RequestBoard() {
           console.error('Frontend - fetchCompanies: companies data is not an array or missing');
           setCompany([]);
         }
-        if (data.processCategories && Array.isArray(data.processCategories)) {
+        if (data.processCategoriesNew && Array.isArray(data.processCategoriesNew)) {
           setProcess(
-            data.processCategories.map((sub: { id_process: number; process: string }) => ({
-              value: sub.id_process.toString(),
+            data.processCategoriesNew.map((sub: { process: string }) => ({
+              value: sub.process,
               label: sub.process,
             }))
           );

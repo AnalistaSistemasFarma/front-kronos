@@ -157,7 +157,7 @@ export async function GET(req) {
     }
 
     if (process) {
-      query += ` AND pc.id = @process`;
+      query += ` AND pc.process LIKE '%' + @process + '%'`;
     }
 
     query += ` ORDER BY rg.id DESC`;
@@ -173,7 +173,7 @@ export async function GET(req) {
     if (date_to)
       request.input('date_to', sql.DateTime, new Date(date_to + 'T23:59:59'));
     if (assigned_to) request.input('assigned_to', sql.NVarChar, assigned_to);
-    if (process) request.input('process', sql.Int, parseInt(process));
+    if (process) request.input('process', sql.VarChar, process);
 
     const result = await request.query(query);
 
