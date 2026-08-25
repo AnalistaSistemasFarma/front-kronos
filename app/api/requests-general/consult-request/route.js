@@ -29,6 +29,24 @@ export async function GET(req) {
 
     queryCategories += ` ORDER BY cr.category`;
 
+    let queryCategoriesNew = `
+      SELECT DISTINCT
+        category
+      FROM category_request
+      WHERE active = 1
+    `;
+
+    queryCategoriesNew += ` ORDER BY category`;
+
+    let queryProcessCategoriesNew = `
+      SELECT DISTINCT
+        process
+      FROM process_category
+      WHERE active = 1
+    `;
+
+    queryProcessCategoriesNew += ` ORDER BY process`;
+
     const queryProcessCategories = `
       SELECT
         pc.id as id_process,
@@ -56,7 +74,7 @@ export async function GET(req) {
       ORDER BY u.name
     `;
 
-    const [companiesRes, categoriesRes, processCategoriesRes, assignedUsersRes] =
+    const [companiesRes, categoriesRes, processCategoriesRes, assignedUsersRes, categoriesNewRes, processCategoriesNewRes] =
       await withMssqlPool(async (pool) => {
         const categoriesRequest = pool.request();
         if (companyId) {
@@ -68,6 +86,8 @@ export async function GET(req) {
           categoriesRequest.query(queryCategories),
           pool.request().query(queryProcessCategories),
           pool.request().query(queryAssignedUsers),
+          pool.request().query(queryCategoriesNew),
+          pool.request().query(queryProcessCategoriesNew),
         ]);
       });
 
@@ -77,6 +97,8 @@ export async function GET(req) {
         categories: categoriesRes.recordset,
         processCategories: processCategoriesRes.recordset,
         assignedUsers: assignedUsersRes.recordset,
+        categoriesNew: categoriesNewRes.recordset,
+        processCategoriesNew: processCategoriesNewRes.recordset,
       },
       { status: 200 }
     );

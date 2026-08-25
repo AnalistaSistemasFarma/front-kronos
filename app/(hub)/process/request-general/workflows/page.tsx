@@ -774,10 +774,10 @@ function RequestBoard() {
           console.error('Frontend - fetchCompanies: companies data is not an array or missing');
           setCompany([]);
         }
-        if (data.processCategories && Array.isArray(data.processCategories)) {
+        if (data.processCategoriesNew && Array.isArray(data.processCategoriesNew)) {
           setProcess(
-            data.processCategories.map((sub: { id_process: number; process: string }) => ({
-              value: sub.id_process.toString(),
+            data.processCategoriesNew.map((sub: { id_process: string; process: string }) => ({
+              value: sub.process,
               label: sub.process,
             }))
           );
@@ -787,10 +787,10 @@ function RequestBoard() {
           );
           setProcess([]);
         }
-        if (data.categories && Array.isArray(data.categories)) {
+        if (data.categoriesNew && Array.isArray(data.categoriesNew)) {
           setCategories(
-            data.categories.map((sub: { id: number; category: string }) => ({
-              value: sub.id.toString(),
+            data.categoriesNew.map((sub: { id: string; category: string }) => ({
+              value: sub.category,
               label: sub.category,
             }))
           );
@@ -1221,6 +1221,22 @@ function RequestBoard() {
                     data={companies}
                     value={filters.company}
                     onChange={(value) => handleFilterChange('company', value || '')}
+                    leftSection={<IconBuilding size={16} />}
+                    size='md'
+                    classNames={{
+                      label: 'text-sm font-medium mb-2',
+                      input: 'min-h-[44px] text-base',
+                    }}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Categoria'
+                    placeholder='Todas las categorias'
+                    clearable
+                    data={categories}
+                    value={filters.category}
+                    onChange={(value) => handleFilterChange('category', value || '')}
                     leftSection={<IconBuilding size={16} />}
                     size='md'
                     classNames={{

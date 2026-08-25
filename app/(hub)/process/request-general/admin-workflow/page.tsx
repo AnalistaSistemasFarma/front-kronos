@@ -508,10 +508,10 @@ function RequestBoard() {
           console.error('Frontend - fetchCompanies: companies data is not an array or missing');
           setCompany([]);
         }
-        if (data.processCategories && Array.isArray(data.processCategories)) {
+        if (data.processCategoriesNew && Array.isArray(data.processCategoriesNew)) {
           setProcess(
-            data.processCategories.map((sub: { id_process: number; process: string }) => ({
-              value: sub.id_process.toString(),
+            data.processCategoriesNew.map((sub: { id_process: number; process: string }) => ({
+              value: sub.process,
               label: sub.process,
             }))
           );
@@ -525,14 +525,14 @@ function RequestBoard() {
           const seen = new Set<string>();
           setCategories(
             data.categories
-              .filter((sub: { id: number; category: string }) => {
-                const key = sub.id.toString();
+              .filter((sub: { category: string }) => {
+                const key = sub.category;
                 if (seen.has(key)) return false;
                 seen.add(key);
                 return true;
               })
-              .map((sub: { id: number; category: string }) => ({
-                value: sub.id.toString(),
+              .map((sub: { category: string }) => ({
+                value: sub.category,
                 label: sub.category,
               }))
           );
