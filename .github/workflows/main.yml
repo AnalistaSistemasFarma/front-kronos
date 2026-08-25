@@ -17,19 +17,21 @@ on:
 # los git-ignored (dbconfig.js, app/generated/prisma, .env) sobreviven porque NO
 # ejecutamos `git clean`.
 #
-# PRISMA: este deploy NO corre `prisma generate` ni `migrate deploy`. Motivos:
-#   - `generate` falla con EPERM en Windows porque GSS-Front Y kronos-mcp mantienen
-#     bloqueado query_engine-windows.dll.node (lo documentó el commit 3957e49 que
-#     quitó ese paso). El cliente ya está generado en disco (app/generated/prisma).
-#   - `migrate deploy` falla con P3005 (la BD de prod no está baselined para
-#     migraciones de Prisma).
-#   Si cambia prisma/schema.prisma o hay una migración nueva, se aplican A MANO en
-#   la ventana de promoción, con backup previo (detener apps, generate/migrar,
-#   reiniciar). El deploy automático asume que el esquema no cambió.
+# PRISMA (2026-08-12): el deploy AHORA detecta si cambio `prisma/schema.prisma` o
+# `prisma/migrations` entre el HEAD viejo y origin/main:
+#   - Si NO cambio el esquema -> camino normal CERO DOWNTIME: npm install -> build ->
+#     `pm2 reload` (grácil, sin detener). El cliente Prisma en disco sigue vigente.
+#   - Si SI cambio el esquema -> detiene GSS-Front + kronos-mcp (para liberar el DLL
+#     query_engine-windows.dll.node, que si no da EPERM), corre `npx prisma generate`,
+#     compila y `pm2 start`. Esto implica una caida BREVE, pero evita el paso manual
+#     que antes hacia falta (prod servia codigo nuevo con cliente Prisma viejo -> 500
+#     en modelos nuevos y en el callback jwt de next-auth). Ver ventana del 2026-08-12.
+#   `migrate deploy` sigue SIN correrse (la BD de prod no esta baselined, da P3005);
+#   los cambios de tablas/columnas se aplican A MANO en la BD antes del pase.
 #
-# CERO DOWNTIME: se usa `pm2 reload` (recarga grácil instancia por instancia del
-# cluster), no `stop`/`restart`. Si el build falla, NO se recarga: GSS-Front sigue
-# sirviendo el build anterior, así que prod nunca queda caído.
+# CERO DOWNTIME: el camino normal usa `pm2 reload` (recarga grácil instancia por
+# instancia). Si el build falla, NO se recarga: GSS-Front sigue sirviendo el build
+# anterior. Solo el camino de cambio-de-esquema hace stop/start (caida breve).
 
 concurrency:
   group: deploy-prod-serfarma05
@@ -42,28 +44,57 @@ jobs:
       PROJECT_DIR: C:\Users\administrador.DFARUNIADM\projects\front-kronos
 
     steps:
-      - name: Actualizar codigo (fetch + reset --hard a origin/main)
+      - name: Actualizar codigo y detectar cambio de esquema
         shell: cmd
         run: |
           cd /d %PROJECT_DIR% || exit /b 1
+          for /f %%i in ('git rev-parse HEAD') do set "OLD_HEAD=%%i"
           echo === git fetch origin ===
           git fetch origin || exit /b 1
           echo === git reset --hard origin/main ===
           git reset --hard origin/main || exit /b 1
           git rev-parse --short HEAD
+          echo === detectar cambio en prisma/schema.prisma o migraciones ===
+          git diff --quiet %OLD_HEAD% HEAD -- prisma/schema.prisma prisma/migrations
+          if errorlevel 1 (set "SCHEMA_CHANGED=1") else (set "SCHEMA_CHANGED=0")
+          echo SCHEMA_CHANGED=%SCHEMA_CHANGED%
+          echo SCHEMA_CHANGED=%SCHEMA_CHANGED%>>%GITHUB_ENV%
 
-      - name: Instalar dependencias y compilar
+      - name: Instalar dependencias
         shell: cmd
         run: |
           cd /d %PROJECT_DIR% || exit /b 1
           echo === npm install ===
           call npm install || exit /b 1
-          echo === next build ===
-          call npm run build || exit /b 1
 
-      - name: Recargar GSS-Front (reload, cero downtime)
+      - name: (Solo si cambio el esquema) detener apps y regenerar cliente Prisma
+        if: env.SCHEMA_CHANGED == '1'
         shell: cmd
         run: |
           cd /d %PROJECT_DIR% || exit /b 1
-          call pm2 reload GSS-Front || exit /b 1
+          echo === cambio de esquema: detengo apps para liberar el DLL de Prisma ===
+          call pm2 stop GSS-Front
+          call pm2 stop kronos-mcp
+          echo === prisma generate ===
+          call npx prisma generate || exit /b 1
+
+      - name: Compilar
+        shell: cmd
+        run: |
+          cd /d %PROJECT_DIR% || exit /b 1
+          echo === next build ===
+          call npm run build || exit /b 1
+
+      - name: Levantar o recargar GSS-Front
+        shell: cmd
+        run: |
+          cd /d %PROJECT_DIR% || exit /b 1
+          if "%SCHEMA_CHANGED%"=="1" (
+            echo === cambio de esquema: levanto apps ===
+            call pm2 start GSS-Front || call pm2 restart GSS-Front || exit /b 1
+            call pm2 start kronos-mcp || call pm2 restart kronos-mcp || exit /b 1
+          ) else (
+            echo === deploy normal: reload cero downtime ===
+            call pm2 reload GSS-Front || exit /b 1
+          )
           call pm2 save
