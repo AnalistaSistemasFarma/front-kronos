@@ -36,6 +36,36 @@ body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* Portada: siempre clara, sin tema ni paleta del usuario */
+html[data-landing],
+html[data-landing] body {
+  background-color: #ffffff !important;
+  color: #1a1d21 !important;
+  color-scheme: light;
+}
+
+/* Fundido breve al pasar de claro ↔ oscuro (View Transitions) */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root) {
+    animation: none;
+    z-index: 1;
+  }
+
+  ::view-transition-new(root) {
+    z-index: 2;
+    animation: theme-crossfade-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+@keyframes theme-crossfade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* ─── Páginas con Tailwind (procesos, login, etc.) ─── */
 .app-page-shell {
   background-color: var(--app-bg, var(--background));
@@ -277,10 +307,514 @@ body {
   font-weight: 600;
 }
 
+.app-nav-dash {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.app-nav-chevron {
+  transition: transform 180ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-nav-chevron {
+    transition: none;
+  }
+}
+
+.app-nav-chevron--open {
+  transform: rotate(180deg);
+}
+
+/* Menú Dashboard — cristal translúcido (sin caja opaca) */
+.app-macos-menu.mantine-Menu-dropdown,
+.app-macos-menu.mantine-Popover-dropdown,
+.app-macos-menu {
+  --paper-bg: transparent;
+  --mantine-color-body: transparent;
+  background: rgba(255, 255, 255, 0.5) !important;
+  background-color: rgba(255, 255, 255, 0.5) !important;
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.35) !important;
+  box-shadow: none !important;
+  padding: 6px !important;
+}
+
+.dark .app-macos-menu.mantine-Menu-dropdown,
+.dark .app-macos-menu.mantine-Popover-dropdown,
+.dark .app-macos-menu,
+html.dark .app-macos-menu {
+  background: rgba(255, 255, 255, 0.12) !important;
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  box-shadow: none !important;
+}
+
+.app-macos-menu--inline {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 6px;
+  border-radius: 10px;
+}
+
+html[data-mantine-color-scheme='dark'] .mantine-Menu-item,
+html[data-mantine-color-scheme='dark'] .mantine-Menu-itemLabel,
+html.dark .mantine-Menu-item,
+html.dark .mantine-Menu-itemLabel {
+  color: var(--app-text, #f0f4ff);
+}
+
+.app-macos-menu .mantine-Menu-item,
+.app-macos-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px !important;
+  border: none;
+  border-radius: 6px !important;
+  background: transparent !important;
+  color: var(--app-text) !important;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.app-macos-menu .mantine-Menu-itemLabel {
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  line-height: 1.25rem;
+  color: inherit !important;
+}
+
+.app-macos-menu__icon {
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.app-macos-menu .mantine-Menu-item[data-active],
+.app-macos-menu__item[data-active] {
+  color: var(--app-accent) !important;
+  font-weight: 600;
+}
+
+.app-macos-menu .mantine-Menu-item[data-hovered],
+.app-macos-menu .mantine-Menu-item:hover,
+.app-macos-menu__item:hover {
+  background: var(--app-accent) !important;
+  color: #fff !important;
+}
+
+.app-macos-menu .mantine-Menu-item[data-hovered] .mantine-Menu-itemLabel,
+.app-macos-menu .mantine-Menu-item[data-hovered] svg,
+.app-macos-menu .mantine-Menu-item:hover .mantine-Menu-itemLabel,
+.app-macos-menu .mantine-Menu-item:hover svg,
+.app-macos-menu__item:hover svg {
+  color: #fff !important;
+  background: transparent !important;
+}
+
+.dark .app-macos-menu .mantine-Menu-item[data-hovered],
+.dark .app-macos-menu .mantine-Menu-item:hover,
+.dark .app-macos-menu__item:hover {
+  color: #10182a !important;
+}
+
+.dark .app-macos-menu .mantine-Menu-item[data-hovered] .mantine-Menu-itemLabel,
+.dark .app-macos-menu .mantine-Menu-item[data-hovered] svg,
+.dark .app-macos-menu .mantine-Menu-item:hover .mantine-Menu-itemLabel,
+.dark .app-macos-menu .mantine-Menu-item:hover svg,
+.dark .app-macos-menu__item:hover svg {
+  color: #10182a !important;
+}
+
 .app-mobile-menu {
   background-color: var(--app-header);
   border-top: 1px solid var(--app-border);
   color: var(--app-text);
+}
+
+/* Hub de procesos — estilo iOS grouped list */
+.ios-process-hub {
+  --ios-radius: 22px;
+  --ios-row: 48px;
+}
+
+.dark .ios-process-hub {
+  position: relative;
+  isolation: isolate;
+}
+
+.dark .ios-process-hub::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(900px 440px at 8% -8%, rgba(94, 179, 232, 0.28), transparent 58%),
+    radial-gradient(720px 400px at 94% 6%, rgba(124, 92, 252, 0.2), transparent 52%),
+    radial-gradient(680px 380px at 48% 108%, rgba(42, 168, 160, 0.16), transparent 55%);
+}
+
+.dark .ios-process-hub > * {
+  position: relative;
+  z-index: 1;
+}
+
+.ios-process-hub__title {
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+
+.ios-process-hub__subtitle {
+  font-size: 1.05rem;
+  line-height: 1.5;
+  color: var(--app-text-muted, #6b7280);
+}
+
+.ios-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-text, #111) 6%, transparent);
+  border: 1px solid transparent;
+  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.dark .ios-search {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.ios-search:focus-within {
+  border-color: color-mix(in srgb, var(--app-accent, #7c5cfc) 55%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--app-accent, #7c5cfc) 18%, transparent);
+  background: color-mix(in srgb, var(--app-surface, #fff) 90%, transparent);
+}
+
+.ios-search__icon {
+  color: var(--app-text-muted, #8b8f98);
+  flex-shrink: 0;
+}
+
+.ios-segments {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-text, #111) 6%, transparent);
+  overflow-x: auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.dark .ios-segments {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.ios-segments::-webkit-scrollbar {
+  display: none;
+}
+
+.ios-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--app-text-muted, #6b7280);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 180ms ease, color 180ms ease;
+}
+
+.ios-segment:hover:not(.ios-segment--active) {
+  color: var(--app-text);
+}
+
+.ios-segment--active {
+  background: var(--app-surface, #fff);
+  color: var(--app-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.dark .ios-segment--active {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--app-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.ios-segment__count {
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--app-text) 10%, transparent);
+}
+
+.ios-segment--active .ios-segment__count {
+  background: color-mix(in srgb, var(--app-accent, #7c5cfc) 22%, transparent);
+  color: var(--app-accent, #7c5cfc);
+}
+
+.ios-process-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-radius: var(--ios-radius, 22px);
+  background: var(--app-surface, #fff);
+  border: 1px solid color-mix(in srgb, var(--app-text) 8%, transparent);
+  overflow: hidden;
+  box-shadow: 0 8px 28px rgba(15, 18, 32, 0.06);
+}
+
+.dark .ios-process-card {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.11) 0%,
+    rgba(255, 255, 255, 0.045) 100%
+  );
+  border-color: rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 16px 40px rgba(0, 0, 0, 0.28);
+}
+
+.dark .ios-process-card--violet {
+  background: linear-gradient(180deg, rgba(124, 92, 252, 0.18), rgba(255, 255, 255, 0.04));
+}
+.dark .ios-process-card--pink {
+  background: linear-gradient(180deg, rgba(232, 90, 144, 0.16), rgba(255, 255, 255, 0.04));
+}
+.dark .ios-process-card--teal {
+  background: linear-gradient(180deg, rgba(42, 168, 160, 0.18), rgba(255, 255, 255, 0.04));
+}
+.dark .ios-process-card--blue {
+  background: linear-gradient(180deg, rgba(94, 179, 232, 0.18), rgba(255, 255, 255, 0.04));
+}
+.dark .ios-process-card--orange {
+  background: linear-gradient(180deg, rgba(240, 138, 42, 0.16), rgba(255, 255, 255, 0.04));
+}
+.dark .ios-process-card--cyan {
+  background: linear-gradient(180deg, rgba(34, 211, 238, 0.16), rgba(255, 255, 255, 0.04));
+}
+.dark .ios-process-card--lime {
+  background: linear-gradient(180deg, rgba(163, 230, 53, 0.14), rgba(255, 255, 255, 0.04));
+}
+.dark .ios-process-card--indigo {
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.2), rgba(255, 255, 255, 0.04));
+}
+.dark .ios-process-card--rose {
+  background: linear-gradient(180deg, rgba(244, 63, 94, 0.16), rgba(255, 255, 255, 0.04));
+}
+.dark .ios-process-card--amber {
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.16), rgba(255, 255, 255, 0.04));
+}
+
+.ios-process-card__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 18px 12px;
+}
+
+.ios-process-card__glyph {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.ios-process-card--blue .ios-process-card__glyph {
+  background: linear-gradient(180deg, #5b9cff, #3b7cf0);
+}
+.ios-process-card--violet .ios-process-card__glyph {
+  background: linear-gradient(180deg, #b08cff, #7c5cfc);
+}
+.ios-process-card--teal .ios-process-card__glyph {
+  background: linear-gradient(180deg, #5ad0c8, #2aa8a0);
+}
+.ios-process-card--orange .ios-process-card__glyph {
+  background: linear-gradient(180deg, #ffb060, #f08a2a);
+}
+.ios-process-card--pink .ios-process-card__glyph {
+  background: linear-gradient(180deg, #ff8ab8, #e85a90);
+}
+.ios-process-card--cyan .ios-process-card__glyph {
+  background: linear-gradient(180deg, #5eead4, #22d3ee);
+}
+.ios-process-card--lime .ios-process-card__glyph {
+  background: linear-gradient(180deg, #a3e635, #65a30d);
+}
+.ios-process-card--indigo .ios-process-card__glyph {
+  background: linear-gradient(180deg, #818cf8, #4f46e5);
+}
+.ios-process-card--rose .ios-process-card__glyph {
+  background: linear-gradient(180deg, #fb7185, #e11d48);
+}
+.ios-process-card--amber .ios-process-card__glyph {
+  background: linear-gradient(180deg, #fbbf24, #d97706);
+}
+
+.ios-process-card__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  color: var(--app-text);
+}
+
+.ios-process-card__meta {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--app-text-muted, #8b8f98);
+}
+
+.ios-process-list {
+  list-style: none;
+  margin: 0 12px 12px;
+  padding: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--app-text) 4%, transparent);
+}
+
+.dark .ios-process-list {
+  background: rgba(8, 12, 24, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ios-process-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: var(--ios-row, 48px);
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  color: var(--app-text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.ios-process-row + .ios-process-row,
+.ios-process-list li + li .ios-process-row {
+  border-top: 1px solid color-mix(in srgb, var(--app-text) 8%, transparent);
+}
+
+.ios-process-row:hover {
+  background: color-mix(in srgb, var(--app-text) 5%, transparent);
+}
+
+.dark .ios-process-row:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dark .ios-process-row:hover .ios-process-row__label,
+.dark .ios-process-row:hover .ios-process-row__icon,
+.dark .ios-process-row:hover .ios-process-row__chevron {
+  color: #fff;
+}
+
+.dark .ios-process-list li + li .ios-process-row {
+  border-top-color: var(--app-border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.ios-process-row:focus-visible {
+  outline: 2px solid var(--app-accent, #7c5cfc);
+  outline-offset: -2px;
+}
+
+.ios-process-row__icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--app-text-muted);
+  flex-shrink: 0;
+}
+
+.ios-process-row__label {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.ios-process-row__chevron {
+  color: color-mix(in srgb, var(--app-text) 35%, transparent);
+  flex-shrink: 0;
+}
+
+.dark .ios-process-row__label {
+  color: #f4f7ff;
+}
+
+.dark .ios-process-row__icon {
+  color: #d5def0;
+}
+
+.dark .ios-process-row__chevron {
+  color: #c5d0e6;
+  opacity: 0.85;
+}
+
+.ios-empty {
+  text-align: center;
+  padding: 48px 24px;
+  border-radius: 22px;
+  background: var(--app-surface, #fff);
+  border: 1px solid color-mix(in srgb, var(--app-text) 8%, transparent);
+}
+
+.dark .ios-empty {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.ios-empty__icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 12px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--app-text) 6%, transparent);
+  color: var(--app-text-muted);
 }
 
 @keyframes closure-toast-progress {

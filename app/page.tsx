@@ -52,38 +52,22 @@ export default function LandingPage() {
 
             <Group gap='xl' visibleFrom='md'>
               <Link href='#services' style={{ textDecoration: 'none' }}>
-                <Text
-                  c='dimmed'
-                  fw={500}
-                  style={{ cursor: 'pointer', '&:hover': { color: '#1f2937' } }}
-                >
+                <Text fw={500} style={{ cursor: 'pointer', color: '#4b5563' }}>
                   Servicios
                 </Text>
               </Link>
               <Link href='#benefits' style={{ textDecoration: 'none' }}>
-                <Text
-                  c='dimmed'
-                  fw={500}
-                  style={{ cursor: 'pointer', '&:hover': { color: '#1f2937' } }}
-                >
+                <Text fw={500} style={{ cursor: 'pointer', color: '#4b5563' }}>
                   Beneficios
                 </Text>
               </Link>
               <Link href='#about' style={{ textDecoration: 'none' }}>
-                <Text
-                  c='dimmed'
-                  fw={500}
-                  style={{ cursor: 'pointer', '&:hover': { color: '#1f2937' } }}
-                >
+                <Text fw={500} style={{ cursor: 'pointer', color: '#4b5563' }}>
                   Nosotros
                 </Text>
               </Link>
               <Link href='#contact' style={{ textDecoration: 'none' }}>
-                <Text
-                  c='dimmed'
-                  fw={500}
-                  style={{ cursor: 'pointer', '&:hover': { color: '#1f2937' } }}
-                >
+                <Text fw={500} style={{ cursor: 'pointer', color: '#4b5563' }}>
                   Contacto
                 </Text>
               </Link>
@@ -130,12 +114,16 @@ export default function LandingPage() {
                 lineHeight: 1.2,
                 maxWidth: '800px',
                 fontSize: 'clamp(2rem, 5vw, 3rem)',
+                color: '#ffffff',
               }}
             >
               Excelencia Centralizada para las Operaciones de tu Negocio
             </Title>
 
-            <Text size='xl' style={{ maxWidth: '600px', lineHeight: 1.6 }}>
+            <Text
+              size='xl'
+              style={{ maxWidth: '600px', lineHeight: 1.6, color: 'rgba(255,255,255,0.92)' }}
+            >
               Transforma tu organización con nuestra plataforma integral de servicios compartidos.
               Consolidamos Recursos Humanos, Finanzas, TI y Operaciones en un único centro eficiente
               que impulsa el ahorro de costos y la excelencia operativa.
@@ -176,10 +164,10 @@ export default function LandingPage() {
       <Box py={80} id='services'>
         <Container size='xl'>
           <Stack align='center' gap='lg' mb={60}>
-            <Title order={2} size='2.5rem' fw={700} ta='center'>
+            <Title order={2} size='2.5rem' fw={700} ta='center' c='#111827'>
               Nuestros Servicios
             </Title>
-            <Text size='lg' c='dimmed' ta='center' style={{ maxWidth: '600px' }}>
+            <Text size='lg' ta='center' style={{ maxWidth: '600px', color: '#6b7280' }}>
               Una suite completa de servicios empresariales diseñados para optimizar tus operaciones
             </Text>
           </Stack>
@@ -210,14 +198,21 @@ export default function LandingPage() {
                 icon: '🛒',
               },
             ].map((service, index) => (
-              <Card key={index} shadow='sm' padding='lg' radius='md' withBorder>
+              <Card
+                key={index}
+                shadow='sm'
+                padding='lg'
+                radius='md'
+                withBorder
+                style={{ backgroundColor: '#ffffff', borderColor: '#e5e7eb' }}
+              >
                 <Text size='3rem' ta='center' py='md'>
                   {service.icon}
                 </Text>
-                <Title order={3} size='lg' fw={600} mb='sm'>
+                <Title order={3} size='lg' fw={600} mb='sm' c='#111827'>
                   {service.title}
                 </Title>
-                <Text size='sm' c='dimmed'>
+                <Text size='sm' style={{ color: '#6b7280' }}>
                   {service.description}
                 </Text>
               </Card>
@@ -231,7 +226,7 @@ export default function LandingPage() {
         <Container size='xl'>
           <Grid gutter='xl' align='center'>
             <GridCol span={{ base: 12, md: 6 }}>
-              <Title order={2} size='2.5rem' fw={700} mb='lg'>
+              <Title order={2} size='2.5rem' fw={700} mb='lg' c='#111827'>
                 Beneficios que Transforman tu Negocio
               </Title>
               <Stack gap='md'>
@@ -248,7 +243,9 @@ export default function LandingPage() {
                       size={20}
                       style={{ color: '#10b981', flexShrink: 0, marginTop: 2 }}
                     />
-                    <Text size='lg'>{benefit}</Text>
+                    <Text size='lg' c='#1f2937'>
+                      {benefit}
+                    </Text>
                   </Group>
                 ))}
               </Stack>
@@ -279,7 +276,7 @@ export default function LandingPage() {
                 <Text size='3rem' fw={700} style={{ color: '#113562' }}>
                   {stat.value}
                 </Text>
-                <Text size='lg' c='dimmed' ta='center'>
+                <Text size='lg' ta='center' style={{ color: '#6b7280' }}>
                   {stat.label}
                 </Text>
               </Stack>
@@ -292,10 +289,10 @@ export default function LandingPage() {
       <Box py={80} style={{ backgroundColor: '#113562', color: 'white' }}>
         <Container size='xl'>
           <Stack align='center' gap='lg' style={{ textAlign: 'center' }}>
-            <Title order={2} size='2.5rem' fw={700}>
+            <Title order={2} size='2.5rem' fw={700} c='white'>
               ¿Listo para Transformar tus Operaciones?
             </Title>
-            <Text size='xl' style={{ maxWidth: '600px' }}>
+            <Text size='xl' style={{ maxWidth: '600px', color: 'rgba(255,255,255,0.92)' }}>
               Únete a cientos de empresas que ya han optimizado sus procesos con nuestros servicios
               compartidos.
             </Text>
@@ -330,13 +327,13 @@ export default function LandingPage() {
                   fit='contain'
                 />
               </Group>
-              <Text size='sm' style={{ lineHeight: 1.6 }}>
+              <Text size='sm' style={{ lineHeight: 1.6, color: '#d1d5db' }}>
                 Entregando excelencia operativa a través de servicios empresariales centralizados.
               </Text>
             </GridCol>
 
             <GridCol span={{ base: 12, md: 6, lg: 2 }}>
-              <Title order={4} size='lg' fw={600} mb='md'>
+              <Title order={4} size='lg' fw={600} mb='md' c='white'>
                 Servicios
               </Title>
               <Stack gap='xs'>
@@ -376,7 +373,7 @@ export default function LandingPage() {
             </GridCol>
 
             <GridCol span={{ base: 12, md: 6, lg: 2 }}>
-              <Title order={4} size='lg' fw={600} mb='md'>
+              <Title order={4} size='lg' fw={600} mb='md' c='white'>
                 Empresa
               </Title>
               <Stack gap='xs'>
@@ -416,28 +413,34 @@ export default function LandingPage() {
             </GridCol>
 
             <GridCol span={{ base: 12, md: 6, lg: 4 }}>
-              <Title order={4} size='lg' fw={600} mb='md'>
+              <Title order={4} size='lg' fw={600} mb='md' c='white'>
                 Contacto
               </Title>
               <Stack gap='sm'>
                 <Group gap='xs' align='center'>
                   <IconMail size={16} />
-                  <Text size='sm'>contacto@servicioscompartidos.com</Text>
+                  <Text size='sm' c='#d1d5db'>
+                    contacto@servicioscompartidos.com
+                  </Text>
                 </Group>
                 <Group gap='xs' align='center'>
                   <IconPhone size={16} />
-                  <Text size='sm'>+1 (555) 123-4567</Text>
+                  <Text size='sm' c='#d1d5db'>
+                    +1 (555) 123-4567
+                  </Text>
                 </Group>
                 <Group gap='xs' align='center'>
                   <IconMapPin size={16} />
-                  <Text size='sm'>Av. Empresarial 123, Suite 100</Text>
+                  <Text size='sm' c='#d1d5db'>
+                    Av. Empresarial 123, Suite 100
+                  </Text>
                 </Group>
               </Stack>
             </GridCol>
           </Grid>
 
           <Box mt='xl' pt='lg' style={{ borderTop: '1px solid #374151', textAlign: 'center' }}>
-            <Text size='sm' c='dimmed'>
+            <Text size='sm' style={{ color: '#9ca3af' }}>
               © {new Date().getFullYear()} ServiciosCompartidos. Todos los derechos reservados.
             </Text>
           </Box>

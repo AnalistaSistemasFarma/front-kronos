@@ -104,7 +104,7 @@ function UserManagement() {
     total: 0,
     pages: 0,
   });
-  const hasLoadedOnce = useRef(false);
+  const hasLoadedOnce = useRef(false); 
 
   // Modal states
   const [createModalOpened, setCreateModalOpened] = useState(false);
