@@ -10,7 +10,10 @@
     "test": "vitest run",
     "verify:deploy": "node scripts/verify-deployment-changes.cjs",
     "seed:organigrama": "node prisma/seeds/organigrama.mjs",
-    "seed:dashboard-solicitudes": "node scripts/seed-dashboard-solicitante-solicitado.cjs"
+    "seed:dashboard-solicitudes": "node scripts/seed-dashboard-solicitante-solicitado.cjs",
+    "seed:farmadosis": "node scripts/seed-farmadosis-workflows.mjs",
+    "seed:farmadosis-company": "node scripts/ensure-farmadosis-company.mjs",
+    "check:farmadosis": "node scripts/check-farmadosis-setup.mjs"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",

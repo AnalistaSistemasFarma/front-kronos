@@ -193,6 +193,41 @@ interface UserEmail {
   label: string;
 }
 
+/** Formatea fechas de SQL (UTC→CO +5h). Tolera null / inválidas sin romper la vista. */
+function formatRequestDateTime(
+  value: string | number | Date | null | undefined,
+  fallback = 'Sin fecha'
+): string {
+  if (value == null || value === '') return fallback;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Fecha inválida';
+  return new Intl.DateTimeFormat('es-CO', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).format(new Date(date.getTime() + 5 * 60 * 60 * 1000));
+}
+
+function formatRequestDateTimeShort(
+  value: string | number | Date | null | undefined,
+  fallback = 'N/A'
+): string {
+  if (value == null || value === '') return fallback;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Fecha inválida';
+  return new Intl.DateTimeFormat('es-CO', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).format(new Date(date.getTime() + 5 * 60 * 60 * 1000));
+}
+
 function ViewRequestPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -861,9 +896,11 @@ function ViewRequestPage() {
           Categoría: request?.category,
           Proceso: request?.process,
           Empresa: request?.company,
-          'Fecha de Creación': request?.created_at
-            ? new Date(request.created_at).toISOString().split('T')[0]
-            : 'N/A',
+          'Fecha de Creación': (() => {
+            if (!request?.created_at) return 'N/A';
+            const d = new Date(request.created_at);
+            return Number.isNaN(d.getTime()) ? 'N/A' : d.toISOString().split('T')[0];
+          })(),
         },
       ];
 
@@ -937,9 +974,11 @@ function ViewRequestPage() {
           Categoría: request?.category,
           Proceso: request?.process,
           Empresa: request?.company,
-          'Fecha de Creación': request?.created_at
-            ? new Date(request.created_at).toISOString().split('T')[0]
-            : 'N/A',
+          'Fecha de Creación': (() => {
+            if (!request?.created_at) return 'N/A';
+            const d = new Date(request.created_at);
+            return Number.isNaN(d.getTime()) ? 'N/A' : d.toISOString().split('T')[0];
+          })(),
         },
       ];
 
@@ -1718,18 +1757,7 @@ function ViewRequestPage() {
                                 size='xs'
                                 className={isCurrentUser ? 'text-blue-100' : 'text-gray-500'}
                               >
-                                {new Intl.DateTimeFormat('es-CO', {
-                                  day: 'numeric',
-                                  month: 'short',
-                                  year: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  hour12: true,
-                                }).format(
-                                  new Date(
-                                    new Date(note.creation_date).getTime() + 5 * 60 * 60 * 1000 
-                                  )
-                                )}
+                                {formatRequestDateTimeShort(note.creation_date)}
                               </Text>
                             )}
                           </div>
@@ -1835,20 +1863,7 @@ function ViewRequestPage() {
                 <Text size='sm' color='gray.6' fw={500}>
                   Fecha y Hora de Creación
                 </Text>
-                <Text size='sm'>
-                  {new Intl.DateTimeFormat('es-CO', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: true,
-                  }).format(
-                    new Date(
-                      new Date(request.created_at).getTime() + 5 * 60 * 60 * 1000 
-                    )
-                  )}
-                </Text>
+                <Text size='sm'>{formatRequestDateTime(request.created_at)}</Text>
               </div>
 
               <div className='pb-2'>
@@ -1934,29 +1949,8 @@ function ViewRequestPage() {
                           <Group>
                             <IconCalendar size={16} className='text-gray-5' />
                             <Text size='xs' color='gray.6'>
-                              Fecha de Resolución: {
-                                (() => {
-                                  try {
-                                    const date = new Date(request.date_resolution);
-                                    if (isNaN(date.getTime())) {
-                                      return 'Fecha inválida';
-                                    }
-                                    return new Intl.DateTimeFormat('es-CO', {
-                                      day: 'numeric',
-                                      month: 'long',
-                                      year: 'numeric',
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                      hour12: true,
-                                    }).format(
-                                      new Date(date.getTime() + 5 * 60 * 60 * 1000) 
-                                    );
-                                  } catch (error) {
-                                    console.error('Error formatting date:', error);
-                                    return 'Fecha inválida';
-                                  }
-                                })()
-                              }
+                              Fecha de Resolución:{' '}
+                              {formatRequestDateTime(request.date_resolution)}
                             </Text>
                             <Text size='xs' color='gray.6'>
                               Resuelto Por: {request.executor_final}
@@ -2466,17 +2460,7 @@ function ViewRequestPage() {
                     : isLocked
                     ? 'gray'
                     : 'blue';
-                  const fmtDate = (d?: string) =>
-                    d
-                      ? new Intl.DateTimeFormat('es-CO', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          hour12: true,
-                        }).format(new Date(d).getTime() + 5 * 60 * 60 * 1000 )
-                      : 'N/A';
+                  const fmtDate = (d?: string) => formatRequestDateTimeShort(d);
                   return (
                     <Flex key={task.id} gap="md" align="stretch">
                       <Flex direction="column" align="center" style={{ flexShrink: 0 }}>

@@ -38,7 +38,26 @@ Campos: crearlos en cada proceso con las **mismas etiquetas** del catálogo (`li
 
 Login `/sign-in` no se integra. Adjuntos: solo en el correo, no en SynerLink.
 
-## Qué crear en la UI
+## Qué crear en SynerLink
+
+### Opción rápida (recomendado)
+
+```bash
+npm run seed:farmadosis
+# o con tu usuario como responsable:
+npm run seed:farmadosis -- --email=tu@empresa.com
+```
+
+El script crea la categoría **Farmadosis**, los 3 procesos activos con campos + 1 tarea, e imprime:
+
+```
+FARMADOSIS_REQUESTER_USER_ID=...
+FARMADOSIS_PROCESS_MAP={"contacto":..,"calidad":..,"farmacovigilancia":..}
+```
+
+Pégalo en `.env` y reinicia `npm run dev`. Diagnóstico: `npm run check:farmadosis`.
+
+### Opción UI
 
 1. Categoría p.ej. `Farmadosis`.
 2. Tres procesos con los nombres de la tabla, campos, **una tarea con responsable**, y **activar**.
