@@ -531,6 +531,7 @@ function ViewerRequestGeneralPage() {
       { key: 'status', header: 'Estado', width: 16 },
       { key: 'created_at', header: 'Fecha Creación de Solicitud', width: 24 },
       { key: 'date_resolution', header: 'Fecha Resolución', width: 24 },
+      { key: 'created_at', header: 'Fecha de Solicitud', width: 24 },
       { key: 'requester', header: 'Solicitante', width: 24 },
       { key: 'user', header: 'Asignado', width: 24 },
     ];

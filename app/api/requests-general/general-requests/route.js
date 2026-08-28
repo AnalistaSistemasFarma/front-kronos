@@ -13,6 +13,8 @@ export async function GET(req) {
     const date_from = searchParams.get('date_from');
     const date_to = searchParams.get('date_to');
     const assigned_to = searchParams.get('assigned_to');
+    const process = searchParams.get('process');
+    const category = searchParams.get('category');
 
     console.log('API requests-general: idUser recibido:', idUser);
 
@@ -54,6 +56,14 @@ export async function GET(req) {
       query += ` AND up.name = @assigned_to`;
     }
 
+    if (process) {
+      query += ` AND pc.process LIKE '%' + @process + '%'`;
+    }
+
+    if (category) {
+      query += ` AND cr.category LIKE '%' + @category + '%'`;
+    }
+
     query += ` ORDER BY rg.id DESC`;
 
     const request = pool.request();
@@ -78,6 +88,14 @@ export async function GET(req) {
 
     if (date_to) {
       request.input('date_to', sql.DateTime, new Date(date_to + 'T23:59:59'));
+    }
+
+    if (process) {
+      request.input('process', sql.VarChar, process);
+    }
+
+    if (category) {
+      request.input('category', sql.VarChar, category);
     }
 
     console.log('API requests-general: Ejecutando consulta:', query);

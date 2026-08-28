@@ -26,6 +26,7 @@ import {
 } from '@tabler/icons-react';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../microsoft-365/useGetMicrosoftToken';
 import { sanitizeOneDriveName } from '../../lib/onedriveName';
+import { ensureOneDriveFolderPath, uploadFileToOneDriveFolder } from '../../lib/onedrive/graphFolderUpload';
 
 export interface UploadedFile {
   id: string;
@@ -162,6 +163,12 @@ const FileUpload: React.FC<FileUploadProps> = ({
     }
   };
 
+  // Ruta base histórica de este componente (tickets de SAPSEND). La lógica de
+  // "obtener o crear carpeta anidada + subir archivo" ahora vive en
+  // lib/onedrive/graphFolderUpload.ts (genérica, por segmentos de ruta), para
+  // que otros módulos (p.ej. Gestión Documental) puedan reusarla sin duplicar
+  // las llamadas a Graph. El comportamiento para este componente no cambia:
+  // sigue subiendo a SAPSEND/TEC/<storagePath>/<folderName>.
   const CheckOrCreateFolderAndUpload = async (
     folderName: string,
     files: { file: File }[],
@@ -169,70 +176,19 @@ const FileUpload: React.FC<FileUploadProps> = ({
     storagePath: string
   ) => {
     try {
-      let folderId: string;
-
-      // Intentar obtener la carpeta existente
-      const getResponse = await fetch(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/${storagePath}/${folderName}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (getResponse.ok) {
-        // Carpeta existe, obtener su ID
-        const folderData = await getResponse.json();
-        folderId = folderData.id;
-      } else if (getResponse.status === 404) {
-        // Carpeta no existe, crearla
-        const createResponse = await fetch(
-          `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/${storagePath}:/children`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              name: folderName,
-              folder: {},
-            }),
-          }
-        );
-
-        if (!createResponse.ok) {
-          throw new Error('Error creando la carpeta.');
-        }
-
-        const folderData = await createResponse.json();
-        folderId = folderData.id;
-      } else {
-        throw new Error('Error al verificar la existencia de la carpeta.');
-      }
+      const folderId = await ensureOneDriveFolderPath(token, ['SAPSEND', 'TEC', storagePath, folderName]);
 
       // Subir archivos a la carpeta
       if (files && files.length > 0) {
-        const uploadPromises = files.map(async (fileWrapper) => {
+        const uploadPromises = files.map((fileWrapper) => {
           const uploadName = sanitizeOneDriveName(fileWrapper.file.name);
-          const response = await fetch(
-            `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${uploadName}:/content`,
-            {
-              method: 'PUT',
-              headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': fileWrapper.file.type,
-              },
-              body: fileWrapper.file,
-            }
+          return uploadFileToOneDriveFolder(
+            token,
+            folderId,
+            uploadName,
+            fileWrapper.file,
+            fileWrapper.file.type
           );
-
-          if (!response.ok) {
-            throw new Error(`Error al subir el archivo: ${fileWrapper.file.name}`);
-          }
-
-          return response;
         });
 
         await Promise.all(uploadPromises);

@@ -36,11 +36,11 @@ export async function GET(req) {
     }
 
     if (category) {
-      query += ` AND cr.id = @category`;
+      query += ` AND cr.category LIKE '%' + @category + '%'`;
     }
 
     if (process) {
-      query += ` AND pc.id = @process`;
+      query += ` AND pc.process LIKE '%' + @process + '%'`;
     }
 
     if (active) {
@@ -62,11 +62,11 @@ export async function GET(req) {
     }
 
     if (category) {
-      request.input('category', sql.Int, parseInt(category));
+      request.input('category', sql.VarChar, category);
     }
 
     if (process) {
-      request.input('process', sql.Int, parseInt(process));
+      request.input('process', sql.VarChar, process);
     }
 
     console.log('API activities: Ejecutando consulta:', query);

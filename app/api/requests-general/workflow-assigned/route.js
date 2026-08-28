@@ -18,7 +18,7 @@ export async function GET(req) {
 
     let query = `
         SELECT
-          pc.id ,cr.id as id_category, cr.category, pc.process, pc.description, pc.active, pc.id_status as id_status_process, scpc.status as status_process, upc.id as id_assigned_process_category ,upc.name as assigned_process_category, c.company, pc.webhook_url
+          pc.id ,cr.id as id_category, cr.category, pc.process, pc.description, pc.active, pc.id_status as id_status_process, scpc.status as status_process, upc.id as id_assigned_process_category ,upc.name as assigned_process_category, c.company, pc.webhook_url, pc.is_external
         FROM process_category pc
         LEFT JOIN category_request cr ON cr.id = pc.id_category_request
         INNER JOIN status_case scpc ON scpc.id_status_case = pc.id_status
@@ -50,11 +50,11 @@ export async function GET(req) {
     }
 
     if (category) {
-      query += ` AND cr.id = @category`;
+      query += ` AND cr.category LIKE '%' + @category + '%'`;
     }
 
     if (process) {
-      query += ` AND pc.id = @process`;
+      query += ` AND pc.process LIKE '%' + @process + '%'`;
     }
 
     if (active) {
@@ -78,11 +78,11 @@ export async function GET(req) {
     }
 
     if (category) {
-      request.input('category', sql.Int, parseInt(category));
+      request.input('category', sql.VarChar, category);
     }
 
     if (process) {
-      request.input('process', sql.Int, parseInt(process));
+      request.input('process', sql.VarChar, process);
     }
 
     console.log('API activities: Ejecutando consulta:', query);
