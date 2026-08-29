@@ -7,7 +7,7 @@
 //   - front-kronos-test/.env      -> lo carga Next.js automaticamente (web).
 //   - front-kronos-test/mcp/.env  -> lo carga mcp/serve.mjs al arrancar el MCP.
 // Ambos .env estan en .gitignore y NUNCA se versionan.
-const path = require('path'); // eslint-disable-line @typescript-eslint/no-require-imports -- archivo de config CommonJS
+const path = require('path'); // eslint-disable-line @typescript-eslint/no-require-imports
 const TEST_ROOT = __dirname;
 
 module.exports = {
