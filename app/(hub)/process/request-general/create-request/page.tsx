@@ -800,6 +800,27 @@ function RequestBoard() {
     return Object.keys(errors).length === 0;
   };
 
+  const resetCreateForm = () => {
+    setFormData({
+      company: '',
+      subject: '',
+      category: '',
+      process: '',
+      descripcion: '',
+      url: '',
+    });
+    setFormErrors({});
+    setAttachedFiles([]);
+    setFilesByDoc({});
+    setRequiredFiles([]);
+    setFormFields([]);
+    setFieldValues({});
+    setActivitySearch('');
+    setSearchResults([]);
+    setShowActivitySearch(false);
+    setError(null);
+  };
+
   const handleCreateTicketWithValidation = async () => {
     if (isSubmittingRef.current) return;
     if (!validateForm()) return;
@@ -926,20 +947,7 @@ function RequestBoard() {
         toast.success(`Solicitud #${requestId} creada correctamente.`);
       }
 
-      setFormData({
-        company: '',
-        subject: '',
-        category: '',
-        process: '',
-        descripcion: '',
-        url: '',
-      });
-
-      setAttachedFiles([]);
-      setFilesByDoc({});
-      setRequiredFiles([]);
-      setFormFields([]);
-      setFieldValues({});
+      resetCreateForm();
 
       fetchTickets();
       setModalOpened(false);
@@ -1718,20 +1726,7 @@ function RequestBoard() {
           opened={modalOpened}
           onClose={() => {
             setModalOpened(false);
-            setFormErrors({});
-            setAttachedFiles([]);
-            setActivitySearch('');
-            setSearchResults([]);
-            setShowActivitySearch(false);
-            setError(null);
-            setFormData({
-              company: '',
-              subject: '',
-              category: '',
-              process: '',
-              descripcion: '',
-              url: '',
-            });
+            resetCreateForm();
           }}
           title={
             <Group>
@@ -1741,7 +1736,7 @@ function RequestBoard() {
               </Text>
             </Group>
           }
-          size='xl'
+          size='90%'
           radius='md'
           overlayProps={{ blur: 4 }}
         >
