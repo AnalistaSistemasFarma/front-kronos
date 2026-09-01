@@ -156,29 +156,84 @@ async function insertNote(
   }
 }
 
-export interface StartWorkflowParams {
+export interface CreateVersionAndStartWorkflowParams {
   idDocument: number;
-  idDocumentVersion: number;
+  versionNumber: number;
+  onedriveItemId: string | null;
+  onedrivePath: string;
+  createdBy: string;
+  comments: string | null;
   idCompany: number;
   ownerUserId: string;
   subject: string;
 }
 
+export interface CreateVersionAndStartWorkflowResult {
+  idDocumentVersion: number;
+  createdAt: Date;
+  idRequestGeneral: number;
+}
+
 /**
- * Arranca el flujo de aprobación para una DocumentVersion recién creada
- * (status ya debe estar en 'En creación'): crea la solicitud
- * (`requests_general`) que representa esta instancia del flujo, su primera
- * tarea (`task_request_general`, estado "En creación", asignada al dueño) y
- * liga todo de vuelta a la versión (`document_version.id_request_general`) y,
- * si aún no estaba, al documento (`document.id_process`).
+ * Crea la fila de `document_version` Y arranca su flujo de aprobación
+ * (`requests_general` + primera `task_request_general` en estado "En
+ * creación", asignada al dueño) EN UNA SOLA transacción `sql.Transaction`.
+ *
+ * Por qué esto NO es un `prisma.$transaction` (fix del 2026-09-01, bug
+ * reportado por Nicolás): `document_version` sí es un modelo Prisma, pero
+ * `requests_general` / `task_request_general` / `process_category_request_general`
+ * NUNCA lo fueron (motor de "solicitudes generales" en SQL crudo, ver nota de
+ * módulo arriba) — viven detrás de un `mssql.ConnectionPool` totalmente
+ * aparte del pool interno de Prisma (`lib/mssqlPool.ts` vs `lib/prisma.ts`).
+ * Prisma y `mssql` no comparten conexión, así que un `prisma.$transaction`
+ * jamás habría podido abarcar los INSERT de `requests_general`/
+ * `task_request_general`: solo hubiera protegido la mitad del problema.
+ *
+ * Antes de este fix, `lib/document-management/newVersion.ts` hacía
+ * `prisma.documentVersion.create(...)` (se confirmaba solo, en su propia
+ * conexión) y LUEGO, en una llamada aparte, arrancaba este flujo. Si el
+ * arranque fallaba (típicamente `WorkflowNotSeededError` cuando
+ * `KRONOSDB_PRUEBAS` se refresca y pierde el seed de
+ * `prisma/seeds/document-management-workflow.sql`), la `DocumentVersion` ya
+ * había quedado comprometida en la base — huérfana, en "En creación", con el
+ * archivo ya subido a OneDrive pero sin ninguna tarea de flujo asociada.
+ *
+ * La solución real es que AMBAS escrituras corran dentro de la MISMA
+ * transacción de base de datos — por eso el INSERT de `document_version` se
+ * movió aquí, a SQL crudo sobre esta misma `sql.Transaction`, en vez de vivir
+ * como un `prisma.documentVersion.create` separado. Así, si cualquier paso
+ * falla (seed faltante, catálogo incompleto, error de red a mitad de
+ * transacción), el `ROLLBACK` deshace TODO, incluida la versión — nunca más
+ * queda un registro a medio crear. La subida a OneDrive sigue ocurriendo
+ * ANTES de llamar a esta función (ver newVersion.ts): una llamada HTTP
+ * externa no puede ni debe vivir dentro de una transacción de base de datos.
  */
-export async function startDocumentVersionWorkflow(params: StartWorkflowParams): Promise<{ idRequestGeneral: number }> {
+export async function createDocumentVersionAndStartWorkflow(
+  params: CreateVersionAndStartWorkflowParams
+): Promise<CreateVersionAndStartWorkflowResult> {
   const pool = await getPool();
   const { processId, taskIdByState } = await resolveWorkflowCatalog(pool);
 
   const transaction = new sql.Transaction(pool);
   await transaction.begin();
   try {
+    const versionInsert = await new sql.Request(transaction)
+      .input('id_document', sql.Int, params.idDocument)
+      .input('version_number', sql.Int, params.versionNumber)
+      .input('status', sql.NVarChar(30), INITIAL_STATE)
+      .input('onedrive_item_id', sql.NVarChar(300), params.onedriveItemId)
+      .input('onedrive_path', sql.NVarChar(1000), params.onedrivePath)
+      .input('created_by', sql.NVarChar(1000), params.createdBy)
+      .input('comments', sql.NVarChar(1000), params.comments)
+      .query(`
+        INSERT INTO document_version
+          (id_document, version_number, status, onedrive_item_id, onedrive_path, created_by, comments)
+        OUTPUT INSERTED.id_document_version, INSERTED.created_at
+        VALUES (@id_document, @version_number, @status, @onedrive_item_id, @onedrive_path, @created_by, @comments);
+      `);
+    const idDocumentVersion: number = versionInsert.recordset[0].id_document_version;
+    const createdAt: Date = versionInsert.recordset[0].created_at;
+
     const reqInsert = await new sql.Request(transaction)
       .input('descripcion', sql.NVarChar(1000), params.subject)
       .input('subject', sql.NVarChar(255), params.subject)
@@ -211,7 +266,7 @@ export async function startDocumentVersionWorkflow(params: StartWorkflowParams):
       `);
 
     await new sql.Request(transaction)
-      .input('id_version', sql.Int, params.idDocumentVersion)
+      .input('id_version', sql.Int, idDocumentVersion)
       .input('id_request', sql.Int, idRequestGeneral)
       .query(`UPDATE document_version SET id_request_general = @id_request WHERE id_document_version = @id_version`);
 
@@ -221,7 +276,7 @@ export async function startDocumentVersionWorkflow(params: StartWorkflowParams):
       .query(`UPDATE document SET id_process = @id_process WHERE id_document = @id_document AND id_process IS NULL`);
 
     await transaction.commit();
-    return { idRequestGeneral };
+    return { idDocumentVersion, createdAt, idRequestGeneral };
   } catch (err) {
     await transaction.rollback();
     throw err;
