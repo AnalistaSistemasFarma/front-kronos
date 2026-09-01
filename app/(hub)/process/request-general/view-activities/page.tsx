@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState, useRef } from 'react';
+import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
@@ -67,6 +67,11 @@ import {
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
+import { parseOrionSignatureState } from '../../../../../lib/orion/formValue';
+import type { OrionSignatureState } from '../../../../../lib/orion/types';
+import { buildOrionParticipants } from '../../../../../lib/orion/participants';
+import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 
 interface Request {
   id: number;
@@ -80,6 +85,7 @@ interface Request {
   created_at: string;
   id_requester: number;
   name_requester: string;
+  requester_email?: string | null;
   status_req: number;
   id_status: number;
   status_task: string;
@@ -147,6 +153,12 @@ interface UserEmail {
   label: string;
 }
 
+function getFolderFileUrl(file: FolderFile): string | null {
+  const download = file['@microsoft.graph.downloadUrl'];
+  if (typeof download === 'string' && download.trim()) return download;
+  return file.webUrl ?? null;
+}
+
 function ViewRequestPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -198,36 +210,56 @@ function ViewRequestPage() {
   const [availableUsers, setAvailableUsers] = useState<UserEmail[]>([]);
   const [selectedNoteEmails, setSelectedNoteEmails] = useState<string[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [requestFormValues, setRequestFormValues] = useState<
+    {
+      id: number;
+      id_form_field?: number;
+      field_label: string;
+      field_type?: string | null;
+      config_json?: string | null;
+      option_label: string | null;
+      value_text: string | null;
+    }[]
+  >([]);
+  const lastOrionFormFetchKeyRef = useRef('');
 
   useEffect(() => {
     const storedRequest = sessionStorage.getItem('selectedRequest');
     if (storedRequest) {
-      const requestData = JSON.parse(storedRequest);
-      setRequest(requestData);
-      setOriginalRequest(requestData);
-      setLoading(false);
-    } else if (id) {
-      fetch(`/api/requests-general/view-activities?id=${id}`)
-        .then((res) => {
-          if (!res.ok) throw new Error('Error al cargar la tarea');
-          return res.json();
-        })
-        .then((data) => {
-          const mappedData = {
-            ...data,
-            resolution: data.resolutioncase || null,
-            date_resolution: data.date_resolution || null,
-          };
-          setRequest(mappedData);
-          setOriginalRequest(mappedData);
-          setLoading(false);
-        })
-        .catch((err) => {
-          console.error('Error fetching request:', err);
-          setError('No se pudo cargar la tarea. Por favor intente nuevamente.');
-          setLoading(false);
-        });
+      try {
+        const requestData = JSON.parse(storedRequest);
+        setRequest(requestData);
+        setOriginalRequest(requestData);
+        setLoading(false);
+      } catch {
+        /* ignore invalid cache */
+      }
     }
+
+    if (!id) return;
+
+    fetch(`/api/requests-general/view-activities?id=${id}`)
+      .then((res) => {
+        if (!res.ok) throw new Error('Error al cargar la tarea');
+        return res.json();
+      })
+      .then((data) => {
+        const mappedData = {
+          ...data,
+          resolution: data.resolutioncase || data.resolution || null,
+          date_resolution: data.date_resolution || null,
+        };
+        setRequest(mappedData);
+        setOriginalRequest(mappedData);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error('Error fetching request:', err);
+        if (!storedRequest) {
+          setError('No se pudo cargar la tarea. Por favor intente nuevamente.');
+        }
+        setLoading(false);
+      });
   }, [id]);
 
   useEffect(() => {
@@ -235,6 +267,9 @@ function ViewRequestPage() {
       fetchNotes();
       fetchFolderContents();
       fetchTasksRG();
+      if (request.id_request_general) {
+        void fetchFormValues(request.id_request_general);
+      }
     }
   }, [request]);
 
@@ -474,6 +509,74 @@ function ViewRequestPage() {
       setLoadingTaskRG(false);
     }
   };
+
+  const fetchFormValues = async (requestId: number, signal?: AbortSignal) => {
+    try {
+      const response = await fetch(
+        `/api/requests-general/request-form-values?id_request=${requestId}`,
+        { signal }
+      );
+      if (!response.ok) throw new Error('Error al cargar las respuestas del formulario');
+      const data = await response.json();
+      if (!signal?.aborted) setRequestFormValues(data);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      console.error('Error fetching form values:', err);
+      if (!signal?.aborted) setRequestFormValues([]);
+    }
+  };
+
+  const orionValueText = useMemo(() => {
+    const field = requestFormValues.find((fv) => fv.field_type === ORION_SIGNATURE_FIELD_TYPE);
+    return field?.value_text ?? null;
+  }, [requestFormValues]);
+
+  const orionInitialState = useMemo(
+    () => parseOrionSignatureState(orionValueText),
+    [orionValueText]
+  );
+
+  const handleOrionStateChange = useCallback(
+    (next: OrionSignatureState) => {
+      if (!request?.id_request_general) return;
+      const status = String(next.status || '').toUpperCase();
+      const fetchKey = JSON.stringify({
+        status,
+        signed: next.signedFileUrl ?? null,
+        id: next.orionDocumentId ?? null,
+      });
+      if (fetchKey === lastOrionFormFetchKeyRef.current) return;
+      const shouldRefresh =
+        Boolean(next.orionDocumentId) ||
+        status === 'FIRMADO' ||
+        status === 'RECHAZADO' ||
+        Boolean(next.signedFileUrl);
+      if (!shouldRefresh) return;
+      lastOrionFormFetchKeyRef.current = fetchKey;
+      void fetchFormValues(request.id_request_general);
+    },
+    [request?.id_request_general]
+  );
+
+  const orionParticipants = useMemo(
+    () =>
+      buildOrionParticipants({
+        requesterName: request?.name_requester,
+        requesterEmail: request?.requester_email,
+        assigneeName: request?.assigned,
+        currentUserEmail: session?.user?.email,
+        users: availableUsers,
+        tasks: taskRQ.map((t) => ({ name: t.name, id_assigned: t.id_assigned })),
+      }),
+    [
+      availableUsers,
+      request?.assigned,
+      request?.name_requester,
+      request?.requester_email,
+      session?.user?.email,
+      taskRQ,
+    ]
+  );
 
   async function CheckOrCreateFolderAndUpload(
     folderName: string,
@@ -984,6 +1087,15 @@ function ViewRequestPage() {
     );
   }
 
+  const isFirmaTask = (request.category ?? '').toUpperCase().includes('FIRMA');
+  const hasOrionSignatureField = requestFormValues.some(
+    (fv) => fv.field_type === ORION_SIGNATURE_FIELD_TYPE
+  );
+  const showOrionPanel = isFirmaTask || hasOrionSignatureField;
+  const primaryPdfFile = folderContents.find((f) => /\.pdf$/i.test(f.name));
+  const attachmentPdfUrl = primaryPdfFile ? getFolderFileUrl(primaryPdfFile) : null;
+  const attachmentFileName = primaryPdfFile?.name ?? null;
+
   return (
     <div className='min-h-screen bg-gray-50'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
@@ -1019,7 +1131,7 @@ function ViewRequestPage() {
         </Card>
 
         <div className='flex flex-col lg:flex-row gap-6'>
-          <div className='flex-1 order-2 lg:order-1 lg:sticky lg:top-6 self-start'>
+          <div className='flex-1 order-2 lg:order-1 min-w-0 space-y-5 lg:sticky lg:top-6 self-start'>
             <Card
               shadow='sm'
               p='xl'
@@ -1181,6 +1293,22 @@ function ViewRequestPage() {
                 )}
               </div>
             </Card>
+
+            {showOrionPanel && (
+              <OrionSignaturePanel
+                requestId={request.id_request_general}
+                requestTitle={request.subject_request}
+                initialState={orionInitialState}
+                createdByEmail={request.requester_email ?? undefined}
+                currentUserEmail={session?.user?.email ?? undefined}
+                attachmentPdfUrl={attachmentPdfUrl}
+                attachmentFileName={attachmentFileName}
+                participants={orionParticipants}
+                availableUsers={availableUsers}
+                currentUserName={session?.user?.name ?? undefined}
+                onStateChange={handleOrionStateChange}
+              />
+            )}
           </div>
 
           <div className='w-full lg:w-150 order-1 lg:order-2'>

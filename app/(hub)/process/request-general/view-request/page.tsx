@@ -1789,7 +1789,203 @@ function ViewRequestPage() {
         </Card>
 
         <div className='flex flex-col lg:flex-row gap-6'>
-          <div className='flex-1 order-2 lg:order-1 lg:sticky lg:top-6 self-start space-y-6'>
+          <div className='flex-1 order-2 lg:order-1 min-w-0 space-y-5'>
+            <Card
+              withBorder
+              radius='md'
+              p='md'
+              shadow='sm'
+              style={{
+                background: 'var(--app-surface)',
+                borderColor: 'var(--app-border)',
+              }}
+            >
+              <Title order={4} mb='sm' fw={600} className='flex items-center gap-2'>
+                <IconNote size={18} />
+                Historial de interacciones
+              </Title>
+
+              <ScrollArea
+                h={360}
+                mb='md'
+                offsetScrollbars
+                type='auto'
+                viewportRef={notesViewportRef}
+                styles={{
+                  viewport: { paddingRight: 4 },
+                }}
+              >
+                <Stack gap='sm' py={4}>
+                  {chatDocumentItems.map((doc) => (
+                    <Box key={doc.id} style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <Box
+                        maw={240}
+                        px='sm'
+                        py='xs'
+                        style={{
+                          borderRadius: 14,
+                          borderBottomRightRadius: 4,
+                          background:
+                            'color-mix(in srgb, var(--app-accent) 14%, var(--app-surface))',
+                          border: '1px solid color-mix(in srgb, var(--app-accent) 28%, var(--app-border))',
+                        }}
+                      >
+                        <Text size='xs' c='dimmed' fw={500} mb={6}>
+                          {request?.requester || 'Solicitud'}
+                        </Text>
+                        <ChatDocumentChip
+                          name={doc.name}
+                          url={doc.url}
+                          variant={doc.variant}
+                          tone='chat'
+                        />
+                        <Text size='10px' c='dimmed' ta='right' mt={6}>
+                          Documento adjunto
+                        </Text>
+                      </Box>
+                    </Box>
+                  ))}
+
+                  {notes.length > 0 ? (
+                    notes.map((note) => {
+                      const isCurrentUser = note.createdBy === userName;
+                      return (
+                        <Box
+                          key={note.id_note}
+                          style={{
+                            display: 'flex',
+                            justifyContent: isCurrentUser ? 'flex-end' : 'flex-start',
+                          }}
+                        >
+                          <Box
+                            maw='85%'
+                            px='sm'
+                            py='xs'
+                            style={{
+                              borderRadius: 14,
+                              borderBottomRightRadius: isCurrentUser ? 4 : 14,
+                              borderBottomLeftRadius: isCurrentUser ? 14 : 4,
+                              background: isCurrentUser
+                                ? 'color-mix(in srgb, var(--app-accent) 16%, var(--app-surface))'
+                                : 'var(--app-surface-raised)',
+                              border: '1px solid var(--app-border)',
+                            }}
+                          >
+                            <Group gap={8} mb={6} wrap='nowrap'>
+                              <Avatar size={24} radius='xl' color={isCurrentUser ? 'blue' : 'gray'}>
+                                {note.createdBy.charAt(0).toUpperCase()}
+                              </Avatar>
+                              <Text size='xs' fw={600} lineClamp={1}>
+                                {note.createdBy}
+                              </Text>
+                              {note.creation_date && (
+                                <Text size='10px' c='dimmed' ml='auto' style={{ whiteSpace: 'nowrap' }}>
+                                  {formatDateCO(note.creation_date, { month: 'short' })}
+                                </Text>
+                              )}
+                            </Group>
+                            <Text size='sm' className='whitespace-pre-line' style={{ lineHeight: 1.5 }}>
+                              {note.note}
+                            </Text>
+                          </Box>
+                        </Box>
+                      );
+                    })
+                  ) : chatDocumentItems.length === 0 ? (
+                    <Stack align='center' py='xl' gap={4}>
+                      <Text size='sm' c='dimmed'>
+                        No hay interacciones registradas
+                      </Text>
+                      <Text size='xs' c='dimmed'>
+                        Sé el primero en añadir un comentario
+                      </Text>
+                    </Stack>
+                  ) : null}
+                  <div ref={chatEndRef} />
+                </Stack>
+              </ScrollArea>
+
+              <Divider mb='sm' color='var(--app-border)' />
+
+              <Stack gap='xs'>
+                <Group align='flex-end' gap='sm' wrap='nowrap'>
+                  <Textarea
+                    placeholder='Escribe un mensaje…'
+                    value={newNote}
+                    onChange={(e) => setNewNote(e.target.value)}
+                    minRows={2}
+                    autosize
+                    maxRows={4}
+                    disabled={!userId || loadingUserId}
+                    style={{ flex: 1 }}
+                    styles={{
+                      input: {
+                        borderRadius: 10,
+                        background: 'var(--app-surface-raised)',
+                        borderColor: 'var(--app-border)',
+                      },
+                    }}
+                  />
+                  <ActionIcon
+                    variant='filled'
+                    color='blue'
+                    size='lg'
+                    radius='md'
+                    onClick={handleAddNote}
+                    disabled={!userId || loadingUserId || !newNote.trim()}
+                    aria-label='Enviar mensaje'
+                  >
+                    <IconCheck size={18} />
+                  </ActionIcon>
+                </Group>
+
+                <Checkbox
+                  label='Notificar por correo'
+                  size='xs'
+                  checked={noteData.notificarPorCorreo}
+                  onChange={(e) => {
+                    const checked = e.currentTarget.checked;
+                    setNoteData({
+                      ...noteData,
+                      notificarPorCorreo: checked,
+                      correo: checked ? noteData.correo : '',
+                    });
+                    if (!checked) {
+                      setSelectedNoteEmails([]);
+                    }
+                  }}
+                />
+
+                {noteData.notificarPorCorreo && (
+                  <MultiSelect
+                    placeholder='Destinatarios del correo…'
+                    data={availableUsers}
+                    value={selectedNoteEmails}
+                    onChange={(values) => {
+                      setSelectedNoteEmails(values);
+                      setNoteData({
+                        ...noteData,
+                        correo: values.join('; '),
+                      });
+                    }}
+                    searchable
+                    clearable
+                    nothingFoundMessage='No se encontraron usuarios'
+                    disabled={loadingUsers}
+                    size='xs'
+                  />
+                )}
+
+                {(!userId || loadingUserId) && (
+                  <Text size='xs' c='orange'>
+                    {loadingUserId
+                      ? 'Cargando información del usuario…'
+                      : 'No se pudo identificar al usuario actual'}
+                  </Text>
+                )}
+              </Stack>
+            </Card>
+
             {hasOrionSignatureField && orionFormField && (
               <OrionSignaturePanel
                 requestId={request?.id ?? Number(id)}
@@ -1805,177 +2001,6 @@ function ViewRequestPage() {
                 onStateChange={handleOrionStateChange}
               />
             )}
-
-            <Card
-              shadow='sm'
-              p='xl'
-              radius='md'
-              withBorder
-              className='bg-white flex flex-col'
-            >
-              <Title order={3} mb='md' className='flex items-center gap-2'>
-                <IconNote size={20} />
-                Historial de Interacciones
-              </Title>
-
-              <ScrollArea h='calc(100vh - 420px)' className='mb-4' offsetScrollbars viewportRef={notesViewportRef}>
-                <div className='space-y-4 p-2'>
-                  {chatDocumentItems.length > 0 &&
-                    chatDocumentItems.map((doc) => (
-                      <div key={doc.id} className='flex justify-end'>
-                        <div className='w-full max-w-[220px] rounded-2xl rounded-br-none bg-blue-500 px-3 py-2 shadow-sm'>
-                          <Text size='xs' className='text-blue-100 font-medium mb-1.5'>
-                            {request?.requester || 'Solicitud'}
-                          </Text>
-                          <ChatDocumentChip
-                            name={doc.name}
-                            url={doc.url}
-                            variant={doc.variant}
-                            tone='chat'
-                          />
-                          <Text size='10px' className='text-blue-100/80 mt-1.5 text-right'>
-                            Documento adjunto
-                          </Text>
-                        </div>
-                      </div>
-                    ))}
-
-                  {notes.length > 0 ? (
-                    notes.map((note) => {
-                      const isCurrentUser = note.createdBy === userName;
-                      return (
-                        <div
-                          key={note.id_note}
-                          className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
-                        >
-                          <div
-                            className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl ${
-                              isCurrentUser
-                                ? 'bg-blue-400 text-white rounded-br-none'
-                                : 'bg-gray-100 text-gray-800 rounded-bl-none'
-                            }`}
-                          >
-                            <div className='flex items-center gap-2 mb-2'>
-                              <Avatar
-                                size='sm'
-                                radius='xl'
-                                color={isCurrentUser ? 'white' : 'gray'}
-                              >
-                                {note.createdBy.charAt(0).toUpperCase()}
-                              </Avatar>
-                              <Text
-                                size='xs'
-                                fw={500}
-                                className={
-                                  isCurrentUser
-                                    ? 'text-blue-100 font-bold'
-                                    : 'text-gray-600 font-bold'
-                                }
-                              >
-                                {note.createdBy}
-                              </Text>
-                            </div>
-                            <Text size='sm' className='whitespace-pre-line mb-2'>
-                              {note.note}
-                            </Text>
-                            {note.creation_date && (
-                              <Text
-                                size='xs'
-                                className={isCurrentUser ? 'text-blue-100' : 'text-gray-500'}
-                              >
-                                {formatDateCO(note.creation_date, { month: 'short' })}
-                              </Text>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                  ) : chatDocumentItems.length === 0 ? (
-                    <div className='text-center py-8'>
-                      <Text size='lg' color='gray.5' mb='xs'>
-                        No hay interacciones registradas
-                      </Text>
-                      <Text size='sm' color='gray.4'>
-                        Sé el primero en añadir un comentario
-                      </Text>
-                    </div>
-                  ) : null}
-                  <div ref={chatEndRef} />
-                </div>
-              </ScrollArea>
-
-              <div className='border-t pt-4'>
-                <Stack gap='sm'>
-                  <Textarea
-                    placeholder='Escribe una nota...'
-                    value={newNote}
-                    onChange={(e) => setNewNote(e.target.value)}
-                    minRows={2}
-                    className='flex-1'
-                    disabled={!userId || loadingUserId}
-                    styles={{
-                      input: {
-                        borderRadius: '12px',
-                      },
-                    }}
-                  />
-                  <Checkbox
-                    label='¿Notificar por correo electrónico?'
-                    checked={noteData.notificarPorCorreo}
-                    onChange={(e) => {
-                      const checked = e.currentTarget.checked;
-                      setNoteData({
-                        ...noteData,
-                        notificarPorCorreo: checked,
-                        correo: checked ? noteData.correo : '',
-                      });
-                      if (!checked) {
-                        setSelectedNoteEmails([]);
-                      }
-                    }}
-                    mb='sm'
-                  />
-                  {noteData.notificarPorCorreo && (
-                    <MultiSelect
-                      label='Correo electrónico de contacto'
-                      placeholder='Buscar y seleccionar usuarios...'
-                      data={availableUsers}
-                      value={selectedNoteEmails}
-                      onChange={(values) => {
-                        setSelectedNoteEmails(values);
-                        setNoteData({
-                          ...noteData,
-                          correo: values.join('; '),
-                        });
-                      }}
-                      searchable
-                      clearable
-                      nothingFoundMessage='No se encontraron usuarios'
-                      disabled={loadingUsers}
-                    />
-                  )}
-                  <Group align='flex-end'>
-                    <ActionIcon
-                      variant='filled'
-                      color='blue'
-                      size='lg'
-                      radius='xl'
-                      onClick={handleAddNote}
-                      disabled={!userId || loadingUserId || !newNote.trim()}
-                    >
-                      <IconCheck size={18} />
-                    </ActionIcon>
-                  </Group>
-                </Stack>
-                {(!userId || loadingUserId) && (
-                  <Text size='xs' color='orange.6' mt='xs'>
-                    {loadingUserId
-                      ? 'Cargando información del usuario...'
-                      : 'No se pudo identificar al usuario actual'}
-                  </Text>
-                )}
-              </div>
-            </Card>
           </div>
 
           <div className='w-full lg:w-150 order-1 lg:order-2'>

@@ -9,10 +9,10 @@ import { usePushNotifications } from '../hooks/usePushNotifications';
 export default function PushNotificationBell() {
   const { data: session } = useSession();
   const userEmail = session?.user?.email;
-  const { isSupported, isSubscribed, permission, loading, subscribe, unsubscribe } =
+  const { isSupported, isAvailable, isSubscribed, permission, loading, subscribe, unsubscribe } =
     usePushNotifications(userEmail);
 
-  if (!isSupported) return null;
+  if (!isSupported || !isAvailable) return null;
 
   const handleClick = async () => {
     if (permission === 'denied') {
@@ -24,13 +24,13 @@ export default function PushNotificationBell() {
     }
 
     if (isSubscribed) {
-      await unsubscribe();
-      toast.success('Notificaciones desactivadas');
+      const ok = await unsubscribe();
+      if (ok) toast.success('Notificaciones desactivadas');
+      else toast.error('No se pudieron desactivar las notificaciones');
     } else {
-      await subscribe();
-      if (permission === 'granted' || Notification.permission === 'granted') {
-        toast.success('Notificaciones activadas');
-      }
+      const ok = await subscribe();
+      if (ok) toast.success('Notificaciones activadas');
+      else toast.error('No se pudieron activar las notificaciones en este entorno', { duration: 5000 });
     }
   };
 

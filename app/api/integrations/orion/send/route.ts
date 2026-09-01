@@ -7,9 +7,11 @@ import { parseOrionSignatureState } from '@/lib/orion/formValue';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import {
   findOrionSignatureField,
+  getRequestOrionContext,
   syncOrionDocumentState,
   userCanManageOrionRequest,
 } from '@/lib/orion/service';
+import { syncOrionSignerTasks } from '@/lib/orion/signerTasks';
 
 /** POST /api/integrations/orion/send — enviar documento a firma en Orion */
 export async function POST(req: Request) {
@@ -55,7 +57,17 @@ export async function POST(req: Request) {
         });
       }
 
-      return syncOrionDocumentState(pool, requestId);
+      const synced = await syncOrionDocumentState(pool, requestId);
+      const nextState = synced ?? current;
+      const ctx = await getRequestOrionContext(pool, requestId);
+      await syncOrionSignerTasks(pool, {
+        requestId,
+        state: nextState,
+        previousSigners: current.signers,
+        subject: ctx?.subject_request ?? null,
+        documentStatus: nextState.status ?? 'PENDIENTE_FIRMA',
+      });
+      return nextState;
     });
 
     return NextResponse.json({ success: true, state }, { status: 200 });

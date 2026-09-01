@@ -9,6 +9,17 @@ import type { OrionDocumentResponse, OrionSignatureState } from './types';
 import { buildOrionExternalRef, resolveOrionTenantId, getOrionDefaultCreatedByEmail } from './config';
 import { createOrionDocument, getOrionDocument, getOrionDocumentByRef } from './client';
 import { advanceSequentialTask } from '../workflow/advanceSequentialTask.js';
+import {
+  allSignersCompleted,
+  getCurrentPendingSigner,
+  isSignerCompleted,
+  newlyCompletedSigners,
+} from './signerStatus';
+import {
+  cancelOpenSignerTasks,
+  findOrionSignatureTaskTemplate,
+  syncOrionSignerTasks,
+} from './signerTasks';
 
 type SqlPool = import('mssql').ConnectionPool;
 type SqlTransaction = import('mssql').Transaction;
@@ -250,7 +261,13 @@ export async function applyOrionWebhookToRequest(
     auditSummary?: string | null;
     noteAuthorUserId: string | null;
   }
-): Promise<{ tasksUpdated: number; requestClosed: boolean }> {
+): Promise<{
+  tasksUpdated: number;
+  requestClosed: boolean;
+  signerTasksClosed: number;
+  signerTasksOpened: number;
+  currentSignerEmail: string | null;
+}> {
   const field = await findOrionSignatureField(pool, params.requestId);
   if (!field) {
     throw Object.assign(new Error('Campo orion_signature no encontrado para la solicitud'), {
@@ -258,7 +275,9 @@ export async function applyOrionWebhookToRequest(
     });
   }
 
+  const ctx = await getRequestOrionContext(pool, params.requestId);
   const current = parseOrionSignatureState(field.value_text);
+  const previousSigners = current.signers;
   const state = mergeOrionSignatureState(current, params.patch);
   await upsertOrionFormValue(pool, params.requestId, field.id_form_field, state);
 
@@ -266,56 +285,52 @@ export async function applyOrionWebhookToRequest(
   let tasksUpdated = 0;
   let requestClosed = false;
 
-  const openTasks = await pool
-    .request()
-    .input('id_request', sql.Int, params.requestId)
-    .query(`
-      SELECT trg.id, trg.id_assigned, trg.id_task, trg.id_status,
-             tpc.task, tpc.is_sequential, tpc.display_order, tpc.id_process_category,
-             rg.subject_request
-      FROM task_request_general trg
-      INNER JOIN requests_general rg ON rg.id = trg.id_request_general
-      LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task
-      WHERE trg.id_request_general = @id_request
-        AND trg.id_status NOT IN (2, 3)
-      ORDER BY ISNULL(tpc.display_order, 0), trg.id
-    `);
+  const syncResult = await syncOrionSignerTasks(pool, {
+    requestId: params.requestId,
+    state,
+    previousSigners,
+    subject: ctx?.subject_request ?? null,
+    documentStatus: statusUpper,
+  });
+
+  tasksUpdated += syncResult.tasksClosed + syncResult.tasksOpened;
 
   const resolution =
     params.auditSummary ||
     (statusUpper === 'FIRMADO'
       ? 'Documento firmado vía GSS Firma (Orion).'
-      : 'Documento rechazado vía GSS Firma (Orion).');
+      : statusUpper === 'RECHAZADO'
+        ? 'Documento rechazado vía GSS Firma (Orion).'
+        : 'Actualización de firma digital (Orion).');
 
-  if (statusUpper === 'FIRMADO') {
-    for (const task of openTasks.recordset) {
-      const assigned = task.id_assigned || params.noteAuthorUserId;
-      if (!assigned) continue;
+  if (statusUpper === 'RECHAZADO') {
+    tasksUpdated += await cancelOpenSignerTasks(
+      pool,
+      params.requestId,
+      'Documento rechazado en GSS Firma (Orion).'
+    );
 
-      await pool
-        .request()
-        .input('id', sql.Int, task.id)
-        .input('id_status', sql.Int, 2)
-        .input('id_assigned', sql.NVarChar(255), assigned)
-        .input('resolution', sql.NVarChar(sql.MAX), resolution)
-        .query(`
-          UPDATE task_request_general
-          SET id_status = @id_status,
-              id_assigned = @id_assigned,
-              resolution = @resolution,
-              end_date = GETDATE(),
-              date_resolution = GETDATE(),
-              id_executor_final = @id_assigned
-          WHERE id = @id
-        `);
-      tasksUpdated += 1;
-
+    await pool
+      .request()
+      .input('id', sql.Int, params.requestId)
+      .input('resolution', sql.NVarChar(sql.MAX), resolution)
+      .query(`
+        UPDATE requests_general
+        SET status_req = 3,
+            resolution = @resolution,
+            date_resolution = GETDATE()
+        WHERE id = @id AND status_req NOT IN (2, 3)
+      `);
+    requestClosed = true;
+  } else if (statusUpper === 'FIRMADO' && allSignersCompleted(state.signers)) {
+    const template = await findOrionSignatureTaskTemplate(pool, params.requestId);
+    if (template) {
       await advanceSequentialTask(pool, {
         id_request_general: params.requestId,
-        id_task: task.id_task,
-        id_process_category: task.id_process_category,
-        display_order: task.display_order,
-        subject_request: task.subject_request,
+        id_task: template.id,
+        id_process_category: template.id_process_category,
+        display_order: template.display_order,
+        subject_request: ctx?.subject_request ?? null,
       });
     }
 
@@ -333,53 +348,50 @@ export async function applyOrionWebhookToRequest(
         WHERE id = @id AND status_req NOT IN (2, 3)
       `);
     requestClosed = true;
-  } else if (statusUpper === 'RECHAZADO') {
-    for (const task of openTasks.recordset) {
-      const assigned = task.id_assigned || params.noteAuthorUserId;
-      if (!assigned) continue;
-
-      await pool
-        .request()
-        .input('id', sql.Int, task.id)
-        .input('id_status', sql.Int, 3)
-        .input('id_assigned', sql.NVarChar(255), assigned)
-        .input('resolution', sql.NVarChar(sql.MAX), resolution)
-        .query(`
-          UPDATE task_request_general
-          SET id_status = @id_status,
-              id_assigned = @id_assigned,
-              resolution = @resolution,
-              end_date = GETDATE(),
-              date_resolution = GETDATE(),
-              id_executor_final = @id_assigned
-          WHERE id = @id
-        `);
-      tasksUpdated += 1;
-    }
-
-    await pool
-      .request()
-      .input('id', sql.Int, params.requestId)
-      .input('resolution', sql.NVarChar(sql.MAX), resolution)
-      .query(`
-        UPDATE requests_general
-        SET status_req = 3,
-            resolution = @resolution,
-            date_resolution = GETDATE()
-        WHERE id = @id AND status_req NOT IN (2, 3)
-      `);
-    requestClosed = true;
   }
 
   if (params.noteAuthorUserId) {
-    const note =
-      statusUpper === 'FIRMADO'
-        ? `GSS Firma: documento firmado. ${resolution}`
-        : `GSS Firma: documento rechazado. ${resolution}`;
-    await insertRequestNote(pool, params.requestId, note, params.noteAuthorUserId);
+    const completed = newlyCompletedSigners(previousSigners, state.signers);
+    if (completed.length > 0 && statusUpper !== 'RECHAZADO') {
+      for (const signer of completed) {
+        await insertRequestNote(
+          pool,
+          params.requestId,
+          `GSS Firma: ${signer.name || signer.email} completó su firma.`,
+          params.noteAuthorUserId
+        );
+      }
+    } else if (statusUpper === 'FIRMADO' && allSignersCompleted(state.signers)) {
+      await insertRequestNote(
+        pool,
+        params.requestId,
+        `GSS Firma: documento firmado por todos los firmantes. ${resolution}`,
+        params.noteAuthorUserId
+      );
+    } else if (statusUpper === 'RECHAZADO') {
+      await insertRequestNote(
+        pool,
+        params.requestId,
+        `GSS Firma: documento rechazado. ${resolution}`,
+        params.noteAuthorUserId
+      );
+    } else if (statusUpper === 'EN_PROCESO' && syncResult.tasksOpened > 0) {
+      await insertRequestNote(
+        pool,
+        params.requestId,
+        `GSS Firma: turno de firma para ${syncResult.currentSignerEmail}.`,
+        params.noteAuthorUserId
+      );
+    }
   }
 
-  return { tasksUpdated, requestClosed };
+  return {
+    tasksUpdated,
+    requestClosed,
+    signerTasksClosed: syncResult.tasksClosed,
+    signerTasksOpened: syncResult.tasksOpened,
+    currentSignerEmail: syncResult.currentSignerEmail,
+  };
 }
 
 /** Sincroniza estado desde Orion GET y persiste en request_form_value. */
@@ -423,4 +435,91 @@ export async function userCanManageOrionRequest(
     `);
 
   return Boolean(assigned.recordset[0]);
+}
+
+function normalizeSignerEmail(email?: string | null): string {
+  return String(email || '').trim().toLowerCase();
+}
+
+/**
+ * Sincroniza el estado desde Orion tras la firma de un firmante,
+ * cierra su tarea y abre la del siguiente en la secuencia.
+ */
+export async function finalizeSignerTurn(
+  pool: SqlPool,
+  params: {
+    requestId: number;
+    userId: string;
+    userEmail: string;
+  }
+): Promise<{
+  state: OrionSignatureState;
+  signerCompleted: boolean;
+  tasksUpdated: number;
+  requestClosed: boolean;
+  signerTasksClosed: number;
+  signerTasksOpened: number;
+  currentSignerEmail: string | null;
+}> {
+  const field = await findOrionSignatureField(pool, params.requestId);
+  if (!field) {
+    throw Object.assign(new Error('Campo orion_signature no encontrado'), { status: 404 });
+  }
+
+  const current = parseOrionSignatureState(field.value_text);
+  if (!current.orionDocumentId) {
+    throw Object.assign(new Error('No hay documento Orion para esta solicitud'), { status: 422 });
+  }
+
+  const previousSigners = current.signers;
+  const live = await getOrionDocument(current.orionDocumentId);
+  if (!live.ok || !live.data) {
+    throw Object.assign(new Error(live.error || 'No se pudo consultar Orion'), {
+      status: live.status >= 500 ? 503 : 502,
+    });
+  }
+
+  const externalRef = current.externalRef || buildOrionExternalRef(params.requestId);
+  const liveState = mergeOrionSignatureState(
+    current,
+    mapOrionResponseToState(externalRef, live.data)
+  );
+
+  const me = normalizeSignerEmail(params.userEmail);
+  const mySigner = liveState.signers?.find((s) => normalizeSignerEmail(s.email) === me);
+  if (!mySigner) {
+    throw Object.assign(new Error('No es firmante de este documento'), { status: 403 });
+  }
+
+  const pending = getCurrentPendingSigner(liveState.signers);
+  const isMyTurn = Boolean(pending && normalizeSignerEmail(pending.email) === me);
+  const alreadyCompleted = isSignerCompleted(mySigner.status);
+
+  if (!isMyTurn && !alreadyCompleted) {
+    throw Object.assign(new Error('Aún no es su turno para firmar'), { status: 403 });
+  }
+
+  const statusUpper = String(liveState.status || 'EN_PROCESO').toUpperCase();
+  const outcome = await applyOrionWebhookToRequest(pool, {
+    requestId: params.requestId,
+    status: statusUpper,
+    auditSummary: liveState.auditSummary,
+    noteAuthorUserId: params.userId,
+    patch: liveState,
+  });
+
+  const completed = newlyCompletedSigners(previousSigners, liveState.signers);
+  const signerCompleted =
+    completed.some((s) => normalizeSignerEmail(s.email) === me) ||
+    Boolean(mySigner && isSignerCompleted(mySigner.status));
+
+  return {
+    state: liveState,
+    signerCompleted,
+    tasksUpdated: outcome.tasksUpdated,
+    requestClosed: outcome.requestClosed,
+    signerTasksClosed: outcome.signerTasksClosed,
+    signerTasksOpened: outcome.signerTasksOpened,
+    currentSignerEmail: outcome.currentSignerEmail,
+  };
 }

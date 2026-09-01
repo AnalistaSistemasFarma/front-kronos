@@ -90,7 +90,7 @@ export default function NotificationBell() {
   const router = useRouter();
   const userEmail = session?.user?.email;
   const isAuthenticated = status === 'authenticated' && Boolean(userEmail);
-  const { isSupported, isSubscribed, permission, loading: pushLoading, subscribe, unsubscribe } =
+  const { isSupported, isAvailable, isSubscribed, permission, loading: pushLoading, subscribe, unsubscribe } =
     usePushNotifications(userEmail);
 
   const [opened, setOpened] = useState(false);
@@ -313,13 +313,13 @@ export default function NotificationBell() {
       return;
     }
     if (isSubscribed) {
-      await unsubscribe();
-      toast.success('Notificaciones push desactivadas');
+      const ok = await unsubscribe();
+      if (ok) toast.success('Notificaciones push desactivadas');
+      else toast.error('No se pudieron desactivar las notificaciones push');
     } else {
-      await subscribe();
-      if (Notification.permission === 'granted') {
-        toast.success('Notificaciones push activadas');
-      }
+      const ok = await subscribe();
+      if (ok) toast.success('Notificaciones push activadas');
+      else toast.error('No se pudieron activar las notificaciones push en este entorno', { duration: 5000 });
     }
   };
 
@@ -426,7 +426,7 @@ export default function NotificationBell() {
           )}
         </ScrollArea.Autosize>
 
-        {isSupported && (
+        {isSupported && isAvailable && (
           <Group
             justify='space-between'
             px='md'

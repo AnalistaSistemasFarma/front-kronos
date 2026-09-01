@@ -85,6 +85,9 @@ export async function POST(req: NextRequest) {
         status: statusUpper,
         tasksUpdated: outcome.tasksUpdated,
         requestClosed: outcome.requestClosed,
+        signerTasksClosed: outcome.signerTasksClosed,
+        signerTasksOpened: outcome.signerTasksOpened,
+        currentSignerEmail: outcome.currentSignerEmail,
       },
       { status: 200 }
     );

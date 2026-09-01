@@ -21,19 +21,21 @@ import {
   IconCheck,
   IconEdit,
   IconFileText,
-  IconPencil,
   IconRefresh,
   IconSignature,
   IconUpload,
-  IconUserCircle,
 } from '@tabler/icons-react';
 import type { OrionPostMessage, OrionSignatureState, OrionSignerState } from '../../lib/orion/types';
 import type { OrionParticipant, OrionUserOption } from '../../lib/orion/participants';
 import type { SignatureFieldPlacement } from '../../lib/orion/signatureFields';
+import { getCurrentPendingSigner } from '../../lib/orion/signerStatus';
+import { resolveOrionPermissions } from '../../lib/orion/permissions';
 import SignaturePad from './SignaturePad';
 import PdfInlineViewer from './PdfInlineViewer';
 import OrionSignersList from './OrionSignersList';
 import OrionDocumentEditor from './OrionDocumentEditor';
+import OrionPermissionsOverview from './OrionPermissionsOverview';
+import OrionSignerWorkflow from './OrionSignerWorkflow';
 
 type Props = {
   requestId: number;
@@ -115,13 +117,18 @@ export default function OrionSignaturePanel({
   const [signatureLoading, setSignatureLoading] = useState(true);
 
   const [canManage, setCanManage] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<OrionSignatureState>(initialState ?? {});
   const [resolvedEmbedOrigin, setResolvedEmbedOrigin] = useState<string | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [acceptLoading, setAcceptLoading] = useState(false);
+  const [signerModalIntent, setSignerModalIntent] = useState<'view' | 'sign'>('view');
+  const [signSuccessMessage, setSignSuccessMessage] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const userRoleRef = useRef<'coordinator' | 'signer' | 'waiting' | 'viewer'>('viewer');
   const mountedRef = useRef(false);
   const lastNotifyKeyRef = useRef('');
   const lastPatchKeyRef = useRef('');
@@ -181,6 +188,7 @@ export default function OrionSignaturePanel({
       if (res.ok && data.state) {
         if (data.embedOrigin) setResolvedEmbedOrigin(data.embedOrigin);
         if (typeof data.canManage === 'boolean') setCanManage(data.canManage);
+        if (typeof data.isAdmin === 'boolean') setIsAdmin(data.isAdmin);
         applyState(data.state as OrionSignatureState);
       }
     } catch {
@@ -231,9 +239,82 @@ export default function OrionSignaturePanel({
   const hasDocument = Boolean(state.orionDocumentId && state.embedUrl);
   const isTerminal = statusUpper === 'FIRMADO' || statusUpper === 'RECHAZADO';
 
+  const participantEmails = useMemo(
+    () => participants.map((p) => p.email).filter(Boolean) as string[],
+    [participants]
+  );
+
+  const permissions = useMemo(
+    () =>
+      resolveOrionPermissions({
+        canManage,
+        isAdmin,
+        currentUserEmail,
+        state,
+        hasAttachment: Boolean(attachmentPdfUrl),
+        participantEmails,
+        hasPersonalSignature: hasSignature,
+      }),
+    [
+      attachmentPdfUrl,
+      canManage,
+      currentUserEmail,
+      hasSignature,
+      isAdmin,
+      participantEmails,
+      state,
+    ]
+  );
+
+  const mySigner = useMemo(() => {
+    const me = normalizeEmail(currentUserEmail);
+    if (!me || !state.signers?.length) return null;
+    return state.signers.find((s) => normalizeEmail(s.email) === me) ?? null;
+  }, [currentUserEmail, state.signers]);
+
+  const pendingSigner = useMemo(() => getCurrentPendingSigner(state.signers), [state.signers]);
+  const isMyTurn = permissions.isMyTurn;
+  userRoleRef.current = permissions.userRole;
+
+  const syncSignerCompletion = useCallback(async () => {
+    if (userRoleRef.current !== 'signer') return false;
+    setAcceptLoading(true);
+    try {
+      const res = await fetch('/api/integrations/orion/complete-sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (data.error) setError(String(data.error));
+        return false;
+      }
+      if (data.state) applyState(data.state as OrionSignatureState);
+      if (data.signerCompleted) {
+        setSignSuccessMessage(
+          data.message ||
+            'Firma registrada. Su tarea fue cerrada y el flujo continúa con el siguiente firmante.'
+        );
+        setDocumentModalOpen(false);
+        setError(null);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      setAcceptLoading(false);
+    }
+  }, [applyState, requestId]);
+
   const openDocumentEditor = useCallback(async () => {
     setError(null);
-    if (!hasSignature) {
+    if (!permissions.canManageWorkflow) {
+      setError('Solo el coordinador puede configurar el documento.');
+      return;
+    }
+    if (!hasSignature && permissions.canDrawSignature) {
       setSignatureModalOpen(true);
       return;
     }
@@ -242,7 +323,7 @@ export default function OrionSignaturePanel({
       await ensureDocument();
       return;
     }
-    if (attachmentPdfUrl) {
+    if (attachmentPdfUrl && permissions.canUseAttachment) {
       setUploading(true);
       try {
         const pdfBase64 = await fetchUrlAsBase64(attachmentPdfUrl);
@@ -253,7 +334,41 @@ export default function OrionSignaturePanel({
         setUploading(false);
       }
     }
-  }, [attachmentPdfUrl, ensureDocument, hasDocument, hasSignature]);
+  }, [
+    attachmentPdfUrl,
+    ensureDocument,
+    hasDocument,
+    hasSignature,
+    permissions.canDrawSignature,
+    permissions.canManageWorkflow,
+    permissions.canUseAttachment,
+  ]);
+
+  const openSignerView = useCallback(() => {
+    setSignerModalIntent('view');
+    setDocumentModalOpen(true);
+  }, []);
+
+  const handleAcceptSign = useCallback(async () => {
+    if (!permissions.canAcceptSign) {
+      setError('Complete su firma personal antes de aceptar.');
+      return;
+    }
+    if (!mySigner?.signUrl && !state.embedUrl) {
+      setError('No hay enlace de firma disponible. Actualice el estado.');
+      void refreshState();
+      return;
+    }
+    setAcceptLoading(true);
+    setError(null);
+    try {
+      await refreshState();
+      setSignerModalIntent('sign');
+      setDocumentModalOpen(true);
+    } finally {
+      setAcceptLoading(false);
+    }
+  }, [mySigner?.signUrl, permissions.canAcceptSign, refreshState, state.embedUrl]);
 
   const saveSignature = useCallback(
     async (dataUrl: string) => {
@@ -270,9 +385,9 @@ export default function OrionSignaturePanel({
         setHasSignature(true);
         setSignaturePreview(dataUrl);
         setSignatureModalOpen(false);
-        if (canManage || attachmentPdfUrl) {
+        if (permissions.canManageWorkflow && attachmentPdfUrl) {
           setDocumentModalOpen(true);
-          if (!hasDocument && attachmentPdfUrl) {
+          if (!hasDocument && permissions.canUseAttachment) {
             setUploading(true);
             try {
               const pdfBase64 = await fetchUrlAsBase64(attachmentPdfUrl);
@@ -290,11 +405,11 @@ export default function OrionSignaturePanel({
         setSignatureSaving(false);
       }
     },
-    [attachmentPdfUrl, canManage, ensureDocument, hasDocument]
+    [attachmentPdfUrl, ensureDocument, hasDocument, permissions]
   );
 
   const useAttachmentForSigning = useCallback(async () => {
-    if (!attachmentPdfUrl) return;
+    if (!attachmentPdfUrl || !permissions.canUseAttachment) return;
     setUploading(true);
     setError(null);
     try {
@@ -305,9 +420,13 @@ export default function OrionSignaturePanel({
     } finally {
       setUploading(false);
     }
-  }, [attachmentPdfUrl, ensureDocument]);
+  }, [attachmentPdfUrl, ensureDocument, permissions.canUseAttachment]);
 
   const handleUploadAndCreate = useCallback(async () => {
+    if (!permissions.canUploadDocument) {
+      setError('No tiene permiso para cargar documentos.');
+      return;
+    }
     if (!pdfFile) {
       setError('Seleccione un archivo PDF');
       return;
@@ -322,7 +441,7 @@ export default function OrionSignaturePanel({
     } finally {
       setUploading(false);
     }
-  }, [ensureDocument, pdfFile]);
+  }, [ensureDocument, pdfFile, permissions.canUploadDocument]);
 
   const patchFromPostMessage = useCallback(
     (message: OrionPostMessage) => {
@@ -342,6 +461,14 @@ export default function OrionSignaturePanel({
 
       applyState(merged);
 
+      if (userRoleRef.current === 'signer') {
+        if (patchTimerRef.current) clearTimeout(patchTimerRef.current);
+        patchTimerRef.current = setTimeout(() => {
+          void syncSignerCompletion();
+        }, 600);
+        return;
+      }
+
       if (patchTimerRef.current) clearTimeout(patchTimerRef.current);
       patchTimerRef.current = setTimeout(() => {
         void fetch('/api/integrations/orion/ensure-document', {
@@ -351,7 +478,7 @@ export default function OrionSignaturePanel({
         });
       }, 400);
     },
-    [applyState, requestId, state, stateNotifyKey]
+    [applyState, requestId, state, stateNotifyKey, syncSignerCompletion]
   );
 
   useEffect(() => {
@@ -381,21 +508,30 @@ export default function OrionSignaturePanel({
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     const active = ['PENDIENTE_FIRMA', 'EN_PROCESO'].includes(statusUpper);
-    if (active && hasDocument && documentModalOpen) {
+    const signingActive =
+      documentModalOpen &&
+      signerModalIntent === 'sign' &&
+      permissions.userRole === 'signer' &&
+      active;
+    if (signingActive) {
+      pollRef.current = setInterval(() => {
+        void syncSignerCompletion();
+      }, 5000);
+    } else if (active && hasDocument && documentModalOpen && permissions.userRole === 'coordinator') {
       pollRef.current = setInterval(() => void refreshState(), 20000);
     }
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [documentModalOpen, refreshState, statusUpper, hasDocument]);
-
-  const mySigner = useMemo(() => {
-    const me = normalizeEmail(currentUserEmail);
-    if (!me || !state.signers?.length) return null;
-    return state.signers.find((s) => normalizeEmail(s.email) === me) ?? null;
-  }, [currentUserEmail, state.signers]);
-
-  const isMyTurn = Boolean(mySigner && signerPending(mySigner));
+  }, [
+    documentModalOpen,
+    hasDocument,
+    permissions.userRole,
+    refreshState,
+    signerModalIntent,
+    statusUpper,
+    syncSignerCompletion,
+  ]);
 
   useEffect(() => {
     if (state.embedUrl && !stableEmbedSrcRef.current) {
@@ -411,18 +547,23 @@ export default function OrionSignaturePanel({
 
   const signatureFields = (state.signatureFields ?? []) as SignatureFieldPlacement[];
   const editorPdfSrc = attachmentPdfUrl ?? null;
-  const useNativeEditor = Boolean(hasDocument && editorPdfSrc);
+  const useNativeEditor = Boolean(
+    hasDocument && editorPdfSrc && permissions.canManageWorkflow
+  );
+  const signOnlyMode = permissions.userRole === 'signer';
+  const documentPreviewUrl =
+    attachmentPdfUrl ?? state.signedFileUrl ?? (signOnlyMode ? state.embedUrl ?? null : null);
 
   const allFieldsPlaced =
     participants.length > 0 &&
     participants.every((p) => signatureFields.some((f) => f.signerOrder === p.order));
 
   const workflowStep = (() => {
-    if (isTerminal) return 4;
-    if (!hasSignature) return 0;
-    if (!hasDocument) return 1;
-    if (!allFieldsPlaced) return signatureFields.length > 0 ? 3 : 2;
-    return 4;
+    if (isTerminal) return 3;
+    if (!hasDocument) return 0;
+    if (!participants.length && !(state.signers?.length ?? 0)) return 1;
+    if (!allFieldsPlaced) return 2;
+    return 3;
   })();
   const statusLabel = state.status || 'SIN INICIAR';
 
@@ -464,31 +605,81 @@ export default function OrionSignaturePanel({
 
   return (
     <>
-      <Card withBorder radius='md' p='lg' shadow='sm'>
-        <Group justify='space-between' mb='md'>
+      <Card
+        withBorder
+        radius='md'
+        p='md'
+        shadow='sm'
+        style={{
+          background: 'var(--app-surface)',
+          borderColor: 'var(--app-border)',
+        }}
+      >
+        <Group justify='space-between' mb='sm' wrap='wrap' gap='sm'>
           <Group gap='sm'>
-            <ThemeIcon size={38} radius='md' variant='light' color='blue'>
-              <IconSignature size={20} />
+            <ThemeIcon size={34} radius='md' variant='light' color='blue'>
+              <IconSignature size={18} />
             </ThemeIcon>
             <div>
-              <Text fw={700}>Firma digital</Text>
+              <Text fw={700} size='sm'>
+                Firma digital
+              </Text>
               <Text size='xs' c='dimmed'>
-                Paso 1: su firma · Paso 2–4: documento, firmantes y ubicación
+                {permissions.userRole === 'coordinator'
+                  ? 'Cargar documento → firmantes → ubicación → enviar'
+                  : 'Ver documento → mi firma → aceptar'}
               </Text>
             </div>
           </Group>
-          <Badge color={statusColor(state.status)} variant='light'>
+          <Badge color={statusColor(state.status)} variant='light' size='sm'>
             {statusLabel}
           </Badge>
         </Group>
 
-        <Stepper active={workflowStep} size='xs' mb='lg'>
-          <Stepper.Step label='Mi firma' description={hasSignature ? 'Lista' : 'Pendiente'} />
-          <Stepper.Step label='Documento' description={hasDocument ? 'Cargado' : 'Pendiente'} />
-          <Stepper.Step label='Firmantes' description={participants.length ? `${participants.length} asignado(s)` : 'Pendiente'} />
-          <Stepper.Step label='Ubicación' description={signatureFields.length ? 'En progreso' : 'Pendiente'} />
-          <Stepper.Step label='Firmar' description={isTerminal ? 'Hecho' : '—'} />
-        </Stepper>
+        <OrionPermissionsOverview permissions={permissions} />
+
+        {permissions.isReadOnly && !isTerminal && (
+          <Alert color='gray' variant='light' mb='md'>
+            Puede consultar el estado del proceso, pero no tiene acciones disponibles en este momento.
+          </Alert>
+        )}
+
+        {permissions.userRole === 'coordinator' && (
+          <Stepper active={workflowStep} size='xs' mb='md' styles={{ stepBody: { marginTop: 2 } }}>
+            <Stepper.Step label='Documento' description={hasDocument ? 'Cargado' : 'Pendiente'} />
+            <Stepper.Step label='Firmantes' description={participants.length ? `${participants.length} asignado(s)` : 'Pendiente'} />
+            <Stepper.Step label='Ubicación' description={signatureFields.length ? 'En progreso' : 'Pendiente'} />
+            <Stepper.Step label='Enviar' description={isTerminal ? 'Hecho' : 'Pendiente'} />
+          </Stepper>
+        )}
+
+        {(permissions.userRole === 'signer' || permissions.userRole === 'waiting') && (
+          <OrionSignerWorkflow
+            permissions={permissions}
+            hasSignature={hasSignature}
+            signatureLoading={signatureLoading}
+            documentPreviewUrl={documentPreviewUrl}
+            documentFileName={attachmentFileName}
+            pendingSignerName={pendingSigner?.name || pendingSigner?.email || null}
+            onViewDocument={openSignerView}
+            onDrawSignature={() => setSignatureModalOpen(true)}
+            onAcceptSign={() => void handleAcceptSign()}
+            acceptLoading={acceptLoading}
+          />
+        )}
+
+        {signSuccessMessage && (
+          <Alert
+            color='green'
+            variant='light'
+            mb='md'
+            withCloseButton
+            onClose={() => setSignSuccessMessage(null)}
+            icon={<IconCheck size={16} />}
+          >
+            {signSuccessMessage}
+          </Alert>
+        )}
 
         {error && (
           <Alert color='red' mb='md' withCloseButton onClose={() => setError(null)}>
@@ -496,39 +687,41 @@ export default function OrionSignaturePanel({
           </Alert>
         )}
 
-        <Group gap='sm' mb='md' wrap='wrap'>
-          <Button
-            variant={hasSignature ? 'light' : 'filled'}
-            leftSection={<IconUserCircle size={16} />}
-            onClick={() => setSignatureModalOpen(true)}
-            loading={signatureLoading}
-          >
-            {hasSignature ? 'Editar mi firma' : '1. Dibujar mi firma'}
-          </Button>
-
-          {(canManage || isMyTurn || hasDocument) && !isTerminal && (
+        {permissions.userRole === 'coordinator' && (
+          <Group gap='xs' mb='sm' wrap='wrap'>
             <Button
-              leftSection={<IconEdit size={16} />}
+              size='compact-sm'
+              leftSection={<IconEdit size={15} />}
               onClick={() => void openDocumentEditor()}
-              disabled={!hasSignature && !signatureLoading}
             >
-              2. Editar documento y ubicar firmas
+              Configurar documento y firmantes
             </Button>
-          )}
-
-          {isMyTurn && (
-            <Button color='green' leftSection={<IconPencil size={16} />} onClick={() => void openDocumentEditor()}>
-              Firmar ahora
+            <Button
+              variant='subtle'
+              size='compact-xs'
+              leftSection={<IconRefresh size={14} />}
+              onClick={() => {
+                void refreshState();
+              }}
+            >
+              Actualizar
             </Button>
-          )}
+          </Group>
+        )}
 
-          <Button variant='subtle' size='compact-sm' leftSection={<IconRefresh size={14} />} onClick={() => { void refreshState(); void loadUserSignature(); }}>
-            Actualizar
-          </Button>
-        </Group>
-
-        {hasSignature && signaturePreview && (
-          <Group gap='xs' mb='sm'>
+        {permissions.userRole === 'signer' && hasSignature && signaturePreview && (
+          <Group
+            gap='xs'
+            mb='sm'
+            px='xs'
+            py={6}
+            wrap='nowrap'
+            style={{
+              borderRadius: 8,
+              border: '1px solid var(--app-border)',
+              background: 'var(--app-surface-raised)',
+            }}
+          >
             <IconCheck size={14} color='var(--mantine-color-green-6)' />
             <Text size='xs' c='dimmed'>
               Firma guardada en GSS Firma (Orion)
@@ -565,7 +758,13 @@ export default function OrionSignaturePanel({
       <Modal
         opened={documentModalOpen}
         onClose={() => setDocumentModalOpen(false)}
-        title='Editar documento'
+        title={
+          signOnlyMode
+            ? 'Aceptar y firmar documento'
+            : permissions.canManageWorkflow
+              ? 'Configurar documento'
+              : 'Documento'
+        }
         size='xl'
         centered
         padding='lg'
@@ -597,29 +796,51 @@ export default function OrionSignaturePanel({
           },
         }}
       >
-        {!hasDocument && !isTerminal && (canManage || attachmentPdfUrl) && (
+        {!hasDocument && !isTerminal && permissions.canManageWorkflow && (
           <Stack gap='sm' mb='md' maw={560}>
             <Text size='sm'>Seleccione el PDF y luego ubique las firmas en el editor (como en GSS Firma).</Text>
             <Group>
-              <FileButton onChange={setPdfFile} accept='application/pdf,.doc,.docx'>
-                {(props) => (
-                  <Button {...props} variant='light' leftSection={<IconUpload size={16} />}>
-                    {pdfFile ? pdfFile.name : 'Seleccionar PDF'}
-                  </Button>
-                )}
-              </FileButton>
-              {pdfFile && (
+              {permissions.canUploadDocument && (
+                <FileButton onChange={setPdfFile} accept='application/pdf,.doc,.docx'>
+                  {(props) => (
+                    <Button {...props} variant='light' leftSection={<IconUpload size={16} />}>
+                      {pdfFile ? pdfFile.name : 'Seleccionar PDF'}
+                    </Button>
+                  )}
+                </FileButton>
+              )}
+              {pdfFile && permissions.canUploadDocument && (
                 <Button onClick={() => void handleUploadAndCreate()} loading={uploading || loading}>
                   Cargar al editor
                 </Button>
               )}
-              {attachmentPdfUrl && (
+              {attachmentPdfUrl && permissions.canUseAttachment && (
                 <Button variant='outline' onClick={() => void useAttachmentForSigning()} loading={uploading || loading}>
                   Usar archivo adjunto
                 </Button>
               )}
             </Group>
           </Stack>
+        )}
+
+        {signOnlyMode && signerModalIntent === 'sign' && (
+          <Group justify='flex-end' mb='md'>
+            <Button
+              color='green'
+              leftSection={<IconCheck size={16} />}
+              loading={acceptLoading}
+              onClick={() => void syncSignerCompletion()}
+            >
+              Confirmar firma y cerrar tarea
+            </Button>
+          </Group>
+        )}
+
+        {signOnlyMode && (
+          <Alert color='green' variant='light' mb='md'>
+            Revise el documento y confirme su firma. Al aceptar, el flujo continuará con el siguiente
+            firmante de forma automática.
+          </Alert>
         )}
 
         {loading || uploading ? (
@@ -651,6 +872,28 @@ export default function OrionSignaturePanel({
             state={state}
             onStateUpdate={applyState}
             onClose={() => setDocumentModalOpen(false)}
+          />
+        ) : signOnlyMode && signerModalIntent === 'view' && documentPreviewUrl ? (
+          <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+            <PdfInlineViewer
+              src={documentPreviewUrl}
+              fileName={attachmentFileName ?? 'Documento.pdf'}
+              minHeight={320}
+            />
+          </div>
+        ) : signOnlyMode && signerModalIntent === 'sign' && documentIframeSrc ? (
+          <iframe
+            title='Confirmar firma GSS Firma'
+            src={documentIframeSrc}
+            style={{
+              flex: 1,
+              width: '100%',
+              minHeight: '55vh',
+              maxHeight: '70vh',
+              border: '1px solid var(--app-border)',
+              borderRadius: 8,
+              background: 'var(--app-surface-raised)',
+            }}
           />
         ) : documentIframeSrc ? (
           <iframe

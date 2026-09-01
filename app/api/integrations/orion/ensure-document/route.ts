@@ -17,6 +17,7 @@ import {
   parseOrionSignatureState,
 } from '@/lib/orion/formValue';
 import type { OrionSignatureState } from '@/lib/orion/types';
+import { resolveOrionPermissions } from '@/lib/orion/permissions';
 
 /**
  * Consulta estado actual desde Orion (polling). Cualquier usuario autenticado.
@@ -56,8 +57,15 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Campo orion_signature no encontrado' }, { status: 404 });
     }
 
+    const permissions = resolveOrionPermissions({
+      canManage,
+      isAdmin,
+      currentUserEmail: session.user.email,
+      state,
+    });
+
     return NextResponse.json(
-      { success: true, state, canManage, embedOrigin: cfg.embedOrigin },
+      { success: true, state, canManage, isAdmin, permissions, embedOrigin: cfg.embedOrigin },
       { status: 200 }
     );
   } catch (err) {
@@ -172,7 +180,7 @@ export async function PATCH(req: Request) {
       await upsertOrionFormValue(pool, requestId, field.id_form_field, merged);
 
       const statusUpper = String(patch.status || merged.status || '').toUpperCase();
-      if (statusUpper === 'FIRMADO' || statusUpper === 'RECHAZADO') {
+      if (['FIRMADO', 'RECHAZADO', 'EN_PROCESO', 'PENDIENTE_FIRMA'].includes(statusUpper)) {
         const ctx = await getRequestOrionContext(pool, requestId);
         await applyOrionWebhookToRequest(pool, {
           requestId,
