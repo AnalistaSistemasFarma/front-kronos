@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState, useRef } from 'react';
+import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
@@ -78,6 +78,12 @@ import {
   parseTableConfig,
   parseTableValue,
 } from '../../../../../lib/requests-general/tableField';
+import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
+import { parseOrionSignatureState } from '../../../../../lib/orion/formValue';
+import type { OrionSignatureState } from '../../../../../lib/orion/types';
+import { buildOrionParticipants } from '../../../../../lib/orion/participants';
+import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
+import ChatDocumentChip from '../../../../../components/orion/ChatDocumentChip';
 
 interface Request {
   id: number;
@@ -193,6 +199,35 @@ interface UserEmail {
   label: string;
 }
 
+function getFolderFileUrl(file: FolderFile): string | null {
+  const download = file['@microsoft.graph.downloadUrl'];
+  if (typeof download === 'string' && download.trim()) return download;
+  return file.webUrl ?? null;
+}
+
+/** Fecha en hora Colombia (+5h). Evita RangeError si el valor no es parseable. */
+function formatDateCO(
+  value?: string | null,
+  options?: { month?: 'long' | 'short'; fallback?: string }
+): string {
+  const fallback = options?.fallback ?? '—';
+  if (!value) return fallback;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return fallback;
+  try {
+    return new Intl.DateTimeFormat('es-CO', {
+      day: 'numeric',
+      month: options?.month ?? 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }).format(new Date(parsed.getTime() + 5 * 60 * 60 * 1000));
+  } catch {
+    return fallback;
+  }
+}
+
 function ViewRequestPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -264,6 +299,7 @@ function ViewRequestPage() {
   const [requestFormValues, setRequestFormValues] = useState<
     {
       id: number;
+      id_form_field?: number;
       field_label: string;
       field_type?: string | null;
       config_json?: string | null;
@@ -306,6 +342,7 @@ function ViewRequestPage() {
           process: data.process,
           company: data.company,
           id_company: data.id_company,
+          created_at: data.created_at,
           id_status_case: data.status_req ?? data.id_status_case,
           status_req: data.status_req ?? data.id_status_case,
           id_process_category: data.id_process_category,
@@ -395,6 +432,61 @@ function ViewRequestPage() {
       if (!signal?.aborted) setRequestFormValues([]);
     }
   };
+
+  const orionValueText = useMemo(() => {
+    const field = requestFormValues.find((fv) => fv.field_type === ORION_SIGNATURE_FIELD_TYPE);
+    return field?.value_text ?? null;
+  }, [requestFormValues]);
+
+  const orionInitialState = useMemo(
+    () => parseOrionSignatureState(orionValueText),
+    [orionValueText]
+  );
+
+  const lastOrionFormFetchKeyRef = useRef('');
+
+  const handleOrionStateChange = useCallback(
+    (next: OrionSignatureState) => {
+      if (!request?.id) return;
+      const status = String(next.status || '').toUpperCase();
+      const fetchKey = JSON.stringify({
+        status,
+        signed: next.signedFileUrl ?? null,
+        id: next.orionDocumentId ?? null,
+      });
+      if (fetchKey === lastOrionFormFetchKeyRef.current) return;
+      const shouldRefresh =
+        Boolean(next.orionDocumentId) ||
+        status === 'FIRMADO' ||
+        status === 'RECHAZADO' ||
+        Boolean(next.signedFileUrl);
+      if (!shouldRefresh) return;
+      lastOrionFormFetchKeyRef.current = fetchKey;
+      void fetchFormValues(request.id);
+    },
+    [request?.id]
+  );
+
+  const orionParticipants = useMemo(
+    () =>
+      buildOrionParticipants({
+        requesterName: request?.requester,
+        requesterEmail: request?.requester_email,
+        assigneeName: request?.user ?? request?.assignedUserName,
+        currentUserEmail: session?.user?.email,
+        users: availableUsers,
+        tasks: taskRQ.map((t) => ({ name: t.name, id_assigned: t.id_assigned })),
+      }),
+    [
+      availableUsers,
+      request?.assignedUserName,
+      request?.requester,
+      request?.requester_email,
+      request?.user,
+      session?.user?.email,
+      taskRQ,
+    ]
+  );
 
   useEffect(() => {
     if (notesViewportRef.current) {
@@ -1623,6 +1715,43 @@ function ViewRequestPage() {
     );
   };
 
+  const hasOrionSignatureField = requestFormValues.some(
+    (fv) => fv.field_type === ORION_SIGNATURE_FIELD_TYPE
+  );
+  const primaryPdfFile = folderContents.find((f) => /\.pdf$/i.test(f.name));
+  const attachmentPdfUrl = primaryPdfFile ? getFolderFileUrl(primaryPdfFile) : null;
+  const attachmentFileName = primaryPdfFile?.name ?? null;
+  const orionFormField = requestFormValues.find(
+    (fv) => fv.field_type === ORION_SIGNATURE_FIELD_TYPE
+  );
+  const orionSignatureState = orionInitialState;
+
+  const chatDocumentItems = [
+    ...folderContents
+      .filter((f) => /\.pdf$/i.test(f.name))
+      .map((f) => {
+        const url = getFolderFileUrl(f);
+        if (!url) return null;
+        return {
+          id: f.id,
+          name: f.name,
+          url,
+          variant: 'attachment' as const,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null),
+    ...(orionSignatureState.signedFileUrl
+      ? [
+          {
+            id: 'orion-signed',
+            name: 'Documento firmado.pdf',
+            url: orionSignatureState.signedFileUrl,
+            variant: 'signed' as const,
+          },
+        ]
+      : []),
+  ];
+
   return (
     <div className='min-h-screen bg-gray-50'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
@@ -1660,7 +1789,23 @@ function ViewRequestPage() {
         </Card>
 
         <div className='flex flex-col lg:flex-row gap-6'>
-          <div className='flex-1 order-2 lg:order-1 lg:sticky lg:top-6 self-start'>
+          <div className='flex-1 order-2 lg:order-1 lg:sticky lg:top-6 self-start space-y-6'>
+            {hasOrionSignatureField && orionFormField && (
+              <OrionSignaturePanel
+                requestId={request?.id ?? Number(id)}
+                requestTitle={request?.subject}
+                initialState={orionInitialState}
+                createdByEmail={request?.requester_email}
+                currentUserEmail={session?.user?.email ?? undefined}
+                attachmentPdfUrl={attachmentPdfUrl}
+                attachmentFileName={attachmentFileName}
+                participants={orionParticipants}
+                availableUsers={availableUsers}
+                currentUserName={session?.user?.name ?? undefined}
+                onStateChange={handleOrionStateChange}
+              />
+            )}
+
             <Card
               shadow='sm'
               p='xl'
@@ -1675,6 +1820,26 @@ function ViewRequestPage() {
 
               <ScrollArea h='calc(100vh - 420px)' className='mb-4' offsetScrollbars viewportRef={notesViewportRef}>
                 <div className='space-y-4 p-2'>
+                  {chatDocumentItems.length > 0 &&
+                    chatDocumentItems.map((doc) => (
+                      <div key={doc.id} className='flex justify-end'>
+                        <div className='w-full max-w-[220px] rounded-2xl rounded-br-none bg-blue-500 px-3 py-2 shadow-sm'>
+                          <Text size='xs' className='text-blue-100 font-medium mb-1.5'>
+                            {request?.requester || 'Solicitud'}
+                          </Text>
+                          <ChatDocumentChip
+                            name={doc.name}
+                            url={doc.url}
+                            variant={doc.variant}
+                            tone='chat'
+                          />
+                          <Text size='10px' className='text-blue-100/80 mt-1.5 text-right'>
+                            Documento adjunto
+                          </Text>
+                        </div>
+                      </div>
+                    ))}
+
                   {notes.length > 0 ? (
                     notes.map((note) => {
                       const isCurrentUser = note.createdBy === userName;
@@ -1718,25 +1883,14 @@ function ViewRequestPage() {
                                 size='xs'
                                 className={isCurrentUser ? 'text-blue-100' : 'text-gray-500'}
                               >
-                                {new Intl.DateTimeFormat('es-CO', {
-                                  day: 'numeric',
-                                  month: 'short',
-                                  year: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  hour12: true,
-                                }).format(
-                                  new Date(
-                                    new Date(note.creation_date).getTime() + 5 * 60 * 60 * 1000 
-                                  )
-                                )}
+                                {formatDateCO(note.creation_date, { month: 'short' })}
                               </Text>
                             )}
                           </div>
                         </div>
                       );
                     })
-                  ) : (
+                  ) : chatDocumentItems.length === 0 ? (
                     <div className='text-center py-8'>
                       <Text size='lg' color='gray.5' mb='xs'>
                         No hay interacciones registradas
@@ -1745,7 +1899,7 @@ function ViewRequestPage() {
                         Sé el primero en añadir un comentario
                       </Text>
                     </div>
-                  )}
+                  ) : null}
                   <div ref={chatEndRef} />
                 </div>
               </ScrollArea>
@@ -1835,20 +1989,7 @@ function ViewRequestPage() {
                 <Text size='sm' color='gray.6' fw={500}>
                   Fecha y Hora de Creación
                 </Text>
-                <Text size='sm'>
-                  {new Intl.DateTimeFormat('es-CO', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: true,
-                  }).format(
-                    new Date(
-                      new Date(request.created_at).getTime() + 5 * 60 * 60 * 1000 
-                    )
-                  )}
-                </Text>
+                <Text size='sm'>{formatDateCO(request.created_at)}</Text>
               </div>
 
               <div className='pb-2'>
@@ -2108,14 +2249,16 @@ function ViewRequestPage() {
           </div>
         </div>
 
-        {requestFormValues.length > 0 && (
+        {requestFormValues.filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE).length > 0 && (
           <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
             <Title order={3} mb='md' className='flex items-center gap-2'>
               <IconTag size={20} />
               Información adicional
             </Title>
             <Grid>
-              {requestFormValues.map((fv) => {
+              {requestFormValues
+                .filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE)
+                .map((fv) => {
                 if (fv.field_type === TABLE_FIELD_TYPE) {
                   const columns = parseTableConfig(fv.config_json).columns;
                   const rows = parseTableValue(fv.value_text).rows;
@@ -2126,7 +2269,7 @@ function ViewRequestPage() {
                     return String(value);
                   };
                   return (
-                    <Grid.Col span={12} key={fv.id}>
+                    <Grid.Col span={12} key={fv.id || fv.id_form_field}>
                       <Card withBorder radius='md' p='md'>
                         <Text size='xs' c='dimmed' fw={500} className='uppercase' mb='xs'>
                           {fv.field_label}
@@ -2164,7 +2307,7 @@ function ViewRequestPage() {
                   );
                 }
                 return (
-                  <Grid.Col span={{ base: 12, md: 6 }} key={fv.id}>
+                  <Grid.Col span={{ base: 12, md: 6 }} key={fv.id || fv.id_form_field}>
                     <Card withBorder radius='md' p='md'>
                       <Text size='xs' c='dimmed' fw={500} className='uppercase'>
                         {fv.field_label}
@@ -2467,16 +2610,7 @@ function ViewRequestPage() {
                     ? 'gray'
                     : 'blue';
                   const fmtDate = (d?: string) =>
-                    d
-                      ? new Intl.DateTimeFormat('es-CO', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          hour12: true,
-                        }).format(new Date(d).getTime() + 5 * 60 * 60 * 1000 )
-                      : 'N/A';
+                    formatDateCO(d, { month: 'short', fallback: 'N/A' });
                   return (
                     <Flex key={task.id} gap="md" align="stretch">
                       <Flex direction="column" align="center" style={{ flexShrink: 0 }}>

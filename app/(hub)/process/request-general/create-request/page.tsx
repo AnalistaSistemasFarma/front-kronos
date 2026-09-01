@@ -78,6 +78,7 @@ import {
   type TableColumn,
   type TableRow,
 } from '../../../../../lib/requests-general/tableField';
+import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
 import SapOptionSelect from './SapOptionSelect';
 import TableFieldInput from './TableFieldInput';
 import toast from 'react-hot-toast';
@@ -768,6 +769,7 @@ function RequestBoard() {
     }
 
     for (const field of visibleFields) {
+      if (field.field_type === ORION_SIGNATURE_FIELD_TYPE) continue;
       const val = fieldValues[field.id];
       if (field.field_type === TABLE_FIELD_TYPE) {
         const columns = parseTableConfig(field.config_json).columns;
@@ -1983,12 +1985,18 @@ function RequestBoard() {
                     // Muestra separador de miles (400.000) y guarda el número limpio (400000).
                     const isMoneyField = /valor a pagar|monto/i.test(field.field_label);
                     const isTableField = field.field_type === TABLE_FIELD_TYPE;
+                    const isOrionSignatureField = field.field_type === ORION_SIGNATURE_FIELD_TYPE;
                     return (
                       <Grid.Col
-                        span={{ base: 12, md: isTableField ? 12 : 6 }}
+                        span={{ base: 12, md: isTableField || isOrionSignatureField ? 12 : 6 }}
                         key={field.id}
                       >
-                        {isTableField ? (
+                        {isOrionSignatureField ? (
+                          <Alert color='blue' title={field.field_label} icon={<IconLink size={16} />}>
+                            La firma digital se gestionará al abrir la solicitud, dentro del flujo
+                            integrado con GSS Firma (Orion).
+                          </Alert>
+                        ) : isTableField ? (
                           <TableFieldInput
                             label={field.field_label}
                             required={field.required}

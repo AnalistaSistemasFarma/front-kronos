@@ -41,7 +41,7 @@ import {
   DASHBOARD_SOLICITANTE_URL,
   DASHBOARD_SOLICITADO_URL,
   isHubHiddenRequestDashboardSubprocess,
-} from '@/lib/request-general/dashboardAccess';
+} from '@/lib/request-general/dashboardRoutes';
 
 interface User {
   id: string;

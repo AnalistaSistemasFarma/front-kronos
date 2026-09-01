@@ -19,19 +19,22 @@ export async function GET(req) {
         .input('idRequest', sql.Int, parseInt(idRequest, 10))
         .query(`
         SELECT
-          rfv.id,
-          rfv.id_form_field,
-          ff.field_label,
-          ff.field_type,
-          ff.config_json,
+          COALESCE(rfv.id, 0) AS id,
+          pff.id AS id_form_field,
+          pff.field_label,
+          pff.field_type,
+          pff.config_json,
           rfv.id_option,
           o.option_label,
           rfv.value_text
-        FROM request_form_value rfv
-        INNER JOIN process_form_field ff ON ff.id = rfv.id_form_field
+        FROM process_category_request_general pcr
+        INNER JOIN process_form_field pff
+          ON pff.id_process_category = pcr.id_process_category AND pff.active = 1
+        LEFT JOIN request_form_value rfv
+          ON rfv.id_form_field = pff.id AND rfv.id_request_general = pcr.id_request_general
         LEFT JOIN process_form_field_option o ON o.id = rfv.id_option
-        WHERE rfv.id_request_general = @idRequest
-        ORDER BY ff.display_order, ff.id
+        WHERE pcr.id_request_general = @idRequest
+        ORDER BY pff.display_order, pff.id
       `);
     });
 

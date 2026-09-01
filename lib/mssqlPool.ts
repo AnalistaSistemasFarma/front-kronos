@@ -1,9 +1,12 @@
 import sql from 'mssql';
 import dbconfig from '../dbconfig';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const ensureDbHost = require('./db/ensureDatabaseHost.server.cjs') as {
+  ensureDatabaseHostResolved?: () => Promise<string>;
+  clearResolvedDatabaseHost?: () => void;
+};
 
 // `dbconfig` puede ser un objeto de configuración plano (dbconfig.js) o exponer helpers.
-// Soportamos ambos: si trae buildMssqlConfig/getDatabaseConfigKey los usamos; si no,
-// tratamos el propio objeto como la config de mssql y derivamos una clave estable.
 const dbAny = dbconfig as unknown as {
   buildMssqlConfig?: () => sql.config;
   getDatabaseConfigKey?: () => string;
@@ -66,7 +69,18 @@ export function isMssqlNotOpenError(error: unknown): boolean {
 export function isRetryablePoolError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null || !('code' in error)) return false;
   const code = (error as { code: string }).code;
-  return code === 'ENOTOPEN' || code === 'ECONNCLOSED';
+  return (
+    code === 'ENOTOPEN' ||
+    code === 'ECONNCLOSED' ||
+    code === 'ESOCKET' ||
+    code === 'ETIMEOUT'
+  );
+}
+
+function isSocketReachabilityError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = (error as { code: string }).code;
+  return code === 'ESOCKET' || code === 'ETIMEOUT';
 }
 
 /**
@@ -97,9 +111,12 @@ export async function getPool(): Promise<sql.ConnectionPool> {
   invalidateGlobalPool();
 
   const connectPromise = (async () => {
+    if (typeof ensureDbHost.ensureDatabaseHostResolved === 'function') {
+      await ensureDbHost.ensureDatabaseHostResolved();
+    }
     const pool = await new sql.ConnectionPool(buildMssqlConfig()).connect();
     global.__kronosMssqlPool = pool;
-    global.__kronosMssqlPoolConfigKey = configKey;
+    global.__kronosMssqlPoolConfigKey = getDatabaseConfigKey();
     global.__kronosMssqlModule = sql;
     return pool;
   })();
@@ -125,6 +142,14 @@ export async function withMssqlPool<T>(
   try {
     return await fn(await getPool());
   } catch (error) {
+    if (isSocketReachabilityError(error) && typeof ensureDbHost.clearResolvedDatabaseHost === 'function') {
+      ensureDbHost.clearResolvedDatabaseHost();
+      invalidateGlobalPool();
+      if (typeof ensureDbHost.ensureDatabaseHostResolved === 'function') {
+        await ensureDbHost.ensureDatabaseHostResolved();
+      }
+      return fn(await getPool());
+    }
     if (!isRetryablePoolError(error)) throw error;
     invalidateGlobalPool();
     return fn(await getPool());

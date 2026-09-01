@@ -30,9 +30,24 @@ export const authOptions: AuthOptions = {
         if (!credentials?.email || !credentials?.password) {
           return null;
         }
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
-        });
+        const emailInput = credentials.email.trim();
+        // Búsqueda case-insensitive (SQL Server): evita fallos por mayúsculas en el correo.
+        const rows = await prisma.$queryRaw<
+          Array<{
+            id: string;
+            name: string | null;
+            email: string;
+            password: string | null;
+            role: string;
+            isActive: boolean;
+            image: string | null;
+          }>
+        >`
+          SELECT TOP 1 id, name, email, password, role, isActive, image
+          FROM [user]
+          WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${emailInput})))
+        `;
+        const user = rows[0];
         if (!user || !user.password) {
           return null;
         }
@@ -108,19 +123,33 @@ export const authOptions: AuthOptions = {
       const email = (user?.email ?? token.email) as string | undefined;
 
       if (email) {
-        const dbUser = await prisma.user.findUnique({
-          where: { email },
-          select: { role: true, image: true, themePalette: true, colorScheme: true, nit: true },
-        });
-        token.email = email;
-        token.role = dbUser?.role;
-        token.nit = dbUser?.nit ?? undefined;
-        token.themePalette = dbUser?.themePalette ?? undefined;
-        token.colorScheme = dbUser?.colorScheme ?? undefined;
-        if (dbUser?.image) {
-          token.image = dbUser.image;
-        } else if (user?.image) {
-          token.image = user.image;
+        try {
+          const rows = await prisma.$queryRaw<
+            Array<{
+              role: string;
+              image: string | null;
+              themePalette: string | null;
+              colorScheme: string | null;
+              nit: string | null;
+            }>
+          >`
+            SELECT TOP 1 role, image, themePalette, colorScheme, nit
+            FROM [user]
+            WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${email})))
+          `;
+          const dbUser = rows[0];
+          token.email = email;
+          token.role = dbUser?.role;
+          token.nit = dbUser?.nit ?? undefined;
+          token.themePalette = dbUser?.themePalette ?? undefined;
+          token.colorScheme = dbUser?.colorScheme ?? undefined;
+          if (dbUser?.image) {
+            token.image = dbUser.image;
+          } else if (user?.image) {
+            token.image = user.image;
+          }
+        } catch (err) {
+          console.error('[nextauth] jwt callback error:', err);
         }
       }
 

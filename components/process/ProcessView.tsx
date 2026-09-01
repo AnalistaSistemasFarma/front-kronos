@@ -15,7 +15,7 @@ import ProcessSearch from './ProcessSearch';
 import ProcessFilters from './ProcessFilters';
 import ProcessSkeleton from './ProcessSkeleton';
 import { useProcessData, type ProcessRecord } from '../../lib/process/ProcessDataContext';
-import { isHubHiddenRequestDashboardSubprocess } from '../../lib/request-general/dashboardAccess';
+import { isHubHiddenRequestDashboardSubprocess } from '../../lib/request-general/dashboardRoutes';
 
 interface FilterOption {
   value: string;
