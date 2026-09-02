@@ -39,6 +39,8 @@ import {
   Progress,
   RingProgress,
   Loader,
+  Checkbox,
+  FileInput,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -64,11 +66,13 @@ import {
   IconDownload,
   IconLink,
   IconTrash,
+  IconUpload,
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 import { sanitizeOneDriveName } from '../../../../../lib/onedriveName';
 import { isSapField } from '../../../../../lib/requests-general/sapSources';
+import { DOCUMENT_WORKFLOW_PROCESS_NAME } from '../../../../../lib/document-management/workflowStates';
 import {
   TABLE_FIELD_TYPE,
   parseTableConfig,
@@ -186,6 +190,7 @@ function RequestBoard() {
       id_category_request: number;
       email?: string;
       description?: string;
+      isDocumentManagement?: boolean;
     }[]
   >([]);
   const [processSearch, setProcessSearch] = useState('');
@@ -245,6 +250,43 @@ function RequestBoard() {
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // Gestión Documental (Sprint 5): al seleccionar ese proceso, el formulario
+  // reemplaza "Asunto"/"Descripción" (reusados como Título/Comentario) y las
+  // secciones genéricas de campos/archivos por estos campos propios del
+  // documento — mismo dato que pide CreateDocumentModal.tsx (atajo de
+  // Asuntos Regulatorios), para terminar en la misma estructura de datos.
+  // Ver app/api/document-management/create-request/route.ts.
+  const [docTypes, setDocTypes] = useState<
+    { id_document_type: number; name: string; code_prefix: string }[]
+  >([]);
+  const [docTypeId, setDocTypeId] = useState<string | null>(null);
+  const [docCode, setDocCode] = useState('');
+  const [docTitle, setDocTitle] = useState('');
+  const [docDueReviewDate, setDocDueReviewDate] = useState('');
+  const [docIsRestricted, setDocIsRestricted] = useState(false);
+  const [docComments, setDocComments] = useState('');
+  const [docFile, setDocFile] = useState<File | null>(null);
+
+  const isDocumentManagementProcess =
+    processCategories.find((p) => p.value === formData.process)?.isDocumentManagement ?? false;
+
+  const resetDocumentFields = () => {
+    setDocTypeId(null);
+    setDocCode('');
+    setDocTitle('');
+    setDocDueReviewDate('');
+    setDocIsRestricted(false);
+    setDocComments('');
+    setDocFile(null);
+  };
+
+  useEffect(() => {
+    fetch('/api/document-management/types')
+      .then((res) => (res.ok ? res.json() : { types: [] }))
+      .then((data) => setDocTypes(data.types ?? []))
+      .catch((err) => console.error('Error cargando tipos de documento:', err));
+  }, []);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -661,6 +703,7 @@ function RequestBoard() {
               id_category_request: p.id_category_request,
               email: p.email,
               description: p.description,
+              isDocumentManagement: p.process === DOCUMENT_WORKFLOW_PROCESS_NAME,
             }))
         );
         if (data.assignedUsers) {
@@ -752,47 +795,58 @@ function RequestBoard() {
     if (!formData.company) {
       errors.company = 'La empresa es obligatoria';
     }
-    if (!formData.subject.trim()) {
-      errors.subject = 'El asunto es obligatorio';
-    }
     if (!formData.category) {
       errors.category = 'La categoría es obligatoria';
     }
     if (!formData.process) {
       errors.process = 'El proceso es obligatorio';
     }
-    if (!formData.descripcion.trim()) {
-      errors.descripcion = 'La descripción es obligatoria';
-    } else if (formData.descripcion.trim().length < 10) {
-      errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
-    }
 
-    for (const field of visibleFields) {
-      const val = fieldValues[field.id];
-      if (field.field_type === TABLE_FIELD_TYPE) {
-        const columns = parseTableConfig(field.config_json).columns;
-        const rows = Array.isArray(val) ? (val as TableRow[]) : [];
-        const tableError = validateTableRows(
-          columns,
-          rows,
-          field.required,
-          field.field_label
-        );
-        if (tableError) errors[`field_${field.id}`] = tableError;
-        continue;
+    if (isDocumentManagementProcess) {
+      // Gestión Documental: "Asunto"/"Descripción" quedan reusados como
+      // Título/Comentario del documento (ver JSX) — se validan como tales,
+      // no como los campos genéricos.
+      if (!docTitle.trim()) errors.docTitle = 'El título del documento es obligatorio';
+      if (!docTypeId) errors.docTypeId = 'Seleccione el tipo de documento';
+      if (!docCode.trim()) errors.docCode = 'El código del documento es obligatorio';
+      if (!docFile) errors.docFile = 'Adjunte el archivo del documento';
+    } else {
+      if (!formData.subject.trim()) {
+        errors.subject = 'El asunto es obligatorio';
       }
-      const empty = val === undefined || val === null || val === '';
-      if (field.required && empty) {
-        errors[`field_${field.id}`] =
-          field.field_type === 'select'
-            ? `Debe seleccionar: ${field.field_label}`
-            : `Debe completar: ${field.field_label}`;
+      if (!formData.descripcion.trim()) {
+        errors.descripcion = 'La descripción es obligatoria';
+      } else if (formData.descripcion.trim().length < 10) {
+        errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
       }
-    }
 
-    for (const doc of visibleRequiredFiles) {
-      if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
-        errors[`file_${doc.id}`] = `Debe adjuntar el documento: ${doc.file_label}`;
+      for (const field of visibleFields) {
+        const val = fieldValues[field.id];
+        if (field.field_type === TABLE_FIELD_TYPE) {
+          const columns = parseTableConfig(field.config_json).columns;
+          const rows = Array.isArray(val) ? (val as TableRow[]) : [];
+          const tableError = validateTableRows(
+            columns,
+            rows,
+            field.required,
+            field.field_label
+          );
+          if (tableError) errors[`field_${field.id}`] = tableError;
+          continue;
+        }
+        const empty = val === undefined || val === null || val === '';
+        if (field.required && empty) {
+          errors[`field_${field.id}`] =
+            field.field_type === 'select'
+              ? `Debe seleccionar: ${field.field_label}`
+              : `Debe completar: ${field.field_label}`;
+        }
+      }
+
+      for (const doc of visibleRequiredFiles) {
+        if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
+          errors[`file_${doc.id}`] = `Debe adjuntar el documento: ${doc.file_label}`;
+        }
       }
     }
 
@@ -803,7 +857,79 @@ function RequestBoard() {
   const handleCreateTicketWithValidation = async () => {
     if (isSubmittingRef.current) return;
     if (!validateForm()) return;
-    await handleCreateTicket();
+    if (isDocumentManagementProcess) {
+      await handleCreateDocumentManagementRequest();
+    } else {
+      await handleCreateTicket();
+    }
+  };
+
+  const handleCreateDocumentManagementRequest = async () => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+
+    try {
+      setCreateLoading(true);
+      setError(null);
+
+      const fd = new FormData();
+      fd.append('companyId', formData.company);
+      fd.append('documentTypeId', docTypeId || '');
+      fd.append('code', docCode.trim());
+      fd.append('title', docTitle.trim());
+      if (docDueReviewDate) fd.append('dueReviewDate', docDueReviewDate);
+      fd.append('isRestricted', String(docIsRestricted));
+      if (docComments.trim()) fd.append('comments', docComments.trim());
+      if (docFile) fd.append('file', docFile);
+
+      let response: Response;
+      try {
+        response = await fetch('/api/document-management/create-request', {
+          method: 'POST',
+          body: fd,
+        });
+      } catch (networkErr) {
+        console.error('Error de red al crear la solicitud de documento:', networkErr);
+        setError('No se pudo crear la solicitud. Intente de nuevo.');
+        toast.error('No se pudo crear la solicitud. Intente de nuevo.');
+        return;
+      }
+
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const errorData = await response.json();
+          detail = errorData.error || '';
+        } catch {
+        }
+        console.error('Fallo al crear la solicitud de documento:', detail);
+        setError(detail || 'No se pudo crear la solicitud. Intente de nuevo.');
+        toast.error(detail || 'No se pudo crear la solicitud. Intente de nuevo.');
+        return;
+      }
+
+      const created = await response.json();
+      toast.success(
+        `Solicitud de documento "${docCode.trim()}" creada correctamente. Quedó en estado "En creación".`
+      );
+      console.log('Documento/solicitud creados:', created);
+
+      resetDocumentFields();
+      setFormData({
+        company: '',
+        subject: '',
+        category: '',
+        process: '',
+        descripcion: '',
+        url: '',
+      });
+
+      fetchTickets();
+      setModalOpened(false);
+    } finally {
+      setCreateLoading(false);
+      isSubmittingRef.current = false;
+    }
   };
 
   const handleCreateTicket = async () => {
@@ -1724,6 +1850,7 @@ function RequestBoard() {
             setSearchResults([]);
             setShowActivitySearch(false);
             setError(null);
+            resetDocumentFields();
             setFormData({
               company: '',
               subject: '',
@@ -1776,16 +1903,31 @@ function RequestBoard() {
 
               <Grid.Col span={{ base: 12, md: 12 }}>
                 <TextInput
-                  label={parseInt(formData.process) == 4 ? 'Cargo' : 'Asunto'}
-                  placeholder='Ingrese el asunto de la solicitud'
-                  value={formData.subject}
+                  label={
+                    isDocumentManagementProcess
+                      ? 'Título del documento'
+                      : parseInt(formData.process) == 4
+                        ? 'Cargo'
+                        : 'Asunto'
+                  }
+                  placeholder={
+                    isDocumentManagementProcess
+                      ? 'Ingrese el título del documento'
+                      : 'Ingrese el asunto de la solicitud'
+                  }
+                  value={isDocumentManagementProcess ? docTitle : formData.subject}
                   onChange={(e) => {
-                    setFormData({ ...formData, subject: e.target.value });
-                    if (formErrors.subject) {
-                      setFormErrors({ ...formErrors, subject: '' });
+                    if (isDocumentManagementProcess) {
+                      setDocTitle(e.target.value);
+                      if (formErrors.docTitle) setFormErrors({ ...formErrors, docTitle: '' });
+                    } else {
+                      setFormData({ ...formData, subject: e.target.value });
+                      if (formErrors.subject) {
+                        setFormErrors({ ...formErrors, subject: '' });
+                      }
                     }
                   }}
-                  error={formErrors.subject}
+                  error={isDocumentManagementProcess ? formErrors.docTitle : formErrors.subject}
                   required
                   maxLength={254}
                   leftSection={<IconFileDescription size={16} />}
@@ -1922,21 +2064,102 @@ function RequestBoard() {
               </Grid.Col>
             </Grid>
 
+            {isDocumentManagementProcess && (
+              <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
+                <Text fw={600} size='sm' mb='xs'>
+                  Datos del documento
+                </Text>
+                <Grid>
+                  <Grid.Col span={{ base: 12, md: 6 }}>
+                    <Select
+                      label='Tipo de documento'
+                      placeholder={docTypes.length === 0 ? 'No hay tipos creados aún' : 'Seleccione el tipo'}
+                      required
+                      data={docTypes.map((t) => ({
+                        value: String(t.id_document_type),
+                        label: `${t.name} (${t.code_prefix})`,
+                      }))}
+                      value={docTypeId}
+                      onChange={(v) => {
+                        setDocTypeId(v);
+                        if (formErrors.docTypeId) setFormErrors({ ...formErrors, docTypeId: '' });
+                      }}
+                      error={formErrors.docTypeId}
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 6 }}>
+                    <TextInput
+                      label='Código del documento'
+                      placeholder='POL-GH-001'
+                      required
+                      value={docCode}
+                      onChange={(e) => {
+                        setDocCode(e.currentTarget.value);
+                        if (formErrors.docCode) setFormErrors({ ...formErrors, docCode: '' });
+                      }}
+                      error={formErrors.docCode}
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 6 }}>
+                    <TextInput
+                      label='Próxima fecha de revisión'
+                      type='date'
+                      value={docDueReviewDate}
+                      onChange={(e) => setDocDueReviewDate(e.currentTarget.value)}
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 6 }}>
+                    <Checkbox
+                      label='Documento restringido (acceso confidencial)'
+                      checked={docIsRestricted}
+                      onChange={(e) => setDocIsRestricted(e.currentTarget.checked)}
+                      mt='xl'
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={12}>
+                    <FileInput
+                      label='Archivo (primera versión)'
+                      placeholder='Seleccione el archivo'
+                      required
+                      value={docFile}
+                      onChange={setDocFile}
+                      leftSection={<IconUpload size={16} />}
+                      error={formErrors.docFile}
+                    />
+                  </Grid.Col>
+                </Grid>
+              </Card>
+            )}
+
             <Textarea
-              label={parseInt(formData.process) == 4 ? 'Conocimientos - Experiencia' : 'Descripción Detallada'}
-              placeholder='Describa detalladamente la solicitud. Incluya toda la información relevante para una mejor atención.'
-              value={formData.descripcion}
+              label={
+                isDocumentManagementProcess
+                  ? 'Comentario (opcional, queda en la versión)'
+                  : parseInt(formData.process) == 4
+                    ? 'Conocimientos - Experiencia'
+                    : 'Descripción Detallada'
+              }
+              placeholder={
+                isDocumentManagementProcess
+                  ? 'Comentario opcional sobre esta versión del documento.'
+                  : 'Describa detalladamente la solicitud. Incluya toda la información relevante para una mejor atención.'
+              }
+              value={isDocumentManagementProcess ? docComments : formData.descripcion}
               onChange={(e) => {
-                setFormData({ ...formData, descripcion: e.target.value });
-                if (formErrors.descripcion) {
-                  setFormErrors({ ...formErrors, descripcion: '' });
+                if (isDocumentManagementProcess) {
+                  setDocComments(e.target.value);
+                } else {
+                  setFormData({ ...formData, descripcion: e.target.value });
+                  if (formErrors.descripcion) {
+                    setFormErrors({ ...formErrors, descripcion: '' });
+                  }
                 }
               }}
-              error={formErrors.descripcion}
-              required
-              minRows={5}
+              error={isDocumentManagementProcess ? undefined : formErrors.descripcion}
+              required={!isDocumentManagementProcess}
+              minRows={isDocumentManagementProcess ? 2 : 5}
               maxLength={1000}
-              description='Mínimo 10 caracteres, máximo 1000 caracteres'
+              description={isDocumentManagementProcess ? undefined : 'Mínimo 10 caracteres, máximo 1000 caracteres'}
               autosize
             />
 
@@ -2161,18 +2384,23 @@ function RequestBoard() {
               </Stack>
             )}
 
-            {/* Subida libre: siempre disponible para adjuntar documentos adicionales */}
-            <div>
-              <Text fw={600} mb='xs'>
-                {requiredFiles.length > 0 ? 'Archivos adicionales (Opcional)' : 'Archivos Adjuntos (Opcional)'}
-              </Text>
-              <FileUpload
-                ticketId={0}
-                onFilesChange={setAttachedFiles}
-                autoUpload={false}
-                disabled={formDataLoading}
-              />
-            </div>
+            {/* Subida libre: siempre disponible para adjuntar documentos adicionales.
+                Se oculta en Gestión Documental: ese proceso ya tiene su propio campo
+                de archivo arriba (la primera versión del documento) y no debe
+                confundirse con un adjunto genérico de la solicitud. */}
+            {!isDocumentManagementProcess && (
+              <div>
+                <Text fw={600} mb='xs'>
+                  {requiredFiles.length > 0 ? 'Archivos adicionales (Opcional)' : 'Archivos Adjuntos (Opcional)'}
+                </Text>
+                <FileUpload
+                  ticketId={0}
+                  onFilesChange={setAttachedFiles}
+                  autoUpload={false}
+                  disabled={formDataLoading}
+                />
+              </div>
+            )}
 
             <Divider />
 
@@ -2187,6 +2415,7 @@ function RequestBoard() {
                   setSearchResults([]);
                   setShowActivitySearch(false);
                   setError(null);
+                  resetDocumentFields();
                 }}
                 size='md'
               >

@@ -65,6 +65,20 @@ import {
  * /process/request-general/general-requests (tarjetas resumen clicables,
  * card de filtros colapsable, tabla striped con paginación en cliente) — a
  * pedido explícito de Nicolás ("la tabla que tenemos aquí me gusta mucho").
+ *
+ * Sprint 5 (2026-09-02): la creación de un documento NUEVO ahora tiene dos
+ * caminos (ver lib/document-management/documents.ts y
+ * app/api/document-management/create-request/route.ts para el detalle):
+ *   1. El camino estándar es el flujo normal de "crear solicitud" de
+ *      SynerLink, seleccionando la categoría/proceso "Gestión Documental" —
+ *      disponible para cualquier usuario, no vive en esta pantalla.
+ *   2. El botón "Cargar documento" de abajo es el atajo de Asuntos
+ *      Regulatorios: crea el documento directo, sin pasar por el formulario
+ *      largo de "crear solicitud", pero termina en la MISMA estructura de
+ *      datos. Por eso ahora se gatea por `canUploadDirect` (permiso NUEVO
+ *      `/process/document-management/manage/regulatory`) y no por
+ *      `canWrite` (que sigue siendo el permiso de las acciones del flujo de
+ *      aprobación — revisar/aprobar/etc., ver [id]/TransitionActions.tsx).
  */
 
 const ITEMS_PER_PAGE = 25;
@@ -83,6 +97,7 @@ interface CompanyAccess {
   companyName: string;
   canRead: boolean;
   canWrite: boolean;
+  canUploadDirect: boolean;
 }
 
 interface DocumentVersionSummary {
@@ -230,8 +245,11 @@ export default function DocumentManagementPage() {
     ...DOCUMENT_WORKFLOW_STATES.map((s) => ({ value: s, label: s })),
   ];
 
-  const writable = companies
-    .filter((c) => c.canWrite)
+  // Sprint 5: el botón/modal "Cargar documento" (atajo directo) es de Asuntos
+  // Regulatorios -- gateado por canUploadDirect, NO por canWrite (que ahora es
+  // solo el permiso de las acciones del flujo de aprobación).
+  const uploadDirectCompanies = companies
+    .filter((c) => c.canUploadDirect)
     .map((c) => ({ idCompany: c.idCompany, companyName: c.companyName }));
 
   const totalCount = documents.length;
@@ -301,7 +319,7 @@ export default function DocumentManagementPage() {
               >
                 Mis tareas
               </Button>
-              {writable.length > 0 && (
+              {uploadDirectCompanies.length > 0 && (
                 <Button leftSection={<IconPlus size={16} />} onClick={() => setCreateOpen(true)}>
                   Cargar documento
                 </Button>
@@ -440,7 +458,7 @@ export default function DocumentManagementPage() {
         <CreateDocumentModal
           opened={createOpen}
           onClose={() => setCreateOpen(false)}
-          companies={writable}
+          companies={uploadDirectCompanies}
           types={types}
           onCreated={loadData}
         />

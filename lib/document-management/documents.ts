@@ -3,21 +3,39 @@ import { sanitizeOneDriveName } from '../onedriveName';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken';
 import { ensureFolderAndUploadFile } from '../onedrive/graphFolderUpload';
 import { buildDocumentVersionFolderSegments, getDocumentCodeError } from './storagePath';
+import { createDocumentAndStartWorkflow } from './workflowEngine';
 
 /**
- * Carga inicial (Fase 1) de un documento: crea el encabezado (Document) y su
- * primera versión (DocumentVersion), subiendo el archivo a OneDrive bajo
+ * Creación de un documento NUEVO (primer `DocumentType` + primera versión),
+ * subiendo el archivo a OneDrive bajo
  * GESTION-DOCUMENTAL/<EMPRESA>/<TIPO>/<CODIGO>/v1/<archivo>.
  *
- * Todo el documento se crea directo en estado "Vigente" (carga histórica),
- * SIN pasar por flujo de aprobación: eso es Fase 2.
+ * Sprint 5 (2026-09-02): esta función es el punto de entrada COMPARTIDO por
+ * los dos caminos de creación de un documento nuevo (antes solo existía el
+ * atajo directo):
+ *   1. Camino estándar: cualquier usuario, desde el flujo normal de "crear
+ *      solicitud" de SynerLink — ver
+ *      app/api/document-management/create-request/route.ts.
+ *   2. Atajo de Asuntos Regulatorios: el botón "Cargar documento" en
+ *      /process/document-management, gateado por el permiso
+ *      `/process/document-management/manage/regulatory` — ver
+ *      app/api/document-management/documents/route.ts.
+ * Antes de este sprint, esta función creaba el documento DIRECTO en estado
+ * "Vigente", sin flujo de aprobación (era la única forma de cargar un
+ * documento — carga histórica). Ahora delega en
+ * createDocumentAndStartWorkflow (workflowEngine.ts), que arranca el mismo
+ * flujo de 14 estados que cualquier otra versión: el documento queda en
+ * INITIAL_STATE ("En creación") con su `requests_general`/
+ * `task_request_general` ya creados, exactamente igual sin importar por cuál
+ * de los dos caminos haya entrado.
  *
  * Orden de operaciones: primero se sube el archivo a OneDrive y solo si eso
- * tiene éxito se escribe en la base de datos (Document + DocumentVersion en
- * una transacción). Si la subida falla, no queda ningún registro huérfano en
- * la base. Si la subida tiene éxito pero la transacción falla, puede quedar
- * un archivo huérfano en OneDrive (aceptable: es preferible a un registro que
- * apunte a un archivo inexistente).
+ * tiene éxito se escribe en la base (Document + DocumentVersion + arranque
+ * del flujo, en una única transacción — ver createDocumentAndStartWorkflow).
+ * Si la subida falla, no queda ningún registro huérfano en la base. Si la
+ * subida tiene éxito pero la transacción falla, puede quedar un archivo
+ * huérfano en OneDrive (aceptable: es preferible a un registro que apunte a
+ * un archivo inexistente).
  */
 
 export interface CreateDocumentInput {
@@ -108,39 +126,23 @@ export async function createDocumentWithFirstVersion(input: CreateDocumentInput)
     input.fileType
   );
 
-  const { document, version } = await prisma.$transaction(async (tx) => {
-    const createdDocument = await tx.document.create({
-      data: {
-        code,
-        title,
-        id_document_type: documentTypeId,
-        id_company: companyId,
-        owner_user_id: input.ownerUserId,
-        due_review_date: dueReviewDate ? new Date(dueReviewDate) : null,
-        is_restricted: Boolean(isRestricted),
-        current_status: 'Vigente',
-      },
-    });
-
-    const createdVersion = await tx.documentVersion.create({
-      data: {
-        id_document: createdDocument.id_document,
-        version_number: versionNumber,
-        status: 'Vigente',
-        onedrive_item_id: uploaded.id,
-        onedrive_path: fullPath,
-        created_by: input.ownerUserId,
-        comments: comments || null,
-      },
-    });
-
-    const updatedDocument = await tx.document.update({
-      where: { id_document: createdDocument.id_document },
-      data: { current_version_id: createdVersion.id_document_version },
-    });
-
-    return { document: updatedDocument, version: createdVersion };
+  const started = await createDocumentAndStartWorkflow({
+    companyId,
+    documentTypeId,
+    code,
+    title,
+    dueReviewDate: dueReviewDate ? new Date(dueReviewDate) : null,
+    isRestricted: Boolean(isRestricted),
+    comments: comments || null,
+    onedriveItemId: uploaded.id,
+    onedrivePath: fullPath,
+    ownerUserId: input.ownerUserId,
   });
 
-  return { document, version, company, documentType };
+  const [document, version] = await Promise.all([
+    prisma.document.findUniqueOrThrow({ where: { id_document: started.idDocument } }),
+    prisma.documentVersion.findUniqueOrThrow({ where: { id_document_version: started.idDocumentVersion } }),
+  ]);
+
+  return { document, version, company, documentType, idRequestGeneral: started.idRequestGeneral };
 }
