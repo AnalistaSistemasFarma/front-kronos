@@ -76,8 +76,14 @@ interface WorkflowCatalog {
 
 let cachedCatalog: WorkflowCatalog | null = null;
 
-/** Resuelve (y cachea en memoria del proceso) el process_category + las 14 tareas sembradas. */
-async function resolveWorkflowCatalog(pool: Awaited<ReturnType<typeof getPool>>): Promise<WorkflowCatalog> {
+/**
+ * Resuelve (y cachea en memoria del proceso) el process_category + las 14 tareas
+ * sembradas. Exportada (además de usarse internamente para transicionar) para que
+ * app/api/document-management/workflow-tasks/route.ts —usada por el componente de
+ * diagrama en la página de detalle del documento— reutilice la misma resolución por
+ * NOMBRE en vez de duplicar la consulta.
+ */
+export async function resolveWorkflowCatalog(pool: Awaited<ReturnType<typeof getPool>>): Promise<WorkflowCatalog> {
   if (cachedCatalog) return cachedCatalog;
 
   const pcResult = await pool

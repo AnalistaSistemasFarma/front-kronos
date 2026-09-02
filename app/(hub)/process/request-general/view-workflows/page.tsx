@@ -66,6 +66,12 @@ import {
 } from '../../../../../lib/requests-general/tableField';
 import TableColumnsEditor from '../_components/TableColumnsEditor';
 import toast from 'react-hot-toast';
+import WorkflowDiagram from '../../../../../components/workflow/WorkflowDiagram';
+import {
+  DOCUMENT_WORKFLOW_PROCESS_NAME,
+  DOCUMENT_WORKFLOW_TRANSITIONS,
+  MAIN_SEQUENCE_STATES,
+} from '../../../../../lib/document-management/workflowStates';
 
 interface WorkFlow {
   id: number;
@@ -96,6 +102,7 @@ interface Task {
   type_authorization: number | null;
   type_authorization_label?: string | null;
   conditions: number[];
+  display_order?: number | null;
 }
 
 interface Note {
@@ -1591,6 +1598,38 @@ function ViewWorkFlowPage() {
           </Grid.Col>
 
           <Grid.Col span={{ base: 12, lg: 8 }}>
+            {tasks.length > 0 && (
+              <Card shadow='sm' p='xl' radius='md' withBorder mb='lg'>
+                <Group mb='md'>
+                  <Box
+                    className='bg-indigo-500 p-2 rounded-lg'
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <IconProgress size={24} color='white' />
+                  </Box>
+                  <Title order={2} className='text-indigo-700'>
+                    Diagrama del Flujo
+                  </Title>
+                </Group>
+                <WorkflowDiagram
+                  tasks={tasks.map((t, i) => ({
+                    id: t.id,
+                    task: t.task,
+                    display_order: t.display_order ?? i,
+                  }))}
+                  transitions={
+                    workflow.process === DOCUMENT_WORKFLOW_PROCESS_NAME
+                      ? DOCUMENT_WORKFLOW_TRANSITIONS
+                      : undefined
+                  }
+                  mainSequenceStates={
+                    workflow.process === DOCUMENT_WORKFLOW_PROCESS_NAME
+                      ? MAIN_SEQUENCE_STATES
+                      : undefined
+                  }
+                />
+              </Card>
+            )}
             <Card
               shadow='sm'
               p='xl'

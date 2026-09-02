@@ -20,7 +20,14 @@ import { IconArrowLeft, IconUpload } from '@tabler/icons-react';
 import Link from 'next/link';
 import UploadVersionModal from './UploadVersionModal';
 import TransitionActions from './TransitionActions';
-import { isClosedState } from '../../../../../lib/document-management/workflowStates';
+import {
+  isClosedState,
+  DOCUMENT_WORKFLOW_TRANSITIONS,
+  MAIN_SEQUENCE_STATES,
+} from '../../../../../lib/document-management/workflowStates';
+import WorkflowDiagram, {
+  type WorkflowDiagramTask,
+} from '../../../../../components/workflow/WorkflowDiagram';
 
 interface DocumentVersionRow {
   id_document_version: number;
@@ -63,15 +70,17 @@ export default function DocumentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [workflowTasks, setWorkflowTasks] = useState<WorkflowDiagramTask[]>([]);
 
   const load = useCallback(async () => {
     if (!idDocument) return;
     try {
       setLoading(true);
       setError(null);
-      const [docRes, accessRes] = await Promise.all([
+      const [docRes, accessRes, tasksRes] = await Promise.all([
         fetch(`/api/document-management/documents/${idDocument}`),
         fetch('/api/document-management/access'),
+        fetch('/api/document-management/workflow-tasks'),
       ]);
       const docData = await docRes.json();
       if (!docRes.ok) throw new Error(docData.error || 'No se pudo cargar el documento');
@@ -82,6 +91,11 @@ export default function DocumentDetailPage() {
         const companies: Array<{ idCompany: number; canWrite: boolean }> = accessData.companies ?? [];
         const match = companies.find((c) => c.idCompany === docData.document.company.id_company);
         setCanWrite(!!match?.canWrite);
+      }
+
+      if (tasksRes.ok) {
+        const tasksData = await tasksRes.json();
+        setWorkflowTasks(tasksData.tasks ?? []);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error inesperado');
@@ -150,6 +164,18 @@ export default function DocumentDetailPage() {
         idDocument={document.id_document}
         onCreated={load}
       />
+
+      {workflowTasks.length > 0 && (
+        <Paper withBorder p="md" mt="md">
+          <WorkflowDiagram
+            title="Ciclo de vida del documento"
+            tasks={workflowTasks}
+            transitions={DOCUMENT_WORKFLOW_TRANSITIONS}
+            mainSequenceStates={MAIN_SEQUENCE_STATES}
+            currentState={currentVersion?.status ?? document.current_status}
+          />
+        </Paper>
+      )}
 
       {currentVersion && (
         <Paper withBorder p="md" mt="md">
