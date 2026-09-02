@@ -159,6 +159,7 @@ function RequestGeneralPage() {
   const [folderContents, setFolderContents] = useState([]);
 
   const [filters, setFilters] = useState({
+    id: '',
     status: '0',
     company: '',
     date_from: '',
@@ -291,7 +292,7 @@ function RequestGeneralPage() {
       if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
       if (filtersToUse.process) params.append('process', filtersToUse.process);
       if (filtersToUse.category) params.append('category', filtersToUse.category);
-
+      if (filtersToUse.id) params.append('id', filtersToUse.id);
       const url = `/api/requests-general/general-requests?${params.toString()}`;
 
       const response = await fetch(url);
@@ -734,6 +735,16 @@ function RequestGeneralPage() {
             <Box mt='md'>
               <Grid>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <TextInput
+                    label='ID Solicitud'
+                    type='text'
+                    value={filters.id}
+                    onChange={(e) => handleFilterChange('id', e.target.value)}
+                    leftSection={<IconFilter size={16} />}
+                    data-testid='id-filter'
+                />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <Select
                     label='Estado'
                     placeholder='Todos los estados'
@@ -825,6 +836,7 @@ function RequestGeneralPage() {
                   variant='outline'
                   onClick={async () => {
                     const clearedFilters = {
+                      id: '',
                       status: '0',
                       company: '',
                       date_from: '',
