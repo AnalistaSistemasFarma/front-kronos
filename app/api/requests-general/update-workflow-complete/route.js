@@ -354,7 +354,7 @@ export async function POST(req) {
         };
 
         for (const field of formFields) {
-          const { id, field_label, field_type, required, action, options, condition_option_ids, config_json } = field;
+          const { id, field_label, field_type, required, editable, action, options, condition_option_ids, config_json } = field;
 
           if (action === 'create') {
             if (!field_label || !field_label.trim()) continue;
@@ -364,12 +364,13 @@ export async function POST(req) {
               .input('field_label', sql.NVarChar(255), field_label)
               .input('field_type', sql.NVarChar(30), field_type || 'select')
               .input('required', sql.Bit, required ? 1 : 0)
+              .input('editable', sql.Bit, editable ? 1 : 0)
               .input('config_json', sql.NVarChar(sql.MAX), config_json ?? null)
               .query(`
                 INSERT INTO process_form_field
-                (id_process_category, field_label, field_type, required, active, config_json)
+                (id_process_category, field_label, field_type, required, editable, active, config_json)
                 OUTPUT INSERTED.id
-                VALUES (@id_process, @field_label, @field_type, @required, 1, @config_json)
+                VALUES (@id_process, @field_label, @field_type, @required, @editable, 1, @config_json)
               `);
 
             const newFieldId = fieldResult.recordset[0].id;
@@ -388,14 +389,16 @@ export async function POST(req) {
                 .input('id', sql.Int, id)
                 .input('field_label', sql.NVarChar(255), field_label)
                 .input('required', sql.Bit, required ? 1 : 0)
+                .input('editable', sql.Bit, editable ? 1 : 0)
                 .input('config_json', sql.NVarChar(sql.MAX), config_json ?? null)
-                .query(`UPDATE process_form_field SET field_label = @field_label, required = @required, config_json = @config_json WHERE id = @id`);
+                .query(`UPDATE process_form_field SET field_label = @field_label, required = @required, editable = @editable, config_json = @config_json WHERE id = @id`);
             } else {
               await new sql.Request(transaction)
                 .input('id', sql.Int, id)
                 .input('field_label', sql.NVarChar(255), field_label)
                 .input('required', sql.Bit, required ? 1 : 0)
-                .query(`UPDATE process_form_field SET field_label = @field_label, required = @required WHERE id = @id`);
+                .input('editable', sql.Bit, editable ? 1 : 0)
+                .query(`UPDATE process_form_field SET field_label = @field_label, required = @required, editable = @editable WHERE id = @id`);
             }
 
             await processOptions(id, options);
