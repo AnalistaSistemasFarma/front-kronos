@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import {
   Loader,
@@ -121,6 +122,7 @@ function formatDate(raw: string | null | undefined): string {
 
 export default function DocumentGeneratorPage() {
   const { data: session } = useSession();
+  const router = useRouter();
 
   const [companies, setCompanies] = useState<CompanyAccess[]>([]);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
@@ -534,8 +536,12 @@ export default function DocumentGeneratorPage() {
                     const latestVersion = d.versions[0];
                     const withoutProcess = d.id_process == null;
                     return (
-                      <Table.Tr key={d.id_document}>
-                        <Table.Td>
+                      <Table.Tr
+                        key={d.id_document}
+                        onClick={() => router.push(`/process/document-management/${d.id_document}`)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <Table.Td onClick={(e) => e.stopPropagation()}>
                           <Group gap={4} wrap="nowrap">
                             <Anchor
                               component={Link}
@@ -587,7 +593,7 @@ export default function DocumentGeneratorPage() {
                             {formatDate(d.updated_at)}
                           </Text>
                         </Table.Td>
-                        <Table.Td>
+                        <Table.Td onClick={(e) => e.stopPropagation()}>
                           {withoutProcess && latestVersion?.onedrive_item_id ? (
                             <Group gap={4} wrap="nowrap">
                               <Tooltip label="Editar contenido y regenerar PDF">

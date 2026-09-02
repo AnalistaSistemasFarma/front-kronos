@@ -15,8 +15,9 @@ import {
   Text,
   Title,
   Anchor,
+  Tooltip,
 } from '@mantine/core';
-import { IconArrowLeft, IconUpload, IconExternalLink } from '@tabler/icons-react';
+import { IconArrowLeft, IconUpload, IconExternalLink, IconEye, IconEdit } from '@tabler/icons-react';
 import Link from 'next/link';
 import UploadVersionModal from './UploadVersionModal';
 import TransitionActions from './TransitionActions';
@@ -49,6 +50,7 @@ interface DocumentDetail {
   current_version_id: number | null;
   due_review_date: string | null;
   is_restricted: boolean;
+  id_process: number | null;
   company: { id_company: number; company: string };
   documentType: { id_document_type: number; name: string };
   owner: { id: string; name: string | null; email: string };
@@ -69,6 +71,7 @@ export default function DocumentDetailPage() {
 
   const [document, setDocument] = useState<DocumentDetail | null>(null);
   const [canWrite, setCanWrite] = useState(false);
+  const [canEditGenerator, setCanEditGenerator] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -79,10 +82,15 @@ export default function DocumentDetailPage() {
     try {
       setLoading(true);
       setError(null);
-      const [docRes, accessRes, tasksRes] = await Promise.all([
+      const [docRes, accessRes, tasksRes, generatorRes] = await Promise.all([
         fetch(`/api/document-management/documents/${idDocument}`),
         fetch('/api/document-management/access'),
         fetch('/api/document-management/workflow-tasks'),
+        // Reusa el listado del Generador solo para leer `companies` (mismo
+        // permiso propio del subproceso '/process/document-management/generador',
+        // ver app/api/document-management/generator/route.ts) y así decidir si
+        // se muestra el botón "Editar documento" en esta pantalla de detalle.
+        fetch('/api/document-management/generator'),
       ]);
       const docData = await docRes.json();
       if (!docRes.ok) throw new Error(docData.error || 'No se pudo cargar el documento');
@@ -98,6 +106,14 @@ export default function DocumentDetailPage() {
       if (tasksRes.ok) {
         const tasksData = await tasksRes.json();
         setWorkflowTasks(tasksData.tasks ?? []);
+      }
+
+      if (generatorRes.ok) {
+        const generatorData = await generatorRes.json();
+        const generatorCompanies: Array<{ idCompany: number }> = generatorData.companies ?? [];
+        setCanEditGenerator(
+          generatorCompanies.some((c) => c.idCompany === docData.document.company.id_company)
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error inesperado');
@@ -152,6 +168,41 @@ export default function DocumentDetailPage() {
           <Badge color={statusColor(document.current_status)} size="lg">
             {document.current_status}
           </Badge>
+          {currentVersion?.onedrive_item_id ? (
+            <Button
+              variant="light"
+              leftSection={<IconEye size={16} />}
+              component="a"
+              href={`/api/document-management/documents/${document.id_document}/versions/${currentVersion.id_document_version}/open`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Ver documento
+            </Button>
+          ) : (
+            <Tooltip label="La versión vigente no tiene un archivo asociado en OneDrive">
+              <Button variant="light" leftSection={<IconEye size={16} />} disabled>
+                Ver documento
+              </Button>
+            </Tooltip>
+          )}
+          {canEditGenerator ? (
+            <Button
+              variant="light"
+              color="violet"
+              leftSection={<IconEdit size={16} />}
+              component={Link}
+              href={`/process/document-management/generador/${document.id_document}/editar`}
+            >
+              Editar documento
+            </Button>
+          ) : (
+            <Tooltip label="No tiene el permiso del Generador de Documentos para editar este documento">
+              <Button variant="light" color="violet" leftSection={<IconEdit size={16} />} disabled>
+                Editar documento
+              </Button>
+            </Tooltip>
+          )}
           {canWrite && (
             <Button leftSection={<IconUpload size={16} />} onClick={() => setUploadOpen(true)}>
               Subir nueva versión

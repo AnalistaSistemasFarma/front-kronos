@@ -38,9 +38,19 @@ async function hasDocumentGeneratorCompanyAccess(userEmail: string, companyId: n
  * no dispara el flujo de 14 estados — ver decisión documentada en
  * lib/document-management/editor.ts) y regenera+sube el PDF a OneDrive.
  *
- * Mismo guardarraíl que .../pdf/route.ts: solo documentos SIN proceso
- * (`id_process IS NULL`) — los documentos con proceso siguen el flujo
- * formal y quedan fuera de este editor por ahora.
+ * A diferencia de .../pdf/route.ts (que sigue restringido a documentos SIN
+ * proceso), este editor SÍ aplica también a documentos CON proceso
+ * (`id_process` no nulo, los que vienen de la Fase 2 / flujo de aprobación
+ * de 14 estados). Pedido explícito de Nicolás (2026-09-02): desde la
+ * pantalla de detalle del documento (app/(hub)/process/document-management/
+ * [id]/page.tsx) necesita poder VER y EDITAR cualquier documento Vigente al
+ * que tenga acceso, no solo los cargados directo sin proceso. El único
+ * guardarraíl que se mantiene es el permiso propio del Generador
+ * (`hasDocumentGeneratorCompanyAccess`, por empresa) — se quitó el bloqueo
+ * por `id_process`. `content_html` puede venir null (versión que nunca se
+ * editó aquí); el editor ya arranca con un esqueleto en ese caso (ver
+ * SKELETON_HTML en generador/[id]/editar/page.tsx), así que no hace falta
+ * lógica adicional para ese caso.
  */
 async function resolveEditableVersion(idDocument: number) {
   const document = await prisma.document.findUnique({
@@ -78,16 +88,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const access = await hasDocumentGeneratorCompanyAccess(session.user.email, document.id_company);
     if (!access) {
       return NextResponse.json({ error: 'Sin acceso a esta empresa' }, { status: 403 });
-    }
-
-    if (document.id_process != null) {
-      return NextResponse.json(
-        {
-          error:
-            'Este documento pertenece a un proceso. El editor solo aplica a documentos sin proceso (Sprint 7/8).',
-        },
-        { status: 403 }
-      );
     }
 
     return NextResponse.json({
@@ -136,16 +136,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const access = await hasDocumentGeneratorCompanyAccess(session.user.email, document.id_company);
     if (!access) {
       return NextResponse.json({ error: 'Sin acceso a esta empresa' }, { status: 403 });
-    }
-
-    if (document.id_process != null) {
-      return NextResponse.json(
-        {
-          error:
-            'Este documento pertenece a un proceso. El editor solo aplica a documentos sin proceso (Sprint 7/8).',
-        },
-        { status: 403 }
-      );
     }
 
     const result = await saveDocumentVersionContentAndGeneratePdf({
