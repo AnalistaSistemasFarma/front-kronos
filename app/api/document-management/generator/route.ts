@@ -97,6 +97,11 @@ export async function GET(request: NextRequest) {
       where: {
         id_company: companyId ? companyId : { in: readableCompanyIds },
         current_status: 'Vigente',
+        // 2026-09-02 (pedido de Nicolás): el Generador solo debe listar
+        // documentos que YA fueron autorizados por el flujo de 14 estados.
+        // id_process IS NULL = carga histórica de Fase 1, nunca pasó por
+        // aprobación — se excluye aunque esté marcado "Vigente".
+        id_process: { not: null },
         id_document_type: documentTypeIdParam ? Number(documentTypeIdParam) : undefined,
       },
       include: {
