@@ -43,6 +43,7 @@ import {
   IconCircleCheck,
   IconProgress,
   IconLockSquare,
+  IconCategory,
 } from '@tabler/icons-react';
 import CreateDocumentModal from './CreateDocumentModal';
 import {
@@ -326,6 +327,14 @@ export default function DocumentManagementPage() {
                 href="/process/document-management/generador"
               >
                 Generador de Documentos
+              </Button>
+              <Button
+                variant="default"
+                leftSection={<IconCategory size={16} />}
+                component={Link}
+                href="/process/document-management/categorias"
+              >
+                Categorías de Proceso
               </Button>
               {uploadDirectCompanies.length > 0 && (
                 <Button leftSection={<IconPlus size={16} />} onClick={() => setCreateOpen(true)}>

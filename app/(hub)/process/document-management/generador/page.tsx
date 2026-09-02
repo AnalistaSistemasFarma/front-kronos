@@ -40,6 +40,7 @@ import {
   IconCircleCheck,
   IconLink,
   IconSitemap,
+  IconCategory,
 } from '@tabler/icons-react';
 
 /**
@@ -272,6 +273,14 @@ export default function DocumentGeneratorPage() {
               </Text>
             </div>
             <Group gap="xs">
+              <Button
+                variant="default"
+                leftSection={<IconCategory size={16} />}
+                component={Link}
+                href="/process/document-management/categorias"
+              >
+                Categorías de Proceso
+              </Button>
               <Button
                 variant="default"
                 leftSection={<IconFileDescription size={16} />}
