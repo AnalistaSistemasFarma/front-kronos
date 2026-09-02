@@ -31,6 +31,7 @@ import {
   Checkbox,
   MultiSelect,
   CopyButton,
+  Tooltip,
 } from '@mantine/core';
 import {
   IconBuilding,
@@ -74,6 +75,7 @@ import toast from 'react-hot-toast';
 //   DOCUMENT_WORKFLOW_TRANSITIONS,
 //   MAIN_SEQUENCE_STATES,
 // } from '../../../../../lib/document-management/workflowStates';
+import { DOCUMENT_WORKFLOW_STATES } from '../../../../../lib/document-management/workflowStates';
 
 interface WorkFlow {
   id: number;
@@ -170,6 +172,24 @@ const ADMIN_USER_IDS = [
   'cmgicd6470000ekpi1a33o581',
   'cmgqz404x0000ct9k1j8xdet1',
 ];
+
+// Candado de Gestión Documental (mismo candado aplicado en el backend, ver
+// app/api/requests-general/update-workflow-complete/route.js): estas 14 tareas del
+// proceso id_process_category=86 ("Gestión Documental — Ciclo de vida del
+// documento") están hardcodeadas por NOMBRE en lib/document-management/workflowStates.ts
+// y en el grafo WORKFLOW_ACTIONS que las consume. Renombrarlas o borrarlas desde esta
+// pantalla genérica rompería el flujo documental en silencio, así que aquí solo se
+// deshabilita visualmente renombrar/borrar para ESAS filas puntuales — el resto de la
+// fila (costo, centro de costo, orden, activo) y cualquier otro proceso siguen
+// editables igual que siempre. La validación real (la que no se puede saltar) vive en
+// el backend; esto es solo UX.
+const DOCUMENT_MANAGEMENT_PROCESS_CATEGORY_ID = 86;
+
+const isLockedDocumentTask = (workflowId: number | undefined, task: Task | undefined | null) =>
+  workflowId === DOCUMENT_MANAGEMENT_PROCESS_CATEGORY_ID &&
+  !!task &&
+  task.id > 0 &&
+  (DOCUMENT_WORKFLOW_STATES as readonly string[]).includes(task.task);
 
 function ViewWorkFlowPage() {
   const searchParams = useSearchParams();
@@ -1745,15 +1765,31 @@ function ViewWorkFlowPage() {
                                 <Group justify='space-between' align='flex-start'>
                                   <div style={{ flex: 1 }}>
                                     {isEditing ? (
-                                      <TextInput
-                                        value={editedTasks[index]?.task || ''}
-                                        onChange={(e) => {
-                                          const newTasks = [...editedTasks];
-                                          newTasks[index] = { ...newTasks[index], task: e.target.value };
-                                          setEditedTasks(newTasks);
-                                        }}
-                                        placeholder='Nombre de la tarea'
-                                      />
+                                      isLockedDocumentTask(workflow?.id, editedTasks[index]) ? (
+                                        <Tooltip
+                                          label='Esta tarea es parte del flujo de Gestión Documental y no se puede renombrar desde aquí. Contacte al equipo técnico si necesita cambiarla.'
+                                          withArrow
+                                          multiline
+                                          w={260}
+                                        >
+                                          <TextInput
+                                            value={editedTasks[index]?.task || ''}
+                                            readOnly
+                                            placeholder='Nombre de la tarea'
+                                            styles={{ input: { cursor: 'not-allowed', backgroundColor: 'var(--mantine-color-default)' } }}
+                                          />
+                                        </Tooltip>
+                                      ) : (
+                                        <TextInput
+                                          value={editedTasks[index]?.task || ''}
+                                          onChange={(e) => {
+                                            const newTasks = [...editedTasks];
+                                            newTasks[index] = { ...newTasks[index], task: e.target.value };
+                                            setEditedTasks(newTasks);
+                                          }}
+                                          placeholder='Nombre de la tarea'
+                                        />
+                                      )
                                     ) : (
                                       <Group gap='xs'>
                                         <Text size='md' fw={600} className='mb-1'>
@@ -1797,15 +1833,33 @@ function ViewWorkFlowPage() {
                                       >
                                         <IconChevronDown size={18} />
                                       </ActionIcon>
-                                      <ActionIcon
-                                        color='red'
-                                        variant='subtle'
-                                        size='lg'
-                                        onClick={() => handleRemoveTask(task.id)}
-                                        title='Eliminar tarea'
-                                      >
-                                        <IconTrash size={18} />
-                                      </ActionIcon>
+                                      {isLockedDocumentTask(workflow?.id, task) ? (
+                                        <Tooltip
+                                          label='Esta tarea es parte del flujo de Gestión Documental y no se puede eliminar desde aquí. Contacte al equipo técnico si necesita cambiarla.'
+                                          withArrow
+                                          multiline
+                                          w={260}
+                                        >
+                                          <ActionIcon
+                                            color='gray'
+                                            variant='subtle'
+                                            size='lg'
+                                            style={{ cursor: 'not-allowed' }}
+                                          >
+                                            <IconTrash size={18} />
+                                          </ActionIcon>
+                                        </Tooltip>
+                                      ) : (
+                                        <ActionIcon
+                                          color='red'
+                                          variant='subtle'
+                                          size='lg'
+                                          onClick={() => handleRemoveTask(task.id)}
+                                          title='Eliminar tarea'
+                                        >
+                                          <IconTrash size={18} />
+                                        </ActionIcon>
+                                      )}
                                     </Group>
                                   )}
                                 </Group>
