@@ -41,6 +41,7 @@ import {
   IconLink,
   IconSitemap,
   IconCategory,
+  IconEdit,
 } from '@tabler/icons-react';
 
 /**
@@ -589,6 +590,17 @@ export default function DocumentGeneratorPage() {
                         <Table.Td>
                           {withoutProcess && latestVersion?.onedrive_item_id ? (
                             <Group gap={4} wrap="nowrap">
+                              <Tooltip label="Editar contenido y regenerar PDF">
+                                <ActionIcon
+                                  variant="light"
+                                  color="violet"
+                                  component={Link}
+                                  href={`/process/document-management/generador/${d.id_document}/editar`}
+                                  aria-label="Editar documento"
+                                >
+                                  <IconEdit size={16} />
+                                </ActionIcon>
+                              </Tooltip>
                               <Tooltip label="Descargar / abrir como PDF">
                                 <ActionIcon
                                   variant="light"

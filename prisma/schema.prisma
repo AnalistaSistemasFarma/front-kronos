@@ -662,6 +662,21 @@ model DocumentVersion {
   // en la carga inicial de Fase 1). Sin relation(): esa tabla no está modelada
   // en Prisma, igual criterio que Document.id_process.
   id_request_general  Int?
+  // Sprint 8 — Editor de documentos (Tiptap). Contenido editable en HTML de
+  // esta versión, generado por el editor propio dentro de la plataforma (ver
+  // app/(hub)/process/document-management/generador/[id]/editar/page.tsx).
+  // NULL = todavía no se ha editado ninguna vez desde el editor (versión
+  // cargada por archivo, p.ej. Fase 1/Fase 2 clásicas, o carga directa del
+  // atajo regulatorio). Al guardar desde el editor, este HTML se persiste
+  // AQUÍ MISMO (se actualiza la versión vigente, no se crea una versión
+  // nueva ni se dispara de nuevo el flujo de 14 estados — ver decisión
+  // documentada en lib/document-management/editor.ts) y además se renderiza
+  // a PDF (Chrome headless vía Puppeteer) y se sube a OneDrive,
+  // reemplazando el archivo de esta misma versión (onedrive_item_id/
+  // onedrive_path se actualizan también). NVARCHAR(MAX) porque el HTML de
+  // un documento con tablas puede superar los 4000 caracteres de un
+  // NVARCHAR normal.
+  content_html        String?  @db.NVarChar(Max)
 
   document Document @relation(fields: [id_document], references: [id_document], onDelete: Cascade)
 
