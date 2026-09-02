@@ -7,6 +7,11 @@ import {
 } from '../../../../lib/notificationEvents.js';
 import { syncAuthorizationToSapsend } from '../../../../lib/sapsend/authorizationStatus.js';
 import { advanceSequentialTask } from '../../../../lib/workflow/advanceSequentialTask.js';
+import { DOCUMENT_WORKFLOW_PROCESS_NAME } from '../../../../lib/document-management/workflowStates';
+import {
+  transitionDocumentVersion,
+  WorkflowTransitionError,
+} from '../../../../lib/document-management/workflowEngine';
 
 export async function POST(req) {
   const TAG = '[update-activities]';
@@ -52,13 +57,90 @@ export async function POST(req) {
         .query(`
           SELECT trg.id_status, trg.id_request_general, trg.id_task, rg.subject_request,
                  tpc.task, tpc.is_sequential, tpc.display_order, tpc.id_process_category,
-                 tpc.is_authorization
+                 tpc.is_authorization, pc.process AS process_name
           FROM task_request_general trg
           INNER JOIN requests_general rg ON rg.id = trg.id_request_general
           LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task
+          LEFT JOIN process_category pc ON pc.id = tpc.id_process_category
           WHERE trg.id = @id
         `);
       const prevRow = prevResult.recordset[0];
+
+      // Sprint 6 (Gestión Documental → /process/authorization): la tarea "En aprobación" del
+      // flujo documental se sembró (ver prisma/seeds/document-management-authorization-type.sql)
+      // con is_authorization = 1, así que aparece en el listado genérico de autorizaciones y se
+      // "autoriza/rechaza" con los MISMOS botones que cualquier otro tipo de autorización — pero
+      // a diferencia de los demás tipos, esta tarea NO se puede cerrar con el UPDATE genérico de
+      // abajo: el documento necesita pasar por lib/document-management/workflowEngine.ts para que
+      // el grafo de transiciones (aprobar → sigue el flujo real; rechazar → "Rechazado") se
+      // aplique, y para que document_version.status / document.current_status queden en sync.
+      // Se detecta por nombre de tarea + nombre de proceso (no solo por is_authorization, que
+      // también es 1 para otros tipos de autorización de otros procesos, p.ej. tesorería).
+      const isDocumentApprovalTask =
+        !!prevRow?.is_authorization &&
+        prevRow?.task === 'En aprobación' &&
+        prevRow?.process_name === DOCUMENT_WORKFLOW_PROCESS_NAME;
+
+      if (isDocumentApprovalTask) {
+        // Solo se hizo un SELECT hasta aquí: no hay nada que confirmar, se libera la transacción
+        // y se delega TODO el cierre (UPDATE de task_request_general, nota, notificación) a
+        // transitionDocumentVersion, que maneja su propia transacción.
+        await transaction.rollback();
+
+        const action = Number(id_status) === 2 ? 'aprobar' : Number(id_status) === 3 ? 'rechazar' : null;
+        if (!action) {
+          console.warn(`${TAG} ✖ Estado ${id_status} inválido para resolver una autorización documental.`);
+          return new Response(
+            JSON.stringify({ error: 'Estado inválido para resolver una autorización documental' }),
+            { status: 400 }
+          );
+        }
+
+        try {
+          const versionResult = await new sql.Request(pool)
+            .input('id_request', sql.Int, prevRow.id_request_general)
+            .query(`SELECT TOP 1 id_document_version FROM document_version WHERE id_request_general = @id_request`);
+          const idDocumentVersion = versionResult.recordset[0]?.id_document_version;
+
+          const actorResult = await new sql.Request(pool)
+            .input('id_user', sql.NVarChar(1000), id_assigned)
+            .query(`SELECT email FROM [user] WHERE id = @id_user`);
+          const actorEmail = actorResult.recordset[0]?.email;
+
+          if (!idDocumentVersion || !actorEmail) {
+            console.warn(`${TAG} ✖ No se pudo resolver la versión del documento o el email del autorizador.`, {
+              idDocumentVersion,
+              id_assigned,
+            });
+            return new Response(
+              JSON.stringify({ error: 'No se pudo resolver la versión del documento o el autorizador' }),
+              { status: 409 }
+            );
+          }
+
+          const result = await transitionDocumentVersion({
+            idDocumentVersion,
+            action,
+            actorUserId: id_assigned,
+            actorEmail,
+            reason: resolution ?? null,
+          });
+          console.log(`${TAG} ✅ Autorización documental resuelta vía workflowEngine:`, result);
+          return new Response(
+            JSON.stringify({ success: true, message: 'Autorización documental resuelta correctamente' }),
+            { status: 200 }
+          );
+        } catch (docErr) {
+          if (docErr instanceof WorkflowTransitionError) {
+            return new Response(JSON.stringify({ error: docErr.message }), { status: docErr.status });
+          }
+          console.error(`${TAG} ✖ Error resolviendo autorización documental:`, docErr);
+          return new Response(
+            JSON.stringify({ error: 'Error resolviendo la autorización documental', details: docErr.message }),
+            { status: 500 }
+          );
+        }
+      }
 
       console.log(`${TAG} 1) Tarea actual (prevRow) =`, {
         id_task: prevRow?.id_task,
