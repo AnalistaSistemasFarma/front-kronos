@@ -1,9 +1,8 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useSession } from 'next-auth/react';
 import Link from 'next/link';
+import { useSession } from 'next-auth/react';
 import {
   Loader,
   Alert,
@@ -30,67 +29,41 @@ import {
 } from '@mantine/core';
 import {
   IconSearch,
-  IconPlus,
-  IconListCheck,
   IconFileDescription,
   IconChevronRight,
   IconFilter,
   IconX,
-  IconExternalLink,
+  IconDownload,
   IconLock,
   IconRefresh,
   IconFiles,
   IconCircleCheck,
-  IconProgress,
-  IconLockSquare,
+  IconLink,
+  IconSitemap,
 } from '@tabler/icons-react';
-import CreateDocumentModal from './CreateDocumentModal';
-import {
-  isClosedState,
-  DOCUMENT_WORKFLOW_STATES,
-} from '../../../../lib/document-management/workflowStates';
 
 /**
- * Gestión Documental — listado de documentos (Fase 1: carga inicial directo
- * en "Vigente"; Fase 2: agrega el flujo de aprobación de 14 estados, ver
- * /process/document-management/[id] y /process/document-management/mis-tareas).
+ * Sprint 7 — "Generador de Documentos"
+ * (/process/document-management/generador).
  *
- * Consolida los documentos de TODAS las empresas a las que el usuario tiene
- * acceso de lectura, con el mismo patrón multiempresa de Registros
- * Sanitarios: dos endpoints propios (/api/document-management/access y
- * /api/document-management/documents) que resuelven el permiso en el
- * servidor.
+ * Muestra TODOS los documentos en estado "Vigente" (ya autorizados/
+ * publicados por el flujo de 14 estados del Sprint 6, o cargados directo en
+ * Fase 1). Reusa el mismo patrón visual de /process/document-management y
+ * /process/request-general/general-requests: tarjetas resumen clicables,
+ * card de filtros colapsable, tabla striped paginada en cliente.
  *
- * Visual: reusa el mismo patrón de tabla/filtros de
- * /process/request-general/general-requests (tarjetas resumen clicables,
- * card de filtros colapsable, tabla striped con paginación en cliente) — a
- * pedido explícito de Nicolás ("la tabla que tenemos aquí me gusta mucho").
- *
- * Sprint 5 (2026-09-02): la creación de un documento NUEVO ahora tiene dos
- * caminos (ver lib/document-management/documents.ts y
- * app/api/document-management/create-request/route.ts para el detalle):
- *   1. El camino estándar es el flujo normal de "crear solicitud" de
- *      SynerLink, seleccionando la categoría/proceso "Gestión Documental" —
- *      disponible para cualquier usuario, no vive en esta pantalla.
- *   2. El botón "Cargar documento" de abajo es el atajo de Asuntos
- *      Regulatorios: crea el documento directo, sin pasar por el formulario
- *      largo de "crear solicitud", pero termina en la MISMA estructura de
- *      datos. Por eso ahora se gatea por `canUploadDirect` (permiso NUEVO
- *      `/process/document-management/manage/regulatory`) y no por
- *      `canWrite` (que sigue siendo el permiso de las acciones del flujo de
- *      aprobación — revisar/aprobar/etc., ver [id]/TransitionActions.tsx).
+ * Para cada documento se indica si está o no ligado a un PROCESO
+ * (`id_process`). Para los que NO tienen proceso se habilita
+ * descargar/copiar enlace del archivo, SIEMPRE como PDF no editable (ver
+ * app/api/document-management/documents/[id]/versions/[versionId]/pdf/route.ts).
+ * Los documentos CON proceso solo muestran a cuál pertenecen — su vista
+ * dedicada por categoría (Auditorías, No Conformidades, Ingeniería
+ * Biomédica) es el Sprint 9, fuera de alcance aquí.
  */
 
 const ITEMS_PER_PAGE = 25;
 
-function statusColor(status: string): string {
-  if (status === 'Vigente') return 'green';
-  if (isClosedState(status)) return 'red';
-  if (status === 'Reasignación' || status === 'Reelaboración') return 'yellow';
-  return 'blue';
-}
-
-type QuickFilter = 'all' | 'vigente' | 'en-tramite' | 'restringido';
+type ProcessFilter = 'all' | 'sin-proceso' | 'con-proceso';
 
 interface CompanyAccess {
   idCompany: number;
@@ -114,9 +87,10 @@ interface DocumentRow {
   code: string;
   title: string;
   current_status: string;
-  due_review_date: string | null;
   is_restricted: boolean;
   updated_at: string;
+  id_process: number | null;
+  processName: string | null;
   company: { id_company: number; company: string };
   documentType: { id_document_type: number; name: string };
   owner: { id: string; name: string | null; email: string };
@@ -140,9 +114,8 @@ function formatDate(raw: string | null | undefined): string {
   }).format(date);
 }
 
-export default function DocumentManagementPage() {
+export default function DocumentGeneratorPage() {
   const { data: session } = useSession();
-  const router = useRouter();
 
   const [companies, setCompanies] = useState<CompanyAccess[]>([]);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
@@ -153,11 +126,10 @@ export default function DocumentManagementPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCompany, setSelectedCompany] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
-  const [selectedState, setSelectedState] = useState<string>('all');
-  const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
+  const [processFilter, setProcessFilter] = useState<ProcessFilter>('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     if (session) loadData();
@@ -168,29 +140,23 @@ export default function DocumentManagementPage() {
       setLoading(true);
       setError(null);
 
-      const [accessRes, typesRes] = await Promise.all([
-        fetch('/api/document-management/access'),
+      const [genRes, typesRes] = await Promise.all([
+        fetch('/api/document-management/generator'),
         fetch('/api/document-management/types'),
       ]);
-      if (!accessRes.ok) throw new Error('No se pudo verificar el acceso al módulo');
-      const accessData = await accessRes.json();
-      const userCompanies: CompanyAccess[] = accessData.companies ?? [];
-      setCompanies(userCompanies);
+      if (!genRes.ok) throw new Error('No se pudieron cargar los documentos vigentes');
+      const genData = await genRes.json();
+      setCompanies(genData.companies ?? []);
+      setDocuments(genData.documents ?? []);
 
       if (typesRes.ok) {
         const typesData = await typesRes.json();
         setTypes(typesData.types ?? []);
       }
 
-      if (userCompanies.length === 0) {
+      if ((genData.companies ?? []).length === 0) {
         setError('No tiene acceso a Gestión Documental en ninguna empresa.');
-        return;
       }
-
-      const listRes = await fetch('/api/document-management/documents');
-      if (!listRes.ok) throw new Error('No se pudieron cargar los documentos');
-      const listData = await listRes.json();
-      setDocuments(listData.documents ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error inesperado');
     } finally {
@@ -200,29 +166,23 @@ export default function DocumentManagementPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedCompany, selectedType, selectedState, quickFilter]);
+  }, [searchTerm, selectedCompany, selectedType, processFilter]);
 
   const filtered = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return documents.filter((d) => {
       if (selectedCompany !== 'all' && String(d.company.id_company) !== selectedCompany) return false;
       if (selectedType !== 'all' && String(d.documentType?.id_document_type) !== selectedType) return false;
-      if (selectedState !== 'all' && d.current_status !== selectedState) return false;
 
-      if (quickFilter === 'vigente' && d.current_status !== 'Vigente') return false;
-      if (
-        quickFilter === 'en-tramite' &&
-        (d.current_status === 'Vigente' || isClosedState(d.current_status))
-      )
-        return false;
-      if (quickFilter === 'restringido' && !d.is_restricted) return false;
+      if (processFilter === 'sin-proceso' && d.id_process != null) return false;
+      if (processFilter === 'con-proceso' && d.id_process == null) return false;
 
       if (!term) return true;
-      return [d.code, d.title, d.documentType?.name, d.owner?.name, d.owner?.email]
+      return [d.code, d.title, d.documentType?.name, d.owner?.name, d.owner?.email, d.processName]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(term));
     });
-  }, [documents, searchTerm, selectedCompany, selectedType, selectedState, quickFilter]);
+  }, [documents, searchTerm, selectedCompany, selectedType, processFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
   const pageItems = filtered.slice(
@@ -240,28 +200,29 @@ export default function DocumentManagementPage() {
     ...types.map((t) => ({ value: String(t.id_document_type), label: t.name })),
   ];
 
-  const stateOptions = [
-    { value: 'all', label: 'Todos los estados' },
-    ...DOCUMENT_WORKFLOW_STATES.map((s) => ({ value: s, label: s })),
-  ];
-
-  // Sprint 5: el botón/modal "Cargar documento" (atajo directo) es de Asuntos
-  // Regulatorios -- gateado por canUploadDirect, NO por canWrite (que ahora es
-  // solo el permiso de las acciones del flujo de aprobación).
-  const uploadDirectCompanies = companies
-    .filter((c) => c.canUploadDirect)
-    .map((c) => ({ idCompany: c.idCompany, companyName: c.companyName }));
-
   const totalCount = documents.length;
-  const vigenteCount = documents.filter((d) => d.current_status === 'Vigente').length;
-  const enTramiteCount = documents.filter(
-    (d) => d.current_status !== 'Vigente' && !isClosedState(d.current_status)
-  ).length;
+  const sinProcesoCount = documents.filter((d) => d.id_process == null).length;
+  const conProcesoCount = documents.filter((d) => d.id_process != null).length;
   const restringidoCount = documents.filter((d) => d.is_restricted).length;
+
+  const copyPdfLink = (documentId: number, versionId: number) => {
+    const url = `${window.location.origin}/api/document-management/documents/${documentId}/versions/${versionId}/pdf`;
+    navigator.clipboard
+      .writeText(url)
+      .then(() => {
+        setCopyFeedback('Enlace del PDF copiado — péguelo en un correo o chat para enviarlo.');
+        setTimeout(() => setCopyFeedback(null), 4000);
+      })
+      .catch(() => {
+        setCopyFeedback('No se pudo copiar el enlace. Use el botón de descarga.');
+        setTimeout(() => setCopyFeedback(null), 4000);
+      });
+  };
 
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
-    { title: 'Gestión Documental', href: '#' },
+    { title: 'Gestión Documental', href: '/process/document-management' },
+    { title: 'Generador de Documentos', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (
       <Link key={index} href={item.href} passHref>
@@ -286,7 +247,7 @@ export default function DocumentManagementPage() {
 
   if (error) {
     return (
-      <Alert color="red" title="Gestión Documental" mt="md">
+      <Alert color="red" title="Generador de Documentos" mt="md">
         {error}
       </Alert>
     );
@@ -304,34 +265,21 @@ export default function DocumentManagementPage() {
             <div>
               <Title order={1} className="text-3xl font-bold mb-2 flex items-center gap-3">
                 <IconFileDescription size={32} className="text-blue-600" />
-                Gestión Documental
+                Generador de Documentos
               </Title>
               <Text size="lg" c="dimmed">
-                Documentos vigentes y en trámite de aprobación
+                Documentos ya autorizados (Vigentes), listos para descargar o enviar en PDF
               </Text>
             </div>
             <Group gap="xs">
               <Button
                 variant="default"
-                leftSection={<IconListCheck size={16} />}
-                component={Link}
-                href="/process/document-management/mis-tareas"
-              >
-                Mis tareas
-              </Button>
-              <Button
-                variant="default"
                 leftSection={<IconFileDescription size={16} />}
                 component={Link}
-                href="/process/document-management/generador"
+                href="/process/document-management"
               >
-                Generador de Documentos
+                Gestión Documental
               </Button>
-              {uploadDirectCompanies.length > 0 && (
-                <Button leftSection={<IconPlus size={16} />} onClick={() => setCreateOpen(true)}>
-                  Cargar documento
-                </Button>
-              )}
             </Group>
           </Flex>
 
@@ -342,13 +290,13 @@ export default function DocumentManagementPage() {
                 radius="md"
                 withBorder
                 role="button"
-                aria-label="Mostrar todos los documentos"
-                onClick={() => setQuickFilter('all')}
+                aria-label="Mostrar todos los documentos vigentes"
+                onClick={() => setProcessFilter('all')}
                 style={{
                   cursor: 'pointer',
                   backgroundColor: 'var(--mantine-color-blue-light)',
                   borderColor:
-                    quickFilter === 'all' ? 'var(--mantine-color-blue-filled)' : 'transparent',
+                    processFilter === 'all' ? 'var(--mantine-color-blue-filled)' : 'transparent',
                   borderWidth: 2,
                   transition: 'border-color 150ms ease',
                 }}
@@ -357,7 +305,7 @@ export default function DocumentManagementPage() {
                   <IconFiles size={24} color="var(--mantine-color-blue-light-color)" />
                   <div>
                     <Text size="xs" c="var(--mantine-color-blue-light-color)">
-                      Total de Documentos
+                      Total Vigentes
                     </Text>
                     <Text size="lg" fw={600}>
                       {totalCount}
@@ -372,13 +320,15 @@ export default function DocumentManagementPage() {
                 radius="md"
                 withBorder
                 role="button"
-                aria-label="Filtrar documentos vigentes"
-                onClick={() => setQuickFilter('vigente')}
+                aria-label="Filtrar documentos sin proceso"
+                onClick={() => setProcessFilter('sin-proceso')}
                 style={{
                   cursor: 'pointer',
                   backgroundColor: 'var(--mantine-color-green-light)',
                   borderColor:
-                    quickFilter === 'vigente' ? 'var(--mantine-color-green-filled)' : 'transparent',
+                    processFilter === 'sin-proceso'
+                      ? 'var(--mantine-color-green-filled)'
+                      : 'transparent',
                   borderWidth: 2,
                   transition: 'border-color 150ms ease',
                 }}
@@ -387,10 +337,10 @@ export default function DocumentManagementPage() {
                   <IconCircleCheck size={24} color="var(--mantine-color-green-light-color)" />
                   <div>
                     <Text size="xs" c="var(--mantine-color-green-light-color)">
-                      Vigentes
+                      Sin proceso (descargables)
                     </Text>
                     <Text size="lg" fw={600}>
-                      {vigenteCount}
+                      {sinProcesoCount}
                     </Text>
                   </div>
                 </Group>
@@ -402,13 +352,13 @@ export default function DocumentManagementPage() {
                 radius="md"
                 withBorder
                 role="button"
-                aria-label="Filtrar documentos en trámite"
-                onClick={() => setQuickFilter('en-tramite')}
+                aria-label="Filtrar documentos con proceso"
+                onClick={() => setProcessFilter('con-proceso')}
                 style={{
                   cursor: 'pointer',
                   backgroundColor: 'var(--mantine-color-orange-light)',
                   borderColor:
-                    quickFilter === 'en-tramite'
+                    processFilter === 'con-proceso'
                       ? 'var(--mantine-color-orange-filled)'
                       : 'transparent',
                   borderWidth: 2,
@@ -416,39 +366,22 @@ export default function DocumentManagementPage() {
                 }}
               >
                 <Group>
-                  <IconProgress size={24} color="var(--mantine-color-orange-light-color)" />
+                  <IconSitemap size={24} color="var(--mantine-color-orange-light-color)" />
                   <div>
                     <Text size="xs" c="var(--mantine-color-orange-light-color)">
-                      En Trámite
+                      Con proceso
                     </Text>
                     <Text size="lg" fw={600}>
-                      {enTramiteCount}
+                      {conProcesoCount}
                     </Text>
                   </div>
                 </Group>
               </Card>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p="md"
-                radius="md"
-                withBorder
-                role="button"
-                aria-label="Filtrar documentos restringidos"
-                onClick={() => setQuickFilter('restringido')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-gray-light)',
-                  borderColor:
-                    quickFilter === 'restringido'
-                      ? 'var(--mantine-color-gray-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
+              <Card p="md" radius="md" withBorder style={{ backgroundColor: 'var(--mantine-color-gray-light)' }}>
                 <Group>
-                  <IconLockSquare size={24} color="var(--mantine-color-gray-light-color)" />
+                  <IconLock size={24} color="var(--mantine-color-gray-light-color)" />
                   <div>
                     <Text size="xs" c="var(--mantine-color-gray-light-color)">
                       Restringidos
@@ -462,14 +395,6 @@ export default function DocumentManagementPage() {
             </Grid.Col>
           </Grid>
         </Card>
-
-        <CreateDocumentModal
-          opened={createOpen}
-          onClose={() => setCreateOpen(false)}
-          companies={uploadDirectCompanies}
-          types={types}
-          onCreated={loadData}
-        />
 
         <Card shadow="sm" p="lg" radius="md" withBorder mb="6">
           <Group justify="space-between" mb="md">
@@ -487,7 +412,7 @@ export default function DocumentManagementPage() {
           </Group>
 
           <TextInput
-            placeholder="Buscar por código, título, tipo o elaborador"
+            placeholder="Buscar por código, título, tipo, elaborador o proceso"
             leftSection={<IconSearch size={16} />}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.currentTarget.value)}
@@ -517,12 +442,15 @@ export default function DocumentManagementPage() {
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 4 }}>
                   <Select
-                    label="Estado del flujo"
-                    data={stateOptions}
-                    value={selectedState}
-                    onChange={(v) => setSelectedState(v ?? 'all')}
+                    label="Proceso"
+                    data={[
+                      { value: 'all', label: 'Todos' },
+                      { value: 'sin-proceso', label: 'Sin proceso' },
+                      { value: 'con-proceso', label: 'Con proceso' },
+                    ]}
+                    value={processFilter}
+                    onChange={(v) => setProcessFilter((v as ProcessFilter) ?? 'all')}
                     allowDeselect={false}
-                    searchable
                   />
                 </Grid.Col>
               </Grid>
@@ -535,8 +463,7 @@ export default function DocumentManagementPage() {
                     setSearchTerm('');
                     setSelectedCompany('all');
                     setSelectedType('all');
-                    setSelectedState('all');
-                    setQuickFilter('all');
+                    setProcessFilter('all');
                   }}
                 >
                   Limpiar Filtros
@@ -554,32 +481,37 @@ export default function DocumentManagementPage() {
 
           <Title order={3} mb="md" className="flex items-center gap-2">
             <IconFileDescription size={20} />
-            Lista de Documentos
+            Documentos Vigentes
           </Title>
 
-          <Table.ScrollContainer minWidth={1100}>
+          {copyFeedback && (
+            <Alert color="green" variant="light" mb="md" onClose={() => setCopyFeedback(null)} withCloseButton>
+              {copyFeedback}
+            </Alert>
+          )}
+
+          <Table.ScrollContainer minWidth={1200}>
             <Table striped highlightOnHover withTableBorder>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Código</Table.Th>
                   <Table.Th>Documento</Table.Th>
                   <Table.Th>Empresa</Table.Th>
-                  <Table.Th>Estado</Table.Th>
+                  <Table.Th>Proceso</Table.Th>
                   <Table.Th>Versión</Table.Th>
                   <Table.Th>Elaborador</Table.Th>
-                  <Table.Th>Próxima revisión</Table.Th>
                   <Table.Th>Actualizado</Table.Th>
-                  <Table.Th>Archivo</Table.Th>
+                  <Table.Th>Descargar / Enviar</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {pageItems.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={9} style={{ textAlign: 'center' }} className="py-12">
+                    <Table.Td colSpan={8} style={{ textAlign: 'center' }} className="py-12">
                       <Stack align="center" gap={4}>
                         <IconFileDescription size={40} className="text-gray-300" />
                         <Text size="sm" c="dimmed">
-                          Sin documentos para mostrar con los filtros actuales.
+                          Sin documentos vigentes para mostrar con los filtros actuales.
                         </Text>
                       </Stack>
                     </Table.Td>
@@ -587,12 +519,9 @@ export default function DocumentManagementPage() {
                 ) : (
                   pageItems.map((d) => {
                     const latestVersion = d.versions[0];
+                    const withoutProcess = d.id_process == null;
                     return (
-                      <Table.Tr
-                        key={d.id_document}
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => router.push(`/process/document-management/${d.id_document}`)}
-                      >
+                      <Table.Tr key={d.id_document}>
                         <Table.Td>
                           <Group gap={4} wrap="nowrap">
                             <Anchor
@@ -600,7 +529,6 @@ export default function DocumentManagementPage() {
                               href={`/process/document-management/${d.id_document}`}
                               size="sm"
                               fw={600}
-                              onClick={(e) => e.stopPropagation()}
                             >
                               {d.code}
                             </Anchor>
@@ -623,9 +551,19 @@ export default function DocumentManagementPage() {
                           <Badge variant="light">{d.company.company}</Badge>
                         </Table.Td>
                         <Table.Td>
-                          <Badge color={statusColor(d.current_status)} variant="light">
-                            {d.current_status}
-                          </Badge>
+                          {withoutProcess ? (
+                            <Badge color="gray" variant="light">
+                              Sin proceso
+                            </Badge>
+                          ) : (
+                            <Tooltip label={d.processName ?? `Proceso #${d.id_process}`}>
+                              <Badge color="orange" variant="light" style={{ maxWidth: 180 }}>
+                                <Text size="xs" truncate>
+                                  {d.processName ?? `Proceso #${d.id_process}`}
+                                </Text>
+                              </Badge>
+                            </Tooltip>
+                          )}
                         </Table.Td>
                         <Table.Td>v{latestVersion?.version_number ?? '-'}</Table.Td>
                         <Table.Td>
@@ -633,33 +571,41 @@ export default function DocumentManagementPage() {
                         </Table.Td>
                         <Table.Td>
                           <Text size="sm" c="dimmed">
-                            {formatDate(d.due_review_date)}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="sm" c="dimmed">
                             {formatDate(d.updated_at)}
                           </Text>
                         </Table.Td>
                         <Table.Td>
-                          {latestVersion?.onedrive_item_id ? (
-                            <Tooltip label="Abrir archivo en OneDrive">
-                              <ActionIcon
-                                variant="light"
-                                color="blue"
-                                component="a"
-                                href={`/api/document-management/documents/${d.id_document}/versions/${latestVersion.id_document_version}/open`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                aria-label="Abrir archivo"
-                              >
-                                <IconExternalLink size={16} />
-                              </ActionIcon>
-                            </Tooltip>
+                          {withoutProcess && latestVersion?.onedrive_item_id ? (
+                            <Group gap={4} wrap="nowrap">
+                              <Tooltip label="Descargar / abrir como PDF">
+                                <ActionIcon
+                                  variant="light"
+                                  color="blue"
+                                  component="a"
+                                  href={`/api/document-management/documents/${d.id_document}/versions/${latestVersion.id_document_version}/pdf`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  aria-label="Descargar PDF"
+                                >
+                                  <IconDownload size={16} />
+                                </ActionIcon>
+                              </Tooltip>
+                              <Tooltip label="Copiar enlace del PDF para enviar por correo/chat">
+                                <ActionIcon
+                                  variant="light"
+                                  color="gray"
+                                  onClick={() =>
+                                    copyPdfLink(d.id_document, latestVersion.id_document_version)
+                                  }
+                                  aria-label="Copiar enlace para enviar"
+                                >
+                                  <IconLink size={16} />
+                                </ActionIcon>
+                              </Tooltip>
+                            </Group>
                           ) : (
                             <Text size="xs" c="dimmed">
-                              -
+                              {withoutProcess ? '-' : 'No disponible (documento de proceso)'}
                             </Text>
                           )}
                         </Table.Td>
