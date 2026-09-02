@@ -3,16 +3,53 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { prisma } from '../../../../lib/prisma';
 import { getPool, sql } from '../../../../lib/mssqlPool';
-import { getDocumentManagementAccess } from '../../../../lib/document-management/access';
+
+/**
+ * Subproceso PROPIO del Generador de Documentos (fix pedido por Nicolás,
+ * 2026-09-02): antes este módulo se gateaba con el permiso GENERAL de
+ * Gestión Documental (lib/document-management/access.ts::getDocumentManagementAccess
+ * -- cualquiera de sus tres subprocesos), igual que un botón más dentro de
+ * ese módulo. Ahora tiene su PROPIO subproceso independiente
+ * ('/process/document-management/generador', sembrado por
+ * prisma/seeds/document-management-generador-subprocess.sql), asignable por
+ * su cuenta desde el admin de usuarios sin tener que dar también
+ * lectura/escritura del módulo documental completo. Resuelto en línea (no en
+ * lib/document-management/access.ts) a propósito: es un permiso propio de
+ * ESTE módulo, no una variante del acceso general de Gestión Documental.
+ */
+const DOCUMENT_GENERATOR_URL = '/process/document-management/generador';
+
+interface DocumentGeneratorCompanyAccess {
+  idCompany: number;
+  companyName: string;
+}
+
+async function getDocumentGeneratorAccess(userEmail: string): Promise<DocumentGeneratorCompanyAccess[]> {
+  const rows = await prisma.subprocessUserCompany.findMany({
+    where: {
+      companyUser: { user: { email: userEmail } },
+      subprocess: { subprocess_url: DOCUMENT_GENERATOR_URL },
+    },
+    include: { companyUser: { include: { company: true } } },
+  });
+
+  const byCompany = new Map<number, DocumentGeneratorCompanyAccess>();
+  for (const row of rows) {
+    const company = row.companyUser.company;
+    if (!byCompany.has(company.id_company)) {
+      byCompany.set(company.id_company, { idCompany: company.id_company, companyName: company.company });
+    }
+  }
+  return [...byCompany.values()];
+}
 
 /**
  * Sprint 7 — "Generador de Documentos".
  *
  * Lista TODOS los documentos en estado "Vigente" (ya autorizados/publicados,
  * ver lib/document-management/workflowStates.ts — se llega ahí solo vía la
- * acción `publicar_vigente`) de las empresas a las que el usuario tiene
- * acceso de lectura. Mismo control de acceso multiempresa que
- * /api/document-management/documents.
+ * acción `publicar_vigente`) de las empresas a las que el usuario tiene el
+ * permiso propio del Generador (ver arriba).
  *
  * Para cada documento resuelve si está o no ligado a un proceso
  * (`document.id_process`, referencia BLANDA a `process_category.id` — ver
@@ -41,8 +78,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const access = await getDocumentManagementAccess(session.user.email);
-    const readableCompanyIds = access.filter((a) => a.canRead).map((a) => a.idCompany);
+    const access = await getDocumentGeneratorAccess(session.user.email);
+    const readableCompanyIds = access.map((a) => a.idCompany);
     if (readableCompanyIds.length === 0) {
       return NextResponse.json({ documents: [], companies: access });
     }
@@ -102,3 +139,4 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+

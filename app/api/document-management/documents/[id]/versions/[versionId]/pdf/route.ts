@@ -2,8 +2,26 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { prisma } from '@/lib/prisma';
-import { getDocumentManagementCompanyAccess } from '@/lib/document-management/access';
 import { useGetMicrosoftToken as getMicrosoftToken } from '@/components/microsoft-365/useGetMicrosoftToken';
+
+/**
+ * Subproceso PROPIO del Generador de Documentos (fix pedido por Nicolás,
+ * 2026-09-02) -- ver el mismo comentario en
+ * app/api/document-management/generator/route.ts. Resuelto en línea (no en
+ * lib/document-management/access.ts) por la misma razón: permiso propio de
+ * este módulo, no una variante del acceso general de Gestión Documental.
+ */
+const DOCUMENT_GENERATOR_URL = '/process/document-management/generador';
+
+async function hasDocumentGeneratorCompanyAccess(userEmail: string, companyId: number): Promise<boolean> {
+  const count = await prisma.subprocessUserCompany.count({
+    where: {
+      companyUser: { user: { email: userEmail }, id_company: companyId },
+      subprocess: { subprocess_url: DOCUMENT_GENERATOR_URL },
+    },
+  });
+  return count > 0;
+}
 
 /**
  * Sprint 7 — "Generador de Documentos": descarga/envío de un documento SIN
@@ -36,6 +54,12 @@ import { useGetMicrosoftToken as getMicrosoftToken } from '@/components/microsof
  * documentos SIN proceso. Si el documento tiene `id_process`, se responde
  * 403 — la descarga/envío de documentos CON proceso queda para un sprint
  * futuro (Sprint 9, vista por categoría de proceso).
+ *
+ * Control de acceso (fix pedido por Nicolás, 2026-09-02): valida el permiso
+ * PROPIO del Generador de Documentos (hasDocumentGeneratorCompanyAccess,
+ * subproceso '/process/document-management/generador') y no el de lectura
+ * general de Gestión Documental — descargar/enviar el PDF es una acción de
+ * este módulo independiente, ver lib/document-management/access.ts.
  */
 export async function GET(
   request: NextRequest,
@@ -62,10 +86,9 @@ export async function GET(
       return NextResponse.json({ error: 'Versión no encontrada' }, { status: 404 });
     }
 
-    const access = await getDocumentManagementCompanyAccess(
+    const access = await hasDocumentGeneratorCompanyAccess(
       session.user.email,
-      version.document.id_company,
-      'read'
+      version.document.id_company
     );
     if (!access) {
       return NextResponse.json({ error: 'Sin acceso a esta empresa' }, { status: 403 });
@@ -174,3 +197,4 @@ export async function GET(
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+

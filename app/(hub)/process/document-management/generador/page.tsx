@@ -66,12 +66,15 @@ const ITEMS_PER_PAGE = 25;
 
 type ProcessFilter = 'all' | 'sin-proceso' | 'con-proceso';
 
+// Fix pedido por Nicolás (2026-09-02): el Generador ya no reusa
+// DocumentManagementCompanyAccess (lectura/escritura/atajo regulatorio del
+// módulo general) -- tiene su PROPIO subproceso independiente
+// ('/process/document-management/generador', ver
+// lib/document-management/access.ts::getDocumentGeneratorAccess), así que
+// aquí solo hace falta el par empresa/nombre.
 interface CompanyAccess {
   idCompany: number;
   companyName: string;
-  canRead: boolean;
-  canWrite: boolean;
-  canUploadDirect: boolean;
 }
 
 interface DocumentVersionSummary {
@@ -156,7 +159,7 @@ export default function DocumentGeneratorPage() {
       }
 
       if ((genData.companies ?? []).length === 0) {
-        setError('No tiene acceso a Gestión Documental en ninguna empresa.');
+        setError('No tiene acceso al Generador de Documentos en ninguna empresa.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error inesperado');
@@ -639,3 +642,4 @@ export default function DocumentGeneratorPage() {
     </div>
   );
 }
+
