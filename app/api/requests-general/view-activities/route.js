@@ -14,10 +14,11 @@ export async function GET(req) {
     const pool = await sql.connect(sqlConfig);
 
     const query = `
-        SELECT 
-            trg.id, trg.id_task, tpc.task ,rg.id as id_request_general, rg.description, rg.subject_request, rg.id_company, c.company ,rg.created_at, 
+        SELECT
+            trg.id, trg.id_task, tpc.task ,rg.id as id_request_general, rg.description, rg.subject_request, rg.id_company, c.company ,rg.created_at,
             rg.id_requester, urq.name as name_requester ,rg.status_req, trg.id_status ,sc.status as status_task, u.name as assigned, pc.process, cr.category,
-            trg.start_date, trg.resolution, trg.date_resolution, uex.name as executor_final
+            trg.start_date, trg.resolution, trg.date_resolution, uex.name as executor_final,
+            pc.id AS id_process_category, docmgmt.id_document
         FROM task_request_general trg
             INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
             LEFT JOIN requests_general rg ON rg.id = trg.id_request_general
@@ -29,6 +30,12 @@ export async function GET(req) {
             LEFT JOIN [user] urq ON urq.id = rg.id_requester
             INNER JOIN company c ON c.id_company = rg.id_company
 			      LEFT JOIN [user] uex ON uex.id = trg.id_executor_final
+            -- Gestión Documental: si esta tarea pertenece al flujo documental, resolvemos el
+            -- id_document asociado para que el frontend pueda enlazar a la página real del
+            -- documento (/process/document-management/[id]) en vez de dejar editar el estado
+            -- por esta vía genérica (ver candado en update-activities/route.js).
+            LEFT JOIN document_version docver ON docver.id_request_general = rg.id
+            LEFT JOIN document docmgmt ON docmgmt.id_document = docver.id_document
         WHERE trg.id = @id
     `;
 

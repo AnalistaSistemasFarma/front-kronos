@@ -142,6 +142,29 @@ export async function POST(req) {
         }
       }
 
+      // Candado de Gestión Documental (bug reportado por Nicolás el 2026-09-02): fuera de
+      // "En aprobación" (que ya se delegó arriba a transitionDocumentVersion), las otras 13
+      // tareas del flujo documental (workflowStates.ts, proceso "Gestión Documental — Ciclo
+      // de vida del documento") NO se pueden resolver por esta vía genérica. Este UPDATE solo
+      // sabe avanzar "a la siguiente tarea por display_order"
+      // (lib/workflow/advanceSequentialTask.js) y no conoce el grafo de WORKFLOW_ACTIONS: un
+      // click aquí (p.ej. "Anular") ignora las ramas condicionadas de
+      // aprobar/rechazar/reelaborar/reasignar/anular/eliminar y avanza la tarea a ciegas,
+      // dejando document_version.status/document.current_status desincronizados de
+      // task_request_general. Mismo criterio que el candado ya aplicado en
+      // update-workflow-complete/route.js para renombrar/borrar estas tareas.
+      if (prevRow?.process_name === DOCUMENT_WORKFLOW_PROCESS_NAME && !isDocumentApprovalTask) {
+        await transaction.rollback();
+        console.warn(`${TAG} ✖ BLOQUEADA: tarea ${id} ("${prevRow?.task}") es del flujo de Gestión Documental; se rechaza la resolución genérica.`);
+        return new Response(
+          JSON.stringify({
+            error:
+              'Esta tarea es parte del flujo de Gestión Documental y no se puede resolver desde aquí. Use las acciones de transición en la página del documento (/process/document-management).',
+          }),
+          { status: 400 }
+        );
+      }
+
       console.log(`${TAG} 1) Tarea actual (prevRow) =`, {
         id_task: prevRow?.id_task,
         id_request_general: prevRow?.id_request_general,

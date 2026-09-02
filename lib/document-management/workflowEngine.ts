@@ -558,6 +558,20 @@ function isOwnerAssignedState(state: string): boolean {
 }
 
 /**
+ * Default temporal (bug reportado por Nicolás el 2026-09-02, ver decisión #8 del
+ * 2026-08-21 en proyectos/sgd-migracion-synerlink.md del vault): las tareas del flujo
+ * SIN dueño fijo (revisión, aprobación, visto bueno calidad, divulgación, reasignación,
+ * y los estados terminales) quedan ABIERTAS por diseño — cualquiera con permiso de
+ * escritura del módulo en esa empresa las puede resolver, eso NO cambia acá. Pero
+ * mientras no exista parametrización real de quién debe tomarlas, Nicolás pidió que
+ * queden asignadas a él por defecto (en vez de NULL/"Sin asignar") para que se vea un
+ * responsable en el timeline; se puede reasignar después con normalidad (acción
+ * `reasignar` / endpoint update-task-assigned). Antes de este fix quedaban con
+ * id_assigned NULL y Nicolás las parcheaba manualmente por SQL.
+ */
+const DEFAULT_UNOWNED_TASK_ASSIGNEE_ID = 'cmgicd6470000ekpi1a33o581'; // Nicolás Rivera
+
+/**
  * Ejecuta una transición de estado sobre una versión. Valida el grafo
  * (workflowStates.ts), cierra la tarea actual, abre la del estado destino,
  * deja nota en la bitácora, actualiza DocumentVersion/Document y notifica.
@@ -630,7 +644,9 @@ export async function transitionDocumentVersion(params: TransitionParams): Promi
     throw new Error(`Estado sin tarea sembrada: ${!fromTaskId ? currentState : toState}`);
   }
 
-  const assignToUserId = isOwnerAssignedState(toState) ? version.document.owner_user_id : null;
+  const assignToUserId = isOwnerAssignedState(toState)
+    ? version.document.owner_user_id
+    : DEFAULT_UNOWNED_TASK_ASSIGNEE_ID;
 
   const transaction = new sql.Transaction(pool);
   await transaction.begin();
@@ -834,6 +850,7 @@ export async function getPendingDocumentTasksForUser(
     .request()
     .input('id_process', sql.Int, processId)
     .input('id_user', sql.NVarChar(1000), userId)
+    .input('default_assignee', sql.NVarChar(1000), DEFAULT_UNOWNED_TASK_ASSIGNEE_ID)
     .query(`
       SELECT
         d.id_document, d.code, d.title, d.id_company,
@@ -845,7 +862,8 @@ export async function getPendingDocumentTasksForUser(
       INNER JOIN document_version dv ON dv.id_request_general = trg.id_request_general AND dv.status = tpc.task
       INNER JOIN document d ON d.id_document = dv.id_document
       INNER JOIN company c ON c.id_company = d.id_company
-      WHERE trg.id_status = 4 AND (trg.id_assigned IS NULL OR trg.id_assigned = @id_user)
+      WHERE trg.id_status = 4
+        AND (trg.id_assigned IS NULL OR trg.id_assigned = @id_user OR trg.id_assigned = @default_assignee)
     `);
 
   const rows = result.recordset as Array<{
