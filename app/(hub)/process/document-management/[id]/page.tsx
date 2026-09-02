@@ -16,18 +16,18 @@ import {
   Title,
   Anchor,
 } from '@mantine/core';
-import { IconArrowLeft, IconUpload } from '@tabler/icons-react';
+import { IconArrowLeft, IconUpload, IconExternalLink } from '@tabler/icons-react';
 import Link from 'next/link';
 import UploadVersionModal from './UploadVersionModal';
 import TransitionActions from './TransitionActions';
 import {
   isClosedState,
   // DOCUMENT_WORKFLOW_TRANSITIONS, MAIN_SEQUENCE_STATES: solo usados por el diagrama visual,
-  // deshabilitado temporalmente (2026-09-02) - ver nota junto al bloque comentado más abajo.
+  // deshabilitado temporalmente (2026-09-02) - ver nota junto al bloque comentado mǭs abajo.
 } from '../../../../../lib/document-management/workflowStates';
 import {
   type WorkflowDiagramTask,
-  // WorkflowDiagram: deshabilitado temporalmente (2026-09-02), diagrama se veía desordenado.
+  // WorkflowDiagram: deshabilitado temporalmente (2026-09-02), diagrama se ve��a desordenado.
 } from '../../../../../components/workflow/WorkflowDiagram';
 
 interface DocumentVersionRow {
@@ -35,6 +35,7 @@ interface DocumentVersionRow {
   version_number: number;
   status: string;
   onedrive_path: string;
+  onedrive_item_id: string | null;
   created_at: string;
   comments: string | null;
   id_request_general: number | null;
@@ -57,7 +58,7 @@ interface DocumentDetail {
 function statusColor(status: string): string {
   if (status === 'Vigente') return 'green';
   if (isClosedState(status)) return 'red';
-  if (status === 'Reasignación' || status === 'Reelaboración') return 'yellow';
+  if (status === 'Reasignaci��n' || status === 'Reelaboraci��n') return 'yellow';
   return 'blue';
 }
 
@@ -119,7 +120,7 @@ export default function DocumentDetailPage() {
 
   if (error || !document) {
     return (
-      <Alert color="red" title="Gestión Documental" mt="md">
+      <Alert color="red" title="Gesti��n Documental" mt="md">
         {error || 'Documento no encontrado'}
       </Alert>
     );
@@ -141,10 +142,10 @@ export default function DocumentDetailPage() {
       <Group justify="space-between" align="center" mt="sm">
         <div>
           <Title order={3}>
-            {document.code} — {document.title}
+            {document.code} �?" {document.title}
           </Title>
           <Text size="sm" c="dimmed">
-            {document.documentType?.name} · {document.company.company} · Dueño: {document.owner.name || document.owner.email}
+            {document.documentType?.name} �� {document.company.company} �� Due��o: {document.owner.name || document.owner.email}
           </Text>
         </div>
         <Group gap="xs">
@@ -153,7 +154,7 @@ export default function DocumentDetailPage() {
           </Badge>
           {canWrite && (
             <Button leftSection={<IconUpload size={16} />} onClick={() => setUploadOpen(true)}>
-              Subir nueva versión
+              Subir nueva versi��n
             </Button>
           )}
         </Group>
@@ -166,10 +167,10 @@ export default function DocumentDetailPage() {
         onCreated={load}
       />
 
-      {/* Diagrama visual del flujo deshabilitado temporalmente (2026-09-02) — se veía
-          desordenado (ramas cruzadas) a criterio de producto. Pendiente rediseño.
+      {/* Diagrama visual del flujo deshabilitado temporalmente (2026-09-02) �?" se ve��a
+          desordenado (ramas cruzadas) a criterio de producto. Pendiente redise��o.
           La data (workflowTasks, DOCUMENT_WORKFLOW_TRANSITIONS, MAIN_SEQUENCE_STATES)
-          se sigue cargando sin cambios; solo se quitó la renderización visual.
+          se sigue cargando sin cambios; solo se quit�� la renderizaci��n visual.
       {workflowTasks.length > 0 && (
         <Paper withBorder p="md" mt="md">
           <WorkflowDiagram
@@ -186,7 +187,7 @@ export default function DocumentDetailPage() {
       {currentVersion && (
         <Paper withBorder p="md" mt="md">
           <Text fw={600} mb="xs">
-            Tarea pendiente — versión {currentVersion.version_number} ({currentVersion.status})
+            Tarea pendiente �?" versi��n {currentVersion.version_number} ({currentVersion.status})
           </Text>
           <TransitionActions
             idDocument={document.id_document}
@@ -205,11 +206,12 @@ export default function DocumentDetailPage() {
         <Table striped highlightOnHover withTableBorder>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>Versión</Table.Th>
+              <Table.Th>Versi��n</Table.Th>
               <Table.Th>Estado</Table.Th>
               <Table.Th>Cargada</Table.Th>
               <Table.Th>Ruta OneDrive</Table.Th>
               <Table.Th>Comentario</Table.Th>
+              <Table.Th>Archivo</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -226,6 +228,22 @@ export default function DocumentDetailPage() {
                   {v.onedrive_path}
                 </Table.Td>
                 <Table.Td>{v.comments || '-'}</Table.Td>
+                <Table.Td>
+                  {v.onedrive_item_id ? (
+                    <Anchor
+                      href={`/api/document-management/documents/${document.id_document}/versions/${v.id_document_version}/open`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      size="sm"
+                    >
+                      <Group gap={4} wrap="nowrap">
+                        <IconExternalLink size={14} /> Ver archivo
+                      </Group>
+                    </Anchor>
+                  ) : (
+                    <Text size="xs" c="dimmed">-</Text>
+                  )}
+                </Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>
