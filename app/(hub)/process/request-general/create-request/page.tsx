@@ -39,7 +39,6 @@ import {
   Progress,
   RingProgress,
   Loader,
-  Checkbox,
   FileInput,
 } from '@mantine/core';
 import {
@@ -251,20 +250,18 @@ function RequestBoard() {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
-  // Gestión Documental (Sprint 5): al seleccionar ese proceso, el formulario
-  // reemplaza "Asunto"/"Descripción" (reusados como Título/Comentario) y las
-  // secciones genéricas de campos/archivos por estos campos propios del
-  // documento — mismo dato que pide CreateDocumentModal.tsx (atajo de
-  // Asuntos Regulatorios), para terminar en la misma estructura de datos.
-  // Ver app/api/document-management/create-request/route.ts.
-  const [docTypes, setDocTypes] = useState<
-    { id_document_type: number; name: string; code_prefix: string }[]
-  >([]);
-  const [docTypeId, setDocTypeId] = useState<string | null>(null);
-  const [docCode, setDocCode] = useState('');
+  // Gestión Documental (parametrizado): al seleccionar ese proceso, el formulario
+  // reemplaza "Asunto"/"Descripción" (reusados como Título/Comentario del documento —
+  // son campos UNIVERSALES de toda solicitud, no específicos de este proceso) y
+  // mantiene un campo de archivo propio (el contenido versionado del documento, con su
+  // propia ruta de OneDrive — no un adjunto genérico). El resto de los campos
+  // específicos del documento (tipo de documento, código, próxima fecha de revisión,
+  // restringido) YA NO son estado aparte: se leen y validan igual que cualquier otro
+  // campo de proceso, vía el bloque genérico "Información adicional" más abajo
+  // (visibleFields/fieldValues), sembrados en process_form_field para
+  // id_process_category=86 — ver prisma/seeds/document-management-generic-fields.sql y
+  // app/api/document-management/create-request/route.ts.
   const [docTitle, setDocTitle] = useState('');
-  const [docDueReviewDate, setDocDueReviewDate] = useState('');
-  const [docIsRestricted, setDocIsRestricted] = useState(false);
   const [docComments, setDocComments] = useState('');
   const [docFile, setDocFile] = useState<File | null>(null);
 
@@ -272,21 +269,10 @@ function RequestBoard() {
     processCategories.find((p) => p.value === formData.process)?.isDocumentManagement ?? false;
 
   const resetDocumentFields = () => {
-    setDocTypeId(null);
-    setDocCode('');
     setDocTitle('');
-    setDocDueReviewDate('');
-    setDocIsRestricted(false);
     setDocComments('');
     setDocFile(null);
   };
-
-  useEffect(() => {
-    fetch('/api/document-management/types')
-      .then((res) => (res.ok ? res.json() : { types: [] }))
-      .then((data) => setDocTypes(data.types ?? []))
-      .catch((err) => console.error('Error cargando tipos de documento:', err));
-  }, []);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -789,6 +775,32 @@ function RequestBoard() {
     }));
   };
 
+  // Validación genérica de los campos dinámicos de proceso (process_form_field). Es la
+  // MISMA para cualquier proceso, incluida Gestión Documental (id_process_category=86,
+  // que aquí valida "Tipo de documento"/"Código del documento"/etc. sin saber nada
+  // específico de ellos — son campos genéricos como cualquier otro).
+  const collectVisibleFieldErrors = (): Record<string, string> => {
+    const errors: Record<string, string> = {};
+    for (const field of visibleFields) {
+      const val = fieldValues[field.id];
+      if (field.field_type === TABLE_FIELD_TYPE) {
+        const columns = parseTableConfig(field.config_json).columns;
+        const rows = Array.isArray(val) ? (val as TableRow[]) : [];
+        const tableError = validateTableRows(columns, rows, field.required, field.field_label);
+        if (tableError) errors[`field_${field.id}`] = tableError;
+        continue;
+      }
+      const empty = val === undefined || val === null || val === '';
+      if (field.required && empty) {
+        errors[`field_${field.id}`] =
+          field.field_type === 'select'
+            ? `Debe seleccionar: ${field.field_label}`
+            : `Debe completar: ${field.field_label}`;
+      }
+    }
+    return errors;
+  };
+
   const validateForm = () => {
     const errors: Record<string, string> = {};
 
@@ -803,13 +815,14 @@ function RequestBoard() {
     }
 
     if (isDocumentManagementProcess) {
-      // Gestión Documental: "Asunto"/"Descripción" quedan reusados como
-      // Título/Comentario del documento (ver JSX) — se validan como tales,
-      // no como los campos genéricos.
+      // Gestión Documental: "Asunto"/"Descripción" quedan reusados como Título/Comentario
+      // del documento (ver JSX) — son campos universales de toda solicitud, se validan
+      // como tales. El archivo también es propio (contenido versionado del documento).
+      // El resto (tipo de documento, código, fecha, restringido) son campos genéricos
+      // sembrados en process_form_field — misma validación que cualquier otro proceso.
       if (!docTitle.trim()) errors.docTitle = 'El título del documento es obligatorio';
-      if (!docTypeId) errors.docTypeId = 'Seleccione el tipo de documento';
-      if (!docCode.trim()) errors.docCode = 'El código del documento es obligatorio';
       if (!docFile) errors.docFile = 'Adjunte el archivo del documento';
+      Object.assign(errors, collectVisibleFieldErrors());
     } else {
       if (!formData.subject.trim()) {
         errors.subject = 'El asunto es obligatorio';
@@ -820,28 +833,7 @@ function RequestBoard() {
         errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
       }
 
-      for (const field of visibleFields) {
-        const val = fieldValues[field.id];
-        if (field.field_type === TABLE_FIELD_TYPE) {
-          const columns = parseTableConfig(field.config_json).columns;
-          const rows = Array.isArray(val) ? (val as TableRow[]) : [];
-          const tableError = validateTableRows(
-            columns,
-            rows,
-            field.required,
-            field.field_label
-          );
-          if (tableError) errors[`field_${field.id}`] = tableError;
-          continue;
-        }
-        const empty = val === undefined || val === null || val === '';
-        if (field.required && empty) {
-          errors[`field_${field.id}`] =
-            field.field_type === 'select'
-              ? `Debe seleccionar: ${field.field_label}`
-              : `Debe completar: ${field.field_label}`;
-        }
-      }
+      Object.assign(errors, collectVisibleFieldErrors());
 
       for (const doc of visibleRequiredFiles) {
         if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
@@ -853,6 +845,37 @@ function RequestBoard() {
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
+
+  // Serializa las respuestas de los campos dinámicos de proceso al formato que espera
+  // el motor genérico ([{ id_field, id_option? | value_text? }] -- ver
+  // createGeneralRequest.js y, para Gestión Documental,
+  // lib/document-management/genericFields.ts). Compartido entre el camino genérico
+  // (handleCreateTicket) y el de Gestión Documental
+  // (handleCreateDocumentManagementRequest) para no duplicar esta lógica.
+  const buildFormValuesPayload = () =>
+    visibleFields
+      .filter((f) => {
+        const v = fieldValues[f.id];
+        if (f.field_type === TABLE_FIELD_TYPE) {
+          const columns = parseTableConfig(f.config_json).columns;
+          const rows = Array.isArray(v) ? (v as TableRow[]) : [];
+          return rows.some((r) => !isRowEmpty(r, columns));
+        }
+        return v !== undefined && v !== null && v !== '';
+      })
+      .map((f) => {
+        const v = fieldValues[f.id];
+        if (f.field_type === TABLE_FIELD_TYPE) {
+          const columns = parseTableConfig(f.config_json).columns;
+          const rows = (Array.isArray(v) ? (v as TableRow[]) : []).filter(
+            (r) => !isRowEmpty(r, columns)
+          );
+          return { id_field: f.id, value_text: serializeTableValue(rows) };
+        }
+        return f.field_type === 'select'
+          ? { id_field: f.id, id_option: v }
+          : { id_field: f.id, value_text: String(v) };
+      });
 
   const handleCreateTicketWithValidation = async () => {
     if (isSubmittingRef.current) return;
@@ -874,12 +897,9 @@ function RequestBoard() {
 
       const fd = new FormData();
       fd.append('companyId', formData.company);
-      fd.append('documentTypeId', docTypeId || '');
-      fd.append('code', docCode.trim());
       fd.append('title', docTitle.trim());
-      if (docDueReviewDate) fd.append('dueReviewDate', docDueReviewDate);
-      fd.append('isRestricted', String(docIsRestricted));
       if (docComments.trim()) fd.append('comments', docComments.trim());
+      fd.append('formValues', JSON.stringify(buildFormValuesPayload()));
       if (docFile) fd.append('file', docFile);
 
       let response: Response;
@@ -909,8 +929,9 @@ function RequestBoard() {
       }
 
       const created = await response.json();
+      const createdCode = created?.document?.code || docTitle.trim();
       toast.success(
-        `Solicitud de documento "${docCode.trim()}" creada correctamente. Quedó en estado "En creación".`
+        `Solicitud de documento "${createdCode}" creada correctamente. Quedó en estado "En creación".`
       );
       console.log('Documento/solicitud creados:', created);
 
@@ -955,29 +976,7 @@ function RequestBoard() {
             process: parseInt(formData.process),
             createdby: userId,
             url: formData.url,
-            formValues: visibleFields
-              .filter((f) => {
-                const v = fieldValues[f.id];
-                if (f.field_type === TABLE_FIELD_TYPE) {
-                  const columns = parseTableConfig(f.config_json).columns;
-                  const rows = Array.isArray(v) ? (v as TableRow[]) : [];
-                  return rows.some((r) => !isRowEmpty(r, columns));
-                }
-                return v !== undefined && v !== null && v !== '';
-              })
-              .map((f) => {
-                const v = fieldValues[f.id];
-                if (f.field_type === TABLE_FIELD_TYPE) {
-                  const columns = parseTableConfig(f.config_json).columns;
-                  const rows = (Array.isArray(v) ? (v as TableRow[]) : []).filter(
-                    (r) => !isRowEmpty(r, columns)
-                  );
-                  return { id_field: f.id, value_text: serializeTableValue(rows) };
-                }
-                return f.field_type === 'select'
-                  ? { id_field: f.id, id_option: v }
-                  : { id_field: f.id, value_text: String(v) };
-              }),
+            formValues: buildFormValuesPayload(),
           }),
         });
       } catch (networkErr) {
@@ -2064,70 +2063,24 @@ function RequestBoard() {
               </Grid.Col>
             </Grid>
 
+            {/* Gestión Documental: el archivo sigue siendo un campo propio (contenido
+                versionado del documento, con su propia ruta de OneDrive -- no un adjunto
+                genérico). "Tipo de documento", "Código del documento", "Próxima fecha de
+                revisión" y "Documento restringido" YA NO están aquí: se leen/validan como
+                cualquier otro campo de proceso en el bloque genérico "Información
+                adicional" más abajo (visibleFields), sembrados en process_form_field para
+                este proceso -- ver prisma/seeds/document-management-generic-fields.sql. */}
             {isDocumentManagementProcess && (
               <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
-                <Text fw={600} size='sm' mb='xs'>
-                  Datos del documento
-                </Text>
-                <Grid>
-                  <Grid.Col span={{ base: 12, md: 6 }}>
-                    <Select
-                      label='Tipo de documento'
-                      placeholder={docTypes.length === 0 ? 'No hay tipos creados aún' : 'Seleccione el tipo'}
-                      required
-                      data={docTypes.map((t) => ({
-                        value: String(t.id_document_type),
-                        label: `${t.name} (${t.code_prefix})`,
-                      }))}
-                      value={docTypeId}
-                      onChange={(v) => {
-                        setDocTypeId(v);
-                        if (formErrors.docTypeId) setFormErrors({ ...formErrors, docTypeId: '' });
-                      }}
-                      error={formErrors.docTypeId}
-                    />
-                  </Grid.Col>
-                  <Grid.Col span={{ base: 12, md: 6 }}>
-                    <TextInput
-                      label='Código del documento'
-                      placeholder='POL-GH-001'
-                      required
-                      value={docCode}
-                      onChange={(e) => {
-                        setDocCode(e.currentTarget.value);
-                        if (formErrors.docCode) setFormErrors({ ...formErrors, docCode: '' });
-                      }}
-                      error={formErrors.docCode}
-                    />
-                  </Grid.Col>
-                  <Grid.Col span={{ base: 12, md: 6 }}>
-                    <TextInput
-                      label='Próxima fecha de revisión'
-                      type='date'
-                      value={docDueReviewDate}
-                      onChange={(e) => setDocDueReviewDate(e.currentTarget.value)}
-                    />
-                  </Grid.Col>
-                  <Grid.Col span={{ base: 12, md: 6 }}>
-                    <Checkbox
-                      label='Documento restringido (acceso confidencial)'
-                      checked={docIsRestricted}
-                      onChange={(e) => setDocIsRestricted(e.currentTarget.checked)}
-                      mt='xl'
-                    />
-                  </Grid.Col>
-                  <Grid.Col span={12}>
-                    <FileInput
-                      label='Archivo (primera versión)'
-                      placeholder='Seleccione el archivo'
-                      required
-                      value={docFile}
-                      onChange={setDocFile}
-                      leftSection={<IconUpload size={16} />}
-                      error={formErrors.docFile}
-                    />
-                  </Grid.Col>
-                </Grid>
+                <FileInput
+                  label='Archivo (primera versión)'
+                  placeholder='Seleccione el archivo'
+                  required
+                  value={docFile}
+                  onChange={setDocFile}
+                  leftSection={<IconUpload size={16} />}
+                  error={formErrors.docFile}
+                />
               </Card>
             )}
 

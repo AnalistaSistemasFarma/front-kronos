@@ -360,6 +360,17 @@ export interface CreateDocumentAndStartWorkflowParams {
   onedriveItemId: string | null;
   onedrivePath: string;
   ownerUserId: string;
+  /**
+   * Parametrización (post-Sprint 5): valores del mecanismo genérico de campos de proceso
+   * (process_form_field, sembrado para id_process_category=86 por
+   * prisma/seeds/document-management-generic-fields.sql) tal cual los envió el usuario
+   * -- ver lib/document-management/genericFields.ts. Se persisten en request_form_value
+   * DENTRO de esta misma transacción, atados al idRequestGeneral recién creado, para que
+   * la solicitud se vea igual que cualquier otra en
+   * /api/requests-general/request-form-values. Opcional: el atajo de Asuntos
+   * Regulatorios no lo envía (sigue sin usar el mecanismo genérico).
+   */
+  formValues?: import('./genericFields').SubmittedFormValue[];
 }
 
 export interface CreateDocumentAndStartWorkflowResult {
@@ -455,6 +466,24 @@ export async function createDocumentAndStartWorkflow(
       .input('id_document', sql.Int, idDocument)
       .input('id_version', sql.Int, idDocumentVersion)
       .query(`UPDATE document SET current_version_id = @id_version WHERE id_document = @id_document`);
+
+    // Parametrización: guarda las respuestas del mecanismo genérico de campos de proceso
+    // (si las hay -- solo el camino estándar las envía) en request_form_value, MISMA
+    // tabla/forma que usa createGeneralRequest.js para cualquier otro proceso.
+    if (params.formValues && params.formValues.length > 0) {
+      for (const fv of params.formValues) {
+        if (!fv || fv.id_field == null) continue;
+        await new sql.Request(transaction)
+          .input('id_request', sql.Int, idRequestGeneral)
+          .input('id_field', sql.Int, fv.id_field)
+          .input('id_option', sql.Int, fv.id_option ?? null)
+          .input('value_text', sql.NVarChar(sql.MAX), fv.value_text ?? null)
+          .query(`
+            INSERT INTO request_form_value (id_request_general, id_form_field, id_option, value_text)
+            VALUES (@id_request, @id_field, @id_option, @value_text)
+          `);
+      }
+    }
 
     await transaction.commit();
     return { idDocument, idDocumentVersion, idRequestGeneral, createdAt };

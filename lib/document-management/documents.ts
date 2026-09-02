@@ -4,6 +4,7 @@ import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/micr
 import { ensureFolderAndUploadFile } from '../onedrive/graphFolderUpload';
 import { buildDocumentVersionFolderSegments, getDocumentCodeError } from './storagePath';
 import { createDocumentAndStartWorkflow } from './workflowEngine';
+import type { SubmittedFormValue } from './genericFields';
 
 /**
  * Creación de un documento NUEVO (primer `DocumentType` + primera versión),
@@ -50,6 +51,17 @@ export interface CreateDocumentInput {
   fileName: string;
   fileType?: string;
   ownerUserId: string;
+  /**
+   * Parametrización (post-Sprint 5): valores tal cual los envió el camino ESTÁNDAR (el
+   * usuario respondió los campos genéricos sembrados en process_form_field para
+   * id_process_category=86 -- ver lib/document-management/genericFields.ts). Se persisten
+   * verbatim en request_form_value dentro de la misma transacción que arranca el flujo,
+   * para que la solicitud se vea igual que cualquier otra en
+   * /api/requests-general/request-form-values. El atajo de Asuntos Regulatorios
+   * (app/api/document-management/documents/route.ts) no pasa este campo -- sigue sin usar
+   * el mecanismo genérico, ver la nota de módulo de ese route.ts.
+   */
+  formValues?: SubmittedFormValue[];
 }
 
 export class CreateDocumentValidationError extends Error {
@@ -137,6 +149,7 @@ export async function createDocumentWithFirstVersion(input: CreateDocumentInput)
     onedriveItemId: uploaded.id,
     onedrivePath: fullPath,
     ownerUserId: input.ownerUserId,
+    formValues: input.formValues,
   });
 
   const [document, version] = await Promise.all([

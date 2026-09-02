@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { prisma } from '../../../../lib/prisma';
 import { getDocumentManagementAccess } from '../../../../lib/document-management/access';
+import { syncDocumentTypeOption } from '../../../../lib/document-management/genericFields';
 
 /**
  * Catálogo de tipos de documento (DocumentType). Es GLOBAL, no por empresa:
@@ -78,6 +79,16 @@ export async function POST(request: NextRequest) {
     const type = await prisma.documentType.create({
       data: { name, code_prefix: codePrefix, ggc_process: ggcProcess },
     });
+
+    // Parametrización: sincroniza la opción nueva en process_form_field_option para que
+    // el selector genérico de "Tipo de documento" (create-request/page.tsx, camino
+    // estándar) la vea sin tener que resembrar a mano -- ver genericFields.ts. Best-effort:
+    // un fallo aquí no debe tumbar la creación del tipo, que ya quedó confirmada.
+    try {
+      await syncDocumentTypeOption(type);
+    } catch (syncError) {
+      console.error('No se pudo sincronizar la opción de "Tipo de documento":', syncError);
+    }
 
     return NextResponse.json({ type }, { status: 201 });
   } catch (error) {
