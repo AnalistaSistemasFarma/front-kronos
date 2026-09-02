@@ -22,11 +22,12 @@ import UploadVersionModal from './UploadVersionModal';
 import TransitionActions from './TransitionActions';
 import {
   isClosedState,
-  DOCUMENT_WORKFLOW_TRANSITIONS,
-  MAIN_SEQUENCE_STATES,
+  // DOCUMENT_WORKFLOW_TRANSITIONS, MAIN_SEQUENCE_STATES: solo usados por el diagrama visual,
+  // deshabilitado temporalmente (2026-09-02) - ver nota junto al bloque comentado más abajo.
 } from '../../../../../lib/document-management/workflowStates';
-import WorkflowDiagram, {
+import {
   type WorkflowDiagramTask,
+  // WorkflowDiagram: deshabilitado temporalmente (2026-09-02), diagrama se veía desordenado.
 } from '../../../../../components/workflow/WorkflowDiagram';
 
 interface DocumentVersionRow {
@@ -165,6 +166,10 @@ export default function DocumentDetailPage() {
         onCreated={load}
       />
 
+      {/* Diagrama visual del flujo deshabilitado temporalmente (2026-09-02) — se veía
+          desordenado (ramas cruzadas) a criterio de producto. Pendiente rediseño.
+          La data (workflowTasks, DOCUMENT_WORKFLOW_TRANSITIONS, MAIN_SEQUENCE_STATES)
+          se sigue cargando sin cambios; solo se quitó la renderización visual.
       {workflowTasks.length > 0 && (
         <Paper withBorder p="md" mt="md">
           <WorkflowDiagram
@@ -176,6 +181,7 @@ export default function DocumentDetailPage() {
           />
         </Paper>
       )}
+      */}
 
       {currentVersion && (
         <Paper withBorder p="md" mt="md">

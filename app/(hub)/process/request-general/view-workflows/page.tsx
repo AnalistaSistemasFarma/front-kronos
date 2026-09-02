@@ -66,12 +66,14 @@ import {
 } from '../../../../../lib/requests-general/tableField';
 import TableColumnsEditor from '../_components/TableColumnsEditor';
 import toast from 'react-hot-toast';
-import WorkflowDiagram from '../../../../../components/workflow/WorkflowDiagram';
-import {
-  DOCUMENT_WORKFLOW_PROCESS_NAME,
-  DOCUMENT_WORKFLOW_TRANSITIONS,
-  MAIN_SEQUENCE_STATES,
-} from '../../../../../lib/document-management/workflowStates';
+// WorkflowDiagram deshabilitado temporalmente (2026-09-02): el diagrama se veía
+// desordenado (ramas cruzadas) a criterio de producto. Pendiente rediseño.
+// import WorkflowDiagram from '../../../../../components/workflow/WorkflowDiagram';
+// import {
+//   DOCUMENT_WORKFLOW_PROCESS_NAME,
+//   DOCUMENT_WORKFLOW_TRANSITIONS,
+//   MAIN_SEQUENCE_STATES,
+// } from '../../../../../lib/document-management/workflowStates';
 
 interface WorkFlow {
   id: number;
@@ -1598,6 +1600,9 @@ function ViewWorkFlowPage() {
           </Grid.Col>
 
           <Grid.Col span={{ base: 12, lg: 8 }}>
+            {/* Diagrama visual del flujo deshabilitado temporalmente (2026-09-02) — se veía
+                desordenado (ramas cruzadas) a criterio de producto. Pendiente rediseño.
+                La data de tareas (tasks) sigue igual; solo se quitó la renderización visual.
             {tasks.length > 0 && (
               <Card shadow='sm' p='xl' radius='md' withBorder mb='lg'>
                 <Group mb='md'>
@@ -1630,6 +1635,7 @@ function ViewWorkFlowPage() {
                 />
               </Card>
             )}
+            */}
             <Card
               shadow='sm'
               p='xl'
