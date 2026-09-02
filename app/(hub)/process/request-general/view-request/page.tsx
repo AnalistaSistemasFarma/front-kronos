@@ -68,6 +68,7 @@ import {
   IconEye,
   IconLock,
   IconArrowBackUp,
+  IconPencil,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
@@ -77,7 +78,10 @@ import {
   TABLE_FIELD_TYPE,
   parseTableConfig,
   parseTableValue,
+  serializeTableValue,
+  type TableRow,
 } from '../../../../../lib/requests-general/tableField';
+import TableFieldInput from '../create-request/TableFieldInput';
 
 interface Request {
   id: number;
@@ -264,13 +268,21 @@ function ViewRequestPage() {
   const [requestFormValues, setRequestFormValues] = useState<
     {
       id: number;
+      id_form_field: number;
       field_label: string;
       field_type?: string | null;
+      editable?: boolean;
       config_json?: string | null;
+      id_option?: number | null;
       option_label: string | null;
       value_text: string | null;
+      options?: { id: number; option_label: string }[];
     }[]
   >([]);
+  const [editingFieldId, setEditingFieldId] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState<string>('');
+  const [editingTableRows, setEditingTableRows] = useState<TableRow[]>([]);
+  const [savingFieldValue, setSavingFieldValue] = useState(false);
 
   useEffect(() => {
     const storedRaw = sessionStorage.getItem('selectedRequest');
@@ -393,6 +405,69 @@ function ViewRequestPage() {
       if (err instanceof Error && err.name === 'AbortError') return;
       console.error('Error fetching form values:', err);
       if (!signal?.aborted) setRequestFormValues([]);
+    }
+  };
+
+  const startEditingField = (fv: (typeof requestFormValues)[number]) => {
+    setEditingFieldId(fv.id_form_field);
+    if (fv.field_type === TABLE_FIELD_TYPE) {
+      setEditingTableRows(parseTableValue(fv.value_text).rows);
+      setEditingValue('');
+    } else if (fv.field_type === 'select') {
+      setEditingValue(fv.id_option != null ? String(fv.id_option) : '');
+      setEditingTableRows([]);
+    } else {
+      setEditingValue(fv.value_text ?? '');
+      setEditingTableRows([]);
+    }
+  };
+
+  const cancelEditingField = () => {
+    setEditingFieldId(null);
+    setEditingValue('');
+    setEditingTableRows([]);
+  };
+
+  const saveFieldValue = async (fv: (typeof requestFormValues)[number]) => {
+    if (!request?.id) return;
+
+    try {
+      setSavingFieldValue(true);
+
+      let value: { id_field: number; id_option?: number | null; value_text?: string | null };
+      if (fv.field_type === TABLE_FIELD_TYPE) {
+        value = {
+          id_field: fv.id_form_field,
+          value_text: serializeTableValue(editingTableRows),
+        };
+      } else if (fv.field_type === 'select') {
+        value = {
+          id_field: fv.id_form_field,
+          id_option: editingValue ? parseInt(editingValue, 10) : null,
+        };
+      } else {
+        value = { id_field: fv.id_form_field, value_text: editingValue };
+      }
+
+      const response = await fetch('/api/requests-general/update-form-values', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_request: request.id, values: [value] }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Error al actualizar el campo');
+      }
+
+      toast.success('Campo actualizado correctamente.');
+      cancelEditingField();
+      fetchFormValues(request.id);
+    } catch (err) {
+      console.error('Error al actualizar el campo:', err);
+      toast.error(err instanceof Error ? err.message : 'Error al actualizar el campo');
+    } finally {
+      setSavingFieldValue(false);
     }
   };
 
@@ -2116,6 +2191,39 @@ function ViewRequestPage() {
             </Title>
             <Grid>
               {requestFormValues.map((fv) => {
+                const canEditField = Boolean(fv.editable) && !isRequestResolved();
+                const isEditingThis = editingFieldId === fv.id_form_field;
+                const editButton = canEditField && !isEditingThis && (
+                  <ActionIcon
+                    variant='subtle'
+                    color='blue'
+                    onClick={() => startEditingField(fv)}
+                    title='Editar campo'
+                  >
+                    <IconPencil size={16} />
+                  </ActionIcon>
+                );
+                const editActions = (
+                  <Group justify='flex-end' gap='xs'>
+                    <Button
+                      variant='outline'
+                      size='xs'
+                      onClick={cancelEditingField}
+                      disabled={savingFieldValue}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      size='xs'
+                      leftSection={<IconCheck size={14} />}
+                      loading={savingFieldValue}
+                      onClick={() => saveFieldValue(fv)}
+                    >
+                      Guardar
+                    </Button>
+                  </Group>
+                );
+
                 if (fv.field_type === TABLE_FIELD_TYPE) {
                   const columns = parseTableConfig(fv.config_json).columns;
                   const rows = parseTableValue(fv.value_text).rows;
@@ -2128,10 +2236,25 @@ function ViewRequestPage() {
                   return (
                     <Grid.Col span={12} key={fv.id}>
                       <Card withBorder radius='md' p='md'>
-                        <Text size='xs' c='dimmed' fw={500} className='uppercase' mb='xs'>
-                          {fv.field_label}
-                        </Text>
-                        {columns.length === 0 || rows.length === 0 ? (
+                        <Group justify='space-between' mb='xs'>
+                          <Text size='xs' c='dimmed' fw={500} className='uppercase'>
+                            {fv.field_label}
+                          </Text>
+                          {editButton}
+                        </Group>
+                        {isEditingThis ? (
+                          <Stack gap='sm'>
+                            <TableFieldInput
+                              label={fv.field_label}
+                              required={false}
+                              columns={columns}
+                              rows={editingTableRows}
+                              onChange={setEditingTableRows}
+                              companyId={request?.id_company}
+                            />
+                            {editActions}
+                          </Stack>
+                        ) : columns.length === 0 || rows.length === 0 ? (
                           <Text size='sm' c='dimmed'>
                             Sin datos.
                           </Text>
@@ -2166,12 +2289,46 @@ function ViewRequestPage() {
                 return (
                   <Grid.Col span={{ base: 12, md: 6 }} key={fv.id}>
                     <Card withBorder radius='md' p='md'>
-                      <Text size='xs' c='dimmed' fw={500} className='uppercase'>
-                        {fv.field_label}
-                      </Text>
-                      <Text size='md' fw={600} mt={4}>
-                        {fv.option_label || fv.value_text || '—'}
-                      </Text>
+                      <Group justify='space-between'>
+                        <Text size='xs' c='dimmed' fw={500} className='uppercase'>
+                          {fv.field_label}
+                        </Text>
+                        {editButton}
+                      </Group>
+                      {isEditingThis ? (
+                        <Stack gap='xs' mt={4}>
+                          {fv.field_type === 'select' ? (
+                            <Select
+                              data={(fv.options || []).map((o) => ({
+                                value: String(o.id),
+                                label: o.option_label,
+                              }))}
+                              value={editingValue || null}
+                              onChange={(v) => setEditingValue(v || '')}
+                              searchable
+                              clearable
+                              placeholder='Seleccione una opción'
+                            />
+                          ) : (
+                            <TextInput
+                              type={
+                                fv.field_type === 'number'
+                                  ? 'number'
+                                  : fv.field_type === 'date'
+                                    ? 'date'
+                                    : 'text'
+                              }
+                              value={editingValue}
+                              onChange={(e) => setEditingValue(e.target.value)}
+                            />
+                          )}
+                          {editActions}
+                        </Stack>
+                      ) : (
+                        <Text size='md' fw={600} mt={4}>
+                          {fv.option_label || fv.value_text || '—'}
+                        </Text>
+                      )}
                     </Card>
                   </Grid.Col>
                 );

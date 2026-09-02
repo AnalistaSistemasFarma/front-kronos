@@ -18,7 +18,7 @@ export async function GET(req) {
 
     const [fieldsResult, optionsResult, condResult] = await Promise.all([
       pool.request().input('idProcess', sql.Int, id).query(`
-        SELECT id, field_label, field_type, required, display_order, config_json
+        SELECT id, field_label, field_type, required, editable, display_order, config_json
         FROM process_form_field
         WHERE active = 1 AND id_process_category = @idProcess
         ORDER BY display_order, id
@@ -62,6 +62,7 @@ export async function GET(req) {
       field_label: f.field_label,
       field_type: f.field_type,
       required: Boolean(f.required),
+      editable: Boolean(f.editable),
       config_json: f.config_json ?? null,
       options: optionsByField[f.id] || [],
       conditions: condByField[f.id] || [],
