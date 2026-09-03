@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { prisma } from '../../../../lib/prisma';
 import { getPool, sql } from '../../../../lib/mssqlPool';
+import { buildGeneratorDocumentsWhere } from '../../../../lib/document-management/generatorQuery';
 
 /**
  * Subproceso PROPIO del Generador de Documentos (fix pedido por Nicolás,
@@ -94,16 +95,18 @@ export async function GET(request: NextRequest) {
     }
 
     const documents = await prisma.document.findMany({
-      where: {
-        id_company: companyId ? companyId : { in: readableCompanyIds },
-        current_status: 'Vigente',
-        // 2026-09-02 (pedido de Nicolás): el Generador solo debe listar
-        // documentos que YA fueron autorizados por el flujo de 14 estados.
-        // id_process IS NULL = carga histórica de Fase 1, nunca pasó por
-        // aprobación — se excluye aunque esté marcado "Vigente".
-        id_process: { not: null },
-        id_document_type: documentTypeIdParam ? Number(documentTypeIdParam) : undefined,
-      },
+      // Filtro extraído a lib/document-management/generatorQuery.ts
+      // (buildGeneratorDocumentsWhere) para poder probar por separado, sin
+      // BD, que id_process: { not: null } SIEMPRE está presente -- 2026-09-02
+      // (pedido de Nicolás): el Generador solo debe listar documentos que YA
+      // fueron autorizados por el flujo de 14 estados. id_process IS NULL =
+      // carga histórica de Fase 1, nunca pasó por aprobación -- se excluye
+      // aunque esté marcado "Vigente".
+      where: buildGeneratorDocumentsWhere({
+        companyId,
+        readableCompanyIds,
+        documentTypeId: documentTypeIdParam ? Number(documentTypeIdParam) : null,
+      }),
       include: {
         documentType: true,
         company: true,

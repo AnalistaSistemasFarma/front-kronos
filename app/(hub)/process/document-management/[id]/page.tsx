@@ -26,6 +26,7 @@ import {
   // DOCUMENT_WORKFLOW_TRANSITIONS, MAIN_SEQUENCE_STATES: solo usados por el diagrama visual,
   // deshabilitado temporalmente (2026-09-02) - ver nota junto al bloque comentado más abajo.
 } from '../../../../../lib/document-management/workflowStates';
+import { parseDocumentIdParam } from '../../../../../lib/document-management/validateDocumentId';
 import {
   type WorkflowDiagramTask,
   // WorkflowDiagram: deshabilitado temporalmente (2026-09-02), diagrama se veía desordenado.
@@ -66,7 +67,7 @@ function statusColor(status: string): string {
 
 export default function DocumentDetailPage() {
   const params = useParams<{ id: string }>();
-  const idDocument = Number(params?.id);
+  const idDocument = parseDocumentIdParam(params?.id);
   const { data: session } = useSession();
 
   const [document, setDocument] = useState<DocumentDetail | null>(null);
@@ -78,7 +79,7 @@ export default function DocumentDetailPage() {
   const [workflowTasks, setWorkflowTasks] = useState<WorkflowDiagramTask[]>([]);
 
   const load = useCallback(async () => {
-    if (!idDocument || Number.isNaN(idDocument)) {
+    if (idDocument == null) {
       setError('Documento no encontrado');
       setLoading(false);
       return;
