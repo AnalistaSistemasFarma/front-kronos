@@ -683,3 +683,32 @@ model DocumentVersion {
   @@unique([id_document, version_number])
   @@map("document_version")
 }
+
+// ===================================================================
+// Métricas diarias del SAP Business One Service Layer (OLP) — 2026-09-03.
+// Reemplaza el Excel manual que se venía sacando a mano: cuenta líneas del
+// log del balanceador del Service Layer (puerto 50000, recibe todo el
+// tráfico, no hace falta sumar los nodos 50001-50010) en serfarma07
+// (192.168.10.7) y las deja acá vía:
+//   - Backfill histórico: prisma/seeds/run-service-layer-metrics-backfill.mjs
+//   - Job diario: Tarea Programada de Windows en pce0023 (no en serfarma07,
+//     ver lib/service-layer-metrics/collectDailyMetric.ts) que hace SSH
+//     puntual a serfarma07 para contar el log del día ya cerrado y hace
+//     upsert acá.
+//
+// `company` es texto libre (SIN FK a la tabla `company`) a propósito: hoy
+// solo se llena "OLP", pero la idea es poder sumar otras empresas más
+// adelante sin tener que resolver primero su id_company real — ver mismo
+// criterio que Document.id_process (referencia blanda documentada arriba).
+// ===================================================================
+model ServiceLayerDailyMetric {
+  id                Int      @id @default(autoincrement())
+  company           String   @db.NVarChar(50)
+  metric_date       DateTime @db.Date
+  transaction_count Int
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@unique([company, metric_date])
+  @@map("service_layer_daily_metrics")
+}
