@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import {
   generatePdfForDownload,
   createNewVersionFromEditorAndStartWorkflow,
+  resolveEditableVersion,
   EditorError,
 } from '@/lib/document-management/editor';
 
@@ -54,24 +55,12 @@ async function hasDocumentGeneratorCompanyAccess(userEmail: string, companyId: n
  *     vigente actual no cambia.
  *
  * Ver lib/document-management/editor.ts para el detalle de cada camino.
+ *
+ * `resolveEditableVersion` (resolución de la versión vigente/editable) vive
+ * en lib/document-management/editor.ts, no aquí — se movió para que también
+ * la reuse app/api/document-management/documents/[id]/upload-word/route.ts
+ * sin duplicar la lógica de resolución.
  */
-async function resolveEditableVersion(idDocument: number) {
-  const document = await prisma.document.findUnique({
-    where: { id_document: idDocument },
-    include: { company: true, documentType: true },
-  });
-  if (!document) return null;
-
-  const version = document.current_version_id
-    ? await prisma.documentVersion.findUnique({ where: { id_document_version: document.current_version_id } })
-    : await prisma.documentVersion.findFirst({
-        where: { id_document: idDocument },
-        orderBy: { version_number: 'desc' },
-      });
-
-  if (!version) return null;
-  return { document, version };
-}
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {

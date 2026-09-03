@@ -4,7 +4,7 @@ import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/micr
 import { ensureFolderAndUploadFile } from '../onedrive/graphFolderUpload';
 import { buildDocumentVersionFolderSegments } from './storagePath';
 import { createDocumentVersionAndStartWorkflow } from './workflowEngine';
-import { INITIAL_STATE } from './workflowStates';
+import { INITIAL_STATE, isClosedState } from './workflowStates';
 import puppeteer, { type Browser } from 'puppeteer';
 
 /**
@@ -46,11 +46,20 @@ import puppeteer, { type Browser } from 'puppeteer';
  * sitio el contenido/PDF de la versión vigente sin distinguir `id_process`.
  * Ese comportamiento único ya no existe.
  *
- * Fuera de alcance (sigue igual que antes): NO convierte DOCX/PDF ya
- * subidos a HTML editable (`content_html` arranca NULL/vacío para
- * versiones que nunca se editaron aquí). NO hay plantillas por tipo de
- * documento (FR-005/029/etc.) — es un editor de texto enriquecido
- * genérico.
+ * ACLARACIÓN DE ALCANCE (2026-09-03, Nicolás, con captura de pantalla): el
+ * flujo real NO es "crear el documento desde cero escribiendo en el editor
+ * en blanco" — el usuario SUBE un Word (.docx) ya existente y previamente
+ * elaborado, el sistema lo convierte a HTML editable, y ESE contenido
+ * convertido es el punto de partida para que otros usuarios trabajen
+ * colaborativamente sobre esa plantilla en el editor online. Ver
+ * `saveWordUploadContent` (usa `mammoth` para la conversión DOCX→HTML,
+ * invocado desde app/api/document-management/documents/[id]/upload-word/
+ * route.ts) y el botón "Subir documento Word (.docx)" en
+ * generador/[id]/editar/page.tsx, que solo aparece cuando `content_html`
+ * está vacío/es el esqueleto genérico.
+ *
+ * Sigue fuera de alcance: no hay plantillas por tipo de documento
+ * (FR-005/029/etc.) — es un editor de texto enriquecido genérico.
  */
 
 export class EditorError extends Error {
@@ -275,5 +284,106 @@ export async function createNewVersionFromEditorAndStartWorkflow(
       id_request_general: idRequestGeneral,
     },
     pdfBytes: pdfBuffer.length,
+  };
+}
+
+/**
+ * Resuelve la versión "editable" de un documento: la vigente
+ * (`document.current_version_id`), con fallback a la de mayor
+ * `version_number` si ese campo estuviera vacío (no debería pasar para un
+ * documento listado en el Generador, que solo muestra "Vigente"). Misma
+ * lógica que usaban GET/POST de app/api/document-management/documents/[id]/
+ * editor/route.ts (antes duplicada ahí como función privada) — se movió
+ * aquí para que la reuse también app/api/document-management/documents/
+ * [id]/upload-word/route.ts sin duplicar la resolución.
+ */
+export async function resolveEditableVersion(idDocument: number) {
+  const document = await prisma.document.findUnique({
+    where: { id_document: idDocument },
+    include: { company: true, documentType: true },
+  });
+  if (!document) return null;
+
+  const version = document.current_version_id
+    ? await prisma.documentVersion.findUnique({ where: { id_document_version: document.current_version_id } })
+    : await prisma.documentVersion.findFirst({
+        where: { id_document: idDocument },
+        orderBy: { version_number: 'desc' },
+      });
+
+  if (!version) return null;
+  return { document, version };
+}
+
+export interface SaveWordUploadContentInput {
+  idDocument: number;
+  contentHtml: string;
+}
+
+export interface SaveWordUploadContentResult {
+  version: {
+    id_document_version: number;
+    version_number: number;
+    status: string;
+    content_html: string;
+  };
+}
+
+/**
+ * Persiste el HTML convertido de un Word (.docx) subido como punto de
+ * partida de edición de la versión editable (ver `resolveEditableVersion`),
+ * llamado desde app/api/document-management/documents/[id]/upload-word/
+ * route.ts luego de convertir el archivo con `mammoth`.
+ *
+ * NO es Caso A ni Caso B: no genera PDF, no toca OneDrive, no crea versión
+ * nueva ni arranca/avanza el flujo de 14 estados — es solo la carga inicial
+ * de contenido editable para que el usuario siga trabajando en Tiptap y
+ * después use "Guardar" (que sí dispara Caso A/B normalmente).
+ *
+ * Salvaguarda CRÍTICA (pedida explícitamente para este sprint): solo
+ * escribe si `content_html` de esa versión todavía es NULL. Esa es
+ * exactamente la misma condición que usa el editor
+ * (`isEditingEmptyTemplate` en generador/[id]/editar/page.tsx) para decidir
+ * si mostrar el botón de "Subir Word" — ninguna versión que ya se editó
+ * desde aquí o que llegó a completar su flujo (Caso B siempre setea
+ * `content_html` al crear la versión, ver `createNewVersionFromEditorAndStartWorkflow`
+ * arriba) tiene `content_html` null. Así se evita pisar una versión
+ * "Vigente" o cualquier otra que ya tenga contenido real sin pasar por el
+ * mecanismo de "nueva versión". Se agrega además una verificación explícita
+ * de estado (ni "Vigente" ni un estado cerrado del flujo) como segunda capa
+ * de defensa, aunque hoy sea redundante con la condición de `content_html`.
+ */
+export async function saveWordUploadContent(
+  input: SaveWordUploadContentInput
+): Promise<SaveWordUploadContentResult> {
+  const resolved = await resolveEditableVersion(input.idDocument);
+  if (!resolved) throw new EditorError('Documento no encontrado', 404);
+  const { version } = resolved;
+
+  if (version.content_html !== null) {
+    throw new EditorError(
+      'Esta versión ya tiene contenido cargado en el editor; no se puede reemplazar subiendo otro Word. Use "Guardar" desde el editor para generar una versión nueva.',
+      409
+    );
+  }
+  if (version.status === 'Vigente' || isClosedState(version.status)) {
+    throw new EditorError(
+      `No se puede cargar contenido sobre una versión en estado "${version.status}".`,
+      409
+    );
+  }
+
+  const updated = await prisma.documentVersion.update({
+    where: { id_document_version: version.id_document_version },
+    data: { content_html: input.contentHtml },
+  });
+
+  return {
+    version: {
+      id_document_version: updated.id_document_version,
+      version_number: updated.version_number,
+      status: updated.status,
+      content_html: updated.content_html as string,
+    },
   };
 }

@@ -17,6 +17,7 @@ import {
   Button,
   Card,
   Divider,
+  FileInput,
   Group,
   Loader,
   Modal,
@@ -39,6 +40,7 @@ import {
   IconDeviceFloppy,
   IconArrowBackUp,
   IconAlertTriangle,
+  IconUpload,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 
@@ -66,13 +68,23 @@ import toast from 'react-hot-toast';
  * trae la versión nueva creada.
  *
  * Arranca con un esqueleto básico (título + sección + párrafo) cuando la
- * versión nunca se editó desde aquí (`content_html` viene null) -- NO
- * intenta convertir el DOCX/PDF ya subido, eso queda fuera de alcance.
- * Salvaguarda (pedida por precaución mientras no exista un conversor
- * DOCX/PDF→HTML): si el `content_html` de la versión que se está editando
- * es null o es exactamente ese esqueleto, se exige una confirmación
- * explícita antes de guardar -- aplica tanto si el guardado termina en
- * descarga como si termina en versión nueva.
+ * versión nunca se editó desde aquí (`content_html` viene null). Salvaguarda:
+ * si el `content_html` de la versión que se está editando es null o es
+ * exactamente ese esqueleto, se exige una confirmación explícita antes de
+ * guardar -- aplica tanto si el guardado termina en descarga como si
+ * termina en versión nueva.
+ *
+ * Sprint 9 (2026-09-03, aclaración de Nicolás con captura de pantalla): el
+ * flujo real no es "crear desde cero en el editor en blanco" -- el usuario
+ * SUBE un Word (.docx) ya elaborado y ese contenido convertido es el punto
+ * de partida para que otros usuarios trabajen sobre la plantilla. Por eso,
+ * mientras `isEditingEmptyTemplate` sea true, se muestra un bloque para
+ * subir un .docx: se convierte en el servidor (`mammoth`, ver
+ * app/api/document-management/documents/[id]/upload-word/route.ts, que
+ * también persiste el HTML convertido en `content_html`) y el resultado se
+ * carga directo en Tiptap para seguir editando -- no hace falta presionar
+ * "Guardar" aparte para que quede la carga inicial, aunque el usuario sigue
+ * pudiendo seguir editando y guardando normalmente después.
  */
 
 const SKELETON_HTML = `
@@ -141,6 +153,8 @@ export default function DocumentEditorPage() {
   const [versionInfo, setVersionInfo] = useState<EditorVersion | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [confirmEmptyOpen, setConfirmEmptyOpen] = useState(false);
+  const [wordFile, setWordFile] = useState<File | null>(null);
+  const [uploadingWord, setUploadingWord] = useState(false);
 
   const editor = useEditor({
     extensions: [
@@ -183,6 +197,42 @@ export default function DocumentEditorPage() {
   // genérico) -- ver nota de módulo arriba.
   const isEditingEmptyTemplate =
     versionInfo?.content_html === null || versionInfo?.content_html === SKELETON_HTML;
+
+  // Sprint 9: sube el .docx elegido, lo convierte en el servidor (mammoth) y
+  // carga el HTML resultante directo en Tiptap para que el usuario siga
+  // editando -- ver nota de módulo arriba.
+  const handleWordUpload = async () => {
+    if (!wordFile || !idDocument) return;
+    try {
+      setUploadingWord(true);
+      const formData = new FormData();
+      formData.append('file', wordFile);
+
+      const res = await fetch(`/api/document-management/documents/${idDocument}/upload-word`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || 'No se pudo convertir el documento Word');
+      }
+
+      editor?.commands.setContent(data.version.content_html);
+      setVersionInfo((prev) =>
+        prev
+          ? { ...prev, content_html: data.version.content_html, status: data.version.status }
+          : prev
+      );
+      setWordFile(null);
+      toast.success(
+        'Word convertido y cargado en el editor. Revise el contenido y presione "Guardar" cuando esté listo.'
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error inesperado al subir el Word');
+    } finally {
+      setUploadingWord(false);
+    }
+  };
 
   const handleSave = () => {
     if (!editor) return;
@@ -338,6 +388,35 @@ export default function DocumentEditorPage() {
               : 'Este documento no tiene proceso asociado: al guardar, el PDF se descarga directo a su equipo. No se modifica OneDrive ni la base de datos.'}
           </Alert>
         </Card>
+
+        {isEditingEmptyTemplate && (
+          <Card shadow="sm" p="lg" radius="md" withBorder mb="6">
+            <Group gap={6} mb="xs">
+              <IconUpload size={18} className="text-blue-600" />
+              <Text fw={600}>Subir documento Word (.docx)</Text>
+            </Group>
+            <Text size="sm" c="dimmed" mb="sm">
+              Este documento todavía no tiene contenido cargado. Si ya cuenta con un Word (.docx)
+              elaborado previamente, súbalo aquí: se convierte automáticamente a contenido editable
+              y queda cargado en el editor de abajo para que continúe trabajando sobre esa
+              plantilla.
+            </Text>
+            <Group align="flex-end" wrap="wrap">
+              <FileInput
+                placeholder="Seleccione el archivo .docx"
+                accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                value={wordFile}
+                onChange={setWordFile}
+                leftSection={<IconUpload size={16} />}
+                disabled={uploadingWord}
+                style={{ flex: 1, minWidth: 260 }}
+              />
+              <Button onClick={handleWordUpload} loading={uploadingWord} disabled={!wordFile}>
+                Convertir y cargar
+              </Button>
+            </Group>
+          </Card>
+        )}
 
         <Card shadow="sm" radius="md" withBorder>
           <Group justify="space-between" mb="sm" wrap="wrap">
