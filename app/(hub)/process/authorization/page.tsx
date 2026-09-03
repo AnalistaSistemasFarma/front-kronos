@@ -52,6 +52,11 @@ import {
 import toast from 'react-hot-toast';
 import AuthorizationDetailModal from './AuthorizationDetailModal';
 
+function parseOrionFileIdFromAuthResolution(resolution?: string | null): string | null {
+  const match = /\[orionFile:([^\]]+)\]/i.exec(String(resolution || ''));
+  return match?.[1]?.trim() || null;
+}
+
 interface AuthorizationRequest {
   id: number;
   id_request_general: number;
@@ -62,6 +67,7 @@ interface AuthorizationRequest {
   requester: string;
   created_at: string;
   status: 'pendiente' | 'autorizado' | 'rechazado' | 'cancelado';
+  resolution?: string | null;
 }
 
 interface RawActivity {
@@ -79,6 +85,7 @@ interface RawActivity {
   created_at: string;
   id_creator_request: string;
   creator_request: string | null;
+  resolution?: string | null;
 }
 
 const STATUS_OPTIONS = [
@@ -305,6 +312,7 @@ function AuthorizationBoard() {
                 requester: a.creator_request || '—',
                 created_at: a.created_at,
                 status: mapStatus(a.id_status),
+                resolution: a.resolution ?? null,
             }));
 
             setRequests(mapped);
@@ -397,7 +405,7 @@ function AuthorizationBoard() {
         taskId: number,
         idStatus: number,
         resolution: string | null
-    ): Promise<boolean> => {
+    ): Promise<{ ok: boolean; error?: string }> => {
         try {
             const response = await fetch('/api/requests-general/update-activities', {
                 method: 'POST',
@@ -407,13 +415,47 @@ function AuthorizationBoard() {
                     id_status: idStatus,
                     id_assigned: userId,
                     resolution,
+                    skip_sequential_gate: true,
                 }),
             });
-            return response.ok;
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                return {
+                    ok: false,
+                    error: typeof data.error === 'string' ? data.error : `Error ${response.status}`,
+                };
+            }
+            return { ok: true };
         } catch (e) {
             console.error('Error updating activity', taskId, e);
-            return false;
+            return { ok: false, error: 'Error de red al autorizar' };
         }
+    };
+
+    const isFirmaAuthorizationRow = (row: AuthorizationRequest) =>
+        /firma/i.test(row.type_authorization || '') ||
+        /firma/i.test(row.subject || '') ||
+        /orionAuth/i.test(row.resolution || '') ||
+        /orionFile/i.test(row.resolution || '');
+
+    const redirectToSignDocument = (params: {
+        requestId: number;
+        fileId?: string | null;
+        signTaskId?: number | null;
+    }) => {
+        toast('Abriendo documento para firmar…', { icon: '✍️' });
+        const qs = new URLSearchParams({
+            from: 'authorization',
+            orionAction: 'sign',
+        });
+        if (params.fileId) qs.set('orionFileId', params.fileId);
+        if (params.signTaskId) {
+            qs.set('id', String(params.signTaskId));
+            router.push(`/process/request-general/view-activities?${qs.toString()}`);
+            return;
+        }
+        qs.set('id', String(params.requestId));
+        router.push(`/process/request-general/view-request?${qs.toString()}`);
     };
 
     const confirmAuthorize = async () => {
@@ -421,20 +463,79 @@ function AuthorizationBoard() {
         const ids = targetIds();
         if (ids.length === 0) return;
 
-        setLoading(true);
-        const results = await Promise.all(ids.map((id) => updateActivityStatus(id, 2, null)));
-        const ok = results.filter(Boolean).length;
-        const fail = results.length - ok;
+        const authorizedRows = requests.filter((r) => ids.includes(r.id));
 
-        setAuthorizeModalOpened(false);
-        setSelectedIds(new Set());
-        if (ok > 0) {
-            toast.success(ok > 1 ? `${ok} solicitudes autorizadas` : 'Solicitud autorizada');
+        setLoading(true);
+        try {
+            const results = await Promise.all(
+                authorizedRows.map(async (row) => {
+                    if (isFirmaAuthorizationRow(row)) {
+                        try {
+                            const consumeRes = await fetch('/api/integrations/orion/consume-auth', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    taskId: row.id,
+                                    requestId: row.id_request_general,
+                                    fileId: parseOrionFileIdFromAuthResolution(row.resolution),
+                                }),
+                            });
+                            const consumeData = await consumeRes.json().catch(() => ({}));
+                            if (consumeRes.ok && (consumeData.closed > 0 || consumeData.success)) {
+                                return {
+                                    ok: true as const,
+                                    row,
+                                    fileId:
+                                        consumeData.fileId ||
+                                        parseOrionFileIdFromAuthResolution(row.resolution),
+                                    signTaskId: consumeData.signTaskId ?? null,
+                                };
+                            }
+                        } catch (e) {
+                            console.error('consume-auth falló, se intenta update-activities', e);
+                        }
+                    }
+
+                    const updated = await updateActivityStatus(row.id, 2, null);
+                    return {
+                        ok: updated.ok,
+                        error: updated.error,
+                        row,
+                        fileId: parseOrionFileIdFromAuthResolution(row.resolution),
+                        signTaskId: null as number | null,
+                    };
+                })
+            );
+
+            const okResults = results.filter((r) => r.ok);
+            const fail = results.length - okResults.length;
+            const failMessage = results.find((r) => !r.ok)?.error;
+
+            setAuthorizeModalOpened(false);
+            setSelectedIds(new Set());
+            if (okResults.length > 0) {
+                toast.success(
+                    okResults.length > 1 ? `${okResults.length} solicitudes autorizadas` : 'Solicitud autorizada'
+                );
+            }
+            if (fail > 0) {
+                toast.error(failMessage || `${fail} solicitud(es) no se pudieron autorizar`);
+            }
+            await fetchActivities(userId, filters);
+
+            if (okResults.length === 1) {
+                const done = okResults[0];
+                if (isFirmaAuthorizationRow(done.row) && done.row.id_request_general) {
+                    redirectToSignDocument({
+                        requestId: done.row.id_request_general,
+                        fileId: done.fileId,
+                        signTaskId: done.signTaskId,
+                    });
+                }
+            }
+        } finally {
+            setLoading(false);
         }
-        if (fail > 0) {
-            toast.error(`${fail} solicitud(es) no se pudieron autorizar`);
-        }
-        await fetchActivities(userId, filters);
     };
 
     const confirmReject = async () => {
@@ -449,7 +550,7 @@ function AuthorizationBoard() {
         setLoading(true);
         const reason = rejectReason.trim();
         const results = await Promise.all(ids.map((id) => updateActivityStatus(id, 3, reason)));
-        const ok = results.filter(Boolean).length;
+        const ok = results.filter((r) => r.ok).length;
         const fail = results.length - ok;
 
         setRejectModalOpened(false);

@@ -63,8 +63,19 @@ export function resolveOrionTenantId(synerlinkCompanyId: number): string | null 
   return tenantMap[synerlinkCompanyId] ?? null;
 }
 
-export function buildOrionExternalRef(requestId: number): string {
-  return `synerlink://request/${requestId}`;
+/** Clave interna para JSON legacy (1 doc por solicitud sin fileId). */
+export const ORION_LEGACY_FILE_ID = '_legacy';
+
+/**
+ * externalRef Orion:
+ * - legacy: synerlink://request/{id}
+ * - por archivo: synerlink://request/{id}/file/{fileId}
+ */
+export function buildOrionExternalRef(requestId: number, fileId?: string | null): string {
+  const base = `synerlink://request/${requestId}`;
+  const fid = String(fileId || '').trim();
+  if (!fid || fid === ORION_LEGACY_FILE_ID) return base;
+  return `${base}/file/${encodeURIComponent(fid)}`;
 }
 
 export function getOrionSignatureProfileUrl(): string | null {
@@ -80,4 +91,15 @@ export function parseRequestIdFromExternalRef(externalRef: string | undefined): 
   if (!match?.[1]) return null;
   const id = Number(match[1]);
   return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+export function parseFileIdFromExternalRef(externalRef: string | undefined): string | null {
+  if (!externalRef?.trim()) return null;
+  const match = /synerlink:\/\/request\/\d+\/file\/([^/?#]+)/i.exec(externalRef.trim());
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
 }

@@ -33,6 +33,7 @@ type Props = {
   onAssign: (order: number, email: string, name: string) => void;
   onClear: (order: number) => void;
   onReorder?: (order: number, direction: 'up' | 'down') => void;
+  readOnly?: boolean;
 };
 
 function statusFor(email: string, signerStatuses: Record<string, string>) {
@@ -60,6 +61,7 @@ export default function OrionSignerAssignment({
   onAssign,
   onClear,
   onReorder,
+  readOnly = false,
 }: Props) {
   const usedEmails = new Set(
     participants.map((p) => p.email.toLowerCase()).filter(Boolean)
@@ -87,6 +89,7 @@ export default function OrionSignerAssignment({
           min={1}
           max={10}
           w={160}
+          disabled={readOnly}
           onChange={(value) => {
             const next = typeof value === 'number' ? value : Number(value);
             if (Number.isFinite(next)) onSignerCountChange(Math.min(10, Math.max(1, next)));
@@ -96,6 +99,7 @@ export default function OrionSignerAssignment({
           label='Yo también firmo'
           description='Si está marcado, usted será el primer firmante.'
           checked={includeSelf}
+          disabled={readOnly}
           onChange={(e) => onIncludeSelfChange(e.currentTarget.checked)}
           mt={4}
         />
@@ -103,6 +107,7 @@ export default function OrionSignerAssignment({
           label='Firma secuencial'
           description='Un firmante a la vez, en el orden definido.'
           checked={sequential}
+          disabled={readOnly}
           onChange={(e) => onSequentialChange(e.currentTarget.checked)}
           mt={4}
         />
@@ -167,6 +172,7 @@ export default function OrionSignerAssignment({
                               size='sm'
                               variant='subtle'
                               color='red'
+                              disabled={readOnly}
                               onClick={() => onClear(person.order)}
                             >
                               <IconX size={14} />
@@ -179,6 +185,7 @@ export default function OrionSignerAssignment({
                         placeholder='Buscar firmante por nombre o correo…'
                         data={options}
                         limit={12}
+                        disabled={readOnly}
                         onOptionSubmit={(value) => {
                           const match = availableUsers.find(
                             (u) => u.value.toLowerCase() === value.toLowerCase()

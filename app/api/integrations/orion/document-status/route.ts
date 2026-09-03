@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { extractBearer, isValidIntegrationApiKey } from '@/lib/integration/apiKeyAuth';
-import { parseRequestIdFromExternalRef } from '@/lib/orion/config';
+import { parseFileIdFromExternalRef, parseRequestIdFromExternalRef } from '@/lib/orion/config';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import {
   applyOrionWebhookToRequest,
@@ -51,6 +51,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'status no reconocido' }, { status: 400 });
     }
 
+    const fileId = parseFileIdFromExternalRef(body.externalRef);
+
     const outcome = await withMssqlPool(async (pool) => {
       const ctx = await getRequestOrionContext(pool, requestId);
       if (!ctx) return { notFound: true as const };
@@ -60,6 +62,7 @@ export async function POST(req: NextRequest) {
         status: statusUpper,
         auditSummary: body.auditSummary,
         noteAuthorUserId: ctx.id_requester,
+        fileId,
         patch: {
           orionDocumentId: body.orionDocumentId,
           externalRef: body.externalRef,
@@ -82,6 +85,7 @@ export async function POST(req: NextRequest) {
       {
         success: true,
         synerlinkRequestId: requestId,
+        fileId: outcome.fileId,
         status: statusUpper,
         tasksUpdated: outcome.tasksUpdated,
         requestClosed: outcome.requestClosed,

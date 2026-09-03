@@ -1,6 +1,6 @@
 # Integración SynerLink ↔ GSS Firma (Orion)
 
-SynerLink consume la API de Orion para embeber el ciclo de firma dentro de una solicitud (`requests_general`).
+SynerLink consume la API de Orion para embeber el ciclo de firma **por archivo adjunto** dentro de una solicitud (`requests_general`).
 
 Documentación Orion (contrato completo): `front-orion/docs/synerlink-integration.md`
 
@@ -36,75 +36,111 @@ SYNERLINK_TENANT_MAP={"7":"farmaceutica-abc"}
 
 Tipo: **`orion_signature`** (`lib/orion/fieldType.ts`)
 
-Se agrega en el builder de workflows. El estado se guarda en `request_form_value.value_text` como JSON:
+Estado en `request_form_value.value_text` (mapa por PDF de OneDrive):
 
 ```json
 {
-  "orionDocumentId": "uuid",
-  "externalRef": "synerlink://request/456",
-  "status": "EN_PROCESO",
-  "embedUrl": "https://orion.../embed/document?...",
-  "signedFileUrl": null
+  "documents": {
+    "<fileId>": {
+      "orionDocumentId": "uuid",
+      "externalRef": "synerlink://request/456/file/<fileId>",
+      "fileId": "<fileId>",
+      "fileName": "contrato.pdf",
+      "status": "EN_PROCESO",
+      "embedUrl": "https://orion.../embed/document?...",
+      "signedFileUrl": null,
+      "signers": []
+    }
+  },
+  "updatedAt": "ISO-8601"
 }
 ```
 
-## Flujo en SynerLink (6 pasos)
+Compatibilidad: JSON plano legacy (1 doc / solicitud) se lee como `documents._legacy`.
 
-1. **Kronos** crea la solicitud (workflow con campo `orion_signature`).
-2. **Responsable de tarea** abre la solicitud → pulsa **Editar documento y firmantes** → sube PDF en el panel → editor Orion (iframe).
-3. **Kronos** abre modal a pantalla completa con el iframe de Orion (mismo motor que GSS Firma: ubicar firmas, firmantes, canvas).
-4. **Operador** asigna firmantes y envía a firma (en el iframe o vía `POST /api/integrations/orion/signers` + `send`).
-5. **Firmantes** firman en Orion (internos: sesión / iframe; externos: `signUrl`).
-6. **Orion** → webhook `document-status` → Kronos cierra tarea y solicitud.
+`externalRef`:
 
-### Permisos en Kronos
+- Legacy: `synerlink://request/{id}`
+- Por archivo: `synerlink://request/{id}/file/{fileId}`
+
+## Flujo en SynerLink
+
+1. **Crear solicitud** FIRMA / con campo `orion_signature`: **al menos 1 PDF obligatorio**.
+2. En **Archivos adjuntos**, cada PDF muestra estado + **Preparar / Gestionar / Firmar**.
+3. **Gestionar** abre el modal de orquestación (firmantes, ubicaciones, enviar) **solo para ese PDF**.
+4. Se puede subir otro PDF (con permiso de adjuntos) y repetir el ciclo por archivo.
+5. Al **Enviar a firma**:
+   - Orion recibe el documento.
+   - Se crea **1 autorización Kronos por firmante** de ese PDF (`[orionFile:…][orionAuth]`), notificada a **Autorizaciones**.
+   - Se crea **1 tarea de firma por firmante×documento** (Tareas asignadas).
+6. Camino del firmante: **Autoriza → ve el documento → firma** (deep-link con `orionFileId` + `orionAction=sign`).
+7. Orion → webhook `document-status` → Kronos actualiza ese `fileId`; la solicitud se cierra cuando **todos** los PDFs están `FIRMADO`.
+8. **Versiones** (solo admin + solicitante): original + una entrada por cada firma parcial/final (`state.versions[]`).
+9. **Descarga / vista del firmante siguiente**: usa el PDF con firmas acumuladas (`signedFileUrl` o última versión), no el adjunto original de OneDrive.
+
+No hay tarjeta hub “Firma digital / Coordinador”: el host Orion es invisible y solo registra acciones para adjuntos + modales.
+
+### Permisos
 
 | Rol | Qué puede hacer |
 |-----|-----------------|
-| Responsable de tarea / admin | Botón **Editar documento y firmantes**, subir PDF, panel Orion embebido |
-| Firmante (email en lista) | Botón **Abrir panel de firma** con su `signUrl` |
-| Cualquier usuario | **Configurar mi firma** → modal embebido en SynerLink (iframe Orion) |
-
-## Flujo técnico (resumen)
-
-1. Admin crea proceso con campo **Firma digital (Orion)** y tareas de firma.
-2. Usuario crea la solicitud (el campo firma se configura al abrirla).
-3. Al abrir `view-request`, aparece tarjeta **Firma digital** con estado y botones de acción.
-4. El botón principal abre un **modal a pantalla completa** con el iframe Orion (`embedUrl`).
-5. Orion notifica `POST /api/integrations/orion/document-status` al firmar/rechazar.
-6. SynerLink actualiza el campo, bitácora y cierra tareas.
+| Responsable de tarea / admin | **Preparar / Gestionar** por PDF en adjuntos |
+| Firmante (email en lista de ese PDF) | Primero **Autorizar** (módulo Autorizaciones); luego **Firmar** en el adjunto |
+| Cualquier usuario | Dibujar/guardar firma personal (rúbrica) |
 
 ## Endpoints en Kronos
 
 | Método | Ruta | Auth | Uso |
 |--------|------|------|-----|
-| POST | `/api/integrations/orion/ensure-document` | Sesión | Crear/vincular documento (+ `pdfBase64`) |
-| GET | `/api/integrations/orion/ensure-document?requestId=` | Sesión | Sincronizar estado desde Orion |
-| PATCH | `/api/integrations/orion/ensure-document` | Sesión | Actualizar estado (postMessage) |
-| POST | `/api/integrations/orion/signers` | Sesión | Asignar firmantes vía API Orion |
-| POST | `/api/integrations/orion/send` | Sesión | Enviar documento a firma |
-| POST | `/api/integrations/orion/document-status` | Bearer API key | Webhook desde Orion |
+| POST | `/api/integrations/orion/ensure-document` | Sesión | Crear/vincular doc (`requestId`, **`fileId`**, `pdfBase64`) |
+| GET | `/api/integrations/orion/ensure-document?requestId=&fileId=` | Sesión | Sync; responde `documents` + `state` |
+| PATCH | `/api/integrations/orion/ensure-document` | Sesión | Patch por `fileId` |
+| POST | `/api/integrations/orion/signers` | Sesión | Asignar firmantes (`fileId` obligatorio) |
+| POST | `/api/integrations/orion/send` | Sesión | Enviar a firma (`fileId` obligatorio) |
+| POST | `/api/integrations/orion/signature-fields` | Sesión | Guardar recuadros de firma en Orion |
+| POST | `/api/integrations/orion/complete-sign` | Sesión | Cerrar turno del firmante (`fileId` opcional) |
+| GET | `/api/integrations/orion/signed-file?requestId=&fileId=` | Sesión | Proxy PDF firmado Orion (Bearer server-side) |
+| POST | `/api/integrations/orion/document-status` | Bearer API key | Webhook Orion |
 
 ## Archivos clave
 
 | Archivo | Rol |
 |---------|-----|
-| `lib/orion/client.ts` | Cliente HTTP hacia Orion |
-| `lib/orion/service.ts` | BD + webhook + ensure document |
-| `components/orion/OrionSignaturePanel.tsx` | Tarjeta compacta + modal fullscreen (iframe Orion, postMessage) |
+| `lib/orion/formValue.ts` | Bag `documents[fileId]` + migración legacy |
+| `lib/orion/service.ts` | ensure / webhook / finalize por archivo |
+| `lib/orion/signerTasks.ts` | Tareas por firmante **y** `fileId` |
+| `components/orion/OrionSignaturePanel.tsx` | Host oculto + modales |
+| `components/orion/OrionAttachmentSignActions.tsx` | Acciones por PDF en adjuntos |
 | `app/api/integrations/orion/*` | Rutas API |
 
-## Configurar un proceso de firma
+## Deep-link
 
-1. Categoría ej. **Firma digital** (empresa destino).
-2. Proceso con campo **Firma digital (Orion)**.
-3. Tareas: preparar → firmar → cerrar (según negocio).
-4. `createdByEmail` del operador debe existir en Orion.
-5. Mapear `id_company` en `ORION_TENANT_MAP`.
+`/process/request-general/view-activities?id={taskId}&from=authorization&orionAction=sign&orionFileId={fileId}`
 
-## Prueba rápida
+- `id` = `task_request_general.id` (tarea de firma o autorización), **no** el id de la solicitud.
+- Tras autorizar tipo **Firma — …** se resuelve la tarea de firma abierta del usuario; si no hay, se usa la de autorización.
+- Si no hay `orionFileId`, se usa el primer PDF.
 
-1. Levantar Orion (`localhost:3000`) y Kronos (`localhost:8080`).
-2. Crear solicitud con proceso que tenga `orion_signature`.
-3. Abrir la solicitud → tarjeta **Firma digital** → **Editar documento y firmantes**.
-4. Firmar en Orion → webhook debe cerrar tarea en SynerLink.
+## Plantilla workflow FIRMA (proceso 84 — FARMADOSIS)
+
+Seeds SQL en `prisma/seeds/`:
+
+| Archivo | Contenido |
+|---------|-----------|
+| `firma-proceso-84-workflow.sql` | Fase A: tarea **Preparar documento y firmantes** + tipos `Firma — *` |
+| `firma-proceso-84-workflow-phase-b.sql` | Fase B: pares autorización → aceptar turno por rol |
+
+Aplicar: `node scripts/apply-firma-workflow.cjs` y `node scripts/apply-firma-workflow-phase-b.cjs`.
+
+## Pendiente (roadmap Orion)
+
+### P0 — requiere equipo Orion
+
+| Item | Motivo |
+|------|--------|
+| Webhook `EN_PROCESO` por cada firma parcial | Hoy el cierre de turno depende de `complete-sign` o polling |
+| `signUrl` para firmantes internos | Hoy se usa `embedUrl` genérico |
+| Campo `order` en `signers[]` | Kronos usa índice del array como respaldo |
+| POST | `/api/integrations/synerlink/documents/{id}/accept-sign` | Orion | Firmante interno acepta con rúbrica guardada (Kronos llama al confirmar) |
+| Embed `/embed/sign` (solo firmar) | Separar editor vs firma (alternativa al flujo nativo SynerLink) |
+| postMessage `DOCUMENT_SIGNER_COMPLETED` | Disparar `complete-sign` sin polling |

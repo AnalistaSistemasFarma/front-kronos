@@ -113,7 +113,14 @@ export async function GET(req) {
     );
   } catch (error) {
     const duration = Date.now() - startTime;
-    const errorMessage = error.message || 'Error desconocido';
+    const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+
+    if (errorMessage.toLowerCase().includes('abort') || req.signal?.aborted) {
+      return NextResponse.json(
+        { success: false, error: 'Solicitud cancelada', code: 'ABORTED' },
+        { status: 499 }
+      );
+    }
 
     logAuditEvent(
       'DATABASE_ERROR',

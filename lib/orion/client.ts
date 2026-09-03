@@ -5,6 +5,25 @@ import type {
   OrionDocumentResponse,
 } from './types';
 
+/** Convierte rutas relativas de Orion en URL absoluta usando ORION_API_BASE_URL. */
+export function resolveOrionAbsoluteUrl(urlOrPath: string | null | undefined): string | null {
+  const value = String(urlOrPath || '').trim();
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) return value;
+  const { apiBaseUrl } = getOrionConfig();
+  if (!apiBaseUrl) return null;
+  return `${apiBaseUrl}${value.startsWith('/') ? value : `/${value}`}`;
+}
+
+/** URL canónica del PDF firmado en Orion (preferida sobre signedFileUrl almacenado). */
+export function buildOrionSignedFileApiUrl(orionDocumentId: string): string | null {
+  const id = String(orionDocumentId || '').trim();
+  if (!id) return null;
+  return resolveOrionAbsoluteUrl(
+    `/api/integrations/synerlink/documents/${encodeURIComponent(id)}/signed-file`
+  );
+}
+
 async function orionFetch<T>(
   path: string,
   init?: RequestInit
@@ -100,6 +119,20 @@ export async function sendOrionDocument(
   );
 }
 
+/** Firmante interno acepta y aplica su rúbrica guardada (sin embed de gestión). */
+export async function acceptOrionSignerTurn(
+  orionDocumentId: string,
+  email: string
+): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+  return orionFetch<OrionDocumentResponse>(
+    `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/accept-sign`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ email: email.trim().toLowerCase() }),
+    }
+  );
+}
+
 export async function getOrionSignatureEmbedUrl(
   email: string
 ): Promise<{ ok: boolean; status: number; data: { embedUrl: string; email: string } | null; error?: string }> {
@@ -144,4 +177,149 @@ export async function saveOrionUserSignature(
       body: JSON.stringify({ signatureDataUrl, method }),
     }
   );
+}
+
+type OrionSignatureFieldInput = {
+  id: string;
+  signerOrder: number;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label?: string;
+};
+
+/** Persiste recuadros de firma en Orion (embed API + token). */
+export async function saveOrionSignatureFields(params: {
+  orionDocumentId: string;
+  embedToken: string;
+  signatureFields: OrionSignatureFieldInput[];
+}): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+  const qs = new URLSearchParams({
+    docId: params.orionDocumentId,
+    token: params.embedToken,
+    action: 'signatureFields',
+  });
+  return orionFetch<OrionDocumentResponse>(
+    `/api/integrations/synerlink/embed/document?${qs.toString()}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ signatureFields: params.signatureFields }),
+    }
+  );
+}
+
+/** Descarga binaria de una URL Orion protegida (Bearer integration key). */
+export async function fetchOrionProtectedFile(url: string): Promise<{
+  ok: boolean;
+  status: number;
+  buffer: ArrayBuffer | null;
+  contentType: string | null;
+  error?: string;
+}> {
+  const cfg = getOrionConfig();
+  if (!cfg.integrationApiKey) {
+    return {
+      ok: false,
+      status: 503,
+      buffer: null,
+      contentType: null,
+      error: 'Integración Orion no configurada',
+    };
+  }
+
+  const absoluteUrl = resolveOrionAbsoluteUrl(url);
+  if (!absoluteUrl) {
+    return {
+      ok: false,
+      status: 503,
+      buffer: null,
+      contentType: null,
+      error: 'ORION_API_BASE_URL no configurado',
+    };
+  }
+
+  try {
+    const res = await fetch(absoluteUrl, {
+      headers: { Authorization: `Bearer ${cfg.integrationApiKey}` },
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return {
+        ok: false,
+        status: res.status,
+        buffer: null,
+        contentType: null,
+        error: text || res.statusText,
+      };
+    }
+    const buffer = await res.arrayBuffer();
+    return {
+      ok: true,
+      status: res.status,
+      buffer,
+      contentType: res.headers.get('content-type'),
+    };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Error de red';
+    const unreachable =
+      /fetch failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT/i.test(message);
+    return {
+      ok: false,
+      status: unreachable ? 503 : 502,
+      buffer: null,
+      contentType: null,
+      error: unreachable
+        ? `Motor de firma Orion no disponible (${cfg.apiBaseUrl || 'ORION_API_BASE_URL'}). Inicie Orion y vuelva a intentar.`
+        : message,
+    };
+  }
+}
+
+/** Intenta descargar el PDF firmado usando la URL canónica y fallbacks almacenados. */
+export async function fetchOrionSignedFileContent(params: {
+  orionDocumentId?: string | null;
+  signedFileUrl?: string | null;
+}): Promise<{
+  ok: boolean;
+  status: number;
+  buffer: ArrayBuffer | null;
+  contentType: string | null;
+  error?: string;
+}> {
+  const candidates = [
+    params.orionDocumentId ? buildOrionSignedFileApiUrl(params.orionDocumentId) : null,
+    resolveOrionAbsoluteUrl(params.signedFileUrl),
+  ].filter((url, index, list): url is string => Boolean(url) && list.indexOf(url) === index);
+
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      status: 404,
+      buffer: null,
+      contentType: null,
+      error: 'No hay URL de PDF firmado en Orion',
+    };
+  }
+
+  let last = {
+    ok: false,
+    status: 502,
+    buffer: null as ArrayBuffer | null,
+    contentType: null as string | null,
+    error: 'No se pudo descargar el PDF firmado desde Orion',
+  };
+
+  for (const url of candidates) {
+    const result = await fetchOrionProtectedFile(url);
+    if (result.ok && result.buffer) return result;
+    last = {
+      ...result,
+      error: result.error || last.error,
+    };
+  }
+
+  return last;
 }

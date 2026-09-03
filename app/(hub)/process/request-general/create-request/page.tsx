@@ -79,6 +79,18 @@ import {
   type TableRow,
 } from '../../../../../lib/requests-general/tableField';
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
+
+function readSelectedCompanyId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const stored = localStorage.getItem('selectedCompany');
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as { id?: number };
+    return parsed?.id != null ? String(parsed.id) : null;
+  } catch {
+    return null;
+  }
+}
 import SapOptionSelect from './SapOptionSelect';
 import TableFieldInput from './TableFieldInput';
 import toast from 'react-hot-toast';
@@ -124,6 +136,7 @@ interface CompanyData {
 interface CategoryData {
   id: number;
   category: string;
+  id_company?: number;
 }
 
 interface ProcessCategoryData {
@@ -154,7 +167,7 @@ interface FolderFile {
 function RequestBoard() {
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
-  const [userId, setUserId] = useState<number | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [userIdInitialized, setUserIdInitialized] = useState(false);
 
@@ -253,32 +266,44 @@ function RequestBoard() {
       router.push('/login');
       return;
     }
-    fetchFormData();
-  }, [session, status, router]);
 
-  useEffect(() => {
-    if (status === 'loading') return;
-    if (!session) {
-      router.push('/login');
-      return;
-    }
+    const controller = new AbortController();
+    let cancelled = false;
 
-    if (!userIdInitialized) {
-      if (userName && !userId) {
-        getUserIdByName(userName).then((id) => {
-          if (id) {
-            setUserId(id);
-            setUserIdInitialized(true);
-            fetchTicketsWithUserId(id);
-          } else {
-            setUserIdInitialized(true);
-          }
-        });
-      } else if (!userName) {
+    const loadInitialData = async () => {
+      await fetchFormData(controller.signal);
+      if (cancelled || userIdInitialized) return;
+
+      const sessionUserId = session.user?.id ? String(session.user.id) : null;
+      if (sessionUserId) {
+        setUserId(sessionUserId);
+        setUserIdInitialized(true);
+        await fetchTicketsWithUserId(sessionUserId);
+        return;
+      }
+
+      if (userName) {
+        const id = await getUserIdByName(userName, controller.signal);
+        if (cancelled) return;
+        if (id) {
+          setUserId(String(id));
+          setUserIdInitialized(true);
+          await fetchTicketsWithUserId(String(id));
+        } else {
+          setUserIdInitialized(true);
+        }
+      } else {
         setUserIdInitialized(true);
       }
-    }
-  }, [status, session, userName, userId, userIdInitialized, router]);
+    };
+
+    void loadInitialData();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [session, status, router]);
 
   useEffect(() => {
     const globalStore = localStorage.getItem('global-store');
@@ -520,7 +545,7 @@ function RequestBoard() {
   };
 
   const fetchTicketsWithUserId = async (
-    userIdToUse: number,
+    userIdToUse: string,
     filtersToUse: typeof filters = filters
   ) => {
     try {
@@ -591,14 +616,15 @@ function RequestBoard() {
     }
   };
 
-  const getUserIdByName = async (userName: string): Promise<number | null> => {
+  const getUserIdByName = async (
+    userName: string,
+    signal?: AbortSignal
+  ): Promise<string | null> => {
     if (!session || status !== 'authenticated') {
-      console.error('No hay sesión activa para realizar esta operación');
       return null;
     }
 
     if (!userName || userName.trim() === '') {
-      console.error('El nombre de usuario es requerido');
       return null;
     }
 
@@ -614,17 +640,20 @@ function RequestBoard() {
         headers: {
           'Content-Type': 'application/json',
         },
+        signal,
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        if (response.status === 499) return null;
+        const errorData = await response.json().catch(() => ({}));
         console.error('Error al obtener ID de usuario:', errorData.error);
         return null;
       }
 
       const data = await response.json();
-      return data.success ? data.userId : null;
+      return data.success ? String(data.userId) : null;
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return null;
       console.error('Error en la llamada al endpoint:', error);
       return null;
     } finally {
@@ -632,12 +661,12 @@ function RequestBoard() {
     }
   };
 
-  const fetchFormData = async () => {
+  const fetchFormData = async (signal?: AbortSignal) => {
     try {
       setFormDataLoading(true);
       setFormDataError(null);
 
-      const response = await fetch(`/api/requests-general/consult-request`);
+      const response = await fetch(`/api/requests-general/consult-request`, { signal });
 
       if (response.ok) {
         const data: ConsultResponse = await response.json();
@@ -645,13 +674,24 @@ function RequestBoard() {
           data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
         );
 
-        const defaultCompanyId = '3';
-        await fetchCategoriesByCompanyOnLoad(defaultCompanyId, data.processCategories);
+        const defaultCompanyId =
+          readSelectedCompanyId() ??
+          (data.companies.length === 1 ? String(data.companies[0].id_company) : '');
 
-        setFormData((prev) => ({
-          ...prev,
-          company: defaultCompanyId,
-        }));
+        if (defaultCompanyId) {
+          const companyIdNum = Number(defaultCompanyId);
+          setCategories(
+            data.categories
+              .filter((c: CategoryData) => c.id_company === companyIdNum)
+              .map((c: CategoryData) => ({ value: c.id.toString(), label: c.category }))
+          );
+          setFormData((prev) => ({
+            ...prev,
+            company: defaultCompanyId,
+          }));
+        } else {
+          setCategories([]);
+        }
 
         setProcessCategories(
           data.processCategories
@@ -667,11 +707,12 @@ function RequestBoard() {
         if (data.assignedUsers) {
           setAssignedUsers(data.assignedUsers.map((u) => ({ value: u.name, label: u.name })));
         }
-      } else {
+      } else if (response.status !== 499) {
         console.error('Frontend - fetchFormData failed with status:', response.status);
         setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       console.error('Error fetching form data:', err);
       setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
     } finally {
@@ -681,24 +722,25 @@ function RequestBoard() {
 
   const fetchCategoriesByCompanyOnLoad = async (
     companyId: string,
-    allProcessCategories: ProcessCategoryData[]
+    signal?: AbortSignal
   ) => {
     try {
       const url = `/api/requests-general/consult-request?companyId=${companyId}`;
-      const response = await fetch(url);
+      const response = await fetch(url, { signal });
 
       if (response.ok) {
         const data = await response.json();
         setCategories(
           data.categories.map((c: CategoryData) => ({ value: c.id.toString(), label: c.category }))
         );
-      } else {
+      } else if (response.status !== 499) {
         console.error(
           'Frontend - fetchCategoriesByCompanyOnLoad failed with status:',
           response.status
         );
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       console.error('Error fetching categories by company on load:', err);
     }
   };
@@ -795,6 +837,24 @@ function RequestBoard() {
     for (const doc of visibleRequiredFiles) {
       if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
         errors[`file_${doc.id}`] = `Debe adjuntar el documento: ${doc.file_label}`;
+      }
+    }
+
+    const hasOrionSignatureField = visibleFields.some(
+      (f) => f.field_type === ORION_SIGNATURE_FIELD_TYPE
+    );
+    const isFirmaProcess = String(formData.category || '')
+      .toUpperCase()
+      .includes('FIRMA');
+    if (hasOrionSignatureField || isFirmaProcess) {
+      const isPdf = (name: string) => /\.pdf$/i.test(name || '');
+      const pdfFromRequired = Object.values(filesByDoc)
+        .flat()
+        .some((f) => isPdf(f.file?.name || ''));
+      const pdfFromAttached = attachedFiles.some((f) => isPdf(f.file?.name || ''));
+      if (!pdfFromRequired && !pdfFromAttached) {
+        errors.orion_pdf =
+          'Debe adjuntar al menos un documento PDF para el flujo de firma digital.';
       }
     }
 
@@ -2180,6 +2240,11 @@ function RequestBoard() {
                 autoUpload={false}
                 disabled={formDataLoading}
               />
+              {formErrors.orion_pdf && (
+                <Text size='sm' c='red' mt='xs'>
+                  {formErrors.orion_pdf}
+                </Text>
+              )}
             </div>
 
             <Divider />

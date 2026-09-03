@@ -11,6 +11,7 @@ import {
   MAX_FIELD_WIDTH,
   MIN_FIELD_HEIGHT,
   MIN_FIELD_WIDTH,
+  pctFromClientPoint,
   type SignatureFieldPlacement,
 } from '../../lib/orion/signatureFields';
 import type { OrionParticipant } from '../../lib/orion/participants';
@@ -39,24 +40,28 @@ export default function SignaturePlacementCanvas({
 }: Props) {
   const { pages, loading, error } = usePdfPageImages(pdfSrc);
   const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const imgRefs = useRef<Record<number, HTMLImageElement | null>>({});
   const [drag, setDrag] = useState<{
     fieldId: string;
     page: number;
     offsetX: number;
     offsetY: number;
   } | null>(null);
+  const [resize, setResize] = useState<{ fieldId: string; page: number } | null>(null);
 
   const activePerson = participants.find((p) => p.order === activeOrder);
 
-  function clientToPct(page: number, clientX: number, clientY: number) {
+  function getPageRect(page: number): DOMRect | null {
+    const img = imgRefs.current[page];
+    if (img) return img.getBoundingClientRect();
     const el = pageRefs.current[page];
-    if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    if (rect.width < 1 || rect.height < 1) return null;
-    return {
-      x: ((clientX - rect.left) / rect.width) * 100,
-      y: ((clientY - rect.top) / rect.height) * 100,
-    };
+    return el ? el.getBoundingClientRect() : null;
+  }
+
+  function clientToPct(page: number, clientX: number, clientY: number) {
+    const rect = getPageRect(page);
+    if (!rect) return null;
+    return pctFromClientPoint(rect, clientX, clientY);
   }
 
   function placeAt(page: number, xPct: number, yPct: number) {
@@ -95,7 +100,7 @@ export default function SignaturePlacementCanvas({
   }
 
   function handlePageClick(page: number, e: MouseEvent<HTMLDivElement>) {
-    if (drag) return;
+    if (drag || resize) return;
     const pct = clientToPct(page, e.clientX, e.clientY);
     if (!pct) return;
     placeAt(page, pct.x, pct.y);
@@ -130,6 +135,36 @@ export default function SignaturePlacementCanvas({
       window.removeEventListener('mouseup', onUp);
     };
   }, [drag, fields, onChange]);
+
+  useEffect(() => {
+    if (!resize) return;
+    const activeResize = resize;
+
+    function onMove(e: globalThis.MouseEvent) {
+      const pct = clientToPct(activeResize.page, e.clientX, e.clientY);
+      if (!pct) return;
+      const field = fields.find((f) => f.id === activeResize.fieldId);
+      if (!field) return;
+      const width = clamp(pct.x - field.x, MIN_FIELD_WIDTH, MAX_FIELD_WIDTH);
+      const height = clamp(pct.y - field.y, MIN_FIELD_HEIGHT, MAX_FIELD_HEIGHT);
+      onChange(
+        fields.map((f) =>
+          f.id === activeResize.fieldId ? clampFieldSize({ ...f, width, height }) : f
+        )
+      );
+    }
+
+    function onUp() {
+      setResize(null);
+    }
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [resize, fields, onChange]);
 
   if (loading) {
     return (
@@ -168,7 +203,8 @@ export default function SignaturePlacementCanvas({
           Ubique la firma de {activePerson?.name ?? 'firmante'}
         </Text>
         <Text size='xs' c='dimmed' mt={4}>
-          Haga clic en el documento para colocar el campo. Arrastre para ajustar la posición.
+          Clic para colocar · arrastre para mover · esquina inferior para redimensionar ({MIN_FIELD_WIDTH}–
+          {MAX_FIELD_WIDTH}% × {MIN_FIELD_HEIGHT}–{MAX_FIELD_HEIGHT}%).
         </Text>
       </Box>
       <ScrollArea
@@ -202,6 +238,9 @@ export default function SignaturePlacementCanvas({
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
+                ref={(el) => {
+                  imgRefs.current[page.page] = el;
+                }}
                 src={page.dataUrl}
                 alt={`Página ${page.page}`}
                 style={{ display: 'block', width: '100%', height: 'auto' }}
@@ -236,13 +275,15 @@ export default function SignaturePlacementCanvas({
                           ? '2px solid var(--mantine-color-blue-6)'
                           : '2px dashed var(--mantine-color-green-6)',
                         borderRadius: 6,
-                        background: 'color-mix(in srgb, var(--app-surface) 92%, transparent)',
+                        background: 'color-mix(in srgb, var(--app-surface) 88%, transparent)',
                         display: 'flex',
+                        flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
                         overflow: 'hidden',
                         cursor: 'move',
                         boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+                        boxSizing: 'border-box',
                       }}
                     >
                       {person?.signatureDataUrl ? (
@@ -250,14 +291,45 @@ export default function SignaturePlacementCanvas({
                         <img
                           src={person.signatureDataUrl}
                           alt=''
-                          style={{ maxWidth: '95%', maxHeight: '95%', objectFit: 'contain' }}
+                          style={{
+                            maxWidth: '92%',
+                            maxHeight: '58%',
+                            objectFit: 'contain',
+                            flexShrink: 0,
+                          }}
                           draggable={false}
                         />
-                      ) : (
-                        <Text size='xs' c='dimmed' ta='center' px={4} fw={500}>
-                          {field.label || person?.name}
-                        </Text>
-                      )}
+                      ) : null}
+                      <Text
+                        size='10px'
+                        c='dimmed'
+                        ta='center'
+                        px={4}
+                        fw={600}
+                        style={{ lineHeight: 1.2, marginTop: 2 }}
+                      >
+                        {(person?.name || field.label || 'Firmante').toUpperCase()}
+                      </Text>
+                      <Box
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          setResize({ fieldId: field.id, page: page.page });
+                        }}
+                        style={{
+                          position: 'absolute',
+                          right: 2,
+                          bottom: 2,
+                          width: 12,
+                          height: 12,
+                          borderRadius: 2,
+                          background: isActive
+                            ? 'var(--mantine-color-blue-6)'
+                            : 'var(--mantine-color-green-6)',
+                          cursor: 'nwse-resize',
+                          border: '1px solid #fff',
+                        }}
+                        title='Redimensionar'
+                      />
                     </Box>
                   );
                 })}

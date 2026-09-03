@@ -68,10 +68,30 @@ import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
-import { parseOrionSignatureState } from '../../../../../lib/orion/formValue';
+import { getCurrentPendingSigner, isSignerCompleted } from '../../../../../lib/orion/signerStatus';
+import {
+  listSignedOrionDocuments,
+  parseOrionSignatureBagBag,
+  resolveOrionDocumentForAttachment,
+} from '../../../../../lib/orion/formValue';
+import {
+  canViewOrionDocumentVersions,
+  resolveOrionPdfUrl,
+} from '../../../../../lib/orion/documentVersions';
+import { resolveOrionPdfAccessUrl } from '../../../../../lib/orion/signedFileAccess';
 import type { OrionSignatureState } from '../../../../../lib/orion/types';
 import { buildOrionParticipants } from '../../../../../lib/orion/participants';
+import {
+  isOrionSignerAuthResolution,
+  isOrionWorkflowResolution,
+  parseOrionFileIdFromResolution,
+} from '../../../../../lib/orion/signerAuthMarkers';
+import { isSynerlinkWorkflowLocked } from '../../../../../lib/orion/workflowLock';
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
+import ChatDocumentChip from '../../../../../components/orion/ChatDocumentChip';
+import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
+import OrionAttachmentSignActions from '../../../../../components/orion/OrionAttachmentSignActions';
+import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 
 interface Request {
   id: number;
@@ -164,6 +184,8 @@ function ViewRequestPage() {
   const router = useRouter();
   const id = searchParams.get('id');
   const from = searchParams.get('from') || searchParams.get('mode') || 'assigned-activities';
+  const orionFileIdParam = searchParams.get('orionFileId');
+  const orionActionParam = searchParams.get('orionAction') as 'sign' | 'manage' | 'view' | null;
   const [request, setRequest] = useState<Request | null>(null);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [assignedUsers, setAssignedUsers] = useState<Option[]>([]);
@@ -222,6 +244,7 @@ function ViewRequestPage() {
     }[]
   >([]);
   const lastOrionFormFetchKeyRef = useRef('');
+  const [orionDocuments, setOrionDocuments] = useState<Record<string, OrionSignatureState>>({});
 
   useEffect(() => {
     const storedRequest = sessionStorage.getItem('selectedRequest');
@@ -238,12 +261,17 @@ function ViewRequestPage() {
 
     if (!id) return;
 
-    fetch(`/api/requests-general/view-activities?id=${id}`)
-      .then((res) => {
+    const loadTask = async () => {
+      try {
+        let res = await fetch(`/api/requests-general/view-activities?id=${id}`);
+        // Deep-link legacy / error: a veces llega id_request_general en lugar del id de tarea
+        if (!res.ok && from === 'authorization') {
+          const qs = new URLSearchParams({ requestId: String(id) });
+          if (orionFileIdParam) qs.set('fileId', orionFileIdParam);
+          res = await fetch(`/api/requests-general/view-activities?${qs.toString()}`);
+        }
         if (!res.ok) throw new Error('Error al cargar la tarea');
-        return res.json();
-      })
-      .then((data) => {
+        const data = await res.json();
         const mappedData = {
           ...data,
           resolution: data.resolutioncase || data.resolution || null,
@@ -252,15 +280,17 @@ function ViewRequestPage() {
         setRequest(mappedData);
         setOriginalRequest(mappedData);
         setLoading(false);
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error('Error fetching request:', err);
         if (!storedRequest) {
           setError('No se pudo cargar la tarea. Por favor intente nuevamente.');
         }
         setLoading(false);
-      });
-  }, [id]);
+      }
+    };
+
+    void loadTask();
+  }, [id, from, orionFileIdParam]);
 
   useEffect(() => {
     if (request) {
@@ -385,7 +415,7 @@ function ViewRequestPage() {
     }
   };
 
-  const fetchUsersWithEmails = async () => {
+  const fetchUsersWithEmails = async (attempt = 0) => {
     try {
       setLoadingUsers(true);
       const response = await fetch('/api/requests-general/users-emails');
@@ -396,10 +426,20 @@ function ViewRequestPage() {
           label: `${user.name} - ${user.email}`,
         }));
         setAvailableUsers(formattedUsers);
-      } else {
-        console.error('Error al cargar usuarios:', response.statusText);
+        return;
       }
+      if (response.status === 499) return;
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+        return fetchUsersWithEmails(attempt + 1);
+      }
+      const errorData = await response.json().catch(() => ({}));
+      console.error('Error al cargar usuarios:', errorData.error || response.statusText);
     } catch (error) {
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+        return fetchUsersWithEmails(attempt + 1);
+      }
       console.error('Error cargando usuarios:', error);
     } finally {
       setLoadingUsers(false);
@@ -451,15 +491,25 @@ function ViewRequestPage() {
       const zip = new JSZip();
 
       for (const file of folderContents) {
-        const url = file["@microsoft.graph.downloadUrl"];
+        const url = resolveAttachmentDownloadUrl(file);
 
         if (!url) continue;
 
         const response = await axios.get(url, {
           responseType: 'blob',
+          withCredentials: url.startsWith('/api/'),
         });
 
-        zip.file(file.name, response.data);
+        const orionState = getOrionDocForFile(String(file.id));
+        const hasSignedVersion =
+          /\.pdf$/i.test(file.name) &&
+          Boolean(orionState?.signedFileUrl || (orionState?.versions ?? []).some((v) => v.kind !== 'original'));
+        const fileName =
+          hasSignedVersion && /\.pdf$/i.test(file.name)
+            ? file.name.replace(/\.pdf$/i, '-firmado.pdf')
+            : file.name;
+
+        zip.file(fileName, response.data);
       }
 
       const content = await zip.generateAsync({ type: 'blob' });
@@ -531,26 +581,72 @@ function ViewRequestPage() {
     return field?.value_text ?? null;
   }, [requestFormValues]);
 
-  const orionInitialState = useMemo(
-    () => parseOrionSignatureState(orionValueText),
+  const orionInitialDocuments = useMemo(
+    () => parseOrionSignatureBagBag(orionValueText).documents,
     [orionValueText]
   );
 
-  const handleOrionStateChange = useCallback(
-    (next: OrionSignatureState) => {
+  useEffect(() => {
+    setOrionDocuments(orionInitialDocuments);
+  }, [orionInitialDocuments]);
+
+  const getOrionDocForFile = useCallback(
+    (fileId: string, fileName?: string | null) =>
+      resolveOrionDocumentForAttachment({
+        fileId,
+        fileName,
+        documents: { ...orionInitialDocuments, ...orionDocuments },
+        fallback: orionDocuments[fileId] ?? orionInitialDocuments[fileId],
+      }),
+    [orionDocuments, orionInitialDocuments]
+  );
+
+  const resolveAttachmentDownloadUrl = useCallback(
+    (file: FolderFile): string | null => {
+      const original = getFolderFileUrl(file);
+      if (!/\.pdf$/i.test(file.name)) return original;
+      const orionDoc = getOrionDocForFile(String(file.id), file.name);
+      if (!request?.id_request_general) {
+        return resolveOrionPdfUrl(orionDoc, original) ?? original;
+      }
+      return (
+        resolveOrionPdfAccessUrl(orionDoc, original, {
+          requestId: request.id_request_general,
+          fileId: String(file.id),
+        }) ?? original
+      );
+    },
+    [getOrionDocForFile, request?.id_request_general]
+  );
+
+  const canViewOrionVersions = canViewOrionDocumentVersions({
+    isAdmin,
+    currentUserId: session?.user?.id,
+    requesterId: request?.id_requester,
+  });
+
+  const handleOrionDocumentsChange = useCallback(
+    (documents: Record<string, OrionSignatureState>) => {
+      setOrionDocuments(documents);
       if (!request?.id_request_general) return;
-      const status = String(next.status || '').toUpperCase();
-      const fetchKey = JSON.stringify({
-        status,
-        signed: next.signedFileUrl ?? null,
-        id: next.orionDocumentId ?? null,
-      });
+      const fetchKey = JSON.stringify(
+        Object.entries(documents).map(([id, doc]) => [
+          id,
+          doc.orionDocumentId,
+          doc.status,
+          doc.signedFileUrl,
+        ])
+      );
       if (fetchKey === lastOrionFormFetchKeyRef.current) return;
-      const shouldRefresh =
-        Boolean(next.orionDocumentId) ||
-        status === 'FIRMADO' ||
-        status === 'RECHAZADO' ||
-        Boolean(next.signedFileUrl);
+      const shouldRefresh = Object.values(documents).some((doc) => {
+        const status = String(doc.status || '').toUpperCase();
+        return (
+          Boolean(doc.orionDocumentId) ||
+          status === 'FIRMADO' ||
+          status === 'RECHAZADO' ||
+          Boolean(doc.signedFileUrl)
+        );
+      });
       if (!shouldRefresh) return;
       lastOrionFormFetchKeyRef.current = fetchKey;
       void fetchFormValues(request.id_request_general);
@@ -870,7 +966,27 @@ function ViewRequestPage() {
   };
 
   const isRequestResolved = () => {
-    return request?.status_task?.toLowerCase() === 'completada' || Boolean(request?.resolution && request.resolution.trim() !== '');
+    const resolution = String(request?.resolution || '').trim();
+    // Marcadores Orion NUNCA cuentan como "tarea resuelta" en la UI.
+    if (isOrionWorkflowResolution(resolution) || /pendiente de firma/i.test(resolution)) {
+      const statusId = Number(request?.id_status);
+      return statusId === 2 || statusId === 3;
+    }
+
+    const statusId = Number(request?.id_status);
+    if (statusId === 2 || statusId === 3) return true;
+    if (statusId === 4 || statusId === 1 || Number.isNaN(statusId)) return false;
+
+    const label = String(request?.status_task || '').toLowerCase();
+    if (
+      label.includes('completad') ||
+      label.includes('resuelt') ||
+      label.includes('cancel')
+    ) {
+      return true;
+    }
+
+    return Boolean(resolution);
   };
 
   const handleAddNote = async () => {
@@ -1087,16 +1203,115 @@ function ViewRequestPage() {
     );
   }
 
-  const isFirmaTask = (request.category ?? '').toUpperCase().includes('FIRMA');
+  const isFirmaTask =
+    (request.category ?? '').toUpperCase().includes('FIRMA') ||
+    (request.process ?? '').toUpperCase().includes('FIRMA');
   const hasOrionSignatureField = requestFormValues.some(
     (fv) => fv.field_type === ORION_SIGNATURE_FIELD_TYPE
   );
-  const showOrionPanel = isFirmaTask || hasOrionSignatureField;
-  const primaryPdfFile = folderContents.find((f) => /\.pdf$/i.test(f.name));
-  const attachmentPdfUrl = primaryPdfFile ? getFolderFileUrl(primaryPdfFile) : null;
-  const attachmentFileName = primaryPdfFile?.name ?? null;
+  const hasOrionDocuments = Object.keys(orionInitialDocuments).length > 0;
+  const taskOrionFileId = parseOrionFileIdFromResolution(request?.resolution);
+  const taskPendingOrionAuth = isOrionSignerAuthResolution(request?.resolution);
+  const showOrionPanel =
+    isFirmaTask ||
+    hasOrionSignatureField ||
+    hasOrionDocuments ||
+    Boolean(taskOrionFileId) ||
+    taskPendingOrionAuth ||
+    from === 'authorization' ||
+    from === 'assigned-activities';
+  const currentUserEmailNorm = String(session?.user?.email || '')
+    .trim()
+    .toLowerCase();
+  const userIsCurrentOrionSigner = Object.values({
+    ...orionInitialDocuments,
+    ...orionDocuments,
+  }).some((doc) => {
+    const pending = getCurrentPendingSigner(doc.signers);
+    if (!pending || !currentUserEmailNorm) return false;
+    return String(pending.email || '').trim().toLowerCase() === currentUserEmailNorm;
+  });
+  const userAlreadySignedOrion = Object.values({
+    ...orionInitialDocuments,
+    ...orionDocuments,
+  }).some((doc) =>
+    (doc.signers ?? []).some(
+      (s) =>
+        String(s.email || '').trim().toLowerCase() === currentUserEmailNorm &&
+        isSignerCompleted(s.status)
+    )
+  );
+  const orionWorkflowLocked =
+    isRequestResolved() ||
+    isSynerlinkWorkflowLocked({
+      taskStatusId: request?.id_status,
+      taskStatusLabel: request?.status_task,
+      taskResolution: request?.resolution,
+      requestStatusReq: request?.status_req,
+    });
+  const signedOrionDocs = listSignedOrionDocuments({ documents: orionInitialDocuments });
+  const autoOpenFile = orionFileIdParam
+    ? folderContents.find(
+        (f) => String(f.id) === String(orionFileIdParam) && /\.pdf$/i.test(f.name)
+      )
+    : undefined;
+  const autoOpenPdfUrl = autoOpenFile ? getFolderFileUrl(autoOpenFile) : null;
+  // Si viene from=authorization sin fileId, abrir el primer PDF pendiente de firma del usuario
+  const fallbackSignFile =
+    !autoOpenFile && from === 'authorization'
+      ? folderContents.find((f) => /\.pdf$/i.test(f.name))
+      : undefined;
+  const deepLinkFileId = autoOpenFile
+    ? String(autoOpenFile.id)
+    : fallbackSignFile
+      ? String(fallbackSignFile.id)
+      : null;
+  const deepLinkPdfUrl = deepLinkFileId
+    ? resolveOrionPdfAccessUrl(
+        getOrionDocForFile(deepLinkFileId),
+        autoOpenPdfUrl || (fallbackSignFile ? getFolderFileUrl(fallbackSignFile) : null),
+        request?.id_request_general
+          ? { requestId: request.id_request_general, fileId: deepLinkFileId }
+          : null
+      )
+    : autoOpenPdfUrl || (fallbackSignFile ? getFolderFileUrl(fallbackSignFile) : null);
+  const deepLinkAction: 'sign' | 'manage' | 'view' | null =
+    orionActionParam === 'sign' || orionActionParam === 'manage' || orionActionParam === 'view'
+      ? orionActionParam
+      : from === 'authorization' || orionFileIdParam
+        ? 'sign'
+        : null;
+
+  const chatDocumentItems = [
+    ...folderContents
+      .filter((f) => /\.pdf$/i.test(f.name))
+      .map((f) => {
+        const url = resolveOrionPdfAccessUrl(
+          getOrionDocForFile(String(f.id)),
+          getFolderFileUrl(f),
+          request?.id_request_general
+            ? { requestId: request.id_request_general, fileId: String(f.id) }
+            : null
+        );
+        if (!url) return null;
+        return {
+          id: f.id,
+          name: f.name,
+          url,
+          variant: 'attachment' as const,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null),
+    ...signedOrionDocs.map((doc) => ({
+      id: `orion-signed-${doc.fileId}`,
+      name: doc.fileName,
+      url: doc.url,
+      variant: 'signed' as const,
+    })),
+  ];
 
   return (
+    <OrionSignatureProvider>
     <div className='min-h-screen bg-gray-50'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
         <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
@@ -1146,6 +1361,35 @@ function ViewRequestPage() {
 
               <ScrollArea h='calc(100vh - 420px)' className='mb-4' offsetScrollbars viewportRef={notesViewportRef}>
                 <div className='space-y-4 p-2'>
+                  {chatDocumentItems.map((doc) => (
+                    <Box key={doc.id} style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <Box
+                        maw={240}
+                        px='sm'
+                        py='xs'
+                        style={{
+                          borderRadius: 14,
+                          borderBottomRightRadius: 4,
+                          background: 'color-mix(in srgb, var(--mantine-color-blue-4) 14%, white)',
+                          border: '1px solid color-mix(in srgb, var(--mantine-color-blue-4) 28%, #dee2e6)',
+                        }}
+                      >
+                        <Text size='xs' c='dimmed' fw={500} mb={6}>
+                          {request.name_requester || 'Solicitud'}
+                        </Text>
+                        <ChatDocumentChip
+                          name={doc.name}
+                          url={doc.url}
+                          variant={doc.variant}
+                          tone='chat'
+                        />
+                        <Text size='10px' c='dimmed' ta='right' mt={6}>
+                          Documento adjunto
+                        </Text>
+                      </Box>
+                    </Box>
+                  ))}
+
                   {notes.length > 0 ? (
                     notes.map((note) => {
                       const isCurrentUser = note.createdBy === userName;
@@ -1207,7 +1451,7 @@ function ViewRequestPage() {
                         </div>
                       );
                     })
-                  ) : (
+                  ) : chatDocumentItems.length === 0 ? (
                     <div className='text-center py-8'>
                       <Text size='lg' color='gray.5' mb='xs'>
                         No hay interacciones registradas
@@ -1216,7 +1460,7 @@ function ViewRequestPage() {
                         Sé el primero en añadir un comentario
                       </Text>
                     </div>
-                  )}
+                  ) : null}
                   <div ref={chatEndRef} />
                 </div>
               </ScrollArea>
@@ -1298,15 +1542,21 @@ function ViewRequestPage() {
               <OrionSignaturePanel
                 requestId={request.id_request_general}
                 requestTitle={request.subject_request}
-                initialState={orionInitialState}
+                initialDocuments={orionInitialDocuments}
                 createdByEmail={request.requester_email ?? undefined}
                 currentUserEmail={session?.user?.email ?? undefined}
-                attachmentPdfUrl={attachmentPdfUrl}
-                attachmentFileName={attachmentFileName}
                 participants={orionParticipants}
                 availableUsers={availableUsers}
                 currentUserName={session?.user?.name ?? undefined}
-                onStateChange={handleOrionStateChange}
+                onDocumentsChange={handleOrionDocumentsChange}
+                workflowLocked={orionWorkflowLocked}
+                autoOpenFileId={deepLinkFileId}
+                autoOpenAction={deepLinkAction}
+                autoOpenFileName={
+                  autoOpenFile?.name || fallbackSignFile?.name || null
+                }
+                autoOpenPdfUrl={deepLinkPdfUrl}
+                fromAuthorization={from === 'authorization'}
               />
             )}
           </div>
@@ -1417,7 +1667,9 @@ function ViewRequestPage() {
 
                 <Divider />
 
-                {request?.resolution && request.resolution.trim() !== '' && (
+                {request?.resolution &&
+                  request.resolution.trim() !== '' &&
+                  !isOrionWorkflowResolution(request.resolution) && (
                   <div>
                     <Text fw={600} mb='xs'>
                       Resolución de la Tarea
@@ -1469,6 +1721,15 @@ function ViewRequestPage() {
                       </Stack>
                     </Card>
                   </div>
+                )}
+
+                {request?.resolution && isOrionWorkflowResolution(request.resolution) && (
+                  <Alert color='blue' variant='light' title='Documento en firma (Orion)'>
+                    <Text size='sm'>
+                      Esta tarea forma parte del flujo de firma digital. Use el botón{' '}
+                      <strong>Firmar</strong> en Archivos adjuntos.
+                    </Text>
+                  </Alert>
                 )}
 
                 <div>
@@ -1722,7 +1983,7 @@ function ViewRequestPage() {
                             </Text>
                           )}
                         </Box>
-                        <Group gap='xs'>
+                        <Stack gap={6} align='center'>
                           <Badge color='teal' size='sm'>
                             Almacenado
                           </Badge>
@@ -1731,14 +1992,50 @@ function ViewRequestPage() {
                             color='blue'
                             size='sm'
                             component='a'
-                            href={file.webUrl}
+                            href={resolveAttachmentDownloadUrl(file) ?? file.webUrl ?? '#'}
                             target='_blank'
                             rel='noopener noreferrer'
-                            aria-label={`Descargar archivo ${file.name}`}
+                            aria-label={`Ver archivo ${file.name}`}
                           >
                             <IconEye size={16} />
                           </ActionIcon>
-                        </Group>
+                          {showOrionPanel &&
+                            String(file.name || '')
+                              .toLowerCase()
+                              .includes('.pdf') && (
+                              <>
+                                <OrionDocumentVersionsButton
+                                  state={getOrionDocForFile(String(file.id), file.name)}
+                                  fileName={file.name}
+                                  canView={canViewOrionVersions}
+                                  fallbackOriginalUrl={getFolderFileUrl(file)}
+                                  requestId={request.id_request_general}
+                                  fileId={String(file.id || taskOrionFileId || '')}
+                                />
+                                <OrionAttachmentSignActions
+                                  fileId={String(file.id || taskOrionFileId || 'pdf')}
+                                  fileName={
+                                    file.name.toLowerCase().endsWith('.pdf')
+                                      ? file.name
+                                      : `${file.name}.pdf`
+                                  }
+                                  pdfUrl={
+                                    resolveAttachmentDownloadUrl(file) ||
+                                    getFolderFileUrl(file) ||
+                                    file.webUrl ||
+                                    `/api/integrations/orion/signed-file?requestId=${request.id_request_general}&fileId=${encodeURIComponent(String(file.id || taskOrionFileId || ''))}`
+                                  }
+                                  currentUserEmail={session?.user?.email}
+                                  fallbackState={getOrionDocForFile(String(file.id), file.name)}
+                                  allDocuments={{
+                                    ...orionInitialDocuments,
+                                    ...orionDocuments,
+                                  }}
+                                  forceSignerUi
+                                />
+                              </>
+                            )}
+                        </Stack>
                       </Flex>
                     </Card>
                   ))}
@@ -2015,6 +2312,7 @@ function ViewRequestPage() {
         </Modal>
       </div>
     </div>
+    </OrionSignatureProvider>
   );
 }
 

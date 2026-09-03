@@ -29,6 +29,7 @@ export async function POST(req: Request) {
 
     const body = await req.json().catch(() => ({}));
     const requestId = Number(body.requestId);
+    const fileId = body.fileId ? String(body.fileId).trim() : null;
     if (!Number.isInteger(requestId) || requestId <= 0) {
       return NextResponse.json({ error: 'requestId inválido' }, { status: 400 });
     }
@@ -38,6 +39,7 @@ export async function POST(req: Request) {
         requestId,
         userId: String(userId),
         userEmail: email,
+        fileId,
       })
     );
 
@@ -45,6 +47,8 @@ export async function POST(req: Request) {
       {
         success: true,
         state: result.state,
+        documents: result.bag.documents,
+        fileId: result.fileId,
         signerCompleted: result.signerCompleted,
         tasksUpdated: result.tasksUpdated,
         requestClosed: result.requestClosed,
@@ -52,8 +56,8 @@ export async function POST(req: Request) {
         signerTasksOpened: result.signerTasksOpened,
         currentSignerEmail: result.currentSignerEmail,
         message: result.signerCompleted
-          ? 'Firma registrada. Su tarea fue cerrada y el flujo continúa con el siguiente firmante.'
-          : 'Estado sincronizado. La firma aún no aparece como completada en Orion.',
+          ? 'Documento firmado correctamente.'
+          : 'No se pudo confirmar la firma. Intente de nuevo.',
       },
       { status: 200 }
     );

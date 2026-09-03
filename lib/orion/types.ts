@@ -16,15 +16,34 @@ export type OrionSignerState = {
   type?: 'internal' | 'external' | string;
 };
 
+export type OrionDocumentVersionKind = 'original' | 'partial' | 'final';
+
+export type OrionDocumentVersion = {
+  id: string;
+  kind: OrionDocumentVersionKind;
+  label: string;
+  url: string;
+  createdAt: string;
+  signerEmail?: string | null;
+  signerName?: string | null;
+};
+
+/** Estado Orion de un PDF concreto (por fileId de OneDrive). */
 export type OrionSignatureState = {
   orionDocumentId?: string | null;
   externalRef?: string;
+  fileId?: string;
+  fileName?: string | null;
+  /** URL del PDF adjunto original en OneDrive/SynerLink */
+  originalFileUrl?: string | null;
   status?: OrionDocumentStatus;
   embedUrl?: string | null;
   signedFileUrl?: string | null;
   signedAt?: string | null;
   auditSummary?: string | null;
   signers?: OrionSignerState[];
+  /** Historial de versiones (original + tras cada firma) */
+  versions?: OrionDocumentVersion[];
   signatureFields?: Array<{
     id: string;
     documentId: string;
@@ -39,6 +58,12 @@ export type OrionSignatureState = {
   updatedAt?: string;
 };
 
+/** Contenedor persistido en request_form_value (campo orion_signature). */
+export type OrionSignatureBagBag = {
+  documents: Record<string, OrionSignatureState>;
+  updatedAt?: string;
+};
+
 export type OrionCreateDocumentPayload = {
   externalRef: string;
   synerlinkRequestId: number;
@@ -50,6 +75,8 @@ export type OrionCreateDocumentPayload = {
   metadata?: {
     processName?: string;
     categoryName?: string;
+    fileId?: string;
+    fileName?: string;
   };
 };
 
@@ -73,6 +100,16 @@ export type OrionDocumentResponse = {
   title?: string;
   signers?: OrionSignerState[];
   auditSummary?: string | null;
+  signatureFields?: Array<{
+    id: string;
+    signerOrder: number;
+    page: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    label?: string;
+  }>;
 };
 
 export type OrionWebhookPayload = {

@@ -20,6 +20,7 @@ export async function POST(req) {
       start_date,
       end_date,
       resolution,
+      skip_sequential_gate,
     } = body;
 
     console.log(`${TAG} ▶ POST recibido. body =`, {
@@ -50,15 +51,39 @@ export async function POST(req) {
       const prevResult = await new sql.Request(transaction)
         .input('id', sql.Int, id)
         .query(`
-          SELECT trg.id_status, trg.id_request_general, trg.id_task, rg.subject_request,
+          SELECT trg.id_status, trg.id_request_general, trg.id_task, trg.resolution,
+                 rg.subject_request,
                  tpc.task, tpc.is_sequential, tpc.display_order, tpc.id_process_category,
-                 tpc.is_authorization
+                 tpc.is_authorization, taut.type_authorization,
+                 pc.process, cr.category
           FROM task_request_general trg
           INNER JOIN requests_general rg ON rg.id = trg.id_request_general
           LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task
+          LEFT JOIN types_authorization taut ON taut.id = tpc.type_authorization
+          LEFT JOIN process_category pc ON pc.id = tpc.id_process_category
+          LEFT JOIN category_request cr ON cr.id = pc.id_category_request
           WHERE trg.id = @id
         `);
       const prevRow = prevResult.recordset[0];
+      const resolutionText = String(prevRow?.resolution || '');
+      const typeAuth = String(prevRow?.type_authorization || '').toLowerCase();
+      const taskName = String(prevRow?.task || '').toLowerCase();
+      const processName = String(prevRow?.process || '').toLowerCase();
+      const categoryName = String(prevRow?.category || '').toLowerCase();
+      const isAuthorizationTask =
+        Number(prevRow?.is_authorization) === 1 || prevRow?.is_authorization === true;
+      const isSequentialTask =
+        Number(prevRow?.is_sequential) === 1 || prevRow?.is_sequential === true;
+      const isOrionSignerAuth =
+        resolutionText.includes('[orionAuth]') || resolutionText.includes('[orionFile:');
+      const isFirmaProcess =
+        typeAuth.includes('firma') ||
+        taskName.includes('firma') ||
+        taskName.includes('previa') ||
+        processName.includes('firma') ||
+        categoryName.includes('firma');
+      const isFirmaAuthorization =
+        isOrionSignerAuth || isFirmaProcess || (isAuthorizationTask && Boolean(skip_sequential_gate));
 
       console.log(`${TAG} 1) Tarea actual (prevRow) =`, {
         id_task: prevRow?.id_task,
@@ -68,17 +93,21 @@ export async function POST(req) {
         display_order: prevRow?.display_order,
         id_process_category: prevRow?.id_process_category,
         task: prevRow?.task,
+        isOrionSignerAuth,
+        isFirmaAuthorization,
+        isAuthorizationTask,
       });
 
-      // Gate de tareas secuenciales: si la tarea es secuencial, su predecesora inmediata
-      // (por display_order, id_task) debe estar cerrada (2 Resuelto o 3 Cancelado).
-      if (prevRow?.is_sequential) {
+      // Gate secuencial: no aplica a autorizaciones FIRMA/Orion (por firmante / Fase B).
+      // Tampoco a cualquier is_authorization: el inbox de Autorizar no debe 409
+      // porque una tarea operativa anterior siga abierta.
+      if (isSequentialTask && !isFirmaAuthorization && !isAuthorizationTask) {
         const predResult = await new sql.Request(transaction)
           .input('id_request', sql.Int, prevRow.id_request_general)
           .input('display_order', sql.Int, prevRow.display_order ?? 0)
           .input('id_task', sql.Int, prevRow.id_task)
           .query(`
-            SELECT TOP 1 trg2.id_status
+            SELECT TOP 1 trg2.id_status, tpc2.is_authorization, trg2.resolution
             FROM task_request_general trg2
             INNER JOIN task_process_category tpc2 ON tpc2.id = trg2.id_task
             WHERE trg2.id_request_general = @id_request
@@ -88,9 +117,25 @@ export async function POST(req) {
               )
             ORDER BY ISNULL(tpc2.display_order, 0) DESC, trg2.id_task DESC
           `);
-        const predStatus = predResult.recordset[0]?.id_status ?? null;
-        console.log(`${TAG} 2) Gate secuencial: estado de la tarea anterior =`, predStatus);
-        if (predStatus !== null && predStatus !== 2 && predStatus !== 3) {
+        const pred = predResult.recordset[0];
+        const predStatus = pred?.id_status ?? null;
+        const predIsAuth =
+          Number(pred?.is_authorization) === 1 || pred?.is_authorization === true;
+        const predIsOrion =
+          String(pred?.resolution || '').includes('[orionAuth]') ||
+          String(pred?.resolution || '').includes('[orionFile:');
+        console.log(`${TAG} 2) Gate secuencial: estado de la tarea anterior =`, predStatus, {
+          predIsAuth,
+          predIsOrion,
+        });
+        // Si la anterior no es autorización de cadena (p. ej. tarea de firma abierta), no bloquear.
+        if (
+          predStatus !== null &&
+          predStatus !== 2 &&
+          predStatus !== 3 &&
+          predIsAuth &&
+          !predIsOrion
+        ) {
           console.warn(`${TAG} ✖ BLOQUEADA: la tarea anterior (estado ${predStatus}) no está cerrada. Respondiendo 409.`);
           await transaction.rollback();
           return new Response(
@@ -101,7 +146,10 @@ export async function POST(req) {
           );
         }
       } else {
-        console.log(`${TAG} 2) Gate secuencial: la tarea NO es secuencial, no se valida predecesora.`);
+        console.log(
+          `${TAG} 2) Gate secuencial: omitido.`,
+          isAuthorizationTask ? '(tarea de autorización)' : isFirmaAuthorization ? '(FIRMA/Orion)' : '(no secuencial)'
+        );
       }
 
       // Para tareas de autorización, además de registrar al ejecutor final, se asigna la tarea
@@ -109,8 +157,6 @@ export async function POST(req) {
       // (date_resolution) con la fecha actual, tanto al autorizar como al rechazar. Para el resto
       // de actividades el comportamiento permanece igual (start_date/end_date/id_assigned según el
       // body; date_resolution solo si hay resolución).
-      const isAuthorizationTask = !!prevRow?.is_authorization;
-
       const updateQuery = `
         UPDATE task_request_general
         SET
@@ -153,7 +199,10 @@ export async function POST(req) {
       request.input(
         'resolution',
         sql.NVarChar(sql.MAX),
-        resolution
+        // Al autorizar Orion se envía null: conservar marcadores [orionFile]/[orionAuth]
+        resolution !== null && resolution !== undefined
+          ? resolution
+          : prevRow?.resolution ?? null
       );
 
       request.input(
@@ -232,9 +281,9 @@ export async function POST(req) {
 
       console.log(`${TAG} 5) ¿Se acaba de cerrar la tarea? justClosed =`, justClosed, `(prevStatus=${prevStatus} -> nextStatus=${nextStatus})`);
 
-      // Creación diferida de la siguiente tarea secuencial (extraída a un helper compartido para
-      // reutilizarla también en el endpoint entrante de SAPSEND). Comportamiento idéntico.
-      if (justClosed) {
+      // Creación diferida de la siguiente tarea secuencial.
+      // Auths Orion por firmante no avanzan el workflow Fase B.
+      if (justClosed && !isFirmaAuthorization) {
         await advanceSequentialTask(pool, {
           id_request_general: prevRow.id_request_general,
           id_task: prevRow.id_task,
@@ -242,6 +291,8 @@ export async function POST(req) {
           display_order: prevRow.display_order,
           subject_request: prevRow.subject_request,
         });
+      } else if (justClosed && isFirmaAuthorization) {
+        console.log(`${TAG} 5b) Auth FIRMA/Orion: no se avanza workflow secuencial.`);
       }
 
       console.log(`${TAG} ✅ Respondiendo 200 (tarea ${id} actualizada).`);

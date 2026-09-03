@@ -25,15 +25,12 @@ export async function GET(req) {
       );
     }
 
-    // Enrutamiento por tipo + departamento (no por id_assigned, que puede ser NULL en tareas
-    // de autorización):
-    //  - Solo tareas de autorización cuyo type_authorization esté asignado al usuario
-    //    (user_types_authorization).
-    //  - El CREADOR de la solicitud (rg.id_requester) debe compartir al menos un departamento
-    //    con el AUTORIZADOR (@idUser).
+    // Enrutamiento:
+    //  - Autorizaciones asignadas directamente al usuario (firma Orion por firmante), o
+    //  - Por tipo en user_types_authorization + mismo departamento que el creador.
     let query = `
         SELECT
-            trg.id as id_task_request, trg.id_request_general, trg.id_status, tpc.task,
+            trg.id as id_task_request, trg.id_request_general, trg.id_status, trg.resolution, tpc.task,
             sc.status as status_task, u.name as assigned_task,
             tp.type_authorization, rg.subject_request, rg.description, rg.id_company, c.company,
             rg.created_at, rg.id_requester as id_creator_request, ucr.name as creator_request
@@ -48,23 +45,28 @@ export async function GET(req) {
         LEFT JOIN [user] ucr ON ucr.id = rg.id_requester
         WHERE tpc.is_authorization = 1
           AND tpc.type_authorization IS NOT NULL
-          AND tpc.type_authorization IN (
-            SELECT ut.type_authorization
-            FROM user_types_authorization ut
-            WHERE ut.id_user = @idUser
-          )
 		  AND c.id_company IN (
             SELECT cu.id_company
             FROM company_user cu
             INNER JOIN subprocess_user_company suc ON suc.id_company_user = cu.id_company_user
             WHERE cu.id_user = @idUser
           )
-          AND EXISTS (
-            SELECT 1
-            FROM department_user du_c
-            INNER JOIN department_user du_a ON du_a.id_department = du_c.id_department
-            WHERE du_c.id_user = rg.id_requester
-              AND du_a.id_user = @idUser
+          AND (
+            trg.id_assigned = @idUser
+            OR (
+              tpc.type_authorization IN (
+                SELECT ut.type_authorization
+                FROM user_types_authorization ut
+                WHERE ut.id_user = @idUser
+              )
+              AND EXISTS (
+                SELECT 1
+                FROM department_user du_c
+                INNER JOIN department_user du_a ON du_a.id_department = du_c.id_department
+                WHERE du_c.id_user = rg.id_requester
+                  AND du_a.id_user = @idUser
+              )
+            )
           )
     `;
 

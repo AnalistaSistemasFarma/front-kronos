@@ -30,6 +30,7 @@ import SignaturePlacementCanvas from './SignaturePlacementCanvas';
 type Props = {
   requestId: number;
   documentId: string;
+  fileId: string;
   pdfSrc: string | null;
   documentTitle?: string;
   fileName?: string | null;
@@ -41,6 +42,7 @@ type Props = {
   state: OrionSignatureState;
   onStateUpdate: (state: OrionSignatureState) => void;
   onClose?: () => void;
+  assignmentsEditable?: boolean;
 };
 
 const EDITOR_HEIGHT = 'min(62vh, 680px)';
@@ -74,6 +76,7 @@ function buildInitialParticipants(
 export default function OrionDocumentEditor({
   requestId,
   documentId,
+  fileId,
   pdfSrc,
   documentTitle,
   fileName,
@@ -85,6 +88,7 @@ export default function OrionDocumentEditor({
   state,
   onStateUpdate,
   onClose,
+  assignmentsEditable = true,
 }: Props) {
   const [editorStep, setEditorStep] = useState(0);
   const [orderedParticipants, setOrderedParticipants] = useState<OrionParticipant[]>(() =>
@@ -236,6 +240,7 @@ export default function OrionDocumentEditor({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         requestId,
+        fileId,
         mode: sequential ? 'sequential' : 'parallel',
         signers: orderedParticipants
           .filter((p) => p.email)
@@ -250,20 +255,24 @@ export default function OrionDocumentEditor({
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'No se pudieron asignar los firmantes');
     if (data.state) onStateUpdate(data.state as OrionSignatureState);
-  }, [onStateUpdate, orderedParticipants, requestId, sequential, validateAssignments]);
+  }, [fileId, onStateUpdate, orderedParticipants, requestId, sequential, validateAssignments]);
 
   const persistFields = useCallback(async () => {
-    const res = await fetch('/api/integrations/orion/ensure-document', {
-      method: 'PATCH',
+    const res = await fetch('/api/integrations/orion/signature-fields', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId, patch: { signatureFields: fields } }),
+      body: JSON.stringify({ requestId, fileId, signatureFields: fields }),
     });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || 'No se guardaron las ubicaciones');
+      throw new Error(data.error || 'No se guardaron las ubicaciones en Orion');
     }
-    onStateUpdate({ ...state, signatureFields: fields });
-  }, [fields, onStateUpdate, requestId, state]);
+    if (data.state) {
+      onStateUpdate(data.state as OrionSignatureState);
+    } else {
+      onStateUpdate({ ...state, signatureFields: fields });
+    }
+  }, [fields, fileId, onStateUpdate, requestId, state]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -291,7 +300,7 @@ export default function OrionDocumentEditor({
       const res = await fetch('/api/integrations/orion/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId }),
+        body: JSON.stringify({ requestId, fileId }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'No se pudo enviar a firma');
@@ -302,7 +311,7 @@ export default function OrionDocumentEditor({
     } finally {
       setSaving(false);
     }
-  }, [allPlaced, assignSigners, onClose, onStateUpdate, persistFields, requestId]);
+  }, [allPlaced, assignSigners, fileId, onClose, onStateUpdate, persistFields, requestId]);
 
   const goNext = useCallback(async () => {
     if (editorStep === 1) {
@@ -399,6 +408,12 @@ export default function OrionDocumentEditor({
           </ScrollArea>
         )}
 
+        {editorStep === 1 && !assignmentsEditable && (
+          <Alert color='gray' variant='light' mb='md'>
+            La tarea o solicitud está cerrada. La asignación de firmantes es solo lectura.
+          </Alert>
+        )}
+
         {editorStep === 1 && (
           <ScrollArea style={{ flex: 1 }} offsetScrollbars type='scroll'>
             <OrionSignerAssignment
@@ -410,12 +425,13 @@ export default function OrionDocumentEditor({
               currentUserEmail={currentUserEmail}
               currentUserName={currentUserName}
               signerStatuses={signerStatuses}
+              readOnly={!assignmentsEditable}
               onSignerCountChange={handleSignerCountChange}
               onSequentialChange={setSequential}
               onIncludeSelfChange={handleIncludeSelfChange}
               onAssign={handleAssignSigner}
               onClear={handleClearSigner}
-              onReorder={signerCount > 1 ? reorderParticipant : undefined}
+              onReorder={signerCount > 1 && assignmentsEditable ? reorderParticipant : undefined}
             />
           </ScrollArea>
         )}
@@ -523,7 +539,7 @@ export default function OrionDocumentEditor({
             </Button>
           )}
           {editorStep < 2 ? (
-            <Button onClick={() => void goNext()} loading={saving}>
+            <Button onClick={() => void goNext()} loading={saving} disabled={!assignmentsEditable && editorStep === 1}>
               Continuar
             </Button>
           ) : (
@@ -532,7 +548,7 @@ export default function OrionDocumentEditor({
                 variant='default'
                 leftSection={saving ? <Loader size={14} /> : <IconDeviceFloppy size={16} />}
                 onClick={() => void handleSave()}
-                disabled={saving}
+                disabled={saving || !assignmentsEditable}
               >
                 Guardar ubicaciones
               </Button>
@@ -540,7 +556,7 @@ export default function OrionDocumentEditor({
                 color='blue'
                 leftSection={saving ? <Loader size={14} /> : <IconSend size={16} />}
                 onClick={() => void handleSend()}
-                disabled={saving || !allPlaced}
+                disabled={saving || !allPlaced || !assignmentsEditable}
               >
                 Enviar a firma
               </Button>

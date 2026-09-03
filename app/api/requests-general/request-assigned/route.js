@@ -114,6 +114,14 @@ export async function GET(req) {
             WHERE ucrg.id_category = cr.id
             AND ucrg.id_user = @idUser
           )
+          OR
+          EXISTS (
+            SELECT 1
+            FROM task_request_general trg
+            WHERE trg.id_request_general = rg.id
+              AND trg.id_assigned = @idUser
+              AND trg.id_status NOT IN (2, 3)
+          )
         )
       `;
     } else {

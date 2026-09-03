@@ -103,6 +103,10 @@ export async function GET(req) {
       { status: 200 }
     );
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.toLowerCase().includes('abort')) {
+      return NextResponse.json({ error: 'Solicitud cancelada', code: 'ABORTED' }, { status: 499 });
+    }
     console.error('Error en el procesamiento de la solicitud:', err);
     return NextResponse.json(
       { error: 'Error procesando la solicitud', details: err.message },

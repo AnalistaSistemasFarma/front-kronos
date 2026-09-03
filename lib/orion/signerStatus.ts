@@ -11,7 +11,15 @@ export function isSignerRejected(status?: string | null): boolean {
 }
 
 export function orderedSigners(signers?: OrionSignerState[] | null): OrionSignerState[] {
-  return [...(signers ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  return [...(signers ?? [])]
+    .map((signer, index) => ({ signer, index }))
+    .sort((a, b) => {
+      const orderA = a.signer.order ?? a.index + 1;
+      const orderB = b.signer.order ?? b.index + 1;
+      if (orderA !== orderB) return orderA - orderB;
+      return a.index - b.index;
+    })
+    .map(({ signer }) => signer);
 }
 
 export function getCurrentPendingSigner(signers?: OrionSignerState[] | null): OrionSignerState | null {

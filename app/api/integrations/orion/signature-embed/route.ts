@@ -69,11 +69,15 @@ export async function POST(req: Request) {
     const result = await saveOrionUserSignature(email, signatureDataUrl, method);
     if (!result.ok) {
       const errBody = result.data as { error?: string; code?: string } | null;
-      const message =
+      let message =
         errBody?.error ||
         result.error ||
         'No se pudo guardar la firma en GSS Firma';
-      console.error('[signature-embed POST]', result.status, message);
+      if (message.includes('<!DOCTYPE') || message.includes('Module not found')) {
+        message =
+          'GSS Firma (Orion) no responde correctamente. Reinicie Orion (npm run dev) y verifique que @napi-rs/canvas no se empaquete en el cliente (/embed/sign).';
+      }
+      console.error('[signature-embed POST]', result.status, message.slice(0, 200));
       return NextResponse.json(
         { error: message, code: errBody?.code },
         { status: result.status >= 400 && result.status < 600 ? result.status : 502 }
