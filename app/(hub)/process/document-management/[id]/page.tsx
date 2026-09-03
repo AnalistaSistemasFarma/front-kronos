@@ -78,7 +78,11 @@ export default function DocumentDetailPage() {
   const [workflowTasks, setWorkflowTasks] = useState<WorkflowDiagramTask[]>([]);
 
   const load = useCallback(async () => {
-    if (!idDocument) return;
+    if (!idDocument || Number.isNaN(idDocument)) {
+      setError('Documento no encontrado');
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
