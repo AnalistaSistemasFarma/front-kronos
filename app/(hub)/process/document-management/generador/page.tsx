@@ -538,7 +538,9 @@ export default function DocumentGeneratorPage() {
                     return (
                       <Table.Tr
                         key={d.id_document}
-                        onClick={() => router.push(`/process/document-management/${d.id_document}`)}
+                        onClick={() =>
+                          router.push(`/process/document-management/generador/${d.id_document}/editar`)
+                        }
                         style={{ cursor: 'pointer' }}
                       >
                         <Table.Td onClick={(e) => e.stopPropagation()}>

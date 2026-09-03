@@ -251,6 +251,15 @@ export interface CreateVersionAndStartWorkflowParams {
   idCompany: number;
   ownerUserId: string;
   subject: string;
+  /**
+   * Sprint 8 (2026-09-03) — HTML editado desde el editor de documentos
+   * (lib/document-management/editor.ts), cuando esta versión nueva se crea
+   * a partir de "Guardar" en el editor sobre un documento CON proceso
+   * (id_process no nulo, Caso B de la decisión de Nicolás del 2026-09-03).
+   * Null/undefined para el camino de carga de archivo (newVersion.ts /
+   * documents.ts), que no tiene HTML editable que persistir.
+   */
+  contentHtml?: string | null;
 }
 
 export interface CreateVersionAndStartWorkflowResult {
@@ -314,11 +323,12 @@ export async function createDocumentVersionAndStartWorkflow(
       .input('onedrive_path', sql.NVarChar(1000), params.onedrivePath)
       .input('created_by', sql.NVarChar(1000), params.createdBy)
       .input('comments', sql.NVarChar(1000), params.comments)
+      .input('content_html', sql.NVarChar(sql.MAX), params.contentHtml ?? null)
       .query(`
         INSERT INTO document_version
-          (id_document, version_number, status, onedrive_item_id, onedrive_path, created_by, comments)
+          (id_document, version_number, status, onedrive_item_id, onedrive_path, created_by, comments, content_html)
         OUTPUT INSERTED.id_document_version, INSERTED.created_at
-        VALUES (@id_document, @version_number, @status, @onedrive_item_id, @onedrive_path, @created_by, @comments);
+        VALUES (@id_document, @version_number, @status, @onedrive_item_id, @onedrive_path, @created_by, @comments, @content_html);
       `);
     const idDocumentVersion: number = versionInsert.recordset[0].id_document_version;
     const createdAt: Date = versionInsert.recordset[0].created_at;

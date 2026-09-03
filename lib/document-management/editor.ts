@@ -3,6 +3,8 @@ import { sanitizeOneDriveName } from '../onedriveName';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken';
 import { ensureFolderAndUploadFile } from '../onedrive/graphFolderUpload';
 import { buildDocumentVersionFolderSegments } from './storagePath';
+import { createDocumentVersionAndStartWorkflow } from './workflowEngine';
+import { INITIAL_STATE } from './workflowStates';
 import puppeteer, { type Browser } from 'puppeteer';
 
 /**
@@ -14,18 +16,37 @@ import puppeteer, { type Browser } from 'puppeteer';
  * propio, sin depender de un Chrome/Edge instalado en el servidor — se
  * verificó que pce0023 no tiene ninguno).
  *
- * DECISIÓN DE ALCANCE (documentada aquí a propósito, pedida explícita del
- * sprint): guardar desde el editor actualiza el CONTENIDO de la versión
- * VIGENTE (`content_html` + el PDF regenerado reemplaza el archivo de esa
- * misma versión en OneDrive). NO crea una versión nueva ni dispara de
- * nuevo el flujo de aprobación de 14 estados (lib/document-management/
- * workflowEngine.ts) — esto es edición de contenido de algo que ya está
- * Vigente/autorizado, no una versión formal nueva sujeta a revisión. Si en
- * el futuro se necesita que cada guardado del editor pase otra vez por
- * aprobación, ese es un cambio de producto a decidir por Nicolás, no una
- * corrección de este sprint.
+ * DECISIÓN DE PRODUCTO (2026-09-03, Nicolás): "Guardar" desde el editor ya
+ * NO se comporta igual para todos los documentos — depende de si el
+ * documento tiene o no un proceso/categoría asociado (`Document.id_process`).
  *
- * Fuera de alcance (ver instrucciones del sprint): NO convierte DOCX/PDF ya
+ *   - Caso A (`id_process IS NULL`, carga histórica sin flujo): el PDF se
+ *     genera y se entrega como DESCARGA directa al navegador del usuario.
+ *     No se toca OneDrive ni la base de datos en absoluto — ni
+ *     `onedrive_item_id`/`onedrive_path` de la versión vigente, ni se crea
+ *     ningún registro nuevo. Ver `generatePdfForDownload`.
+ *
+ *   - Caso B (`id_process IS NOT NULL`, ya pasó por el flujo de 14 estados
+ *     al menos una vez): "Guardar" crea una VERSIÓN NUEVA de `DocumentVersion`
+ *     (nunca sobrescribe el archivo/versión vigente actual) y esa versión
+ *     nueva vuelve a entrar al flujo de aprobación de 14 estados, igual que
+ *     cualquier otra versión nueva de un documento existente — ver
+ *     `createNewVersionFromEditorAndStartWorkflow`, que reutiliza
+ *     `createDocumentVersionAndStartWorkflow` (lib/document-management/
+ *     workflowEngine.ts), el MISMO mecanismo atómico que ya usa
+ *     lib/document-management/newVersion.ts para "cargar una versión nueva"
+ *     por archivo. El documento sigue mostrando como vigente la versión
+ *     ANTERIOR: `current_version_id` no se toca aquí — solo lo actualiza
+ *     `transitionDocumentVersion` cuando la nueva versión llegue a "Vigente"
+ *     (acción `publicar_vigente`), exactamente igual que cualquier otra
+ *     versión nueva del módulo.
+ *
+ * Reemplaza la decisión de alcance anterior de este mismo archivo (Sprint 8
+ * inicial, 2026-09-02), que hacía que "Guardar" SIEMPRE sobrescribiera en
+ * sitio el contenido/PDF de la versión vigente sin distinguir `id_process`.
+ * Ese comportamiento único ya no existe.
+ *
+ * Fuera de alcance (sigue igual que antes): NO convierte DOCX/PDF ya
  * subidos a HTML editable (`content_html` arranca NULL/vacío para
  * versiones que nunca se editaron aquí). NO hay plantillas por tipo de
  * documento (FR-005/029/etc.) — es un editor de texto enriquecido
@@ -117,37 +138,31 @@ export async function renderHtmlToPdf(html: string): Promise<Buffer> {
   }
 }
 
-export interface SaveEditorInput {
+export interface GeneratePdfForDownloadInput {
   idDocument: number;
   idDocumentVersion: number;
   contentHtml: string;
 }
 
-export interface SaveEditorResult {
-  version: {
-    id_document_version: number;
-    content_html: string | null;
-    onedrive_item_id: string | null;
-    onedrive_path: string;
-  };
-  pdfBytes: number;
+export interface GeneratePdfForDownloadResult {
+  pdfBuffer: Buffer;
+  fileName: string;
 }
 
 /**
- * Persiste el HTML editado en `document_version.content_html`, renderiza el
- * PDF con Chrome headless y lo sube a OneDrive en la misma carpeta de esa
- * versión (mismo patrón de rutas que lib/document-management/newVersion.ts:
- * `GESTION-DOCUMENTAL/<EMPRESA>/<TIPO>/<CODIGO>/v<version>/<archivo>`),
- * reemplazando el archivo existente de la versión (PUT a
- * items/{folderId}:/{fileName}:/content sobrescribe si el nombre coincide).
- * Actualiza `onedrive_item_id`/`onedrive_path` al item recién subido.
+ * Caso A (`document.id_process IS NULL`): genera el PDF a partir del HTML
+ * editado y lo devuelve en memoria para que el llamador (la ruta API) lo
+ * entregue como descarga al navegador. NO escribe nada en OneDrive ni en la
+ * base de datos — ni `content_html`, ni `onedrive_item_id`/`onedrive_path`,
+ * ni ningún registro nuevo. El documento y su versión vigente quedan
+ * exactamente igual que antes de presionar "Guardar".
  */
-export async function saveDocumentVersionContentAndGeneratePdf(
-  input: SaveEditorInput
-): Promise<SaveEditorResult> {
+export async function generatePdfForDownload(
+  input: GeneratePdfForDownloadInput
+): Promise<GeneratePdfForDownloadResult> {
   const version = await prisma.documentVersion.findUnique({
     where: { id_document_version: input.idDocumentVersion },
-    include: { document: { include: { company: true, documentType: true } } },
+    include: { document: true },
   });
   if (!version || version.id_document !== input.idDocument) {
     throw new EditorError('Versión no encontrada', 404);
@@ -160,14 +175,71 @@ export async function saveDocumentVersionContentAndGeneratePdf(
     contentHtml: input.contentHtml,
   });
   const pdfBuffer = await renderHtmlToPdf(html);
+  const fileName = sanitizeOneDriveName(`${document.code}-v${version.version_number}.pdf`);
+
+  return { pdfBuffer, fileName };
+}
+
+export interface CreateVersionFromEditorInput {
+  idDocument: number;
+  contentHtml: string;
+  actorUserId: string;
+}
+
+export interface CreateVersionFromEditorResult {
+  version: {
+    id_document_version: number;
+    version_number: number;
+    status: string;
+    content_html: string | null;
+    id_request_general: number;
+  };
+  pdfBytes: number;
+}
+
+/**
+ * Caso B (`document.id_process IS NOT NULL`): genera el PDF a partir del
+ * HTML editado, lo sube a OneDrive como archivo NUEVO (carpeta de la nueva
+ * versión, nunca la de la versión vigente actual) y crea la nueva
+ * `DocumentVersion` + arranca su flujo de aprobación de 14 estados en una
+ * sola transacción atómica — reutilizando `createDocumentVersionAndStartWorkflow`
+ * (lib/document-management/workflowEngine.ts), el MISMO mecanismo que usa
+ * lib/document-management/newVersion.ts para cargar una versión nueva por
+ * archivo. `current_version_id` del documento NO se toca aquí: sigue
+ * apuntando a la versión anterior (la vigente) hasta que esta versión nueva
+ * complete el flujo y llegue a "Vigente" (acción `publicar_vigente` en
+ * `transitionDocumentVersion`, que sí actualiza `current_version_id` — ver
+ * workflowEngine.ts).
+ */
+export async function createNewVersionFromEditorAndStartWorkflow(
+  input: CreateVersionFromEditorInput
+): Promise<CreateVersionFromEditorResult> {
+  const document = await prisma.document.findUnique({
+    where: { id_document: input.idDocument },
+    include: { company: true, documentType: true },
+  });
+  if (!document) throw new EditorError('Documento no encontrado', 404);
+
+  const lastVersion = await prisma.documentVersion.findFirst({
+    where: { id_document: input.idDocument },
+    orderBy: { version_number: 'desc' },
+  });
+  const versionNumber = (lastVersion?.version_number ?? 0) + 1;
+
+  const html = wrapForPdf({
+    title: document.title,
+    code: document.code,
+    contentHtml: input.contentHtml,
+  });
+  const pdfBuffer = await renderHtmlToPdf(html);
 
   const segments = buildDocumentVersionFolderSegments({
     companyName: document.company.company,
     documentTypeName: document.documentType.name,
     code: document.code,
-    versionNumber: version.version_number,
+    versionNumber,
   });
-  const fileName = sanitizeOneDriveName(`${document.code}-v${version.version_number}.pdf`);
+  const fileName = sanitizeOneDriveName(`${document.code}-v${versionNumber}.pdf`);
   const fullPath = [...segments, fileName].join('/');
 
   const token = await getMicrosoftToken();
@@ -181,21 +253,26 @@ export async function saveDocumentVersionContentAndGeneratePdf(
     'application/pdf'
   );
 
-  const updated = await prisma.documentVersion.update({
-    where: { id_document_version: version.id_document_version },
-    data: {
-      content_html: input.contentHtml,
-      onedrive_item_id: uploaded.id,
-      onedrive_path: fullPath,
-    },
+  const { idDocumentVersion, idRequestGeneral } = await createDocumentVersionAndStartWorkflow({
+    idDocument: input.idDocument,
+    versionNumber,
+    onedriveItemId: uploaded.id,
+    onedrivePath: fullPath,
+    createdBy: input.actorUserId,
+    comments: null,
+    idCompany: document.id_company,
+    ownerUserId: document.owner_user_id,
+    subject: `${document.code} v${versionNumber} — ${document.title}`,
+    contentHtml: input.contentHtml,
   });
 
   return {
     version: {
-      id_document_version: updated.id_document_version,
-      content_html: updated.content_html,
-      onedrive_item_id: updated.onedrive_item_id,
-      onedrive_path: updated.onedrive_path,
+      id_document_version: idDocumentVersion,
+      version_number: versionNumber,
+      status: INITIAL_STATE,
+      content_html: input.contentHtml,
+      id_request_general: idRequestGeneral,
     },
     pdfBytes: pdfBuffer.length,
   };

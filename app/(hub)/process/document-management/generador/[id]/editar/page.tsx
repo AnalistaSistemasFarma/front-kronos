@@ -19,6 +19,7 @@ import {
   Divider,
   Group,
   Loader,
+  Modal,
   Text,
   Title,
   Tooltip,
@@ -37,6 +38,7 @@ import {
   IconTable,
   IconDeviceFloppy,
   IconArrowBackUp,
+  IconAlertTriangle,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 
@@ -45,13 +47,32 @@ import toast from 'react-hot-toast';
  *
  * MVP genérico (sin plantillas por tipo de documento -- fuera de alcance):
  * el usuario edita texto enriquecido (títulos, párrafos, listas, tabla
- * simple) sobre la versión VIGENTE del documento. "Guardar y generar PDF"
- * persiste el HTML y sube un PDF real a OneDrive vía Chrome headless
- * (ver app/api/document-management/documents/[id]/editor/route.ts).
+ * simple) sobre la versión VIGENTE del documento.
+ *
+ * Decisión de producto de Nicolás (2026-09-03): "Guardar" ya NO se comporta
+ * igual siempre -- depende de si el documento tiene proceso/categoría
+ * asociado (`document.id_process`, resuelto por el SERVIDOR en
+ * app/api/document-management/documents/[id]/editor/route.ts, nunca
+ * decidido aquí):
+ *
+ *   - Sin proceso: el PDF se descarga directo al equipo del usuario. No se
+ *     toca OneDrive ni la base de datos.
+ *   - Con proceso: se crea una versión NUEVA que entra al flujo de
+ *     aprobación de 14 estados. La versión vigente actual no cambia hasta
+ *     que ese flujo la publique.
+ *
+ * La respuesta del POST distingue el caso por su Content-Type: un PDF
+ * binario (`application/pdf`) dispara la descarga en el navegador; un JSON
+ * trae la versión nueva creada.
  *
  * Arranca con un esqueleto básico (título + sección + párrafo) cuando la
  * versión nunca se editó desde aquí (`content_html` viene null) -- NO
  * intenta convertir el DOCX/PDF ya subido, eso queda fuera de alcance.
+ * Salvaguarda (pedida por precaución mientras no exista un conversor
+ * DOCX/PDF→HTML): si el `content_html` de la versión que se está editando
+ * es null o es exactamente ese esqueleto, se exige una confirmación
+ * explícita antes de guardar -- aplica tanto si el guardado termina en
+ * descarga como si termina en versión nueva.
  */
 
 const SKELETON_HTML = `
@@ -66,6 +87,7 @@ interface EditorDocument {
   title: string;
   company: string;
   documentType: string;
+  id_process: number | null;
 }
 
 interface EditorVersion {
@@ -74,6 +96,17 @@ interface EditorVersion {
   status: string;
   content_html: string | null;
   onedrive_item_id: string | null;
+}
+
+interface NewVersionResponse {
+  version: {
+    id_document_version: number;
+    version_number: number;
+    status: string;
+    content_html: string | null;
+    id_request_general: number;
+  };
+  pdfBytes: number;
 }
 
 function ToolbarButton({
@@ -107,6 +140,7 @@ export default function DocumentEditorPage() {
   const [documentInfo, setDocumentInfo] = useState<EditorDocument | null>(null);
   const [versionInfo, setVersionInfo] = useState<EditorVersion | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [confirmEmptyOpen, setConfirmEmptyOpen] = useState(false);
 
   const editor = useEditor({
     extensions: [
@@ -144,13 +178,27 @@ export default function DocumentEditorPage() {
     }
   };
 
-  const handleSave = async () => {
+  // Salvaguarda: la versión que se está editando nunca tuvo contenido real
+  // cargado (todavía es null en la base, o es literalmente el esqueleto
+  // genérico) -- ver nota de módulo arriba.
+  const isEditingEmptyTemplate =
+    versionInfo?.content_html === null || versionInfo?.content_html === SKELETON_HTML;
+
+  const handleSave = () => {
     if (!editor) return;
     const html = editor.getHTML();
     if (!html || html === '<p></p>') {
       toast.error('El documento no puede quedar vacío.');
       return;
     }
+    if (isEditingEmptyTemplate) {
+      setConfirmEmptyOpen(true);
+      return;
+    }
+    void doSave(html);
+  };
+
+  const doSave = async (html: string) => {
     try {
       setSaving(true);
       const res = await fetch(`/api/document-management/documents/${idDocument}/editor`, {
@@ -158,12 +206,44 @@ export default function DocumentEditorPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content_html: html }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'No se pudo guardar');
 
-      setVersionInfo((prev) => (prev ? { ...prev, onedrive_item_id: data.version.onedrive_item_id } : prev));
+      const contentType = res.headers.get('content-type') || '';
+
+      if (!res.ok) {
+        let message = 'No se pudo guardar';
+        if (contentType.includes('application/json')) {
+          const data = await res.json().catch(() => null);
+          message = data?.error || message;
+        }
+        throw new Error(message);
+      }
+
+      if (contentType.includes('application/pdf')) {
+        // Caso A (sin proceso): descarga directa, no se tocó OneDrive ni la BD.
+        const blob = await res.blob();
+        const disposition = res.headers.get('content-disposition') || '';
+        const match = disposition.match(/filename="([^"]+)"/);
+        const fileName = match ? match[1] : `${documentInfo?.code || 'documento'}.pdf`;
+        const url = URL.createObjectURL(blob);
+        const link = window.document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        window.document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        setLastSavedAt(new Date());
+        toast.success('PDF generado y descargado. La versión vigente no se modificó.');
+        return;
+      }
+
+      // Caso B (con proceso): versión nueva creada, enviada al flujo de aprobación.
+      const data: NewVersionResponse = await res.json();
       setLastSavedAt(new Date());
-      toast.success('Guardado — PDF generado y subido a OneDrive.');
+      toast.success(
+        `Versión v${data.version.version_number} creada y enviada al flujo de aprobación. La versión vigente actual no cambió.`
+      );
+      router.push(`/process/document-management/${idDocument}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error guardando el documento');
     } finally {
@@ -220,6 +300,8 @@ export default function DocumentEditorPage() {
     );
   }
 
+  const hasProcess = documentInfo?.id_process != null;
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
       <div className="max-w-5xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
@@ -249,6 +331,12 @@ export default function DocumentEditorPage() {
               )}
             </Group>
           </Group>
+
+          <Alert color={hasProcess ? 'orange' : 'blue'} variant="light" mt="md">
+            {hasProcess
+              ? 'Este documento tiene proceso asociado: al guardar se crea una versión nueva que inicia el flujo de aprobación de 14 estados. La versión vigente actual no cambia hasta que ese flujo la publique.'
+              : 'Este documento no tiene proceso asociado: al guardar, el PDF se descarga directo a su equipo. No se modifica OneDrive ni la base de datos.'}
+          </Alert>
         </Card>
 
         <Card shadow="sm" radius="md" withBorder>
@@ -313,7 +401,7 @@ export default function DocumentEditorPage() {
               onClick={handleSave}
               loading={saving}
             >
-              Guardar y generar PDF
+              Guardar {hasProcess ? '(nueva versión)' : '(descargar PDF)'}
             </Button>
           </Group>
 
@@ -323,6 +411,38 @@ export default function DocumentEditorPage() {
             <EditorContent editor={editor} />
           </div>
         </Card>
+
+        <Modal
+          opened={confirmEmptyOpen}
+          onClose={() => setConfirmEmptyOpen(false)}
+          title={
+            <Group gap={6}>
+              <IconAlertTriangle size={18} className="text-orange-500" />
+              <Text fw={600}>Documento sin contenido cargado</Text>
+            </Group>
+          }
+          centered
+        >
+          <Text size="sm" mb="lg">
+            Este documento no tiene contenido cargado, está editando una plantilla vacía. ¿Está
+            seguro de continuar?
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setConfirmEmptyOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              color="orange"
+              onClick={() => {
+                setConfirmEmptyOpen(false);
+                const html = editor?.getHTML();
+                if (html) void doSave(html);
+              }}
+            >
+              Continuar de todas formas
+            </Button>
+          </Group>
+        </Modal>
 
         <style jsx global>{`
           .tiptap-editor-wrapper .ProseMirror {

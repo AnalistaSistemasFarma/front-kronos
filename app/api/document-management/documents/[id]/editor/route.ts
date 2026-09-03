@@ -2,7 +2,11 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { prisma } from '@/lib/prisma';
-import { saveDocumentVersionContentAndGeneratePdf, EditorError } from '@/lib/document-management/editor';
+import {
+  generatePdfForDownload,
+  createNewVersionFromEditorAndStartWorkflow,
+  EditorError,
+} from '@/lib/document-management/editor';
 
 /**
  * Subproceso PROPIO del Generador de Documentos (mismo criterio que
@@ -31,26 +35,25 @@ async function hasDocumentGeneratorCompanyAccess(userEmail: string, companyId: n
  * debería pasar para un documento listado en el Generador, que solo
  * muestra "Vigente").
  *
- * GET: carga documento + `content_html` actual (o null si la versión nunca
- * se editó desde aquí) para precargar Tiptap.
+ * GET: carga documento (incluido `id_process`, para que el front sepa qué
+ * comportamiento de "Guardar" aplica) + `content_html` actual de la versión
+ * vigente (o null si nunca se editó desde aquí) para precargar Tiptap.
  *
- * POST: guarda el HTML en la MISMA versión vigente (no crea versión nueva,
- * no dispara el flujo de 14 estados — ver decisión documentada en
- * lib/document-management/editor.ts) y regenera+sube el PDF a OneDrive.
+ * POST: decisión de producto de Nicolás (2026-09-03) — el comportamiento
+ * depende de si el documento tiene proceso/categoría asociado
+ * (`document.id_process`), y esa decisión se toma SIEMPRE del lado del
+ * servidor (releyendo `document.id_process` de la base), nunca de un flag
+ * que mande el cliente:
  *
- * A diferencia de .../pdf/route.ts (que sigue restringido a documentos SIN
- * proceso), este editor SÍ aplica también a documentos CON proceso
- * (`id_process` no nulo, los que vienen de la Fase 2 / flujo de aprobación
- * de 14 estados). Pedido explícito de Nicolás (2026-09-02): desde la
- * pantalla de detalle del documento (app/(hub)/process/document-management/
- * [id]/page.tsx) necesita poder VER y EDITAR cualquier documento Vigente al
- * que tenga acceso, no solo los cargados directo sin proceso. El único
- * guardarraíl que se mantiene es el permiso propio del Generador
- * (`hasDocumentGeneratorCompanyAccess`, por empresa) — se quitó el bloqueo
- * por `id_process`. `content_html` puede venir null (versión que nunca se
- * editó aquí); el editor ya arranca con un esqueleto en ese caso (ver
- * SKELETON_HTML en generador/[id]/editar/page.tsx), así que no hace falta
- * lógica adicional para ese caso.
+ *   - `id_process IS NULL` (Caso A): genera el PDF y lo devuelve como
+ *     descarga binaria (`Content-Type: application/pdf`). No toca OneDrive
+ *     ni la base de datos.
+ *   - `id_process IS NOT NULL` (Caso B): crea una VERSIÓN NUEVA (nunca
+ *     sobrescribe la vigente) y arranca su flujo de aprobación de 14
+ *     estados. Devuelve JSON con la versión nueva creada. La versión
+ *     vigente actual no cambia.
+ *
+ * Ver lib/document-management/editor.ts para el detalle de cada camino.
  */
 async function resolveEditableVersion(idDocument: number) {
   const document = await prisma.document.findUnique({
@@ -97,6 +100,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         title: document.title,
         company: document.company.company,
         documentType: document.documentType.name,
+        id_process: document.id_process,
       },
       version: {
         id_document_version: version.id_document_version,
@@ -138,13 +142,33 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'Sin acceso a esta empresa' }, { status: 403 });
     }
 
-    const result = await saveDocumentVersionContentAndGeneratePdf({
+    if (document.id_process == null) {
+      // Caso A: descarga directa al navegador. No toca OneDrive ni la BD.
+      const { pdfBuffer, fileName } = await generatePdfForDownload({
+        idDocument,
+        idDocumentVersion: version.id_document_version,
+        contentHtml,
+      });
+      return new NextResponse(new Uint8Array(pdfBuffer), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="${fileName}"`,
+        },
+      });
+    }
+
+    // Caso B: nueva versión + flujo de aprobación de 14 estados.
+    const actor = await prisma.user.findUnique({ where: { email: session.user.email }, select: { id: true } });
+    if (!actor) return NextResponse.json({ error: 'Usuario no encontrado' }, { status: 404 });
+
+    const result = await createNewVersionFromEditorAndStartWorkflow({
       idDocument,
-      idDocumentVersion: version.id_document_version,
       contentHtml,
+      actorUserId: actor.id,
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof EditorError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
