@@ -68,6 +68,8 @@ model User {
   sessions                Session[]
   auditLogs               UserAuditLog[]
   documentsOwned          Document[]               @relation("DocumentOwner")
+  // Modulo "Asistentes IA" (chat de agentes) — back-relation requerida por Prisma.
+  chatConversations       ChatConversation[]       @relation("ChatConversationUser")
 
   @@map("user")
 }
@@ -90,6 +92,8 @@ model Company {
   cargoAliases    CargoAlias[]
   cargoJerarquias CargoJerarquia[]
   documents       Document[]
+  // Modulo "Asistentes IA" (chat de agentes) — back-relation requerida por Prisma.
+  agentCompanies  AgentCompany[]
 
   @@map("company")
 }
@@ -121,6 +125,8 @@ model Subprocess {
   subprocess_url          String?
   process                 Process                 @relation(fields: [id_process], references: [id_process], onDelete: Cascade)
   subprocessUserCompanies SubprocessUserCompany[]
+  // Modulo "Asistentes IA" (chat de agentes) — back-relation requerida por Prisma.
+  agents                  Agent[]
 
   @@map("subprocess")
 }
@@ -711,4 +717,199 @@ model ServiceLayerDailyMetric {
 
   @@unique([company, metric_date])
   @@map("service_layer_daily_metrics")
+}
+
+// ===================================================================
+// Módulo "Asistentes IA" — chat de agentes en SynerLink (Fase 2a: modelo de
+// datos y permisos). 2026-09-06.
+//
+// AISLAMIENTO: este módulo es independiente del de Gestión Documental (SGD).
+// No comparte ni modifica ninguna de sus tablas; lo único común son las
+// tablas de plataforma que ya existían (`user`, `company`, y el esquema de
+// permisos process -> subprocess -> subprocess_user_company).
+//
+// -------------------------------------------------------------------
+// DECISIÓN DE DISEÑO — dónde vive el PERMISO (una sola fuente de verdad)
+// -------------------------------------------------------------------
+// El diseño original contemplaba una tabla `user_agent_access`
+// (usuario -> agente, con granted_by/granted_at). NO se creó, a propósito.
+//
+// El permiso es el SUBPROCESO. SynerLink ya modela "qué puede hacer un
+// usuario" como una URL en `subprocess`, otorgada por la tripleta
+// (usuario, empresa, subproceso) vía subprocess_user_company -> company_user,
+// y esa tripleta ya se administra desde /process/administration/users.
+// Nicolás pidió explícitamente que este módulo se asigne desde esa misma
+// pantalla, "como cualquier otro módulo".
+//
+// Razones para NO duplicarlo en `user_agent_access`:
+//   1. `user_agent_access` no tiene empresa. El permiso de SynerLink SÍ es
+//      por empresa; una tabla usuario->agente plana no puede expresar
+//      "Nicolás habla con Orus en GSS pero no en Ryan", y al mezclarse con
+//      el subproceso quedarían dos respuestas distintas a la misma pregunta.
+//   2. La auditoría que justificaba la tabla (quién otorgó y cuándo) ya
+//      existe: app/api/users/[id]/subprocesses/route.ts escribe en
+//      `user_audit_log` la acción UPDATE_SUBPROCESSES con performed_by y
+//      created_at cada vez que se cambia una asignación.
+//   3. Dos fuentes de verdad del mismo permiso es un riesgo de seguridad,
+//      no una redundancia inofensiva: basta con que un endpoint consulte la
+//      "equivocada" para abrir un hueco.
+//
+// El vínculo agente <-> subproceso es una FK REAL: `agent.id_subprocess`.
+//   /process/chat        -> subproceso de acceso al módulo (CHAT_MODULE_URL)
+//   /process/chat/orus   -> subproceso-permiso del agente Orus
+// Se prefirió la FK a derivar la URL por convención (p.ej. '/process/chat/' +
+// code) porque `code` y `display_name` no coinciden ('horus' vs. 'Orus') y
+// una URL derivada de `display_name` se rompería en silencio el día que
+// alguien renombre el agente — inaceptable tratándose de un permiso. Con la
+// FK, renombrar el agente no mueve su permiso, y un subproceso no puede ser
+// el permiso de dos agentes (índice único filtrado UX_agent_id_subprocess).
+// Hay precedente de subprocesos que son solo marcadores de permiso y no
+// páginas reales (p.ej. /process/document-management/manage/regulatory).
+//
+// `agent_company` es OTRA cosa: es la AGRUPACIÓN (las "carpetas" de la
+// interfaz), no el permiso. Dice a qué empresas pertenece un agente —
+// modelo N:N elegido por Nicolás (opción A) porque los agentes de GSS son
+// transversales al grupo. Ver también lib/chat/access.ts: un usuario ve un
+// agente en una empresa solo si (a) el agente pertenece a esa empresa y
+// (b) el usuario tiene el subproceso del agente en esa misma empresa.
+//
+// Siembra: prisma/seeds/chat-agents.sql (idempotente, APPEND-ONLY). Siembra
+// por NOMBRE de empresa, nunca por id: los id_company NO coinciden entre
+// producción y KRONOSDB_PRUEBAS.
+// ===================================================================
+
+/// Catálogo de agentes (bots) de la flota. `code` es el identificador
+/// estable ('horus'); `display_name` es como se ve en la interfaz ('Orus');
+/// `handle` es el puente con Telegram ('@horus_gss_bot').
+model Agent {
+  id_agent     Int      @id @default(autoincrement())
+  code         String   @db.NVarChar(60)
+  display_name String   @db.NVarChar(120)
+  handle       String?  @db.NVarChar(60)
+  /// Ruta relativa dentro de /public (p.ej. /agents/orus.png). NULL = la
+  /// interfaz cae al avatar por inicial. A propósito no se guardan URLs
+  /// externas: las fotos de usuario que hoy apuntan a postimg.cc son frágiles.
+  avatar_url   String?  @db.NVarChar(500)
+  description  String?  @db.NVarChar(500)
+  is_active    Boolean  @default(true)
+  sort_order   Int      @default(0)
+  /// Subproceso que ES el permiso para hablar con este agente (fuente de
+  /// verdad única del permiso; ver la nota de módulo arriba). NULL = agente
+  /// del catálogo todavía sin subproceso creado, y por tanto invisible para
+  /// todos. La unicidad se garantiza con un índice ÚNICO FILTRADO
+  /// (WHERE id_subprocess IS NOT NULL) creado en la migración; no se declara
+  /// @unique aquí porque SQL Server solo admite un NULL en un índice único
+  /// no filtrado (mismo caso que User.nit).
+  id_subprocess Int?
+  created_at   DateTime @default(now())
+
+  subprocess    Subprocess?        @relation(fields: [id_subprocess], references: [id_subprocess], onDelete: NoAction, onUpdate: NoAction)
+  companies     AgentCompany[]
+  conversations ChatConversation[]
+
+  @@unique([code])
+  @@map("agent")
+}
+
+/// Agrupación agente <-> empresa (las "carpetas" de la interfaz). NO es el
+/// permiso: ver la nota de módulo arriba. `is_primary` marca la empresa
+/// principal del agente (los de GSS son transversales al grupo).
+model AgentCompany {
+  id_agent_company Int     @id @default(autoincrement())
+  id_agent         Int
+  id_company       Int
+  is_primary       Boolean @default(false)
+
+  agent   Agent   @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
+  company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, id_company])
+  @@index([id_company])
+  @@map("agent_company")
+}
+
+/// Hilo de conversación entre UN usuario y UN agente. La propiedad del hilo
+/// es `id_user`: todo endpoint debe verificar que el id_conversation que
+/// llega del cliente pertenece al usuario de la sesión (IDOR).
+model ChatConversation {
+  id              Int       @id @default(autoincrement())
+  id_user         String    @db.NVarChar(1000)
+  id_agent        Int
+  title           String?   @db.NVarChar(300)
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+  /// Denormalizado para ordenar la bandeja sin agregar sobre chat_message.
+  last_message_at DateTime?
+  archived        Boolean   @default(false)
+
+  user     User              @relation("ChatConversationUser", fields: [id_user], references: [id], onDelete: Cascade)
+  agent    Agent             @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+  messages ChatMessage[]
+  status   ChatAgentStatus?
+
+  @@index([id_user, archived, last_message_at(sort: Desc)])
+  @@index([id_agent])
+  @@map("chat_conversation")
+}
+
+/// Un mensaje del hilo.
+model ChatMessage {
+  id              Int    @id @default(autoincrement())
+  id_conversation Int
+  /// 'user' | 'agent' | 'system'. Texto y no enum porque el provider
+  /// sqlserver de Prisma no soporta enums nativos.
+  role            String @db.NVarChar(20)
+  /// MARKDOWN CRUDO. NUNCA HTML: el HTML se guarda tal cual y se renderiza
+  /// en el cliente, así que almacenarlo abriría un XSS almacenado. El
+  /// render a HTML es responsabilidad de la interfaz, sanitizando.
+  /// (Contraste deliberado con DocumentVersion.content_html, que sí es HTML
+  /// porque lo produce un editor propio y no un agente.)
+  body            String @db.NVarChar(Max)
+
+  created_at   DateTime  @default(now())
+  /// Momento en que el agente confirmó la recepción (puente con Telegram).
+  delivered_at DateTime?
+  read_at      DateTime?
+
+  conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+  attachments  ChatAttachment[]
+
+  @@index([id_conversation, id(sort: Desc)])
+  @@index([id_conversation, created_at])
+  @@map("chat_message")
+}
+
+/// Adjunto de un mensaje. El archivo vive en OneDrive (mismo criterio que
+/// DocumentVersion del SGD); aquí solo queda la referencia.
+model ChatAttachment {
+  id               Int      @id @default(autoincrement())
+  id_message       Int
+  file_name        String   @db.NVarChar(400)
+  content_type     String?  @db.NVarChar(200)
+  size_bytes       Int?
+  onedrive_item_id String?  @db.NVarChar(300)
+  web_url          String?  @db.NVarChar(1000)
+  created_at       DateTime @default(now())
+
+  message ChatMessage @relation(fields: [id_message], references: [id], onDelete: Cascade)
+
+  @@index([id_message])
+  @@map("chat_attachment")
+}
+
+/// Estado en vivo del agente dentro de una conversación — alimenta el
+/// indicador de "qué está haciendo" (pensando / usando una herramienta).
+/// Una sola fila por conversación (la PK es id_conversation): es un estado
+/// puntual que se sobrescribe, no un histórico.
+model ChatAgentStatus {
+  id_conversation Int      @id
+  /// 'idle' | 'thinking' | 'tool'.
+  state           String   @default("idle") @db.NVarChar(20)
+  /// Texto libre que se muestra al usuario ("Consultando SAP…").
+  label           String?  @db.NVarChar(200)
+  updated_at      DateTime @updatedAt
+
+  conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+
+  @@map("chat_agent_status")
 }
