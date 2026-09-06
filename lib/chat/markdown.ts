@@ -106,7 +106,6 @@ export function sanitizeChatUrl(url: string | null | undefined): string {
 
   // Fuera espacios, saltos y caracteres de control (incl. NUL) en cualquier
   // posición: son el vehículo clásico para disfrazar el esquema.
-  // eslint-disable-next-line no-control-regex
   const cleaned = url.replace(/[\u0000-\u0020\u007f-\u00a0]/g, '');
   if (cleaned.length === 0) return '';
 
@@ -142,6 +141,37 @@ export function clampMarkdownLength(
 }
 
 /**
+ * Mide el prefijo de citas (`> > >`) de una línea, DEVOLVIENDO su longitud y
+ * su profundidad.
+ *
+ * Se hace con un recorrido a mano y no con una expresión regular a propósito:
+ * el patrón natural (`/^((?:\s{0,3}>\s?)+)/`) tiene cuantificadores anidados y
+ * es vulnerable a retroceso catastrófico — justo lo que este archivo intenta
+ * evitar, y lo que marca la regla `security/detect-unsafe-regex`. Este bucle
+ * es lineal en la longitud de la línea, sin retroceso posible.
+ */
+function measureQuotePrefix(line: string): { length: number; depth: number } {
+  let index = 0;
+  let depth = 0;
+
+  for (;;) {
+    let cursor = index;
+    let spaces = 0;
+    while (cursor < line.length && spaces < 3 && (line[cursor] === ' ' || line[cursor] === '\t')) {
+      cursor += 1;
+      spaces += 1;
+    }
+    if (line[cursor] !== '>') break;
+    cursor += 1;
+    if (line[cursor] === ' ') cursor += 1;
+    depth += 1;
+    index = cursor;
+  }
+
+  return { length: index, depth };
+}
+
+/**
  * Aplana el anidamiento excesivo de citas y listas.
  *
  * Recorta los `>` encadenados y la sangría de las listas a `maxDepth` niveles.
@@ -167,13 +197,12 @@ export function limitNestingDepth(
     if (insideFence) return line;
 
     // 1) Citas encadenadas: "> > > > > > > > texto".
-    const quote = /^((?:\s{0,3}>\s?)+)/.exec(line);
+    const quote = measureQuotePrefix(line);
     let rest = line;
     let prefix = '';
-    if (quote) {
-      const depth = (quote[1].match(/>/g) ?? []).length;
-      prefix = '> '.repeat(Math.min(depth, maxDepth));
-      rest = line.slice(quote[1].length);
+    if (quote.depth > 0) {
+      prefix = '> '.repeat(Math.min(quote.depth, maxDepth));
+      rest = line.slice(quote.length);
     }
 
     // 2) Sangría de listas: se recorta el bloque de espacios inicial.

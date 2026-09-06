@@ -8,6 +8,7 @@ import {
   groupAgentsByCompany,
   normalizeAgentKey,
   sortAgentsForBar,
+  toPlainPreview,
   type ChatAgentDto,
 } from '../client';
 
@@ -130,6 +131,34 @@ describe('groupAgentsByCompany', () => {
 
   it('un agente sin empresas no crea carpeta (no se inventa una)', () => {
     expect(groupAgentsByCompany([agent({ idAgent: 1, code: 'x' })])).toEqual([]);
+  });
+});
+
+describe('toPlainPreview', () => {
+  it('quita las marcas de Markdown del extracto de la bandeja', () => {
+    const preview =
+      'Con gusto, aqui va el **corte de compras**. ### Resumen | Documento | Cantidad | |---|---:|';
+    const plain = toPlainPreview(preview);
+    expect(plain).not.toContain('**');
+    expect(plain).not.toContain('###');
+    expect(plain).not.toContain('|');
+    expect(plain).not.toContain('---');
+    expect(plain).toContain('corte de compras');
+    expect(plain).toContain('Resumen');
+  });
+
+  it('deja el texto del enlace y descarta la URL', () => {
+    expect(toPlainPreview('Mire el [Portal GSS](https://ejemplo.com) por favor')).toBe(
+      'Mire el Portal GSS por favor'
+    );
+  });
+
+  it('quita viñetas, citas y comillas de código', () => {
+    expect(toPlainPreview('- uno `dos` > tres')).toBe('uno dos > tres');
+  });
+
+  it('no revienta con una cadena vacía', () => {
+    expect(toPlainPreview('')).toBe('');
   });
 });
 

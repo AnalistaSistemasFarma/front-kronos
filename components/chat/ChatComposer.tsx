@@ -67,7 +67,8 @@ export default function ChatComposer({
   placeholder = 'Escriba su mensaje… (Markdown: **negrita**, _cursiva_, - viñetas)',
   autoFocus = false,
 }: {
-  onSend: (body: string) => void | Promise<void>;
+  /** Devuelve lo que quiera (p. ej. si el envío tuvo éxito); aquí solo se espera. */
+  onSend: (body: string) => void | Promise<unknown>;
   disabled?: boolean;
   sending?: boolean;
   placeholder?: string;
