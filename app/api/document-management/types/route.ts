@@ -3,27 +3,28 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { prisma } from '../../../../lib/prisma';
 import { getDocumentManagementAccess } from '../../../../lib/document-management/access';
+import { syncDocumentTypeOption } from '../../../../lib/document-management/genericFields';
 
 /**
  * Catálogo de tipos de documento (DocumentType). Es GLOBAL, no por empresa:
  * la nomenclatura de políticas/procedimientos aplica igual en todo el grupo.
  *
- * GET  -> lista los tipos activos (requiere solo acceso de lectura, en
- *         cualquier empresa, al módulo).
+ * GET  -> lista los tipos activos. Sprint 5: cualquier usuario autenticado
+ *         puede leerlo (ya no exige acceso de lectura al módulo) porque
+ *         ahora también lo consume el flujo ESTÁNDAR de "crear solicitud"
+ *         de SynerLink (app/(hub)/process/request-general/create-request/page.tsx)
+ *         al seleccionar Gestión Documental, disponible para cualquiera —
+ *         es solo una lista de nombres (Procedimiento, Política, ...), sin
+ *         nada confidencial.
  * POST -> crea un tipo nuevo (requiere acceso de ESCRITURA en al menos una
  *         empresa: no hay "empresa" en este catálogo, así que se exige el
- *         mismo nivel que para cargar documentos).
+ *         mismo nivel que para las acciones del flujo de aprobación).
  */
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !session.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const access = await getDocumentManagementAccess(session.user.email);
-    if (!access.some((a) => a.canRead)) {
-      return NextResponse.json({ error: 'Sin acceso al módulo' }, { status: 403 });
     }
 
     const types = await prisma.documentType.findMany({
@@ -78,6 +79,16 @@ export async function POST(request: NextRequest) {
     const type = await prisma.documentType.create({
       data: { name, code_prefix: codePrefix, ggc_process: ggcProcess },
     });
+
+    // Parametrización: sincroniza la opción nueva en process_form_field_option para que
+    // el selector genérico de "Tipo de documento" (create-request/page.tsx, camino
+    // estándar) la vea sin tener que resembrar a mano -- ver genericFields.ts. Best-effort:
+    // un fallo aquí no debe tumbar la creación del tipo, que ya quedó confirmada.
+    try {
+      await syncDocumentTypeOption(type);
+    } catch (syncError) {
+      console.error('No se pudo sincronizar la opción de "Tipo de documento":', syncError);
+    }
 
     return NextResponse.json({ type }, { status: 201 });
   } catch (error) {

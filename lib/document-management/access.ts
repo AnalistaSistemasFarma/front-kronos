@@ -10,19 +10,31 @@ import { prisma } from '../prisma';
  * documento, no a un rol genérico de este módulo).
  *
  *   - Nivel 1 (módulo):  el usuario tiene al menos una fila para alguno de
- *                        los dos subprocesos -> ve el módulo.
+ *                        los tres subprocesos -> ve el módulo.
  *   - Nivel 2 (empresa): cada fila está atada a un company_user, así que
  *                        define EN QUÉ EMPRESA tiene acceso.
  *
- * La separación lectura/escritura usa DOS subprocesos distintos bajo el
- * mismo proceso (igual que Registros Sanitarios):
- *   - READ_URL  -> consultar el listado de documentos vigentes
- *   - WRITE_URL -> crear tipos de documento / cargar documentos nuevos
- * Un usuario puede tener lectura en una empresa y escritura en otra.
+ * TRES subprocesos distintos bajo el mismo proceso (igual que Registros
+ * Sanitarios, que solo tiene dos):
+ *   - READ_URL        -> consultar el listado de documentos vigentes
+ *   - WRITE_URL        -> acciones del flujo de aprobación (revisar, aprobar,
+ *                         reasignar, anular, etc. — ver workflowEngine.ts) y
+ *                         administración del catálogo de tipos de documento
+ *   - REGULATORY_URL   -> (Sprint 5) atajo "Cargar documento": crear un
+ *                         documento NUEVO directo, sin pasar por el flujo
+ *                         estándar de "crear solicitud" de SynerLink. Antes
+ *                         de este sprint este atajo vivía detrás de
+ *                         WRITE_URL; ahora es un permiso aparte reservado a
+ *                         Asuntos Regulatorios (pedido explícito de
+ *                         Nicolás) — ver prisma/seeds/
+ *                         document-management-regulatory-subprocess.sql
+ *                         para la migración de quién lo tenía antes.
+ * Un usuario puede tener cualquier combinación de los tres, por empresa.
  */
 
 export const DOCUMENT_MANAGEMENT_READ_URL = '/process/document-management';
 export const DOCUMENT_MANAGEMENT_WRITE_URL = '/process/document-management/manage';
+export const DOCUMENT_MANAGEMENT_REGULATORY_URL = '/process/document-management/manage/regulatory';
 
 /** Acceso de un usuario a una empresa dentro del módulo. */
 export interface DocumentManagementCompanyAccess {
@@ -30,11 +42,13 @@ export interface DocumentManagementCompanyAccess {
   companyName: string;
   canRead: boolean;
   canWrite: boolean;
+  /** Asuntos Regulatorios (Sprint 5): puede usar el atajo "Cargar documento". */
+  canUploadDirect: boolean;
 }
 
 /**
  * Devuelve las empresas a las que el usuario tiene acceso en el módulo de
- * gestión documental, con su nivel (lectura/escritura).
+ * gestión documental, con su nivel (lectura/escritura/atajo regulatorio).
  */
 export async function getDocumentManagementAccess(
   userEmail: string
@@ -44,7 +58,11 @@ export async function getDocumentManagementAccess(
       companyUser: { user: { email: userEmail } },
       subprocess: {
         subprocess_url: {
-          in: [DOCUMENT_MANAGEMENT_READ_URL, DOCUMENT_MANAGEMENT_WRITE_URL],
+          in: [
+            DOCUMENT_MANAGEMENT_READ_URL,
+            DOCUMENT_MANAGEMENT_WRITE_URL,
+            DOCUMENT_MANAGEMENT_REGULATORY_URL,
+          ],
         },
       },
     },
@@ -61,7 +79,7 @@ export async function getDocumentManagementAccess(
   for (const row of rows) {
     const company = row.companyUser.company;
     const id = company.id_company;
-    const isWrite = row.subprocess.subprocess_url === DOCUMENT_MANAGEMENT_WRITE_URL;
+    const url = row.subprocess.subprocess_url;
 
     let entry = byCompany.get(id);
     if (!entry) {
@@ -70,17 +88,19 @@ export async function getDocumentManagementAccess(
         companyName: company.company,
         canRead: false,
         canWrite: false,
+        canUploadDirect: false,
       };
       byCompany.set(id, entry);
     }
 
-    if (isWrite) entry.canWrite = true;
+    if (url === DOCUMENT_MANAGEMENT_WRITE_URL) entry.canWrite = true;
+    else if (url === DOCUMENT_MANAGEMENT_REGULATORY_URL) entry.canUploadDirect = true;
     else entry.canRead = true;
   }
 
-  // El permiso de escritura implica el de lectura.
+  // El permiso de escritura o el atajo regulatorio implican el de lectura.
   for (const entry of byCompany.values()) {
-    if (entry.canWrite) entry.canRead = true;
+    if (entry.canWrite || entry.canUploadDirect) entry.canRead = true;
   }
 
   return [...byCompany.values()];
@@ -89,17 +109,18 @@ export async function getDocumentManagementAccess(
 /**
  * Devuelve el acceso de UNA empresa para un usuario, validando el nivel
  * requerido. null si no tiene permiso o la empresa no aplica. Uso en las
- * rutas de crear tipo de documento / crear documento.
+ * rutas de crear tipo de documento / crear documento / atajo regulatorio.
  */
 export async function getDocumentManagementCompanyAccess(
   userEmail: string,
   companyId: number,
-  level: 'read' | 'write'
+  level: 'read' | 'write' | 'uploadDirect'
 ): Promise<DocumentManagementCompanyAccess | null> {
   const access = await getDocumentManagementAccess(userEmail);
   const company = access.find((a) => a.idCompany === companyId);
   if (!company) return null;
   if (level === 'write' && !company.canWrite) return null;
+  if (level === 'uploadDirect' && !company.canUploadDirect) return null;
   if (!company.canRead) return null;
   return company;
 }

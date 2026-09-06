@@ -296,3 +296,84 @@ export const STATE_DISPLAY_ORDER: Record<DocumentWorkflowState, number> = Object
 ) as Record<DocumentWorkflowState, number>;
 
 export const DOCUMENT_WORKFLOW_PROCESS_NAME = 'Gestión Documental — Ciclo de vida del documento';
+
+/**
+ * Proyección del grafo de arriba para el DIAGRAMA visual (componente
+ * WorkflowDiagram, usado en /process/request-general/admin-workflow y en
+ * /process/document-management/[id]). NO es una copia paralela de la regla de
+ * negocio: se calcula 1:1 a partir de WORKFLOW_ACTIONS (la misma fuente que
+ * lee `findAction`/`transitionDocumentVersion`), así que un cambio en
+ * WORKFLOW_ACTIONS se refleja automáticamente en el diagrama sin tocar nada
+ * más. Lo único que se agrega aquí es METADATA de presentación:
+ *
+ *  - `kind`: estilo del borde en el diagrama.
+ *      'forward'    -> avance del camino sano (flecha sólida).
+ *      'reversible' -> reasignar/reelaborar (flecha punteada ámbar), incluye
+ *                      también el regreso real `reanudar_elaboracion`.
+ *      'terminal'   -> rechazar/anular/eliminar (flecha punteada roja).
+ *      'system'     -> efecto automático sin acción de usuario (punteada gris).
+ *
+ * Se agrega un único borde SINTÉTICO (Vigente -> Obsoleto) que no existe en
+ * WORKFLOW_ACTIONS porque, como explica el comentario de arriba, ese efecto
+ * no es una acción que el usuario dispare sobre esta versión sino un
+ * side-effect del sistema sobre OTRA versión (ver el bloque
+ * `if (toState === 'Vigente')` dentro de
+ * workflowEngine.transitionDocumentVersion). Es solo una etiqueta visual — la
+ * regla real sigue viviendo, sin duplicarse, en workflowEngine.ts.
+ */
+export type DocumentWorkflowTransitionKind = 'forward' | 'reversible' | 'terminal' | 'system';
+
+export interface DocumentWorkflowTransition {
+  action: string;
+  from: DocumentWorkflowState;
+  to: DocumentWorkflowState;
+  label: string;
+  kind: DocumentWorkflowTransitionKind;
+}
+
+const FORWARD_ACTIONS = new Set([
+  'iniciar_elaboracion',
+  'enviar_a_revision',
+  'aprobar_revision',
+  'aprobar',
+  'aprobar_calidad',
+  'iniciar_divulgacion',
+  'publicar_vigente',
+]);
+
+const TERMINAL_ACTIONS = new Set(['rechazar', 'anular', 'eliminar']);
+
+function classifyTransitionKind(action: string): DocumentWorkflowTransitionKind {
+  if (FORWARD_ACTIONS.has(action)) return 'forward';
+  if (TERMINAL_ACTIONS.has(action)) return 'terminal';
+  // solicitar_ajustes, reasignar, reanudar_elaboracion, reanudar_asignacion
+  return 'reversible';
+}
+
+export const DOCUMENT_WORKFLOW_TRANSITIONS: DocumentWorkflowTransition[] = [
+  ...WORKFLOW_ACTIONS.map((a) => ({
+    action: a.action,
+    from: a.from,
+    to: a.to,
+    label: a.label,
+    kind: classifyTransitionKind(a.action),
+  })),
+  {
+    action: 'marcar_obsoleto',
+    from: 'Vigente',
+    to: 'Obsoleto',
+    label: 'Reemplazo automático (versión más nueva publicada)',
+    kind: 'system',
+  },
+];
+
+/**
+ * Estados que se dibujan en la fila principal (camino sano) del diagrama, en
+ * orden real de avance. Coincide 1:1 con los primeros 7 valores de
+ * STATE_DISPLAY_ORDER (0..6): son exactamente los 7 estados que
+ * prisma/seeds/document-management-workflow.sql siembra al inicio de
+ * `display_order`, antes de las 7 ramas de excepción. El resto de estados
+ * (Reasignación, Reelaboración, Rechazado, Visto bueno calidad, Obsoleto,
+ * Anulado, Eliminado) se dibujan como ramas debajo — ver WorkflowDiagram.
+ */
+export const MAIN_SEQUENCE_STATES: DocumentWorkflowState[] = DOCUMENT_WORKFLOW_STATES.slice(0, 7);

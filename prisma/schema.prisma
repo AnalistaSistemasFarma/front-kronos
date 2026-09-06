@@ -40,27 +40,27 @@ model Session {
 }
 
 model User {
-  id             String         @id @default(cuid())
-  name           String?
-  email          String         @unique
-  emailVerified  DateTime?
-  image          String?
-  password       String?
-  createdAt      DateTime       @default(now())
-  isActive       Boolean        @default(true)
-  role           String         @default("user")
-  phone          String?
-  identification String?
+  id                      String                   @id @default(cuid())
+  name                    String?
+  email                   String                   @unique
+  emailVerified           DateTime?
+  image                   String?
+  password                String?
+  createdAt               DateTime                 @default(now())
+  isActive                Boolean                  @default(true)
+  role                    String                   @default("user")
+  phone                   String?
+  identification          String?
   // NIT del proveedor. Solo lo tienen los usuarios con role = "supplier" (proveedores
   // externos que ingresan por /proveedor/login). Es el identificador con el que se
   // scopea TODA su información del lado del servidor. Nullable porque los usuarios
   // internos no tienen NIT. La unicidad se garantiza con un índice ÚNICO FILTRADO
   // (WHERE nit IS NOT NULL) creado en la migración; no se declara @unique aquí porque
   // SQL Server solo admite un único NULL en un índice único no filtrado.
-  nit            String?
-  id_user_sapsend Int?
-  themePalette   String?        @default("gss")
-  colorScheme    String?        @default("light")
+  nit                     String?
+  id_user_sapsend         Int?
+  themePalette            String?                  @default("gss")
+  colorScheme             String?                  @default("light")
   accounts                Account[]
   companyUsers            CompanyUser[]
   departmentUsers         DepartmentUser[]
@@ -400,8 +400,8 @@ model SavedView {
   updated_at       DateTime  @updatedAt
   published_at     DateTime?
 
-  columns          SavedViewColumn[]
-  filters          SavedViewFilter[]
+  columns SavedViewColumn[]
+  filters SavedViewFilter[]
 
   @@map("saved_view")
 }
@@ -524,41 +524,113 @@ model DocumentType {
   @@map("document_type")
 }
 
+// ===================================================================
+// Sprint 9 — Catálogo de CATEGORÍAS DE PROCESO DOCUMENTAL (Auditorías y
+// Autoinspecciones / No Conformidades / Ingeniería Biomédica, con sus
+// sub-procesos). Resuelve el hallazgo documentado en el comentario de
+// Document.id_process más abajo y en app/api/document-management/generator/
+// route.ts: `id_process` es una referencia BLANDA al `process_category` del
+// motor de workflow SQL crudo (lib/document-management/workflowEngine.ts) —
+// identifica que un documento "pasó por el flujo de aprobación de 14
+// estados", NO a qué proceso de NEGOCIO pertenece. Todo documento que pasó
+// por ese flujo comparte el mismo id_process (el de "Gestión Documental —
+// Ciclo de vida del documento"); los de carga histórica (Fase 1) quedan en
+// NULL. Ninguno de los dos casos distingue Auditorías de No Conformidades de
+// Ingeniería Biomédica.
+//
+// Por eso este catálogo va en tablas NUEVAS y separadas de `id_process`,
+// con relación REAL (a diferencia de id_process/id_request_general, que son
+// blandas porque apuntan al motor SQL crudo preexistente): estas tablas SÍ
+// las crea/versiona este repo, así que no hay razón para no tener FK real.
+//
+// Diseño como DATO, no hardcode (pedido explícito de Nicolás — "esos
+// procesos deben tener su propia tableta para poder añadir más en el
+// futuro"): dos niveles, categoría → sub-procesos, cada uno con
+// display_order para el orden de siembra y is_active para poder retirar uno
+// sin borrar histórico. Agregar una categoría o sub-proceso nuevo en el
+// futuro es un INSERT, no un despliegue de código.
+//
+// Sembrado en prisma/seeds/document-management-process-categories.sql con
+// las 3 categorías y sub-procesos exactos que dio Nicolás para este sprint.
+// ===================================================================
+
+model DocumentProcessCategory {
+  id            Int                         @id @default(autoincrement())
+  name          String                      @db.NVarChar(200)
+  display_order Int                         @default(0)
+  is_active     Boolean                     @default(true)
+  created_at    DateTime                    @default(now())
+  subprocesses  DocumentProcessSubprocess[]
+
+  @@unique([name])
+  @@map("document_process_category")
+}
+
+model DocumentProcessSubprocess {
+  id                           Int      @id @default(autoincrement())
+  id_document_process_category Int
+  name                         String   @db.NVarChar(200)
+  display_order                Int      @default(0)
+  is_active                    Boolean  @default(true)
+  created_at                   DateTime @default(now())
+
+  category  DocumentProcessCategory @relation(fields: [id_document_process_category], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@unique([id_document_process_category, name])
+  @@map("document_process_subprocess")
+}
+
 // Documento vigente (encabezado). Multiempresa vía id_company. La carga
 // inicial (Fase 1) crea el Document + su primera DocumentVersion ya en
 // estado "Vigente"; no hay todavía transición de estados.
 model Document {
-  id_document        Int       @id @default(autoincrement())
-  code               String    @db.NVarChar(50)
-  title              String    @db.NVarChar(300)
-  id_document_type   Int
-  id_company         Int
+  id_document                    Int       @id @default(autoincrement())
+  code                           String    @db.NVarChar(50)
+  title                          String    @db.NVarChar(300)
+  id_document_type               Int
+  id_company                     Int
   // Referencia BLANDA a process_category (motor SQL crudo, ver nota de
   // módulo arriba). Sin relation(): esa tabla no está modelada en Prisma.
   // Null = el documento aún no está ligado a un proceso de aprobación.
-  id_process         Int?
-  owner_user_id      String    @db.NVarChar(1000)
-  due_review_date    DateTime?
-  is_restricted      Boolean   @default(false)
-  current_status     String    @default("Vigente") @db.NVarChar(30)
+  //
+  // OJO — NO es la categoría de negocio del documento (Auditorías, No
+  // Conformidades, Ingeniería Biomédica): ver el catálogo
+  // DocumentProcessCategory/DocumentProcessSubprocess y el campo
+  // id_document_process_subprocess más abajo, agregados en el Sprint 9
+  // precisamente porque este campo NO alcanzaba para eso (todo documento
+  // que pasa por el flujo de aprobación comparte el mismo id_process).
+  id_process                     Int?
+  // Sprint 9 — categoría de negocio real del documento (FK real, ver nota de
+  // módulo arriba de DocumentProcessCategory). Null = documento aún sin
+  // clasificar en el catálogo de procesos de negocio (p.ej. documentos
+  // fuera de Auditorías/No Conformidades/Ingeniería Biomédica, o pendientes
+  // de clasificar).
+  id_document_process_subprocess Int?
+  owner_user_id                  String    @db.NVarChar(1000)
+  due_review_date                DateTime?
+  is_restricted                  Boolean   @default(false)
+  current_status                 String    @default("Vigente") @db.NVarChar(30)
   // Referencia BLANDA a DocumentVersion.id_document_version (sin relation()):
   // declararla como relación real crearía una segunda ruta de FK entre
   // Document y DocumentVersion además de la relación 1:N `versions`
   // (cascade), lo que SQL Server rechaza como ciclo de FK. Se mantiene
   // consistente desde la capa de aplicación (lib/document-management), justo
   // después de insertar la versión.
-  current_version_id Int?
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @updatedAt
+  current_version_id             Int?
+  created_at                     DateTime  @default(now())
+  updated_at                     DateTime  @updatedAt
 
-  documentType DocumentType      @relation(fields: [id_document_type], references: [id_document_type], onDelete: NoAction, onUpdate: NoAction)
-  company      Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
-  owner        User              @relation("DocumentOwner", fields: [owner_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  versions     DocumentVersion[]
+  documentType      DocumentType               @relation(fields: [id_document_type], references: [id_document_type], onDelete: NoAction, onUpdate: NoAction)
+  company           Company                    @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  owner             User                       @relation("DocumentOwner", fields: [owner_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  processSubprocess DocumentProcessSubprocess? @relation(fields: [id_document_process_subprocess], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  versions          DocumentVersion[]
 
   @@unique([id_company, code])
   @@index([id_company, current_status])
   @@index([id_document_type])
+  @@index([id_document_process_subprocess])
   @@map("document")
 }
 
@@ -568,21 +640,21 @@ model Document {
 // de versiones anteriores queda en el SGD y no se migra.
 model DocumentVersion {
   id_document_version Int      @id @default(autoincrement())
-  id_document          Int
-  version_number       Int
-  status               String   @default("Vigente") @db.NVarChar(30)
+  id_document         Int
+  version_number      Int
+  status              String   @default("Vigente") @db.NVarChar(30)
   // Id del item en Microsoft Graph (drive item), para poder descargarlo /
   // reemplazarlo sin volver a resolver la ruta.
-  onedrive_item_id     String?  @db.NVarChar(300)
+  onedrive_item_id    String?  @db.NVarChar(300)
   // Ruta completa dentro del drive:
   // GESTION-DOCUMENTAL/<EMPRESA>/<TIPO>/<CODIGO>/v<version>/<archivo>
-  onedrive_path        String   @db.NVarChar(1000)
+  onedrive_path       String   @db.NVarChar(1000)
   // Referencia BLANDA a User.id (sin relation() para no sumar una segunda FK
   // Document/DocumentVersion → User en la misma migración manual; ver nota
   // de owner_user_id arriba, que sí es relación real vía "DocumentOwner").
-  created_by           String   @db.NVarChar(1000)
-  created_at           DateTime @default(now())
-  comments             String?  @db.NVarChar(1000)
+  created_by          String   @db.NVarChar(1000)
+  created_at          DateTime @default(now())
+  comments            String?  @db.NVarChar(1000)
   // Fase 2 — Referencia BLANDA a requests_general.id (motor SQL crudo de
   // "solicitudes generales", ver nota de módulo arriba y lib/document-management/
   // workflowEngine.ts). Null mientras la versión todavía no tiene flujo de
@@ -590,6 +662,21 @@ model DocumentVersion {
   // en la carga inicial de Fase 1). Sin relation(): esa tabla no está modelada
   // en Prisma, igual criterio que Document.id_process.
   id_request_general  Int?
+  // Sprint 8 — Editor de documentos (Tiptap). Contenido editable en HTML de
+  // esta versión, generado por el editor propio dentro de la plataforma (ver
+  // app/(hub)/process/document-management/generador/[id]/editar/page.tsx).
+  // NULL = todavía no se ha editado ninguna vez desde el editor (versión
+  // cargada por archivo, p.ej. Fase 1/Fase 2 clásicas, o carga directa del
+  // atajo regulatorio). Al guardar desde el editor, este HTML se persiste
+  // AQUÍ MISMO (se actualiza la versión vigente, no se crea una versión
+  // nueva ni se dispara de nuevo el flujo de 14 estados — ver decisión
+  // documentada en lib/document-management/editor.ts) y además se renderiza
+  // a PDF (Chrome headless vía Puppeteer) y se sube a OneDrive,
+  // reemplazando el archivo de esta misma versión (onedrive_item_id/
+  // onedrive_path se actualizan también). NVARCHAR(MAX) porque el HTML de
+  // un documento con tablas puede superar los 4000 caracteres de un
+  // NVARCHAR normal.
+  content_html        String?  @db.NVarChar(Max)
 
   document Document @relation(fields: [id_document], references: [id_document], onDelete: Cascade)
 
@@ -597,3 +684,31 @@ model DocumentVersion {
   @@map("document_version")
 }
 
+// ===================================================================
+// Métricas diarias del SAP Business One Service Layer (OLP) — 2026-09-03.
+// Reemplaza el Excel manual que se venía sacando a mano: cuenta líneas del
+// log del balanceador del Service Layer (puerto 50000, recibe todo el
+// tráfico, no hace falta sumar los nodos 50001-50010) en serfarma07
+// (192.168.10.7) y las deja acá vía:
+//   - Backfill histórico: prisma/seeds/run-service-layer-metrics-backfill.mjs
+//   - Job diario: Tarea Programada de Windows en pce0023 (no en serfarma07,
+//     ver lib/service-layer-metrics/collectDailyMetric.ts) que hace SSH
+//     puntual a serfarma07 para contar el log del día ya cerrado y hace
+//     upsert acá.
+//
+// `company` es texto libre (SIN FK a la tabla `company`) a propósito: hoy
+// solo se llena "OLP", pero la idea es poder sumar otras empresas más
+// adelante sin tener que resolver primero su id_company real — ver mismo
+// criterio que Document.id_process (referencia blanda documentada arriba).
+// ===================================================================
+model ServiceLayerDailyMetric {
+  id                Int      @id @default(autoincrement())
+  company           String   @db.NVarChar(50)
+  metric_date       DateTime @db.Date
+  transaction_count Int
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@unique([company, metric_date])
+  @@map("service_layer_daily_metrics")
+}

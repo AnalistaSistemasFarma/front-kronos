@@ -1,0 +1,422 @@
+{
+  "company": "OLP",
+  "source": "access_50000_log (serfarma07, puerto balanceador Service Layer)",
+  "rows": [
+    {
+      "date": "2026-05-23",
+      "transactionCount": 764
+    },
+    {
+      "date": "2026-05-24",
+      "transactionCount": 1779
+    },
+    {
+      "date": "2026-05-25",
+      "transactionCount": 17230
+    },
+    {
+      "date": "2026-05-26",
+      "transactionCount": 16434
+    },
+    {
+      "date": "2026-05-27",
+      "transactionCount": 14905
+    },
+    {
+      "date": "2026-05-28",
+      "transactionCount": 8773
+    },
+    {
+      "date": "2026-05-29",
+      "transactionCount": 5864
+    },
+    {
+      "date": "2026-05-30",
+      "transactionCount": 1700
+    },
+    {
+      "date": "2026-05-31",
+      "transactionCount": 1632
+    },
+    {
+      "date": "2026-06-01",
+      "transactionCount": 10077
+    },
+    {
+      "date": "2026-06-02",
+      "transactionCount": 11443
+    },
+    {
+      "date": "2026-06-03",
+      "transactionCount": 12503
+    },
+    {
+      "date": "2026-06-04",
+      "transactionCount": 9873
+    },
+    {
+      "date": "2026-06-05",
+      "transactionCount": 9590
+    },
+    {
+      "date": "2026-06-06",
+      "transactionCount": 1804
+    },
+    {
+      "date": "2026-06-07",
+      "transactionCount": 1601
+    },
+    {
+      "date": "2026-06-08",
+      "transactionCount": 1668
+    },
+    {
+      "date": "2026-06-09",
+      "transactionCount": 12913
+    },
+    {
+      "date": "2026-06-10",
+      "transactionCount": 10777
+    },
+    {
+      "date": "2026-06-11",
+      "transactionCount": 13033
+    },
+    {
+      "date": "2026-06-12",
+      "transactionCount": 9693
+    },
+    {
+      "date": "2026-06-13",
+      "transactionCount": 2617
+    },
+    {
+      "date": "2026-06-14",
+      "transactionCount": 2095
+    },
+    {
+      "date": "2026-06-15",
+      "transactionCount": 1947
+    },
+    {
+      "date": "2026-06-16",
+      "transactionCount": 12378
+    },
+    {
+      "date": "2026-06-17",
+      "transactionCount": 16995
+    },
+    {
+      "date": "2026-06-18",
+      "transactionCount": 11271
+    },
+    {
+      "date": "2026-06-19",
+      "transactionCount": 10264
+    },
+    {
+      "date": "2026-06-20",
+      "transactionCount": 2466
+    },
+    {
+      "date": "2026-06-21",
+      "transactionCount": 1983
+    },
+    {
+      "date": "2026-06-22",
+      "transactionCount": 11789
+    },
+    {
+      "date": "2026-06-23",
+      "transactionCount": 11335
+    },
+    {
+      "date": "2026-06-24",
+      "transactionCount": 11972
+    },
+    {
+      "date": "2026-06-25",
+      "transactionCount": 21540
+    },
+    {
+      "date": "2026-06-26",
+      "transactionCount": 12990
+    },
+    {
+      "date": "2026-06-27",
+      "transactionCount": 2710
+    },
+    {
+      "date": "2026-06-28",
+      "transactionCount": 2367
+    },
+    {
+      "date": "2026-06-29",
+      "transactionCount": 1979
+    },
+    {
+      "date": "2026-06-30",
+      "transactionCount": 11008
+    },
+    {
+      "date": "2026-07-01",
+      "transactionCount": 13102
+    },
+    {
+      "date": "2026-07-02",
+      "transactionCount": 19852
+    },
+    {
+      "date": "2026-07-03",
+      "transactionCount": 11277
+    },
+    {
+      "date": "2026-07-04",
+      "transactionCount": 1960
+    },
+    {
+      "date": "2026-07-05",
+      "transactionCount": 1741
+    },
+    {
+      "date": "2026-07-06",
+      "transactionCount": 14236
+    },
+    {
+      "date": "2026-07-07",
+      "transactionCount": 11341
+    },
+    {
+      "date": "2026-07-08",
+      "transactionCount": 22982
+    },
+    {
+      "date": "2026-07-09",
+      "transactionCount": 20304
+    },
+    {
+      "date": "2026-07-10",
+      "transactionCount": 18343
+    },
+    {
+      "date": "2026-07-11",
+      "transactionCount": 7917
+    },
+    {
+      "date": "2026-07-12",
+      "transactionCount": 5938
+    },
+    {
+      "date": "2026-07-13",
+      "transactionCount": 5759
+    },
+    {
+      "date": "2026-07-14",
+      "transactionCount": 21177
+    },
+    {
+      "date": "2026-07-15",
+      "transactionCount": 17325
+    },
+    {
+      "date": "2026-07-16",
+      "transactionCount": 18218
+    },
+    {
+      "date": "2026-07-17",
+      "transactionCount": 15975
+    },
+    {
+      "date": "2026-07-18",
+      "transactionCount": 7795
+    },
+    {
+      "date": "2026-07-19",
+      "transactionCount": 7683
+    },
+    {
+      "date": "2026-07-20",
+      "transactionCount": 7713
+    },
+    {
+      "date": "2026-07-21",
+      "transactionCount": 22030
+    },
+    {
+      "date": "2026-07-22",
+      "transactionCount": 30466
+    },
+    {
+      "date": "2026-07-23",
+      "transactionCount": 19724
+    },
+    {
+      "date": "2026-07-24",
+      "transactionCount": 14327
+    },
+    {
+      "date": "2026-07-25",
+      "transactionCount": 5047
+    },
+    {
+      "date": "2026-07-26",
+      "transactionCount": 3073
+    },
+    {
+      "date": "2026-07-27",
+      "transactionCount": 16465
+    },
+    {
+      "date": "2026-07-28",
+      "transactionCount": 16904
+    },
+    {
+      "date": "2026-07-29",
+      "transactionCount": 16086
+    },
+    {
+      "date": "2026-07-30",
+      "transactionCount": 13578
+    },
+    {
+      "date": "2026-07-31",
+      "transactionCount": 6533
+    },
+    {
+      "date": "2026-08-01",
+      "transactionCount": 1930
+    },
+    {
+      "date": "2026-08-02",
+      "transactionCount": 1862
+    },
+    {
+      "date": "2026-08-03",
+      "transactionCount": 9236
+    },
+    {
+      "date": "2026-08-04",
+      "transactionCount": 11258
+    },
+    {
+      "date": "2026-08-05",
+      "transactionCount": 10797
+    },
+    {
+      "date": "2026-08-06",
+      "transactionCount": 12231
+    },
+    {
+      "date": "2026-08-07",
+      "transactionCount": 3769
+    },
+    {
+      "date": "2026-08-08",
+      "transactionCount": 3660
+    },
+    {
+      "date": "2026-08-09",
+      "transactionCount": 3650
+    },
+    {
+      "date": "2026-08-10",
+      "transactionCount": 8416
+    },
+    {
+      "date": "2026-08-11",
+      "transactionCount": 9510
+    },
+    {
+      "date": "2026-08-12",
+      "transactionCount": 10859
+    },
+    {
+      "date": "2026-08-13",
+      "transactionCount": 13843
+    },
+    {
+      "date": "2026-08-14",
+      "transactionCount": 8982
+    },
+    {
+      "date": "2026-08-15",
+      "transactionCount": 3716
+    },
+    {
+      "date": "2026-08-16",
+      "transactionCount": 3657
+    },
+    {
+      "date": "2026-08-17",
+      "transactionCount": 4740
+    },
+    {
+      "date": "2026-08-18",
+      "transactionCount": 12275
+    },
+    {
+      "date": "2026-08-19",
+      "transactionCount": 10739
+    },
+    {
+      "date": "2026-08-20",
+      "transactionCount": 9787
+    },
+    {
+      "date": "2026-08-21",
+      "transactionCount": 6140
+    },
+    {
+      "date": "2026-08-22",
+      "transactionCount": 2023
+    },
+    {
+      "date": "2026-08-23",
+      "transactionCount": 1950
+    },
+    {
+      "date": "2026-08-24",
+      "transactionCount": 9727
+    },
+    {
+      "date": "2026-08-25",
+      "transactionCount": 9893
+    },
+    {
+      "date": "2026-08-26",
+      "transactionCount": 10331
+    },
+    {
+      "date": "2026-08-27",
+      "transactionCount": 10415
+    },
+    {
+      "date": "2026-08-28",
+      "transactionCount": 5948
+    },
+    {
+      "date": "2026-08-29",
+      "transactionCount": 164
+    },
+    {
+      "date": "2026-08-30",
+      "transactionCount": 64
+    },
+    {
+      "date": "2026-08-31",
+      "transactionCount": 4976
+    },
+    {
+      "date": "2026-09-01",
+      "transactionCount": 4744
+    },
+    {
+      "date": "2026-09-02",
+      "transactionCount": 10019
+    },
+    {
+      "date": "2026-09-03",
+      "transactionCount": 4181
+    }
+  ]
+}

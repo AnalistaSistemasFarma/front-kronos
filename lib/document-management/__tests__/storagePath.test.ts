@@ -63,4 +63,54 @@ describe('getDocumentCodeError', () => {
     expect(getDocumentCodeError('POL 001')).toMatch(/letras, números/);
     expect(getDocumentCodeError('POL/001')).toMatch(/letras, números/);
   });
+
+  // Bug real de producción (2026-09-03): un código de documento "CON" es una
+  // secuencia de letras válida para CODE_PATTERN, pero es un nombre de
+  // dispositivo reservado de Windows -- OneDrive/SharePoint lo rechaza al
+  // crear la carpeta (HTTP 400), y ese rechazo no controlado tumbaba
+  // create-request con un 500. getDocumentCodeError debe atraparlo ANTES,
+  // aquí mismo, como error de validación (400).
+  describe('nombres reservados de dispositivo de Windows', () => {
+    const reserved = [
+      'CON',
+      'con',
+      'Con',
+      'PRN',
+      'prn',
+      'AUX',
+      'aux',
+      'NUL',
+      'nul',
+      'COM1',
+      'com1',
+      'COM9',
+      'LPT1',
+      'lpt1',
+      'LPT9',
+    ];
+
+    it.each(reserved)('rechaza "%s" como nombre reservado de Windows', (code) => {
+      const error = getDocumentCodeError(code);
+      expect(error).not.toBeNull();
+      expect(error).toMatch(/nombre reservado de Windows/);
+    });
+
+    it('COM0 y LPT0 también se rechazan (dígito 0 incluido en el rango)', () => {
+      expect(getDocumentCodeError('COM0')).toMatch(/nombre reservado de Windows/);
+      expect(getDocumentCodeError('LPT0')).toMatch(/nombre reservado de Windows/);
+    });
+
+    it('no rechaza códigos que solo contienen un nombre reservado como substring', () => {
+      // La palabra reservada debe ser el código COMPLETO, no una parte de él:
+      // "CON-GH-001" es un código de documento legítimo, no un archivo "CON".
+      expect(getDocumentCodeError('CON-GH-001')).toBeNull();
+      expect(getDocumentCodeError('PRO-CON-001')).toBeNull();
+      expect(getDocumentCodeError('CONTRATO-001')).toBeNull();
+    });
+
+    it('COM10 y LPT10 no son nombres reservados (el rango real es 0-9)', () => {
+      expect(getDocumentCodeError('COM10')).toBeNull();
+      expect(getDocumentCodeError('LPT10')).toBeNull();
+    });
+  });
 });
