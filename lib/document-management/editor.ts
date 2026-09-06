@@ -6,6 +6,7 @@ import { buildDocumentVersionFolderSegments } from './storagePath';
 import { createDocumentVersionAndStartWorkflow } from './workflowEngine';
 import { INITIAL_STATE, isClosedState } from './workflowStates';
 import puppeteer, { type Browser } from 'puppeteer';
+import mammoth from 'mammoth';
 
 /**
  * Sprint 8 — Editor de documentos dentro de la plataforma (Tiptap sobre
@@ -313,6 +314,62 @@ export async function resolveEditableVersion(idDocument: number) {
 
   if (!version) return null;
   return { document, version };
+}
+
+/**
+ * Fix 2026-09-04 (bug reportado por Nicolás, documento id=17): una versión
+ * puede llegar a "Vigente" con un archivo .docx real ya subido a OneDrive
+ * (`onedrive_item_id`/`onedrive_path`) sin haber pasado nunca por el editor
+ * ni por "Subir documento Word" de aquí -- por ejemplo, versiones creadas
+ * por la carga normal de archivos (lib/document-management/newVersion.ts)
+ * o por la migración histórica de Fase 1. En ese caso `content_html` queda
+ * NULL en la base aunque el documento sí tenga contenido real, y el editor
+ * mostraba la plantilla vacía + el bloque de "Subir Word" como si el
+ * documento no tuviera nada cargado.
+ *
+ * Esta función resuelve el HTML a MOSTRAR en el editor: si ya hay
+ * `content_html` guardado se usa tal cual; si no, pero existe un .docx en
+ * OneDrive, se descarga y se convierte al vuelo con `mammoth` (mismo
+ * mecanismo que `upload-word/route.ts`) solo para precargar la vista. A
+ * propósito NO se persiste en `content_html`: la restricción de
+ * `saveWordUploadContent` (no escribir contenido sobre una versión
+ * "Vigente"/cerrada) sigue vigente sin cambios -- este helper es de solo
+ * lectura, para que abrir el editor no engañe al usuario diciéndole que el
+ * documento no tiene contenido.
+ */
+export async function resolveDisplayContentHtml(version: {
+  content_html: string | null;
+  onedrive_item_id: string | null;
+  onedrive_path: string;
+}): Promise<string | null> {
+  if (version.content_html !== null) return version.content_html;
+  if (!version.onedrive_item_id) return null;
+  if (!version.onedrive_path.toLowerCase().endsWith('.docx')) return null;
+
+  const graphBase = (process.env.MICROSOFTGRAPHUSERROUTE || '').toString();
+  if (!graphBase) return null;
+
+  try {
+    const token = await getMicrosoftToken();
+    if (!token) return null;
+
+    const res = await fetch(`${graphBase}items/${version.onedrive_item_id}/content`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      console.error(
+        `No se pudo descargar de OneDrive el archivo de la versión (item ${version.onedrive_item_id}) para precargar el editor: HTTP ${res.status}`
+      );
+      return null;
+    }
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const conversion = await mammoth.convertToHtml({ buffer });
+    return conversion.value?.trim() ? conversion.value : null;
+  } catch (error) {
+    console.error('Error convirtiendo a HTML el Word existente para precargar el editor:', error);
+    return null;
+  }
 }
 
 export interface SaveWordUploadContentInput {

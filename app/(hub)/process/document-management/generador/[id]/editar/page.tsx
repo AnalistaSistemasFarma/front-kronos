@@ -169,10 +169,20 @@ export default function DocumentEditorPage() {
   });
 
   useEffect(() => {
-    if (!idDocument) return;
+    // Fix 2026-09-04 (bug documento id=14, "editor vacío con content_html
+    // real"): con `immediatelyRender: false` (arriba), `editor` llega como
+    // `null` en el primer render -- Tiptap recién crea la instancia real en
+    // un efecto interno posterior. Este efecto se define con `[idDocument]`
+    // como dependencia, así que su closure capturaba ese `editor` nulo del
+    // montaje INICIAL para siempre: `editor?.commands.setContent(...)` en
+    // `loadData` quedaba como no-op permanente aunque el fetch trajera bien
+    // los 2200 caracteres reales del documento (confirmado con curl directo
+    // al endpoint) -- el editor nunca se enteraba. Se agrega `editor` a las
+    // dependencias y se espera a que exista antes de cargar los datos.
+    if (!idDocument || !editor) return;
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idDocument]);
+  }, [idDocument, editor]);
 
   const loadData = async () => {
     try {

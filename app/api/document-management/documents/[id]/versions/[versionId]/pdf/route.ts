@@ -24,10 +24,8 @@ async function hasDocumentGeneratorCompanyAccess(userEmail: string, companyId: n
 }
 
 /**
- * Sprint 7 — "Generador de Documentos": descarga/envío de un documento SIN
- * proceso (`document.id_process IS NULL`, ver
- * app/api/document-management/generator/route.ts) siempre como PDF no
- * editable, pedido explícito de Nicolás.
+ * Sprint 7 — "Generador de Documentos": descarga/envío de la versión
+ * VIGENTE de un documento, siempre como PDF no editable.
  *
  * Mismo mecanismo de resolución que .../[versionId]/open/route.ts (Graph,
  * a partir de `onedrive_item_id`), pero en vez de redirigir al `webUrl` del
@@ -50,10 +48,26 @@ async function hasDocumentGeneratorCompanyAccess(userEmail: string, companyId: n
  * proxea/bufferea el archivo por este servidor), igual patrón que el
  * endpoint `open` ya existente.
  *
- * Guardarraíl de negocio (servidor, no solo UI): esta acción solo aplica a
- * documentos SIN proceso. Si el documento tiene `id_process`, se responde
- * 403 — la descarga/envío de documentos CON proceso queda para un sprint
- * futuro (Sprint 9, vista por categoría de proceso).
+ * Guardarraíl de negocio (servidor, no solo UI) -- CORREGIDO 2026-09-04:
+ * antes este endpoint bloqueaba con 403 cualquier documento CON
+ * `id_process` (pensado como "solo aplica a documentos sin proceso, Sprint
+ * 7; los documentos con proceso quedan para un sprint futuro"). Ese
+ * criterio quedó obsoleto en cuanto el Generador empezó a listar también
+ * documentos CON proceso (aclaración de Nicolás: el Generador muestra TODO
+ * documento Vigente, tenga o no `id_process`) -- con el filtro viejo, el
+ * botón de descarga daba 403 justo en los documentos que el Generador ya
+ * mostraba. Además, `id_process` nunca fue una señal de "documento en
+ * trámite": los datos reales muestran documentos "Rechazado"/"Anulado"/
+ * "Eliminado"/"Visto bueno calidad" con `id_process` poblado igual que los
+ * "Vigente" -- ese campo solo indica si el documento pasó por el motor de
+ * flujo, no en qué estado quedó. La señal correcta de "todavía en trámite,
+ * no descargable" es el ESTADO del documento
+ * (`document.current_status`, ver lib/document-management/workflowStates.ts):
+ * la única versión que debe poder descargarse/enviarse por esta vía es la
+ * que ya llegó a "Vigente". Cualquier otro estado (En creación, En
+ * elaboración, En revisión, En aprobación, Aprobado, En divulgación,
+ * Reasignación, Reelaboración, Rechazado, Obsoleto, Anulado, Visto bueno
+ * calidad, Eliminado) responde 403.
  *
  * Control de acceso (fix pedido por Nicolás, 2026-09-02): valida el permiso
  * PROPIO del Generador de Documentos (hasDocumentGeneratorCompanyAccess,
@@ -94,12 +108,12 @@ export async function GET(
       return NextResponse.json({ error: 'Sin acceso a esta empresa' }, { status: 403 });
     }
 
-    if (version.document.id_process != null) {
+    if (version.document.current_status !== 'Vigente') {
       return NextResponse.json(
         {
           error:
-            'Este documento pertenece a un proceso. La descarga/envío directo solo aplica a ' +
-            'documentos sin proceso (Sprint 7); la vista por categoría de proceso llega en un sprint futuro.',
+            'Este documento todavía no está Vigente. La descarga/envío directo solo aplica a ' +
+            `la versión ya publicada como Vigente (estado actual: "${version.document.current_status}").`,
         },
         { status: 403 }
       );

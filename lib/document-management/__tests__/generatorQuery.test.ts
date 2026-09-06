@@ -1,19 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import { buildGeneratorDocumentsWhere } from '../generatorQuery';
 
-// Regresión: el listado del Generador de Documentos debe excluir SIEMPRE los
-// documentos sin proceso (carga histórica de Fase 1), pedido de Nicolás
-// 2026-09-02. Documentos SIN proceso no deben aparecer; documentos CON
-// proceso sí.
+// Regresión: el listado del Generador de Documentos debe mostrar SIEMPRE
+// todos los documentos "Vigente" -- aclaración definitiva de Nicolás,
+// 2026-09-04: "todos los documentos, sean de procedimiento o no, deben
+// mostrarse" -- sin importar id_process (null o no) ni id_document_type.
+// Regla anterior (2026-09-02 a 2026-09-04, ya retirada): excluía los
+// documentos con id_process IS NULL (carga histórica de Fase 1).
 
 describe('buildGeneratorDocumentsWhere', () => {
-  it('siempre excluye documentos sin proceso (id_process: { not: null })', () => {
+  it('nunca incluye id_process en el where (ya no filtra por eso)', () => {
     const where = buildGeneratorDocumentsWhere({
       companyId: null,
       readableCompanyIds: [1, 2],
       documentTypeId: null,
     });
-    expect(where.id_process).toEqual({ not: null });
+    expect(where).not.toHaveProperty('id_process');
   });
 
   it('siempre filtra por estado "Vigente"', () => {
@@ -61,14 +63,16 @@ describe('buildGeneratorDocumentsWhere', () => {
     expect(where.id_document_type).toBeUndefined();
   });
 
-  it('el filtro id_process NUNCA se puede omitir sin importar la combinación de los demás filtros (regresión)', () => {
+  it('el filtro current_status "Vigente" es el ÚNICO filtro de estado/proceso, sin importar la combinación de los demás filtros (regresión)', () => {
     const combos: Array<Parameters<typeof buildGeneratorDocumentsWhere>[0]> = [
       { companyId: null, readableCompanyIds: [1], documentTypeId: null },
       { companyId: 3, readableCompanyIds: [1, 3], documentTypeId: 7 },
       { companyId: null, readableCompanyIds: [], documentTypeId: null },
     ];
     for (const combo of combos) {
-      expect(buildGeneratorDocumentsWhere(combo).id_process).toEqual({ not: null });
+      const where = buildGeneratorDocumentsWhere(combo);
+      expect(where.current_status).toBe('Vigente');
+      expect(where).not.toHaveProperty('id_process');
     }
   });
 });

@@ -6,6 +6,7 @@ import {
   generatePdfForDownload,
   createNewVersionFromEditorAndStartWorkflow,
   resolveEditableVersion,
+  resolveDisplayContentHtml,
   EditorError,
 } from '@/lib/document-management/editor';
 
@@ -82,6 +83,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Sin acceso a esta empresa' }, { status: 403 });
     }
 
+    // Fix 2026-09-04 (bug documento id=17): si `content_html` está NULL pero
+    // la versión ya tiene un .docx real en OneDrive (subido por la carga
+    // normal de archivos, no por el editor), se convierte al vuelo solo
+    // para precargar la vista -- ver comentario de
+    // `resolveDisplayContentHtml` en lib/document-management/editor.ts.
+    const displayContentHtml = await resolveDisplayContentHtml(version);
+
     return NextResponse.json({
       document: {
         id_document: document.id_document,
@@ -95,7 +103,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         id_document_version: version.id_document_version,
         version_number: version.version_number,
         status: version.status,
-        content_html: version.content_html,
+        content_html: displayContentHtml,
         onedrive_item_id: version.onedrive_item_id,
       },
     });

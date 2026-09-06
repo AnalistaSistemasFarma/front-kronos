@@ -50,13 +50,17 @@ async function getDocumentGeneratorAccess(userEmail: string): Promise<DocumentGe
  * Lista TODOS los documentos en estado "Vigente" (ya autorizados/publicados,
  * ver lib/document-management/workflowStates.ts — se llega ahí solo vía la
  * acción `publicar_vigente`) de las empresas a las que el usuario tiene el
- * permiso propio del Generador (ver arriba).
+ * permiso propio del Generador (ver arriba). CORREGIDO 2026-09-04: sin
+ * ningún otro filtro de estado/proceso/tipo -- ver el comentario de
+ * `buildGeneratorDocumentsWhere` en lib/document-management/generatorQuery.ts
+ * para el detalle de la aclaración de Nicolás que motivó el cambio.
  *
  * Para cada documento resuelve si está o no ligado a un proceso
  * (`document.id_process`, referencia BLANDA a `process_category.id` — ver
  * el comentario del modelo Document en prisma/schema.prisma) y, si lo está,
  * el NOMBRE de ese proceso vía un lookup aparte en SQL crudo (esa tabla no
- * está modelada en Prisma).
+ * está modelada en Prisma). Esto es solo INFORMATIVO para la UI (columna de
+ * proceso); ya no afecta si el documento aparece o no en el listado.
  *
  * HALLAZGO IMPORTANTE (documentado también en el mensaje de cierre del
  * sprint): hoy `id_process` no distingue procesos de negocio (Auditorías,
@@ -66,11 +70,11 @@ async function getDocumentGeneratorAccess(userEmail: string): Promise<DocumentGe
  * `DOCUMENT_WORKFLOW_PROCESS_NAME` ("Gestión Documental — Ciclo de vida del
  * documento"): es el proceso interno de SynerLink que orquesta el flujo, no
  * una categoría de negocio. Los únicos documentos con `id_process IS NULL`
- * hoy son los cargados directo en Fase 1 (carga histórica, sin flujo). Por
- * eso, mientras no exista el catálogo de procesos de negocio del Sprint 9,
- * "con proceso" / "sin proceso" en este listado equivale en la práctica a
- * "pasó por el flujo de aprobación" / "carga histórica directa" — no a una
- * categoría específica.
+ * hoy son los cargados directo en Fase 1 (carga histórica, sin flujo) --
+ * también ambigua con "tipo de documento" (`id_document_type`,
+ * `DocumentType.code_prefix` como "PRO"/"PROCEDIMIENTO"): ese es un concepto
+ * totalmente aparte y nunca estuvo excluido de este listado (el filtro por
+ * tipo aquí siempre fue opcional, vía el query param `documentTypeId`).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -97,11 +101,11 @@ export async function GET(request: NextRequest) {
     const documents = await prisma.document.findMany({
       // Filtro extraído a lib/document-management/generatorQuery.ts
       // (buildGeneratorDocumentsWhere) para poder probar por separado, sin
-      // BD, que id_process: { not: null } SIEMPRE está presente -- 2026-09-02
-      // (pedido de Nicolás): el Generador solo debe listar documentos que YA
-      // fueron autorizados por el flujo de 14 estados. id_process IS NULL =
-      // carga histórica de Fase 1, nunca pasó por aprobación -- se excluye
-      // aunque esté marcado "Vigente".
+      // BD, que el único filtro de estado es current_status: 'Vigente' --
+      // aclaración definitiva de Nicolás, 2026-09-04: el Generador muestra
+      // TODOS los documentos vigentes, sean o no "de procedimiento" y
+      // tengan o no id_process (ver el comentario de esa función para el
+      // detalle completo).
       where: buildGeneratorDocumentsWhere({
         companyId,
         readableCompanyIds,
