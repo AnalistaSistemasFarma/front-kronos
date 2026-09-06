@@ -36,6 +36,7 @@ import {
   findAgentByRouteKey,
   formatChatTime,
   groupAgentsByCompany,
+  toPlainPreview,
   type ChatAgentDto,
 } from '../../lib/chat/client';
 
@@ -311,7 +312,11 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
                           unread={overview.unreadByAgent.get(agent.idAgent) ?? 0}
                           statusLabel={describeAgentStatus(agentStatus).label}
                           status={agentStatus}
-                          lastPreview={conversation?.lastMessage?.preview ?? null}
+                          lastPreview={
+                            conversation?.lastMessage
+                              ? toPlainPreview(conversation.lastMessage.preview)
+                              : null
+                          }
                           lastAt={conversation?.lastMessageAt ?? null}
                           selected={selectedAgent?.idAgent === agent.idAgent}
                           compact={viewMode === 'list' || Boolean(selectedAgent)}

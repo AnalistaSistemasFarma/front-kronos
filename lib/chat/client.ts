@@ -276,6 +276,37 @@ export function groupAgentsByCompany(
   return list;
 }
 
+/**
+ * Convierte el extracto Markdown que devuelve la API (`lastMessage.preview`)
+ * en texto llano para las tarjetas de la bandeja.
+ *
+ * El servidor solo aplasta los espacios: si el agente respondió con una tabla,
+ * el extracto llega como `### Resumen | Documento | Cantidad | |---|---:|`, que
+ * en una tarjeta no dice nada. Aquí se quitan las marcas — nunca se renderiza,
+ * solo se limpia — y por eso es seguro: la salida es una cadena que se pinta
+ * como texto, jamás como HTML.
+ *
+ * Las expresiones son todas de un solo cuantificador para no abrir la puerta a
+ * un retroceso catastrófico con un extracto malicioso.
+ */
+export function toPlainPreview(markdown: string): string {
+  return markdown
+    .replace(/```+/g, ' ')
+    .replace(/`/g, '')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/#{1,6}\s+/g, '')
+    .replace(/\*{1,3}/g, '')
+    .replace(/~{1,2}/g, '')
+    .replace(/^\s{0,8}[-*+]\s+/gm, '')
+    .replace(/^\s{0,8}>\s?/gm, '')
+    .replace(/\|/g, ' ')
+    .replace(/-{3,}/g, ' ')
+    .replace(/:?-{2,}:?/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** Fecha relativa corta, en español, para la bandeja y las burbujas. */
 export function formatChatTime(iso: string): string {
   const date = new Date(iso);
