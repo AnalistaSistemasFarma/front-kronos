@@ -19,6 +19,7 @@ import {
 import { useState, useEffect, useContext, useMemo } from 'react';
 import { useTheme } from './providers';
 import NotificationBell from './NotificationBell';
+import ChatAgentBar from './chat/ChatAgentBar';
 import {
   AppSectionContext,
   type AppSection,
@@ -311,6 +312,12 @@ export default function Header() {
             </nav>
 
             <div className='flex items-center space-x-2'>
+              {/* Avatares de los asistentes IA (módulo de chat de agentes).
+                  Se pinta solo si el usuario tiene el permiso; si no, no
+                  ocupa espacio. Único cambio de este archivo en la fase 2c:
+                  una línea AÑADIDA al grupo de acciones, sin tocar ni
+                  reordenar nada de lo que ya estaba. */}
+              <ChatAgentBar />
               <NotificationBell />
               <ActionIcon
                 variant='subtle'
