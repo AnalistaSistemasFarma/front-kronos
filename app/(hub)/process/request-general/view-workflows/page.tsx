@@ -133,6 +133,7 @@ interface FormFieldDef {
   field_label: string;
   field_type: string;
   required: boolean;
+  editable: boolean;
   options: FieldOptionDef[];
   conditions: number[];
   // Solo para field_type === 'table': definición de columnas de la tabla.
@@ -426,6 +427,7 @@ function ViewWorkFlowPage() {
             field_label: string;
             field_type?: string;
             required: boolean | number;
+            editable?: boolean | number;
             options: { id: number; option_label: string }[];
             conditions: number[];
             config_json?: string | null;
@@ -434,6 +436,7 @@ function ViewWorkFlowPage() {
             field_label: f.field_label,
             field_type: f.field_type || 'select',
             required: Boolean(f.required),
+            editable: Boolean(f.editable),
             options: f.options || [],
             conditions: f.conditions || [],
             columns:
@@ -605,6 +608,7 @@ function ViewWorkFlowPage() {
       field_label: '',
       field_type: 'select',
       required: true,
+      editable: false,
       options: [],
       conditions: [],
       columns: [],
@@ -827,7 +831,9 @@ function ViewWorkFlowPage() {
         const orig = originalFormFields.find((of) => of.id === f.id);
         if (!orig) return false;
         const labelChanged =
-          orig.field_label !== f.field_label || Boolean(orig.required) !== Boolean(f.required);
+          orig.field_label !== f.field_label ||
+          Boolean(orig.required) !== Boolean(f.required) ||
+          Boolean(orig.editable) !== Boolean(f.editable);
         const newOpts = f.options.filter((o) => o.id < 0 && o.option_label.trim());
         const deletedOpts = orig.options.filter((oo) => !f.options.find((o) => o.id === oo.id));
         const updatedOpts = f.options.filter((o) => {
@@ -914,6 +920,7 @@ function ViewWorkFlowPage() {
         field_label?: string;
         field_type?: string;
         required?: boolean;
+        editable?: boolean;
         condition_option_ids?: number[];
         options?: OptionToProcess[];
         config_json?: string | null;
@@ -1048,6 +1055,7 @@ function ViewWorkFlowPage() {
             field_label: field.field_label,
             field_type: field.field_type,
             required: field.required,
+            editable: field.editable,
             condition_option_ids: field.conditions,
             options: buildOptionActions(field),
             config_json: fieldConfigJson(field),
@@ -1059,6 +1067,7 @@ function ViewWorkFlowPage() {
               id: field.id,
               field_label: field.field_label,
               required: field.required,
+              editable: field.editable,
               condition_option_ids: field.conditions,
               options: buildOptionActions(field, orig),
               ...(field.field_type === TABLE_FIELD_TYPE
@@ -2210,6 +2219,19 @@ function ViewWorkFlowPage() {
                           }}
                           mb={8}
                         />
+                        <Checkbox
+                          label='Editable en proceso'
+                          checked={editedFormFields[fieldIndex]?.editable || false}
+                          onChange={(e) => {
+                            const next = [...editedFormFields];
+                            next[fieldIndex] = {
+                              ...next[fieldIndex],
+                              editable: e.currentTarget.checked,
+                            };
+                            setEditedFormFields(next);
+                          }}
+                          mb={8}
+                        />
                         <ActionIcon
                           color='red'
                           variant='subtle'
@@ -2335,6 +2357,11 @@ function ViewWorkFlowPage() {
                           <Badge color={field.required ? 'red' : 'gray'} variant='light' size='sm'>
                             {field.required ? 'Obligatorio' : 'Opcional'}
                           </Badge>
+                          {field.editable && (
+                            <Badge color='teal' variant='light' size='sm'>
+                              Editable en proceso
+                            </Badge>
+                          )}
                         </Group>
                       </Group>
                       <Group gap='xs'>
