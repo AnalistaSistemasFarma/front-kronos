@@ -43,7 +43,8 @@ export interface ChatAttachmentDto {
   fileName: string;
   contentType: string | null;
   sizeBytes: number | null;
-  webUrl: string | null;
+  /** Siempre /api/chat/attachments/<id>: el contenido pasa por la aplicación. */
+  downloadUrl: string;
 }
 
 export interface ChatMessageDto {

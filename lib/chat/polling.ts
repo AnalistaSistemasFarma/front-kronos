@@ -44,19 +44,32 @@ export interface PollCadenceInput {
   msSinceLastActivity: number;
   /** ¿La pestaña está oculta? El cliente lo informa para bajar la cadencia. */
   hidden?: boolean;
+  /**
+   * ¿El último mensaje del hilo es del USUARIO y el agente todavía no ha
+   * contestado? Es justo el momento en que la persona está mirando la pantalla
+   * esperando una señal de vida.
+   */
+  awaitingAgent?: boolean;
 }
 
 /**
  * Cuántos milisegundos debería esperar el cliente antes de volver a preguntar.
  *
  * Con la pestaña oculta se aplica el tope superior sin importar lo demás: si
- * el usuario no está mirando, no hay nada que refrescar en vivo.
+ * el usuario no está mirando, no hay nada que refrescar en vivo. Esa regla va
+ * PRIMERO y gana sobre todas las siguientes, `awaitingAgent` incluido.
  */
 export function computeNextPollMs(input: PollCadenceInput): number {
   if (input.hidden) return POLL_MS.dormant;
 
   if (input.hasNewMessages) return POLL_MS.live;
   if (input.agentState === 'thinking' || input.agentState === 'tool') return POLL_MS.live;
+
+  // Acabo de escribir y el agente aún no responde. Sin este caso, el estado
+  // sigue en 'idle' y la conversación cae en `active` (2 s): la persona espera
+  // hasta dos segundos solo para ver aparecer el "Pensando…". Es el instante en
+  // que más se está mirando la pantalla, así que aquí se sondea en vivo.
+  if (input.awaitingAgent) return POLL_MS.live;
 
   const since = Number.isFinite(input.msSinceLastActivity)
     ? Math.max(0, input.msSinceLastActivity)

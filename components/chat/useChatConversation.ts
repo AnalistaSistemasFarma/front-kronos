@@ -41,7 +41,7 @@ export interface ChatThreadState {
   error: string | null;
   hasOlder: boolean;
   loadingOlder: boolean;
-  send: (body: string) => Promise<boolean>;
+  send: (body: string, files?: File[]) => Promise<boolean>;
   loadOlder: () => Promise<void>;
   markRead: () => Promise<void>;
 }
@@ -246,10 +246,11 @@ export function useChatConversation(idAgent: number | null, active: boolean): Ch
   /* ─────────────────────────────── Acciones ───────────────────────────── */
 
   const send = useCallback(
-    async (body: string): Promise<boolean> => {
+    async (body: string, files: File[] = []): Promise<boolean> => {
       const conversationId = conversationIdRef.current;
       const text = body.trim();
-      if (conversationId === null || text.length === 0) return false;
+      // Con adjuntos el texto puede ir vacío; sin nada de nada, no se envía.
+      if (conversationId === null || (text.length === 0 && files.length === 0)) return false;
 
       const optimisticId = -Date.now();
       setSending(true);
@@ -263,16 +264,43 @@ export function useChatConversation(idAgent: number | null, active: boolean): Ch
           createdAt: new Date().toISOString(),
           deliveredAt: null,
           readAt: null,
-          attachments: [],
+          // Los adjuntos optimistas se muestran con id negativo: todavía no
+          // existen en la base y su enlace de descarga aún no sirve. La
+          // respuesta del servidor los reemplaza por los reales.
+          attachments: files.map((file, index) => ({
+            id: optimisticId - index - 1,
+            fileName: file.name,
+            contentType: file.type || null,
+            sizeBytes: file.size,
+            downloadUrl: '',
+          })),
           pending: true,
         },
       ]);
 
       try {
-        const res = await chatFetch(`/api/chat/conversations/${conversationId}/messages`, {
-          method: 'POST',
-          body: JSON.stringify({ body: text }),
-        });
+        // Con adjuntos hay que ir en multipart; sin adjuntos se conserva el
+        // JSON de siempre (mismo nombre de campo `body` en ambos casos).
+        let res: Response;
+        if (files.length > 0) {
+          const form = new FormData();
+          form.append('body', text);
+          for (const file of files) form.append('files', file);
+          // Sin `Content-Type` a mano: el navegador tiene que ponerlo con su
+          // propio `boundary`, si no el servidor no puede leer el formulario.
+          res = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
+            method: 'POST',
+            body: form,
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+          });
+        } else {
+          res = await chatFetch(`/api/chat/conversations/${conversationId}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({ body: text }),
+          });
+        }
 
         if (!res.ok) {
           const payload = (await res.json().catch(() => null)) as { error?: string } | null;

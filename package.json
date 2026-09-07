@@ -53,9 +53,11 @@
   "overrides": {
     "tar": "^7.5.7"
   },
+  "optionalDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "1.1.5"
+  },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
-    "@rolldown/binding-win32-x64-msvc": "1.1.5",
     "@tailwindcss/postcss": "^4",
     "@types/file-saver": "^2.0.7",
     "@types/mssql": "^9.1.9",

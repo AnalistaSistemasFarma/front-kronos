@@ -961,7 +961,13 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   min-height: 0;
 }
 
+/* Fila FIJA de abajo del hilo: nunca se encoge ni se va con el scroll. Lo que
+   scrollea es solo .chat-thread__scroll, que es el hermano de arriba con
+   flex:1 y min-height:0. Las fichas de los archivos elegidos se pintan dentro
+   de este bloque, así que tampoco empujan el layout ni tapan el último
+   mensaje. */
 .chat-thread__composer {
+  flex: 0 0 auto;
   border-top: 1px solid var(--app-border, var(--border-subtle));
   background-color: var(--app-surface, var(--surface));
   padding: 8px 10px 10px;
@@ -1137,9 +1143,71 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   background-color: var(--app-surface, var(--surface));
   position: sticky;
   top: calc(var(--app-header-height) + 16px);
+  /* Altura ACOTADA para que el hilo scrollee POR DENTRO y el compositor quede
+     siempre visible abajo. Sin este tope, el bloque crecía con el contenido y
+     la caja de escribir se iba con el scroll de la página.
+
+     Se usa `dvh` y no `vh` por el móvil: cuando sale el teclado de iOS/Android
+     la unidad `vh` sigue valiendo lo que medía la pantalla completa y el
+     compositor queda DEBAJO del teclado. La primera declaración, en `vh`, es
+     el respaldo para navegadores que no entienden `dvh`. */
+  height: calc(100vh - var(--app-header-height) - 32px);
+  height: calc(100dvh - var(--app-header-height) - 32px);
 }
 
-/* ── Markdown de los mensajes ── */
+/* ── Fichas de adjuntos ── */
+.chat-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  color: var(--app-text, var(--foreground));
+  text-decoration: none;
+}
+
+.chat-attachment__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-attachment__size {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+/* Ficha de un archivo TODAVÍA no enviado, dentro del compositor. */
+.chat-attachment--draft {
+  max-width: 240px;
+  font-size: 12px;
+}
+
+.chat-attachment--link {
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.chat-attachment--link:hover {
+  border-color: var(--app-accent, #2563eb);
+  background-color: var(--app-surface, var(--surface));
+}
+
+/* Dentro de la burbuja del usuario (fondo de color) la ficha se aclara para
+   conservar el contraste; el resto de la paleta sale de los tokens --app-*. */
+.chat-bubble--user .chat-attachment {
+  background-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+
+.chat-bubble--user .chat-attachment--link:hover {
+  background-color: rgba(255, 255, 255, 0.28);
+  border-color: #ffffff;
+}
+
+/* Markdown de los mensajes */
 .chat-md {
   font-size: 13.5px;
   line-height: 1.55;
