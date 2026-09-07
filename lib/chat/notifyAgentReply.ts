@@ -98,9 +98,13 @@ export async function notifyAgentReply(input: NotifyAgentReplyInput): Promise<vo
     await createAndSendNotifications([email], {
       title: input.agentName,
       body: summarizeReply(input.body, input.attachmentCount),
-      // Enlace profundo al hilo: es la misma URL que usa la interfaz al
-      // seleccionar un agente (ChatWorkspace.selectAgent).
-      url: `/process/chat?agent=${encodeURIComponent(input.agentCode)}`,
+      // Enlace profundo al hilo. Se usa la RUTA DEDICADA del agente
+      // (/process/chat/<code>) y no el parámetro ?agent=, porque esa página
+      // llega con el agente ya seleccionado desde el servidor
+      // (initialAgentCode). El parámetro depende de un efecto en el navegador
+      // y, al abrir la aplicación desde cero por una notificación, se veía la
+      // lista de agentes en vez de la conversación.
+      url: `/process/chat/${encodeURIComponent(input.agentCode)}`,
       // Un `tag` por conversación: si el agente manda varios mensajes, la
       // notificación se reemplaza en vez de apilarse.
       tag: `chat-agente-${input.idConversation}`,
