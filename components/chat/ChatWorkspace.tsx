@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useMediaQuery } from '@mantine/hooks';
 import {
   ActionIcon,
   Alert,
@@ -141,6 +142,15 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [selectedCode, setSelectedCode] = useState<string | null>(initialAgentCode ?? null);
 
+  // En pantallas angostas las dos columnas de la rejilla se APILAN: la lista de
+  // asistentes arriba y la conversación debajo. Al llegar desde una
+  // notificación uno cae en la lista y la conversación queda fuera de la
+  // pantalla, así que parece que no lo llevó a ninguna parte y toca volver a
+  // tocar el agente. Ahí se pasa a maestro-detalle: con un agente elegido se
+  // muestra SOLO la conversación, y la flecha del encabezado devuelve a las
+  // carpetas. En pantalla ancha no cambia nada: siguen las dos columnas.
+  const enPantallaAngosta = useMediaQuery('(max-width: 992px)');
+
   // El código del agente también puede llegar por la URL (?agent=orus), que es
   // lo que usa el botón "abrir en la página de chats" del panel flotante.
   useEffect(() => {
@@ -206,7 +216,7 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
   return (
     <div className='app-page-shell app-page-shell--fill ios-process-hub min-h-screen'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <header className='mb-6'>
+        <header className='mb-6' hidden={Boolean(enPantallaAngosta && selectedAgent)}>
           <h1 className='ios-process-hub__title text-3xl sm:text-4xl mb-2'>Asistentes IA</h1>
           <p className='ios-process-hub__subtitle mb-5'>
             Sus asistentes, agrupados por empresa. Elija uno para conversar.
@@ -259,6 +269,7 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
 
         <Grid gutter='lg'>
           {/* Columna de carpetas */}
+          {!(enPantallaAngosta && selectedAgent) && (
           <Grid.Col span={{ base: 12, lg: selectedAgent ? 5 : 12 }}>
             {folders.length === 0 ? (
               <div className='ios-empty'>
@@ -335,6 +346,7 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
               </Text>
             )}
           </Grid.Col>
+          )}
 
           {/* Columna del hilo */}
           {selectedAgent && (
