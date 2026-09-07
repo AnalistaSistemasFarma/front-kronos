@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -12,9 +12,9 @@ import {
   Stack,
   Text,
 } from '@mantine/core';
-import { IconAlertCircle, IconDownload, IconMessage2 } from '@tabler/icons-react';
+import { IconAlertCircle, IconDownload, IconMessage2, IconUpload } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
-import ChatComposer from './ChatComposer';
+import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import ChatMarkdown from './ChatMarkdown';
 import { useChatConversation } from './useChatConversation';
 import {
@@ -225,6 +225,63 @@ export default function ChatThread({
     viewport.scrollTop = viewport.scrollHeight;
   }, [thread.loading, agent.idAgent]);
 
+  // ── Arrastrar y soltar archivos sobre la conversación ────────────────────
+  // El área de soltar es TODO el hilo (mensajes + compositor), no solo la caja
+  // de texto: es donde la gente suelta por instinto. Los archivos se entregan
+  // al compositor por su ref, así la validación y el tope por mensaje siguen
+  // viviendo en un solo lugar.
+  const composerRef = useRef<ChatComposerHandle>(null);
+  const [dragging, setDragging] = useState(false);
+  // Contador de entradas/salidas: sin él, pasar el cursor por encima de un
+  // hijo dispara dragleave del padre y el aviso parpadea.
+  const dragDepth = useRef(0);
+
+  const composerDisabled = thread.loading || thread.conversation === null;
+
+  /** Solo reaccionamos si lo que se arrastra son ARCHIVOS (no texto ni enlaces). */
+  const dragTraeArchivos = (event: React.DragEvent) =>
+    Array.from(event.dataTransfer?.types ?? []).includes('Files');
+
+  const onDragEnter = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      if (composerDisabled || !dragTraeArchivos(event)) return;
+      event.preventDefault();
+      dragDepth.current += 1;
+      setDragging(true);
+    },
+    [composerDisabled]
+  );
+
+  const onDragOver = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      if (composerDisabled || !dragTraeArchivos(event)) return;
+      // Sin este preventDefault el navegador ABRE el archivo en una pestaña
+      // en vez de dejarnos soltarlo.
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+    },
+    [composerDisabled]
+  );
+
+  const onDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!dragTraeArchivos(event)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
+  }, []);
+
+  const onDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      dragDepth.current = 0;
+      setDragging(false);
+      if (composerDisabled || !dragTraeArchivos(event)) return;
+      event.preventDefault();
+      const soltados = Array.from(event.dataTransfer.files ?? []);
+      if (soltados.length === 0) return;
+      composerRef.current?.addFiles(soltados);
+    },
+    [composerDisabled]
+  );
+
   const onScrollPositionChange = ({ y }: { x: number; y: number }) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -233,7 +290,27 @@ export default function ChatThread({
   };
 
   return (
-    <Box className='chat-thread' style={height ? { height } : undefined}>
+    <Box
+      className={`chat-thread${dragging ? ' chat-thread--dragging' : ''}`}
+      style={height ? { height } : undefined}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {dragging && (
+        <Box className='chat-thread__dropzone' aria-hidden>
+          <Stack align='center' gap={4}>
+            <IconUpload size={26} />
+            <Text size='sm' fw={600}>
+              Suelte los archivos aquí
+            </Text>
+            <Text size='xs' className='chat-text-muted'>
+              Se adjuntan al mensaje; usted decide cuándo enviarlo.
+            </Text>
+          </Stack>
+        </Box>
+      )}
       <ScrollArea
         className='chat-thread__scroll'
         viewportRef={viewportRef}
@@ -298,9 +375,10 @@ export default function ChatThread({
 
       <Box className='chat-thread__composer'>
         <ChatComposer
+          ref={composerRef}
           onSend={(body, files) => thread.send(body, files)}
           sending={thread.sending}
-          disabled={thread.loading || thread.conversation === null}
+          disabled={composerDisabled}
           placeholder={`Escríbale a ${agent.displayName}…`}
         />
       </Box>
