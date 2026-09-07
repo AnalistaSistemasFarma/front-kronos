@@ -73,6 +73,30 @@ const EMOJI_GROUPS: { label: string; emojis: string[] }[] = [
 
 type WrapKind = 'bold' | 'italic' | 'code' | 'list';
 
+/**
+ * Le pone un nombre útil a lo que llega sin él.
+ *
+ * Una captura pegada del portapapeles llega SIEMPRE como "image.png": los
+ * navegadores no le dan otro nombre. Si se dejara así, dos capturas del mismo
+ * tamaño se verían como el mismo archivo y la regla de duplicados de
+ * `addFiles` se comería la segunda. Se renombra con la fecha y la hora.
+ *
+ * Lo que ya viene con nombre propio (el clip, un archivo arrastrado) se
+ * devuelve intacto.
+ */
+function conNombreUtil(file: File, index: number): File {
+  const generico = !file.name || /^image\.[a-z0-9]+$/i.test(file.name);
+  if (!generico) return file;
+
+  const sello = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+  const ext = (file.type.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '');
+  const sufijo = index > 0 ? `-${index + 1}` : '';
+  return new File([file], `captura-${sello}${sufijo}.${ext}`, {
+    type: file.type,
+    lastModified: file.lastModified,
+  });
+}
+
 /** Lo que el hilo puede pedirle al compositor desde afuera. */
 export type ChatComposerHandle = {
   /** Agrega archivos a la bandeja del mensaje, con la misma validación del clip. */
@@ -122,7 +146,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
       const accepted: File[] = [];
       let problem: string | null = null;
 
-      for (const file of Array.from(incoming)) {
+      for (const file of Array.from(incoming).map(conNombreUtil)) {
         const error = getChatAttachmentError({ name: file.name, size: file.size });
         if (error) {
           problem = error;
@@ -159,6 +183,25 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   // conversación, no solo sobre la caja de texto), pero los archivos y su
   // validación viven aquí. Esta es la única puerta entre los dos.
   useImperativeHandle(ref, () => ({ addFiles }), [addFiles]);
+
+  /**
+   * Pegar una imagen del portapapeles (Ctrl+V / Cmd+V) — el caso de todos los
+   * días: uno toma una captura y la pega en el chat.
+   *
+   * Solo se intercepta cuando de verdad viene un archivo; pegar texto sigue
+   * funcionando igual. El nombre se lo pone `conNombreUtil`, porque el
+   * portapapeles entrega las capturas como "image.png".
+   */
+  const onPaste = useCallback(
+    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (disabled) return;
+      const pegados = Array.from(event.clipboardData?.files ?? []);
+      if (pegados.length === 0) return;
+      event.preventDefault();
+      addFiles(pegados);
+    },
+    [addFiles, disabled]
+  );
 
   /**
    * Envuelve la selección (o inserta el marcador donde esté el cursor) y deja
@@ -359,6 +402,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           value={value}
           onChange={(event) => setValue(event.currentTarget.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           placeholder={placeholder}
           autosize
           minRows={2}
