@@ -14,6 +14,7 @@ import {
 } from '@mantine/core';
 import { IconAlertCircle, IconDownload, IconMessage2, IconUpload } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
+import AgentTaskTable from './AgentTaskTable';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import ChatMarkdown from './ChatMarkdown';
 import { useChatConversation } from './useChatConversation';
@@ -170,24 +171,29 @@ function AgentActivity({
   if (!view.busy) return null;
 
   return (
-    <Group gap='xs' align='center' className='chat-activity' role='status' aria-live='polite'>
-      <AgentAvatar
-        code={agent.code}
-        displayName={agent.displayName}
-        avatarUrl={agent.avatarUrl}
-        size={24}
-        showStatus={false}
-        withTooltip={false}
-      />
-      <span className='chat-typing' aria-hidden>
-        <i />
-        <i />
-        <i />
-      </span>
-      <Text size='xs' className='chat-activity__label'>
-        {view.label}
-      </Text>
-    </Group>
+    <Box role='status' aria-live='polite'>
+      <Group gap='xs' align='center' className='chat-activity'>
+        <AgentAvatar
+          code={agent.code}
+          displayName={agent.displayName}
+          avatarUrl={agent.avatarUrl}
+          size={24}
+          showStatus={false}
+          withTooltip={false}
+        />
+        <span className='chat-typing' aria-hidden>
+          <i />
+          <i />
+          <i />
+        </span>
+        <Text size='xs' className='chat-activity__label'>
+          {view.label}
+        </Text>
+      </Group>
+
+      {/* Solo aparece cuando el agente reporta sub-agentes trabajando. */}
+      <AgentTaskTable tasks={status?.tasks} />
+    </Box>
   );
 }
 
