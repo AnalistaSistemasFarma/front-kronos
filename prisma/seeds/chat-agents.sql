@@ -21,8 +21,9 @@
     4. Siembra UN solo agente: code='horus', display_name='Orus',
        handle='@horus_gss_bot', vinculado a GSS como empresa principal.
        Nicolás: "iniciamos con el tuyo orus". No se inventan los demás.
-       avatar_url queda NULL a propósito -> la interfaz cae al avatar por
-       inicial (no se inventan URLs externas).
+       avatar_url apunta a /agents/orus.jpg, la foto que entregó Nicolás el
+       2026-09-07 y que vive versionada en public/agents (nunca una URL
+       externa). Si el archivo faltara, la interfaz cae al avatar por inicial.
     5. Otorga los dos subprocesos al administrador en GSS, creando el
        company_user de GSS si no lo tiene (es indispensable para que la
        empresa aparezca en /process/administration/users). Solo inserta lo
@@ -39,6 +40,7 @@ DECLARE @AgentCode    NVARCHAR(60)  = 'horus';
 DECLARE @AgentName    NVARCHAR(120) = 'Orus';
 DECLARE @AgentHandle  NVARCHAR(60)  = '@horus_gss_bot';
 DECLARE @AgentUrl     NVARCHAR(255) = '/process/chat/orus';
+DECLARE @AgentAvatar  NVARCHAR(500) = '/agents/orus.jpg';
 
 /* ------------------------------------------------------------------ */
 /* 1) Empresa GSS (por NOMBRE, nunca por id).                          */
@@ -104,7 +106,7 @@ BEGIN
     @AgentCode,
     @AgentName,
     @AgentHandle,
-    NULL,
+    @AgentAvatar,
     N'Asistente de inteligencia artificial de Group Shared Services Latinoamérica.',
     1,
     10,
@@ -119,6 +121,13 @@ END
 UPDATE [dbo].[agent]
 SET id_subprocess = @AgentSubId
 WHERE id_agent = @AgentId AND id_subprocess IS NULL;
+
+/* Igual que el UPDATE de arriba: el agente se sembró antes de que existiera
+   la foto, así que se le pone ahora. Solo cuando está en NULL, para no
+   pisar un avatar que alguien haya cambiado a mano después. */
+UPDATE [dbo].[agent]
+SET avatar_url = @AgentAvatar
+WHERE id_agent = @AgentId AND avatar_url IS NULL;
 
 IF NOT EXISTS (
   SELECT 1 FROM [dbo].[agent_company] WHERE id_agent = @AgentId AND id_company = @CompanyId
