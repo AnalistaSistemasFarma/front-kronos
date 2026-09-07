@@ -12,7 +12,7 @@ import {
   Stack,
   Text,
 } from '@mantine/core';
-import { IconAlertCircle, IconMessage2 } from '@tabler/icons-react';
+import { IconAlertCircle, IconDownload, IconMessage2 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import ChatComposer from './ChatComposer';
 import ChatMarkdown from './ChatMarkdown';
@@ -23,6 +23,7 @@ import {
   type ChatAgentDto,
   type ChatMessageDto,
 } from '../../lib/chat/client';
+import { formatBytes } from '../../lib/chat/attachments';
 
 /**
  * El hilo de conversación: burbujas con Markdown real, indicador de qué está
@@ -39,6 +40,58 @@ import {
  * tokens --app-* de app/globals.css.
  */
 
+/**
+ * Adjuntos de un mensaje, como fichas descargables.
+ *
+ * El enlace apunta SIEMPRE a /api/chat/attachments/<id> (nunca a OneDrive):
+ * ahí se vuelve a comprobar el permiso en cada descarga. Mientras el mensaje
+ * está en vuelo el id todavía no existe, así que la ficha se muestra sin
+ * enlace en vez de ofrecer una descarga que daría 404.
+ */
+function MessageAttachments({ message }: { message: ChatMessageDto }) {
+  if (message.attachments.length === 0) return null;
+
+  return (
+    <Stack gap={4} mt={6}>
+      {message.attachments.map((attachment) => {
+        const content = (
+          <>
+            <IconDownload size={13} />
+            <Text size='xs' lineClamp={1} className='chat-attachment__name'>
+              {attachment.fileName}
+            </Text>
+            {attachment.sizeBytes !== null && (
+              <Text size='xs' className='chat-attachment__size'>
+                {formatBytes(attachment.sizeBytes)}
+              </Text>
+            )}
+          </>
+        );
+
+        if (!attachment.downloadUrl) {
+          return (
+            <span key={attachment.id} className='chat-attachment'>
+              {content}
+            </span>
+          );
+        }
+
+        return (
+          <a
+            key={attachment.id}
+            href={attachment.downloadUrl}
+            download={attachment.fileName}
+            className='chat-attachment chat-attachment--link'
+            title={`Descargar ${attachment.fileName}`}
+          >
+            {content}
+          </a>
+        );
+      })}
+    </Stack>
+  );
+}
+
 function MessageBubble({ message, agent }: { message: ChatMessageDto; agent: ChatAgentDto }) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -48,6 +101,7 @@ function MessageBubble({ message, agent }: { message: ChatMessageDto; agent: Cha
       <Center>
         <Box className='chat-bubble chat-bubble--system'>
           <ChatMarkdown content={message.body} />
+          <MessageAttachments message={message} />
         </Box>
       </Center>
     );
@@ -89,7 +143,8 @@ function MessageBubble({ message, agent }: { message: ChatMessageDto; agent: Cha
           </Text>
         )}
 
-        <ChatMarkdown content={message.body} />
+        {message.body.trim().length > 0 && <ChatMarkdown content={message.body} />}
+        <MessageAttachments message={message} />
 
         <Text size='xs' className='chat-bubble__meta'>
           {message.failed
@@ -243,7 +298,7 @@ export default function ChatThread({
 
       <Box className='chat-thread__composer'>
         <ChatComposer
-          onSend={(body) => thread.send(body)}
+          onSend={(body, files) => thread.send(body, files)}
           sending={thread.sending}
           disabled={thread.loading || thread.conversation === null}
           placeholder={`Escríbale a ${agent.displayName}…`}

@@ -30,9 +30,36 @@ describe('computeNextPollMs', () => {
     );
   });
 
+  it('sondea en vivo mientras se espera la respuesta del agente', () => {
+    // El usuario acaba de escribir: el estado sigue en 'idle' y la actividad es
+    // reciente, así que sin `awaitingAgent` esto caería en `active` (2 s).
+    expect(computeNextPollMs({ ...base, msSinceLastActivity: 1_500 })).toBe(POLL_MS.active);
+    expect(
+      computeNextPollMs({ ...base, msSinceLastActivity: 1_500, awaitingAgent: true })
+    ).toBe(POLL_MS.live);
+  });
+
+  it('esperar al agente también acelera un hilo que ya se había enfriado', () => {
+    expect(
+      computeNextPollMs({ ...base, msSinceLastActivity: 10 * 60_000, awaitingAgent: true })
+    ).toBe(POLL_MS.live);
+  });
+
+  it('con `awaitingAgent` en false la cadencia no cambia', () => {
+    expect(
+      computeNextPollMs({ ...base, msSinceLastActivity: 2 * 60_000, awaitingAgent: false })
+    ).toBe(POLL_MS.warm);
+  });
+
   it('con la pestaña oculta aplica el tope superior, pase lo que pase', () => {
     expect(
       computeNextPollMs({ ...base, hasNewMessages: true, agentState: 'thinking', hidden: true })
+    ).toBe(POLL_MS.dormant);
+  });
+
+  it('la pestaña oculta gana también sobre `awaitingAgent`', () => {
+    expect(
+      computeNextPollMs({ ...base, awaitingAgent: true, hidden: true, msSinceLastActivity: 100 })
     ).toBe(POLL_MS.dormant);
   });
 

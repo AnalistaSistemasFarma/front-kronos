@@ -115,3 +115,50 @@ export async function readJsonBody(request: Request): Promise<Record<string, unk
     return null;
   }
 }
+
+/**
+ * Lee el cuerpo de una petición de CREACIÓN DE MENSAJE, que admite dos
+ * codificaciones a la vez:
+ *
+ *   - `application/json`      -> el camino de siempre, solo texto.
+ *   - `multipart/form-data`   -> texto MÁS archivos (campo `files`).
+ *
+ * Devuelve las dos cosas en la misma forma para que la ruta no tenga que
+ * ramificar: `fields` se lee igual venga de donde venga (los campos del
+ * formulario llegan como texto, que es justo lo que ya esperan
+ * `normalizeMessageBody` y `Number(...)`), y `form` solo trae valor cuando hubo
+ * multipart, para sacar los adjuntos.
+ *
+ * Los nombres de los campos NO cambian entre una codificación y otra: el
+ * formulario usa `body`, `idConversation`, `state` y `label`, exactamente como
+ * el JSON. Un cliente que hoy manda JSON sigue funcionando sin tocar nada.
+ */
+export interface ChatMessageRequestBody {
+  fields: Record<string, unknown>;
+  form: FormData | null;
+}
+
+export async function readMessageRequest(
+  request: Request
+): Promise<ChatMessageRequestBody | null> {
+  const contentType = (request.headers.get('content-type') ?? '').toLowerCase();
+
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const form = await request.formData();
+      const fields: Record<string, unknown> = {};
+      for (const [key, value] of form.entries()) {
+        // Los archivos se sacan aparte (collectChatAttachments); aquí solo
+        // interesan los campos de texto.
+        if (typeof value === 'string') fields[key] = value;
+      }
+      return { fields, form };
+    } catch {
+      return null;
+    }
+  }
+
+  const parsed = await readJsonBody(request);
+  if (!parsed) return null;
+  return { fields: parsed, form: null };
+}

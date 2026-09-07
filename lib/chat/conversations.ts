@@ -16,13 +16,24 @@ export interface ChatMessagePayload {
   createdAt: string;
   deliveredAt: string | null;
   readAt: string | null;
-  attachments: {
-    id: number;
-    fileName: string;
-    contentType: string | null;
-    sizeBytes: number | null;
-    webUrl: string | null;
-  }[];
+  attachments: ChatAttachmentPayload[];
+}
+
+/**
+ * Adjunto tal como lo ve el CLIENTE.
+ *
+ * A propósito NO viaja el `onedrive_item_id` ni el `web_url`: el primero es el
+ * identificador interno del archivo en Graph y el segundo es un enlace de
+ * OneDrive que se reenvía con un copiar y pegar. La única puerta al contenido
+ * es `downloadUrl`, que pasa por /api/chat/attachments/[id] y vuelve a
+ * comprobar el permiso en cada descarga.
+ */
+export interface ChatAttachmentPayload {
+  id: number;
+  fileName: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  downloadUrl: string;
 }
 
 export interface ChatConversationPayload {
@@ -57,7 +68,6 @@ type MessageRow = {
     file_name: string;
     content_type: string | null;
     size_bytes: number | null;
-    web_url: string | null;
   }[];
 };
 
@@ -69,13 +79,23 @@ export function serializeMessage(row: MessageRow): ChatMessagePayload {
     createdAt: row.created_at.toISOString(),
     deliveredAt: row.delivered_at ? row.delivered_at.toISOString() : null,
     readAt: row.read_at ? row.read_at.toISOString() : null,
-    attachments: (row.attachments ?? []).map((a) => ({
-      id: a.id,
-      fileName: a.file_name,
-      contentType: a.content_type,
-      sizeBytes: a.size_bytes,
-      webUrl: a.web_url,
-    })),
+    attachments: (row.attachments ?? []).map(serializeAttachment),
+  };
+}
+
+/** Serializa UN adjunto. Un solo lugar para decidir qué sale hacia afuera. */
+export function serializeAttachment(row: {
+  id: number;
+  file_name: string;
+  content_type: string | null;
+  size_bytes: number | null;
+}): ChatAttachmentPayload {
+  return {
+    id: row.id,
+    fileName: row.file_name,
+    contentType: row.content_type,
+    sizeBytes: row.size_bytes,
+    downloadUrl: `/api/chat/attachments/${row.id}`,
   };
 }
 

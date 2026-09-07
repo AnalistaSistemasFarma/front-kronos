@@ -13,9 +13,17 @@ import {
   badRequest,
   guardConversation,
   jsonNoStore,
-  readJsonBody,
+  readMessageRequest,
   serverError,
 } from '../../../../../../lib/chat/http';
+import {
+  collectChatAttachments,
+  type ChatAttachmentCandidate,
+} from '../../../../../../lib/chat/attachments';
+import {
+  uploadChatAttachments,
+  type UploadedChatAttachment,
+} from '../../../../../../lib/chat/attachmentStorage';
 
 /**
  * Histórico de mensajes de una conversación, MÁS RECIENTES PRIMERO y paginado
@@ -72,9 +80,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 /**
- * Envía un mensaje del USUARIO.
+ * Envía un mensaje del USUARIO, con o sin adjuntos.
  *
- *   POST /api/chat/conversations/12/messages   { "body": "…markdown…" }
+ *   POST /api/chat/conversations/12/messages
+ *   Content-Type: application/json
+ *   { "body": "…markdown…" }
+ *
+ *   POST /api/chat/conversations/12/messages
+ *   Content-Type: multipart/form-data
+ *   body=…markdown…  files=<archivo>  files=<archivo>  …
+ *
+ * Las dos codificaciones usan LOS MISMOS nombres de campo (`body`), así que el
+ * camino de solo texto que ya existía no cambia en nada.
  *
  * El `body` se guarda como MARKDOWN CRUDO, jamás HTML: guardar HTML sería un
  * XSS almacenado esperando a que alguien lo renderice. Sanear y renderizar es
@@ -82,6 +99,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
  *
  * El `role` lo pone el servidor ('user'): aunque el cliente mande otro, se
  * ignora. Un usuario no puede fabricar un mensaje que parezca del agente.
+ *
+ * -------------------------------------------------------------------------
+ * ADJUNTOS
+ * -------------------------------------------------------------------------
+ * Con adjuntos el `body` SÍ puede ir vacío (mandar solo un archivo es un uso
+ * legítimo); lo que se sigue rechazando es un mensaje del todo vacío —ni texto
+ * ni archivos—, que solo ensuciaría el hilo.
+ *
+ * El archivo se sube a OneDrive ANTES de abrir la transacción y el mensaje con
+ * sus filas de `chat_attachment` se crean JUNTOS, en una sola escritura
+ * anidada. Nunca se crea el mensaje primero para "engancharle" los adjuntos
+ * después: `chat_attachment.id_message` es NOT NULL y ese orden dejaría
+ * mensajes a medias en cuanto una subida fallara.
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -89,13 +119,43 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const guard = await guardConversation(id);
     if ('response' in guard) return guard.response;
 
-    const payload = await readJsonBody(request);
-    if (!payload) return badRequest('El cuerpo debe ser un objeto JSON.');
+    const payload = await readMessageRequest(request);
+    if (!payload) {
+      return badRequest('El cuerpo debe ser un objeto JSON o un formulario multipart/form-data.');
+    }
 
-    const normalized = normalizeMessageBody(payload.body, MAX_USER_MESSAGE_CHARS);
-    if (!normalized.ok) return badRequest(normalized.error);
+    let files: ChatAttachmentCandidate[] = [];
+    if (payload.form) {
+      const collected = collectChatAttachments(payload.form);
+      if (!collected.ok) return badRequest(collected.error);
+      files = collected.files;
+    }
+
+    // Con adjuntos, el texto es opcional. Sin adjuntos, se exige como siempre.
+    const rawBody = typeof payload.fields.body === 'string' ? payload.fields.body : '';
+    let body = '';
+    if (files.length === 0 || rawBody.trim() !== '') {
+      const normalized = normalizeMessageBody(payload.fields.body, MAX_USER_MESSAGE_CHARS);
+      if (!normalized.ok) return badRequest(normalized.error);
+      body = normalized.body;
+    }
 
     const now = new Date();
+
+    // OneDrive primero (operación externa, no transaccional). Si falla, se
+    // responde sin haber escrito nada: no hay mensaje ni adjunto a medias.
+    let uploaded: UploadedChatAttachment[] = [];
+    if (files.length > 0) {
+      try {
+        uploaded = await uploadChatAttachments(guard.conversationId, files, now);
+      } catch (error) {
+        console.error('[chat] no se pudieron subir los adjuntos del usuario a OneDrive:', error);
+        return jsonNoStore(
+          { error: 'No se pudieron guardar los adjuntos. El mensaje no se envió.' },
+          { status: 502 }
+        );
+      }
+    }
 
     // Transacción: el mensaje y la marca de tiempo de la bandeja entran juntos
     // o no entra ninguno. Si se separan, un fallo intermedio deja la bandeja
@@ -105,8 +165,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         data: {
           id_conversation: guard.conversationId,
           role: 'user',
-          body: normalized.body,
+          body,
           created_at: now,
+          // Mensaje y adjuntos, una sola escritura: o entran los dos o ninguno.
+          ...(uploaded.length > 0 ? { attachments: { create: uploaded } } : {}),
         },
         include: { attachments: true },
       });

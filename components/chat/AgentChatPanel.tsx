@@ -39,7 +39,9 @@ export default function AgentChatPanel({
               style={{
                 ...styles,
                 width: 'min(460px, calc(100vw - 32px))',
-                height: 'min(640px, calc(100vh - 96px))',
+                // dvh y no vh: con el teclado del móvil abierto, `vh` sigue
+                // midiendo la pantalla completa y el compositor queda debajo.
+                height: 'min(640px, calc(100dvh - 96px))',
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',

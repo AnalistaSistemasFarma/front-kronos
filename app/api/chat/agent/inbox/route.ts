@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { authenticateAgent } from '../../../../../lib/chat/agent-auth';
+import { serializeAttachment } from '../../../../../lib/chat/conversations';
 import {
   INBOX_PAGE_DEFAULT,
   INBOX_PAGE_MAX,
@@ -123,13 +124,10 @@ export async function GET(request: NextRequest) {
             email: m.conversation.user.email,
           },
         },
-        attachments: m.attachments.map((a) => ({
-          id: a.id,
-          fileName: a.file_name,
-          contentType: a.content_type,
-          sizeBytes: a.size_bytes,
-          webUrl: a.web_url,
-        })),
+        // Misma forma que en el resto del módulo (serializeAttachment): el bot
+        // baja el archivo por /api/chat/attachments/<id> con su propia llave,
+        // no por un enlace de OneDrive.
+        attachments: m.attachments.map(serializeAttachment),
       })),
     });
   } catch (error) {

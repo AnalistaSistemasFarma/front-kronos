@@ -19,10 +19,17 @@ import {
   IconItalic,
   IconList,
   IconMoodSmile,
+  IconPaperclip,
   IconSend,
+  IconX,
 } from '@tabler/icons-react';
 import ChatMarkdown from './ChatMarkdown';
 import { MAX_USER_MESSAGE_CHARS } from '../../lib/chat/constants';
+import {
+  MAX_CHAT_ATTACHMENTS_PER_MESSAGE,
+  formatBytes,
+  getChatAttachmentError,
+} from '../../lib/chat/attachments';
 
 /**
  * Entrada de texto del chat — v1: Markdown CRUDO con ayudas.
@@ -31,6 +38,12 @@ import { MAX_USER_MESSAGE_CHARS } from '../../lib/chat/constants';
  * envuelven la selección por él. Un editor visual completo (WYSIWYG) exigiría
  * ProseMirror/TipTap — una decena de dependencias y varios días — y no cambia
  * lo que llega a la base, que es Markdown de todas formas. Queda para v2.
+ *
+ * Los adjuntos se validan aquí con LA MISMA función del servidor
+ * (getChatAttachmentError, lib/chat/attachments.ts) para que el usuario vea el
+ * problema antes de subir 20 MB por nada. Es comodidad, no seguridad: la
+ * validación que manda es la de la API, que vuelve a correr exactamente esa
+ * misma comprobación.
  *
  * El selector de emojis es una rejilla propia con una selección curada: las
  * librerías de emojis pesan cientos de kilobytes (traen catálogo completo,
@@ -68,7 +81,7 @@ export default function ChatComposer({
   autoFocus = false,
 }: {
   /** Devuelve lo que quiera (p. ej. si el envío tuvo éxito); aquí solo se espera. */
-  onSend: (body: string) => void | Promise<unknown>;
+  onSend: (body: string, files: File[]) => void | Promise<unknown>;
   disabled?: boolean;
   sending?: boolean;
   placeholder?: string;
@@ -77,10 +90,56 @@ export default function ChatComposer({
   const [value, setValue] = useState('');
   const [preview, setPreview] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tooLong = value.length > MAX_USER_MESSAGE_CHARS;
-  const canSend = value.trim().length > 0 && !disabled && !sending && !tooLong;
+  // Con adjuntos el texto puede ir vacío (mandar solo un archivo es válido);
+  // lo que no se puede enviar es un mensaje sin texto Y sin archivos.
+  const canSend = (value.trim().length > 0 || files.length > 0) && !disabled && !sending && !tooLong;
+
+  /** Agrega lo que el usuario escogió, validando cada archivo y el tope. */
+  const addFiles = useCallback(
+    (incoming: FileList | null) => {
+      if (!incoming || incoming.length === 0) return;
+
+      const accepted: File[] = [];
+      let problem: string | null = null;
+
+      for (const file of Array.from(incoming)) {
+        const error = getChatAttachmentError({ name: file.name, size: file.size });
+        if (error) {
+          problem = error;
+          continue;
+        }
+        accepted.push(file);
+      }
+
+      setFiles((prev) => {
+        const merged = [...prev];
+        for (const file of accepted) {
+          // Mismo nombre y mismo tamaño = el usuario lo escogió dos veces.
+          if (merged.some((x) => x.name === file.name && x.size === file.size)) continue;
+          if (merged.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE) break;
+          merged.push(file);
+        }
+        return merged;
+      });
+
+      if (!problem && files.length + accepted.length > MAX_CHAT_ATTACHMENTS_PER_MESSAGE) {
+        problem = `Puede adjuntar máximo ${MAX_CHAT_ATTACHMENTS_PER_MESSAGE} archivos por mensaje.`;
+      }
+      setFileError(problem);
+    },
+    [files.length]
+  );
+
+  const removeFile = useCallback((index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setFileError(null);
+  }, []);
 
   /**
    * Envuelve la selección (o inserta el marcador donde esté el cursor) y deja
@@ -142,10 +201,14 @@ export default function ChatComposer({
   const submit = useCallback(async () => {
     if (!canSend) return;
     const body = value.trim();
+    const attachments = files;
     setValue('');
+    setFiles([]);
+    setFileError(null);
     setPreview(false);
-    await onSend(body);
-  }, [canSend, onSend, value]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    await onSend(body, attachments);
+  }, [canSend, files, onSend, value]);
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -232,6 +295,19 @@ export default function ChatComposer({
           </Popover.Dropdown>
         </Popover>
 
+        <Tooltip label='Adjuntar archivos' withArrow>
+          <ActionIcon
+            variant='subtle'
+            color='gray'
+            size='md'
+            disabled={disabled || files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
+            onClick={() => fileInputRef.current?.click()}
+            aria-label='Adjuntar archivos'
+          >
+            <IconPaperclip size={16} />
+          </ActionIcon>
+        </Tooltip>
+
         <Tooltip label={preview ? 'Volver a editar' : 'Vista previa'} withArrow>
           <ActionIcon
             variant={preview ? 'light' : 'subtle'}
@@ -273,6 +349,53 @@ export default function ChatComposer({
           error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
           classNames={{ input: 'chat-composer__input' }}
         />
+      )}
+
+      <input
+        ref={fileInputRef}
+        type='file'
+        multiple
+        hidden
+        onChange={(event) => {
+          addFiles(event.currentTarget.files);
+          // Se limpia para que escoger DOS VECES el mismo archivo vuelva a
+          // disparar el onChange.
+          event.currentTarget.value = '';
+        }}
+      />
+
+      {files.length > 0 && (
+        <Group gap={6} mt={6} wrap='wrap'>
+          {files.map((file, index) => (
+            <div
+              key={`${file.name}-${file.size}-${index}`}
+              className='chat-attachment chat-attachment--draft'
+            >
+              <IconPaperclip size={13} />
+              <Text size='xs' lineClamp={1} className='chat-attachment__name'>
+                {file.name}
+              </Text>
+              <Text size='xs' className='chat-attachment__size'>
+                {formatBytes(file.size)}
+              </Text>
+              <ActionIcon
+                size='xs'
+                variant='subtle'
+                color='gray'
+                onClick={() => removeFile(index)}
+                aria-label={`Quitar ${file.name}`}
+              >
+                <IconX size={12} />
+              </ActionIcon>
+            </div>
+          ))}
+        </Group>
+      )}
+
+      {fileError && (
+        <Text size='xs' c='red' mt={4}>
+          {fileError}
+        </Text>
       )}
 
       <Group justify='space-between' mt={6} wrap='nowrap'>

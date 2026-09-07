@@ -378,7 +378,10 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
                   </Tooltip>
                 </Group>
 
-                <ChatThread agent={selectedAgent} active height='calc(100vh - 320px)' />
+                {/* Sin `height`: el alto lo acota .chat-page-thread (100dvh menos la
+                    cabecera), y dentro del hilo solo scrollea la lista de
+                    mensajes — el compositor queda fijo abajo. */}
+                <ChatThread agent={selectedAgent} active />
               </Box>
             </Grid.Col>
           )}
