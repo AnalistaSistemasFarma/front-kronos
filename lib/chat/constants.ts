@@ -61,8 +61,18 @@ export const INBOX_ACK_MAX_IDS = 200;
  */
 export const INBOX_WAIT_MAX_SECONDS = 30;
 export const INBOX_WAIT_DEFAULT_SECONDS = 0;
-/** Cada cuánto revisa la base el long-poll mientras espera. */
-export const INBOX_WAIT_TICK_MS = 1_000;
+/**
+ * Cada cuánto revisa la base el long-poll mientras espera.
+ *
+ * 400 ms es un compromiso: es el PRIMER tramo de la demora que percibe el
+ * usuario —el mensaje ya está escrito en `chat_message` pero el agente no se
+ * entera hasta el siguiente tick—, así que bajarlo se nota de inmediato en la
+ * pantalla. Al mismo tiempo, cada tick es un `SELECT TOP (n)` por el índice
+ * (delivered_at, id) de UN agente: barato, pero no gratis. Por debajo de ~250 ms
+ * el usuario ya no distingue la diferencia y solo se multiplican las consultas
+ * contra SQL Server; por encima de 1 s la respuesta se siente tardía.
+ */
+export const INBOX_WAIT_TICK_MS = 400;
 
 /** Longitud del extracto del último mensaje que se muestra en la bandeja. */
 export const PREVIEW_CHARS = 160;

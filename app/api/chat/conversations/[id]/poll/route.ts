@@ -54,7 +54,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const limit = parsePositiveInt(sp.get('limit'), POLL_PAGE_MAX, POLL_PAGE_MAX);
     const hidden = sp.get('hidden') === '1';
 
-    const [rows, status, conversation] = await Promise.all([
+    const [rows, status, conversation, lastMessage] = await Promise.all([
       prisma.chatMessage.findMany({
         where: { id_conversation: guard.conversationId, id: { gt: after } },
         orderBy: { id: 'asc' },
@@ -65,6 +65,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       prisma.chatConversation.findUnique({
         where: { id: guard.conversationId },
         select: { last_message_at: true, updated_at: true },
+      }),
+      // Quién habló de último. Alimenta `awaitingAgent` (ver más abajo): es un
+      // seek de UNA fila por el índice (id_conversation, id DESC), el mismo que
+      // ya usa la consulta de arriba.
+      prisma.chatMessage.findFirst({
+        where: { id_conversation: guard.conversationId },
+        orderBy: { id: 'desc' },
+        select: { role: true },
       }),
     ]);
 
@@ -77,11 +85,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       ? Date.now() - lastActivity.getTime()
       : Number.POSITIVE_INFINITY;
 
+    // El usuario escribió de último y el agente todavía no contesta: se sondea
+    // en vivo aunque el estado siga en 'idle', que es lo que pasa entre que se
+    // envía el mensaje y el bot publica su primer "Pensando…".
+    const lastRole = page.length > 0 ? page[page.length - 1].role : lastMessage?.role ?? null;
+    const awaitingAgent = lastRole === 'user';
+
     const nextPollMs = computeNextPollMs({
       hasNewMessages: page.length > 0,
       agentState: status?.state ?? null,
       msSinceLastActivity,
       hidden,
+      awaitingAgent,
     });
 
     return jsonNoStore({
