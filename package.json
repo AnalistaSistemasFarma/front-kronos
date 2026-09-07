@@ -37,10 +37,15 @@
     "react-d3-tree": "^3.6.6",
     "react-dom": "19.1.0",
     "react-hot-toast": "^2.6.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "web-push": "^3.6.7"
   },
   "overrides": {
     "tar": "^7.5.7"
+  },
+  "optionalDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "1.1.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
