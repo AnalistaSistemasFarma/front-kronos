@@ -269,7 +269,13 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     setFileError(null);
     setPreview(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+    // El foco vuelve a la caja ANTES de esperar el envío: en el celular, si el
+    // textarea pierde el foco (por ejemplo al tocar el botón de enviar) el
+    // teclado se cierra y hay que volver a tocarlo para escribir el mensaje
+    // siguiente. Conversar así es incómodo.
+    textareaRef.current?.focus();
     await onSend(body, attachments);
+    textareaRef.current?.focus();
   }, [canSend, files, onSend, value]);
 
   const onKeyDown = useCallback(
@@ -472,6 +478,10 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           color='blue'
           loading={sending}
           disabled={!canSend}
+          // Sin esto, TOCAR el botón le quita el foco al textarea y el teclado
+          // del celular se cierra antes de que el mensaje salga. El
+          // preventDefault del mousedown/touchstart evita ese robo de foco.
+          onMouseDown={(event) => event.preventDefault()}
           onClick={() => void submit()}
           aria-label='Enviar mensaje'
         >
