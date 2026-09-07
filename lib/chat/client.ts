@@ -32,9 +32,23 @@ export interface ChatAccessDto {
   agents: ChatAgentDto[];
 }
 
+/**
+ * Sub-agentes en curso. El tipo vive en lib/chat/status-tasks.ts, que es el
+ * único que valida y parsea ese JSON; aquí se re-exporta para que los
+ * componentes lo importen del mismo lugar que el resto de los DTO.
+ */
+export type { AgentTaskDto } from './status-tasks';
+import type { AgentTaskDto } from './status-tasks';
+
 export interface ChatStatusDto {
   state: string;
   label: string | null;
+  /**
+   * Sub-agentes en curso, para la tablita de "qué está corriendo". Opcional a
+   * propósito: una respuesta vieja (o un front desplegado antes que la API) no
+   * la trae, y la interfaz simplemente no pinta la tabla.
+   */
+  tasks?: AgentTaskDto[];
   updatedAt: string;
 }
 

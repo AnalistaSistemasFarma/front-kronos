@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
+import { parseAgentTasks } from '../../../../../../lib/chat/status-tasks';
 import { serializeMessage } from '../../../../../../lib/chat/conversations';
 import {
   POLL_PAGE_MAX,
@@ -108,6 +109,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         ? {
             state: status.state,
             label: status.label,
+            tasks: parseAgentTasks(status.tasks),
             updatedAt: status.updated_at.toISOString(),
           }
         : null,
