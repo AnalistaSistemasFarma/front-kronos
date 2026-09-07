@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
 import {
   ActionIcon,
   Box,
@@ -73,20 +73,29 @@ const EMOJI_GROUPS: { label: string; emojis: string[] }[] = [
 
 type WrapKind = 'bold' | 'italic' | 'code' | 'list';
 
-export default function ChatComposer({
-  onSend,
-  disabled = false,
-  sending = false,
-  placeholder = 'Escriba su mensaje… (Markdown: **negrita**, _cursiva_, - viñetas)',
-  autoFocus = false,
-}: {
+/** Lo que el hilo puede pedirle al compositor desde afuera. */
+export type ChatComposerHandle = {
+  /** Agrega archivos a la bandeja del mensaje, con la misma validación del clip. */
+  addFiles: (incoming: FileList | File[] | null) => void;
+};
+
+const ChatComposer = forwardRef<ChatComposerHandle, {
   /** Devuelve lo que quiera (p. ej. si el envío tuvo éxito); aquí solo se espera. */
   onSend: (body: string, files: File[]) => void | Promise<unknown>;
   disabled?: boolean;
   sending?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
-}) {
+}>(function ChatComposer(
+  {
+    onSend,
+    disabled = false,
+    sending = false,
+    placeholder = 'Escriba su mensaje… (Markdown: **negrita**, _cursiva_, - viñetas)',
+    autoFocus = false,
+  },
+  ref
+) {
   const [value, setValue] = useState('');
   const [preview, setPreview] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -100,9 +109,14 @@ export default function ChatComposer({
   // lo que no se puede enviar es un mensaje sin texto Y sin archivos.
   const canSend = (value.trim().length > 0 || files.length > 0) && !disabled && !sending && !tooLong;
 
-  /** Agrega lo que el usuario escogió, validando cada archivo y el tope. */
+  /**
+   * Agrega lo que el usuario escogió, validando cada archivo y el tope.
+   * Acepta un `FileList` (el input de archivos) o un arreglo de `File` (lo que
+   * entrega un arrastrar-y-soltar), para que las dos vías compartan la misma
+   * validación y el mismo tope por mensaje.
+   */
   const addFiles = useCallback(
-    (incoming: FileList | null) => {
+    (incoming: FileList | File[] | null) => {
       if (!incoming || incoming.length === 0) return;
 
       const accepted: File[] = [];
@@ -140,6 +154,11 @@ export default function ChatComposer({
     setFiles((prev) => prev.filter((_, i) => i !== index));
     setFileError(null);
   }, []);
+
+  // El arrastrar-y-soltar vive en el hilo (para poder soltar sobre toda la
+  // conversación, no solo sobre la caja de texto), pero los archivos y su
+  // validación viven aquí. Esta es la única puerta entre los dos.
+  useImperativeHandle(ref, () => ({ addFiles }), [addFiles]);
 
   /**
    * Envuelve la selección (o inserta el marcador donde esté el cursor) y deja
@@ -417,4 +436,6 @@ export default function ChatComposer({
       </Group>
     </Box>
   );
-}
+});
+
+export default ChatComposer;

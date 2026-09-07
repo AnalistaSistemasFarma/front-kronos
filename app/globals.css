@@ -961,6 +961,36 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   min-height: 0;
 }
 
+/* ── Arrastrar y soltar archivos sobre la conversación ──
+   El aviso es una capa por encima de TODO el hilo (mensajes + compositor).
+   Va con pointer-events:none a propósito: si capturara el puntero, el propio
+   aviso se interpondría y el navegador dispararía dragleave sin parar. */
+.chat-thread {
+  position: relative;
+}
+
+.chat-thread--dragging {
+  outline: 2px dashed var(--app-primary, #1a3c6e);
+  outline-offset: -4px;
+  border-radius: 0.5rem;
+}
+
+.chat-thread__dropzone {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+  padding: 16px;
+  color: var(--app-text, var(--foreground));
+  /* Respaldo para navegadores sin color-mix: mejor un velo fijo que ninguno. */
+  background-color: rgba(255, 255, 255, 0.88);
+  background-color: color-mix(in srgb, var(--app-surface, #ffffff) 88%, transparent);
+}
+
 /* Fila FIJA de abajo del hilo: nunca se encoge ni se va con el scroll. Lo que
    scrollea es solo .chat-thread__scroll, que es el hermano de arriba con
    flex:1 y min-height:0. Las fichas de los archivos elegidos se pintan dentro
@@ -1322,4 +1352,72 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
 .chat-md__th {
   font-weight: 700;
   background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+/* ── Tablita de sub-agentes en curso (indicador del chat de agentes) ── */
+.chat-tasks {
+  margin-top: 6px;
+  margin-left: 32px; /* alineada bajo el texto, no bajo el avatar */
+  padding: 8px 10px;
+  border: 1px solid var(--app-border, #e2e8f0);
+  border-radius: 10px;
+  background-color: var(--app-surface-muted, rgba(148, 163, 184, 0.08));
+  max-width: 100%;
+}
+
+.chat-tasks__title {
+  color: var(--app-text-muted, #64748b);
+  margin-bottom: 4px;
+}
+
+.chat-tasks__table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.chat-tasks__cell {
+  padding: 2px 0;
+  vertical-align: middle;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.chat-tasks__cell:first-child {
+  width: 14px;
+}
+
+.chat-tasks__desc {
+  color: var(--app-text, #1e293b);
+  /* Una descripción larga no debe empujar la tabla ni partir el globo. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-tasks__time {
+  width: 68px;
+  text-align: right;
+  color: var(--app-text-muted, #64748b);
+  font-variant-numeric: tabular-nums; /* el número no baila cada segundo */
+  white-space: nowrap;
+}
+
+.chat-tasks__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background-color: var(--app-accent, #2563eb);
+  animation: chat-tasks-pulse 1.4s infinite ease-in-out;
+}
+
+@keyframes chat-tasks-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
 }
