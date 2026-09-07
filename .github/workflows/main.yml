@@ -58,7 +58,13 @@ jobs:
           git diff --quiet %OLD_HEAD% HEAD -- prisma/schema.prisma prisma/migrations
           if errorlevel 1 (set "SCHEMA_CHANGED=1") else (set "SCHEMA_CHANGED=0")
           echo SCHEMA_CHANGED=%SCHEMA_CHANGED%
-          echo SCHEMA_CHANGED=%SCHEMA_CHANGED%>>%GITHUB_ENV%
+          rem OJO: la redireccion va DELANTE del echo a proposito. Escrito como
+          rem `echo SCHEMA_CHANGED=%%SCHEMA_CHANGED%%>>%%GITHUB_ENV%%`, cmd.exe lee el
+          rem digito pegado al `>>` como el NUMERO DEL FLUJO (1=salida, 0=entrada),
+          rem no como parte del valor: al archivo llegaba `SCHEMA_CHANGED=` vacio y el
+          rem paso condicional de abajo NUNCA se ejecutaba. Con la redireccion primero
+          rem no hay digito adyacente al operador y el valor viaja completo.
+          >>"%GITHUB_ENV%" echo SCHEMA_CHANGED=%SCHEMA_CHANGED%
 
       - name: Instalar dependencias
         shell: cmd
