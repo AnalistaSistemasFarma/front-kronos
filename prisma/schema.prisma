@@ -907,6 +907,13 @@ model ChatAgentStatus {
   state           String   @default("idle") @db.NVarChar(20)
   /// Texto libre que se muestra al usuario ("Consultando SAP…").
   label           String?  @db.NVarChar(200)
+  /// Sub-agentes en curso, serializados como JSON:
+  /// [{"desc":"Muestra de phishing","startedAt":"2026-09-07T13:20:00.000Z"}]
+  /// NULL o [] = sin desglose, y la interfaz cae al `label` de siempre. Se
+  /// guarda como TEXTO porque SQL Server no tiene tipo JSON nativo aquí, y
+  /// nunca se consulta por contenido: es solo para pintar la tablita de "qué
+  /// está corriendo". Por eso tampoco lleva índice.
+  tasks           String?  @db.NVarChar(Max)
   updated_at      DateTime @updatedAt
 
   conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)

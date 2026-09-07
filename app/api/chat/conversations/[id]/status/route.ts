@@ -1,4 +1,5 @@
 import { prisma } from '../../../../../../lib/prisma';
+import { parseAgentTasks } from '../../../../../../lib/chat/status-tasks';
 import { guardConversation, jsonNoStore, serverError } from '../../../../../../lib/chat/http';
 
 /**
@@ -31,6 +32,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         ? {
             state: status.state,
             label: status.label,
+            tasks: parseAgentTasks(status.tasks),
             updatedAt: status.updated_at.toISOString(),
           }
         : null,

@@ -8,6 +8,7 @@
 import { prisma } from '../prisma';
 import { getChatAccess } from './access';
 import { toPreview } from './constants';
+import { parseAgentTasks } from './status-tasks';
 
 export interface ChatMessagePayload {
   id: number;
@@ -132,7 +133,7 @@ type ConversationRow = {
     handle: string | null;
     avatar_url: string | null;
   };
-  status: { state: string; label: string | null; updated_at: Date } | null;
+  status: { state: string; label: string | null; tasks: string | null; updated_at: Date } | null;
   messages: { id: number; role: string; body: string; created_at: Date }[];
 };
 
@@ -168,6 +169,7 @@ export function serializeConversation(
       ? {
           state: row.status.state,
           label: row.status.label,
+          tasks: parseAgentTasks(row.status.tasks),
           updatedAt: row.status.updated_at.toISOString(),
         }
       : null,
