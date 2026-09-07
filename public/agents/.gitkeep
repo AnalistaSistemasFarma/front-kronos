@@ -1,3 +1,5 @@
-# Los avatares de los agentes van aqui (p.ej. orus.png), referenciados desde
-# agent.avatar_url como /agents/<archivo>. Vacio por ahora: no se inventan
-# imagenes ni URLs externas (ver prisma/seeds/chat-agents.sql).
+# Los avatares de los agentes van aqui, referenciados desde agent.avatar_url
+# como /agents/<archivo>. Ya hay uno: orus.jpg (512x512, la foto que entrego
+# Nicolas el 2026-09-07). No se usan URLs externas: son fragiles y se caen.
+# Si un agente no tiene archivo aqui, la interfaz cae al avatar por inicial
+# (ver components/chat/AgentAvatar.tsx y prisma/seeds/chat-agents.sql).
