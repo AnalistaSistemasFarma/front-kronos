@@ -151,6 +151,19 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
   // carpetas. En pantalla ancha no cambia nada: siguen las dos columnas.
   const enPantallaAngosta = useMediaQuery('(max-width: 992px)');
 
+  // Llegar por un ENLACE DIRECTO (la notificación, o /process/chat/<code>) no
+  // es lo mismo que elegir un agente en la lista: el que llega por enlace ya
+  // sabe con quién quiere hablar, así que la conversación se muestra sola y a
+  // todo el ancho, sin la columna de carpetas al lado. Al tocar la flecha de
+  // "volver a las carpetas" se sale de ese modo y la página se comporta como
+  // siempre.
+  const [soloConversacion, setSoloConversacion] = useState(Boolean(initialAgentCode));
+
+  // Solo la conversación: por enlace directo, o en pantalla angosta con un
+  // agente abierto (allí las dos columnas se apilan y la conversación quedaría
+  // debajo de la lista, fuera de la vista).
+  const conversacionSola = soloConversacion || Boolean(enPantallaAngosta && selectedCode);
+
   // El código del agente también puede llegar por la URL (?agent=orus), que es
   // lo que usa el botón "abrir en la página de chats" del panel flotante.
   useEffect(() => {
@@ -216,7 +229,7 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
   return (
     <div className='app-page-shell app-page-shell--fill ios-process-hub min-h-screen'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <header className='mb-6' hidden={Boolean(enPantallaAngosta && selectedAgent)}>
+        <header className='mb-6' hidden={Boolean(conversacionSola && selectedAgent)}>
           <h1 className='ios-process-hub__title text-3xl sm:text-4xl mb-2'>Asistentes IA</h1>
           <p className='ios-process-hub__subtitle mb-5'>
             Sus asistentes, agrupados por empresa. Elija uno para conversar.
@@ -269,7 +282,7 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
 
         <Grid gutter='lg'>
           {/* Columna de carpetas */}
-          {!(enPantallaAngosta && selectedAgent) && (
+          {!(conversacionSola && selectedAgent) && (
           <Grid.Col span={{ base: 12, lg: selectedAgent ? 5 : 12 }}>
             {folders.length === 0 ? (
               <div className='ios-empty'>
@@ -350,7 +363,7 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
 
           {/* Columna del hilo */}
           {selectedAgent && (
-            <Grid.Col span={{ base: 12, lg: 7 }}>
+            <Grid.Col span={{ base: 12, lg: conversacionSola ? 12 : 7 }}>
               <Box className='chat-page-thread'>
                 <Group justify='space-between' p='sm' className='chat-panel__header' wrap='nowrap'>
                   <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
@@ -381,6 +394,7 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
                       color='gray'
                       onClick={() => {
                         setSelectedCode(null);
+                        setSoloConversacion(false);
                         router.replace('/process/chat', { scroll: false });
                       }}
                       aria-label='Cerrar la conversación'
