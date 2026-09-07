@@ -50,6 +50,12 @@ export interface ChatAgentIdentity {
   idAgent: number;
   code: string;
   displayName: string;
+  /**
+   * Ruta del avatar dentro de /public ('/agents/orus.jpg'), o null si el
+   * agente no tiene foto. Se usa como icono de la notificación push: ver
+   * app/api/chat/agent/messages/route.ts.
+   */
+  avatarUrl: string | null;
   /** Etiqueta de la llave usada, para logs. Nunca es la llave. */
   keyLabel: string;
 }
@@ -69,7 +75,7 @@ export async function authenticateAgent(request: Request): Promise<ChatAgentIden
 
   const agent = await prisma.agent.findFirst({
     where: { code: entry.agent, is_active: true },
-    select: { id_agent: true, code: true, display_name: true },
+    select: { id_agent: true, code: true, display_name: true, avatar_url: true },
   });
   if (!agent) {
     console.error(
@@ -82,6 +88,7 @@ export async function authenticateAgent(request: Request): Promise<ChatAgentIden
     idAgent: agent.id_agent,
     code: agent.code,
     displayName: agent.display_name,
+    avatarUrl: agent.avatar_url ?? null,
     keyLabel: entry.label ?? entry.agent,
   };
 }
