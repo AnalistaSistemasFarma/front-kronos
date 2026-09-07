@@ -961,6 +961,36 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   min-height: 0;
 }
 
+/* ── Arrastrar y soltar archivos sobre la conversación ──
+   El aviso es una capa por encima de TODO el hilo (mensajes + compositor).
+   Va con pointer-events:none a propósito: si capturara el puntero, el propio
+   aviso se interpondría y el navegador dispararía dragleave sin parar. */
+.chat-thread {
+  position: relative;
+}
+
+.chat-thread--dragging {
+  outline: 2px dashed var(--app-primary, #1a3c6e);
+  outline-offset: -4px;
+  border-radius: 0.5rem;
+}
+
+.chat-thread__dropzone {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+  padding: 16px;
+  color: var(--app-text, var(--foreground));
+  /* Respaldo para navegadores sin color-mix: mejor un velo fijo que ninguno. */
+  background-color: rgba(255, 255, 255, 0.88);
+  background-color: color-mix(in srgb, var(--app-surface, #ffffff) 88%, transparent);
+}
+
 /* Fila FIJA de abajo del hilo: nunca se encoge ni se va con el scroll. Lo que
    scrollea es solo .chat-thread__scroll, que es el hermano de arriba con
    flex:1 y min-height:0. Las fichas de los archivos elegidos se pintan dentro
