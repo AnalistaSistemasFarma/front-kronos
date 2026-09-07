@@ -8,7 +8,7 @@
 import { prisma } from '../prisma';
 import { getChatAccess } from './access';
 import { toPreview } from './constants';
-import { parseAgentTasks } from './status-tasks';
+import { parseAgentTasks, type AgentTaskDto } from './status-tasks';
 
 export interface ChatMessagePayload {
   id: number;
@@ -53,7 +53,15 @@ export interface ChatConversationPayload {
   };
   lastMessage: { id: number; role: string; preview: string; createdAt: string } | null;
   unreadCount: number;
-  agentStatus: { state: string; label: string | null; updatedAt: string } | null;
+  // `tasks` va aquí porque la fila de la bandeja también carga los sub-agentes
+  // en curso; sin esto el objeto que se arma más abajo no cuadra con el tipo.
+  // Opcional a propósito: un estado viejo no la trae y la tabla no se pinta.
+  agentStatus: {
+    state: string;
+    label: string | null;
+    tasks?: AgentTaskDto[];
+    updatedAt: string;
+  } | null;
 }
 
 /** Forma mínima de una fila de chat_message con sus adjuntos. */
