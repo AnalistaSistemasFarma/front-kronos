@@ -34,16 +34,43 @@ self.addEventListener('push', (event) => {
     }
   }
 
+  const targetUrl = data.url || '/';
+
+  // No se le avisa de algo que ya está mirando: si hay una pestaña VISIBLE
+  // parada justo en esa URL, la notificación sería ruido (el mensaje ya le
+  // apareció en el chat). Cualquier otro caso —pestaña en otra página, en
+  // segundo plano, o navegador cerrado— sí notifica.
+  const shouldSkip = async () => {
+    try {
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const target = new URL(targetUrl, self.location.origin);
+      return clients.some((client) => {
+        if (client.visibilityState !== 'visible') return false;
+        const open = new URL(client.url, self.location.origin);
+        return open.pathname === target.pathname && open.search === target.search;
+      });
+    } catch {
+      // Ante cualquier duda, se muestra: perder una notificación es peor que
+      // mostrar una de más.
+      return false;
+    }
+  };
+
   event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      icon: '/iconocel.png',
-      badge: '/iconocel.png',
-      data: { url: data.url || '/' },
-      requireInteraction: false,
-      tag: data.tag || 'synerlink',
-      renotify: true,
-      vibrate: [120, 60, 120],
+    shouldSkip().then((skip) => {
+      if (skip) return undefined;
+      return self.registration.showNotification(data.title, {
+        body: data.body,
+        // El icono puede venir en el payload (p.ej. la foto del agente que
+        // responde en el chat de Asistentes IA). Sin él, el logo de SynerLink.
+        icon: data.icon || '/iconocel.png',
+        badge: '/iconocel.png',
+        data: { url: targetUrl },
+        requireInteraction: false,
+        tag: data.tag || 'synerlink',
+        renotify: true,
+        vibrate: [120, 60, 120],
+      });
     })
   );
 });
