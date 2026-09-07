@@ -275,6 +275,25 @@ export default function ChatThread({
     if (dragDepth.current === 0) setDragging(false);
   }, []);
 
+  /**
+   * Pegar con el foco en cualquier parte de la conversación, no solo en la
+   * caja de texto: uno toma la captura, hace clic en el chat y pega.
+   *
+   * Si el pegado ya lo atendió el compositor (el foco estaba en la caja), ese
+   * manejador llamó a `preventDefault` y aquí no se hace nada: si no, la misma
+   * imagen entraría dos veces.
+   */
+  const onPaste = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      if (composerDisabled || event.defaultPrevented) return;
+      const pegados = Array.from(event.clipboardData?.files ?? []);
+      if (pegados.length === 0) return;
+      event.preventDefault();
+      composerRef.current?.addFiles(pegados);
+    },
+    [composerDisabled]
+  );
+
   const onDrop = useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
       dragDepth.current = 0;
@@ -303,6 +322,7 @@ export default function ChatThread({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onPaste={onPaste}
     >
       {dragging && (
         <Box className='chat-thread__dropzone' aria-hidden>
