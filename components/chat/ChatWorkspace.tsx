@@ -164,6 +164,13 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
   // debajo de la lista, fuera de la vista).
   const conversacionSola = soloConversacion || Boolean(enPantallaAngosta && selectedCode);
 
+  // ESCRITORIO con una conversación abierta: el chat ocupa la pantalla y la
+  // lista de agentes se convierte en una barra lateral angosta con su propio
+  // desplazamiento, como en cualquier aplicación de mensajería de escritorio.
+  // Pedido de Nicolás. Sin conversación abierta la página sigue siendo la
+  // rejilla de carpetas de siempre, que es donde uno escoge.
+  const modoEscritorio = !enPantallaAngosta && !conversacionSola && Boolean(selectedCode);
+
   // Modo inmersivo: mientras la conversación va sola se esconde la barra
   // superior de la aplicación (menú, avatares, campana). Pedido de Nicolás
   // para que al llegar por la notificación el chat ocupe la pantalla de
@@ -247,12 +254,15 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
     <div className='app-page-shell app-page-shell--fill ios-process-hub min-h-screen'>
       <div
         className={
-          conversacionSola
+          conversacionSola || modoEscritorio
             ? 'chat-page-shell--completa'
             : 'max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'
         }
       >
-        <header className='mb-6' hidden={Boolean(conversacionSola && selectedAgent)}>
+        <header
+          className='mb-6'
+          hidden={Boolean((conversacionSola || modoEscritorio) && selectedAgent)}
+        >
           <h1 className='ios-process-hub__title text-3xl sm:text-4xl mb-2'>Asistentes IA</h1>
           <p className='ios-process-hub__subtitle mb-5'>
             Sus asistentes, agrupados por empresa. Elija uno para conversar.
@@ -303,10 +313,13 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
           </Group>
         </header>
 
-        <Grid gutter='lg'>
+        <Grid gutter={modoEscritorio ? 0 : 'lg'} className={modoEscritorio ? 'chat-escritorio' : undefined}>
           {/* Columna de carpetas */}
           {!(conversacionSola && selectedAgent) && (
-          <Grid.Col span={{ base: 12, lg: selectedAgent ? 5 : 12 }}>
+          <Grid.Col
+            span={{ base: 12, lg: selectedAgent ? (modoEscritorio ? 3.5 : 5) : 12 }}
+            className={modoEscritorio ? 'chat-escritorio__lateral' : undefined}
+          >
             {folders.length === 0 ? (
               <div className='ios-empty'>
                 <div className='ios-empty__icon'>
@@ -386,7 +399,10 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
 
           {/* Columna del hilo */}
           {selectedAgent && (
-            <Grid.Col span={{ base: 12, lg: conversacionSola ? 12 : 7 }}>
+            <Grid.Col
+              span={{ base: 12, lg: conversacionSola ? 12 : modoEscritorio ? 8.5 : 7 }}
+              className={modoEscritorio ? 'chat-escritorio__principal' : undefined}
+            >
               <Box
                 className={`chat-page-thread${conversacionSola ? ' chat-page-thread--completa' : ''}`}
               >
