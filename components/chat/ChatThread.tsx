@@ -94,14 +94,23 @@ function MessageAttachments({ message }: { message: ChatMessageDto }) {
   );
 }
 
-function MessageBubble({ message, agent }: { message: ChatMessageDto; agent: ChatAgentDto }) {
+function MessageBubble({
+  message,
+  agent,
+  nueva = false,
+}: {
+  message: ChatMessageDto;
+  agent: ChatAgentDto;
+  /** Llegó DESPUÉS de abrir el hilo: solo esas se animan (ver ChatThread). */
+  nueva?: boolean;
+}) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
   if (isSystem) {
     return (
       <Center>
-        <Box className='chat-bubble chat-bubble--system'>
+        <Box className={`chat-bubble chat-bubble--system${nueva ? ' chat-bubble--nueva' : ''}`}>
           <ChatMarkdown content={message.body} />
           <MessageAttachments message={message} />
         </Box>
@@ -133,6 +142,7 @@ function MessageBubble({ message, agent }: { message: ChatMessageDto; agent: Cha
         className={[
           'chat-bubble',
           isUser ? 'chat-bubble--user' : 'chat-bubble--agent',
+          nueva ? 'chat-bubble--nueva' : '',
           message.pending ? 'chat-bubble--pending' : '',
           message.failed ? 'chat-bubble--failed' : '',
         ]
@@ -224,9 +234,10 @@ export default function ChatThread({
       const viewport = viewportRef.current;
       if (!viewport || !stickToBottomRef.current) return;
       // En el mismo cuadro el navegador todavía no reacomodó el layout con el
-      // alto nuevo; se espera al siguiente.
+      // alto nuevo; se espera al siguiente. Y se baja con `smooth` para que la
+      // conversación acompañe al teclado en vez de saltar de golpe.
       requestAnimationFrame(() => {
-        viewport.scrollTop = viewport.scrollHeight;
+        viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
       });
     }, [])
   );
@@ -237,6 +248,15 @@ export default function ChatThread({
   const stickToBottomRef = useRef(true);
   stickToBottomRef.current = stickToBottom;
   const lastCountRef = useRef(0);
+
+  // Qué mensajes ya estaban cuando se abrió la conversación. Solo se animan
+  // los que llegan DESPUÉS: si se animara todo, al entrar a un hilo largo la
+  // pantalla entera se sacudiría, que es justo lo contrario de lo que se
+  // busca. Se llena una sola vez, con el primer lote que llega.
+  const yaEstaban = useRef<Set<string | number> | null>(null);
+  if (yaEstaban.current === null && thread.messages.length > 0) {
+    yaEstaban.current = new Set(thread.messages.map((m) => m.id));
+  }
 
   // Autoscroll al final SOLO si el usuario ya estaba abajo: si subió a leer
   // algo, un mensaje nuevo no debe arrancarle la vista.
@@ -404,7 +424,12 @@ export default function ChatThread({
           )}
 
           {thread.messages.map((message) => (
-            <MessageBubble key={message.id} message={message} agent={agent} />
+            <MessageBubble
+              key={message.id}
+              message={message}
+              agent={agent}
+              nueva={yaEstaban.current ? !yaEstaban.current.has(message.id) : false}
+            />
           ))}
 
           <AgentActivity agent={agent} status={thread.status} />

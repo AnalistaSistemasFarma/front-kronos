@@ -1128,10 +1128,24 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
    accesibilidad del sistema: quien la activa NO debe ver nada de esto.
    ══════════════════════════════════════════════════════════════════════ */
 @media (prefers-reduced-motion: no-preference) {
-  /* La burbuja entra subiendo apenas. Solo se anima al MONTARSE, así que en
-     un hilo largo no hay coste: los mensajes viejos ya están en el DOM. */
-  .chat-bubble {
+  /* SOLO se anima lo que llega después de abrir el hilo (`--nueva`, marcada
+     por ChatThread). Animar todo hacía que al entrar a una conversación larga
+     se sacudiera la pantalla entera, que es lo contrario de lo que se busca. */
+
+  /* Lo que manda el AGENTE: entra desde su lado, subiendo apenas. */
+  .chat-bubble--nueva {
     animation: chat-burbuja-entra 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    transform-origin: bottom left;
+  }
+
+  /* Lo que manda UNO: la animación de envío, al estilo iMessage. La burbuja
+     sale del lado de la caja de escribir —de ahí el `transform-origin` abajo a
+     la derecha—, empieza más pequeña y baja, y se acomoda con un pequeño
+     rebote. La curva con valores fuera de 0..1 es lo que produce ese
+     sobrepaso: crece un pelo de más y vuelve. Sin eso se siente mecánico. */
+  .chat-bubble--user.chat-bubble--nueva {
+    animation: chat-envio 340ms cubic-bezier(0.22, 1.28, 0.42, 1) both;
+    transform-origin: bottom right;
   }
 
   .chat-attachment--draft {
@@ -1167,6 +1181,17 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
 
   .chat-agent-card:active {
     transform: scale(0.99);
+  }
+}
+
+@keyframes chat-envio {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
@@ -1299,6 +1324,16 @@ body.chat-inmersivo .chat-page-thread--completa {
   top: 0;
   height: 100dvh;
   height: var(--alto-visible, 100dvh);
+}
+
+/* El alto cambia cuando sale o se guarda el teclado. Sin transición, la
+   conversación pega un salto seco; con ella acompaña al teclado. Corta a
+   propósito (160 ms): el teclado del sistema tarda alrededor de eso, y una
+   transición más larga se sentiría rezagada. */
+@media (prefers-reduced-motion: no-preference) {
+  .chat-page-thread--completa {
+    transition: height 160ms ease-out;
+  }
 }
 
 .chat-page-shell--completa {
