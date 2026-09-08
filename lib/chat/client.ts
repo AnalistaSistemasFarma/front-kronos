@@ -28,6 +28,9 @@ export interface ChatAgentDto {
 
 export interface ChatAccessDto {
   canUseChat: boolean;
+  /** Solo administradores: habilita el mensaje masivo. La reja real está en el
+   *  endpoint; esto es únicamente para saber si pintar el botón. */
+  canBroadcast?: boolean;
   companies: ChatAgentCompanyDto[];
   agents: ChatAgentDto[];
 }
