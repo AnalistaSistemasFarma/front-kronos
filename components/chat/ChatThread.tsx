@@ -25,14 +25,16 @@ import AgentAvatar from './AgentAvatar';
 import AgentTaskTable from './AgentTaskTable';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import ChatMarkdown from './ChatMarkdown';
-import { useChatConversation } from './useChatConversation';
+import { useChatConversation, type ChatTarget } from './useChatConversation';
 import { useAltoVisible } from './useAltoVisible';
 import {
   describeAgentStatus,
   formatChatTime,
   SIN_RESPUESTA_MS,
   type ChatAgentDto,
+  type ChatAgentStatusDto,
   type ChatMessageDto,
+  type ChatParticipantDto,
 } from '../../lib/chat/client';
 import { formatBytes } from '../../lib/chat/attachments';
 
@@ -106,15 +108,36 @@ function MessageAttachments({ message }: { message: ChatMessageDto }) {
 function MessageBubble({
   message,
   agent,
+  currentUserId,
+  enGrupo = false,
   nueva = false,
 }: {
   message: ChatMessageDto;
-  agent: ChatAgentDto;
+  /** El agente del hilo directo. En un grupo no hay "uno". */
+  agent?: ChatAgentDto;
+  /** Quién soy: en un grupo es lo que distingue mis mensajes de los ajenos. */
+  currentUserId?: string;
+  enGrupo?: boolean;
   /** Llegó DESPUÉS de abrir el hilo: solo esas se animan (ver ChatThread). */
   nueva?: boolean;
 }) {
-  const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+
+  // ⚠️ EN UN GRUPO, "mío" NO es lo mismo que role='user'. Con el criterio del
+  // hilo directo, los mensajes de las OTRAS personas del grupo se pintarían
+  // alineados a la derecha como si los hubiera escrito uno: el grupo quedaría
+  // ilegible. Aquí lo mío es lo que escribí yo, y eso solo lo dice el autor.
+  const isUser = enGrupo
+    ? message.author?.kind === 'user' &&
+      currentUserId !== undefined &&
+      String(message.author.id) === currentUserId
+    : message.role === 'user';
+
+  // Nombre de quien escribió, para la etiqueta de la burbuja. En el hilo
+  // directo es siempre el agente; en un grupo, quien sea (persona o agente).
+  const nombreAutor = message.author?.name ?? agent?.displayName ?? 'Asistente';
+  const avatarAutor = message.author?.avatarUrl ?? agent?.avatarUrl ?? null;
+  const codigoAutor = message.author?.kind === 'agent' ? String(message.author.id) : agent?.code ?? '';
 
   if (isSystem) {
     return (
@@ -137,9 +160,9 @@ function MessageBubble({
       {!isUser && (
         <Box style={{ flexShrink: 0 }}>
           <AgentAvatar
-            code={agent.code}
-            displayName={agent.displayName}
-            avatarUrl={agent.avatarUrl}
+            code={codigoAutor}
+            displayName={nombreAutor}
+            avatarUrl={avatarAutor}
             size={28}
             showStatus={false}
             withTooltip={false}
@@ -160,7 +183,7 @@ function MessageBubble({
       >
         {!isUser && (
           <Text size='xs' fw={600} className='chat-bubble__author'>
-            {agent.displayName}
+            {nombreAutor}
           </Text>
         )}
 
@@ -254,6 +277,50 @@ function SinRespuesta({
   );
 }
 
+/**
+ * Indicador de varios agentes a la vez, para los GRUPOS.
+ *
+ * En un grupo el indicador no puede ser uno solo: si tres agentes están
+ * trabajando y se muestra "Pensando…" sin decir quién, el usuario no sabe si
+ * le contesta el que le importa. Se pinta una línea por agente ocupado, y
+ * ninguna cuando están todos quietos.
+ */
+function GroupActivity({ statuses }: { statuses: ChatAgentStatusDto[] }) {
+  const ocupados = statuses.filter((s) => describeAgentStatus(s).busy);
+  if (ocupados.length === 0) return null;
+
+  return (
+    <Stack gap={4} role='status' aria-live='polite'>
+      {ocupados.map((s) => {
+        const view = describeAgentStatus(s);
+        return (
+          <Box key={s.idAgent}>
+            <Group gap='xs' align='center' className='chat-activity'>
+              <AgentAvatar
+                code={String(s.idAgent)}
+                displayName={s.agentName ?? 'Asistente'}
+                avatarUrl={s.agentAvatarUrl ?? null}
+                size={24}
+                showStatus={false}
+                withTooltip={false}
+              />
+              <span className='chat-typing' aria-hidden>
+                <i />
+                <i />
+                <i />
+              </span>
+              <Text size='xs' className='chat-activity__label'>
+                <b>{s.agentName ?? 'Asistente'}</b> · {view.label}
+              </Text>
+            </Group>
+            <AgentTaskTable tasks={s.tasks} />
+          </Box>
+        );
+      })}
+    </Stack>
+  );
+}
+
 /** Indicador de "qué está haciendo el agente" — lo que evita el efecto congelado. */
 function AgentActivity({
   agent,
@@ -294,16 +361,52 @@ function AgentActivity({
 
 export default function ChatThread({
   agent,
+  group,
+  currentUserId,
   active = true,
   height,
 }: {
-  agent: ChatAgentDto;
+  /** Hilo DIRECTO: el agente con el que se habla. */
+  agent?: ChatAgentDto;
+  /**
+   * GRUPO: el hilo ya existe y se abre por su id. `agentes` son los asistentes
+   * del grupo, para el autocompletado del `@`.
+   */
+  group?: {
+    idConversation: number;
+    title: string;
+    participants?: ChatParticipantDto[] | null;
+  };
+  /** Quién soy. En un grupo es lo que distingue mis mensajes de los ajenos. */
+  currentUserId?: string;
   /** El hilo está a la vista (marca leído y arranca el sondeo). */
   active?: boolean;
   /** Alto del área de mensajes. Sin valor, ocupa el espacio disponible. */
   height?: string | number;
 }) {
-  const thread = useChatConversation(agent.idAgent, active);
+  const enGrupo = Boolean(group);
+
+  const target: ChatTarget | null = group
+    ? { kind: 'group', idConversation: group.idConversation }
+    : agent
+      ? { kind: 'agent', idAgent: agent.idAgent }
+      : null;
+
+  const thread = useChatConversation(target, active);
+
+  // Asistentes del grupo, para el autocompletado del `@`. Se toman de la
+  // ficha que devuelve el servidor cuando está disponible: si se tomaran solo
+  // de las props, agregar un asistente al grupo no se reflejaría hasta
+  // recargar la página.
+  // Clave del hilo abierto: cambia al pasar de un agente a otro o de un grupo
+  // a otro, y es lo que reinicia los efectos de desplazamiento.
+  const claveHilo = group ? `grupo:${group.idConversation}` : `agente:${agent?.idAgent ?? 0}`;
+
+  const agentesMencionables = (
+    thread.conversation?.participants ??
+    group?.participants ??
+    []
+  ).filter((p) => p.kind === 'agent');
 
   // Mantiene `--alto-visible` al día: es lo que permite que el compositor no
   // quede debajo del teclado en el celular (ver el propio hook).
@@ -358,7 +461,7 @@ export default function ChatThread({
     const viewport = viewportRef.current;
     if (!viewport || thread.loading) return;
     viewport.scrollTop = viewport.scrollHeight;
-  }, [thread.loading, agent.idAgent]);
+  }, [thread.loading, claveHilo]);
 
   /**
    * PEGADO AL FONDO de verdad, mientras el usuario esté abajo.
@@ -394,7 +497,7 @@ export default function ChatThread({
     });
     observador.observe(contenido);
     return () => observador.disconnect();
-  }, [agent.idAgent]);
+  }, [claveHilo]);
 
   // ── Arrastrar y soltar archivos sobre la conversación ────────────────────
   // El área de soltar es TODO el hilo (mensajes + compositor), no solo la caja
@@ -556,8 +659,10 @@ export default function ChatThread({
                   Todavía no han hablado
                 </Text>
                 <Text size='xs' ta='center' className='chat-text-muted' maw={320}>
-                  {agent.description ||
-                    `Escríbale a ${agent.displayName} para empezar la conversación.`}
+                  {enGrupo
+                    ? 'Escriba para empezar. Los asistentes de este grupo responden solo cuando se los menciona con @.'
+                    : agent?.description ||
+                      `Escríbale a ${agent?.displayName ?? 'el asistente'} para empezar la conversación.`}
                 </Text>
               </Stack>
             </Center>
@@ -568,17 +673,28 @@ export default function ChatThread({
               key={message.id}
               message={message}
               agent={agent}
+              currentUserId={currentUserId}
+              enGrupo={enGrupo}
               nueva={yaEstaban.current ? !yaEstaban.current.has(message.id) : false}
             />
           ))}
 
-          <AgentActivity agent={agent} status={thread.status} />
+          {enGrupo ? (
+            <GroupActivity statuses={thread.statuses} />
+          ) : (
+            agent && <AgentActivity agent={agent} status={thread.status} />
+          )}
 
-          <SinRespuesta
-            agent={agent}
-            ultimoMensaje={thread.messages[thread.messages.length - 1]}
-            status={thread.status}
-          />
+          {/* El aviso de "nadie ha contestado" NO va en los grupos: allí un
+              mensaje sin menciones no espera respuesta de nadie, así que el
+              aviso sería una falsa alarma en el caso más común. */}
+          {!enGrupo && agent && (
+            <SinRespuesta
+              agent={agent}
+              ultimoMensaje={thread.messages[thread.messages.length - 1]}
+              status={thread.status}
+            />
+          )}
         </Stack>
       </ScrollArea>
 
@@ -619,7 +735,18 @@ export default function ChatThread({
           onSend={(body, files) => thread.send(body, files)}
           sending={thread.sending}
           disabled={composerDisabled}
-          placeholder={`Escríbale a ${agent.displayName}…`}
+          placeholder={
+            enGrupo
+              ? `Escriba en ${group?.title ?? 'el grupo'}…  (mencione con @)`
+              : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
+          }
+          menciones={agentesMencionables.map((p) => ({
+            // Se sugiere el handle sin arroba cuando existe (es el nombre que
+            // el servidor reconoce sin ambigüedad) y el nombre visible si no.
+            valor: (p.handle ?? p.name).replace(/^@/, ''),
+            nombre: p.name,
+            avatarUrl: p.avatarUrl,
+          }))}
         />
       </Box>
     </Box>

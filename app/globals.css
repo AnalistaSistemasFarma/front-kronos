@@ -1292,6 +1292,51 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   }
 }
 
+/* ── Contador de no leídos de un grupo ──
+   Igual que el de los avatares de los agentes, pero anclado al icono del
+   grupo. Va con z-index explícito por la misma razón que allá: sin él, el
+   punto de estado se le montaba encima y tapaba el número. */
+.chat-grupo__contador {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  z-index: 2;
+}
+
+/* ── Lista de menciones (@) en un grupo ──
+   Va DENTRO del compositor, como primer hijo, así que aparece encima de la
+   caja de escribir. Se hizo así y no con un menú flotante a propósito: en el
+   celular, un menú posicionado debajo del campo queda tapado por el teclado, y
+   uno posicionado con `fixed` se descoloca con el viewport visual — el mismo
+   problema que costó tres pases arreglar en este chat. Aquí es un bloque más
+   del flujo y no puede descolocarse. */
+.chat-menciones {
+  margin-bottom: 6px;
+  max-height: 208px;
+  overflow-y: auto;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  border-radius: 12px;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  box-shadow: 0 6px 18px rgb(0 0 0 / 12%);
+  padding: 4px;
+}
+
+.chat-menciones__item {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--app-text, var(--foreground));
+  transition: background-color 120ms ease;
+}
+
+/* El resaltado es del TECLADO, no del ratón: es el que se mueve con las
+   flechas y el que Enter escoge. */
+.chat-menciones__item--activo,
+.chat-menciones__item:hover {
+  background-color: var(--app-surface-hover, rgb(0 0 0 / 6%));
+}
+
 /* ── Caja de escritura ── */
 .chat-composer__input {
   background-color: var(--app-surface-raised, var(--surface-muted));

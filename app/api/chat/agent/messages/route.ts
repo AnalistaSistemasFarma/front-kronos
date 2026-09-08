@@ -1,7 +1,12 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
-import { assertAgentConversation, authenticateAgent } from '../../../../../lib/chat/agent-auth';
-import { serializeMessage } from '../../../../../lib/chat/conversations';
+import { authenticateAgent, resolveAgentConversation } from '../../../../../lib/chat/agent-auth';
+import { messageInclude, serializeMessage } from '../../../../../lib/chat/conversations';
+import {
+  AVISO_CADENA_CORTADA,
+  calcularEntregas,
+  contarTurnosDeAgenteAlFinal,
+} from '../../../../../lib/chat/groups';
 import {
   MAX_AGENT_MESSAGE_CHARS,
   MAX_STATUS_LABEL_CHARS,
@@ -56,13 +61,32 @@ export const dynamic = 'force-dynamic';
  *  - El AGENTE sale de la LLAVE. El payload NO lleva ni puede llevar un
  *    id_agent: un bot no puede escribir haciéndose pasar por otro.
  *  - El `role` lo pone el servidor ('agent'). No se acepta del cliente.
- *  - assertAgentConversation() verifica que la conversación sea de ESTE agente
- *    antes de escribir nada (anti-IDOR del lado del bot). Si no lo es, 404: no
- *    se le confirma al bot que el hilo existe.
+ *  - resolveAgentConversation() verifica que la conversación sea de ESTE agente
+ *    —o que el agente sea integrante del grupo— antes de escribir nada
+ *    (anti-IDOR del lado del bot). Si no lo es, 404: no se le confirma al bot
+ *    que el hilo existe.
  *  - El body es Markdown crudo con tope de longitud; jamás HTML.
  *  - Los adjuntos se validan por EXTENSIÓN y TAMAÑO en el servidor
  *    (lib/chat/attachments.ts), sin confiar en el `Content-Type` declarado: un
  *    bot es un cliente HTTP más y puede mandar lo que quiera en esa cabecera.
+ *
+ * -------------------------------------------------------------------------
+ * EN UN GRUPO: MENCIONES Y TOPE CONTRA EL BUCLE
+ * -------------------------------------------------------------------------
+ * Un agente puede mencionar a otro con `@` y así pasarle el turno. Las dos
+ * reglas que evitan que eso se vuelva una fuga de consumo (decisiones de
+ * Nicolás, 2026-09-08):
+ *
+ *   1. Solo se le entrega a los agentes MENCIONADOS, y nunca al propio autor.
+ *   2. Tope de MAX_TURNOS_AGENTE_SEGUIDOS turnos encadenados entre agentes sin
+ *      que escriba una persona. Al pasarse, las menciones NO se entregan y
+ *      queda un mensaje de sistema en el grupo diciendo que se cortó. Se deja
+ *      el aviso a propósito: un mensaje que desaparece en silencio es un
+ *      misterio; uno que dice por qué se detuvo es información.
+ *
+ * El conteo de turnos se hace DENTRO de la transacción, sobre los últimos
+ * mensajes del grupo. Si se hiciera antes, dos agentes contestando a la vez
+ * podrían leer el mismo conteo y colarse los dos.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -75,7 +99,7 @@ export async function POST(request: NextRequest) {
     }
     const fields = payload.fields;
 
-    const conversation = await assertAgentConversation(agent.idAgent, Number(fields.idConversation));
+    const conversation = await resolveAgentConversation(agent.idAgent, Number(fields.idConversation));
     if (!conversation) {
       return jsonNoStore({ error: 'Conversación no encontrada.' }, { status: 404 });
     }
@@ -130,20 +154,71 @@ export async function POST(request: NextRequest) {
     // son un solo hecho ("el agente respondió"). Si se aplicaran por separado,
     // un fallo intermedio dejaría al usuario viendo "Pensando…" con la
     // respuesta ya publicada, o al revés.
-    const message = await prisma.$transaction(async (tx) => {
+    const { created: message, entregas } = await prisma.$transaction(async (tx) => {
+      // A quién le pasa el turno este mensaje. Solo aplica en grupos; en un
+      // hilo directo no hay nadie más a quien mencionar.
+      let entregas = { idAgents: [] as number[], cadenaCortada: false };
+
+      if (conversation.kind === 'group') {
+        // El conteo va DENTRO de la transacción: si se hiciera antes, dos
+        // agentes contestando a la vez leerían el mismo número y los dos se
+        // colarían por encima del tope.
+        const ultimos = await tx.chatMessage.findMany({
+          where: { id_conversation: conversation.id },
+          orderBy: { id: 'desc' },
+          // Alcanza con mirar unos pocos: la cuenta se corta en el primer
+          // mensaje de una persona hacia atrás.
+          take: 12,
+          select: { role: true },
+        });
+        const turnosPrevios = contarTurnosDeAgenteAlFinal([...ultimos].reverse());
+
+        entregas = calcularEntregas({
+          body,
+          agentesDelGrupo: conversation.agentes,
+          idAgentAutor: agent.idAgent,
+          turnosPrevios,
+        });
+      }
+
       const created = await tx.chatMessage.create({
         data: {
           id_conversation: conversation.id,
           role: 'agent',
           body,
           created_at: now,
+          // El AUTOR sale de la llave, nunca del payload.
+          id_agent_author: agent.idAgent,
           // El agente escribe: su propio mensaje nace ya entregado.
           delivered_at: now,
           // Mensaje y adjuntos, una sola escritura: o entran los dos o ninguno.
           ...(uploaded.length > 0 ? { attachments: { create: uploaded } } : {}),
+          // Mensaje y entregas, también: un mensaje que menciona a alguien que
+          // nunca se enteraría sería peor que no haberlo escrito.
+          ...(entregas.idAgents.length > 0
+            ? {
+                deliveries: {
+                  create: entregas.idAgents.map((idAgent) => ({ id_agent: idAgent })),
+                },
+              }
+            : {}),
         },
-        include: { attachments: true },
+        include: messageInclude,
       });
+
+      // El tope frenó una mención: queda dicho en el grupo. Sin autor, porque
+      // no lo escribió nadie.
+      if (entregas.cadenaCortada) {
+        await tx.chatMessage.create({
+          data: {
+            id_conversation: conversation.id,
+            role: 'system',
+            body: AVISO_CADENA_CORTADA,
+            created_at: new Date(now.getTime() + 1),
+            delivered_at: now,
+          },
+        });
+      }
 
       await tx.chatConversation.update({
         where: { id: conversation.id },
@@ -151,29 +226,62 @@ export async function POST(request: NextRequest) {
       });
 
       await tx.chatAgentStatus.upsert({
-        where: { id_conversation: conversation.id },
-        create: { id_conversation: conversation.id, state, label },
+        where: {
+          id_conversation_id_agent: { id_conversation: conversation.id, id_agent: agent.idAgent },
+        },
+        create: { id_conversation: conversation.id, id_agent: agent.idAgent, state, label },
         update: { state, label },
       });
 
-      return created;
+      return { created, entregas };
     });
 
-    // AVISO AL DUEÑO DEL HILO. Va DESPUÉS de la transacción y sin `await`: la
+    // AVISO A QUIEN CORRESPONDA. Va DESPUÉS de la transacción y sin `await`: la
     // respuesta del agente ya está publicada y no debe quedar en vilo porque
     // un endpoint de push esté lento o una suscripción esté vencida. Los
     // errores se registran adentro; nunca se propagan al bot.
-    void notifyAgentReply({
-      idConversation: conversation.id,
-      idUser: conversation.idUser,
-      agentCode: agent.code,
-      agentName: agent.displayName,
-      agentAvatarUrl: agent.avatarUrl,
-      body,
-      attachmentCount: uploaded.length,
-    });
+    if (conversation.kind === 'group') {
+      // En un grupo se le avisa a todas las personas del grupo. Se resuelven
+      // los correos aquí y no dentro del aviso para no meter otra consulta en
+      // el camino caliente de la transacción.
+      const personas = await prisma.chatParticipant.findMany({
+        where: { id_conversation: conversation.id, id_user: { not: null } },
+        select: { user: { select: { email: true } } },
+      });
+      void notifyAgentReply({
+        idConversation: conversation.id,
+        idUser: null,
+        groupEmails: personas.map((p) => p.user?.email ?? '').filter((e) => e.length > 0),
+        groupTitle: conversation.title,
+        agentCode: agent.code,
+        agentName: agent.displayName,
+        agentAvatarUrl: agent.avatarUrl,
+        body,
+        attachmentCount: uploaded.length,
+      });
+    } else {
+      void notifyAgentReply({
+        idConversation: conversation.id,
+        idUser: conversation.idUser,
+        agentCode: agent.code,
+        agentName: agent.displayName,
+        agentAvatarUrl: agent.avatarUrl,
+        body,
+        attachmentCount: uploaded.length,
+      });
+    }
 
-    return jsonNoStore({ message: serializeMessage(message) }, { status: 201 });
+    return jsonNoStore(
+      {
+        message: serializeMessage(message),
+        // Para que el bot sepa a quién le pasó el turno, y cuándo el tope lo
+        // frenó: si no se le dice, vuelve a intentarlo sin entender por qué
+        // nadie contesta.
+        notifiedAgents: entregas.idAgents,
+        chainStopped: entregas.cadenaCortada,
+      },
+      { status: 201 }
+    );
   } catch (error) {
     return serverError('POST /api/chat/agent/messages', error);
   }
