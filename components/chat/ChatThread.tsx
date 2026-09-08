@@ -18,6 +18,7 @@ import AgentTaskTable from './AgentTaskTable';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import ChatMarkdown from './ChatMarkdown';
 import { useChatConversation } from './useChatConversation';
+import { useAltoVisible } from './useAltoVisible';
 import {
   describeAgentStatus,
   formatChatTime,
@@ -209,6 +210,10 @@ export default function ChatThread({
   height?: string | number;
 }) {
   const thread = useChatConversation(agent.idAgent, active);
+
+  // Mantiene `--alto-visible` al día: es lo que permite que el compositor
+  // no quede debajo del teclado en el celular (ver el propio hook).
+  useAltoVisible();
   const viewportRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
   const lastCountRef = useRef(0);
