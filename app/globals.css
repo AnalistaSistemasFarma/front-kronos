@@ -1478,6 +1478,69 @@ body.chat-inmersivo .chat-page-thread--completa {
   height: calc(var(--alto-visible, 100dvh) - var(--app-header-height));
 }
 
+/* ── Avatar del agente: punto de estado y contador ──
+   Posición explícita en vez de `Indicator` anidados de Mantine. El punto va
+   ABAJO A LA DERECHA y el contador ARRIBA A LA DERECHA, por encima; los dos
+   con borde del color del fondo para separarse del avatar y entre sí. Nicolás
+   reportó el contador tapado por el punto cuando esto dependía del
+   anidamiento. */
+.agent-avatar {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.agent-avatar__estado {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  border-radius: 999px;
+  border: 2px solid var(--app-surface, var(--surface));
+  box-sizing: content-box;
+}
+
+/* Late mientras el agente trabaja: sin esto el chat parece congelado. */
+@media (prefers-reduced-motion: no-preference) {
+  .agent-avatar__estado--ocupado {
+    animation: agent-avatar-pulso 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes agent-avatar-pulso {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.82);
+    opacity: 0.72;
+  }
+}
+
+.agent-avatar__contador {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  /* Por encima del punto de estado, siempre. Era justo lo que fallaba. */
+  z-index: 2;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 2px solid var(--app-surface, var(--surface));
+  background-color: var(--mantine-color-red-filled, #e03131);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  box-sizing: content-box;
+}
+
 /* ── Fichas de adjuntos ── */
 .chat-attachment {
   display: inline-flex;
