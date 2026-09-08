@@ -32,6 +32,7 @@ import {
   IconSend,
   IconLock,
   IconSearch,
+  IconUsersGroup,
   IconX,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
@@ -550,6 +551,28 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
               }
               radius='md'
             />
+            {/* GRUPOS. El botón lo ven TODOS los que tienen el módulo, no solo
+                los administradores: crear un grupo es de administradores, pero
+                participar en uno no — si el botón estuviera detrás de esa reja,
+                a quien lo agregan a un grupo no tendría por dónde entrar. */}
+            <Tooltip label='Grupos con varias personas y asistentes' withArrow>
+              <Button
+                variant='subtle'
+                color='gray'
+                radius='md'
+                leftSection={<IconUsersGroup size={16} />}
+                component={Link}
+                href='/process/chat/grupos'
+              >
+                Grupos
+                {overview.groupUnread > 0 && (
+                  <Badge size='xs' color='red' ml={6} circle>
+                    {overview.groupUnread}
+                  </Badge>
+                )}
+              </Button>
+            </Tooltip>
+
             {overview.canBroadcast && (
               <Tooltip label='Ver el organigrama de la flota' withArrow>
                 <Button

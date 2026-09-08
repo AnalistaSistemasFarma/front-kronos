@@ -42,6 +42,7 @@
  */
 import { prisma } from '../prisma';
 import { extractBearer, loadAgentKeys, matchAgentKey } from './agent-keys';
+import { assertAgentGroup, type AgenteMencionable } from './groups';
 
 export type { ChatAgentKeyEntry } from './agent-keys';
 
@@ -94,11 +95,19 @@ export async function authenticateAgent(request: Request): Promise<ChatAgentIden
 }
 
 /**
- * Verificación de PROPIEDAD del lado del agente (anti-IDOR; espejo de
- * assertConversationOwnership del lado del usuario): la conversación debe
- * pertenecer a ESTE agente. El id_agent sale de la llave, nunca del payload.
+ * Verificación de PROPIEDAD del lado del agente sobre un hilo DIRECTO
+ * (anti-IDOR; espejo de assertConversationOwnership del lado del usuario): la
+ * conversación debe pertenecer a ESTE agente. El id_agent sale de la llave,
+ * nunca del payload.
  *
- * Devuelve null si la conversación no existe o es de otro agente.
+ * ⚠️ ANCLADA A `kind = 'direct'` A PROPÓSITO. En un grupo, `id_agent` es el
+ * agente ANFITRIÓN y no significa "este hilo es suyo": sin este filtro, el
+ * anfitrión podría escribir y mover el indicador de un grupo por el camino del
+ * hilo directo, saltándose la regla de la mención. La puerta de los grupos es
+ * `assertAgentGroup` (lib/chat/groups.ts).
+ *
+ * Devuelve null si la conversación no existe, no es un hilo directo, o es de
+ * otro agente.
  */
 export async function assertAgentConversation(
   idAgent: number,
@@ -109,10 +118,35 @@ export async function assertAgentConversation(
   }
 
   const conversation = await prisma.chatConversation.findFirst({
-    where: { id: conversationId, id_agent: idAgent },
+    where: { id: conversationId, kind: 'direct', id_agent: idAgent },
     select: { id: true, id_user: true },
   });
   if (!conversation) return null;
 
   return { id: conversation.id, idUser: conversation.id_user };
+}
+
+/**
+ * Conversación resuelta para un agente, sea un hilo directo o un grupo.
+ *
+ * Existe para que los endpoints del agente no tengan que preguntar dos veces
+ * ni repetir el "primero pruebo directo, después grupo": las dos puertas están
+ * ancladas a su `kind`, así que ninguna acepta una conversación de la otra
+ * clase, y el resultado dice cuál fue.
+ */
+export type AgentConversation =
+  | { id: number; kind: 'direct'; idUser: string }
+  | { id: number; kind: 'group'; title: string | null; agentes: AgenteMencionable[] };
+
+export async function resolveAgentConversation(
+  idAgent: number,
+  conversationId: unknown
+): Promise<AgentConversation | null> {
+  const directo = await assertAgentConversation(idAgent, conversationId);
+  if (directo) return { id: directo.id, kind: 'direct', idUser: directo.idUser };
+
+  const grupo = await assertAgentGroup(idAgent, conversationId);
+  if (grupo) return { id: grupo.id, kind: 'group', title: grupo.title, agentes: grupo.agentes };
+
+  return null;
 }

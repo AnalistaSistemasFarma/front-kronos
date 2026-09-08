@@ -31,6 +31,9 @@ export interface ChatAccessDto {
   /** Solo administradores: habilita el mensaje masivo. La reja real está en el
    *  endpoint; esto es únicamente para saber si pintar el botón. */
   canBroadcast?: boolean;
+  /** Solo administradores: habilita crear grupos. Igual que arriba, la reja
+   *  real está en POST /api/chat/groups. */
+  canCreateGroups?: boolean;
   companies: ChatAgentCompanyDto[];
   agents: ChatAgentDto[];
 }
@@ -64,6 +67,21 @@ export interface ChatAttachmentDto {
   downloadUrl: string;
 }
 
+/**
+ * Quién escribió un mensaje. En un hilo directo el `role` alcanzaba; en un
+ * GRUPO hay que decir cuál de las personas o cuál de los agentes.
+ * `null` en los mensajes de sistema: no los escribió nadie.
+ *
+ * Opcional a propósito: una respuesta vieja (o un front desplegado antes que
+ * la API) no lo trae y el hilo directo se pinta como siempre.
+ */
+export interface ChatAuthorDto {
+  kind: 'user' | 'agent';
+  id: string | number;
+  name: string;
+  avatarUrl: string | null;
+}
+
 export interface ChatMessageDto {
   id: number;
   role: string;
@@ -72,19 +90,44 @@ export interface ChatMessageDto {
   deliveredAt: string | null;
   readAt: string | null;
   attachments: ChatAttachmentDto[];
+  author?: ChatAuthorDto | null;
   /** Marca local: mensaje aún no confirmado por el servidor (envío optimista). */
   pending?: boolean;
   /** Marca local: el envío falló y el usuario puede reintentar. */
   failed?: boolean;
 }
 
+/** Un integrante de un grupo. */
+export interface ChatParticipantDto {
+  kind: 'user' | 'agent';
+  id: string | number;
+  name: string;
+  avatarUrl: string | null;
+  /** El `@handle` del agente; null en las personas. */
+  handle: string | null;
+  role: string;
+}
+
+/** Indicador de "qué está haciendo" de UN agente dentro de la conversación. */
+export interface ChatAgentStatusDto extends ChatStatusDto {
+  idAgent: number;
+  agentName?: string;
+  agentAvatarUrl?: string | null;
+}
+
 export interface ChatConversationDto {
   id: number;
   title: string | null;
+  /**
+   * 'direct' | 'group'. Opcional para que un front viejo siga funcionando: si
+   * no viene, se trata como 'direct', que es lo que había antes de los grupos.
+   */
+  kind?: string;
   createdAt: string;
   updatedAt: string;
   lastMessageAt: string | null;
   archived: boolean;
+  /** En un grupo, el agente ANFITRIÓN (la cara del grupo en la bandeja). */
   agent: {
     idAgent: number;
     code: string;
@@ -92,9 +135,20 @@ export interface ChatConversationDto {
     handle: string | null;
     avatarUrl: string | null;
   };
+  /** Empresa del grupo. null en los hilos directos. */
+  company?: { idCompany: number; companyName: string } | null;
+  /** Integrantes. null en los hilos directos. */
+  participants?: ChatParticipantDto[] | null;
   lastMessage: { id: number; role: string; preview: string; createdAt: string } | null;
   unreadCount: number;
   agentStatus: ChatStatusDto | null;
+  /** Un estado por agente. En un hilo directo trae, como máximo, uno. */
+  agentStatuses?: ChatAgentStatusDto[];
+}
+
+/** ¿Es un grupo? Un hilo sin `kind` es de antes de los grupos: es directo. */
+export function esGrupo(conversacion: { kind?: string } | null | undefined): boolean {
+  return conversacion?.kind === 'group';
 }
 
 export interface ChatPollDto {
@@ -102,6 +156,8 @@ export interface ChatPollDto {
   cursor: number;
   hasMore: boolean;
   status: ChatStatusDto | null;
+  /** Desglose por agente: lo que pinta el encabezado de un grupo. */
+  statuses?: ChatAgentStatusDto[];
   /** Cadencia que ORDENA el servidor. El cliente la respeta tal cual. */
   nextPollMs: number;
   serverTime: string;
