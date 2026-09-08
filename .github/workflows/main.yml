@@ -81,8 +81,21 @@ jobs:
           echo === cambio de esquema: detengo apps para liberar el DLL de Prisma ===
           call pm2 stop GSS-Front
           call pm2 stop kronos-mcp
+          rem `pm2 stop` devuelve el control ANTES de que Windows libere las
+          rem bibliotecas que los procesos tenian abiertas. El pase del
+          rem 2026-09-08 se cayo aqui: `prisma generate` corrio medio segundo
+          rem despues del stop y murio con EPERM al renombrar
+          rem query_engine-windows.dll.node. Como este paso fallo, "Compilar" y
+          rem "Levantar" se saltaron y el servicio quedo ABAJO sin nada nuevo
+          rem puesto. Ver scripts/esperar-motor-prisma.cjs.
+          echo === espero a que el motor de Prisma quede libre ===
+          call node scripts\esperar-motor-prisma.cjs 20 500
           echo === prisma generate ===
+          call npx prisma generate && goto :generado
+          echo    fallo el primer intento; espero un poco mas y reintento
+          call node scripts\esperar-motor-prisma.cjs 20 1000
           call npx prisma generate || exit /b 1
+          :generado
 
       - name: Compilar
         shell: cmd
