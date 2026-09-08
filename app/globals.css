@@ -1185,6 +1185,27 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   height: calc(100dvh - var(--app-header-height) - 32px);
 }
 
+/* ── La conversación sola: llegar por la notificación y poder escribir ──
+   Cuando el hilo se muestra SIN la columna de carpetas (enlace directo o
+   pantalla angosta) ocupa exactamente el alto REALMENTE visible y se pega
+   arriba. Así no queda nada que desplazar: se llega con los últimos mensajes
+   y la caja de escribir a la vista.
+
+   `--alto-visible` la publica el hook useAltoVisible con el visual viewport,
+   que es lo único que refleja el teclado del celular: `dvh` no se encoge
+   cuando el teclado sale en iOS, y por eso el compositor terminaba debajo del
+   teclado y tocaba hacer scroll. Si no hay hook o el navegador no soporta la
+   API, cae a `dvh` y se comporta como antes. */
+.chat-page-thread--completa {
+  position: sticky;
+  top: var(--app-header-height);
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  height: calc(100dvh - var(--app-header-height));
+  height: calc(var(--alto-visible, 100dvh) - var(--app-header-height));
+}
+
 /* ── Fichas de adjuntos ── */
 .chat-attachment {
   display: inline-flex;

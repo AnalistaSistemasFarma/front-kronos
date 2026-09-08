@@ -364,7 +364,9 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
           {/* Columna del hilo */}
           {selectedAgent && (
             <Grid.Col span={{ base: 12, lg: conversacionSola ? 12 : 7 }}>
-              <Box className='chat-page-thread'>
+              <Box
+                className={`chat-page-thread${conversacionSola ? ' chat-page-thread--completa' : ''}`}
+              >
                 <Group justify='space-between' p='sm' className='chat-panel__header' wrap='nowrap'>
                   <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
                     <AgentAvatar

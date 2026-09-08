@@ -73,7 +73,12 @@ export default function AgentChatPanel({
                 // abierto, `vh` sigue midiendo la pantalla completa y el
                 // compositor queda debajo, tapado.
                 width: aPantallaCompleta ? '100vw' : 'min(460px, calc(100vw - 32px))',
-                height: aPantallaCompleta ? '100dvh' : 'min(640px, calc(100dvh - 96px))',
+                // `--alto-visible` la publica useAltoVisible desde el visual
+                // viewport, que es lo único que se encoge cuando sale el teclado
+                // del celular. Sin eso el compositor queda debajo del teclado.
+                height: aPantallaCompleta
+                  ? 'var(--alto-visible, 100dvh)'
+                  : 'min(640px, calc(100dvh - 96px))',
                 borderRadius: aPantallaCompleta ? 0 : undefined,
                 display: 'flex',
                 flexDirection: 'column',
