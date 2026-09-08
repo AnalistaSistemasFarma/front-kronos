@@ -1200,6 +1200,26 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
    a borde. El contenedor normal (max-w-7xl + padding) dejaba franjas a los
    lados y arriba, y en el celular eso se ve como una tarjeta metida dentro de
    la página en vez de una pantalla de chat. */
+/* ── Modo inmersivo del chat ──
+   Con la conversación abierta a pantalla completa (llegada por notificación o
+   pantalla angosta) se esconde la barra superior de la aplicación y se anula
+   el espacio que reservaba. La marca la pone y la QUITA ChatWorkspace; si
+   alguna vez quedara pegada, la aplicación se quedaría sin navegación, así que
+   ese `cleanup` no es opcional. */
+body.chat-inmersivo .app-header {
+  display: none;
+}
+
+body.chat-inmersivo .app-page-shell {
+  padding-top: 0;
+}
+
+body.chat-inmersivo .chat-page-thread--completa {
+  top: 0;
+  height: 100dvh;
+  height: var(--alto-visible, 100dvh);
+}
+
 .chat-page-shell--completa {
   max-width: none;
   margin: 0;
