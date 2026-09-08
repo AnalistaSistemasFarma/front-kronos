@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useId, useImperativeHandle, useRef, useState } from 'react';
 import { useMediaQuery } from '@mantine/hooks';
 import {
   ActionIcon,
@@ -157,6 +157,15 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   // Enter físico y ahí Enter debe seguir enviando. Pedido de Nicolás
   // (2026-09-08): en el celular no hay un Shift+Enter cómodo.
   const tecladoTactil = useMediaQuery('(pointer: coarse)');
+  // El id amarra la opción "Adjuntar archivos" (una <label>) con el input de
+  // archivos. Va con useId y no con una constante porque puede haber más de un
+  // compositor montado (el panel flotante y la página) y dos labels apuntando
+  // al mismo id abrirían siempre el input equivocado.
+  const fileInputId = useId();
+  // El menú del clip se maneja controlado: la opción de adjuntar NO puede
+  // cerrarlo al tocarla (ver el comentario de esa opción), así que hay que
+  // cerrarlo a mano cuando ya se escogió el archivo.
+  const [menuAbierto, setMenuAbierto] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -623,7 +632,14 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             Antes eran dos (clip y ⋯) y Nicolás lo pidió explícito: "solo hay
             un botón de clip y ese sí muestra todo". Adjuntar queda de primero
             porque es lo que la gente viene a buscar cuando toca un clip. */}
-        <Menu position='top-end' withArrow shadow='md' width={225}>
+        <Menu
+          opened={menuAbierto}
+          onChange={setMenuAbierto}
+          position='top-end'
+          withArrow
+          shadow='md'
+          width={225}
+        >
           <Menu.Target>
             <ActionIcon
               variant='subtle'
@@ -638,10 +654,24 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             </ActionIcon>
           </Menu.Target>
           <Menu.Dropdown className='chat-surface'>
+            {/* ETIQUETA, no botón con `.click()` por programa.
+                Abrir el selector desde JavaScript es frágil en el celular: se
+                pierde el gesto del usuario, el teclado se cierra y no pasa
+                nada más (Nicolás en iPhone, 2026-09-08 — el primer intento,
+                que solo dejó de esconder el input, no bastó). Con una <label>
+                amarrada por `htmlFor`, quien abre el selector es el navegador
+                de forma nativa: no hay gesto que perder.
+                `closeMenuOnClick={false}` es indispensable: si el menú se
+                desmonta con el mismo toque, la etiqueta desaparece antes de
+                que el navegador alcance a activar el input. El menú se cierra
+                en el `onChange` del input, cuando ya escogieron el archivo. */}
             <Menu.Item
+              component='label'
+              htmlFor={fileInputId}
+              closeMenuOnClick={false}
               leftSection={<IconPaperclip size={14} />}
-              onClick={() => fileInputRef.current?.click()}
               disabled={files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
+              style={{ cursor: 'pointer' }}
             >
               Adjuntar archivos
             </Menu.Item>
@@ -729,6 +759,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           programa sí lo alcanza. */}
       <input
         ref={fileInputRef}
+        id={fileInputId}
         type='file'
         multiple
         tabIndex={-1}
@@ -744,6 +775,9 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           pointerEvents: 'none',
         }}
         onChange={(event) => {
+          // El menú quedó abierto a propósito mientras se escogía el archivo;
+          // ya con el archivo en mano se cierra.
+          setMenuAbierto(false);
           addFiles(event.currentTarget.files);
           // Se limpia para que escoger DOS VECES el mismo archivo vuelva a
           // disparar el onChange.
