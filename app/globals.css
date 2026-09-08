@@ -1292,6 +1292,29 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   }
 }
 
+/* ── Icono del grupo en la lista ──
+   Los grupos comparten la tarjeta de los asistentes (`chat-agent-card`) para
+   que la lista se vea de una sola pieza. Lo único propio es este icono: un
+   grupo no tiene cara, así que en el lugar del avatar va un círculo del mismo
+   tamaño con el símbolo de varias personas. Sin el círculo, el icono suelto
+   rompe la alineación de toda la columna. */
+.chat-grupo__icono {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background-color: var(--app-surface-hover, rgb(0 0 0 / 6%));
+  color: var(--app-text-muted, var(--foreground));
+}
+
+.chat-grupo__icono--grande {
+  width: 36px;
+  height: 36px;
+}
+
 /* ── Contador de no leídos de un grupo ──
    Igual que el de los avatares de los agentes, pero anclado al icono del
    grupo. Va con z-index explícito por la misma razón que allá: sin él, el
