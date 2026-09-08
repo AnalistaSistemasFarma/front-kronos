@@ -74,8 +74,11 @@ self.addEventListener('push', (event) => {
         body: data.body,
         // El icono puede venir en el payload (p.ej. la foto del agente que
         // responde en el chat de Asistentes IA). Sin él, el logo de SynerLink.
-        icon: data.icon || '/iconocel.png',
-        badge: '/iconocel.png',
+        // Iconos del TAMAÑO que la notificación necesita. Antes los dos
+        // apuntaban a /iconocel.png (2500 × 2500, 916 KB): cada notificación
+        // se bajaba casi un mega para pintar una insignia de 24 px.
+        icon: data.icon || '/icons/icon-192.png',
+        badge: '/icons/badge-96.png',
         data: { url: targetUrl },
         requireInteraction: false,
         tag: data.tag || 'synerlink',
