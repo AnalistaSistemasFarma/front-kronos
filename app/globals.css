@@ -23,7 +23,15 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Fuente del sistema, UNA sola fuente de verdad: el tema de Mantine también
+     lee esta variable, así que cambiarla aquí cambia toda la aplicación.
+     `Roboto` se quitó a propósito (2026-09-08, pedido de Nicolás): estaba
+     escrito de forma explícita, así que en Android la cadena se quedaba SIEMPRE
+     en Roboto y nunca alcanzaba `sans-serif`, que es el alias que respeta la
+     fuente configurada en el equipo. Chrome tampoco lee la fuente del tema del
+     fabricante, así que esto ayuda pero no garantiza: la vía confiable es la
+     preferencia por perfil. */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
     'Courier New', monospace;
 }
@@ -33,7 +41,9 @@ body {
   min-height: 100%;
   background-color: var(--app-bg, var(--background));
   color: var(--app-text, var(--foreground));
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Con respaldo: si la variable no llegara a :root, un var() pelado
+     dejaría la página en la fuente por defecto del navegador. */
+  font-family: var(--font-sans, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
 }
 
 /* Portada: siempre clara, sin tema ni paleta del usuario */
