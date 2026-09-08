@@ -158,6 +158,7 @@ export async function POST(request: NextRequest) {
       // A quién le pasa el turno este mensaje. Solo aplica en grupos; en un
       // hilo directo no hay nadie más a quien mencionar.
       let entregas = { idAgents: [] as number[], cadenaCortada: false };
+      let avisoYaEstaba = false;
 
       if (conversation.kind === 'group') {
         // El conteo va DENTRO de la transacción: si se hiciera antes, dos
@@ -169,9 +170,19 @@ export async function POST(request: NextRequest) {
           // Alcanza con mirar unos pocos: la cuenta se corta en el primer
           // mensaje de una persona hacia atrás.
           take: 12,
-          select: { role: true },
+          // El `body` es para no repetir el aviso de cadena cortada (abajo).
+          select: { role: true, body: true },
         });
         const turnosPrevios = contarTurnosDeAgenteAlFinal([...ultimos].reverse());
+
+        // ¿El último mensaje del grupo YA es el aviso de cadena cortada? Un
+        // bot que insista vuelve a chocar con el tope en cada intento, y sin
+        // esto el grupo se llena de avisos idénticos. Se detectó probando en
+        // pruebas: cuatro intentos seguidos dejaban cuatro avisos iguales.
+        avisoYaEstaba =
+          ultimos.length > 0 &&
+          ultimos[0].role === 'system' &&
+          ultimos[0].body === AVISO_CADENA_CORTADA;
 
         entregas = calcularEntregas({
           body,
@@ -207,8 +218,9 @@ export async function POST(request: NextRequest) {
       });
 
       // El tope frenó una mención: queda dicho en el grupo. Sin autor, porque
-      // no lo escribió nadie.
-      if (entregas.cadenaCortada) {
+      // no lo escribió nadie. Y una sola vez: si el aviso ya era el último
+      // mensaje, no se repite.
+      if (entregas.cadenaCortada && !avisoYaEstaba) {
         await tx.chatMessage.create({
           data: {
             id_conversation: conversation.id,

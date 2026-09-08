@@ -1015,8 +1015,8 @@ model ChatAttachment {
 
 /// Estado en vivo del agente dentro de una conversación — alimenta el
 /// indicador de "qué está haciendo" (pensando / usando una herramienta).
-/// Una sola fila por conversación (la PK es id_conversation): es un estado
-/// puntual que se sobrescribe, no un histórico.
+/// Una sola fila por conversación Y AGENTE (la PK es (id_conversation,
+/// id_agent)): es un estado puntual que se sobrescribe, no un histórico.
 model ChatAgentStatus {
   id_conversation Int
   /// El agente al que corresponde este indicador. En un hilo directo es el
