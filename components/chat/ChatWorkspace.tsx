@@ -171,6 +171,19 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
   // rejilla de carpetas de siempre, que es donde uno escoge.
   const modoEscritorio = !enPantallaAngosta && !conversacionSola && Boolean(selectedCode);
 
+  // Mientras dura ese modo la PÁGINA no se desplaza: el marco queda clavado a
+  // la pantalla y lo único que corre es el interior de la barra lateral y el
+  // de la conversación. Sin esto la página conserva su propio desplazamiento
+  // detrás del marco fijo y la rueda del ratón mueve el fondo — que es
+  // exactamente lo que se veía mal. La marca se quita SIEMPRE al salir.
+  useEffect(() => {
+    if (!modoEscritorio) return;
+    document.body.classList.add('chat-escritorio-abierto');
+    return () => {
+      document.body.classList.remove('chat-escritorio-abierto');
+    };
+  }, [modoEscritorio]);
+
   // Modo inmersivo: mientras la conversación va sola se esconde la barra
   // superior de la aplicación (menú, avatares, campana). Pedido de Nicolás
   // para que al llegar por la notificación el chat ocupe la pantalla de
@@ -250,19 +263,191 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
 
   const totalAgents = overview.agents.length;
 
+  /* ─────────── Piezas que comparten los dos armazones de la página ──────── */
+
+  // Las carpetas por empresa. `comoLista` las apila en una sola columna: es lo
+  // que necesita la barra lateral del escritorio, donde no caben tarjetas de
+  // dos columnas.
+  const renderCarpetas = (comoLista: boolean) =>
+    folders.length === 0 ? (
+      <div className='ios-empty'>
+        <div className='ios-empty__icon'>
+          <IconFolderOff size={26} />
+        </div>
+        <h2 className='text-lg font-semibold mb-1'>
+          {search ? 'Nada coincide con su búsqueda' : 'Aún no tiene asistentes'}
+        </h2>
+        <p className='ios-process-hub__subtitle mb-4'>
+          {search
+            ? 'Pruebe con otro nombre o limpie el filtro.'
+            : 'Cuando le habiliten un asistente, aparecerá aquí.'}
+        </p>
+        {search && (
+          <Button variant='light' size='xs' onClick={() => setSearch('')}>
+            Limpiar búsqueda
+          </Button>
+        )}
+      </div>
+    ) : (
+      folders.map((folder) => (
+        <Box key={folder.idCompany} mb={comoLista ? 'md' : 'lg'} className='chat-folder'>
+          <Group gap='xs' mb='sm' className='chat-folder__header'>
+            <IconBuilding size={18} className='chat-folder__icon' />
+            <Text fw={700} size='sm'>
+              {folder.companyName}
+            </Text>
+            <Badge size='xs' variant='light' color='gray'>
+              {folder.agents.length}
+            </Badge>
+          </Group>
+
+          <SimpleGrid
+            cols={
+              comoLista || viewMode === 'list'
+                ? 1
+                : selectedAgent
+                  ? { base: 1, sm: 2 }
+                  : { base: 1, sm: 2, lg: 3 }
+            }
+            spacing='sm'
+          >
+            {folder.agents.map((agent) => {
+              const conversation = overview.conversationByAgent.get(agent.idAgent) ?? null;
+              const agentStatus = overview.statusByAgent.get(agent.idAgent) ?? null;
+              return (
+                <AgentCard
+                  key={`${folder.idCompany}-${agent.idAgent}`}
+                  agent={agent}
+                  unread={overview.unreadByAgent.get(agent.idAgent) ?? 0}
+                  statusLabel={describeAgentStatus(agentStatus).label}
+                  status={agentStatus}
+                  lastPreview={
+                    conversation?.lastMessage
+                      ? toPlainPreview(conversation.lastMessage.preview)
+                      : null
+                  }
+                  lastAt={conversation?.lastMessageAt ?? null}
+                  selected={selectedAgent?.idAgent === agent.idAgent}
+                  compact={comoLista || viewMode === 'list' || Boolean(selectedAgent)}
+                  onSelect={() => selectAgent(agent)}
+                />
+              );
+            })}
+          </SimpleGrid>
+        </Box>
+      ))
+    );
+
+  const pieDeLista =
+    totalAgents > 0 ? (
+      <Text size='xs' className='chat-text-muted'>
+        {totalAgents === 1 ? '1 asistente disponible' : `${totalAgents} asistentes disponibles`}
+      </Text>
+    ) : null;
+
+  const cerrarConversacion = () => {
+    setSelectedCode(null);
+    setSoloConversacion(false);
+    router.replace('/process/chat', { scroll: false });
+  };
+
+  // El hilo con su encabezado. `clase` decide si va como tarjeta (la rejilla de
+  // siempre) o como panel de borde a borde (escritorio y pantalla completa).
+  const renderConversacion = (clase: string) =>
+    selectedAgent ? (
+      <Box className={clase}>
+        <Group justify='space-between' p='sm' className='chat-panel__header' wrap='nowrap'>
+          <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
+            <AgentAvatar
+              code={selectedAgent.code}
+              displayName={selectedAgent.displayName}
+              avatarUrl={selectedAgent.avatarUrl}
+              status={overview.statusByAgent.get(selectedAgent.idAgent) ?? null}
+              size={36}
+              withTooltip={false}
+            />
+            <Box style={{ minWidth: 0 }}>
+              <Text fw={600} size='sm' lineClamp={1}>
+                {selectedAgent.displayName}
+              </Text>
+              <Text size='xs' className='chat-text-muted' lineClamp={1}>
+                {describeAgentStatus(overview.statusByAgent.get(selectedAgent.idAgent) ?? null).label}
+              </Text>
+            </Box>
+          </Group>
+          <Tooltip label='Volver a las carpetas' withArrow>
+            <ActionIcon
+              variant='subtle'
+              color='gray'
+              onClick={cerrarConversacion}
+              aria-label='Cerrar la conversación'
+            >
+              <IconArrowLeft size={18} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+
+        {/* Sin `height`: el alto lo acota el contenedor, y dentro del hilo solo
+            scrollea la lista de mensajes — el compositor queda fijo abajo. */}
+        <ChatThread agent={selectedAgent} active />
+      </Box>
+    ) : null;
+
+  /* ───────────── Armazón de ESCRITORIO: aplicación de mensajería ────────── */
+  /* Marco clavado a la pantalla (debajo de la barra de SynerLink, que en
+     escritorio SÍ se conserva porque es la navegación de toda la aplicación).
+     Nada se desplaza salvo el interior de las dos columnas. */
+  if (modoEscritorio && selectedAgent) {
+    return (
+      <div className='chat-escritorio'>
+        <aside className='chat-escritorio__lateral'>
+          <div className='chat-escritorio__buscador'>
+            <TextInput
+              value={search}
+              onChange={(event) => setSearch(event.currentTarget.value)}
+              placeholder='Buscar asistente…'
+              leftSection={<IconSearch size={16} />}
+              rightSection={
+                search ? (
+                  <ActionIcon
+                    variant='subtle'
+                    color='gray'
+                    onClick={() => setSearch('')}
+                    aria-label='Limpiar'
+                  >
+                    <IconX size={14} />
+                  </ActionIcon>
+                ) : null
+              }
+              radius='md'
+              size='sm'
+            />
+          </div>
+          <div className='chat-escritorio__lista'>
+            {renderCarpetas(true)}
+            {pieDeLista}
+          </div>
+        </aside>
+
+        <section className='chat-escritorio__principal'>
+          {renderConversacion('chat-page-thread chat-page-thread--panel')}
+        </section>
+      </div>
+    );
+  }
+
+  /* ──────────────── Armazón normal: rejilla de carpetas ─────────────────── */
+
   return (
     <div className='app-page-shell app-page-shell--fill ios-process-hub min-h-screen'>
       <div
         className={
-          conversacionSola || modoEscritorio
+          conversacionSola
             ? 'chat-page-shell--completa'
             : 'max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'
         }
       >
-        <header
-          className='mb-6'
-          hidden={Boolean((conversacionSola || modoEscritorio) && selectedAgent)}
-        >
+        <header className='mb-6' hidden={Boolean(conversacionSola && selectedAgent)}>
           <h1 className='ios-process-hub__title text-3xl sm:text-4xl mb-2'>Asistentes IA</h1>
           <p className='ios-process-hub__subtitle mb-5'>
             Sus asistentes, agrupados por empresa. Elija uno para conversar.
@@ -277,7 +462,12 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
               leftSection={<IconSearch size={16} />}
               rightSection={
                 search ? (
-                  <ActionIcon variant='subtle' color='gray' onClick={() => setSearch('')} aria-label='Limpiar'>
+                  <ActionIcon
+                    variant='subtle'
+                    color='gray'
+                    onClick={() => setSearch('')}
+                    aria-label='Limpiar'
+                  >
                     <IconX size={14} />
                   </ActionIcon>
                 ) : null
@@ -313,143 +503,21 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
           </Group>
         </header>
 
-        <Grid gutter={modoEscritorio ? 0 : 'lg'} className={modoEscritorio ? 'chat-escritorio' : undefined}>
+        <Grid gutter='lg'>
           {/* Columna de carpetas */}
           {!(conversacionSola && selectedAgent) && (
-          <Grid.Col
-            span={{ base: 12, lg: selectedAgent ? (modoEscritorio ? 3.5 : 5) : 12 }}
-            className={modoEscritorio ? 'chat-escritorio__lateral' : undefined}
-          >
-            {folders.length === 0 ? (
-              <div className='ios-empty'>
-                <div className='ios-empty__icon'>
-                  <IconFolderOff size={26} />
-                </div>
-                <h2 className='text-lg font-semibold mb-1'>
-                  {search ? 'Nada coincide con su búsqueda' : 'Aún no tiene asistentes'}
-                </h2>
-                <p className='ios-process-hub__subtitle mb-4'>
-                  {search
-                    ? 'Pruebe con otro nombre o limpie el filtro.'
-                    : 'Cuando le habiliten un asistente, aparecerá aquí.'}
-                </p>
-                {search && (
-                  <Button variant='light' size='xs' onClick={() => setSearch('')}>
-                    Limpiar búsqueda
-                  </Button>
-                )}
-              </div>
-            ) : (
-              folders.map((folder) => (
-                <Box key={folder.idCompany} mb='lg' className='chat-folder'>
-                  <Group gap='xs' mb='sm' className='chat-folder__header'>
-                    <IconBuilding size={18} className='chat-folder__icon' />
-                    <Text fw={700} size='sm'>
-                      {folder.companyName}
-                    </Text>
-                    <Badge size='xs' variant='light' color='gray'>
-                      {folder.agents.length}
-                    </Badge>
-                  </Group>
-
-                  <SimpleGrid
-                    cols={
-                      viewMode === 'list'
-                        ? 1
-                        : selectedAgent
-                          ? { base: 1, sm: 2 }
-                          : { base: 1, sm: 2, lg: 3 }
-                    }
-                    spacing='sm'
-                  >
-                    {folder.agents.map((agent) => {
-                      const conversation = overview.conversationByAgent.get(agent.idAgent) ?? null;
-                      const agentStatus = overview.statusByAgent.get(agent.idAgent) ?? null;
-                      return (
-                        <AgentCard
-                          key={`${folder.idCompany}-${agent.idAgent}`}
-                          agent={agent}
-                          unread={overview.unreadByAgent.get(agent.idAgent) ?? 0}
-                          statusLabel={describeAgentStatus(agentStatus).label}
-                          status={agentStatus}
-                          lastPreview={
-                            conversation?.lastMessage
-                              ? toPlainPreview(conversation.lastMessage.preview)
-                              : null
-                          }
-                          lastAt={conversation?.lastMessageAt ?? null}
-                          selected={selectedAgent?.idAgent === agent.idAgent}
-                          compact={viewMode === 'list' || Boolean(selectedAgent)}
-                          onSelect={() => selectAgent(agent)}
-                        />
-                      );
-                    })}
-                  </SimpleGrid>
-                </Box>
-              ))
-            )}
-
-            {totalAgents > 0 && (
-              <Text size='xs' className='chat-text-muted'>
-                {totalAgents === 1 ? '1 asistente disponible' : `${totalAgents} asistentes disponibles`}
-              </Text>
-            )}
-          </Grid.Col>
+            <Grid.Col span={{ base: 12, lg: selectedAgent ? 5 : 12 }}>
+              {renderCarpetas(false)}
+              {pieDeLista}
+            </Grid.Col>
           )}
 
           {/* Columna del hilo */}
           {selectedAgent && (
-            <Grid.Col
-              span={{ base: 12, lg: conversacionSola ? 12 : modoEscritorio ? 8.5 : 7 }}
-              className={modoEscritorio ? 'chat-escritorio__principal' : undefined}
-            >
-              <Box
-                className={`chat-page-thread${conversacionSola ? ' chat-page-thread--completa' : ''}`}
-              >
-                <Group justify='space-between' p='sm' className='chat-panel__header' wrap='nowrap'>
-                  <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
-                    <AgentAvatar
-                      code={selectedAgent.code}
-                      displayName={selectedAgent.displayName}
-                      avatarUrl={selectedAgent.avatarUrl}
-                      status={overview.statusByAgent.get(selectedAgent.idAgent) ?? null}
-                      size={36}
-                      withTooltip={false}
-                    />
-                    <Box style={{ minWidth: 0 }}>
-                      <Text fw={600} size='sm' lineClamp={1}>
-                        {selectedAgent.displayName}
-                      </Text>
-                      <Text size='xs' className='chat-text-muted' lineClamp={1}>
-                        {
-                          describeAgentStatus(
-                            overview.statusByAgent.get(selectedAgent.idAgent) ?? null
-                          ).label
-                        }
-                      </Text>
-                    </Box>
-                  </Group>
-                  <Tooltip label='Volver a las carpetas' withArrow>
-                    <ActionIcon
-                      variant='subtle'
-                      color='gray'
-                      onClick={() => {
-                        setSelectedCode(null);
-                        setSoloConversacion(false);
-                        router.replace('/process/chat', { scroll: false });
-                      }}
-                      aria-label='Cerrar la conversación'
-                    >
-                      <IconArrowLeft size={18} />
-                    </ActionIcon>
-                  </Tooltip>
-                </Group>
-
-                {/* Sin `height`: el alto lo acota .chat-page-thread (100dvh menos la
-                    cabecera), y dentro del hilo solo scrollea la lista de
-                    mensajes — el compositor queda fijo abajo. */}
-                <ChatThread agent={selectedAgent} active />
-              </Box>
+            <Grid.Col span={{ base: 12, lg: conversacionSola ? 12 : 7 }}>
+              {renderConversacion(
+                `chat-page-thread${conversacionSola ? ' chat-page-thread--completa' : ''}`
+              )}
             </Grid.Col>
           )}
         </Grid>
