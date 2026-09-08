@@ -211,11 +211,31 @@ export default function ChatThread({
 }) {
   const thread = useChatConversation(agent.idAgent, active);
 
-  // Mantiene `--alto-visible` al día: es lo que permite que el compositor
-  // no quede debajo del teclado en el celular (ver el propio hook).
-  useAltoVisible();
+  // Mantiene `--alto-visible` al día: es lo que permite que el compositor no
+  // quede debajo del teclado en el celular (ver el propio hook).
+  //
+  // Y cuando ese alto cambia —o sea, cuando sale o se guarda el teclado— el
+  // hilo vuelve al fondo: al encogerse el contenedor, los últimos mensajes se
+  // salen de la vista y había que desplazar para ver lo que uno acababa de
+  // escribir. Solo se hace si el usuario YA estaba abajo: si subió a leer algo
+  // viejo, el teclado no debe arrancarle la lectura.
+  useAltoVisible(
+    useCallback(() => {
+      const viewport = viewportRef.current;
+      if (!viewport || !stickToBottomRef.current) return;
+      // En el mismo cuadro el navegador todavía no reacomodó el layout con el
+      // alto nuevo; se espera al siguiente.
+      requestAnimationFrame(() => {
+        viewport.scrollTop = viewport.scrollHeight;
+      });
+    }, [])
+  );
   const viewportRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
+  // Espejo en referencia: el aviso del teclado se registra una sola vez y
+  // necesita leer el valor VIGENTE, no el del primer render.
+  const stickToBottomRef = useRef(true);
+  stickToBottomRef.current = stickToBottom;
   const lastCountRef = useRef(0);
 
   // Autoscroll al final SOLO si el usuario ya estaba abajo: si subió a leer
