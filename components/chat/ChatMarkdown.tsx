@@ -4,6 +4,7 @@ import { memo, useMemo } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Box, Text } from '@mantine/core';
+import CopiarBoton from './CopiarBoton';
 import {
   ALLOWED_MARKDOWN_ELEMENTS,
   prepareChatMarkdown,
@@ -40,14 +41,50 @@ function MarkdownLink({
   const safe = sanitizeChatUrl(href);
   if (!safe) return <span>{children}</span>;
   return (
-    <a
-      href={safe}
-      target='_blank'
-      rel='noreferrer noopener'
-      className='chat-md__link'
-    >
-      {children}
-    </a>
+    <span className='chat-md__link-wrap'>
+      <a href={safe} target='_blank' rel='noreferrer noopener' className='chat-md__link'>
+        {children}
+      </a>
+      {/* Se copia la DIRECCIÓN, no el texto del enlace: si el mensaje dice
+          "ver el informe" y apunta a una URL larga, lo que hace falta es la
+          URL. */}
+      <CopiarBoton
+        texto={safe}
+        etiqueta='Copiar el enlace'
+        className='chat-copiar--enlace'
+        size={18}
+      />
+    </span>
+  );
+}
+
+/**
+ * Bloque de código con su botón de copiar arriba a la derecha.
+ *
+ * El texto se saca de los hijos y NO del DOM: leerlo del elemento renderizado
+ * arrastraría el propio botón y cualquier adorno. Así se copia exactamente lo
+ * que el agente escribió.
+ */
+function textoDeLosHijos(nodo: React.ReactNode): string {
+  if (nodo === null || nodo === undefined || typeof nodo === 'boolean') return '';
+  if (typeof nodo === 'string' || typeof nodo === 'number') return String(nodo);
+  if (Array.isArray(nodo)) return nodo.map(textoDeLosHijos).join('');
+  if (typeof nodo === 'object' && 'props' in (nodo as { props?: unknown })) {
+    const props = (nodo as { props?: { children?: React.ReactNode } }).props;
+    return textoDeLosHijos(props?.children);
+  }
+  return '';
+}
+
+function BloqueDeCodigo({ children }: { children?: React.ReactNode }) {
+  const texto = textoDeLosHijos(children);
+  return (
+    <div className='chat-md__pre-wrap'>
+      <pre className='chat-md__pre'>{children}</pre>
+      {texto.trim().length > 0 && (
+        <CopiarBoton texto={texto} etiqueta='Copiar el código' className='chat-copiar--codigo' />
+      )}
+    </div>
   );
 }
 
@@ -62,7 +99,7 @@ const components: Components = {
   h2: ({ children }) => <h2 className='chat-md__h chat-md__h2'>{children}</h2>,
   h3: ({ children }) => <h3 className='chat-md__h chat-md__h3'>{children}</h3>,
   hr: () => <hr className='chat-md__hr' />,
-  pre: ({ children }) => <pre className='chat-md__pre'>{children}</pre>,
+  pre: ({ children }) => <BloqueDeCodigo>{children}</BloqueDeCodigo>,
   code: ({ className, children }) => {
     // react-markdown pasa `className='language-xxx'` solo en los bloques
     // cercados; sin clase es código en línea.

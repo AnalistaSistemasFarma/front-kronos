@@ -1074,7 +1074,72 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
 }
 
 .chat-bubble--user .chat-md__code-inline,
-.chat-bubble--user .chat-md__pre {
+.chat-bubble--user /* ── Botón de copiar en bloques de código y enlaces ──
+   Pedido de Nicolás: "para no tener que seleccionar todo". Seleccionar un
+   bloque de código a mano en el celular es incómodo y casi siempre se lleva un
+   salto de línea de más. */
+.chat-md__pre-wrap {
+  position: relative;
+}
+
+.chat-copiar--codigo {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  /* Discreto mientras no se necesita: el código es lo que hay que leer. */
+  opacity: 0;
+  transition: opacity 140ms ease;
+  background-color: var(--app-surface, var(--surface));
+  border: 1px solid var(--app-border, var(--border-subtle));
+}
+
+.chat-md__pre-wrap:hover .chat-copiar--codigo,
+.chat-copiar--codigo:focus-visible {
+  opacity: 1;
+}
+
+/* En pantallas sin puntero NO hay "hover": si se dejara escondido, en el
+   celular el botón sería invisible — y el celular es justo donde más molesta
+   seleccionar a mano. */
+@media (hover: none) {
+  .chat-copiar--codigo {
+    opacity: 0.85;
+  }
+}
+
+/* El botón flota sobre la esquina, así que se le abre espacio para que no
+   tape el final de la primera línea. */
+.chat-md__pre-wrap .chat-md__pre {
+  padding-right: 34px;
+}
+
+.chat-md__link-wrap {
+  display: inline;
+}
+
+.chat-copiar--enlace {
+  /* Pegado al enlace, alineado con el texto y sin romper el renglón. */
+  display: inline-flex;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  opacity: 0.55;
+  transition: opacity 140ms ease;
+}
+
+.chat-copiar--enlace:hover,
+.chat-copiar--enlace:focus-visible {
+  opacity: 1;
+}
+
+/* Dentro de la burbuja del usuario el fondo es azul: el botón se aclara para
+   no desaparecer. */
+.chat-bubble--user .chat-copiar--codigo {
+  background-color: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+
+.chat-md__pre {
   background-color: rgba(255, 255, 255, 0.18);
   color: #ffffff;
 }

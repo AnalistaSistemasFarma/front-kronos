@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -25,6 +26,7 @@ import {
   IconFolderOff,
   IconLayoutGrid,
   IconList,
+  IconHierarchy2,
   IconMaximize,
   IconMinimize,
   IconSend,
@@ -548,6 +550,21 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
               }
               radius='md'
             />
+            {overview.canBroadcast && (
+              <Tooltip label='Ver el organigrama de la flota' withArrow>
+                <Button
+                  variant='subtle'
+                  color='gray'
+                  radius='md'
+                  leftSection={<IconHierarchy2 size={16} />}
+                  component={Link}
+                  href='/process/chat/organigrama'
+                >
+                  Organigrama
+                </Button>
+              </Tooltip>
+            )}
+
             {overview.canBroadcast && overview.agents.length > 1 && (
               <Tooltip label='Enviar un mensaje a varios asistentes' withArrow>
                 <Button
