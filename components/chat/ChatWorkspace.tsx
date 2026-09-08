@@ -164,6 +164,23 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
   // debajo de la lista, fuera de la vista).
   const conversacionSola = soloConversacion || Boolean(enPantallaAngosta && selectedCode);
 
+  // Modo inmersivo: mientras la conversación va sola se esconde la barra
+  // superior de la aplicación (menú, avatares, campana). Pedido de Nicolás
+  // para que al llegar por la notificación el chat ocupe la pantalla de
+  // verdad.
+  //
+  // Se hace marcando el <body> y no desmontando nada, porque la barra la pinta
+  // el armazón de la aplicación, muy por encima de este componente. La marca
+  // se quita SIEMPRE al salir del modo o al desmontar: una barra de navegación
+  // que se queda escondida deja la aplicación sin salida.
+  useEffect(() => {
+    if (!(conversacionSola && selectedCode)) return;
+    document.body.classList.add('chat-inmersivo');
+    return () => {
+      document.body.classList.remove('chat-inmersivo');
+    };
+  }, [conversacionSola, selectedCode]);
+
   // El código del agente también puede llegar por la URL (?agent=orus), que es
   // lo que usa el botón "abrir en la página de chats" del panel flotante.
   useEffect(() => {
