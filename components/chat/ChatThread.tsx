@@ -276,6 +276,42 @@ export default function ChatThread({
     viewport.scrollTop = viewport.scrollHeight;
   }, [thread.loading, agent.idAgent]);
 
+  /**
+   * PEGADO AL FONDO de verdad, mientras el usuario esté abajo.
+   *
+   * El efecto de arriba solo reacciona a que CAMBIE LA CANTIDAD de mensajes, y
+   * eso no alcanza: lo último de la conversación es el indicador de actividad,
+   * que aparece DESPUÉS de enviar y además crece solo (cambia el texto, se le
+   * suma la tabla de sub-tareas). Nicolás lo reportó así: "cuando envío un
+   * mensaje no baja hasta abajo correctamente, se ve cortado" — y en su
+   * captura el indicador quedaba partido por la mitad.
+   *
+   * Un observador de tamaño sobre el contenido cubre TODOS los casos, no solo
+   * ese: el indicador que crece, una imagen del Markdown que termina de
+   * cargar, las fichas de adjuntos, el mensaje que se reacomoda al cambiar el
+   * ancho.
+   *
+   * El ajuste es INSTANTÁNEO a propósito. Con `smooth` el observador y la
+   * animación se pelean por la posición y el resultado es peor que el
+   * problema. La entrada de las burbujas sigue animada, que es de donde viene
+   * la sensación de fluidez.
+   *
+   * No hay bucle: desplazarse no cambia el tamaño del contenido.
+   */
+  const contenidoRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const contenido = contenidoRef.current;
+    const viewport = viewportRef.current;
+    if (!contenido || !viewport || typeof ResizeObserver === 'undefined') return;
+
+    const observador = new ResizeObserver(() => {
+      if (!stickToBottomRef.current) return;
+      viewport.scrollTop = viewport.scrollHeight;
+    });
+    observador.observe(contenido);
+    return () => observador.disconnect();
+  }, [agent.idAgent]);
+
   // ── Arrastrar y soltar archivos sobre la conversación ────────────────────
   // El área de soltar es TODO el hilo (mensajes + compositor), no solo la caja
   // de texto: es donde la gente suelta por instinto. Los archivos se entregan
@@ -388,7 +424,7 @@ export default function ChatThread({
         onScrollPositionChange={onScrollPositionChange}
         offsetScrollbars
       >
-        <Stack gap='sm' p='sm'>
+        <Stack gap='sm' p='sm' ref={contenidoRef}>
           {thread.hasOlder && (
             <Center>
               <Button

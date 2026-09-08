@@ -1,6 +1,6 @@
 'use client';
 
-import { Avatar, Indicator, Tooltip } from '@mantine/core';
+import { Avatar, Tooltip } from '@mantine/core';
 import {
   agentColor,
   agentInitials,
@@ -11,8 +11,7 @@ import {
 /**
  * Avatar de un agente con sus dos señales:
  *
- *   - CONTADOR de mensajes sin leer (Indicator de Mantine, mismo patrón que
- *     components/NotificationBell.tsx).
+ *   - CONTADOR de mensajes sin leer, arriba a la derecha.
  *   - PUNTO DE ESTADO (trabajando / disponible). Es lo que evita que el chat
  *     parezca congelado mientras el agente piensa.
  *
@@ -54,44 +53,50 @@ export default function AgentAvatar({
     </Avatar>
   );
 
-  // Dos Indicator anidados: el de afuera lleva el contador (arriba-derecha) y
-  // el de adentro el punto de estado (abajo-derecha). Anidarlos es lo que
-  // permite mostrar las dos señales sin que se pisen.
-  const withStatus = showStatus ? (
-    <Indicator
-      inline
-      position='bottom-end'
-      size={Math.max(9, Math.round(size * 0.28))}
-      offset={Math.round(size * 0.1)}
-      color={view.color}
-      processing={view.busy}
-      withBorder
-      aria-label={`Estado: ${view.label}`}
-    >
+  /*
+   * DOS MARCAS CON POSICIÓN EXPLÍCITA, no `Indicator` anidados.
+   *
+   * Antes eran dos `Indicator` de Mantine, uno dentro del otro, confiando en
+   * que "bottom-end" y "top-end" nunca se pisaran. Nicolás mandó un
+   * acercamiento donde el contador quedaba tapado —"el 1 se ve detrás del
+   * circulito de estado"— y las esquinas opuestas dejaron de ser garantía.
+   *
+   * Con un contenedor relativo y dos elementos absolutos el resultado no
+   * depende de cómo Mantine resuelva el anidamiento: el punto de estado va
+   * ABAJO A LA DERECHA, el contador ARRIBA A LA DERECHA y por encima
+   * (`z-index`), y los dos llevan un borde del color del fondo para que se
+   * separen del avatar y entre sí.
+   */
+  const puntoTamano = Math.max(9, Math.round(size * 0.28));
+  const marcas = (
+    <div className='agent-avatar' style={{ width: size, height: size }}>
       {avatar}
-    </Indicator>
-  ) : (
-    avatar
+
+      {showStatus && (
+        <span
+          className={`agent-avatar__estado${view.busy ? ' agent-avatar__estado--ocupado' : ''}`}
+          style={{
+            width: puntoTamano,
+            height: puntoTamano,
+            backgroundColor: `var(--mantine-color-${view.color}-filled)`,
+          }}
+          role='img'
+          aria-label={`Estado: ${view.label}`}
+        />
+      )}
+
+      {unread > 0 && (
+        <span
+          className='agent-avatar__contador'
+          aria-label={`${unread} mensajes sin leer`}
+        >
+          {unread > 99 ? '99+' : unread}
+        </span>
+      )}
+    </div>
   );
 
-  const withUnread =
-    unread > 0 ? (
-      <Indicator
-        inline
-        position='top-end'
-        size={16}
-        offset={2}
-        color='red'
-        label={unread > 99 ? '99+' : String(unread)}
-        aria-label={`${unread} mensajes sin leer`}
-      >
-        {withStatus}
-      </Indicator>
-    ) : (
-      withStatus
-    );
-
-  if (!withTooltip) return withUnread;
+  if (!withTooltip) return marcas;
 
   const tooltip =
     unread > 0
@@ -100,7 +105,7 @@ export default function AgentAvatar({
 
   return (
     <Tooltip label={tooltip} withArrow position='bottom'>
-      <div style={{ display: 'inline-flex' }}>{withUnread}</div>
+      <div style={{ display: 'inline-flex' }}>{marcas}</div>
     </Tooltip>
   );
 }
