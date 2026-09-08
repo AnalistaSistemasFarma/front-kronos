@@ -29,6 +29,7 @@ import { useChatConversation } from './useChatConversation';
 import { useAltoVisible } from './useAltoVisible';
 import {
   describeAgentStatus,
+  ESTADO_RANCIO_MS,
   formatChatTime,
   type ChatAgentDto,
   type ChatMessageDto,
@@ -175,6 +176,80 @@ function MessageBubble({
         </Text>
       </Box>
     </Group>
+  );
+}
+
+/**
+ * Aviso de "su mensaje llegó pero nadie ha contestado".
+ *
+ * POR QUÉ EXISTE (preocupación de Nicolás, 2026-09-08): hoy, cuando un
+ * asistente NO PUEDE responder, el chat se ve igual que cuando sí puede. Y las
+ * causas son varias: se le agotó la cuota de la sesión —le pasó a Troy, y los
+ * usuarios esperaron hasta las 11 sin saberlo—, se le venció la autenticación
+ * (Cali y Mark, esta misma mañana), se congeló el proceso, o está apagada la
+ * máquina donde corre.
+ *
+ * En los cuatro casos el usuario ve lo mismo: NADA. Y se queda esperando.
+ *
+ * Este aviso NO adivina la causa: informa el hecho, que es lo que la persona
+ * necesita para dejar de esperar y buscar por otro lado. Se muestra solo cuando
+ * el último mensaje del hilo es del usuario y ya pasó el umbral sin respuesta.
+ *
+ * Va en el FRONT y no en el conector a propósito: el conector está copiado en
+ * la máquina de cada bot (quince copias hoy), así que un cambio allá hay que
+ * repartirlo quince veces y repetirlo con cada bot nuevo. Aquí es un solo
+ * lugar y aplica a todos los agentes, incluidos los que se siembren mañana.
+ */
+function SinRespuesta({
+  agent,
+  ultimoMensaje,
+  status,
+}: {
+  agent: ChatAgentDto;
+  ultimoMensaje: ChatMessageDto | undefined;
+  status: Parameters<typeof describeAgentStatus>[0];
+}) {
+  // Un tic propio: si el aviso dependiera solo de que lleguen mensajes, en un
+  // hilo callado nunca aparecería — que es exactamente el caso que importa.
+  const [, setTic] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTic((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (!ultimoMensaje || ultimoMensaje.role !== 'user') return null;
+
+  // Si el agente está trabajando DE VERDAD (estado fresco), no se avisa nada:
+  // el indicador ya le está mostrando qué hace.
+  const view = describeAgentStatus(status);
+  if (view.busy) return null;
+
+  const desde = Date.parse(ultimoMensaje.createdAt);
+  if (Number.isNaN(desde)) return null;
+  const transcurrido = Date.now() - desde;
+  if (transcurrido < ESTADO_RANCIO_MS) return null;
+
+  const minutos = Math.floor(transcurrido / 60_000);
+  const cuanto =
+    minutos < 60
+      ? `${minutos} minutos`
+      : `${Math.floor(minutos / 60)} h ${minutos % 60 ? `${minutos % 60} min` : ''}`.trim();
+
+  return (
+    <Alert
+      color='orange'
+      radius='md'
+      icon={<IconAlertCircle size={18} />}
+      role='status'
+      aria-live='polite'
+    >
+      <Text size='xs'>
+        Su mensaje llegó, pero <b>{agent.displayName}</b> no ha respondido en {cuanto}. Puede que
+        haya agotado su cuota de la sesión, que se le haya vencido el acceso o que esté fuera de
+        servicio. {view.stale ? 'Su indicador quedó colgado, que es otra señal de lo mismo. ' : ''}
+        Si es urgente, avísele a Nicolás Rivera.
+      </Text>
+    </Alert>
   );
 }
 
@@ -497,6 +572,12 @@ export default function ChatThread({
           ))}
 
           <AgentActivity agent={agent} status={thread.status} />
+
+          <SinRespuesta
+            agent={agent}
+            ultimoMensaje={thread.messages[thread.messages.length - 1]}
+            status={thread.status}
+          />
         </Stack>
       </ScrollArea>
 

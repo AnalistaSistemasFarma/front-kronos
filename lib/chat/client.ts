@@ -181,11 +181,51 @@ export interface AgentStatusView {
   color: string;
   /** true mientras el agente está trabajando (anima el punto). */
   busy: boolean;
+  /**
+   * true cuando el estado dice "trabajando" pero lleva demasiado rato sin
+   * refrescarse. Ver ESTADO_RANCIO_MS.
+   */
+  stale?: boolean;
+}
+
+/**
+ * Cuánto puede pasar un estado "trabajando" sin refrescarse antes de que deje
+ * de creérsele.
+ *
+ * POR QUÉ EXISTE: el indicador lo publican los hooks del bot, y el hook `Stop`
+ * es el que lo baja al terminar. Si la sesión del bot muere de golpe —se le
+ * agota la cuota, se le vence la autenticación, se congela, se apaga la
+ * máquina— ese `Stop` NUNCA CORRE y el indicador se queda diciendo
+ * "trabajando…" para siempre. Nicolás lo reportó así: "el hook se quedó
+ * cargando", después de que a Troy se le acabó el consumo y los usuarios
+ * tuvieron que esperar hasta las 11 sin saberlo.
+ *
+ * Un indicador que miente es peor que no tener indicador: el usuario espera de
+ * más porque cree que hay alguien trabajando.
+ *
+ * Cinco minutos es generoso a propósito: los hooks refrescan en cada uso de
+ * herramienta, pero un turno largo de razonamiento puro puede pasar minutos sin
+ * tocar ninguna. Con este umbral no se declara caído a un agente que sí está
+ * pensando.
+ */
+export const ESTADO_RANCIO_MS = 5 * 60 * 1000;
+
+/** ¿Este estado dice "trabajando" pero lleva demasiado sin refrescarse? */
+export function estadoEstaRancio(status: ChatStatusDto | null): boolean {
+  if (!status || status.state === 'idle') return false;
+  const marca = Date.parse(status.updatedAt);
+  if (Number.isNaN(marca)) return false;
+  return Date.now() - marca > ESTADO_RANCIO_MS;
 }
 
 export function describeAgentStatus(status: ChatStatusDto | null): AgentStatusView {
   if (!status || status.state === 'idle') {
     return { label: 'Disponible', color: 'gray', busy: false };
+  }
+  // Un "trabajando" viejo no se pinta como trabajando: se avisa. Ver
+  // ESTADO_RANCIO_MS para el porqué.
+  if (estadoEstaRancio(status)) {
+    return { label: 'Sin novedades hace rato', color: 'orange', busy: false, stale: true };
   }
   if (status.state === 'thinking') {
     return { label: status.label?.trim() || 'Pensando…', color: 'blue', busy: true };
