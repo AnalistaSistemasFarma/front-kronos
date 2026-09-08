@@ -40,17 +40,17 @@ model Session {
 }
 
 model User {
-  id             String         @id @default(cuid())
-  name           String?
-  email          String         @unique
-  emailVerified  DateTime?
-  image          String?
-  password       String?
-  createdAt      DateTime       @default(now())
-  isActive       Boolean        @default(true)
-  role           String         @default("user")
-  phone          String?
-  identification String?
+  id                      String                   @id @default(cuid())
+  name                    String?
+  email                   String                   @unique
+  emailVerified           DateTime?
+  image                   String?
+  password                String?
+  createdAt               DateTime                 @default(now())
+  isActive                Boolean                  @default(true)
+  role                    String                   @default("user")
+  phone                   String?
+  identification          String?
   // NIT del proveedor. Solo lo tienen los usuarios con role = "supplier" (proveedores
   // externos que ingresan por /proveedor/login). Es el identificador con el que se
   // scopea TODA su información del lado del servidor. Nullable porque los usuarios
@@ -414,8 +414,8 @@ model SavedView {
   updated_at       DateTime  @updatedAt
   published_at     DateTime?
 
-  columns          SavedViewColumn[]
-  filters          SavedViewFilter[]
+  columns SavedViewColumn[]
+  filters SavedViewFilter[]
 
   @@map("saved_view")
 }
@@ -582,21 +582,21 @@ model Document {
 // de versiones anteriores queda en el SGD y no se migra.
 model DocumentVersion {
   id_document_version Int      @id @default(autoincrement())
-  id_document          Int
-  version_number       Int
-  status               String   @default("Vigente") @db.NVarChar(30)
+  id_document         Int
+  version_number      Int
+  status              String   @default("Vigente") @db.NVarChar(30)
   // Id del item en Microsoft Graph (drive item), para poder descargarlo /
   // reemplazarlo sin volver a resolver la ruta.
-  onedrive_item_id     String?  @db.NVarChar(300)
+  onedrive_item_id    String?  @db.NVarChar(300)
   // Ruta completa dentro del drive:
   // GESTION-DOCUMENTAL/<EMPRESA>/<TIPO>/<CODIGO>/v<version>/<archivo>
-  onedrive_path        String   @db.NVarChar(1000)
+  onedrive_path       String   @db.NVarChar(1000)
   // Referencia BLANDA a User.id (sin relation() para no sumar una segunda FK
   // Document/DocumentVersion → User en la misma migración manual; ver nota
   // de owner_user_id arriba, que sí es relación real vía "DocumentOwner").
-  created_by           String   @db.NVarChar(1000)
-  created_at           DateTime @default(now())
-  comments             String?  @db.NVarChar(1000)
+  created_by          String   @db.NVarChar(1000)
+  created_at          DateTime @default(now())
+  comments            String?  @db.NVarChar(1000)
   // Fase 2 — Referencia BLANDA a requests_general.id (motor SQL crudo de
   // "solicitudes generales", ver nota de módulo arriba y lib/document-management/
   // workflowEngine.ts). Null mientras la versión todavía no tiene flujo de
@@ -899,8 +899,8 @@ model ChatAttachment {
 
 /// Estado en vivo del agente dentro de una conversación — alimenta el
 /// indicador de "qué está haciendo" (pensando / usando una herramienta).
-/// Una sola fila por conversación (la PK es id_conversation): es un estado
-/// puntual que se sobrescribe, no un histórico.
+/// Una sola fila por conversación Y AGENTE (la PK es (id_conversation,
+/// id_agent)): es un estado puntual que se sobrescribe, no un histórico.
 model ChatAgentStatus {
   id_conversation Int
   /// El agente al que corresponde este indicador. En un hilo directo es el
