@@ -27,11 +27,13 @@ import {
   IconList,
   IconMaximize,
   IconMinimize,
+  IconSend,
   IconLock,
   IconSearch,
   IconX,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
+import ChatBroadcastModal from './ChatBroadcastModal';
 import ChatThread from './ChatThread';
 import { useChatOverview } from './useChatOverview';
 import {
@@ -185,6 +187,11 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
   // Se recuerda en `localStorage` para no tener que pulsarlo en cada visita.
   // No va al perfil a propósito: es una comodidad del equipo desde el que uno
   // está trabajando, no una preferencia de la persona.
+  // Mensaje masivo: solo para administradores (lo decidió Nicolás). El botón se
+  // pinta con `overview.canBroadcast`, pero la reja de verdad está en el
+  // endpoint: esconder un botón no protege nada.
+  const [masivoAbierto, setMasivoAbierto] = useState(false);
+
   const [expandido, setExpandido] = useState(false);
   useEffect(() => {
     try {
@@ -492,6 +499,13 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
         <section className='chat-escritorio__principal'>
           {renderConversacion('chat-page-thread chat-page-thread--panel')}
         </section>
+
+        <ChatBroadcastModal
+          opened={masivoAbierto}
+          onClose={() => setMasivoAbierto(false)}
+          agents={overview.agents}
+          onEnviado={overview.refresh}
+        />
       </div>
     );
   }
@@ -534,6 +548,19 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
               }
               radius='md'
             />
+            {overview.canBroadcast && overview.agents.length > 1 && (
+              <Tooltip label='Enviar un mensaje a varios asistentes' withArrow>
+                <Button
+                  variant='light'
+                  radius='md'
+                  leftSection={<IconSend size={16} />}
+                  onClick={() => setMasivoAbierto(true)}
+                >
+                  Enviar a todos
+                </Button>
+              </Tooltip>
+            )}
+
             <Group gap={4} wrap='nowrap'>
               <Tooltip label='Vista en tarjetas' withArrow>
                 <ActionIcon
@@ -582,6 +609,13 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
           )}
         </Grid>
       </div>
+
+      <ChatBroadcastModal
+        opened={masivoAbierto}
+        onClose={() => setMasivoAbierto(false)}
+        agents={overview.agents}
+        onEnviado={overview.refresh}
+      />
     </div>
   );
 }
