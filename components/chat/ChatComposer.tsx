@@ -11,6 +11,7 @@ import {
   Text,
   Textarea,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import {
   IconBold,
@@ -24,6 +25,7 @@ import {
   IconSend,
   IconX,
 } from '@tabler/icons-react';
+import AgentAvatar from './AgentAvatar';
 import ChatMarkdown from './ChatMarkdown';
 import { MAX_USER_MESSAGE_CHARS } from '../../lib/chat/constants';
 import {
@@ -112,6 +114,15 @@ export type ChatComposerHandle = {
   addFiles: (incoming: FileList | File[] | null) => void;
 };
 
+/** Un candidato del autocompletado del `@` (los asistentes de un grupo). */
+export interface MencionCandidato {
+  /** Lo que se inserta después de la arroba. */
+  valor: string;
+  /** Cómo se muestra en la lista. */
+  nombre: string;
+  avatarUrl: string | null;
+}
+
 const ChatComposer = forwardRef<ChatComposerHandle, {
   /** Devuelve lo que quiera (p. ej. si el envío tuvo éxito); aquí solo se espera. */
   onSend: (body: string, files: File[]) => void | Promise<unknown>;
@@ -119,6 +130,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   sending?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
+  /**
+   * A quién se puede mencionar con `@`. Vacío (lo normal en un hilo directo)
+   * apaga el autocompletado por completo.
+   */
+  menciones?: MencionCandidato[];
 }>(function ChatComposer(
   {
     onSend,
@@ -126,6 +142,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     sending = false,
     placeholder = 'Escriba su mensaje… (Markdown: **negrita**, _cursiva_, - viñetas)',
     autoFocus = false,
+    menciones = [],
   },
   ref
 ) {
@@ -136,6 +153,87 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   const [fileError, setFileError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /* ─────────────────── Autocompletado de menciones (@) ────────────────── */
+  /**
+   * Solo se activa cuando hay a quién mencionar (grupos). En un hilo directo
+   * `menciones` viene vacío y todo esto queda inerte: escribir una arroba no
+   * abre nada.
+   *
+   * El disparador es la arroba MÁS CERCANA hacia atrás desde el cursor, y solo
+   * cuenta si viene tras un inicio o un espacio — la misma condición que usa
+   * el servidor para no confundir un correo con una mención
+   * (lib/chat/groups.ts). Si aquí fuera distinto, la interfaz sugeriría
+   * menciones que el servidor después no reconoce.
+   */
+  const [mencionAbierta, setMencionAbierta] = useState(false);
+  const [mencionFiltro, setMencionFiltro] = useState('');
+  const [mencionIndice, setMencionIndice] = useState(0);
+  const mencionInicioRef = useRef(0);
+
+  const candidatos = menciones.filter((m) => {
+    if (mencionFiltro === '') return true;
+    const f = mencionFiltro.toLowerCase();
+    return m.valor.toLowerCase().includes(f) || m.nombre.toLowerCase().includes(f);
+  });
+  const mencionVisible = mencionAbierta && menciones.length > 0 && candidatos.length > 0;
+
+  /** Revisa, tras cada cambio, si el cursor está justo detrás de una arroba. */
+  const revisarMencion = useCallback(
+    (texto: string, cursor: number) => {
+      if (menciones.length === 0) return;
+
+      const antes = texto.slice(0, cursor);
+      const arroba = antes.lastIndexOf('@');
+      if (arroba < 0) {
+        setMencionAbierta(false);
+        return;
+      }
+
+      // Lo escrito entre la arroba y el cursor. Un espacio o un salto de línea
+      // cierran la mención: ya se pasó a escribir otra cosa.
+      const parcial = antes.slice(arroba + 1);
+      if (/[\s]/.test(parcial)) {
+        setMencionAbierta(false);
+        return;
+      }
+
+      // La arroba debe estar al inicio o tras un separador (si va pegada a
+      // texto, es un correo).
+      const anterior = arroba === 0 ? '' : antes[arroba - 1];
+      if (anterior !== '' && /[\w@.]/.test(anterior)) {
+        setMencionAbierta(false);
+        return;
+      }
+
+      mencionInicioRef.current = arroba;
+      setMencionFiltro(parcial);
+      setMencionIndice(0);
+      setMencionAbierta(true);
+    },
+    [menciones.length]
+  );
+
+  /** Reemplaza lo escrito tras la arroba por el nombre elegido. */
+  const insertarMencion = useCallback(
+    (candidato: MencionCandidato) => {
+      const area = textareaRef.current;
+      const inicio = mencionInicioRef.current;
+      const cursor = area?.selectionStart ?? value.length;
+
+      const texto = `${value.slice(0, inicio)}@${candidato.valor} ${value.slice(cursor)}`;
+      setValue(texto);
+      setMencionAbierta(false);
+
+      // El cursor queda después del espacio que se acaba de insertar.
+      const posicion = inicio + candidato.valor.length + 2;
+      requestAnimationFrame(() => {
+        area?.focus();
+        area?.setSelectionRange(posicion, posicion);
+      });
+    },
+    [value]
+  );
 
   const tooLong = value.length > MAX_USER_MESSAGE_CHARS;
   // Con adjuntos el texto puede ir vacío (mandar solo un archivo es válido);
@@ -289,6 +387,33 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // ⚠️ La lista de menciones se atiende ANTES que todo lo demás: con la
+      // lista abierta, Enter escoge el nombre resaltado en vez de enviar el
+      // mensaje. Si se atendiera después, escribir "@pl" + Enter mandaría el
+      // mensaje a medio escribir, que es el error clásico de estos menús.
+      if (mencionVisible) {
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          setMencionIndice((i) => (i + 1) % candidatos.length);
+          return;
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          setMencionIndice((i) => (i - 1 + candidatos.length) % candidatos.length);
+          return;
+        }
+        if (event.key === 'Enter' || event.key === 'Tab') {
+          event.preventDefault();
+          insertarMencion(candidatos[Math.min(mencionIndice, candidatos.length - 1)]);
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          setMencionAbierta(false);
+          return;
+        }
+      }
+
       // Enter envía; Shift+Enter hace salto de línea (convención universal).
       if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
         event.preventDefault();
@@ -306,11 +431,57 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         }
       }
     },
-    [applyFormat, submit]
+    [applyFormat, candidatos, insertarMencion, mencionIndice, mencionVisible, submit]
   );
 
   return (
     <Box className='chat-composer'>
+      {/* Lista de menciones. Va como primer hijo del compositor, así que se
+          dibuja ARRIBA de la caja de escribir: en el celular, un menú que
+          apareciera debajo quedaría tapado por el teclado. */}
+      {mencionVisible && (
+        <Box className='chat-menciones' role='listbox' aria-label='Asistentes del grupo'>
+          {candidatos.map((c, i) => (
+            <UnstyledButton
+              key={c.valor}
+              role='option'
+              aria-selected={i === mencionIndice}
+              className={[
+                'chat-menciones__item',
+                i === mencionIndice ? 'chat-menciones__item--activo' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              // `onMouseDown` y no `onClick`: el clic llega después del blur
+              // del textarea, que cierra la lista, y el `onClick` nunca se
+              // dispararía.
+              onMouseDown={(event) => {
+                event.preventDefault();
+                insertarMencion(c);
+              }}
+              onMouseEnter={() => setMencionIndice(i)}
+            >
+              <Group gap={8} wrap='nowrap'>
+                <AgentAvatar
+                  code={c.valor}
+                  displayName={c.nombre}
+                  avatarUrl={c.avatarUrl}
+                  size={22}
+                  showStatus={false}
+                  withTooltip={false}
+                />
+                <Text size='sm' fw={600} lineClamp={1}>
+                  {c.nombre}
+                </Text>
+                <Text size='xs' className='chat-text-muted' lineClamp={1}>
+                  @{c.valor}
+                </Text>
+              </Group>
+            </UnstyledButton>
+          ))}
+        </Box>
+      )}
+
       {files.length > 0 && (
         <Group gap={6} mb={6} wrap='wrap'>
           {files.map((file, index) => (
@@ -409,7 +580,18 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           <Textarea
             ref={textareaRef}
             value={value}
-            onChange={(event) => setValue(event.currentTarget.value)}
+            onChange={(event) => {
+              setValue(event.currentTarget.value);
+              revisarMencion(event.currentTarget.value, event.currentTarget.selectionStart ?? 0);
+            }}
+            onKeyUp={(event) => {
+              // Mover el cursor con las flechas también cambia si estamos o no
+              // dentro de una mención.
+              if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
+                revisarMencion(event.currentTarget.value, event.currentTarget.selectionStart ?? 0);
+              }
+            }}
+            onBlur={() => setMencionAbierta(false)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             placeholder={placeholder}

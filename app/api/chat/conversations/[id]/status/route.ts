@@ -11,6 +11,10 @@ import { guardConversation, jsonNoStore, serverError } from '../../../../../../l
  * Devuelve `{ status: null }` cuando el agente nunca ha publicado un estado en
  * ese hilo; la interfaz lo trata como 'idle'.
  *
+ * En un GRUPO no hay "el" estado: hay uno por agente. `status` viene en null y
+ * el desglose va en `statuses`, uno por agente que haya publicado algo. Se
+ * devuelven las dos formas para que el cliente del hilo directo no cambie.
+ *
  * Este endpoint es solo de LECTURA. Quien escribe el estado es el agente, por
  * su propia API (POST /api/chat/agent/status) autenticada con su llave: el
  * usuario no puede fabricar el estado de un bot.
@@ -23,19 +27,35 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const guard = await guardConversation(id);
     if ('response' in guard) return guard.response;
 
-    const status = await prisma.chatAgentStatus.findUnique({
+    const filas = await prisma.chatAgentStatus.findMany({
       where: { id_conversation: guard.conversationId },
+      include: { agent: { select: { display_name: true, avatar_url: true } } },
     });
 
+    const statuses = filas.map((f) => ({
+      idAgent: f.id_agent,
+      agentName: f.agent.display_name,
+      agentAvatarUrl: f.agent.avatar_url,
+      state: f.state,
+      label: f.label,
+      tasks: parseAgentTasks(f.tasks),
+      updatedAt: f.updated_at.toISOString(),
+    }));
+
+    // En el hilo directo, "el" estado es el del agente del hilo.
+    const delHilo =
+      guard.kind === 'direct' ? statuses.find((s) => s.idAgent === guard.idAgent) ?? null : null;
+
     return jsonNoStore({
-      status: status
+      status: delHilo
         ? {
-            state: status.state,
-            label: status.label,
-            tasks: parseAgentTasks(status.tasks),
-            updatedAt: status.updated_at.toISOString(),
+            state: delHilo.state,
+            label: delHilo.label,
+            tasks: delHilo.tasks,
+            updatedAt: delHilo.updatedAt,
           }
         : null,
+      statuses,
     });
   } catch (error) {
     return serverError('GET /api/chat/conversations/[id]/status', error);

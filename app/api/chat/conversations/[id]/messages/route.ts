@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
-import { serializeMessage } from '../../../../../../lib/chat/conversations';
+import { messageInclude, serializeMessage } from '../../../../../../lib/chat/conversations';
+import { calcularEntregas } from '../../../../../../lib/chat/groups';
 import {
   MAX_USER_MESSAGE_CHARS,
   MESSAGES_PAGE_DEFAULT,
@@ -63,7 +64,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       orderBy: { id: 'desc' },
       // Se pide uno de más para saber si hay página siguiente sin un COUNT.
       take: limit + 1,
-      include: { attachments: true },
+      include: messageInclude,
     });
 
     const hasMore = rows.length > limit;
@@ -98,7 +99,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
  * responsabilidad del cliente.
  *
  * El `role` lo pone el servidor ('user'): aunque el cliente mande otro, se
- * ignora. Un usuario no puede fabricar un mensaje que parezca del agente.
+ * ignora. Un usuario no puede fabricar un mensaje que parezca del agente. Lo
+ * mismo con el AUTOR: sale de la sesión, así que nadie puede escribir en
+ * nombre de otra persona del grupo.
+ *
+ * -------------------------------------------------------------------------
+ * EN UN GRUPO: LAS MENCIONES SON LO QUE DESPIERTA A LOS AGENTES
+ * -------------------------------------------------------------------------
+ * Un mensaje de grupo se le entrega SOLO a los agentes mencionados con `@`
+ * (decisión de Nicolás, 2026-09-08). Sin mención no se le entrega a ninguno:
+ * la gente puede hablar entre ella sin gastar una sesión de Claude por cada
+ * frase. Las filas de entrega se crean en la MISMA transacción del mensaje: si
+ * se crearan después, un fallo intermedio dejaría un mensaje que menciona a
+ * alguien que nunca se va a enterar.
  *
  * -------------------------------------------------------------------------
  * ADJUNTOS
@@ -160,6 +173,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // Transacción: el mensaje y la marca de tiempo de la bandeja entran juntos
     // o no entra ninguno. Si se separan, un fallo intermedio deja la bandeja
     // ordenada por un instante que no corresponde a ningún mensaje.
+    // A quién hay que despertar. Una PERSONA nunca choca con el tope de
+    // turnos: ese tope existe para las cadenas entre agentes.
+    const entregas =
+      guard.kind === 'group'
+        ? calcularEntregas({
+            body,
+            agentesDelGrupo: guard.groupAgents,
+            idAgentAutor: null,
+            turnosPrevios: 0,
+          })
+        : { idAgents: [], cadenaCortada: false };
+
     const message = await prisma.$transaction(async (tx) => {
       const created = await tx.chatMessage.create({
         data: {
@@ -167,10 +192,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           role: 'user',
           body,
           created_at: now,
+          // El autor sale de la SESIÓN, nunca del payload.
+          id_user_author: guard.user.id,
           // Mensaje y adjuntos, una sola escritura: o entran los dos o ninguno.
           ...(uploaded.length > 0 ? { attachments: { create: uploaded } } : {}),
+          // Mensaje y entregas, también: ver la nota de arriba.
+          ...(entregas.idAgents.length > 0
+            ? {
+                deliveries: {
+                  create: entregas.idAgents.map((idAgent) => ({ id_agent: idAgent })),
+                },
+              }
+            : {}),
         },
-        include: { attachments: true },
+        include: messageInclude,
       });
 
       await tx.chatConversation.update({
@@ -181,7 +216,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return created;
     });
 
-    return jsonNoStore({ message: serializeMessage(message) }, { status: 201 });
+    return jsonNoStore(
+      {
+        message: serializeMessage(message),
+        // Para que la interfaz pueda decir "no mencionó a ningún asistente"
+        // en vez de dejar al usuario esperando una respuesta que no viene.
+        notifiedAgents: entregas.idAgents,
+      },
+      { status: 201 }
+    );
   } catch (error) {
     return serverError('POST /api/chat/conversations/[id]/messages', error);
   }

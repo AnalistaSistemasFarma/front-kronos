@@ -40,27 +40,31 @@ model Session {
 }
 
 model User {
-  id             String         @id @default(cuid())
-  name           String?
-  email          String         @unique
-  emailVerified  DateTime?
-  image          String?
-  password       String?
-  createdAt      DateTime       @default(now())
-  isActive       Boolean        @default(true)
-  role           String         @default("user")
-  phone          String?
-  identification String?
+  id                      String                   @id @default(cuid())
+  name                    String?
+  email                   String                   @unique
+  emailVerified           DateTime?
+  image                   String?
+  password                String?
+  createdAt               DateTime                 @default(now())
+  isActive                Boolean                  @default(true)
+  role                    String                   @default("user")
+  phone                   String?
+  identification          String?
   // NIT del proveedor. Solo lo tienen los usuarios con role = "supplier" (proveedores
   // externos que ingresan por /proveedor/login). Es el identificador con el que se
   // scopea TODA su información del lado del servidor. Nullable porque los usuarios
   // internos no tienen NIT. La unicidad se garantiza con un índice ÚNICO FILTRADO
   // (WHERE nit IS NOT NULL) creado en la migración; no se declara @unique aquí porque
   // SQL Server solo admite un único NULL en un índice único no filtrado.
-  nit            String?
-  id_user_sapsend Int?
-  themePalette   String?        @default("gss")
-  colorScheme    String?        @default("light")
+  nit                     String?
+  id_user_sapsend         Int?
+  themePalette            String?                  @default("gss")
+  colorScheme             String?                  @default("light")
+  // Tipografía elegida por el usuario. Es una CLAVE del catálogo de
+  // lib/theme/fonts.ts, no una cadena CSS: así el valor que llega de la base
+  // nunca puede inyectar CSS arbitrario en :root.
+  uiFont                  String?                  @default("sistema")
   accounts                Account[]
   companyUsers            CompanyUser[]
   departmentUsers         DepartmentUser[]
@@ -68,8 +72,11 @@ model User {
   sessions                Session[]
   auditLogs               UserAuditLog[]
   documentsOwned          Document[]               @relation("DocumentOwner")
-  // Modulo "Asistentes IA" (chat de agentes) — back-relation requerida por Prisma.
+  // Modulo "Asistentes IA" (chat de agentes) — back-relations requeridas por Prisma.
   chatConversations       ChatConversation[]       @relation("ChatConversationUser")
+  chatGroupsCreated       ChatConversation[]       @relation("ChatConversationCreator")
+  chatParticipations      ChatParticipant[]
+  chatMessagesAuthored    ChatMessage[]            @relation("ChatMessageUserAuthor")
 
   @@map("user")
 }
@@ -84,7 +91,7 @@ model VerificationToken {
 }
 
 model Company {
-  id_company      Int              @id @default(autoincrement())
+  id_company      Int                @id @default(autoincrement())
   company         String
   company_logo    String?
   companyUsers    CompanyUser[]
@@ -92,8 +99,9 @@ model Company {
   cargoAliases    CargoAlias[]
   cargoJerarquias CargoJerarquia[]
   documents       Document[]
-  // Modulo "Asistentes IA" (chat de agentes) — back-relation requerida por Prisma.
+  // Modulo "Asistentes IA" (chat de agentes) — back-relations requeridas por Prisma.
   agentCompanies  AgentCompany[]
+  chatGroups      ChatConversation[]
 
   @@map("company")
 }
@@ -406,8 +414,8 @@ model SavedView {
   updated_at       DateTime  @updatedAt
   published_at     DateTime?
 
-  columns          SavedViewColumn[]
-  filters          SavedViewFilter[]
+  columns SavedViewColumn[]
+  filters SavedViewFilter[]
 
   @@map("saved_view")
 }
@@ -574,21 +582,21 @@ model Document {
 // de versiones anteriores queda en el SGD y no se migra.
 model DocumentVersion {
   id_document_version Int      @id @default(autoincrement())
-  id_document          Int
-  version_number       Int
-  status               String   @default("Vigente") @db.NVarChar(30)
+  id_document         Int
+  version_number      Int
+  status              String   @default("Vigente") @db.NVarChar(30)
   // Id del item en Microsoft Graph (drive item), para poder descargarlo /
   // reemplazarlo sin volver a resolver la ruta.
-  onedrive_item_id     String?  @db.NVarChar(300)
+  onedrive_item_id    String?  @db.NVarChar(300)
   // Ruta completa dentro del drive:
   // GESTION-DOCUMENTAL/<EMPRESA>/<TIPO>/<CODIGO>/v<version>/<archivo>
-  onedrive_path        String   @db.NVarChar(1000)
+  onedrive_path       String   @db.NVarChar(1000)
   // Referencia BLANDA a User.id (sin relation() para no sumar una segunda FK
   // Document/DocumentVersion → User en la misma migración manual; ver nota
   // de owner_user_id arriba, que sí es relación real vía "DocumentOwner").
-  created_by           String   @db.NVarChar(1000)
-  created_at           DateTime @default(now())
-  comments             String?  @db.NVarChar(1000)
+  created_by          String   @db.NVarChar(1000)
+  created_at          DateTime @default(now())
+  comments            String?  @db.NVarChar(1000)
   // Fase 2 — Referencia BLANDA a requests_general.id (motor SQL crudo de
   // "solicitudes generales", ver nota de módulo arriba y lib/document-management/
   // workflowEngine.ts). Null mientras la versión todavía no tiene flujo de
@@ -666,17 +674,17 @@ model DocumentVersion {
 /// estable ('horus'); `display_name` es como se ve en la interfaz ('Orus');
 /// `handle` es el puente con Telegram ('@horus_gss_bot').
 model Agent {
-  id_agent     Int      @id @default(autoincrement())
-  code         String   @db.NVarChar(60)
-  display_name String   @db.NVarChar(120)
-  handle       String?  @db.NVarChar(60)
+  id_agent      Int      @id @default(autoincrement())
+  code          String   @db.NVarChar(60)
+  display_name  String   @db.NVarChar(120)
+  handle        String?  @db.NVarChar(60)
   /// Ruta relativa dentro de /public (p.ej. /agents/orus.png). NULL = la
   /// interfaz cae al avatar por inicial. A propósito no se guardan URLs
   /// externas: las fotos de usuario que hoy apuntan a postimg.cc son frágiles.
-  avatar_url   String?  @db.NVarChar(500)
-  description  String?  @db.NVarChar(500)
-  is_active    Boolean  @default(true)
-  sort_order   Int      @default(0)
+  avatar_url    String?  @db.NVarChar(500)
+  description   String?  @db.NVarChar(500)
+  is_active     Boolean  @default(true)
+  sort_order    Int      @default(0)
   /// Subproceso que ES el permiso para hablar con este agente (fuente de
   /// verdad única del permiso; ver la nota de módulo arriba). NULL = agente
   /// del catálogo todavía sin subproceso creado, y por tanto invisible para
@@ -685,11 +693,15 @@ model Agent {
   /// @unique aquí porque SQL Server solo admite un NULL en un índice único
   /// no filtrado (mismo caso que User.nit).
   id_subprocess Int?
-  created_at   DateTime @default(now())
+  created_at    DateTime @default(now())
 
-  subprocess    Subprocess?        @relation(fields: [id_subprocess], references: [id_subprocess], onDelete: NoAction, onUpdate: NoAction)
-  companies     AgentCompany[]
-  conversations ChatConversation[]
+  subprocess       Subprocess?           @relation(fields: [id_subprocess], references: [id_subprocess], onDelete: NoAction, onUpdate: NoAction)
+  companies        AgentCompany[]
+  conversations    ChatConversation[]
+  participations   ChatParticipant[]
+  messagesAuthored ChatMessage[]         @relation("ChatMessageAgentAuthor")
+  deliveries       ChatMessageDelivery[]
+  statuses         ChatAgentStatus[]
 
   @@unique([code])
   @@map("agent")
@@ -712,28 +724,91 @@ model AgentCompany {
   @@map("agent_company")
 }
 
-/// Hilo de conversación entre UN usuario y UN agente. La propiedad del hilo
-/// es `id_user`: todo endpoint debe verificar que el id_conversation que
-/// llega del cliente pertenece al usuario de la sesión (IDOR).
+/// Hilo de conversación. Hay DOS clases, distinguidas por `kind`:
+///
+///   'direct' — UNA persona con UN agente. Es el hilo original y el que usa
+///              toda la flota. La propiedad es `id_user`: todo endpoint debe
+///              verificar que el id_conversation que llega del cliente
+///              pertenece al usuario de la sesión (IDOR).
+///   'group'  — VARIAS personas y VARIOS agentes. La pertenencia NO se lee de
+///              `id_user`/`id_agent` sino de `ChatParticipant`.
+///
+/// ⚠️ EN UN GRUPO, `id_user` y `id_agent` SON METADATOS, NO PERMISO.
+/// Lo natural sería dejarlos en NULL, pero las dos columnas están dentro de
+/// índices y SQL Server rechaza un ALTER COLUMN sobre una columna indexada:
+/// volverlas nullables obligaba a tumbar índices y claves ajenas de una tabla
+/// viva. Se decidió no pagar ese riesgo (ver el encabezado de la migración
+/// 20260908180000_add_chat_groups). En un grupo:
+///   - `id_user`  = quien lo creó (además queda como participante 'owner').
+///   - `id_agent` = el agente ANFITRIÓN, la cara del grupo en la bandeja.
+/// Quien pregunte "¿este usuario puede entrar?" tiene que consultar
+/// ChatParticipant, nunca estas dos columnas.
 model ChatConversation {
   id              Int       @id @default(autoincrement())
   id_user         String    @db.NVarChar(1000)
   id_agent        Int
   title           String?   @db.NVarChar(300)
+  /// 'direct' | 'group'. Texto y no enum porque el provider sqlserver de
+  /// Prisma no soporta enums nativos. Hay un CHECK en la base que solo admite
+  /// esos dos valores.
+  kind            String    @default("direct") @db.NVarChar(20)
+  /// Empresa del grupo. NULL en los hilos directos: allí la empresa la define
+  /// el permiso sobre el agente, no el hilo.
+  id_company      Int?
+  /// Quién creó el grupo. Redundante con `id_user` hoy, pero explícito a
+  /// propósito: `id_user` se lee como "el dueño" y en un grupo eso no
+  /// significa lo mismo.
+  created_by      String?   @db.NVarChar(1000)
   created_at      DateTime  @default(now())
   updated_at      DateTime  @updatedAt
   /// Denormalizado para ordenar la bandeja sin agregar sobre chat_message.
   last_message_at DateTime?
   archived        Boolean   @default(false)
 
-  user     User              @relation("ChatConversationUser", fields: [id_user], references: [id], onDelete: Cascade)
-  agent    Agent             @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
-  messages ChatMessage[]
-  status   ChatAgentStatus?
+  user         User              @relation("ChatConversationUser", fields: [id_user], references: [id], onDelete: Cascade)
+  agent        Agent             @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+  company      Company?          @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  creator      User?             @relation("ChatConversationCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  messages     ChatMessage[]
+  participants ChatParticipant[]
+  /// Un indicador POR AGENTE: en un grupo hay varios trabajando a la vez.
+  statuses     ChatAgentStatus[]
 
   @@index([id_user, archived, last_message_at(sort: Desc)])
   @@index([id_agent])
+  @@index([kind, archived, last_message_at(sort: Desc)])
   @@map("chat_conversation")
+}
+
+/// Integrante de un grupo: una PERSONA o un AGENTE, nunca los dos.
+/// Es la ÚNICA fuente de verdad de quién está en un grupo — un CHECK en la
+/// base garantiza que exactamente una de las dos columnas venga con valor,
+/// para que no dependa de que cada endpoint se acuerde de validarlo.
+model ChatParticipant {
+  id_participant       Int      @id @default(autoincrement())
+  id_conversation      Int
+  id_user              String?  @db.NVarChar(1000)
+  id_agent             Int?
+  /// 'owner' = puede agregar y quitar integrantes. 'member' = solo participa.
+  role                 String   @default("member") @db.NVarChar(20)
+  /// Id del último mensaje que esta persona ya vio. Es la marca de agua con la
+  /// que se cuentan sus no leídos: `chat_message.read_at` no sirve en un grupo
+  /// porque es una sola columna por mensaje y el primero que leyera lo daría
+  /// por leído para todos los demás. NULL = nunca ha abierto el grupo.
+  last_read_message_id Int?
+  added_at             DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+  user         User?            @relation(fields: [id_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  agent        Agent?           @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  /// Los dos únicos son ÍNDICES FILTRADOS en la base (WHERE ... IS NOT NULL),
+  /// porque la mitad de las filas tiene una de las dos columnas en NULL a
+  /// propósito y SQL Server solo admite un NULL en un único no filtrado. No
+  /// se declaran con @@unique aquí por el mismo motivo que User.nit.
+  @@index([id_user])
+  @@index([id_agent])
+  @@map("chat_participant")
 }
 
 /// Un mensaje del hilo.
@@ -750,17 +825,58 @@ model ChatMessage {
   /// porque lo produce un editor propio y no un agente.)
   body            String @db.NVarChar(Max)
 
+  /// Autor PERSONA. En un hilo directo es siempre el dueño y se puede deducir
+  /// de la conversación; en un grupo es imprescindible saber cuál de las
+  /// personas escribió. NULL en los mensajes del agente y en los de sistema.
+  id_user_author  String? @db.NVarChar(1000)
+  /// Autor AGENTE. NULL en los mensajes de personas y en los de sistema.
+  id_agent_author Int?
+
   created_at   DateTime  @default(now())
   /// Momento en que el agente confirmó la recepción (puente con Telegram).
+  /// SOLO SIRVE EN HILOS DIRECTOS, donde hay un único agente. En un grupo la
+  /// entrega se lleva en ChatMessageDelivery, una fila por agente: si se usara
+  /// esta columna, el primer agente que recogiera el mensaje lo marcaría
+  /// entregado y los demás no lo verían nunca.
   delivered_at DateTime?
   read_at      DateTime?
 
-  conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+  conversation ChatConversation      @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
   attachments  ChatAttachment[]
+  userAuthor   User?                 @relation("ChatMessageUserAuthor", fields: [id_user_author], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  agentAuthor  Agent?                @relation("ChatMessageAgentAuthor", fields: [id_agent_author], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+  deliveries   ChatMessageDelivery[]
 
   @@index([id_conversation, id(sort: Desc)])
   @@index([id_conversation, created_at])
+  @@index([id_agent_author])
   @@map("chat_message")
+}
+
+/// Entrega de UN mensaje de grupo a UN agente — y, a la vez, el registro de
+/// que ese agente fue MENCIONADO en ese mensaje.
+///
+/// Las dos cosas son el mismo hecho a propósito: **existe una fila solo si el
+/// agente fue mencionado**, y `delivered_at` dice si ya lo recogió. Así "a
+/// quién le toca" y "quién ya lo tiene" no pueden contradecirse, y la bandeja
+/// del agente es una lectura directa por índice
+/// (id_agent, delivered_at, id_message).
+///
+/// Lo que la interfaz resalta en el texto NO se lee de aquí: se resuelve
+/// leyendo el propio cuerpo del mensaje, para que el render nunca dependa del
+/// estado de entrega.
+model ChatMessageDelivery {
+  id_message   Int
+  id_agent     Int
+  /// NULL = pendiente, es lo que devuelve el long-poll de la bandeja.
+  delivered_at DateTime?
+
+  message ChatMessage @relation(fields: [id_message], references: [id], onDelete: Cascade)
+  agent   Agent       @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([id_message, id_agent])
+  @@index([id_agent, delivered_at, id_message])
+  @@map("chat_message_delivery")
 }
 
 /// Adjunto de un mensaje. El archivo vive en OneDrive (mismo criterio que
@@ -783,10 +899,15 @@ model ChatAttachment {
 
 /// Estado en vivo del agente dentro de una conversación — alimenta el
 /// indicador de "qué está haciendo" (pensando / usando una herramienta).
-/// Una sola fila por conversación (la PK es id_conversation): es un estado
-/// puntual que se sobrescribe, no un histórico.
+/// Una sola fila por conversación Y AGENTE (la PK es (id_conversation,
+/// id_agent)): es un estado puntual que se sobrescribe, no un histórico.
 model ChatAgentStatus {
-  id_conversation Int      @id
+  id_conversation Int
+  /// El agente al que corresponde este indicador. En un hilo directo es el
+  /// agente del hilo; en un grupo, cada agente tiene el suyo. Forma parte de
+  /// la clave primaria: antes la clave era solo `id_conversation` y en un
+  /// grupo no cabía más que un indicador.
+  id_agent        Int
   /// 'idle' | 'thinking' | 'tool'.
   state           String   @default("idle") @db.NVarChar(20)
   /// Texto libre que se muestra al usuario ("Consultando SAP…").
@@ -801,6 +922,8 @@ model ChatAgentStatus {
   updated_at      DateTime @updatedAt
 
   conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+  agent        Agent            @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
 
+  @@id([id_conversation, id_agent])
   @@map("chat_agent_status")
 }
