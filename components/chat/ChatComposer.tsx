@@ -5,6 +5,7 @@ import {
   ActionIcon,
   Box,
   Group,
+  Menu,
   Popover,
   ScrollArea,
   Text,
@@ -14,6 +15,7 @@ import {
 import {
   IconBold,
   IconCode,
+  IconDots,
   IconEye,
   IconEyeOff,
   IconItalic,
@@ -33,6 +35,14 @@ import {
 
 /**
  * Entrada de texto del chat — v1: Markdown CRUDO con ayudas.
+ *
+ * DISPOSICIÓN: una sola fila, como WhatsApp — emoji · caja · clip · ⋯ · enviar.
+ * Antes eran tres filas apiladas (barra de siete botones, caja de dos renglones
+ * mínimos y el renglón del recordatorio con el botón de enviar): unos 155 px que
+ * le quitaba a la conversación. Ahora son ~55 px, unos tres renglones más de
+ * texto en pantalla. Lo secundario —formato y vista previa— vive en el menú ⋯,
+ * y los atajos Ctrl+B / Ctrl+I siguen funcionando aunque el botón no esté
+ * a la vista.
  *
  * Es lo que hacen Slack y GitHub: el usuario escribe Markdown y unos botones
  * envuelven la selección por él. Un editor visual completo (WYSIWYG) exigiría
@@ -300,39 +310,64 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     [applyFormat, submit]
   );
 
-  const toolButton = (
-    label: string,
-    icon: React.ReactNode,
-    onClick: () => void,
-    keyHint?: string
-  ) => (
-    <Tooltip label={keyHint ? `${label} (${keyHint})` : label} withArrow>
-      <ActionIcon variant='subtle' color='gray' size='md' onClick={onClick} disabled={disabled}>
-        {icon}
-      </ActionIcon>
-    </Tooltip>
-  );
-
   return (
     <Box className='chat-composer'>
-      <Group gap={2} mb={6} wrap='nowrap'>
-        {toolButton('Negrita', <IconBold size={16} />, () => applyFormat('bold'), 'Ctrl+B')}
-        {toolButton('Cursiva', <IconItalic size={16} />, () => applyFormat('italic'), 'Ctrl+I')}
-        {toolButton('Lista', <IconList size={16} />, () => applyFormat('list'))}
-        {toolButton('Código', <IconCode size={16} />, () => applyFormat('code'))}
+      {files.length > 0 && (
+        <Group gap={6} mb={6} wrap='wrap'>
+          {files.map((file, index) => (
+            <div
+              key={`${file.name}-${file.size}-${index}`}
+              className='chat-attachment chat-attachment--draft'
+            >
+              <IconPaperclip size={13} />
+              <Text size='xs' lineClamp={1} className='chat-attachment__name'>
+                {file.name}
+              </Text>
+              <Text size='xs' className='chat-attachment__size'>
+                {formatBytes(file.size)}
+              </Text>
+              <ActionIcon
+                size='xs'
+                variant='subtle'
+                color='gray'
+                onClick={() => removeFile(index)}
+                aria-label={`Quitar ${file.name}`}
+              >
+                <IconX size={12} />
+              </ActionIcon>
+            </div>
+          ))}
+        </Group>
+      )}
 
+      {fileError && (
+        <Text size='xs' c='red' mb={4}>
+          {fileError}
+        </Text>
+      )}
+
+      {/* El contador solo aparece cerca del tope; el resto del tiempo no ocupa
+          renglón, que es justamente lo que se buscaba. */}
+      {value.length > MAX_USER_MESSAGE_CHARS * 0.8 && (
+        <Text size='xs' c={tooLong ? 'red' : 'dimmed'} ta='right' mb={4}>
+          {value.length.toLocaleString('es-CO')} / {MAX_USER_MESSAGE_CHARS.toLocaleString('es-CO')}
+        </Text>
+      )}
+
+      <Group gap={2} align='flex-end' wrap='nowrap'>
         <Popover opened={emojiOpen} onChange={setEmojiOpen} position='top-start' withArrow shadow='md' width={260}>
           <Popover.Target>
             <Tooltip label='Emojis' withArrow>
               <ActionIcon
                 variant='subtle'
                 color='gray'
-                size='md'
+                size={34}
+                radius='xl'
                 disabled={disabled}
                 onClick={() => setEmojiOpen((o) => !o)}
                 aria-label='Insertar emoji'
               >
-                <IconMoodSmile size={16} />
+                <IconMoodSmile size={18} />
               </ActionIcon>
             </Tooltip>
           </Popover.Target>
@@ -363,62 +398,127 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           </Popover.Dropdown>
         </Popover>
 
+        {preview ? (
+          <Box
+            className='chat-composer__preview'
+            style={{ flex: 1, minWidth: 0 }}
+            onDoubleClick={() => setPreview(false)}
+          >
+            <ChatMarkdown content={value} />
+          </Box>
+        ) : (
+          <Textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(event) => setValue(event.currentTarget.value)}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            placeholder={placeholder}
+            autosize
+            /* Arranca en UN renglón, como WhatsApp, y crece al escribir. */
+            minRows={1}
+            maxRows={6}
+            disabled={disabled}
+            autoFocus={autoFocus}
+            error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
+            style={{ flex: 1, minWidth: 0 }}
+            classNames={{ input: 'chat-composer__input' }}
+          />
+        )}
+
         <Tooltip label='Adjuntar archivos' withArrow>
           <ActionIcon
             variant='subtle'
             color='gray'
-            size='md'
+            size={34}
+            radius='xl'
             disabled={disabled || files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
             onClick={() => fileInputRef.current?.click()}
             aria-label='Adjuntar archivos'
           >
-            <IconPaperclip size={16} />
+            <IconPaperclip size={18} />
           </ActionIcon>
         </Tooltip>
 
-        <Tooltip label={preview ? 'Volver a editar' : 'Vista previa'} withArrow>
+        {/* Lo secundario, detrás de un solo botón. El Tooltip NO envuelve al
+            Menu.Target: el target necesita la referencia del botón y meter otro
+            componente en medio rompe la apertura del menú. */}
+        <Menu position='top-end' withArrow shadow='md' width={215}>
+          <Menu.Target>
+            <ActionIcon
+              variant='subtle'
+              color='gray'
+              size={34}
+              radius='xl'
+              disabled={disabled}
+              aria-label='Más opciones'
+              title='Más opciones'
+            >
+              <IconDots size={18} />
+            </ActionIcon>
+          </Menu.Target>
+          <Menu.Dropdown className='chat-surface'>
+            <Menu.Label>Formato</Menu.Label>
+            <Menu.Item
+              leftSection={<IconBold size={14} />}
+              rightSection={
+                <Text size='xs' c='dimmed'>
+                  Ctrl+B
+                </Text>
+              }
+              onClick={() => applyFormat('bold')}
+            >
+              Negrita
+            </Menu.Item>
+            <Menu.Item
+              leftSection={<IconItalic size={14} />}
+              rightSection={
+                <Text size='xs' c='dimmed'>
+                  Ctrl+I
+                </Text>
+              }
+              onClick={() => applyFormat('italic')}
+            >
+              Cursiva
+            </Menu.Item>
+            <Menu.Item leftSection={<IconList size={14} />} onClick={() => applyFormat('list')}>
+              Lista
+            </Menu.Item>
+            <Menu.Item leftSection={<IconCode size={14} />} onClick={() => applyFormat('code')}>
+              Código
+            </Menu.Item>
+            <Menu.Divider />
+            <Menu.Item
+              leftSection={preview ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+              onClick={() => setPreview((p) => !p)}
+              disabled={value.trim().length === 0}
+            >
+              {preview ? 'Volver a editar' : 'Vista previa'}
+            </Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
+
+        {/* El recordatorio de Enter / Shift+Enter era un renglón entero; ahora
+            vive en el globo de este botón. */}
+        <Tooltip label='Enviar · Enter envía, Shift+Enter salta de línea' withArrow>
           <ActionIcon
-            variant={preview ? 'light' : 'subtle'}
-            color={preview ? 'blue' : 'gray'}
-            size='md'
-            onClick={() => setPreview((p) => !p)}
-            disabled={disabled || value.trim().length === 0}
-            aria-label='Vista previa'
+            size={34}
+            radius='xl'
+            variant='filled'
+            color='blue'
+            loading={sending}
+            disabled={!canSend}
+            // Sin esto, TOCAR el botón le quita el foco al textarea y el teclado
+            // del celular se cierra antes de que el mensaje salga. El
+            // preventDefault del mousedown/touchstart evita ese robo de foco.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => void submit()}
+            aria-label='Enviar mensaje'
           >
-            {preview ? <IconEyeOff size={16} /> : <IconEye size={16} />}
+            <IconSend size={16} />
           </ActionIcon>
         </Tooltip>
-
-        <Box style={{ flex: 1 }} />
-
-        {value.length > MAX_USER_MESSAGE_CHARS * 0.8 && (
-          <Text size='xs' c={tooLong ? 'red' : 'dimmed'}>
-            {value.length.toLocaleString('es-CO')} / {MAX_USER_MESSAGE_CHARS.toLocaleString('es-CO')}
-          </Text>
-        )}
       </Group>
-
-      {preview ? (
-        <Box className='chat-composer__preview' onDoubleClick={() => setPreview(false)}>
-          <ChatMarkdown content={value} />
-        </Box>
-      ) : (
-        <Textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(event) => setValue(event.currentTarget.value)}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          placeholder={placeholder}
-          autosize
-          minRows={2}
-          maxRows={8}
-          disabled={disabled}
-          autoFocus={autoFocus}
-          error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
-          classNames={{ input: 'chat-composer__input' }}
-        />
-      )}
 
       <input
         ref={fileInputRef}
@@ -432,62 +532,6 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           event.currentTarget.value = '';
         }}
       />
-
-      {files.length > 0 && (
-        <Group gap={6} mt={6} wrap='wrap'>
-          {files.map((file, index) => (
-            <div
-              key={`${file.name}-${file.size}-${index}`}
-              className='chat-attachment chat-attachment--draft'
-            >
-              <IconPaperclip size={13} />
-              <Text size='xs' lineClamp={1} className='chat-attachment__name'>
-                {file.name}
-              </Text>
-              <Text size='xs' className='chat-attachment__size'>
-                {formatBytes(file.size)}
-              </Text>
-              <ActionIcon
-                size='xs'
-                variant='subtle'
-                color='gray'
-                onClick={() => removeFile(index)}
-                aria-label={`Quitar ${file.name}`}
-              >
-                <IconX size={12} />
-              </ActionIcon>
-            </div>
-          ))}
-        </Group>
-      )}
-
-      {fileError && (
-        <Text size='xs' c='red' mt={4}>
-          {fileError}
-        </Text>
-      )}
-
-      <Group justify='space-between' mt={6} wrap='nowrap'>
-        <Text size='xs' c='dimmed'>
-          Enter envía · Shift+Enter salta de línea
-        </Text>
-        <ActionIcon
-          size={36}
-          radius='md'
-          variant='filled'
-          color='blue'
-          loading={sending}
-          disabled={!canSend}
-          // Sin esto, TOCAR el botón le quita el foco al textarea y el teclado
-          // del celular se cierra antes de que el mensaje salga. El
-          // preventDefault del mousedown/touchstart evita ese robo de foco.
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => void submit()}
-          aria-label='Enviar mensaje'
-        >
-          <IconSend size={16} />
-        </ActionIcon>
-      </Group>
     </Box>
   );
 });
