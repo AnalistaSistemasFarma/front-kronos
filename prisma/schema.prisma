@@ -57,10 +57,14 @@ model User {
   // internos no tienen NIT. La unicidad se garantiza con un índice ÚNICO FILTRADO
   // (WHERE nit IS NOT NULL) creado en la migración; no se declara @unique aquí porque
   // SQL Server solo admite un único NULL en un índice único no filtrado.
-  nit            String?
-  id_user_sapsend Int?
-  themePalette   String?        @default("gss")
-  colorScheme    String?        @default("light")
+  nit                     String?
+  id_user_sapsend         Int?
+  themePalette            String?                  @default("gss")
+  colorScheme             String?                  @default("light")
+  // Tipografía elegida por el usuario. Es una CLAVE del catálogo de
+  // lib/theme/fonts.ts, no una cadena CSS: así el valor que llega de la base
+  // nunca puede inyectar CSS arbitrario en :root.
+  uiFont                  String?                  @default("sistema")
   accounts                Account[]
   companyUsers            CompanyUser[]
   departmentUsers         DepartmentUser[]
