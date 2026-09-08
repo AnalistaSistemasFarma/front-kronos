@@ -20,13 +20,20 @@ export async function GET() {
     }
 
     const access = await getChatAccess(session.user.email);
-    // `canBroadcast` es solo para que la interfaz sepa si pintar el botón del
-    // mensaje masivo. La reja de verdad vive en POST /api/chat/broadcast: una
+    // `canBroadcast` y `canCreateGroups` son solo para que la interfaz sepa si
+    // pintar el botón del mensaje masivo y el de crear grupo. Las rejas de
+    // verdad viven en POST /api/chat/broadcast y POST /api/chat/groups: una
     // interfaz que esconde un botón no protege nada.
-    const canBroadcast = access.canUseChat
+    //
+    // Las dos salen del MISMO criterio (checkAdminPrivileges) y se calculan de
+    // una sola vez: dos consultas para la misma pregunta es como se
+    // desincronizan.
+    const esAdministrador = access.canUseChat
       ? await checkAdminPrivileges(session.user.email)
       : false;
-    return NextResponse.json({ ...access, canBroadcast }, {
+    const canBroadcast = esAdministrador;
+    const canCreateGroups = esAdministrador;
+    return NextResponse.json({ ...access, canBroadcast, canCreateGroups }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {

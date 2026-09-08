@@ -204,13 +204,20 @@ export async function getChatAgentAccess(
 }
 
 /**
- * Verificación de PROPIEDAD de una conversación (anti-IDOR). Nunca confíe en
- * un id_conversation que llegue del cliente sin pasar por aquí: valida a la
- * vez que el hilo es del usuario de la sesión Y que el usuario todavía tiene
- * permiso sobre el agente del hilo (un permiso revocado cierra el acceso a
- * las conversaciones viejas).
+ * Verificación de PROPIEDAD de una conversación DIRECTA (anti-IDOR). Nunca
+ * confíe en un id_conversation que llegue del cliente sin pasar por aquí:
+ * valida a la vez que el hilo es del usuario de la sesión Y que el usuario
+ * todavía tiene permiso sobre el agente del hilo (un permiso revocado cierra
+ * el acceso a las conversaciones viejas).
  *
- * Devuelve null si la conversación no existe, no es suya, o perdió el permiso.
+ * ⚠️ ANCLADA A `kind = 'direct'` A PROPÓSITO. En un GRUPO, `id_user` es solo
+ * "quien lo creó": si esta función no filtrara por `kind`, el creador de un
+ * grupo entraría por el camino del hilo directo y se saltaría la verificación
+ * de participantes. La puerta de los grupos es `assertGroupAccess`
+ * (lib/chat/groups.ts).
+ *
+ * Devuelve null si la conversación no existe, no es un hilo directo, no es
+ * suya, o perdió el permiso.
  */
 export async function assertConversationOwnership(
   userEmail: string,
@@ -221,6 +228,7 @@ export async function assertConversationOwnership(
   const conversation = await prisma.chatConversation.findFirst({
     where: {
       id: conversationId,
+      kind: 'direct',
       // El filtro por correo de la sesión es lo que ata el hilo al dueño.
       user: { email: userEmail },
     },

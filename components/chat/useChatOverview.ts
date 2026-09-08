@@ -38,12 +38,20 @@ export interface ChatOverview {
   canUseChat: boolean;
   /** Si el usuario puede usar el mensaje masivo (administradores). */
   canBroadcast: boolean;
+  /** Si el usuario puede crear grupos (administradores). */
+  canCreateGroups: boolean;
   agents: ChatAgentDto[];
+  /** TODAS las conversaciones: hilos directos y grupos. */
   conversations: ChatConversationDto[];
+  /** Solo los grupos, ya separados y ordenados por actividad. */
+  groups: ChatConversationDto[];
   unreadByAgent: Map<number, number>;
   statusByAgent: Map<number, ChatStatusDto | null>;
   conversationByAgent: Map<number, ChatConversationDto>;
+  /** No leídos de los HILOS DIRECTOS (lo que suman los avatares de la barra). */
   totalUnread: number;
+  /** No leídos de los GRUPOS, aparte. */
+  groupUnread: number;
   refresh: () => void;
 }
 
@@ -146,7 +154,15 @@ export function useChatOverview(): ChatOverview {
     const statusByAgent = new Map<number, ChatStatusDto | null>();
     const conversationByAgent = new Map<number, ChatConversationDto>();
 
-    for (const conversation of conversations) {
+    // ⚠️ SOLO LOS HILOS DIRECTOS. En un grupo, `conversation.agent` es el
+    // agente ANFITRIÓN y no significa que el hilo sea de él: si los grupos
+    // entraran aquí, sus no leídos se le sumarían al contador del avatar de
+    // ese agente en la barra superior y abrir su chat directo no los bajaría
+    // —quedaría un número pegado que nadie puede quitar—.
+    const directas = conversations.filter((c) => c.kind !== 'group');
+    const groups = conversations.filter((c) => c.kind === 'group');
+
+    for (const conversation of directas) {
       const id = conversation.agent.idAgent;
       unreadByAgent.set(id, (unreadByAgent.get(id) ?? 0) + conversation.unreadCount);
       if (!conversationByAgent.has(id)) {
@@ -158,7 +174,10 @@ export function useChatOverview(): ChatOverview {
     let totalUnread = 0;
     for (const value of unreadByAgent.values()) totalUnread += value;
 
-    return { unreadByAgent, statusByAgent, conversationByAgent, totalUnread };
+    let groupUnread = 0;
+    for (const g of groups) groupUnread += g.unreadCount;
+
+    return { unreadByAgent, statusByAgent, conversationByAgent, totalUnread, groups, groupUnread };
   }, [conversations]);
 
   return {
@@ -166,6 +185,7 @@ export function useChatOverview(): ChatOverview {
     loading,
     canUseChat: access?.canUseChat ?? false,
     canBroadcast: access?.canBroadcast ?? false,
+    canCreateGroups: access?.canCreateGroups ?? false,
     agents: access?.agents ?? [],
     conversations,
     ...derived,
