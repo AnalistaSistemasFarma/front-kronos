@@ -1,6 +1,7 @@
 'use client';
 
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
+import { useMediaQuery } from '@mantine/hooks';
 import {
   ActionIcon,
   Box,
@@ -149,6 +150,13 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   const [value, setValue] = useState('');
   const [preview, setPreview] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  // Con teclado TÁCTIL el Enter hace salto de línea y para enviar está el
+  // botón. Se detecta por `pointer: coarse` y no por ancho de pantalla a
+  // propósito: lo que manda no es que la pantalla sea angosta sino que el
+  // teclado sea de vidrio — un portátil con la ventana chica sigue teniendo
+  // Enter físico y ahí Enter debe seguir enviando. Pedido de Nicolás
+  // (2026-09-08): en el celular no hay un Shift+Enter cómodo.
+  const tecladoTactil = useMediaQuery('(pointer: coarse)');
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -415,7 +423,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
       }
 
       // Enter envía; Shift+Enter hace salto de línea (convención universal).
+      // Con teclado táctil se invierte: Enter salta de línea y se envía con el
+      // botón. No se llama a preventDefault, así que el salto lo hace el
+      // navegador solo.
       if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+        if (tecladoTactil) return;
         event.preventDefault();
         void submit();
         return;
@@ -431,7 +443,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         }
       }
     },
-    [applyFormat, candidatos, insertarMencion, mencionIndice, mencionVisible, submit]
+    [applyFormat, candidatos, insertarMencion, mencionIndice, mencionVisible, submit, tecladoTactil]
   );
 
   return (
@@ -679,7 +691,14 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         {/* Grande a propósito (46 px contra los 34 de los secundarios): es la
             acción principal y en el celular se toca con el pulgar. Es el
             círculo verde de WhatsApp. */}
-        <Tooltip label='Enviar · Enter envía, Shift+Enter salta de línea' withArrow>
+        <Tooltip
+          label={
+            tecladoTactil
+              ? 'Enviar · con teclado táctil, Enter salta de línea'
+              : 'Enviar · Enter envía, Shift+Enter salta de línea'
+          }
+          withArrow
+        >
           <ActionIcon
             size={46}
             radius='xl'
@@ -699,11 +718,31 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         </Tooltip>
       </Group>
 
+      {/* NO va con `hidden`. Con `hidden` (o sea `display:none`) el input no se
+          renderiza, y varios navegadores móviles se niegan a abrir el selector
+          de archivos cuando se le hace `.click()` por programa a un input que
+          no está en el layout. En escritorio funcionaba y en el celular no
+          pasaba nada al tocar "Adjuntar archivos" (Nicolás, 2026-09-08).
+          Queda renderizado pero sin ocupar espacio: bloque de 0×0 y
+          transparente. Va como `block` a propósito — en línea generaría una
+          caja de renglón y le sumaría alto al compositor. El `.click()` por
+          programa sí lo alcanza. */}
       <input
         ref={fileInputRef}
         type='file'
         multiple
-        hidden
+        tabIndex={-1}
+        aria-hidden='true'
+        style={{
+          display: 'block',
+          width: 0,
+          height: 0,
+          padding: 0,
+          border: 0,
+          opacity: 0,
+          overflow: 'hidden',
+          pointerEvents: 'none',
+        }}
         onChange={(event) => {
           addFiles(event.currentTarget.files);
           // Se limpia para que escoger DOS VECES el mismo archivo vuelva a
