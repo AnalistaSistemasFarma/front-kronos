@@ -25,6 +25,8 @@ import {
   IconFolderOff,
   IconLayoutGrid,
   IconList,
+  IconMaximize,
+  IconMinimize,
   IconLock,
   IconSearch,
   IconX,
@@ -133,6 +135,9 @@ function AgentCard({
   );
 }
 
+/** Clave de localStorage donde se recuerda el chat expandido en ESTE equipo */
+const CHAT_EXPANDIDO_KEY = 'chat-escritorio-expandido';
+
 export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?: string }) {
   const overview = useChatOverview();
   const router = useRouter();
@@ -171,6 +176,34 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
   // rejilla de carpetas de siempre, que es donde uno escoge.
   const modoEscritorio = !enPantallaAngosta && !conversacionSola && Boolean(selectedCode);
 
+  // Pantalla completa DE VERDAD en escritorio: también se esconde la barra de
+  // SynerLink. Pedido de Nicolás (2026-09-08), y se hizo con un botón —no
+  // siempre encendido— porque esconder esa barra deja la aplicación sin
+  // navegación, y el chat lo usan otras trece personas que quizá sí la
+  // quieren. Cada quien decide.
+  //
+  // Se recuerda en `localStorage` para no tener que pulsarlo en cada visita.
+  // No va al perfil a propósito: es una comodidad del equipo desde el que uno
+  // está trabajando, no una preferencia de la persona.
+  const [expandido, setExpandido] = useState(false);
+  useEffect(() => {
+    try {
+      setExpandido(localStorage.getItem(CHAT_EXPANDIDO_KEY) === '1');
+    } catch {
+      // Modo privado o almacenamiento bloqueado: se queda sin expandir, que es
+      // el comportamiento seguro (con navegación a la vista).
+    }
+  }, []);
+  const alternarExpandido = () => {
+    setExpandido((previo) => {
+      const siguiente = !previo;
+      try {
+        localStorage.setItem(CHAT_EXPANDIDO_KEY, siguiente ? '1' : '0');
+      } catch {}
+      return siguiente;
+    });
+  };
+
   // Mientras dura ese modo la PÁGINA no se desplaza: el marco queda clavado a
   // la pantalla y lo único que corre es el interior de la barra lateral y el
   // de la conversación. Sin esto la página conserva su propio desplazamiento
@@ -193,13 +226,18 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
   // el armazón de la aplicación, muy por encima de este componente. La marca
   // se quita SIEMPRE al salir del modo o al desmontar: una barra de navegación
   // que se queda escondida deja la aplicación sin salida.
+  //
+  // Dos caminos llegan aquí: la conversación sola (celular o enlace directo) y
+  // el escritorio con el botón de expandir pulsado.
+  const inmersivo =
+    (conversacionSola && Boolean(selectedCode)) || (modoEscritorio && expandido);
   useEffect(() => {
-    if (!(conversacionSola && selectedCode)) return;
+    if (!inmersivo) return;
     document.body.classList.add('chat-inmersivo');
     return () => {
       document.body.classList.remove('chat-inmersivo');
     };
-  }, [conversacionSola, selectedCode]);
+  }, [inmersivo]);
 
   // El código del agente también puede llegar por la URL (?agent=orus), que es
   // lo que usa el botón "abrir en la página de chats" del panel flotante.
@@ -375,16 +413,38 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
               </Text>
             </Box>
           </Group>
-          <Tooltip label='Volver a las carpetas' withArrow>
-            <ActionIcon
-              variant='subtle'
-              color='gray'
-              onClick={cerrarConversacion}
-              aria-label='Cerrar la conversación'
-            >
-              <IconArrowLeft size={18} />
-            </ActionIcon>
-          </Tooltip>
+          <Group gap={4} wrap='nowrap'>
+            {/* Solo en escritorio: en el celular la barra ya se esconde sola y
+                el botón no tendría nada que hacer. */}
+            {modoEscritorio && (
+              <Tooltip
+                label={expandido ? 'Mostrar el menú de SynerLink' : 'Pantalla completa'}
+                withArrow
+              >
+                <ActionIcon
+                  variant='subtle'
+                  color='gray'
+                  onClick={alternarExpandido}
+                  aria-label={
+                    expandido ? 'Salir de pantalla completa' : 'Ver el chat en pantalla completa'
+                  }
+                  aria-pressed={expandido}
+                >
+                  {expandido ? <IconMinimize size={18} /> : <IconMaximize size={18} />}
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <Tooltip label='Volver a las carpetas' withArrow>
+              <ActionIcon
+                variant='subtle'
+                color='gray'
+                onClick={cerrarConversacion}
+                aria-label='Cerrar la conversación'
+              >
+                <IconArrowLeft size={18} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
         </Group>
 
         {/* Sin `height`: el alto lo acota el contenedor, y dentro del hilo solo

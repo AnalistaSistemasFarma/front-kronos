@@ -1420,6 +1420,14 @@ body.chat-inmersivo .app-page-shell {
   padding-top: 0;
 }
 
+/* Escritorio expandido: sin la barra de SynerLink, el marco recupera el alto
+   que ella ocupaba. Sin esta regla queda una franja muerta del tamaño de la
+   barra escondida. */
+body.chat-inmersivo .chat-escritorio {
+  height: 100vh;
+  height: 100dvh;
+}
+
 /* En modo inmersivo la página NO se desplaza: la conversación es la pantalla
    completa y cada columna trae su propio desplazamiento. Sin esto el navegador
    podía correr el documento para dejar el campo a la vista —al adjuntar un
