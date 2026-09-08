@@ -17,6 +17,14 @@ import { useEffect, useRef } from 'react';
  * `window.visualViewport` sí refleja el teclado, así que de ahí sale la
  * medida. En navegadores sin esa API no se escribe nada y el CSS cae a su
  * valor por defecto (`100dvh`), que es el comportamiento de antes.
+ *
+ * TAMBIÉN PUBLICA EL DESPLAZAMIENTO (`--desplazamiento-visible`):
+ * el alto no alcanza. Cuando sale el teclado, el navegador mueve el *visual
+ * viewport* hacia abajo dentro del de diseño para dejar el campo a la vista, y
+ * eso es `vv.offsetTop`. Un elemento anclado arriba del viewport de diseño se
+ * queda donde estaba y aparece un hueco entre la caja de escribir y el
+ * teclado — justo del tamaño de ese desplazamiento. Con la variable, el
+ * contenedor se corre lo mismo y queda pegado a lo que de verdad se ve.
  */
 export function useAltoVisible(alCambiar?: () => void) {
   // La referencia evita reinstalar los escuchas en cada render por el cambio
@@ -34,6 +42,7 @@ export function useAltoVisible(alCambiar?: () => void) {
       // `Math.round` a propósito: los decimales del visual viewport hacen
       // parpadear el layout en cada micro-scroll.
       raiz.style.setProperty('--alto-visible', `${Math.round(vv.height)}px`);
+      raiz.style.setProperty('--desplazamiento-visible', `${Math.round(vv.offsetTop)}px`);
       avisar.current?.();
     };
 
@@ -45,6 +54,7 @@ export function useAltoVisible(alCambiar?: () => void) {
       vv.removeEventListener('resize', actualizar);
       vv.removeEventListener('scroll', actualizar);
       raiz.style.removeProperty('--alto-visible');
+      raiz.style.removeProperty('--desplazamiento-visible');
     };
   }, []);
 }
