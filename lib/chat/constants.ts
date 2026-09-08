@@ -36,6 +36,16 @@ export const MAX_AGENT_MESSAGE_CHARS = 40_000;
 /** Tope del texto del indicador de estado. */
 export const MAX_STATUS_LABEL_CHARS = 200;
 
+/**
+ * Tope de sub-agentes que se listan en la tablita del indicador. Con más de
+ * ocho la tabla deja de informar y empieza a estorbar; el resto se resume en
+ * el contador.
+ */
+export const MAX_STATUS_TASKS = 8;
+
+/** Tope de la descripción de cada sub-agente en esa tablita. */
+export const MAX_TASK_DESC_CHARS = 80;
+
 /** Tope del título de una conversación. */
 export const MAX_TITLE_CHARS = 300;
 

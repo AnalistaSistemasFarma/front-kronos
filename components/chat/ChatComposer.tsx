@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
 import {
   ActionIcon,
   Box,
   Group,
+  Menu,
   Popover,
   ScrollArea,
   Text,
@@ -33,6 +34,14 @@ import {
 
 /**
  * Entrada de texto del chat — v1: Markdown CRUDO con ayudas.
+ *
+ * DISPOSICIÓN: una sola fila, como WhatsApp — emoji · caja · clip · ⋯ · enviar.
+ * Antes eran tres filas apiladas (barra de siete botones, caja de dos renglones
+ * mínimos y el renglón del recordatorio con el botón de enviar): unos 155 px que
+ * le quitaba a la conversación. Ahora son ~55 px, unos tres renglones más de
+ * texto en pantalla. Lo secundario —formato y vista previa— vive en el menú ⋯,
+ * y los atajos Ctrl+B / Ctrl+I siguen funcionando aunque el botón no esté
+ * a la vista.
  *
  * Es lo que hacen Slack y GitHub: el usuario escribe Markdown y unos botones
  * envuelven la selección por él. Un editor visual completo (WYSIWYG) exigiría
@@ -73,20 +82,53 @@ const EMOJI_GROUPS: { label: string; emojis: string[] }[] = [
 
 type WrapKind = 'bold' | 'italic' | 'code' | 'list';
 
-export default function ChatComposer({
-  onSend,
-  disabled = false,
-  sending = false,
-  placeholder = 'Escriba su mensaje… (Markdown: **negrita**, _cursiva_, - viñetas)',
-  autoFocus = false,
-}: {
+/**
+ * Le pone un nombre útil a lo que llega sin él.
+ *
+ * Una captura pegada del portapapeles llega SIEMPRE como "image.png": los
+ * navegadores no le dan otro nombre. Si se dejara así, dos capturas del mismo
+ * tamaño se verían como el mismo archivo y la regla de duplicados de
+ * `addFiles` se comería la segunda. Se renombra con la fecha y la hora.
+ *
+ * Lo que ya viene con nombre propio (el clip, un archivo arrastrado) se
+ * devuelve intacto.
+ */
+function conNombreUtil(file: File, index: number): File {
+  const generico = !file.name || /^image\.[a-z0-9]+$/i.test(file.name);
+  if (!generico) return file;
+
+  const sello = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+  const ext = (file.type.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '');
+  const sufijo = index > 0 ? `-${index + 1}` : '';
+  return new File([file], `captura-${sello}${sufijo}.${ext}`, {
+    type: file.type,
+    lastModified: file.lastModified,
+  });
+}
+
+/** Lo que el hilo puede pedirle al compositor desde afuera. */
+export type ChatComposerHandle = {
+  /** Agrega archivos a la bandeja del mensaje, con la misma validación del clip. */
+  addFiles: (incoming: FileList | File[] | null) => void;
+};
+
+const ChatComposer = forwardRef<ChatComposerHandle, {
   /** Devuelve lo que quiera (p. ej. si el envío tuvo éxito); aquí solo se espera. */
   onSend: (body: string, files: File[]) => void | Promise<unknown>;
   disabled?: boolean;
   sending?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
-}) {
+}>(function ChatComposer(
+  {
+    onSend,
+    disabled = false,
+    sending = false,
+    placeholder = 'Escriba su mensaje… (Markdown: **negrita**, _cursiva_, - viñetas)',
+    autoFocus = false,
+  },
+  ref
+) {
   const [value, setValue] = useState('');
   const [preview, setPreview] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -100,15 +142,20 @@ export default function ChatComposer({
   // lo que no se puede enviar es un mensaje sin texto Y sin archivos.
   const canSend = (value.trim().length > 0 || files.length > 0) && !disabled && !sending && !tooLong;
 
-  /** Agrega lo que el usuario escogió, validando cada archivo y el tope. */
+  /**
+   * Agrega lo que el usuario escogió, validando cada archivo y el tope.
+   * Acepta un `FileList` (el input de archivos) o un arreglo de `File` (lo que
+   * entrega un arrastrar-y-soltar), para que las dos vías compartan la misma
+   * validación y el mismo tope por mensaje.
+   */
   const addFiles = useCallback(
-    (incoming: FileList | null) => {
+    (incoming: FileList | File[] | null) => {
       if (!incoming || incoming.length === 0) return;
 
       const accepted: File[] = [];
       let problem: string | null = null;
 
-      for (const file of Array.from(incoming)) {
+      for (const file of Array.from(incoming).map(conNombreUtil)) {
         const error = getChatAttachmentError({ name: file.name, size: file.size });
         if (error) {
           problem = error;
@@ -140,6 +187,30 @@ export default function ChatComposer({
     setFiles((prev) => prev.filter((_, i) => i !== index));
     setFileError(null);
   }, []);
+
+  // El arrastrar-y-soltar vive en el hilo (para poder soltar sobre toda la
+  // conversación, no solo sobre la caja de texto), pero los archivos y su
+  // validación viven aquí. Esta es la única puerta entre los dos.
+  useImperativeHandle(ref, () => ({ addFiles }), [addFiles]);
+
+  /**
+   * Pegar una imagen del portapapeles (Ctrl+V / Cmd+V) — el caso de todos los
+   * días: uno toma una captura y la pega en el chat.
+   *
+   * Solo se intercepta cuando de verdad viene un archivo; pegar texto sigue
+   * funcionando igual. El nombre se lo pone `conNombreUtil`, porque el
+   * portapapeles entrega las capturas como "image.png".
+   */
+  const onPaste = useCallback(
+    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (disabled) return;
+      const pegados = Array.from(event.clipboardData?.files ?? []);
+      if (pegados.length === 0) return;
+      event.preventDefault();
+      addFiles(pegados);
+    },
+    [addFiles, disabled]
+  );
 
   /**
    * Envuelve la selección (o inserta el marcador donde esté el cursor) y deja
@@ -207,7 +278,13 @@ export default function ChatComposer({
     setFileError(null);
     setPreview(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+    // El foco vuelve a la caja ANTES de esperar el envío: en el celular, si el
+    // textarea pierde el foco (por ejemplo al tocar el botón de enviar) el
+    // teclado se cierra y hay que volver a tocarlo para escribir el mensaje
+    // siguiente. Conversar así es incómodo.
+    textareaRef.current?.focus();
     await onSend(body, attachments);
+    textareaRef.current?.focus();
   }, [canSend, files, onSend, value]);
 
   const onKeyDown = useCallback(
@@ -232,39 +309,64 @@ export default function ChatComposer({
     [applyFormat, submit]
   );
 
-  const toolButton = (
-    label: string,
-    icon: React.ReactNode,
-    onClick: () => void,
-    keyHint?: string
-  ) => (
-    <Tooltip label={keyHint ? `${label} (${keyHint})` : label} withArrow>
-      <ActionIcon variant='subtle' color='gray' size='md' onClick={onClick} disabled={disabled}>
-        {icon}
-      </ActionIcon>
-    </Tooltip>
-  );
-
   return (
     <Box className='chat-composer'>
-      <Group gap={2} mb={6} wrap='nowrap'>
-        {toolButton('Negrita', <IconBold size={16} />, () => applyFormat('bold'), 'Ctrl+B')}
-        {toolButton('Cursiva', <IconItalic size={16} />, () => applyFormat('italic'), 'Ctrl+I')}
-        {toolButton('Lista', <IconList size={16} />, () => applyFormat('list'))}
-        {toolButton('Código', <IconCode size={16} />, () => applyFormat('code'))}
+      {files.length > 0 && (
+        <Group gap={6} mb={6} wrap='wrap'>
+          {files.map((file, index) => (
+            <div
+              key={`${file.name}-${file.size}-${index}`}
+              className='chat-attachment chat-attachment--draft'
+            >
+              <IconPaperclip size={13} />
+              <Text size='xs' lineClamp={1} className='chat-attachment__name'>
+                {file.name}
+              </Text>
+              <Text size='xs' className='chat-attachment__size'>
+                {formatBytes(file.size)}
+              </Text>
+              <ActionIcon
+                size='xs'
+                variant='subtle'
+                color='gray'
+                onClick={() => removeFile(index)}
+                aria-label={`Quitar ${file.name}`}
+              >
+                <IconX size={12} />
+              </ActionIcon>
+            </div>
+          ))}
+        </Group>
+      )}
 
+      {fileError && (
+        <Text size='xs' c='red' mb={4}>
+          {fileError}
+        </Text>
+      )}
+
+      {/* El contador solo aparece cerca del tope; el resto del tiempo no ocupa
+          renglón, que es justamente lo que se buscaba. */}
+      {value.length > MAX_USER_MESSAGE_CHARS * 0.8 && (
+        <Text size='xs' c={tooLong ? 'red' : 'dimmed'} ta='right' mb={4}>
+          {value.length.toLocaleString('es-CO')} / {MAX_USER_MESSAGE_CHARS.toLocaleString('es-CO')}
+        </Text>
+      )}
+
+      <Group gap={2} align='flex-end' wrap='nowrap'>
         <Popover opened={emojiOpen} onChange={setEmojiOpen} position='top-start' withArrow shadow='md' width={260}>
           <Popover.Target>
             <Tooltip label='Emojis' withArrow>
               <ActionIcon
                 variant='subtle'
                 color='gray'
-                size='md'
+                size={34}
+                radius='xl'
                 disabled={disabled}
                 onClick={() => setEmojiOpen((o) => !o)}
                 aria-label='Insertar emoji'
               >
-                <IconMoodSmile size={16} />
+                <IconMoodSmile size={18} />
               </ActionIcon>
             </Tooltip>
           </Popover.Target>
@@ -295,61 +397,125 @@ export default function ChatComposer({
           </Popover.Dropdown>
         </Popover>
 
-        <Tooltip label='Adjuntar archivos' withArrow>
-          <ActionIcon
-            variant='subtle'
-            color='gray'
-            size='md'
-            disabled={disabled || files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
-            onClick={() => fileInputRef.current?.click()}
-            aria-label='Adjuntar archivos'
+        {preview ? (
+          <Box
+            className='chat-composer__preview'
+            style={{ flex: 1, minWidth: 0 }}
+            onDoubleClick={() => setPreview(false)}
           >
-            <IconPaperclip size={16} />
-          </ActionIcon>
-        </Tooltip>
-
-        <Tooltip label={preview ? 'Volver a editar' : 'Vista previa'} withArrow>
-          <ActionIcon
-            variant={preview ? 'light' : 'subtle'}
-            color={preview ? 'blue' : 'gray'}
-            size='md'
-            onClick={() => setPreview((p) => !p)}
-            disabled={disabled || value.trim().length === 0}
-            aria-label='Vista previa'
-          >
-            {preview ? <IconEyeOff size={16} /> : <IconEye size={16} />}
-          </ActionIcon>
-        </Tooltip>
-
-        <Box style={{ flex: 1 }} />
-
-        {value.length > MAX_USER_MESSAGE_CHARS * 0.8 && (
-          <Text size='xs' c={tooLong ? 'red' : 'dimmed'}>
-            {value.length.toLocaleString('es-CO')} / {MAX_USER_MESSAGE_CHARS.toLocaleString('es-CO')}
-          </Text>
+            <ChatMarkdown content={value} />
+          </Box>
+        ) : (
+          <Textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(event) => setValue(event.currentTarget.value)}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            placeholder={placeholder}
+            autosize
+            /* Arranca en UN renglón, como WhatsApp, y crece al escribir. */
+            minRows={1}
+            maxRows={6}
+            disabled={disabled}
+            autoFocus={autoFocus}
+            error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
+            style={{ flex: 1, minWidth: 0 }}
+            classNames={{ input: 'chat-composer__input' }}
+          />
         )}
-      </Group>
 
-      {preview ? (
-        <Box className='chat-composer__preview' onDoubleClick={() => setPreview(false)}>
-          <ChatMarkdown content={value} />
-        </Box>
-      ) : (
-        <Textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(event) => setValue(event.currentTarget.value)}
-          onKeyDown={onKeyDown}
-          placeholder={placeholder}
-          autosize
-          minRows={2}
-          maxRows={8}
-          disabled={disabled}
-          autoFocus={autoFocus}
-          error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
-          classNames={{ input: 'chat-composer__input' }}
-        />
-      )}
+        {/* UN SOLO botón secundario, como WhatsApp: el clip abre todo.
+            Antes eran dos (clip y ⋯) y Nicolás lo pidió explícito: "solo hay
+            un botón de clip y ese sí muestra todo". Adjuntar queda de primero
+            porque es lo que la gente viene a buscar cuando toca un clip. */}
+        <Menu position='top-end' withArrow shadow='md' width={225}>
+          <Menu.Target>
+            <ActionIcon
+              variant='subtle'
+              color='gray'
+              size={34}
+              radius='xl'
+              disabled={disabled}
+              aria-label='Adjuntar y más opciones'
+              title='Adjuntar y más opciones'
+            >
+              <IconPaperclip size={19} />
+            </ActionIcon>
+          </Menu.Target>
+          <Menu.Dropdown className='chat-surface'>
+            <Menu.Item
+              leftSection={<IconPaperclip size={14} />}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
+            >
+              Adjuntar archivos
+            </Menu.Item>
+            <Menu.Divider />
+            <Menu.Label>Formato</Menu.Label>
+            <Menu.Item
+              leftSection={<IconBold size={14} />}
+              rightSection={
+                <Text size='xs' c='dimmed'>
+                  Ctrl+B
+                </Text>
+              }
+              onClick={() => applyFormat('bold')}
+            >
+              Negrita
+            </Menu.Item>
+            <Menu.Item
+              leftSection={<IconItalic size={14} />}
+              rightSection={
+                <Text size='xs' c='dimmed'>
+                  Ctrl+I
+                </Text>
+              }
+              onClick={() => applyFormat('italic')}
+            >
+              Cursiva
+            </Menu.Item>
+            <Menu.Item leftSection={<IconList size={14} />} onClick={() => applyFormat('list')}>
+              Lista
+            </Menu.Item>
+            <Menu.Item leftSection={<IconCode size={14} />} onClick={() => applyFormat('code')}>
+              Código
+            </Menu.Item>
+            <Menu.Divider />
+            <Menu.Item
+              leftSection={preview ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+              onClick={() => setPreview((p) => !p)}
+              disabled={value.trim().length === 0}
+            >
+              {preview ? 'Volver a editar' : 'Vista previa'}
+            </Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
+
+        {/* El recordatorio de Enter / Shift+Enter era un renglón entero; ahora
+            vive en el globo de este botón. */}
+        {/* Grande a propósito (46 px contra los 34 de los secundarios): es la
+            acción principal y en el celular se toca con el pulgar. Es el
+            círculo verde de WhatsApp. */}
+        <Tooltip label='Enviar · Enter envía, Shift+Enter salta de línea' withArrow>
+          <ActionIcon
+            size={46}
+            radius='xl'
+            variant='filled'
+            color='blue'
+            loading={sending}
+            disabled={!canSend}
+            // Sin esto, TOCAR el botón le quita el foco al textarea y el teclado
+            // del celular se cierra antes de que el mensaje salga. El
+            // preventDefault del mousedown/touchstart evita ese robo de foco.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => void submit()}
+            aria-label='Enviar mensaje'
+          >
+            <IconSend size={20} />
+          </ActionIcon>
+        </Tooltip>
+      </Group>
 
       <input
         ref={fileInputRef}
@@ -363,58 +529,8 @@ export default function ChatComposer({
           event.currentTarget.value = '';
         }}
       />
-
-      {files.length > 0 && (
-        <Group gap={6} mt={6} wrap='wrap'>
-          {files.map((file, index) => (
-            <div
-              key={`${file.name}-${file.size}-${index}`}
-              className='chat-attachment chat-attachment--draft'
-            >
-              <IconPaperclip size={13} />
-              <Text size='xs' lineClamp={1} className='chat-attachment__name'>
-                {file.name}
-              </Text>
-              <Text size='xs' className='chat-attachment__size'>
-                {formatBytes(file.size)}
-              </Text>
-              <ActionIcon
-                size='xs'
-                variant='subtle'
-                color='gray'
-                onClick={() => removeFile(index)}
-                aria-label={`Quitar ${file.name}`}
-              >
-                <IconX size={12} />
-              </ActionIcon>
-            </div>
-          ))}
-        </Group>
-      )}
-
-      {fileError && (
-        <Text size='xs' c='red' mt={4}>
-          {fileError}
-        </Text>
-      )}
-
-      <Group justify='space-between' mt={6} wrap='nowrap'>
-        <Text size='xs' c='dimmed'>
-          Enter envía · Shift+Enter salta de línea
-        </Text>
-        <ActionIcon
-          size={36}
-          radius='md'
-          variant='filled'
-          color='blue'
-          loading={sending}
-          disabled={!canSend}
-          onClick={() => void submit()}
-          aria-label='Enviar mensaje'
-        >
-          <IconSend size={16} />
-        </ActionIcon>
-      </Group>
     </Box>
   );
-}
+});
+
+export default ChatComposer;

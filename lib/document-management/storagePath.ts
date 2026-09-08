@@ -39,6 +39,16 @@ export function buildDocumentVersionFullPath(
 
 const CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$/;
 
+// Nombres reservados de dispositivo en Windows (CON, PRN, AUX, NUL, COM0-9, LPT0-9).
+// OneDrive/SharePoint los rechaza como nombre de carpeta o archivo (HTTP 400 al
+// crear), sin importar mayúsculas/minúsculas ni si van solos o con extensión --
+// ver lib/onedrive/graphFolderUpload.ts. Bug 2026-09-03: un código de documento
+// "CON" pasaba el CODE_PATTERN de abajo (son letras válidas) y solo fallaba mucho
+// más adelante, al crear la carpeta en OneDrive, como un Error genérico no
+// controlado (500 Internal server error) en vez de un error de validación (400)
+// aquí mismo.
+const RESERVED_WINDOWS_DEVICE_NAMES = /^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$/i;
+
 /**
  * Valida el código de un documento (p.ej. "POL-GH-001"). No fuerza un prefijo
  * concreto: la nomenclatura por tipo la define el catálogo DocumentType
@@ -50,6 +60,9 @@ export function getDocumentCodeError(code: string): string | null {
   if (!value) return 'El código es obligatorio.';
   if (!CODE_PATTERN.test(value)) {
     return 'El código solo admite letras, números, punto, guion y guion bajo (máximo 49 caracteres).';
+  }
+  if (RESERVED_WINDOWS_DEVICE_NAMES.test(value)) {
+    return `"${value}" es un nombre reservado de Windows y OneDrive no permite usarlo como código de documento (evite CON, PRN, AUX, NUL, COM0-9, LPT0-9).`;
   }
   return null;
 }

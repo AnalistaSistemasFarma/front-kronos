@@ -36,6 +36,8 @@ export interface ChatOverview {
   ready: boolean;
   loading: boolean;
   canUseChat: boolean;
+  /** Si el usuario puede usar el mensaje masivo (administradores). */
+  canBroadcast: boolean;
   agents: ChatAgentDto[];
   conversations: ChatConversationDto[];
   unreadByAgent: Map<number, number>;
@@ -163,6 +165,7 @@ export function useChatOverview(): ChatOverview {
     ready: access !== null,
     loading,
     canUseChat: access?.canUseChat ?? false,
+    canBroadcast: access?.canBroadcast ?? false,
     agents: access?.agents ?? [],
     conversations,
     ...derived,

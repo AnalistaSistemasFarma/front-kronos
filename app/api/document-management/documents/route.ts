@@ -63,8 +63,17 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Crea un documento nuevo (carga inicial) con su primera versión, subiendo
- * el archivo a OneDrive. multipart/form-data:
+ * Atajo de Asuntos Regulatorios (Sprint 5): crea un documento nuevo directo,
+ * sin pasar por el flujo estándar de "crear solicitud" de SynerLink —
+ * reservado a quien tenga el permiso NUEVO
+ * `/process/document-management/manage/regulatory` (antes de este sprint
+ * bastaba el permiso general de escritura del módulo; ver
+ * lib/document-management/access.ts para el porqué del cambio). Produce
+ * exactamente la misma estructura de datos que el camino estándar (ver
+ * app/api/document-management/create-request/route.ts): ambos llaman a
+ * createDocumentWithFirstVersion.
+ *
+ * multipart/form-data:
  *   file, companyId, documentTypeId, code, title,
  *   dueReviewDate? (YYYY-MM-DD), isRestricted? ("true"/"false"), comments?
  */
@@ -84,11 +93,15 @@ export async function POST(request: NextRequest) {
     const companyAccess = await getDocumentManagementCompanyAccess(
       session.user.email,
       companyId,
-      'write'
+      'uploadDirect'
     );
     if (!companyAccess) {
       return NextResponse.json(
-        { error: 'No tiene permiso de escritura en esta empresa' },
+        {
+          error:
+            'No tiene el permiso de Asuntos Regulatorios para cargar documentos directamente en esta empresa. ' +
+            'Use el flujo normal de "crear solicitud" seleccionando Gestión Documental.',
+        },
         { status: 403 }
       );
     }

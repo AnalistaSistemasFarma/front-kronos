@@ -1,6 +1,7 @@
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../lib/prisma';
+import { isValidFontKey } from '../../../lib/theme/fonts';
 import { isValidPaletteKey } from '../../../lib/theme/palettes';
 import { authOptions } from '../auth/[...nextauth]/route';
 
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
         createdAt: true,
         themePalette: true,
         colorScheme: true,
+        uiFont: true,
       },
     });
 
@@ -50,6 +52,7 @@ export async function PUT(request: NextRequest) {
     const imageUrl = formData.get('image') as string;
     const themePaletteRaw = formData.get('themePalette');
     const colorSchemeRaw = formData.get('colorScheme');
+    const uiFontRaw = formData.get('uiFont');
 
     // Validate appearance fields against the allowed catalog
     if (themePaletteRaw !== null && !isValidPaletteKey(themePaletteRaw)) {
@@ -61,6 +64,12 @@ export async function PUT(request: NextRequest) {
       colorSchemeRaw !== 'dark'
     ) {
       return NextResponse.json({ error: 'Invalid color scheme' }, { status: 400 });
+    }
+
+    // Se valida contra el CATÁLOGO: la clave que llegue de aquí termina
+    // redefiniendo --font-sans en :root, así que no puede ser texto libre.
+    if (uiFontRaw !== null && !isValidFontKey(uiFontRaw)) {
+      return NextResponse.json({ error: 'Invalid UI font' }, { status: 400 });
     }
 
     // Validate email format
@@ -104,12 +113,14 @@ export async function PUT(request: NextRequest) {
       image?: string;
       themePalette?: string;
       colorScheme?: string;
+      uiFont?: string;
     } = {};
     if (formData.has('name')) updateData.name = name;
     if (formData.has('email')) updateData.email = email;
     if (formData.has('image')) updateData.image = imageUrl;
     if (themePaletteRaw !== null) updateData.themePalette = themePaletteRaw as string;
     if (colorSchemeRaw !== null) updateData.colorScheme = colorSchemeRaw as string;
+    if (uiFontRaw !== null) updateData.uiFont = uiFontRaw as string;
 
     // Update user
     const user = await prisma.user.update({
@@ -123,6 +134,7 @@ export async function PUT(request: NextRequest) {
         createdAt: true,
         themePalette: true,
         colorScheme: true,
+        uiFont: true,
       },
     });
 
@@ -138,6 +150,8 @@ export async function PUT(request: NextRequest) {
       changes.push(`themePalette: ${currentUser.themePalette} -> ${themePaletteRaw}`);
     if (colorSchemeRaw !== null && colorSchemeRaw !== currentUser.colorScheme)
       changes.push(`colorScheme: ${currentUser.colorScheme} -> ${colorSchemeRaw}`);
+    if (uiFontRaw !== null && uiFontRaw !== currentUser.uiFont)
+      changes.push(`uiFont: ${currentUser.uiFont} -> ${uiFontRaw}`);
 
     await prisma.userAuditLog.create({
       data: {

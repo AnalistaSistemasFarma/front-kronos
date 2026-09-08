@@ -46,3 +46,6 @@ dbconfig.js
 
 # Claude Code — configuración local por-desarrollador (no versionar)
 .claude/settings.local.json
+
+# Logs de jobs programados (service-layer-metrics, etc.) - generado, no versionar
+/logs/

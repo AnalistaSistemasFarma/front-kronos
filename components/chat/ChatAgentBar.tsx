@@ -15,6 +15,7 @@ import {
 } from '@mantine/core';
 import { IconDotsVertical } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
+import { useTituloDeEstado } from './useTituloDeEstado';
 import AgentChatPanel from './AgentChatPanel';
 import { useChatOverview } from './useChatOverview';
 import {
@@ -54,6 +55,13 @@ export default function ChatAgentBar() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // El estado de los asistentes también se cuenta en la PESTAÑA del navegador.
+  // Va aquí porque esta barra vive en el encabezado de toda la aplicación: así
+  // se ve desde cualquier pantalla. El hook se llama SIEMPRE, antes de
+  // cualquier retorno temprano, porque las reglas de los hooks no admiten
+  // llamadas condicionales.
+  useTituloDeEstado(overview.agents, overview.statusByAgent, overview.totalUnread);
 
   const ordered = useMemo(
     () => sortAgentsForBar(overview.agents, overview.unreadByAgent),

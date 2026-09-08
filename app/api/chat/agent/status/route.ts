@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { assertAgentConversation, authenticateAgent } from '../../../../../lib/chat/agent-auth';
 import { MAX_STATUS_LABEL_CHARS, isAgentState } from '../../../../../lib/chat/constants';
+import { normalizeAgentTasks, parseAgentTasks } from '../../../../../lib/chat/status-tasks';
 import {
   badRequest,
   jsonNoStore,
@@ -21,6 +22,14 @@ export const dynamic = 'force-dynamic';
  *
  * `state` es 'idle' | 'thinking' | 'tool'. `label` es el texto que ve el
  * usuario; se recorta al tope y se guarda tal cual (texto plano, no HTML).
+ *
+ * `tasks` es OPCIONAL y lleva el desglose de sub-agentes en curso, que la
+ * interfaz pinta como una tabla:
+ *   { "tasks": [{ "desc": "Muestra de phishing", "startedAt": 1788786955 }] }
+ * `startedAt` admite ISO, milisegundos o segundos epoch (el hook de bash usa
+ * segundos). Omitir `tasks` DEJA la lista como estaba; mandar `null` o `[]` la
+ * borra — así un `pre` que no sepa de sub-agentes no pisa lo que otro publicó,
+ * pero el cierre del turno sí limpia.
  * Es un estado puntual que se sobrescribe: una sola fila por conversación
  * (la PK de chat_agent_status es id_conversation), no un histórico.
  *
@@ -55,10 +64,18 @@ export async function POST(request: NextRequest) {
       label = payload.label.trim().slice(0, MAX_STATUS_LABEL_CHARS) || null;
     }
 
+    // Omitido = no se toca. Presente (incluso null o []) = se reemplaza.
+    let tasksColumn: string | null | undefined;
+    if (payload.tasks !== undefined) {
+      const tasks = normalizeAgentTasks(payload.tasks);
+      if (tasks === undefined) return badRequest('tasks debe ser una lista.');
+      tasksColumn = tasks ? JSON.stringify(tasks) : null;
+    }
+
     const status = await prisma.chatAgentStatus.upsert({
       where: { id_conversation: conversation.id },
-      create: { id_conversation: conversation.id, state, label },
-      update: { state, label },
+      create: { id_conversation: conversation.id, state, label, tasks: tasksColumn ?? null },
+      update: { state, label, ...(tasksColumn !== undefined ? { tasks: tasksColumn } : {}) },
     });
 
     return jsonNoStore({
@@ -66,6 +83,7 @@ export async function POST(request: NextRequest) {
         idConversation: status.id_conversation,
         state: status.state,
         label: status.label,
+        tasks: parseAgentTasks(status.tasks),
         updatedAt: status.updated_at.toISOString(),
       },
     });

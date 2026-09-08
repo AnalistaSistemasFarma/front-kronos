@@ -36,6 +36,7 @@ import {
 } from '@tabler/icons-react';
 import { useTheme } from '../../../components/providers';
 import { CustomColorPicker } from '../../../components/theme/CustomColorPicker';
+import { FONTS } from '../../../lib/theme/fonts';
 import { PALETTES } from '../../../lib/theme/palettes';
 
 interface UserProfile {
@@ -215,12 +216,13 @@ export default function ProfileSettingsPage() {
     setErrorMessage('');
   };
 
-  // Apariencia: paleta de color y modo claro/oscuro
-  const { theme, setThemeMode, palette, setPalette } = useTheme();
+  // Apariencia: paleta de color, modo claro/oscuro y tipografía
+  const { theme, setThemeMode, palette, setPalette, font, setFont } = useTheme();
 
   const persistAppearance = async (
     nextPalette: string,
     nextColorScheme: 'light' | 'dark',
+    nextFont: string = font,
   ) => {
     try {
       const submitData = new FormData();
@@ -229,6 +231,7 @@ export default function ProfileSettingsPage() {
       if (formData.image) submitData.append('image', formData.image);
       submitData.append('themePalette', nextPalette);
       submitData.append('colorScheme', nextColorScheme);
+      submitData.append('uiFont', nextFont);
 
       const response = await fetch('/api/profile', { method: 'PUT', body: submitData });
       if (!response.ok) {
@@ -250,6 +253,11 @@ export default function ProfileSettingsPage() {
 
   const handlePalettePreview = (key: string) => {
     setPalette(key);
+  };
+
+  const handleFontSelect = (key: string) => {
+    setFont(key); // se aplica al instante en toda la app
+    void persistAppearance(palette, theme, key);
   };
 
   const handleColorSchemeChange = (value: string) => {
@@ -439,6 +447,55 @@ export default function ProfileSettingsPage() {
                     },
                   ]}
                 />
+              </div>
+
+              <div>
+                <Text fw={600} size='sm' mb={4}>
+                  Tipografía
+                </Text>
+                <Text size='xs' c='dimmed' mb='sm'>
+                  Todas son fuentes que ya trae su equipo: ninguna se descarga, así
+                  que el cambio no le agrega peso a la aplicación. Se aplica de
+                  inmediato y queda guardado en su perfil.
+                </Text>
+                <SimpleGrid cols={{ base: 1, xs: 2 }} spacing='sm'>
+                  {FONTS.map((f) => {
+                    const active = font === f.key;
+                    return (
+                      <UnstyledButton
+                        key={f.key}
+                        onClick={() => handleFontSelect(f.key)}
+                        aria-pressed={active}
+                        aria-label={`Tipografía ${f.label}`}
+                        style={{
+                          padding: rem(10),
+                          borderRadius: 'var(--mantine-radius-md)',
+                          border: active
+                            ? '2px solid var(--mantine-primary-color-filled)'
+                            : '1px solid var(--app-border, var(--mantine-color-default-border))',
+                          background: active
+                            ? 'var(--mantine-primary-color-light)'
+                            : 'transparent',
+                        }}
+                      >
+                        <Group gap={8} wrap='nowrap' mb={2}>
+                          {active ? <IconCheck size={14} /> : null}
+                          <Text size='sm' fw={active ? 600 : 500}>
+                            {f.label}
+                          </Text>
+                        </Group>
+                        {/* La muestra se pinta CON la fuente de la opción: es la
+                            única forma de escoger tipografía sin adivinar. */}
+                        <Text size='sm' style={{ fontFamily: f.stack }}>
+                          Solicitud #1234 — Aa Bb Cc 0123
+                        </Text>
+                        <Text size='xs' c='dimmed' mt={2}>
+                          {f.hint}
+                        </Text>
+                      </UnstyledButton>
+                    );
+                  })}
+                </SimpleGrid>
               </div>
             </Stack>
           </Card>

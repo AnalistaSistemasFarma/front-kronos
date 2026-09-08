@@ -110,12 +110,20 @@ export const authOptions: AuthOptions = {
       if (email) {
         const dbUser = await prisma.user.findUnique({
           where: { email },
-          select: { role: true, image: true, themePalette: true, colorScheme: true, nit: true },
+          select: {
+            role: true,
+            image: true,
+            themePalette: true,
+            colorScheme: true,
+            uiFont: true,
+            nit: true,
+          },
         });
         token.email = email;
         token.role = dbUser?.role;
         token.nit = dbUser?.nit ?? undefined;
         token.themePalette = dbUser?.themePalette ?? undefined;
+        token.uiFont = dbUser?.uiFont ?? undefined;
         token.colorScheme = dbUser?.colorScheme ?? undefined;
         if (dbUser?.image) {
           token.image = dbUser.image;
@@ -133,6 +141,7 @@ export const authOptions: AuthOptions = {
         session.user.role = token.role as string | undefined;
         session.user.nit = token.nit as string | undefined;
         session.user.themePalette = token.themePalette as string | undefined;
+        session.user.uiFont = token.uiFont as string | undefined;
         session.user.colorScheme = token.colorScheme as string | undefined;
       }
       return session;

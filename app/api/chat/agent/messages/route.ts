@@ -23,6 +23,7 @@ import {
   uploadChatAttachments,
   type UploadedChatAttachment,
 } from '../../../../../lib/chat/attachmentStorage';
+import { notifyAgentReply } from '../../../../../lib/chat/notifyAgentReply';
 
 export const dynamic = 'force-dynamic';
 
@@ -156,6 +157,20 @@ export async function POST(request: NextRequest) {
       });
 
       return created;
+    });
+
+    // AVISO AL DUEÑO DEL HILO. Va DESPUÉS de la transacción y sin `await`: la
+    // respuesta del agente ya está publicada y no debe quedar en vilo porque
+    // un endpoint de push esté lento o una suscripción esté vencida. Los
+    // errores se registran adentro; nunca se propagan al bot.
+    void notifyAgentReply({
+      idConversation: conversation.id,
+      idUser: conversation.idUser,
+      agentCode: agent.code,
+      agentName: agent.displayName,
+      agentAvatarUrl: agent.avatarUrl,
+      body,
+      attachmentCount: uploaded.length,
     });
 
     return jsonNoStore({ message: serializeMessage(message) }, { status: 201 });

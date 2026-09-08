@@ -28,13 +28,30 @@ export interface ChatAgentDto {
 
 export interface ChatAccessDto {
   canUseChat: boolean;
+  /** Solo administradores: habilita el mensaje masivo. La reja real está en el
+   *  endpoint; esto es únicamente para saber si pintar el botón. */
+  canBroadcast?: boolean;
   companies: ChatAgentCompanyDto[];
   agents: ChatAgentDto[];
 }
 
+/**
+ * Sub-agentes en curso. El tipo vive en lib/chat/status-tasks.ts, que es el
+ * único que valida y parsea ese JSON; aquí se re-exporta para que los
+ * componentes lo importen del mismo lugar que el resto de los DTO.
+ */
+export type { AgentTaskDto } from './status-tasks';
+import type { AgentTaskDto } from './status-tasks';
+
 export interface ChatStatusDto {
   state: string;
   label: string | null;
+  /**
+   * Sub-agentes en curso, para la tablita de "qué está corriendo". Opcional a
+   * propósito: una respuesta vieja (o un front desplegado antes que la API) no
+   * la trae, y la interfaz simplemente no pinta la tabla.
+   */
+  tasks?: AgentTaskDto[];
   updatedAt: string;
 }
 
@@ -164,11 +181,78 @@ export interface AgentStatusView {
   color: string;
   /** true mientras el agente está trabajando (anima el punto). */
   busy: boolean;
+  /**
+   * true cuando el estado dice "trabajando" pero lleva demasiado rato sin
+   * refrescarse. Ver ESTADO_RANCIO_MS.
+   */
+  stale?: boolean;
 }
+
+/**
+ * Cuánto puede pasar un estado "trabajando" sin refrescarse antes de que deje
+ * de creérsele.
+ *
+ * POR QUÉ EXISTE: el indicador lo publican los hooks del bot, y el hook `Stop`
+ * es el que lo baja al terminar. Si la sesión del bot muere de golpe —se le
+ * agota la cuota, se le vence la autenticación, se congela, se apaga la
+ * máquina— ese `Stop` NUNCA CORRE y el indicador se queda diciendo
+ * "trabajando…" para siempre. Nicolás lo reportó así: "el hook se quedó
+ * cargando", después de que a Troy se le acabó el consumo y los usuarios
+ * tuvieron que esperar hasta las 11 sin saberlo.
+ *
+ * Un indicador que miente es peor que no tener indicador: el usuario espera de
+ * más porque cree que hay alguien trabajando.
+ *
+ * ⚠️ EL UMBRAL NO MIDE LO QUE DURA LA TAREA, mide CUÁNTO LLEVA SIN REPORTAR.
+ * Nicolás hizo justo la objeción correcta: "pero si hay una tarea que demanda
+ * más de 5 minutos". Una tarea larga que sigue trabajando sigue reportando —los
+ * hooks refrescan el estado en CADA uso de herramienta—, así que no se vuelve
+ * rancia por durar. Se vuelve rancia por CALLARSE.
+ *
+ * El hueco real que queda es un turno que pasa mucho rato razonando sin tocar
+ * ninguna herramienta. Por eso el umbral es de DIEZ minutos y no de cinco, y por
+ * eso sube a VEINTE cuando el agente reporta sub-agentes en curso: unos
+ * sub-agentes trabajando son prueba de que la tarea está viva aunque el padre
+ * lleve rato sin publicar nada.
+ *
+ * Y por eso el aviso está redactado como "no hemos tenido novedades" y no como
+ * "está caído": ante la duda, se informa el hecho, no se acusa.
+ */
+export const ESTADO_RANCIO_MS = 10 * 60 * 1000;
+
+/** Con sub-agentes en curso se es más paciente: son prueba de trabajo vivo. */
+export const ESTADO_RANCIO_CON_SUBAGENTES_MS = 20 * 60 * 1000;
+
+/** ¿Este estado dice "trabajando" pero lleva demasiado sin refrescarse? */
+export function estadoEstaRancio(status: ChatStatusDto | null): boolean {
+  if (!status || status.state === 'idle') return false;
+  const marca = Date.parse(status.updatedAt);
+  if (Number.isNaN(marca)) return false;
+  const umbral =
+    status.tasks && status.tasks.length > 0
+      ? ESTADO_RANCIO_CON_SUBAGENTES_MS
+      : ESTADO_RANCIO_MS;
+  return Date.now() - marca > umbral;
+}
+
+/**
+ * Cuánto se espera, sin respuesta ninguna, antes de avisarle al usuario.
+ *
+ * Se mide desde SU último mensaje y solo aplica cuando el agente NO está
+ * reportando actividad fresca. Es más largo que el umbral del estado a
+ * propósito: primero se le da la oportunidad de que el propio indicador
+ * muestre que está trabajando.
+ */
+export const SIN_RESPUESTA_MS = 12 * 60 * 1000;
 
 export function describeAgentStatus(status: ChatStatusDto | null): AgentStatusView {
   if (!status || status.state === 'idle') {
     return { label: 'Disponible', color: 'gray', busy: false };
+  }
+  // Un "trabajando" viejo no se pinta como trabajando: se avisa. Ver
+  // ESTADO_RANCIO_MS para el porqué.
+  if (estadoEstaRancio(status)) {
+    return { label: 'Sin novedades hace rato', color: 'orange', busy: false, stale: true };
   }
   if (status.state === 'thinking') {
     return { label: status.label?.trim() || 'Pensando…', color: 'blue', busy: true };

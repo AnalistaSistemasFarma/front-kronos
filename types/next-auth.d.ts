@@ -12,6 +12,8 @@ declare module 'next-auth' {
       /** NIT del proveedor (solo presente cuando role === 'supplier'). */
       nit?: string;
       themePalette?: string;
+    uiFont?: string;
+      uiFont?: string;
       colorScheme?: string;
     };
   }
