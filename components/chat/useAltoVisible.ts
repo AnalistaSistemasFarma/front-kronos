@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 /**
  * Publica el alto REALMENTE visible de la pantalla en la variable CSS
@@ -18,7 +18,12 @@ import { useEffect } from 'react';
  * medida. En navegadores sin esa API no se escribe nada y el CSS cae a su
  * valor por defecto (`100dvh`), que es el comportamiento de antes.
  */
-export function useAltoVisible() {
+export function useAltoVisible(alCambiar?: () => void) {
+  // La referencia evita reinstalar los escuchas en cada render por el cambio
+  // de identidad de la función.
+  const avisar = useRef(alCambiar);
+  avisar.current = alCambiar;
+
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -29,6 +34,7 @@ export function useAltoVisible() {
       // `Math.round` a propósito: los decimales del visual viewport hacen
       // parpadear el layout en cada micro-scroll.
       raiz.style.setProperty('--alto-visible', `${Math.round(vv.height)}px`);
+      avisar.current?.();
     };
 
     actualizar();

@@ -1196,12 +1196,21 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
    cuando el teclado sale en iOS, y por eso el compositor terminaba debajo del
    teclado y tocaba hacer scroll. Si no hay hook o el navegador no soporta la
    API, cae a `dvh` y se comporta como antes. */
+/* Sin márgenes ni ancho máximo: con la conversación sola, el hilo va de borde
+   a borde. El contenedor normal (max-w-7xl + padding) dejaba franjas a los
+   lados y arriba, y en el celular eso se ve como una tarjeta metida dentro de
+   la página en vez de una pantalla de chat. */
+.chat-page-shell--completa {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
 .chat-page-thread--completa {
   position: sticky;
   top: var(--app-header-height);
+  border: none;
   border-radius: 0;
-  border-left: none;
-  border-right: none;
   height: calc(100dvh - var(--app-header-height));
   height: calc(var(--alto-visible, 100dvh) - var(--app-header-height));
 }
