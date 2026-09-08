@@ -1365,16 +1365,22 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   background-color: var(--app-surface-raised, var(--surface-muted));
   border-color: var(--app-border, var(--border-subtle));
   color: var(--app-text, var(--foreground));
-  /* +2 pt, igual que el cuerpo del mensaje: uno escribe y lee con el mismo
-     tamaño. */
-  font-size: 15px;
+  /* 16 px NO es capricho de tamaño: es el umbral de Safari en iPhone. Con
+     cualquier cosa por debajo, al enfocar la caja hace zoom solo, y ese zoom
+     corre el viewport y descoloca el chat entero. Estaba en 15 px con un
+     parche que solo subía a 16 por debajo de 768 px; el parche no bastó y
+     además se leía chiquito en el computador. Ahora son 16 px SIEMPRE, que es
+     lo que Nicolás pidió y de paso mata el zoom en todos los anchos
+     (2026-09-08). No la baje de 16. */
+  font-size: 16px;
   /* Cápsula, como la caja de WhatsApp. Con un renglón queda redonda y al crecer
      se ve como una caja de bordes suaves. */
   border-radius: 18px;
-  /* Vertical apretado: con `minRows={1}` el alto lo pone este padding, y es lo
-     que baja la fila de ~78 px a ~38 px. */
-  padding: 7px 14px;
-  min-height: 36px;
+  /* El aire de adentro. Subió de 7 a 10 px y NO le cuesta alto a la
+     conversación: la fila la gobierna el botón de enviar, que mide 46 px, y la
+     caja sigue quedando por debajo. */
+  padding: 10px 16px;
+  min-height: 42px;
   /* El `autosize` de Mantine cambia el alto de golpe cada vez que el texto
      salta de renglón; con la transición el crecimiento se siente continuo. */
   transition: height 130ms ease;
@@ -1386,10 +1392,12 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
    corre el viewport y descoloca todo lo que esté anclado a la pantalla. Es la
    otra mitad del reporte "se pierde el máximo del chat… cuando sale el teclado
    se vuelve loco".
-   La caja estaba en 15 px, justo por debajo del umbral. En pantalla angosta
-   sube a 16 px —la diferencia no se nota— y Safari deja de hacer zoom. */
+   La caja del compositor ya NO depende de esta regla: se subió a 16 px en su
+   propia declaración, porque este parche por ancho no alcanzó (Nicolás seguía
+   viendo el zoom en el iPhone) y además dejaba la letra chiquita en el
+   computador. Esta regla se queda por los OTROS campos del panel, que sí
+   siguen con el tamaño de Mantine. */
 @media (max-width: 768px) {
-  .chat-composer__input,
   .chat-panel input,
   .chat-panel textarea {
     font-size: 16px;
