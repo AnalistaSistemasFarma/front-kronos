@@ -15,7 +15,6 @@ import {
 import {
   IconBold,
   IconCode,
-  IconDots,
   IconEye,
   IconEyeOff,
   IconItalic,
@@ -426,24 +425,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           />
         )}
 
-        <Tooltip label='Adjuntar archivos' withArrow>
-          <ActionIcon
-            variant='subtle'
-            color='gray'
-            size={34}
-            radius='xl'
-            disabled={disabled || files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
-            onClick={() => fileInputRef.current?.click()}
-            aria-label='Adjuntar archivos'
-          >
-            <IconPaperclip size={18} />
-          </ActionIcon>
-        </Tooltip>
-
-        {/* Lo secundario, detrás de un solo botón. El Tooltip NO envuelve al
-            Menu.Target: el target necesita la referencia del botón y meter otro
-            componente en medio rompe la apertura del menú. */}
-        <Menu position='top-end' withArrow shadow='md' width={215}>
+        {/* UN SOLO botón secundario, como WhatsApp: el clip abre todo.
+            Antes eran dos (clip y ⋯) y Nicolás lo pidió explícito: "solo hay
+            un botón de clip y ese sí muestra todo". Adjuntar queda de primero
+            porque es lo que la gente viene a buscar cuando toca un clip. */}
+        <Menu position='top-end' withArrow shadow='md' width={225}>
           <Menu.Target>
             <ActionIcon
               variant='subtle'
@@ -451,13 +437,21 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
               size={34}
               radius='xl'
               disabled={disabled}
-              aria-label='Más opciones'
-              title='Más opciones'
+              aria-label='Adjuntar y más opciones'
+              title='Adjuntar y más opciones'
             >
-              <IconDots size={18} />
+              <IconPaperclip size={19} />
             </ActionIcon>
           </Menu.Target>
           <Menu.Dropdown className='chat-surface'>
+            <Menu.Item
+              leftSection={<IconPaperclip size={14} />}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
+            >
+              Adjuntar archivos
+            </Menu.Item>
+            <Menu.Divider />
             <Menu.Label>Formato</Menu.Label>
             <Menu.Item
               leftSection={<IconBold size={14} />}
@@ -500,9 +494,12 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
 
         {/* El recordatorio de Enter / Shift+Enter era un renglón entero; ahora
             vive en el globo de este botón. */}
+        {/* Grande a propósito (46 px contra los 34 de los secundarios): es la
+            acción principal y en el celular se toca con el pulgar. Es el
+            círculo verde de WhatsApp. */}
         <Tooltip label='Enviar · Enter envía, Shift+Enter salta de línea' withArrow>
           <ActionIcon
-            size={34}
+            size={46}
             radius='xl'
             variant='filled'
             color='blue'
@@ -515,7 +512,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             onClick={() => void submit()}
             aria-label='Enviar mensaje'
           >
-            <IconSend size={16} />
+            <IconSend size={20} />
           </ActionIcon>
         </Tooltip>
       </Group>
