@@ -29,8 +29,8 @@ import { useChatConversation } from './useChatConversation';
 import { useAltoVisible } from './useAltoVisible';
 import {
   describeAgentStatus,
-  ESTADO_RANCIO_MS,
   formatChatTime,
+  SIN_RESPUESTA_MS,
   type ChatAgentDto,
   type ChatMessageDto,
 } from '../../lib/chat/client';
@@ -227,7 +227,7 @@ function SinRespuesta({
   const desde = Date.parse(ultimoMensaje.createdAt);
   if (Number.isNaN(desde)) return null;
   const transcurrido = Date.now() - desde;
-  if (transcurrido < ESTADO_RANCIO_MS) return null;
+  if (transcurrido < SIN_RESPUESTA_MS) return null;
 
   const minutos = Math.floor(transcurrido / 60_000);
   const cuanto =
@@ -244,10 +244,11 @@ function SinRespuesta({
       aria-live='polite'
     >
       <Text size='xs'>
-        Su mensaje llegó, pero <b>{agent.displayName}</b> no ha respondido en {cuanto}. Puede que
-        haya agotado su cuota de la sesión, que se le haya vencido el acceso o que esté fuera de
-        servicio. {view.stale ? 'Su indicador quedó colgado, que es otra señal de lo mismo. ' : ''}
-        Si es urgente, avísele a Nicolás Rivera.
+        Su mensaje llegó, pero no hemos tenido novedades de <b>{agent.displayName}</b> hace{' '}
+        {cuanto}. Si estaba en una tarea larga puede seguir trabajando; también puede que haya
+        agotado su cuota de la sesión, que se le haya vencido el acceso o que esté fuera de
+        servicio.{view.stale ? ' Su indicador quedó colgado, que apunta a lo segundo.' : ''} Si es
+        urgente, avísele a Nicolás Rivera.
       </Text>
     </Alert>
   );
