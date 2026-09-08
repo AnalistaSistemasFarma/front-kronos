@@ -1,15 +1,23 @@
 import { Suspense } from 'react';
 import { Center, Loader } from '@mantine/core';
-import ChatGroups from '../../../../../../components/chat/ChatGroups';
+import ChatWorkspace from '../../../../../../components/chat/ChatWorkspace';
 
 /**
  * UN grupo abierto — /process/chat/grupo/12.
  *
- * Es el destino de la notificación push de un grupo (ver
+ * Abre LA MISMA pantalla de chats con el grupo ya seleccionado, igual que
+ * /process/chat/<code> hace con un asistente. Los grupos viven en la misma
+ * lista que los asistentes (pedido de Nicolás, 2026-09-08: "quiero ordenar es
+ * como la vista chat, pero que ahí aparezcan los grupos también"), así que esta
+ * ruta no es otra pantalla: es un enlace directo a un elemento de esa lista.
+ *
+ * Es además el destino de la notificación push de un grupo (ver
  * lib/chat/notifyAgentReply.ts): al tocar el aviso hay que caer DENTRO del
- * grupo, no en la lista. Un id que no sea suyo abre la pantalla y el servidor
- * responde 404 al pedir el hilo, así que se ve el mensaje de "no forma parte de
- * este grupo" — el permiso lo decide el servidor, nunca el id de la URL.
+ * grupo, no en la lista.
+ *
+ * Un id que no sea suyo no aparece en su bandeja, así que la pantalla se
+ * comporta como si no existiera. El permiso lo decide el servidor
+ * (lib/chat/groups.ts), nunca el id de la URL.
  */
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +35,9 @@ export default async function ChatGroupPage({ params }: { params: Promise<{ id: 
         </div>
       }
     >
-      <ChatGroups initialGroupId={Number.isInteger(numero) && numero > 0 ? numero : undefined} />
+      <ChatWorkspace
+        initialGroupId={Number.isInteger(numero) && numero > 0 ? numero : undefined}
+      />
     </Suspense>
   );
 }
