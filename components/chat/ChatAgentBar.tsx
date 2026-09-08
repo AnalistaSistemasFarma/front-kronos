@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
+import { useMediaQuery } from '@mantine/hooks';
 import {
   ActionIcon,
   Box,
@@ -47,7 +49,12 @@ import {
  */
 export default function ChatAgentBar() {
   const { status } = useSession();
+  const router = useRouter();
   const overview = useChatOverview();
+  // Mismo corte que usa AgentChatPanel para considerarse "pantalla pequeña":
+  // si el panel ya se comporta distinto por debajo de 768 px, la barra no
+  // puede usar otro umbral o quedarían en desacuerdo.
+  const enPantallaPequena = useMediaQuery('(max-width: 768px)');
   const [mounted, setMounted] = useState(false);
   const [openAgentId, setOpenAgentId] = useState<number | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -88,6 +95,14 @@ export default function ChatAgentBar() {
 
   const handleClick = (agent: ChatAgentDto) => {
     setOverflowOpen(false);
+    // En el celular el panel flotante pelea con el teclado y con el poco alto
+    // disponible. Allá el avatar lleva DERECHO a la página del asistente, que
+    // está hecha para pantalla angosta. Pedido de Nicolás (2026-09-08).
+    if (enPantallaPequena) {
+      setOpenAgentId(null);
+      router.push(`/process/chat/${encodeURIComponent(agent.code)}`);
+      return;
+    }
     setOpenAgentId((current) => (current === agent.idAgent ? null : agent.idAgent));
   };
 
