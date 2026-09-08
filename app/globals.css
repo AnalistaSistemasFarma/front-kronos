@@ -1052,7 +1052,7 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
 .chat-bubble__meta {
   margin-top: 4px;
   opacity: 0.75;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .chat-bubble--user .chat-bubble__meta,
@@ -1114,13 +1114,94 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   Suavizado del chat
+   ──────────────────────────────────────────────────────────────────────
+   Nicolás (2026-09-07): "las animaciones se sienten un poco rústicas,
+   incluso escribiendo". Lo que se sentía duro eran los saltos secos: la
+   burbuja que aparece de golpe, la caja que crece de un tirón, el velo del
+   arrastre que se enciende sin transición.
+
+   Todo va con duraciones cortas (130-200 ms) y curvas de salida: lo justo
+   para que el ojo siga el cambio sin que la interfaz se sienta lenta. Y
+   todo está envuelto en `prefers-reduced-motion`, que es una preferencia de
+   accesibilidad del sistema: quien la activa NO debe ver nada de esto.
+   ══════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: no-preference) {
+  /* La burbuja entra subiendo apenas. Solo se anima al MONTARSE, así que en
+     un hilo largo no hay coste: los mensajes viejos ya están en el DOM. */
+  .chat-bubble {
+    animation: chat-burbuja-entra 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .chat-attachment--draft {
+    animation: chat-burbuja-entra 150ms ease-out both;
+  }
+
+  .chat-thread__dropzone {
+    animation: chat-velo-entra 140ms ease-out both;
+  }
+
+  .chat-tasks {
+    animation: chat-burbuja-entra 160ms ease-out both;
+  }
+
+  /* Botones de la barra y del envío: el color y el hundido al presionar. */
+  .chat-composer .mantine-ActionIcon-root {
+    transition:
+      background-color 140ms ease,
+      color 140ms ease,
+      transform 110ms ease;
+  }
+
+  .chat-composer .mantine-ActionIcon-root:active {
+    transform: scale(0.94);
+  }
+
+  .chat-agent-card {
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      transform 140ms ease;
+  }
+
+  .chat-agent-card:active {
+    transform: scale(0.99);
+  }
+}
+
+@keyframes chat-burbuja-entra {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes chat-velo-entra {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* ── Caja de escritura ── */
 .chat-composer__input {
   background-color: var(--app-surface-raised, var(--surface-muted));
   border-color: var(--app-border, var(--border-subtle));
   color: var(--app-text, var(--foreground));
-  font-size: 13px;
+  /* +2 pt, igual que el cuerpo del mensaje: uno escribe y lee con el mismo
+     tamaño. */
+  font-size: 15px;
   border-radius: 12px;
+  /* El `autosize` de Mantine cambia el alto de golpe cada vez que el texto
+     salta de renglón; con la transición el crecimiento se siente continuo. */
+  transition: height 130ms ease;
 }
 
 .chat-composer__preview {
@@ -1289,8 +1370,11 @@ body.chat-inmersivo .chat-page-thread--completa {
 
 /* Markdown de los mensajes */
 .chat-md {
-  font-size: 13.5px;
-  line-height: 1.55;
+  /* +2 pt sobre los 13.5 originales, a pedido de Nicolás (2026-09-07): en el
+     celular el texto se leía chico. La interlínea sube un poco con él para que
+     el bloque no quede apretado. */
+  font-size: 15.5px;
+  line-height: 1.6;
 }
 
 .chat-md__p {
