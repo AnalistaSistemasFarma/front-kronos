@@ -228,7 +228,13 @@ export default function ChatWorkspace({ initialAgentCode }: { initialAgentCode?:
 
   return (
     <div className='app-page-shell app-page-shell--fill ios-process-hub min-h-screen'>
-      <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
+      <div
+        className={
+          conversacionSola
+            ? 'chat-page-shell--completa'
+            : 'max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'
+        }
+      >
         <header className='mb-6' hidden={Boolean(conversacionSola && selectedAgent)}>
           <h1 className='ios-process-hub__title text-3xl sm:text-4xl mb-2'>Asistentes IA</h1>
           <p className='ios-process-hub__subtitle mb-5'>
