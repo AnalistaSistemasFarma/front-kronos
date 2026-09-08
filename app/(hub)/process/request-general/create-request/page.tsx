@@ -1741,7 +1741,19 @@ function RequestBoard() {
               </Text>
             </Group>
           }
-          size='xl'
+          /* 90 % del ancho de la ventana, no 'xl' (que son 900 px fijos).
+             Pedido de Nicolás Rojas, y es el MISMO cambio de su commit 9309276
+             del PR #241: "hacer más grande el modal de creación, ya que si
+             tenemos campos de tabla que son extensos en columnas puedan
+             visualizarse sin ningún problema".
+             El commit original no se pudo traer entero porque su otra mitad
+             —un refactor del reseteo del formulario— choca con lo que `testing`
+             reescribió al entrar los campos de tabla dinámicos y Gestión
+             Documental. Esta es su intención aplicada sobre el código de hoy.
+             La tabla ya venía con su propio desplazamiento horizontal
+             (ScrollArea en TableFieldInput), así que con el ancho extra las
+             columnas se ven sin pelear. */
+          size='90%'
           radius='md'
           overlayProps={{ blur: 4 }}
         >

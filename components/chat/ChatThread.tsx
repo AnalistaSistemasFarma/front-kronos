@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
+  ActionIcon,
   Alert,
   Box,
   Button,
@@ -11,8 +12,15 @@ import {
   ScrollArea,
   Stack,
   Text,
+  Tooltip,
 } from '@mantine/core';
-import { IconAlertCircle, IconDownload, IconMessage2, IconUpload } from '@tabler/icons-react';
+import {
+  IconAlertCircle,
+  IconArrowDown,
+  IconDownload,
+  IconMessage2,
+  IconUpload,
+} from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import AgentTaskTable from './AgentTaskTable';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
@@ -395,6 +403,26 @@ export default function ChatThread({
     setStickToBottom(distanceToBottom < 80);
   };
 
+  /**
+   * Bajar del todo, a mano.
+   *
+   * Pedido de Nicolás (2026-09-08): "a veces se sube pero toca bajar de nuevo
+   * al mensaje más reciente". Subir a leer algo viejo desactiva el
+   * autodesplazamiento a propósito —para no arrancarle la lectura—, y entonces
+   * volver abajo era trabajo manual: en una conversación larga, mucho trabajo.
+   *
+   * El botón solo aparece cuando uno NO está abajo, que es cuando sirve. Al
+   * pulsarlo, además de bajar, se vuelve a activar el pegado al fondo: quien
+   * baja a propósito quiere seguir la conversación en vivo.
+   */
+  const bajarDelTodo = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    setStickToBottom(true);
+    stickToBottomRef.current = true;
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
+  }, []);
+
   return (
     <Box
       className={`chat-thread${dragging ? ' chat-thread--dragging' : ''}`}
@@ -483,6 +511,24 @@ export default function ChatThread({
         >
           <Text size='xs'>{thread.error}</Text>
         </Alert>
+      )}
+
+      {/* Flotante sobre la conversación, no en la fila del compositor: ahí
+          taparía la caja de escribir. Se esconde solo cuando ya está abajo. */}
+      {!stickToBottom && (
+        <Tooltip label='Bajar al mensaje más reciente' withArrow position='left'>
+          <ActionIcon
+            className='chat-thread__bajar'
+            variant='filled'
+            color='blue'
+            radius='xl'
+            size={38}
+            onClick={bajarDelTodo}
+            aria-label='Bajar al mensaje más reciente'
+          >
+            <IconArrowDown size={20} />
+          </ActionIcon>
+        </Tooltip>
       )}
 
       <Box className='chat-thread__composer'>
