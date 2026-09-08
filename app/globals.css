@@ -1365,8 +1365,27 @@ body.chat-inmersivo .app-page-shell {
   padding-top: 0;
 }
 
+/* En modo inmersivo la página NO se desplaza: la conversación es la pantalla
+   completa y cada columna trae su propio desplazamiento. Sin esto el navegador
+   podía correr el documento para dejar el campo a la vista —al adjuntar un
+   archivo, la ficha empuja la caja hacia abajo y el navegador reacciona— y el
+   bloque entero se subía, dejando un vacío entre la caja y el teclado. */
+body.chat-inmersivo {
+  overflow: hidden;
+}
+
+/* Anclado a lo que DE VERDAD se ve, no al viewport de diseño.
+   `sticky` no sirve aquí: solo se pega mientras le quede recorrido dentro de
+   su contenedor, y en modo inmersivo el contenedor mide lo mismo que el
+   elemento, así que no tenía dónde pegarse y se iba con el desplazamiento.
+   `fixed` más el desplazamiento del visual viewport lo dejan calcado sobre el
+   área visible, salga o no el teclado. */
 body.chat-inmersivo .chat-page-thread--completa {
+  position: fixed;
   top: 0;
+  top: var(--desplazamiento-visible, 0px);
+  left: 0;
+  right: 0;
   height: 100dvh;
   height: var(--alto-visible, 100dvh);
 }
