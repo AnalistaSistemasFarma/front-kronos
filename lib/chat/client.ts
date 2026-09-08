@@ -203,20 +203,47 @@ export interface AgentStatusView {
  * Un indicador que miente es peor que no tener indicador: el usuario espera de
  * más porque cree que hay alguien trabajando.
  *
- * Cinco minutos es generoso a propósito: los hooks refrescan en cada uso de
- * herramienta, pero un turno largo de razonamiento puro puede pasar minutos sin
- * tocar ninguna. Con este umbral no se declara caído a un agente que sí está
- * pensando.
+ * ⚠️ EL UMBRAL NO MIDE LO QUE DURA LA TAREA, mide CUÁNTO LLEVA SIN REPORTAR.
+ * Nicolás hizo justo la objeción correcta: "pero si hay una tarea que demanda
+ * más de 5 minutos". Una tarea larga que sigue trabajando sigue reportando —los
+ * hooks refrescan el estado en CADA uso de herramienta—, así que no se vuelve
+ * rancia por durar. Se vuelve rancia por CALLARSE.
+ *
+ * El hueco real que queda es un turno que pasa mucho rato razonando sin tocar
+ * ninguna herramienta. Por eso el umbral es de DIEZ minutos y no de cinco, y por
+ * eso sube a VEINTE cuando el agente reporta sub-agentes en curso: unos
+ * sub-agentes trabajando son prueba de que la tarea está viva aunque el padre
+ * lleve rato sin publicar nada.
+ *
+ * Y por eso el aviso está redactado como "no hemos tenido novedades" y no como
+ * "está caído": ante la duda, se informa el hecho, no se acusa.
  */
-export const ESTADO_RANCIO_MS = 5 * 60 * 1000;
+export const ESTADO_RANCIO_MS = 10 * 60 * 1000;
+
+/** Con sub-agentes en curso se es más paciente: son prueba de trabajo vivo. */
+export const ESTADO_RANCIO_CON_SUBAGENTES_MS = 20 * 60 * 1000;
 
 /** ¿Este estado dice "trabajando" pero lleva demasiado sin refrescarse? */
 export function estadoEstaRancio(status: ChatStatusDto | null): boolean {
   if (!status || status.state === 'idle') return false;
   const marca = Date.parse(status.updatedAt);
   if (Number.isNaN(marca)) return false;
-  return Date.now() - marca > ESTADO_RANCIO_MS;
+  const umbral =
+    status.tasks && status.tasks.length > 0
+      ? ESTADO_RANCIO_CON_SUBAGENTES_MS
+      : ESTADO_RANCIO_MS;
+  return Date.now() - marca > umbral;
 }
+
+/**
+ * Cuánto se espera, sin respuesta ninguna, antes de avisarle al usuario.
+ *
+ * Se mide desde SU último mensaje y solo aplica cuando el agente NO está
+ * reportando actividad fresca. Es más largo que el umbral del estado a
+ * propósito: primero se le da la oportunidad de que el propio indicador
+ * muestre que está trabajando.
+ */
+export const SIN_RESPUESTA_MS = 12 * 60 * 1000;
 
 export function describeAgentStatus(status: ChatStatusDto | null): AgentStatusView {
   if (!status || status.state === 'idle') {
