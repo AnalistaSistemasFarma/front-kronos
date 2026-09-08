@@ -1247,6 +1247,22 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   transition: height 130ms ease;
 }
 
+/* ── iOS: el ZOOM AUTOMÁTICO al enfocar la caja ──
+   Safari en iPhone hace zoom sobre cualquier campo con letra MENOR a 16 px en
+   cuanto recibe el foco. Y ese zoom no es cosmético: encoge el área visible,
+   corre el viewport y descoloca todo lo que esté anclado a la pantalla. Es la
+   otra mitad del reporte "se pierde el máximo del chat… cuando sale el teclado
+   se vuelve loco".
+   La caja estaba en 15 px, justo por debajo del umbral. En pantalla angosta
+   sube a 16 px —la diferencia no se nota— y Safari deja de hacer zoom. */
+@media (max-width: 768px) {
+  .chat-composer__input,
+  .chat-panel input,
+  .chat-panel textarea {
+    font-size: 16px;
+  }
+}
+
 .chat-composer__preview {
   min-height: 66px;
   padding: 8px 12px;

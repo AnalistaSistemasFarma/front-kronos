@@ -78,7 +78,27 @@ export default function AgentChatPanel({
                 // del celular. Sin eso el compositor queda debajo del teclado.
                 height: aPantallaCompleta
                   ? 'var(--alto-visible, 100dvh)'
-                  : 'min(640px, calc(100dvh - 96px))',
+                  : 'min(640px, calc(var(--alto-visible, 100dvh) - 96px))',
+                // EL ALTO NO ALCANZA — hacía falta también el DESPLAZAMIENTO.
+                //
+                // Reporte de un usuario en iPhone: "cuando se le da al cuadro
+                // para escribir se pierde el máximo del chat, no se respetan
+                // los tamaños, y cuando sale el teclado se vuelve loco".
+                //
+                // La causa: al enfocar la caja, iOS corre el *visual viewport*
+                // hacia abajo dentro del de diseño para dejar el campo a la
+                // vista (`vv.offsetTop`). Este panel es `fixed` anclado al
+                // viewport de DISEÑO, así que se queda arriba: su parte
+                // superior se sale de la pantalla y por debajo asoma la página
+                // que está detrás. El alto correcto no sirve de nada si el
+                // bloque está corrido.
+                //
+                // `--desplazamiento-visible` la publica el mismo hook con
+                // `vv.offsetTop`. Con el margen, el panel baja exactamente lo
+                // que bajó el área visible y queda calcado sobre ella. Va como
+                // margen y no como `transform` porque la animación de entrada
+                // del `Transition` ya usa `transform`.
+                marginTop: aPantallaCompleta ? 'var(--desplazamiento-visible, 0px)' : undefined,
                 borderRadius: aPantallaCompleta ? 0 : undefined,
                 display: 'flex',
                 flexDirection: 'column',
