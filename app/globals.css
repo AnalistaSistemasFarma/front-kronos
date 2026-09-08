@@ -1361,6 +1361,35 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
 }
 
 /* ── Caja de escritura ── */
+/* ── La fila del compositor NO puede desbordar ──
+   Nicolás, desde Android: "el botón de enviar está haciendo que aparezcan
+   barras de scroll horizontal" — en la captura el círculo de enviar sale
+   cortado contra el borde derecho.
+
+   La regla del compositor es: **la caja de texto cede, los botones nunca**.
+   Los botones llevan su tamaño fijo (34, 34 y 46 px) y el texto se queda con
+   lo que sobre. Sin `flex: 0 0 auto` los botones también son encogibles y el
+   reparto queda a merced de los tamaños mínimos de cada uno; sin `min-width:0`
+   en la fila, un hijo con contenido ancho la estira por dentro.
+
+   El `overflow-x: clip` del contenedor es un tope de seguridad, no el arreglo:
+   si algo vuelve a crecer de más, que se quede adentro en vez de sacarle una
+   barra horizontal a toda la página. */
+.chat-composer,
+.chat-composer > .mantine-Group-root {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-composer .mantine-ActionIcon-root {
+  flex: 0 0 auto;
+}
+
+.chat-thread__composer {
+  min-width: 0;
+  overflow-x: clip;
+}
+
 .chat-composer__input {
   background-color: var(--app-surface-raised, var(--surface-muted));
   border-color: var(--app-border, var(--border-subtle));
