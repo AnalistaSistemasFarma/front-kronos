@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
@@ -47,9 +47,11 @@ import {
   findAgentByRouteKey,
   formatChatTime,
   groupAgentsByCompany,
+  MIN_SEARCH_CHARS,
   toPlainPreview,
   type ChatAgentDto,
   type ChatConversationDto,
+  type ChatSearchHit,
 } from '../../lib/chat/client';
 
 /**
@@ -258,6 +260,12 @@ export default function ChatWorkspace({
   const miId = session?.user?.id;
 
   const [search, setSearch] = useState('');
+  // Resultados del BUSCADOR DE MENSAJES. La misma caja hace dos cosas: filtra
+  // la lista por nombre —al instante, sin red— y busca dentro de los mensajes
+  // —contra el servidor, que es el único que sabe qué puede ver esta persona—.
+  const [resultados, setResultados] = useState<ChatSearchHit[]>([]);
+  const [buscandoMensajes, setBuscandoMensajes] = useState(false);
+  const abortoBusqueda = useRef<AbortController | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   // LA SELECCIÓN ES UNA SOLA COSA, y por eso vive en UN SOLO estado.
   //
@@ -381,6 +389,44 @@ export default function ChatWorkspace({
     };
   }, [inmersivo]);
 
+  /**
+   * Busca en los mensajes mientras se escribe.
+   *
+   * Con espera de 300 ms y cancelando la petición anterior: escribir "cargue"
+   * son seis pulsaciones, y sin esto serían seis consultas de las que solo
+   * importa la última —y la que llegue tarde sobrescribiría a la buena—.
+   */
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < MIN_SEARCH_CHARS) {
+      abortoBusqueda.current?.abort();
+      setResultados([]);
+      setBuscandoMensajes(false);
+      return;
+    }
+
+    setBuscandoMensajes(true);
+    const reloj = window.setTimeout(() => {
+      abortoBusqueda.current?.abort();
+      const control = new AbortController();
+      abortoBusqueda.current = control;
+
+      fetch(`/api/chat/search?q=${encodeURIComponent(q)}`, {
+        signal: control.signal,
+        cache: 'no-store',
+      })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+        .then((data) => setResultados(Array.isArray(data?.results) ? data.results : []))
+        .catch((error) => {
+          // Cancelar es lo normal aquí, no un fallo: no se pinta nada.
+          if ((error as Error)?.name !== 'AbortError') setResultados([]);
+        })
+        .finally(() => setBuscandoMensajes(false));
+    }, 300);
+
+    return () => window.clearTimeout(reloj);
+  }, [search]);
+
   // El código del agente también puede llegar por la URL (?agent=orus), que es
   // lo que usa el botón "abrir en la página de chats" del panel flotante.
   useEffect(() => {
@@ -502,6 +548,82 @@ export default function ChatWorkspace({
   // Las carpetas por empresa. `comoLista` las apila en una sola columna: es lo
   // que necesita la barra lateral del escritorio, donde no caben tarjetas de
   // dos columnas.
+  /**
+   * Abrir la conversación de un resultado.
+   *
+   * Un grupo se abre por su id; un hilo directo, buscando el agente en la
+   * bandeja y pasando por `selectAgent` —no tocando la selección a mano— para
+   * que abrir desde el buscador y abrir desde la lista hagan exactamente lo
+   * mismo. Si el agente ya no está en su bandeja (le revocaron el permiso
+   * entre la búsqueda y el clic), no pasa nada: el servidor tampoco lo
+   * dejaría entrar.
+   */
+  const abrirResultado = (hit: ChatSearchHit) => {
+    if (hit.kind === 'group') {
+      selectGroup(hit.idConversation);
+      return;
+    }
+    const agente = overview.agents.find((a) => a.code === hit.agentCode);
+    if (agente) selectAgent(agente);
+  };
+
+  /**
+   * Los MENSAJES encontrados, arriba de todo mientras se busca.
+   *
+   * Va primero porque cuando uno escribe tres letras o más ya no está
+   * escogiendo con quién hablar: está buscando algo que se dijo.
+   */
+  const renderResultados = (comoLista: boolean) => {
+    if (search.trim().length < MIN_SEARCH_CHARS) return null;
+
+    return (
+      <Box mb={comoLista ? 'md' : 'lg'} className='chat-folder'>
+        <Group gap='xs' mb='sm' className='chat-folder__header' wrap='nowrap'>
+          <IconSearch size={18} className='chat-folder__icon' />
+          <Text fw={700} size='sm'>
+            Mensajes
+          </Text>
+          {buscandoMensajes ? (
+            <Loader size={12} />
+          ) : (
+            <Badge size='xs' variant='light' color='gray'>
+              {resultados.length}
+            </Badge>
+          )}
+        </Group>
+
+        {!buscandoMensajes && resultados.length === 0 ? (
+          <Text size='xs' className='chat-text-muted'>
+            Ningún mensaje con “{search.trim()}”.
+          </Text>
+        ) : (
+          <SimpleGrid cols={1} spacing='xs'>
+            {resultados.map((hit) => (
+              <UnstyledButton
+                key={hit.idMessage}
+                onClick={() => abrirResultado(hit)}
+                className='chat-agent-card chat-agent-card--compact'
+                aria-label={`Abrir ${hit.conversationTitle}`}
+              >
+                <Group gap={6} wrap='nowrap' justify='space-between'>
+                  <Text size='xs' fw={600} lineClamp={1}>
+                    {hit.conversationTitle} · {hit.author}
+                  </Text>
+                  <Text size='xs' className='chat-text-muted' style={{ flexShrink: 0 }}>
+                    {formatChatTime(hit.createdAt)}
+                  </Text>
+                </Group>
+                <Text size='xs' className='chat-text-muted' lineClamp={2}>
+                  {hit.snippet}
+                </Text>
+              </UnstyledButton>
+            ))}
+          </SimpleGrid>
+        )}
+      </Box>
+    );
+  };
+
   /**
    * La carpeta de GRUPOS, que va ANTES de las de empresa.
    *
@@ -840,6 +962,7 @@ export default function ChatWorkspace({
             />
           </div>
           <div className='chat-escritorio__lista'>
+            {renderResultados(true)}
             {renderGrupos(true)}
             {renderCarpetas(true)}
             {pieDeLista}
@@ -961,6 +1084,7 @@ export default function ChatWorkspace({
           {/* Columna de carpetas */}
           {!(conversacionSola && hayAlgoAbierto) && (
             <Grid.Col span={{ base: 12, lg: hayAlgoAbierto ? 5 : 12 }}>
+              {renderResultados(false)}
               {renderGrupos(false)}
               {renderCarpetas(false)}
               {pieDeLista}
