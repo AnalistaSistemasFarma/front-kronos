@@ -28,6 +28,7 @@ export default function AgentAvatar({
   size = 34,
   showStatus = true,
   withTooltip = true,
+  working = false,
 }: {
   code: string;
   displayName: string;
@@ -37,6 +38,12 @@ export default function AgentAvatar({
   size?: number;
   showStatus?: boolean;
   withTooltip?: boolean;
+  /**
+   * El agente está atendiendo un turno CON QUIEN SEA. Pinta un aro alrededor
+   * del avatar. Es una señal global, a diferencia del punto de estado, que
+   * habla del hilo de quien mira.
+   */
+  working?: boolean;
 }) {
   const view = describeAgentStatus(status);
 
@@ -68,13 +75,21 @@ export default function AgentAvatar({
    * separen del avatar y entre sí.
    */
   const puntoTamano = Math.max(9, Math.round(size * 0.28));
+  // El aro sale con la señal GLOBAL (`working`) o, si no la mandan, con el
+  // estado del hilo. Así funciona igual en la barra —donde sí hay señal
+  // global— y en las pantallas que todavía solo conocen su conversación.
+  const conAro = working || view.busy;
   const marcas = (
     <div className='agent-avatar' style={{ width: size, height: size }}>
       {avatar}
 
+      {/* Va DESPUÉS del avatar y sin capturar el puntero: es decoración
+          encima, no un elemento con el que se interactúe. */}
+      {conAro && <span className='agent-avatar__aro' aria-hidden='true' />}
+
       {showStatus && (
         <span
-          className={`agent-avatar__estado${view.busy ? ' agent-avatar__estado--ocupado' : ''}`}
+          className='agent-avatar__estado'
           style={{
             width: puntoTamano,
             height: puntoTamano,

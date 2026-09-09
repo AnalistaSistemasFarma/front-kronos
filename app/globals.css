@@ -1686,22 +1686,42 @@ body.chat-inmersivo .chat-page-thread--completa {
   box-sizing: content-box;
 }
 
-/* Late mientras el agente trabaja: sin esto el chat parece congelado. */
+
+/* ── Aro de "trabajando" ──
+   Pedido de Nicolás (2026-09-09): un aro alrededor de la foto del agente
+   mientras atiende un turno, visible para TODOS y no solo para quien tiene el
+   hilo abierto — para eso ya está el indicador de la conversación.
+
+   Va como elemento aparte y no como `border` del avatar: un borde le cambiaría
+   la caja al avatar y correría el punto de estado y el contador, que están
+   anclados a esa caja.
+
+   Solo anima `transform` y `opacity`, que el navegador resuelve sin recalcular
+   el diseño. El chat pinta muchos avatares a la vez y una animación que toque
+   el layout se sentiría en todos. */
+.agent-avatar__aro {
+  position: absolute;
+  inset: -3px;
+  border-radius: 999px;
+  border: 2px solid var(--app-accent, #2563eb);
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: no-preference) {
-  .agent-avatar__estado--ocupado {
-    animation: agent-avatar-pulso 1.6s ease-in-out infinite;
+  .agent-avatar__aro {
+    animation: agent-avatar-aro 1.6s ease-in-out infinite;
   }
 }
 
-@keyframes agent-avatar-pulso {
+@keyframes agent-avatar-aro {
   0%,
   100% {
     transform: scale(1);
-    opacity: 1;
+    opacity: 0.95;
   }
   50% {
-    transform: scale(0.82);
-    opacity: 0.72;
+    transform: scale(1.09);
+    opacity: 0.35;
   }
 }
 

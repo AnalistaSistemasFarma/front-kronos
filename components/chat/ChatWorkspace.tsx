@@ -105,6 +105,7 @@ function AgentCard({
       <Group gap='sm' wrap='nowrap' align='flex-start'>
         <AgentAvatar
           code={agent.code}
+          working={agent.busy}
           displayName={agent.displayName}
           avatarUrl={agent.avatarUrl}
           unread={unread}
@@ -756,6 +757,7 @@ export default function ChatWorkspace({
           <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
             <AgentAvatar
               code={selectedAgent.code}
+              working={selectedAgent.busy}
               displayName={selectedAgent.displayName}
               avatarUrl={selectedAgent.avatarUrl}
               status={overview.statusByAgent.get(selectedAgent.idAgent) ?? null}
