@@ -1410,9 +1410,12 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
      caja sigue quedando por debajo. */
   padding: 10px 16px;
   min-height: 42px;
-  /* El `autosize` de Mantine cambia el alto de golpe cada vez que el texto
-     salta de renglón; con la transición el crecimiento se siente continuo. */
-  transition: height 130ms ease;
+  /* SIN transición de alto, a propósito (2026-09-09, por el reporte de
+     lentitud de Nicolás). Animar `height` obliga al navegador a rehacer el
+     diseño en CADA cuadro, y aquí se disparaba con cada salto de renglón —
+     o sea, mientras la persona escribe, que es el peor momento posible.
+     El salto de un renglón es de unos pocos píxeles y sin la transición ni
+     se nota; lo que sí se notaba era el tirón. */
 }
 
 /* ── iOS: el ZOOM AUTOMÁTICO al enfocar la caja ──
@@ -1639,15 +1642,15 @@ body.chat-inmersivo .chat-page-thread--completa {
   height: var(--alto-visible, 100dvh);
 }
 
-/* El alto cambia cuando sale o se guarda el teclado. Sin transición, la
-   conversación pega un salto seco; con ella acompaña al teclado. Corta a
-   propósito (160 ms): el teclado del sistema tarda alrededor de eso, y una
-   transición más larga se sentiría rezagada. */
-@media (prefers-reduced-motion: no-preference) {
-  .chat-page-thread--completa {
-    transition: height 160ms ease-out;
-  }
-}
+/* La transición de alto al salir el teclado SE QUITÓ (2026-09-09, por el
+   reporte de lentitud de Nicolás).
+
+   Acompañaba bonito al teclado, pero animaba `height` sobre un contenedor
+   `fixed` que tiene toda la conversación adentro: un recálculo completo del
+   diseño por cuadro, justo en el momento en que el teléfono ya está ocupado
+   animando su propio teclado. Era la animación más cara del chat y en el peor
+   instante. El movimiento del teclado del sistema ya da la sensación de
+   continuidad; no hacía falta duplicarla. */
 
 .chat-page-shell--completa {
   max-width: none;
