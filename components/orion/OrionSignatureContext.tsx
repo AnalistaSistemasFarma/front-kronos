@@ -30,6 +30,8 @@ export type OrionSignatureApi = {
   /** fileId → true si el usuario actual tiene auth FIRMA pendiente */
   pendingAuthorizationByFile: Record<string, boolean>;
   canManage: boolean;
+  /** Permiso subproceso “Firmar documento” (obligatorio para firmar). */
+  canSignPermission: boolean;
   isAdmin: boolean;
   hasSignature: boolean;
   acceptLoading: boolean;

@@ -261,7 +261,19 @@ export default function NotificationBell() {
     [router]
   );
 
-  const handleClick = async (n: Notification) => {
+  const prefetchDetail = useCallback(
+    (path: string) => {
+      if (!path || isExternalNotificationPath(path)) return;
+      try {
+        router.prefetch(path);
+      } catch {
+        /* prefetch best-effort */
+      }
+    },
+    [router]
+  );
+
+  const handleClick = (n: Notification) => {
     const detailPath = inferNotificationPath(n);
 
     if (!detailPath) {
@@ -269,24 +281,22 @@ export default function NotificationBell() {
       return;
     }
 
+    // Navegar primero; marcar leída en segundo plano (no esperar red).
+    setOpened(false);
+    navigateToDetail(detailPath);
+
     if (!n.read_at) {
-      try {
-        await apiFetch('/api/notifications/read', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: n.id }),
-        });
-      } catch {
-        /* no bloquear navegación */
-      }
-      // Sale de la lista de no leídas; la de leídas se recargará al verla.
       setNotifications((prev) => prev.filter((x) => x.id !== n.id));
       setUnreadCount((c) => Math.max(0, c - 1));
       setReadLoaded(false);
+      void apiFetch('/api/notifications/read', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: n.id }),
+      }).catch(() => {
+        /* la UI ya avanzó; el próximo poll corrige el contador si falló */
+      });
     }
-
-    setOpened(false);
-    navigateToDetail(detailPath);
   };
 
   const markAllRead = async () => {
@@ -408,7 +418,12 @@ export default function NotificationBell() {
             ) : (
               <ul className='list-none m-0 p-0'>
                 {notifications.map((n) => (
-                  <NotificationRow key={n.id} notification={n} onOpen={handleClick} />
+                  <NotificationRow
+                    key={n.id}
+                    notification={n}
+                    onOpen={handleClick}
+                    onPrefetch={prefetchDetail}
+                  />
                 ))}
               </ul>
             )
@@ -423,7 +438,12 @@ export default function NotificationBell() {
           ) : (
             <ul className='list-none m-0 p-0'>
               {readNotifications.map((n) => (
-                <NotificationRow key={n.id} notification={n} onOpen={handleClick} />
+                <NotificationRow
+                  key={n.id}
+                  notification={n}
+                  onOpen={handleClick}
+                  onPrefetch={prefetchDetail}
+                />
               ))}
             </ul>
           )}
@@ -455,9 +475,11 @@ export default function NotificationBell() {
 function NotificationRow({
   notification: n,
   onOpen,
+  onPrefetch,
 }: {
   notification: Notification;
   onOpen: (n: Notification) => void;
+  onPrefetch?: (path: string) => void;
 }) {
   const detailPath = inferNotificationPath(n);
   const actionLabel = getNotificationActionLabel(detailPath, n.title);
@@ -469,6 +491,12 @@ function NotificationRow({
     <li>
       <UnstyledButton
         onClick={() => onOpen(n)}
+        onMouseEnter={() => {
+          if (detailPath) onPrefetch?.(detailPath);
+        }}
+        onFocus={() => {
+          if (detailPath) onPrefetch?.(detailPath);
+        }}
         disabled={!hasLink}
         w='100%'
         aria-label={hasLink ? `${actionLabel}: ${n.title}` : n.title}

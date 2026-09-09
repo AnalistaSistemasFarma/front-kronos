@@ -959,7 +959,7 @@ function RequestBoard() {
 
           // SAPSEND: reenviar los adjuntos (si es solicitud de tesorería). No bloquea; el servidor
           // aplica el gate y lee los archivos desde OneDrive.
-          fetch('/api/requests-general/sapsend-files', {
+          void fetch('/api/requests-general/sapsend-files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: requestId }),
@@ -969,29 +969,28 @@ function RequestBoard() {
           console.error('Error al subir archivos:', uploadErr);
           toast.error(
             `Solicitud #${requestId} creada, pero NO se pudieron subir los archivos. ` +
-              `Ábrala desde la lista y cárguelos en la vista de la solicitud.`,
+              `Cárguelos en la vista de la solicitud.`,
             { duration: 10000 }
           );
         }
       }
 
-      try {
-        await sendRequestEmailNotification(
-          requestId,
-          formData.subject,
-          parseInt(formData.process)
-        );
-      } catch (notifyErr) {
+      // Notificación en segundo plano: no retrasa la llegada a la solicitud.
+      void sendRequestEmailNotification(
+        requestId,
+        formData.subject,
+        parseInt(formData.process)
+      ).catch((notifyErr) => {
         console.error('Error en notificación por correo:', notifyErr);
-      }
+      });
 
       if (uploadOk) {
         toast.success(`Solicitud #${requestId} creada correctamente.`);
       }
 
-      // Tras crear: ir a la solicitud; el creador marca qué PDFs van a firma.
-      if (uploadOk && Number.isInteger(requestId) && requestId > 0) {
-        router.push(
+      // Ir de inmediato a la solicitud creada (creador marca PDFs / sigue el flujo).
+      if (Number.isInteger(requestId) && requestId > 0) {
+        router.replace(
           `/process/request-general/view-request?id=${requestId}&from=create-request`
         );
         return;

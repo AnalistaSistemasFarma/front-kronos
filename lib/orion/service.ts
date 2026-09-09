@@ -1147,19 +1147,28 @@ export async function userHasOrionFirmaManage(
   userId: string,
   _isAdmin = false
 ): Promise<boolean> {
-  // No bypass por role admin: crear/ver FIRMA y gestionar Orion
-  // requieren el subproceso "Firma digital" en la persona.
+  // Compat: “Firma digital” / manage = permiso Preparar.
+  return userHasOrionPreparePermission(pool, userId, _isAdmin);
+}
+
+/** Permiso Preparar firma (URL prepare o legacy manage). Sin bypass admin. */
+export async function userHasOrionPreparePermission(
+  pool: SqlPool,
+  userId: string,
+  _isAdmin = false
+): Promise<boolean> {
   void _isAdmin;
   if (!userId) return false;
 
-  // Permiso sobre la PERSONA (no sobre la empresa).
-  // En Admin → Usuarios la fila se guarda vía company_user (modelo actual),
-  // pero basta con tener "Firma digital" en cualquier empresa del usuario.
-  const { ORION_FIRMA_MANAGE_URL } = await import('./access');
+  const {
+    ORION_FIRMA_PREPARE_URL,
+    ORION_FIRMA_MANAGE_URL,
+  } = await import('./access');
   const permitted = await pool
     .request()
     .input('id_user', sql.NVarChar(255), userId)
-    .input('url', sql.NVarChar(255), ORION_FIRMA_MANAGE_URL)
+    .input('urlPrepare', sql.NVarChar(255), ORION_FIRMA_PREPARE_URL)
+    .input('urlManage', sql.NVarChar(255), ORION_FIRMA_MANAGE_URL)
     .query(`
       SELECT TOP 1 suc.id_subprocess_user_company AS id
       FROM subprocess_user_company suc
@@ -1169,7 +1178,9 @@ export async function userHasOrionFirmaManage(
         ON s.id_subprocess = suc.id_subprocess
       WHERE cu.id_user = @id_user
         AND (
-          LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N'')))) = LOWER(LTRIM(RTRIM(@url)))
+          LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N'')))) = LOWER(LTRIM(RTRIM(@urlPrepare)))
+          OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N'')))) = LOWER(LTRIM(RTRIM(@urlManage)))
+          OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N'')))) LIKE N'%preparar firma%'
           OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N'')))) LIKE N'%firma digital%'
         )
     `);
@@ -1177,23 +1188,54 @@ export async function userHasOrionFirmaManage(
   return Boolean(permitted.recordset[0]?.id);
 }
 
+/** Permiso Firmar documento. Sin bypass admin. */
+export async function userHasOrionSignPermission(
+  pool: SqlPool,
+  userId: string,
+  _isAdmin = false
+): Promise<boolean> {
+  void _isAdmin;
+  if (!userId) return false;
+
+  const { ORION_FIRMA_SIGN_URL } = await import('./access');
+  const permitted = await pool
+    .request()
+    .input('id_user', sql.NVarChar(255), userId)
+    .input('urlSign', sql.NVarChar(255), ORION_FIRMA_SIGN_URL)
+    .query(`
+      SELECT TOP 1 suc.id_subprocess_user_company AS id
+      FROM subprocess_user_company suc
+      INNER JOIN company_user cu
+        ON cu.id_company_user = suc.id_company_user
+      INNER JOIN subprocess s
+        ON s.id_subprocess = suc.id_subprocess
+      WHERE cu.id_user = @id_user
+        AND (
+          LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N'')))) = LOWER(LTRIM(RTRIM(@urlSign)))
+          OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N'')))) LIKE N'%firmar documento%'
+        )
+    `);
+
+  return Boolean(permitted.recordset[0]?.id);
+}
+
+/**
+ * Puede preparar firma en la solicitud: solo permiso Preparar (no creador/admin automático).
+ */
 export async function userCanManageOrionRequest(
   pool: SqlPool,
   requestId: number,
   userId: string,
-  isAdmin: boolean
+  _isAdmin: boolean
 ): Promise<boolean> {
+  void requestId;
+  void _isAdmin;
   if (!userId) return false;
-  if (isAdmin) return true;
-  if (!Number.isInteger(requestId) || requestId <= 0) return false;
-
-  const ctx = await getRequestOrionContext(pool, requestId);
-  if (!ctx?.id_requester) return false;
-  return String(ctx.id_requester) === String(userId);
+  return userHasOrionPreparePermission(pool, userId, false);
 }
 
 /**
- * Edición de preparación: creador/admin + abierta + sin firmas completadas.
+ * Edición de preparación: permiso Preparar + abierta + sin firmas completadas.
  */
 export async function assertUserCanEditOrionPreparation(
   pool: SqlPool,
@@ -1212,6 +1254,14 @@ export async function assertUserCanEditOrionPreparation(
     params.userId,
     Boolean(params.isAdmin)
   );
+  if (!canManage) {
+    throw Object.assign(
+      new Error(
+        'No tiene permiso “Preparar firma”. Asígueselo en Administración → Usuarios.'
+      ),
+      { status: 403 }
+    );
+  }
   const locked = await isOrionRequestWorkflowLocked(pool, params.requestId);
   const ctx = await getRequestOrionContext(pool, params.requestId);
   if (!ctx) {
@@ -1239,7 +1289,7 @@ export async function assertUserCanEditOrionPreparation(
   if (!allowed) {
     throw Object.assign(
       new Error(
-        'Solo el creador puede editar el documento, firmantes o posiciones mientras la solicitud esté abierta y nadie haya firmado.'
+        'Solo quien tiene permiso Preparar firma puede editar el documento, firmantes o posiciones mientras la solicitud esté abierta y nadie haya firmado.'
       ),
       { status: 403 }
     );
@@ -1248,7 +1298,7 @@ export async function assertUserCanEditOrionPreparation(
   return { ctx, state };
 }
 
-/** Marca un PDF como para firmar o solo ver (creador/admin). */
+/** Marca un PDF como para firmar o solo ver (permiso Preparar). */
 export async function setOrionDocumentSignatureIntent(
   pool: SqlPool,
   params: {
@@ -1278,7 +1328,9 @@ export async function setOrionDocumentSignatureIntent(
   );
   if (!canManage) {
     throw Object.assign(
-      new Error('Solo el creador de la solicitud puede marcar documentos para firma'),
+      new Error(
+        'No tiene permiso “Preparar firma”. Asígueselo en Administración → Usuarios.'
+      ),
       { status: 403 }
     );
   }
@@ -1361,6 +1413,16 @@ export async function finalizeSignerTurn(
   signerTasksOpened: number;
   currentSignerEmail: string | null;
 }> {
+  const canSign = await userHasOrionSignPermission(pool, params.userId, false);
+  if (!canSign) {
+    throw Object.assign(
+      new Error(
+        'No tiene permiso “Firmar documento”. Sin ese permiso no puede firmar aunque esté asignado como firmante. Asígueselo en Administración → Usuarios.'
+      ),
+      { status: 403 }
+    );
+  }
+
   const loaded = await loadOrionFormBag(pool, params.requestId);
   if (!loaded) {
     throw Object.assign(new Error('Campo orion_signature no encontrado'), { status: 404 });

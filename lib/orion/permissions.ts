@@ -80,7 +80,7 @@ export function isOrionRequestCreator(params: {
 
 /**
  * Edición de documento/firmantes/posiciones:
- * creador/admin (canManage) + solicitud abierta + nadie ha firmado.
+ * creador no automático: canManage = permiso Preparar en el servidor.
  */
 export function canEditOrionPreparation(params: {
   canManage: boolean;
@@ -94,7 +94,7 @@ export function canEditOrionPreparation(params: {
   if (!params.canManage || params.workflowLocked) return false;
   if (isTerminalStatus(params.state?.status)) return false;
   if (hasAnyCompletedOrionSignature(params.state)) return false;
-  // canManage ya implica creador o admin en el servidor.
+  // canManage = permiso Preparar (servidor); no se infiere de creador/admin.
   return true;
 }
 

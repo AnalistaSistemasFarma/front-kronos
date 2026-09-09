@@ -371,6 +371,10 @@ export default function OrionAttachmentTableRow({
                 >
                   {d.needsSignaturePad ? 'Mi firma' : 'Firmar'}
                 </Button>
+              ) : d.missingSignPermission ? (
+                <Text size='xs' c='orange' mt={4}>
+                  Sin permiso “Firmar documento”
+                </Text>
               ) : null}
 
               {d.turnExpired && d.isMyTurn ? (

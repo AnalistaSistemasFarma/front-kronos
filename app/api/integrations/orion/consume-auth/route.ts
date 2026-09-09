@@ -9,14 +9,12 @@ import {
 } from '@/lib/orion/signerAuthorizations';
 import { findUserIdByEmail } from '@/lib/orion/signerTasks';
 import { parseOrionFileIdFromResolution } from '@/lib/orion/signerAuthMarkers';
+import { userHasOrionSignPermission } from '@/lib/orion/service';
 
 /**
  * Cierra la autorización FIRMA del usuario y devuelve a dónde ir a firmar.
  * POST /api/integrations/orion/consume-auth
  * Body: { requestId?, fileId?, taskId? }
- *
- * No usa el gate secuencial de update-activities (Fase B), para que el
- * siguiente firmante pueda autorizar y pasar al PDF.
  */
 export async function POST(req: Request) {
   try {
@@ -37,6 +35,15 @@ export async function POST(req: Request) {
       const userId = String(byEmail?.id || session.user.id || '');
       if (!userId) {
         return { error: 'No se pudo identificar al usuario', status: 401 as const };
+      }
+
+      const canSign = await userHasOrionSignPermission(pool, userId, false);
+      if (!canSign) {
+        return {
+          error:
+            'No tiene permiso “Firmar documento”. Asígueselo en Administración → Usuarios.',
+          status: 403 as const,
+        };
       }
 
       let requestId = Number.isInteger(requestIdBody) && requestIdBody > 0 ? requestIdBody : null;

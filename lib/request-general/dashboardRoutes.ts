@@ -1,4 +1,7 @@
-import { isOrionFirmaManageSubprocess } from '../orion/access';
+import {
+  isOrionFirmaPrepareSubprocess,
+  isOrionFirmaSignSubprocess,
+} from '../orion/access';
 
 export const DASHBOARD_SOLICITANTE_URL = '/process/request-general/dashboard-solicitante';
 export const DASHBOARD_SOLICITADO_URL = '/process/request-general/dashboard-solicitado';
@@ -11,7 +14,9 @@ export function isHubHiddenRequestDashboardSubprocess(subprocess: {
   subprocess?: string | null;
   subprocess_url?: string | null;
 }): boolean {
-  if (isOrionFirmaManageSubprocess(subprocess)) return true;
+  if (isOrionFirmaPrepareSubprocess(subprocess) || isOrionFirmaSignSubprocess(subprocess)) {
+    return true;
+  }
 
   const url = (subprocess.subprocess_url ?? '').toLowerCase().trim();
   if (

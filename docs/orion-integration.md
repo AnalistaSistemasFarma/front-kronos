@@ -78,17 +78,17 @@ Compatibilidad: JSON plano legacy (1 doc / solicitud) se lee como `documents._le
 8. **Versiones** (solo admin + solicitante): original + una entrada por cada firma parcial/final (`state.versions[]`).
 9. **Descarga / vista del firmante siguiente**: usa el PDF con firmas acumuladas (`signedFileUrl` o última versión), no el adjunto original de OneDrive.
 
-No hay tarjeta hub “Firma digital”: el host Orion es invisible y solo registra acciones para adjuntos + modales. El permiso de gestión es el subproceso **Firma digital** (`/process/firma/manage`), asignable en **Administración → Usuarios** (no aparece como tarjeta en el hub).
+No hay tarjetas hub de firma: el host Orion es invisible y solo registra acciones para adjuntos + modales. Los permisos son subprocesos ocultos asignables en **Administración → Usuarios**.
 
 ### Permisos
 
 | Quién | Qué puede hacer |
 |-------|-----------------|
-| Persona con subproceso **Firma digital** (obligatorio; el role `admin` no lo omite) | Ver categoría **FIRMA** al crear solicitudes; **Preparar / Gestionar** por PDF |
-| Firmante (email en lista de ese PDF) | Primero **Autorizar** (módulo Autorizaciones); luego **Firmar** en el adjunto |
+| Subproceso **Preparar firma** (`/process/firma/prepare`; legacy `/process/firma/manage`) | **Preparar / Gestionar** por PDF (marcar, firmantes, ubicar, enviar). El creador o `admin` **no** omiten este permiso. |
+| Subproceso **Firmar documento** (`/process/firma/sign`) **y** ser firmante en turno | **Autorizar** → **Firmar**. Sin el subproceso no puede firmar aunque esté en la lista. |
 | Cualquier usuario | Dibujar/guardar firma personal (rúbrica) |
 
-Semilla del subproceso: `node scripts/seed-firma-manage-subprocess.cjs` (opcional `--email=usuario@empresa.com` para otorgarlo).
+Semilla: `node scripts/seed-firma-manage-subprocess.cjs` (migra legacy manage→prepare y crea sign). Opcional `--email=usuario@empresa.com` y `--also-sign` para otorgar ambos.
 
 ## Endpoints en Kronos
 

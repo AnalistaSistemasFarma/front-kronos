@@ -80,7 +80,7 @@ import {
   parseTableValue,
 } from '../../../../../lib/requests-general/tableField';
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
-import { getCurrentPendingSigner, isSignerCompleted } from '../../../../../lib/orion/signerStatus';
+import { allSlotsCompletedForEmail, getCurrentPendingSigner, isSignerCompleted } from '../../../../../lib/orion/signerStatus';
 import {
   listSignedOrionDocuments,
   parseOrionSignatureBagBag,
@@ -1884,12 +1884,30 @@ function ViewRequestPage() {
   const deepLinkPdfUrl = deepLinkFileId
     ? getFolderPdfDownloadUrl((autoOpenFile || fallbackManageOrSignFile) as FolderFile)
     : null;
-  const deepLinkAction: 'sign' | 'manage' | 'view' | null =
-    orionActionParam === 'sign' || orionActionParam === 'manage' || orionActionParam === 'view'
-      ? orionActionParam
-      : from === 'authorization' || orionFileIdParam
-        ? 'sign'
-        : null;
+  const deepLinkAction: 'sign' | 'manage' | 'view' | null = (() => {
+    const raw: 'sign' | 'manage' | 'view' | null =
+      orionActionParam === 'sign' || orionActionParam === 'manage' || orionActionParam === 'view'
+        ? orionActionParam
+        : from === 'authorization' || orionFileIdParam
+          ? 'sign'
+          : null;
+    if (raw !== 'sign' || !deepLinkFileId || !currentUserEmailNorm) return raw;
+    const doc =
+      orionDocuments[deepLinkFileId] ||
+      orionInitialDocuments[deepLinkFileId] ||
+      {};
+    if (allSlotsCompletedForEmail(doc.signers, currentUserEmailNorm)) return null;
+    const pending = getCurrentPendingSigner(doc.signers);
+    if (
+      pending &&
+      String(pending.email || '').trim().toLowerCase() !== currentUserEmailNorm
+    ) {
+      return null;
+    }
+    const st = String(doc.status || '').toUpperCase();
+    if (st === 'FIRMADO' || st === 'RECHAZADO') return null;
+    return raw;
+  })();
 
   const chatDocumentItems = [
     ...folderContents
@@ -2620,21 +2638,27 @@ function ViewRequestPage() {
                           }}
                           workflowLocked={orionWorkflowLocked}
                           onDocumentsUpdate={handleOrionDocumentsChange}
-                          forceSignerUi={
-                            ((from === 'authorization' || orionActionParam === 'sign') &&
-                              (!orionFileIdParam ||
-                                String(orionFileIdParam) === String(fileId))) ||
-                            (() => {
-                              const pending = getCurrentPendingSigner(orionState.signers);
-                              return Boolean(
-                                pending &&
-                                  currentUserEmailNorm &&
-                                  String(pending.email || '')
-                                    .trim()
-                                    .toLowerCase() === currentUserEmailNorm
-                              );
-                            })()
-                          }
+                          forceSignerUi={(() => {
+                            const me = currentUserEmailNorm;
+                            if (!me) return false;
+                            if (allSlotsCompletedForEmail(orionState.signers, me)) return false;
+                            const pending = getCurrentPendingSigner(orionState.signers);
+                            const isMyTurn = Boolean(
+                              pending &&
+                                String(pending.email || '')
+                                  .trim()
+                                  .toLowerCase() === me
+                            );
+                            if (!isMyTurn) return false;
+                            const fileMatch =
+                              !orionFileIdParam ||
+                              String(orionFileIdParam) === String(fileId);
+                            return (
+                              ((from === 'authorization' || orionActionParam === 'sign') &&
+                                fileMatch) ||
+                              isMyTurn
+                            );
+                          })()}
                           versionsSlot={
                             <OrionDocumentVersionsButton
                               state={orionState}

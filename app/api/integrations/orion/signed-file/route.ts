@@ -94,7 +94,7 @@ export async function GET(req: Request) {
       : null;
 
     if (versionId === 'original') {
-      // Original: creador de la solicitud, admin, o quien tiene permiso Firma digital (gestión).
+      // Original: creador de la solicitud, admin, o quien tiene permiso Preparar firma.
       if (!isCreatorOrAdmin && !canManageOrion) {
         return NextResponse.json(
           { error: 'No tiene permiso para descargar el original' },

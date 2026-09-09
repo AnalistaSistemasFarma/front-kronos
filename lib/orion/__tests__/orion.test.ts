@@ -23,6 +23,65 @@ import {
   newlyCompletedSigners,
 } from '../signerStatus';
 import { resolveOrionPermissions } from '../permissions';
+import {
+  isHubHiddenSubprocess,
+  isOrionFirmaPrepareSubprocess,
+  isOrionFirmaSignSubprocess,
+  ORION_FIRMA_MANAGE_URL,
+  ORION_FIRMA_PREPARE_URL,
+  ORION_FIRMA_SIGN_URL,
+} from '../access';
+
+describe('orion access subprocesses', () => {
+  it('detecta Preparar (prepare y legacy manage)', () => {
+    expect(
+      isOrionFirmaPrepareSubprocess({
+        subprocess: 'Preparar firma',
+        subprocess_url: ORION_FIRMA_PREPARE_URL,
+      })
+    ).toBe(true);
+    expect(
+      isOrionFirmaPrepareSubprocess({
+        subprocess: 'Firma digital',
+        subprocess_url: ORION_FIRMA_MANAGE_URL,
+      })
+    ).toBe(true);
+    expect(
+      isOrionFirmaPrepareSubprocess({
+        subprocess: 'Otra cosa',
+        subprocess_url: '/process/other',
+      })
+    ).toBe(false);
+  });
+
+  it('detecta Firmar documento y no confunde con preparar', () => {
+    expect(
+      isOrionFirmaSignSubprocess({
+        subprocess: 'Firmar documento',
+        subprocess_url: ORION_FIRMA_SIGN_URL,
+      })
+    ).toBe(true);
+    expect(
+      isOrionFirmaSignSubprocess({
+        subprocess: 'Preparar firma',
+        subprocess_url: ORION_FIRMA_PREPARE_URL,
+      })
+    ).toBe(false);
+  });
+
+  it('oculta prepare y sign en el hub', () => {
+    expect(isHubHiddenSubprocess({ url: ORION_FIRMA_PREPARE_URL, name: 'Preparar firma' })).toBe(
+      true
+    );
+    expect(isHubHiddenSubprocess({ url: ORION_FIRMA_SIGN_URL, name: 'Firmar documento' })).toBe(
+      true
+    );
+    expect(isHubHiddenSubprocess({ url: ORION_FIRMA_MANAGE_URL, name: 'Firma digital' })).toBe(
+      true
+    );
+    expect(isHubHiddenSubprocess({ url: '/process/other', name: 'Otro' })).toBe(false);
+  });
+});
 
 describe('orion signerStatus', () => {
   it('detecta firmante pendiente en orden secuencial', () => {
@@ -101,7 +160,7 @@ describe('orion permissions', () => {
     expect(perms.canAcceptSign).toBe(false);
   });
 
-  it('sin canManage no edita (gestión solo creador/admin vía API)', () => {
+  it('sin canManage no edita (gestión = permiso Preparar vía API)', () => {
     const perms = resolveOrionPermissions({
       canManage: false,
       currentUserEmail: 'otro@test.com',
@@ -113,7 +172,7 @@ describe('orion permissions', () => {
     expect(perms.canManageWorkflow).toBe(false);
   });
 
-  it('canManage permite editar aunque el email no coincida (admin/creador ya validado en API)', () => {
+  it('canManage permite editar aunque el email no coincida (permiso Preparar ya validado en API)', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
       currentUserEmail: 'admin@test.com',

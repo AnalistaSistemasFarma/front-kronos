@@ -11,6 +11,7 @@ import {
   loadOrionFormBag,
   syncOrionDocumentState,
   userCanManageOrionRequest,
+  userHasOrionSignPermission,
 } from '@/lib/orion/service';
 import { syncOrionSignerTasks } from '@/lib/orion/signerTasks';
 import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
@@ -69,14 +70,16 @@ export async function GET(req: Request) {
     // Bootstrap rápido: sin llamadas a Orion ni sync de tareas.
     if (lite) {
       const boot = await withMssqlPool(async (pool) => {
-        const [canManage, loaded] = await Promise.all([
+        const [canManage, canSignPermission, loaded] = await Promise.all([
           userId
             ? userCanManageOrionRequest(pool, requestId, userId, isAdmin)
             : Promise.resolve(false),
+          userId ? userHasOrionSignPermission(pool, userId, false) : Promise.resolve(false),
           loadOrionFormBag(pool, requestId),
         ]);
         return {
           canManage,
+          canSignPermission,
           bag: loaded?.bag ?? { documents: {} as Record<string, OrionSignatureState> },
         };
       });
@@ -89,6 +92,7 @@ export async function GET(req: Request) {
           documents: boot.bag.documents,
           fileId: fileId || null,
           canManage: boot.canManage,
+          canSignPermission: boot.canSignPermission,
           isAdmin,
           pendingAuthorization: false,
           embedOrigin: cfg.embedOrigin,
@@ -109,10 +113,14 @@ export async function GET(req: Request) {
       const canManagePromise = userId
         ? userCanManageOrionRequest(pool, requestId, userId, isAdmin)
         : Promise.resolve(false);
+      const canSignPromise = userId
+        ? userHasOrionSignPermission(pool, userId, false)
+        : Promise.resolve(false);
 
       if (softBagOnly) {
-        const [canManage, loaded] = await Promise.all([
+        const [canManage, canSignPermission, loaded] = await Promise.all([
           canManagePromise,
+          canSignPromise,
           loadOrionFormBag(pool, requestId),
         ]);
         const bag = loaded?.bag ?? { documents: {} as Record<string, OrionSignatureState> };
@@ -143,6 +151,7 @@ export async function GET(req: Request) {
         }
         return {
           canManage,
+          canSignPermission,
           payload: loaded
             ? {
                 state: {},
@@ -155,8 +164,9 @@ export async function GET(req: Request) {
         };
       }
 
-      const [canManage, synced] = await Promise.all([
+      const [canManage, canSignPermission, synced] = await Promise.all([
         canManagePromise,
+        canSignPromise,
         syncOrionDocumentState(pool, requestId, fileId, {
           rebuildSigned,
         }),
@@ -164,6 +174,7 @@ export async function GET(req: Request) {
       if (!synced) {
         return {
           canManage,
+          canSignPermission,
           payload: null as Awaited<ReturnType<typeof syncOrionDocumentState>>,
           pendingAuthorization: false,
           pendingAuthorizationByFile: {} as Record<string, boolean>,
@@ -230,6 +241,7 @@ export async function GET(req: Request) {
 
       return {
         canManage,
+        canSignPermission,
         payload: synced,
         pendingAuthorization,
         pendingAuthorizationByFile,
@@ -245,6 +257,7 @@ export async function GET(req: Request) {
           documents: {},
           fileId: fileId || null,
           canManage: result.canManage,
+          canSignPermission: result.canSignPermission,
           isAdmin,
           pendingAuthorization: false,
           pendingAuthorizationByFile: {},
@@ -272,6 +285,7 @@ export async function GET(req: Request) {
         documents: result.payload.bag.documents,
         fileId: result.payload.fileId,
         canManage: result.canManage,
+        canSignPermission: result.canSignPermission,
         isAdmin,
         permissions,
         pendingAuthorization: result.pendingAuthorization,

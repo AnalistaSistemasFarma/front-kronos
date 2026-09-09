@@ -141,7 +141,7 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
   const isCoordinatorUi = permissions.userRole === 'coordinator';
   const inSigningPhase =
     forSigning &&
-    ((!isTerminal && forceSignerUi && !isCoordinatorUi) ||
+    ((!isTerminal && isMyTurn && !isCoordinatorUi) ||
       statusUpper === 'EN_PROCESO' ||
       statusUpper === 'PENDIENTE_FIRMA' ||
       Boolean(
@@ -150,7 +150,7 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
           (state.signers?.length ?? 0) > 0 &&
           !isTerminal
       ) ||
-      Boolean(api?.pendingAuthorizationByFile?.[fileId]));
+      Boolean(isMyTurn && api?.pendingAuthorizationByFile?.[fileId]));
 
   const signers = orderedSigners(state.signers);
   const completedCount = signers.filter((s) => isSignerCompleted(s.status)).length;
@@ -179,7 +179,7 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
   const canPrepareDocument =
     forSigning &&
     Boolean(api?.enabled) &&
-    Boolean(api?.canManage || api?.isAdmin) &&
+    Boolean(api?.canManage) &&
     !isTerminal &&
     !state.orionDocumentId;
 
@@ -190,7 +190,17 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     !isTerminal &&
     inSigningPhase &&
     !turnExpired &&
-    (forceSignerUi || isMyTurn || permissions.userRole === 'signer');
+    isMyTurn &&
+    Boolean(api?.canSignPermission);
+
+  const missingSignPermission =
+    forSigning &&
+    isMyTurn &&
+    !currentUserCompleted &&
+    !isTerminal &&
+    !turnExpired &&
+    api != null &&
+    api.canSignPermission === false;
 
   const isWaiting =
     forSigning &&
@@ -203,7 +213,7 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
 
   const hasCompletedSignatures = (state.signers ?? []).some((s) => isSignerCompleted(s.status));
   const canToggleIntent =
-    Boolean(api?.canManage || api?.isAdmin) &&
+    Boolean(api?.canManage) &&
     !workflowLocked &&
     !isTerminal &&
     !(signatureIntent === 'sign' && hasCompletedSignatures);
@@ -280,6 +290,7 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     canEditDocument,
     canPrepareDocument,
     canSignNow,
+    missingSignPermission,
     isWaiting,
     turnExpired,
     isMyTurn,
@@ -405,6 +416,10 @@ export default function OrionAttachmentSignActions(props: OrionAttachmentSignAct
         >
           {d.needsSignaturePad ? 'Mi firma' : 'Tu turno'}
         </Button>
+      ) : d.missingSignPermission ? (
+        <Text size='xs' c='orange' maw={220}>
+          Su turno, pero sin permiso “Firmar documento”. Pida asignación en Administración.
+        </Text>
       ) : d.turnExpired && d.isMyTurn ? (
         <Button
           size='compact-xs'

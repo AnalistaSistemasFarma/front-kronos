@@ -144,6 +144,7 @@ export default function OrionSignaturePanel({
   const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
   const [signatureSaving, setSignatureSaving] = useState(false);
   const [canManage, setCanManage] = useState(false);
+  const [canSignPermission, setCanSignPermission] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -303,6 +304,9 @@ export default function OrionSignaturePanel({
         if (!res.ok) return;
         if (data.embedOrigin) setResolvedEmbedOrigin(data.embedOrigin);
         if (typeof data.canManage === 'boolean') setCanManage(data.canManage);
+        if (typeof data.canSignPermission === 'boolean') {
+          setCanSignPermission(data.canSignPermission);
+        }
         if (typeof data.isAdmin === 'boolean') setIsAdmin(data.isAdmin);
         if (data.documents && typeof data.documents === 'object') {
           notifyDocuments(data.documents as Record<string, OrionSignatureState>);
@@ -574,6 +578,26 @@ export default function OrionSignaturePanel({
           setSignSuccessMessage(data.message || 'Documento firmado correctamente.');
           setDocumentModalOpen(false);
           setSignerModalIntent('view');
+          // Quitar deep-link para que un F5 no vuelva a abrir “Firmar”.
+          try {
+            const url = new URL(window.location.href);
+            let changed = false;
+            for (const key of ['orionAction', 'orionFileId']) {
+              if (url.searchParams.has(key)) {
+                url.searchParams.delete(key);
+                changed = true;
+              }
+            }
+            if (url.searchParams.get('from') === 'authorization') {
+              url.searchParams.set('from', 'assigned-activities');
+              changed = true;
+            }
+            if (changed) {
+              window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+            }
+          } catch {
+            /* ignore */
+          }
           return true;
         }
         const msg = String(
@@ -679,7 +703,9 @@ export default function OrionSignaturePanel({
       });
 
       if (!filePerms.canManageWorkflow) {
-        setError('Solo el creador de la solicitud puede configurar la firma del documento.');
+        setError(
+          'No tiene permiso “Preparar firma”. Asígueselo en Administración → Usuarios.'
+        );
         return false;
       }
 
@@ -773,6 +799,13 @@ export default function OrionSignaturePanel({
       setActiveFile(file);
       setAcceptLoading(true);
       setError(null);
+      if (!canSignPermission) {
+        setError(
+          'No tiene permiso “Firmar documento”. Sin ese permiso no puede firmar aunque esté asignado como firmante.'
+        );
+        setAcceptLoading(false);
+        return;
+      }
       const skipAuthRedirect = Boolean(opts?.skipAuthRedirect || fromAuthorization);
       try {
         const qs = new URLSearchParams({
@@ -877,6 +910,7 @@ export default function OrionSignaturePanel({
     [
       applyFileState,
       canManage,
+      canSignPermission,
       createdByEmail,
       currentUserEmail,
       currentUserId,
@@ -1038,33 +1072,77 @@ export default function OrionSignaturePanel({
     }
   }, [state.embedUrl]);
 
-  // Deep-link post-auth / desde tarea / tras crear FIRMA
+  // Deep-link post-auth / desde tarea: solo si aún corresponde firmar/gestionar.
   useEffect(() => {
     if (autoOpenedRef.current) return;
     if (!autoOpenFileId || !autoOpenAction || !autoOpenPdfUrl) return;
-    // Gestionar requiere canManage; el primer ensure-document puede tardar varios segundos.
+    if (!permissionsReady) return;
+
+    const doc = documents[autoOpenFileId] ?? {};
+    const me = normalizeEmail(currentUserEmail);
+    const alreadyDone = me ? allSlotsCompletedForEmail(doc.signers, me) : false;
+    const statusUpperDoc = String(doc.status || '').toUpperCase();
+    const docTerminal = statusUpperDoc === 'FIRMADO' || statusUpperDoc === 'RECHAZADO';
+    const pending = getCurrentPendingSigner(doc.signers);
+    const isMyTurnNow = Boolean(
+      me && pending && normalizeEmail(pending.email) === me
+    );
+
+    const clearDeepLink = () => {
+      if (typeof window === 'undefined') return;
+      try {
+        const url = new URL(window.location.href);
+        let changed = false;
+        for (const key of ['orionAction', 'orionFileId']) {
+          if (url.searchParams.has(key)) {
+            url.searchParams.delete(key);
+            changed = true;
+          }
+        }
+        if (url.searchParams.get('from') === 'authorization') {
+          url.searchParams.set('from', 'assigned-activities');
+          changed = true;
+        }
+        if (changed) {
+          window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
     if (autoOpenAction === 'manage') {
-      if (!permissionsReady) return;
       if (!canManage) {
         autoOpenedRef.current = true;
+        clearDeepLink();
         setError('Solo el creador de la solicitud puede configurar la firma del documento.');
         return;
       }
     }
+
+    if (autoOpenAction === 'sign') {
+      // Ya firmó o el documento terminó: no reabrir el asistente al recargar.
+      if (alreadyDone || docTerminal || (doc.signers?.length && !isMyTurnNow)) {
+        autoOpenedRef.current = true;
+        clearDeepLink();
+        return;
+      }
+    }
+
     autoOpenedRef.current = true;
     const meta: OrionFileMeta = {
       fileId: autoOpenFileId,
       fileName: autoOpenFileName || 'Documento.pdf',
       pdfUrl: autoOpenPdfUrl,
     };
-    // Pequeño delay solo si hace falta estabilizar el listado OneDrive
     const t = window.setTimeout(() => {
       if (autoOpenAction === 'manage') {
-        void openDocumentEditor(meta);
+        void openDocumentEditor(meta).finally(() => clearDeepLink());
       } else if (autoOpenAction === 'sign') {
-        void handleAcceptSign(meta);
+        void handleAcceptSign(meta).finally(() => clearDeepLink());
       } else {
         openSignerView(meta);
+        clearDeepLink();
       }
     }, 0);
     return () => window.clearTimeout(t);
@@ -1074,6 +1152,8 @@ export default function OrionSignaturePanel({
     autoOpenFileName,
     autoOpenPdfUrl,
     canManage,
+    currentUserEmail,
+    documents,
     handleAcceptSign,
     openDocumentEditor,
     openSignerView,
@@ -1120,6 +1200,7 @@ export default function OrionSignaturePanel({
       documents,
       pendingAuthorizationByFile,
       canManage,
+      canSignPermission,
       isAdmin,
       hasSignature,
       acceptLoading,
@@ -1160,6 +1241,7 @@ export default function OrionSignaturePanel({
   }, [
     acceptLoading,
     canManage,
+    canSignPermission,
     currentUserEmail,
     documents,
     handleAcceptSign,

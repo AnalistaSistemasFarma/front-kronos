@@ -42,6 +42,10 @@ import {
   DASHBOARD_SOLICITADO_URL,
   isHubHiddenRequestDashboardSubprocess,
 } from '@/lib/request-general/dashboardRoutes';
+import {
+  isOrionFirmaPrepareSubprocess,
+  isOrionFirmaSignSubprocess,
+} from '@/lib/orion/access';
 
 interface User {
   id: string;
@@ -1218,22 +1222,22 @@ function UserManagement() {
                                 )}
                                 {isHubHiddenRequestDashboardSubprocess(subprocess) ? (
                                   <Badge size='xs' variant='light' color='teal' mt={4}>
-                                    {subprocess.subprocess_url === DASHBOARD_SOLICITADO_URL ||
-                                    (subprocess.subprocess_url ?? '').includes(
-                                      'dashboard-solicitado'
-                                    )
-                                      ? 'Da acceso a Dashboard personal en el menú'
-                                      : subprocess.subprocess_url === DASHBOARD_SOLICITANTE_URL ||
-                                          (subprocess.subprocess_url ?? '').includes(
-                                            'dashboard-solicitante'
-                                          )
-                                        ? 'Da acceso a Dashboard solicitudes en el menú'
-                                        : (subprocess.subprocess_url ?? '').includes('/firma/manage') ||
-                                            String(subprocess.subprocess || '')
-                                              .toLowerCase()
-                                              .includes('firma digital')
-                                          ? 'Permiso legacy (oculto): la firma la gestiona el creador en cualquier solicitud'
-                                          : 'Da acceso al dashboard en el menú'}
+                                    {isOrionFirmaPrepareSubprocess(subprocess)
+                                      ? 'Permiso: preparar PDF, firmantes y enviar a firma'
+                                      : isOrionFirmaSignSubprocess(subprocess)
+                                        ? 'Permiso obligatorio para firmar (aunque esté como firmante)'
+                                        : subprocess.subprocess_url === DASHBOARD_SOLICITADO_URL ||
+                                            (subprocess.subprocess_url ?? '').includes(
+                                              'dashboard-solicitado'
+                                            )
+                                          ? 'Da acceso a Dashboard personal en el menú'
+                                          : subprocess.subprocess_url ===
+                                                DASHBOARD_SOLICITANTE_URL ||
+                                              (subprocess.subprocess_url ?? '').includes(
+                                                'dashboard-solicitante'
+                                              )
+                                            ? 'Da acceso a Dashboard solicitudes en el menú'
+                                            : 'Da acceso al dashboard en el menú'}
                                   </Badge>
                                 ) : null}
                               </div>
