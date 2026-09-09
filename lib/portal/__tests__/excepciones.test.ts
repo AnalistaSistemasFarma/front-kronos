@@ -32,6 +32,13 @@ describe('correos de la lista de excepciones (Excel)', () => {
     expect(await __soloParaPruebas.correosDeExcel(buf)).toEqual(['cristianbaldion@gmail.com']);
   });
 
+  it('acepta también el encabezado "Mail" — así quedó el archivo real', async () => {
+    // Cristian lo cambió de "Correo" a "Mail" el 2026-09-09. Los dos sirven, y
+    // esta prueba fija que siga siendo así.
+    const buf = await libro([['Mail'], ['cristianbaldion@gmail.com']]);
+    expect(await __soloParaPruebas.correosDeExcel(buf)).toEqual(['cristianbaldion@gmail.com']);
+  });
+
   it('no se rompe cuando agregan columnas alrededor', async () => {
     const buf = await libro([
       ['Nombre', 'Empresa', 'Correo', 'Observación'],
