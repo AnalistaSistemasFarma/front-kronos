@@ -1,38 +1,54 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Box, Button, Group, Loader, Paper, Stack, Text, ThemeIcon } from '@mantine/core';
 import { IconExternalLink, IconFileText } from '@tabler/icons-react';
 import { usePdfBlobPreview } from './usePdfBlobPreview';
 
 type Props = {
   src: string | null;
+  /** Si `src` falla (p. ej. signed-file 409), intentar este PDF. */
+  fallbackSrc?: string | null;
   fileName?: string;
   minHeight?: number;
   onOpenExternal?: () => void;
 };
 
+/**
+ * Vista previa PDF embebida en la página (sin forzar descarga).
+ * Carga el archivo como blob → blob: URL → iframe (Content-Type application/pdf).
+ */
 export default function PdfInlineViewer({
   src,
+  fallbackSrc = null,
   fileName,
   minHeight = 420,
   onOpenExternal,
 }: Props) {
-  const isEmbeddable =
-    Boolean(src) &&
-    (src!.startsWith('blob:') ||
-      src!.includes('/embed/') ||
-      src!.includes('localhost') ||
-      src!.includes('/api/integrations/'));
+  const [activeSrc, setActiveSrc] = useState<string | null>(src);
+  const { blobUrl, loading, failed } = usePdfBlobPreview(activeSrc, Boolean(activeSrc));
 
-  const { blobUrl, loading, failed } = usePdfBlobPreview(src, Boolean(src) && !isEmbeddable);
-  const displayUrl = isEmbeddable ? src : blobUrl;
+  useEffect(() => {
+    setActiveSrc(src);
+  }, [src]);
+
+  useEffect(() => {
+    if (!failed || !fallbackSrc) return;
+    if (fallbackSrc === activeSrc) return;
+    setActiveSrc(fallbackSrc);
+  }, [failed, fallbackSrc, activeSrc]);
 
   const openExternal = () => {
-    if (onOpenExternal) onOpenExternal();
-    else if (src) window.open(src, '_blank', 'noopener,noreferrer');
+    if (onOpenExternal) {
+      onOpenExternal();
+      return;
+    }
+    // Preferir blob (inline) sobre la URL remota (a veces dispara descarga).
+    const href = blobUrl || activeSrc || src || fallbackSrc;
+    if (href) window.open(href, '_blank', 'noopener,noreferrer');
   };
 
-  if (!src) return null;
+  if (!src && !fallbackSrc) return null;
 
   if (loading) {
     return (
@@ -40,14 +56,14 @@ export default function PdfInlineViewer({
         <Stack align='center' justify='center' h='100%' gap='sm'>
           <Loader size='sm' />
           <Text size='sm' c='dimmed'>
-            Cargando vista previa…
+            Cargando documento…
           </Text>
         </Stack>
       </Paper>
     );
   }
 
-  if (failed || !displayUrl) {
+  if (failed || !blobUrl) {
     return (
       <Paper withBorder radius='md' h={minHeight} style={{ background: 'var(--app-surface-raised)' }}>
         <Stack align='center' justify='center' h='100%' gap='md' p='xl'>
@@ -58,7 +74,7 @@ export default function PdfInlineViewer({
             {fileName || 'Documento PDF'}
           </Text>
           <Text size='xs' c='dimmed' ta='center' maw={320}>
-            La vista previa no está disponible en el navegador. Puede abrir el archivo directamente.
+            No se pudo cargar la vista previa. Puede abrir el archivo directamente.
           </Text>
           <Button variant='light' leftSection={<IconExternalLink size={16} />} onClick={openExternal}>
             Abrir documento
@@ -72,7 +88,14 @@ export default function PdfInlineViewer({
     <Paper
       withBorder
       radius='md'
-      style={{ overflow: 'hidden', minHeight, background: 'var(--app-surface-raised)' }}
+      style={{
+        overflow: 'hidden',
+        minHeight,
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--app-surface-raised)',
+      }}
     >
       {fileName && (
         <Group
@@ -82,6 +105,7 @@ export default function PdfInlineViewer({
           style={{
             borderBottom: '1px solid var(--app-border)',
             background: 'var(--app-surface)',
+            flexShrink: 0,
           }}
         >
           <IconFileText size={16} style={{ opacity: 0.6 }} />
@@ -89,27 +113,23 @@ export default function PdfInlineViewer({
             {fileName}
           </Text>
           <Button variant='subtle' size='compact-xs' onClick={openExternal}>
-            Abrir
+            Ampliar
           </Button>
         </Group>
       )}
-      <Box h={fileName ? minHeight - 40 : minHeight}>
-        <object
-          data={`${displayUrl}#toolbar=0&navpanes=0`}
-          type='application/pdf'
-          width='100%'
-          height='100%'
-          style={{ display: 'block', border: 'none' }}
-        >
-          <Stack align='center' justify='center' h='100%' p='md'>
-            <Text size='sm' c='dimmed' ta='center'>
-              No se pudo renderizar el PDF aquí.
-            </Text>
-            <Button size='xs' variant='light' onClick={openExternal}>
-              Abrir en nueva pestaña
-            </Button>
-          </Stack>
-        </object>
+      <Box style={{ flex: 1, minHeight: fileName ? minHeight - 40 : minHeight }}>
+        <iframe
+          title={fileName || 'Documento PDF'}
+          src={`${blobUrl}#toolbar=1&navpanes=0&scrollbar=1`}
+          style={{
+            display: 'block',
+            width: '100%',
+            height: '100%',
+            minHeight: fileName ? minHeight - 40 : minHeight,
+            border: 'none',
+            background: '#525659',
+          }}
+        />
       </Box>
     </Paper>
   );

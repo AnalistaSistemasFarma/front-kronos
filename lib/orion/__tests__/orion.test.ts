@@ -47,11 +47,31 @@ describe('orion signerStatus', () => {
   });
 });
 
+describe('orion signerDeadline', () => {
+  it('aplica expiresAt +24h al firmante pendiente', async () => {
+    const { applyPendingSignerTurnDeadline, isSignerTurnExpired, ORION_SIGNER_TURN_HOURS } =
+      await import('../signerDeadline');
+    expect(ORION_SIGNER_TURN_HOURS).toBe(24);
+    const now = new Date('2026-09-09T12:00:00.000Z');
+    const next = applyPendingSignerTurnDeadline(
+      [
+        { email: 'a@test.com', order: 1, status: 'FIRMADO' },
+        { email: 'b@test.com', order: 2, status: 'PENDIENTE' },
+      ],
+      now
+    );
+    expect(next[1]?.expiresAt).toBe('2026-09-10T12:00:00.000Z');
+    expect(isSignerTurnExpired(next[1], now)).toBe(false);
+    expect(isSignerTurnExpired(next[1], new Date('2026-09-10T12:00:01.000Z'))).toBe(true);
+  });
+});
+
 describe('orion permissions', () => {
-  it('coordinador en fase de configuración', () => {
+  it('coordinador creador en fase de configuración', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
       currentUserEmail: 'coord@test.com',
+      createdByEmail: 'coord@test.com',
       state: { status: 'BORRADOR', orionDocumentId: 'doc-1', embedUrl: 'https://orion/embed' },
       hasAttachment: true,
     });
@@ -61,10 +81,88 @@ describe('orion permissions', () => {
     expect(perms.canAcceptSign).toBe(false);
   });
 
-  it('permite editar asignación durante firma si la tarea sigue abierta', () => {
+  it('con permiso Firma digital pero no creador no edita', () => {
+    const perms = resolveOrionPermissions({
+      canManage: true,
+      currentUserEmail: 'otro@test.com',
+      createdByEmail: 'coord@test.com',
+      state: { status: 'BORRADOR', orionDocumentId: 'doc-1', embedUrl: 'https://orion/embed' },
+      hasAttachment: true,
+    });
+    expect(perms.canEditAssignments).toBe(false);
+    expect(perms.canManageWorkflow).toBe(false);
+  });
+
+  it('creador listado como firmante en BORRADOR sigue siendo coordinador', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
       currentUserEmail: 'coord@test.com',
+      createdByEmail: 'coord@test.com',
+      state: {
+        status: 'BORRADOR',
+        orionDocumentId: 'doc-1',
+        embedUrl: 'https://orion/embed',
+        signers: [
+          { email: 'coord@test.com', order: 1, status: 'PENDIENTE' },
+          { email: 'b@test.com', order: 2, status: 'PENDIENTE' },
+        ],
+      },
+      hasAttachment: true,
+    });
+    expect(perms.userRole).toBe('coordinator');
+    expect(perms.canAssignSigners).toBe(true);
+    expect(perms.canPlaceSignatures).toBe(true);
+    expect(perms.canAcceptSign).toBe(false);
+  });
+
+  it('documento DEVUELTO permite al creador gestionar de nuevo si nadie firmó', () => {
+    const perms = resolveOrionPermissions({
+      canManage: true,
+      currentUserEmail: 'coord@test.com',
+      createdByEmail: 'coord@test.com',
+      state: {
+        status: 'DEVUELTO',
+        orionDocumentId: 'doc-1',
+        embedUrl: 'https://orion/embed',
+        signers: [
+          { email: 'a@test.com', order: 1, status: 'PENDIENTE' },
+          { email: 'b@test.com', order: 2, status: 'PENDIENTE' },
+        ],
+      },
+      hasAttachment: true,
+    });
+    expect(perms.userRole).toBe('coordinator');
+    expect(perms.canEditAssignments).toBe(true);
+    expect(perms.canManageWorkflow).toBe(true);
+    expect(perms.canAcceptSign).toBe(false);
+    expect(perms.roleLabel).toContain('devuelto');
+  });
+
+  it('bloquea edición si ya hay una firma completada', () => {
+    const perms = resolveOrionPermissions({
+      canManage: true,
+      currentUserEmail: 'coord@test.com',
+      createdByEmail: 'coord@test.com',
+      state: {
+        status: 'EN_PROCESO',
+        orionDocumentId: 'doc-1',
+        embedUrl: 'https://orion/embed',
+        signers: [
+          { email: 'a@test.com', order: 1, status: 'FIRMADO' },
+          { email: 'b@test.com', order: 2, status: 'PENDIENTE' },
+        ],
+      },
+      workflowLocked: false,
+    });
+    expect(perms.canEditAssignments).toBe(false);
+    expect(perms.canRenewDeadline).toBe(true);
+  });
+
+  it('permite editar en EN_PROCESO sin firmas si es el creador', () => {
+    const perms = resolveOrionPermissions({
+      canManage: true,
+      currentUserEmail: 'coord@test.com',
+      createdByEmail: 'coord@test.com',
       state: {
         status: 'EN_PROCESO',
         orionDocumentId: 'doc-1',
@@ -81,6 +179,7 @@ describe('orion permissions', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
       currentUserEmail: 'coord@test.com',
+      createdByEmail: 'coord@test.com',
       state: {
         status: 'EN_PROCESO',
         orionDocumentId: 'doc-1',
@@ -95,6 +194,7 @@ describe('orion permissions', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
       currentUserEmail: 'b@test.com',
+      createdByEmail: 'coord@test.com',
       hasPersonalSignature: true,
       state: {
         status: 'EN_PROCESO',
@@ -112,23 +212,18 @@ describe('orion permissions', () => {
     expect(perms.canPlaceSignatures).toBe(false);
   });
 
-  it('firmante en espera no puede aceptar', () => {
+  it('admin sin subproceso Firma digital no gestiona', () => {
     const perms = resolveOrionPermissions({
       canManage: false,
-      currentUserEmail: 'b@test.com',
-      state: {
-        status: 'EN_PROCESO',
-        orionDocumentId: 'doc-1',
-        embedUrl: 'https://orion/embed',
-        signers: [
-          { email: 'a@test.com', order: 1, status: 'PENDIENTE' },
-          { email: 'b@test.com', order: 2, status: 'PENDIENTE' },
-        ],
-      },
+      isAdmin: true,
+      currentUserEmail: 'admin@test.com',
+      createdByEmail: 'admin@test.com',
+      state: { status: 'BORRADOR', orionDocumentId: 'doc-1', embedUrl: 'https://orion/embed' },
+      hasAttachment: true,
     });
-    expect(perms.userRole).toBe('waiting');
-    expect(perms.canAcceptSign).toBe(false);
-    expect(perms.canDrawSignature).toBe(false);
+    expect(perms.userRole).toBe('viewer');
+    expect(perms.canAssignSigners).toBe(false);
+    expect(perms.canManageWorkflow).toBe(false);
   });
 });
 
@@ -166,22 +261,40 @@ describe('orion formValue', () => {
     expect(next.documents['onedrive-1']?.fileName).toBe('contrato.pdf');
   });
 
-  it('resuelve adjunto por nombre o documento único si el fileId no coincide', () => {
+  it('no reutiliza el estado de otro PDF cuando el fileId no coincide', () => {
     const documents = {
-      'other-id': {
+      'file-a': {
         orionDocumentId: 'doc-1',
         status: 'EN_PROCESO',
-        fileName: 'Documento escaneado 6.pdf',
+        fileName: 'Documento escaneado-firmado (1).pdf',
+        fileId: 'file-a',
         signers: [{ email: 'a@test.com', status: 'PENDIENTE', order: 1 }],
       },
     };
     const resolved = resolveOrionDocumentForAttachment({
-      fileId: 'onedrive-xyz',
-      fileName: 'Documento escaneado 6.pdf',
+      fileId: 'file-b',
+      fileName: 'Documento escaneado.pdf',
       documents,
     });
-    expect(resolved.orionDocumentId).toBe('doc-1');
-    expect(resolved.signers?.[0]?.email).toBe('a@test.com');
+    expect(resolved.orionDocumentId).toBeUndefined();
+    expect(resolved.status).toBeUndefined();
+    expect(resolved.signers).toBeUndefined();
+  });
+
+  it('adopta solo el documento legacy cuando no hay clave por fileId', () => {
+    const documents = {
+      [ORION_LEGACY_FILE_ID]: {
+        orionDocumentId: 'doc-legacy',
+        status: 'BORRADOR',
+        fileName: 'contrato.pdf',
+      },
+    };
+    const resolved = resolveOrionDocumentForAttachment({
+      fileId: 'onedrive-xyz',
+      fileName: 'contrato.pdf',
+      documents,
+    });
+    expect(resolved.orionDocumentId).toBe('doc-legacy');
   });
 
   it('merge no degrada firmante FIRMADO a PENDIENTE', () => {
@@ -252,6 +365,125 @@ describe('documentVersions', () => {
       'https://example.com/fallback.pdf'
     );
     expect(url).toBe('https://example.com/partial.pdf');
+  });
+
+  it('ordena original → firmantes por order → final', async () => {
+    const { listOrionDocumentVersions } = await import('../documentVersions');
+    const ordered = listOrionDocumentVersions({
+      signers: [
+        { email: 'b@test.com', order: 2 },
+        { email: 'a@test.com', order: 1 },
+      ],
+      versions: [
+        {
+          id: 'final-1',
+          kind: 'final',
+          label: 'Final',
+          url: 'https://example.com/final.pdf',
+          createdAt: '2026-01-04',
+        },
+        {
+          id: 'sign-b',
+          kind: 'partial',
+          label: 'B',
+          url: 'https://example.com/b.pdf',
+          createdAt: '2026-01-03',
+          signerEmail: 'b@test.com',
+        },
+        {
+          id: 'original',
+          kind: 'original',
+          label: 'Original',
+          url: 'https://example.com/original.pdf',
+          createdAt: '2026-01-01',
+        },
+        {
+          id: 'sign-a',
+          kind: 'partial',
+          label: 'A',
+          url: 'https://example.com/a.pdf',
+          createdAt: '2026-01-02',
+          signerEmail: 'a@test.com',
+        },
+      ],
+    });
+    expect(ordered.map((v) => v.id)).toEqual(['original', 'sign-a', 'sign-b', 'final-1']);
+  });
+
+  it('firmante solo ve la última versión firmada', async () => {
+    const { listOrionDocumentVersionsForViewer } = await import('../documentVersions');
+    const state = {
+      signers: [
+        { email: 'a@test.com', order: 1 },
+        { email: 'b@test.com', order: 2 },
+      ],
+      versions: [
+        {
+          id: 'original',
+          kind: 'original' as const,
+          label: 'Original',
+          url: 'https://example.com/original.pdf',
+          createdAt: '2026-01-01',
+        },
+        {
+          id: 'sign-a',
+          kind: 'partial' as const,
+          label: 'A',
+          url: 'https://example.com/a.pdf',
+          createdAt: '2026-01-02',
+          signerEmail: 'a@test.com',
+        },
+        {
+          id: 'sign-b',
+          kind: 'partial' as const,
+          label: 'B',
+          url: 'https://example.com/b.pdf',
+          createdAt: '2026-01-03',
+          signerEmail: 'b@test.com',
+        },
+      ],
+    };
+    expect(listOrionDocumentVersionsForViewer(state, { fullHistory: true }).map((v) => v.id)).toEqual([
+      'original',
+      'sign-a',
+      'sign-b',
+    ]);
+    expect(listOrionDocumentVersionsForViewer(state, { fullHistory: false }).map((v) => v.id)).toEqual([
+      'sign-b',
+    ]);
+  });
+
+  it('rebuildOrionVersionHistory reconstruye original + firmantes en orden', async () => {
+    const { rebuildOrionVersionHistory } = await import('../documentVersions');
+    const rebuilt = rebuildOrionVersionHistory(
+      {
+        status: 'EN_PROCESO',
+        originalFileUrl: 'https://example.com/original.pdf',
+        signedFileUrl: 'https://example.com/signed.pdf',
+        signers: [
+          {
+            email: 'b@test.com',
+            name: 'B',
+            order: 2,
+            status: 'FIRMADO',
+            signedAt: '2026-01-03',
+          },
+          {
+            email: 'a@test.com',
+            name: 'A',
+            order: 1,
+            status: 'FIRMADO',
+            signedAt: '2026-01-02',
+          },
+        ],
+        versions: [{ id: 'broken', kind: 'partial', label: 'x', url: 'old', createdAt: '2026-01-01' }],
+      },
+      null,
+      null
+    );
+    expect(rebuilt.versions?.map((v) => v.kind)).toEqual(['original', 'partial', 'final']);
+    expect(rebuilt.versions?.[1]?.signerEmail).toBe('a@test.com');
+    expect(rebuilt.versions?.[2]?.signerEmail).toBe('b@test.com');
   });
 
   it('canViewOrionDocumentVersions solo admin o solicitante', async () => {

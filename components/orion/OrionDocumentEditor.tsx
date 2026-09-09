@@ -9,10 +9,11 @@ import {
   Loader,
   Paper,
   ScrollArea,
+  SimpleGrid,
   Stack,
   Text,
 } from '@mantine/core';
-import { IconDeviceFloppy, IconFileText, IconSend } from '@tabler/icons-react';
+import { IconCertificate, IconDeviceFloppy, IconFileText, IconPaperclip, IconSend } from '@tabler/icons-react';
 import {
   emptySignerSlot,
   mergeParticipantSources,
@@ -25,7 +26,9 @@ import type { OrionSignatureState } from '../../lib/orion/types';
 import OrionEditorSteps, { editorStepSubtitle } from './OrionEditorSteps';
 import OrionSignerAssignment from './OrionSignerAssignment';
 import OrionSignersList from './OrionSignersList';
+import PdfInlineViewer from './PdfInlineViewer';
 import SignaturePlacementCanvas from './SignaturePlacementCanvas';
+import { usePdfBlobPreview } from './usePdfBlobPreview';
 
 type Props = {
   requestId: number;
@@ -38,6 +41,8 @@ type Props = {
   availableUsers?: OrionUserOption[];
   currentUserEmail?: string;
   currentUserName?: string;
+  /** Departamento del coordinador (solo visual, v1) */
+  departmentLabel?: string | null;
   initialFields?: SignatureFieldPlacement[];
   state: OrionSignatureState;
   onStateUpdate: (state: OrionSignatureState) => void;
@@ -84,6 +89,7 @@ export default function OrionDocumentEditor({
   availableUsers = [],
   currentUserEmail,
   currentUserName,
+  departmentLabel = null,
   initialFields = [],
   state,
   onStateUpdate,
@@ -91,6 +97,9 @@ export default function OrionDocumentEditor({
   assignmentsEditable = true,
 }: Props) {
   const [editorStep, setEditorStep] = useState(0);
+  // Una sola carga de blob compartida entre preview (paso 0) y canvas (paso 2).
+  const { blobUrl: sharedPdfBlob } = usePdfBlobPreview(pdfSrc, Boolean(pdfSrc));
+  const sharedPdfSrc = sharedPdfBlob || pdfSrc;
   const [orderedParticipants, setOrderedParticipants] = useState<OrionParticipant[]>(() =>
     buildInitialParticipants(participants, state)
   );
@@ -363,54 +372,137 @@ export default function OrionDocumentEditor({
       <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {editorStep === 0 && (
           <ScrollArea style={{ flex: 1 }} offsetScrollbars type='scroll'>
-            <Stack gap='md' maw={560}>
-              <Paper withBorder p='md' radius='md' style={{ background: 'var(--app-surface)' }}>
-                <Group gap='sm' mb='sm'>
-                  <IconFileText size={20} style={{ opacity: 0.7 }} />
-                  <Text size='sm' fw={600}>
-                    Archivo del documento
-                  </Text>
-                </Group>
-                <Text size='sm'>{fileName || 'Documento adjunto'}</Text>
-              </Paper>
+            <Stack gap='md' maw={640}>
+              <Box>
+                <Text size='sm' fw={600} mb={4}>
+                  Archivo del documento *
+                </Text>
+                <Text size='xs' c='dimmed' mb='xs'>
+                  Formatos admitidos: PDF. El archivo ya está adjunto a esta solicitud.
+                </Text>
+                <Paper
+                  withBorder
+                  p='xl'
+                  radius='md'
+                  style={{
+                    background: 'var(--app-surface-raised)',
+                    borderStyle: 'dashed',
+                    textAlign: 'center',
+                  }}
+                >
+                  <Stack gap={6} align='center'>
+                    <IconPaperclip size={28} style={{ opacity: 0.65 }} />
+                    <Text size='sm' fw={600}>
+                      {fileName || 'Documento adjunto'}
+                    </Text>
+                    <Text size='xs' c='dimmed'>
+                      PDF listo para preparar firmantes
+                    </Text>
+                  </Stack>
+                </Paper>
+                {sharedPdfSrc ? (
+                  <Box mt='md'>
+                    <PdfInlineViewer
+                      src={sharedPdfSrc}
+                      fileName={fileName ?? undefined}
+                      minHeight={320}
+                    />
+                  </Box>
+                ) : null}
+              </Box>
 
               <Box>
                 <Text size='sm' fw={600} mb={4}>
                   Título
                 </Text>
-                <Text size='sm' c='dimmed'>
-                  {documentTitle || fileName || 'Sin título'}
-                </Text>
+                <Paper withBorder p='sm' radius='md' style={{ background: 'var(--app-surface)' }}>
+                  <Text size='sm'>{documentTitle || fileName || 'Sin título'}</Text>
+                </Paper>
               </Box>
 
               <Box>
                 <Text size='sm' fw={600} mb={8}>
                   Tipo de firma del documento
                 </Text>
-                <Paper
-                  withBorder
-                  p='sm'
-                  radius='md'
-                  style={{
-                    background: 'color-mix(in srgb, var(--app-accent) 10%, var(--app-surface))',
-                    borderColor: 'color-mix(in srgb, var(--app-accent) 40%, var(--app-border))',
-                  }}
-                >
-                  <Text size='sm' fw={600}>
-                    Firma electrónica
-                  </Text>
-                  <Text size='xs' c='dimmed' mt={4}>
-                    Rúbrica e identidad del firmante. Ideal para flujos internos.
-                  </Text>
-                </Paper>
+                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
+                  <Paper
+                    withBorder
+                    p='sm'
+                    radius='md'
+                    style={{
+                      background: 'color-mix(in srgb, var(--app-accent) 10%, var(--app-surface))',
+                      borderColor: 'color-mix(in srgb, var(--app-accent) 45%, var(--app-border))',
+                    }}
+                  >
+                    <Group gap='xs' mb={4}>
+                      <IconFileText size={16} />
+                      <Text size='sm' fw={700}>
+                        Firma digital activa
+                      </Text>
+                    </Group>
+                    <Text size='xs' c='dimmed'>
+                      Rúbrica + identidad en GSS Firma (Orion). Plazo de 24 h por turno.
+                    </Text>
+                  </Paper>
+                  <Paper
+                    withBorder
+                    p='sm'
+                    radius='md'
+                    style={{
+                      background: 'var(--app-surface)',
+                    }}
+                  >
+                    <Group gap='xs' mb={4}>
+                      <IconCertificate size={16} />
+                      <Text size='sm' fw={700}>
+                        Procedencia SynerLink
+                      </Text>
+                    </Group>
+                    <Text size='xs' c='dimmed'>
+                      El documento queda trazado en Orion con empresa y origen SynerLink.
+                    </Text>
+                  </Paper>
+                </SimpleGrid>
               </Box>
+
+              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
+                <Box>
+                  <Text size='sm' fw={600} mb={4}>
+                    Responsable
+                  </Text>
+                  <Paper withBorder p='sm' radius='md' style={{ background: 'var(--app-surface)' }}>
+                    <Text size='sm'>{currentUserName || currentUserEmail || '—'}</Text>
+                  </Paper>
+                </Box>
+                <Box>
+                  <Text size='sm' fw={600} mb={4}>
+                    Departamento
+                  </Text>
+                  <Paper withBorder p='sm' radius='md' style={{ background: 'var(--app-surface)' }}>
+                    <Text size='sm'>{departmentLabel || 'Según su perfil SynerLink'}</Text>
+                  </Paper>
+                </Box>
+              </SimpleGrid>
+
+              <Alert color='blue' variant='light'>
+                Continúe para asignar firmantes (puede incluirse usted) y ubicar las firmas en el
+                PDF, igual que en GSS Firma.
+              </Alert>
             </Stack>
           </ScrollArea>
         )}
 
         {editorStep === 1 && !assignmentsEditable && (
           <Alert color='gray' variant='light' mb='md'>
-            La tarea o solicitud está cerrada. La asignación de firmantes es solo lectura.
+            Solo el creador puede editar firmantes y posiciones mientras la solicitud esté abierta y
+            nadie haya firmado.
+          </Alert>
+        )}
+
+        {editorStep === 1 && assignmentsEditable && (
+          <Alert color='blue' variant='light' mb='md'>
+            Cada firmante tendrá 24 horas para firmar cuando sea su turno. Si vence, podrá solicitar
+            renovación al líder del proceso.
           </Alert>
         )}
 
@@ -504,7 +596,7 @@ export default function OrionDocumentEditor({
               }}
             >
               <SignaturePlacementCanvas
-                pdfSrc={pdfSrc}
+                pdfSrc={sharedPdfSrc}
                 documentId={documentId}
                 participants={assignedParticipants}
                 activeOrder={activeOrder}

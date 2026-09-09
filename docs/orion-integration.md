@@ -7,8 +7,8 @@ Documentación Orion (contrato completo): `front-orion/docs/synerlink-integratio
 ## Variables de entorno (Kronos)
 
 ```env
-# Misma clave que Orion
-INTEGRATION_API_KEYS=gss-orion-synerlink-dev-2026-shared-key
+# Misma clave que Orion (dev: use una clave local, nunca reutilice ejemplos de docs en prod)
+INTEGRATION_API_KEYS=<shared-integration-api-key>
 
 # URL base de Orion (sin slash final)
 ORION_API_BASE_URL=http://localhost:3000
@@ -26,7 +26,7 @@ ORION_SIGNATURE_PROFILE_URL=
 En Orion debe existir:
 
 ```env
-SYNERLINK_INTEGRATION_API_KEY=gss-orion-synerlink-dev-2026-shared-key
+SYNERLINK_INTEGRATION_API_KEY=<shared-integration-api-key>
 SYNERLINK_WEBHOOK_URL=http://localhost:8080/api/integrations/orion/document-status
 SYNERLINK_ALLOWED_ORIGINS=http://localhost:8080
 SYNERLINK_TENANT_MAP={"7":"farmaceutica-abc"}
@@ -78,15 +78,17 @@ Compatibilidad: JSON plano legacy (1 doc / solicitud) se lee como `documents._le
 8. **Versiones** (solo admin + solicitante): original + una entrada por cada firma parcial/final (`state.versions[]`).
 9. **Descarga / vista del firmante siguiente**: usa el PDF con firmas acumuladas (`signedFileUrl` o última versión), no el adjunto original de OneDrive.
 
-No hay tarjeta hub “Firma digital / Coordinador”: el host Orion es invisible y solo registra acciones para adjuntos + modales.
+No hay tarjeta hub “Firma digital”: el host Orion es invisible y solo registra acciones para adjuntos + modales. El permiso de gestión es el subproceso **Firma digital** (`/process/firma/manage`), asignable en **Administración → Usuarios** (no aparece como tarjeta en el hub).
 
 ### Permisos
 
-| Rol | Qué puede hacer |
-|-----|-----------------|
-| Responsable de tarea / admin | **Preparar / Gestionar** por PDF en adjuntos |
+| Quién | Qué puede hacer |
+|-------|-----------------|
+| Persona con subproceso **Firma digital** (obligatorio; el role `admin` no lo omite) | Ver categoría **FIRMA** al crear solicitudes; **Preparar / Gestionar** por PDF |
 | Firmante (email en lista de ese PDF) | Primero **Autorizar** (módulo Autorizaciones); luego **Firmar** en el adjunto |
 | Cualquier usuario | Dibujar/guardar firma personal (rúbrica) |
+
+Semilla del subproceso: `node scripts/seed-firma-manage-subprocess.cjs` (opcional `--email=usuario@empresa.com` para otorgarlo).
 
 ## Endpoints en Kronos
 

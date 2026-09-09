@@ -52,6 +52,11 @@ export async function POST(req: Request) {
           if (!fileId) {
             fileId = parseOrionFileIdFromResolution(closedTask.resolution);
           }
+        } else {
+          return {
+            error: 'No puede cerrar esta autorización (no está asignada a usted)',
+            status: 403 as const,
+          };
         }
       }
 

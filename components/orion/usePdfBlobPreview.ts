@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { fetchPdfArrayBuffer } from './pdfFetchCache';
 
-/** Carga un PDF remoto como blob URL para poder mostrarlo en object/iframe. */
+/** Carga un PDF remoto como blob URL para mostrarlo embebido (sin forzar descarga). */
 export function usePdfBlobPreview(sourceUrl: string | null | undefined, enabled = true) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -16,7 +17,7 @@ export function usePdfBlobPreview(sourceUrl: string | null | undefined, enabled 
       return;
     }
 
-    if (sourceUrl.startsWith('blob:')) {
+    if (sourceUrl.startsWith('blob:') || sourceUrl.startsWith('data:application/pdf')) {
       setBlobUrl(sourceUrl);
       setFailed(false);
       setLoading(false);
@@ -30,11 +31,12 @@ export function usePdfBlobPreview(sourceUrl: string | null | undefined, enabled 
 
     void (async () => {
       try {
-        const res = await fetch(sourceUrl);
-        if (!res.ok) throw new Error('fetch failed');
-        const blob = await res.blob();
+        const buffer = await fetchPdfArrayBuffer(sourceUrl);
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
+
+        // Forzar application/pdf para que el iframe muestre y no descargue.
+        const pdfBlob = new Blob([buffer], { type: 'application/pdf' });
+        objectUrl = URL.createObjectURL(pdfBlob);
         setBlobUrl(objectUrl);
         setFailed(false);
       } catch {

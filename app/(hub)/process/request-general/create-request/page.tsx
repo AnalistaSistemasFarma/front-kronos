@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
-import axios from 'axios';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useGetMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
@@ -68,6 +67,10 @@ import {
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 import { sanitizeOneDriveName } from '../../../../../lib/onedriveName';
+import {
+  ensureOneDriveFolderPath,
+  uploadFileToOneDriveFolder,
+} from '../../../../../lib/onedrive/graphFolderUpload';
 import { isSapField } from '../../../../../lib/requests-general/sapSources';
 import {
   TABLE_FIELD_TYPE,
@@ -843,9 +846,12 @@ function RequestBoard() {
     const hasOrionSignatureField = visibleFields.some(
       (f) => f.field_type === ORION_SIGNATURE_FIELD_TYPE
     );
-    const isFirmaProcess = String(formData.category || '')
-      .toUpperCase()
-      .includes('FIRMA');
+    const categoryLabel =
+      categories.find((c) => c.value === formData.category)?.label || '';
+    const processLabel =
+      processCategories.find((p) => p.value === formData.process)?.label || '';
+    const isFirmaProcess =
+      /FIRMA/i.test(categoryLabel) || /FIRMA/i.test(processLabel);
     if (hasOrionSignatureField || isFirmaProcess) {
       const isPdf = (name: string) => /\.pdf$/i.test(name || '');
       const pdfFromRequired = Object.values(filesByDoc)
@@ -988,6 +994,23 @@ function RequestBoard() {
         toast.success(`Solicitud #${requestId} creada correctamente.`);
       }
 
+      const categoryLabel =
+        categories.find((c) => c.value === formData.category)?.label || '';
+      const processLabel =
+        processCategories.find((p) => p.value === formData.process)?.label || '';
+      const isFirmaFlow =
+        visibleFields.some((f) => f.field_type === ORION_SIGNATURE_FIELD_TYPE) ||
+        /FIRMA/i.test(categoryLabel) ||
+        /FIRMA/i.test(processLabel);
+
+      // FIRMA: abrir la solicitud y el modal Orion (mismo flujo que GSS Firma)
+      if (uploadOk && isFirmaFlow && Number.isInteger(requestId) && requestId > 0) {
+        router.push(
+          `/process/request-general/view-request?id=${requestId}&from=create-request&orionAction=manage`
+        );
+        return;
+      }
+
       setFormData({
         company: '',
         subject: '',
@@ -1017,73 +1040,50 @@ function RequestBoard() {
     token: string
   ) {
     try {
-      const createResponse = await axios.post(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG:/children`,
-        {
-          name: folderName,
-          folder: {},
-          '@microsoft.graph.conflictBehavior': 'replace',
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const folderId = await ensureOneDriveFolderPath(token, [
+        'SAPSEND',
+        'TEC',
+        'SG',
+        folderName,
+      ]);
 
-      if (createResponse.status !== 201) {
-        throw new Error('Error al crear la carpeta.');
+      if (!files?.length) {
+        console.log('No hay archivos seleccionados para subir.');
+        return;
       }
 
-      const folderId = createResponse.data.id;
+      const uploadNames = files.map((file) =>
+        sanitizeOneDriveName(
+          file.label ? `${file.label} - ${file.file.name}` : file.file.name
+        )
+      );
 
-      if (files && files.length > 0) {
-        const uploadNames = files.map((file) =>
-          sanitizeOneDriveName(
-            file.label ? `${file.label} - ${file.file.name}` : file.file.name
-          )
-        );
-
-        const uploadPromises = files.map((file: { file: File; label?: string }, index) =>
-          axios.put(
-            `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${uploadNames[index]}:/content`,
+      const results = await Promise.allSettled(
+        files.map((file, index) =>
+          uploadFileToOneDriveFolder(
+            token,
+            folderId,
+            uploadNames[index],
             file.file,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': file.file.type,
-              },
-            }
+            file.file.type || 'application/octet-stream'
           )
-        );
+        )
+      );
 
-        const results = await Promise.allSettled(uploadPromises);
-
-        const failed: string[] = [];
-        results.forEach((result, index) => {
-          if (
-            result.status === 'fulfilled' &&
-            (result.value.status === 201 || result.value.status === 200)
-          ) {
-            console.log(`Archivo subido: ${uploadNames[index]}`, result.value.data);
-          } else {
-            const reason =
-              result.status === 'rejected'
-                ? result.reason
-                : `status ${result.value.status}`;
-            console.log(`Error al subir el archivo: ${uploadNames[index]}`, reason);
-            failed.push(uploadNames[index]);
-          }
-        });
-
-        if (failed.length > 0) {
-          throw new Error(
-            `No se pudieron subir ${failed.length} archivo(s): ${failed.join(', ')}`
-          );
+      const failed: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          console.log(`Archivo subido: ${uploadNames[index]}`, result.value);
+        } else {
+          console.log(`Error al subir el archivo: ${uploadNames[index]}`, result.reason);
+          failed.push(uploadNames[index]);
         }
-      } else {
-        console.log('No hay archivos seleccionados para subir.');
+      });
+
+      if (failed.length > 0) {
+        throw new Error(
+          `No se pudieron subir ${failed.length} archivo(s): ${failed.join(', ')}`
+        );
       }
     } catch (error) {
       console.error('Error en CheckOrCreateFolderAndUpload:', error);
@@ -2053,8 +2053,9 @@ function RequestBoard() {
                       >
                         {isOrionSignatureField ? (
                           <Alert color='blue' title={field.field_label} icon={<IconLink size={16} />}>
-                            La firma digital se gestionará al abrir la solicitud, dentro del flujo
-                            integrado con GSS Firma (Orion).
+                            Tras crear la solicitud se abrirá el asistente de firma (como en GSS
+                            Firma): documento, firmantes y ubicación de firmas. Adjunte al menos un
+                            PDF.
                           </Alert>
                         ) : isTableField ? (
                           <TableFieldInput

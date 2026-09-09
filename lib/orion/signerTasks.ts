@@ -314,11 +314,16 @@ export async function syncOrionSignerTasks(
   const completedSigners = newlyCompletedSigners(params.previousSigners, signers);
   const statusUpper = String(params.documentStatus || params.state.status || '').toUpperCase();
   const documentRejected = statusUpper === 'RECHAZADO';
+  const documentReturned = statusUpper === 'DEVUELTO';
   const documentFullySigned =
     statusUpper === 'FIRMADO' || allSignersCompleted(signers);
   const hasDocument = Boolean(params.state.orionDocumentId);
   const shouldManageTasks =
-    hasDocument && signers.length > 0 && !documentRejected && !documentFullySigned;
+    hasDocument &&
+    signers.length > 0 &&
+    !documentRejected &&
+    !documentReturned &&
+    !documentFullySigned;
   const fileId = String(params.fileId || params.state.fileId || '').trim() || null;
   const fileName = params.fileName ?? params.state.fileName ?? null;
   const marker = buildOrionFileTaskMarker(fileId);
@@ -356,6 +361,7 @@ export async function syncOrionSignerTasks(
       isSignerCompleted(signer.status) ||
       isSignerRejected(signer.status) ||
       documentRejected ||
+      documentReturned ||
       documentFullySigned;
 
     if (shouldClose) {
@@ -368,16 +374,19 @@ export async function syncOrionSignerTasks(
       );
       if (!openTaskId) continue;
 
-      const resolution = isSignerRejected(signer.status) || documentRejected
-        ? `${marker} Firma rechazada (${signer.name || email}).`.trim()
-        : `${marker} Firma completada por ${signer.name || email}.`.trim();
+      const resolution =
+        isSignerRejected(signer.status) || documentRejected
+          ? `${marker} Firma rechazada (${signer.name || email}).`.trim()
+          : documentReturned
+            ? `${marker} Documento devuelto; firma pendiente reiniciada (${signer.name || email}).`.trim()
+            : `${marker} Firma completada por ${signer.name || email}.`.trim();
 
       await closeSignerTask(
         pool,
         openTaskId,
         user.id,
         resolution,
-        isSignerRejected(signer.status) || documentRejected ? 3 : 2
+        isSignerRejected(signer.status) || documentRejected || documentReturned ? 3 : 2
       );
       tasksClosed += 1;
       continue;
@@ -403,6 +412,13 @@ export async function syncOrionSignerTasks(
       pool,
       params.requestId,
       `${marker} Documento rechazado en GSS Firma (Orion).`.trim(),
+      fileId
+    );
+  } else if (documentReturned) {
+    tasksClosed += await cancelOpenSignerTasks(
+      pool,
+      params.requestId,
+      `${marker} Documento devuelto para corrección (Orion).`.trim(),
       fileId
     );
   }

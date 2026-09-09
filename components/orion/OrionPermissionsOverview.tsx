@@ -104,7 +104,7 @@ export default function OrionPermissionsOverview({ permissions }: Props) {
 
       {permissions.userRole === 'waiting' && (
         <Text size='xs' c='dimmed'>
-          Acciones disponibles cuando el coordinador envíe el documento y sea su turno en la secuencia.
+          Acciones disponibles cuando envíen el documento a firma y sea su turno en la secuencia.
         </Text>
       )}
     </Paper>

@@ -1,14 +1,18 @@
+import { isOrionFirmaManageSubprocess } from '../orion/access';
+
 export const DASHBOARD_SOLICITANTE_URL = '/process/request-general/dashboard-solicitante';
 export const DASHBOARD_SOLICITADO_URL = '/process/request-general/dashboard-solicitado';
 
 /**
- * Subprocesos que viven en el header (no deben listarse en el hub de Procesos).
+ * Subprocesos que viven en el header o son solo permiso (no listar en el hub).
  * Función pura — segura para componentes cliente.
  */
 export function isHubHiddenRequestDashboardSubprocess(subprocess: {
   subprocess?: string | null;
   subprocess_url?: string | null;
 }): boolean {
+  if (isOrionFirmaManageSubprocess(subprocess)) return true;
+
   const url = (subprocess.subprocess_url ?? '').toLowerCase().trim();
   if (
     url === DASHBOARD_SOLICITADO_URL.toLowerCase() ||

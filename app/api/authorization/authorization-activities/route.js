@@ -26,8 +26,9 @@ export async function GET(req) {
     }
 
     // Enrutamiento:
-    //  - Autorizaciones asignadas directamente al usuario (firma Orion por firmante), o
-    //  - Por tipo en user_types_authorization + mismo departamento que el creador.
+    //  - Autorizaciones asignadas directamente al usuario (firma Orion por firmante):
+    //    siempre visibles, sin filtrar por empresa/subprocess.
+    //  - Pool por tipo en user_types_authorization + mismo departamento + empresa accesible.
     let query = `
         SELECT
             trg.id as id_task_request, trg.id_request_general, trg.id_status, trg.resolution, tpc.task,
@@ -45,16 +46,16 @@ export async function GET(req) {
         LEFT JOIN [user] ucr ON ucr.id = rg.id_requester
         WHERE tpc.is_authorization = 1
           AND tpc.type_authorization IS NOT NULL
-		  AND c.id_company IN (
-            SELECT cu.id_company
-            FROM company_user cu
-            INNER JOIN subprocess_user_company suc ON suc.id_company_user = cu.id_company_user
-            WHERE cu.id_user = @idUser
-          )
           AND (
             trg.id_assigned = @idUser
             OR (
-              tpc.type_authorization IN (
+              c.id_company IN (
+                SELECT cu.id_company
+                FROM company_user cu
+                INNER JOIN subprocess_user_company suc ON suc.id_company_user = cu.id_company_user
+                WHERE cu.id_user = @idUser
+              )
+              AND tpc.type_authorization IN (
                 SELECT ut.type_authorization
                 FROM user_types_authorization ut
                 WHERE ut.id_user = @idUser

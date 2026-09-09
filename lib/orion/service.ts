@@ -21,18 +21,20 @@ import {
   parseFileIdFromExternalRef,
   resolveOrionTenantId,
 } from './config';
-import { acceptOrionSignerTurn, createOrionDocument, getOrionDocument, getOrionDocumentByRef, saveOrionSignatureFields } from './client';
+import { acceptOrionSignerTurn, buildOrionSignedFileApiUrl, createOrionDocument, getOrionDocument, getOrionDocumentByRef, rebuildOrionSignedPdf, returnOrionDocument, saveOrionSignatureFields } from './client';
 import { mapOrionFieldsToPlacements, normalizeFieldsForStorage, parseEmbedTokenFromUrl, toOrionSignatureFields, type SignatureFieldPlacement } from './signatureFields';
 import { advanceSequentialTask } from '../workflow/advanceSequentialTask.js';
 import {
   applyOrionVersionHistory,
   ensureOriginalOrionVersion,
+  rebuildOrionVersionHistory,
 } from './documentVersions';
 import {
   allSignersCompleted,
   getCurrentPendingSigner,
   isSignerCompleted,
   newlyCompletedSigners,
+  orderedSigners,
 } from './signerStatus';
 import {
   cancelOpenSignerTasks,
@@ -40,9 +42,85 @@ import {
   syncOrionSignerTasks,
 } from './signerTasks';
 import { createOrionSignerAuthorizations, openNextOrionSignerAuthorization } from './signerAuthorizations';
+import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken.jsx';
+import type { SignerAcceptIdentity } from './signerIdentity';
+import { normalizeSignerIdentity } from './signerIdentity';
+import {
+  applyPendingSignerTurnDeadline,
+  isSignerTurnExpired,
+} from './signerDeadline';
 
 type SqlPool = import('mssql').ConnectionPool;
 type SqlTransaction = import('mssql').Transaction;
+
+/** Descarga el PDF original desde URL pública o OneDrive (item id = fileId). */
+export async function resolveOriginalPdfBase64(params: {
+  fileId: string;
+  originalFileUrl?: string | null;
+  versions?: OrionSignatureState['versions'];
+}): Promise<{ base64: string | null; sourceUrl: string | null }> {
+  const tryUrl = async (url: string): Promise<string | null> => {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      return buf.byteLength > 0 ? buf.toString('base64') : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const candidates = [
+    String(params.originalFileUrl || '').trim(),
+    String(params.versions?.find((v) => v.kind === 'original')?.url || '').trim(),
+  ].filter(Boolean);
+
+  for (const url of candidates) {
+    const base64 = await tryUrl(url);
+    if (base64) return { base64, sourceUrl: url };
+  }
+
+  const fileId = String(params.fileId || '').trim();
+  const graph = String(process.env.MICROSOFTGRAPHUSERROUTE || '').trim();
+  if (!fileId || !graph || fileId === ORION_LEGACY_FILE_ID) {
+    return { base64: null, sourceUrl: null };
+  }
+
+  try {
+    const token = await getMicrosoftToken();
+    const metaRes = await fetch(`${graph}items/${encodeURIComponent(fileId)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    if (metaRes.ok) {
+      const meta = (await metaRes.json()) as {
+        '@microsoft.graph.downloadUrl'?: string;
+        webUrl?: string;
+      };
+      const downloadUrl = String(meta['@microsoft.graph.downloadUrl'] || '').trim();
+      if (downloadUrl) {
+        const base64 = await tryUrl(downloadUrl);
+        if (base64) return { base64, sourceUrl: downloadUrl };
+      }
+    }
+
+    const contentRes = await fetch(`${graph}items/${encodeURIComponent(fileId)}/content`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+      redirect: 'follow',
+    });
+    if (contentRes.ok) {
+      const buf = Buffer.from(await contentRes.arrayBuffer());
+      if (buf.byteLength > 0) {
+        return { base64: buf.toString('base64'), sourceUrl: contentRes.url || null };
+      }
+    }
+  } catch (err) {
+    console.warn('[orion] resolveOriginalPdfBase64 OneDrive:', err);
+  }
+
+  return { base64: null, sourceUrl: null };
+}
 
 export type RequestOrionContext = {
   id: number;
@@ -52,6 +130,7 @@ export type RequestOrionContext = {
   category: string | null;
   requester_email: string | null;
   id_requester: string | null;
+  company_name: string | null;
 };
 
 export async function getRequestOrionContext(
@@ -69,12 +148,14 @@ export async function getRequestOrionContext(
         pc.process,
         cr.category,
         u.email AS requester_email,
-        rg.id_requester
+        rg.id_requester,
+        c.company AS company_name
       FROM requests_general rg
       LEFT JOIN process_category_request_general pcr ON pcr.id_request_general = rg.id
       LEFT JOIN process_category pc ON pc.id = pcr.id_process_category
       LEFT JOIN category_request cr ON cr.id = pc.id_category_request
       LEFT JOIN [user] u ON u.id = rg.id_requester
+      LEFT JOIN company c ON c.id_company = rg.id_company
       WHERE rg.id = @id
     `);
   return result.recordset[0] ?? null;
@@ -274,6 +355,21 @@ export async function ensureOrionDocumentForRequest(
         { status: 422 }
       );
     }
+
+    let pdfBase64 = params.pdfBase64;
+    let resolvedOriginalUrl = params.originalFileUrl ?? current.originalFileUrl ?? null;
+    if (!pdfBase64 && fileId !== ORION_LEGACY_FILE_ID) {
+      const resolved = await resolveOriginalPdfBase64({
+        fileId,
+        originalFileUrl: resolvedOriginalUrl,
+        versions: current.versions,
+      });
+      if (resolved.base64) {
+        pdfBase64 = resolved.base64;
+        if (resolved.sourceUrl) resolvedOriginalUrl = resolved.sourceUrl;
+      }
+    }
+
     const createRes = await createOrionDocument({
       externalRef,
       synerlinkRequestId: params.requestId,
@@ -285,12 +381,17 @@ export async function ensureOrionDocumentForRequest(
         ctx.subject_request ||
         `Solicitud #${params.requestId}`,
       createdByEmail,
-      pdfBase64: params.pdfBase64,
+      pdfBase64,
       metadata: {
+        source: 'synerlink',
+        synerlinkRequestId: params.requestId,
+        synerlinkCompanyId: ctx.id_company,
+        companyName: ctx.company_name ?? undefined,
         processName: ctx.process ?? undefined,
         categoryName: ctx.category ?? undefined,
         fileId: fileId === ORION_LEGACY_FILE_ID ? undefined : fileId,
         fileName: params.fileName ?? undefined,
+        createdByEmail,
       },
     });
 
@@ -301,6 +402,20 @@ export async function ensureOrionDocumentForRequest(
     }
     doc = createRes.data;
     created = createRes.status === 201;
+
+    const state = applyOrionVersionHistory({
+      previous: current,
+      next: mergeOrionSignatureState(current, {
+        ...mapOrionResponseToState(externalRef, doc, fileId, params.fileName ?? current.fileName),
+        originalFileUrl: resolvedOriginalUrl,
+      }),
+      previousSigners: current.signers,
+      originalUrl: resolvedOriginalUrl,
+    });
+    bag = setOrionDocumentInBag(bag, fileId, ensureOriginalOrionVersion(state, resolvedOriginalUrl));
+    await upsertOrionFormBag(pool, params.requestId, field.id_form_field, bag);
+
+    return { state, bag, formFieldId: field.id_form_field, created, fileId };
   }
 
   const state = applyOrionVersionHistory({
@@ -370,6 +485,9 @@ export async function applyOrionWebhookToRequest(
     auditSummary?: string | null;
     noteAuthorUserId: string | null;
     fileId?: string | null;
+    /** Bag ya cargado en memoria (evita re-leer el campo). */
+    bag?: OrionSignatureBagBag;
+    fieldId?: number;
   }
 ): Promise<{
   tasksUpdated: number;
@@ -381,15 +499,20 @@ export async function applyOrionWebhookToRequest(
   bag: OrionSignatureBagBag;
   state: OrionSignatureState;
 }> {
-  const field = await findOrionSignatureField(pool, params.requestId);
-  if (!field) {
-    throw Object.assign(new Error('Campo orion_signature no encontrado para la solicitud'), {
-      status: 404,
-    });
+  let fieldId = params.fieldId;
+  let bag = params.bag;
+  if (!bag || !fieldId) {
+    const field = await findOrionSignatureField(pool, params.requestId);
+    if (!field) {
+      throw Object.assign(new Error('Campo orion_signature no encontrado para la solicitud'), {
+        status: 404,
+      });
+    }
+    fieldId = field.id_form_field;
+    bag = bag ?? parseOrionSignatureBagBag(field.value_text);
   }
 
   const ctx = await getRequestOrionContext(pool, params.requestId);
-  let bag = parseOrionSignatureBagBag(field.value_text);
   const fileId = resolveWebhookFileId(bag, params.patch, params.fileId);
   const current = getOrionDocumentFromBag(bag, fileId);
   const previousSigners = current.signers;
@@ -405,7 +528,7 @@ export async function applyOrionWebhookToRequest(
     originalUrl: current.originalFileUrl ?? null,
   });
   bag = setOrionDocumentInBag(bag, fileId, ensureOriginalOrionVersion(state, current.originalFileUrl));
-  await upsertOrionFormBag(pool, params.requestId, field.id_form_field, bag);
+  await upsertOrionFormBag(pool, params.requestId, fieldId, bag);
 
   const statusUpper = String(params.status).toUpperCase();
   let tasksUpdated = 0;
@@ -424,7 +547,11 @@ export async function applyOrionWebhookToRequest(
   tasksUpdated += syncResult.tasksClosed + syncResult.tasksOpened;
 
   // Asegura autorización Kronos del firmante en turno (el que aún no tiene [orionAuth]).
-  if (statusUpper !== 'RECHAZADO' && statusUpper !== 'BORRADOR') {
+  if (
+    statusUpper !== 'RECHAZADO' &&
+    statusUpper !== 'BORRADOR' &&
+    statusUpper !== 'DEVUELTO'
+  ) {
     try {
       await openNextOrionSignerAuthorization(pool, {
         requestId: params.requestId,
@@ -444,7 +571,9 @@ export async function applyOrionWebhookToRequest(
       ? `Documento firmado vía GSS Firma (Orion)${state.fileName ? `: ${state.fileName}` : ''}.`
       : statusUpper === 'RECHAZADO'
         ? `Documento rechazado vía GSS Firma (Orion)${state.fileName ? `: ${state.fileName}` : ''}.`
-        : 'Actualización de firma digital (Orion).');
+        : statusUpper === 'DEVUELTO'
+          ? `Documento devuelto para corrección (Orion)${state.fileName ? `: ${state.fileName}` : ''}.`
+          : 'Actualización de firma digital (Orion).');
 
   const allRejected = anyOrionDocumentRejected(bag) && statusUpper === 'RECHAZADO';
   const allSigned = allOrionDocumentsFullySigned(bag) && allSignersCompleted(state.signers);
@@ -468,6 +597,14 @@ export async function applyOrionWebhookToRequest(
         WHERE id = @id AND status_req NOT IN (2, 3)
       `);
     requestClosed = true;
+  } else if (statusUpper === 'DEVUELTO') {
+    // Devolución: cancela turnos de firma, NO cierra la solicitud (coordinador corrige y reenvía).
+    tasksUpdated += await cancelOpenSignerTasks(
+      pool,
+      params.requestId,
+      `Documento devuelto para corrección${state.fileName ? `: ${state.fileName}` : ''}.`,
+      fileId
+    );
   } else if (statusUpper === 'FIRMADO' && allSigned) {
     const template = await findOrionSignatureTaskTemplate(pool, params.requestId);
     if (template) {
@@ -498,12 +635,24 @@ export async function applyOrionWebhookToRequest(
 
   if (params.noteAuthorUserId) {
     const completed = newlyCompletedSigners(previousSigners, state.signers);
-    if (completed.length > 0 && statusUpper !== 'RECHAZADO') {
+    const totalSigners = orderedSigners(state.signers).length;
+    if (completed.length > 0 && statusUpper !== 'RECHAZADO' && statusUpper !== 'DEVUELTO') {
       for (const signer of completed) {
+        const order = Number(signer.order);
+        const position =
+          Number.isFinite(order) && order > 0
+            ? order
+            : orderedSigners(state.signers).findIndex(
+                (s) =>
+                  String(s.email || '').trim().toLowerCase() ===
+                  String(signer.email || '').trim().toLowerCase()
+              ) + 1;
+        const positionLabel =
+          totalSigners > 0 && position > 0 ? `firmante ${position}/${totalSigners}` : 'firmante';
         await insertRequestNote(
           pool,
           params.requestId,
-          `GSS Firma (${state.fileName || fileId}): ${signer.name || signer.email} completó su firma.`,
+          `GSS Firma (${state.fileName || fileId}): ${positionLabel} — ${signer.name || signer.email} completó su firma.`,
           params.noteAuthorUserId
         );
       }
@@ -519,6 +668,13 @@ export async function applyOrionWebhookToRequest(
         pool,
         params.requestId,
         `GSS Firma: documento rechazado. ${resolution}`,
+        params.noteAuthorUserId
+      );
+    } else if (statusUpper === 'DEVUELTO') {
+      await insertRequestNote(
+        pool,
+        params.requestId,
+        `GSS Firma: documento devuelto para corrección. ${resolution}`,
         params.noteAuthorUserId
       );
     } else if (statusUpper === 'EN_PROCESO' && syncResult.tasksOpened > 0) {
@@ -547,12 +703,18 @@ export async function applyOrionWebhookToRequest(
 export async function syncOrionDocumentState(
   pool: SqlPool,
   requestId: number,
-  fileId?: string | null
+  fileId?: string | null,
+  options?: {
+    /** Regenerar PDF acumulado en Orion (lento; solo cuando haga falta). */
+    rebuildSigned?: boolean;
+  }
 ): Promise<{ state: OrionSignatureState; bag: OrionSignatureBagBag; fileId: string } | null> {
+  const rebuildSigned = Boolean(options?.rebuildSigned);
   const loaded = await loadOrionFormBag(pool, requestId);
   if (!loaded) return null;
 
   let { bag } = loaded;
+  const bagBefore = serializeOrionSignatureBagBag(bag);
   const requested = String(fileId || '').trim();
 
   const targets = requested
@@ -569,24 +731,79 @@ export async function syncOrionDocumentState(
     };
   }
 
+  const withOrionId = targets.filter((fid) => Boolean(getOrionDocumentFromBag(bag, fid).orionDocumentId));
+
+  // Soft multi-doc: GETs Orion en paralelo (límite pequeño).
+  const CONCURRENCY = 4;
+  const liveByFile = new Map<
+    string,
+    { ok: boolean; data: OrionDocumentResponse | null; error?: string }
+  >();
+  for (let i = 0; i < withOrionId.length; i += CONCURRENCY) {
+    const chunk = withOrionId.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      chunk.map(async (fid) => {
+        const current = getOrionDocumentFromBag(bag, fid);
+        const live = await getOrionDocument(String(current.orionDocumentId));
+        return [fid, live] as const;
+      })
+    );
+    for (const [fid, live] of results) {
+      liveByFile.set(fid, live);
+    }
+  }
+
   for (const fid of targets) {
     const current = getOrionDocumentFromBag(bag, fid);
     if (!current.orionDocumentId) continue;
 
-    const live = await getOrionDocument(current.orionDocumentId);
-    if (!live.ok || !live.data) continue;
+    const live = liveByFile.get(fid);
+    if (!live?.ok || !live.data) continue;
 
     const externalRef =
       current.externalRef ||
       buildOrionExternalRef(requestId, fid === ORION_LEGACY_FILE_ID ? null : fid);
-    const state = mergeOrionSignatureState(
+    let state = mergeOrionSignatureState(
       current,
       mapOrionResponseToState(externalRef, live.data, fid, current.fileName)
+    );
+
+    const signedCount = (state.signers ?? []).filter((s) => isSignerCompleted(s.status)).length;
+    // Documentos ya firmados: regenera PDF acumulado en Orion (corrige solo-1.ª-firma).
+    // Costoso (OneDrive + Orion); omitir en bootstrap/polling rutinario.
+    if (rebuildSigned && signedCount > 0 && state.orionDocumentId) {
+      const resolved = await resolveOriginalPdfBase64({
+        fileId: fid,
+        originalFileUrl: state.originalFileUrl ?? current.originalFileUrl,
+        versions: state.versions ?? current.versions,
+      });
+      if (resolved.sourceUrl && !state.originalFileUrl) {
+        state = { ...state, originalFileUrl: resolved.sourceUrl };
+      }
+      const rebuild = await rebuildOrionSignedPdf(String(state.orionDocumentId), {
+        originalPdfBase64: resolved.base64,
+      });
+      if (rebuild.ok && rebuild.data) {
+        state = mergeOrionSignatureState(
+          state,
+          mapOrionResponseToState(externalRef, rebuild.data, fid, current.fileName)
+        );
+      }
+    }
+
+    // Fuerza historial correcto (original → firmantes en orden → final)
+    state = rebuildOrionVersionHistory(
+      state,
+      state.originalFileUrl ?? current.originalFileUrl ?? null,
+      buildOrionSignedFileApiUrl(String(state.orionDocumentId || current.orionDocumentId))
     );
     bag = setOrionDocumentInBag(bag, fid, state);
   }
 
-  await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
+  const bagAfter = serializeOrionSignatureBagBag(bag);
+  if (bagAfter !== bagBefore) {
+    await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
+  }
 
   const primaryId = requested || targets[0]!;
   return {
@@ -594,6 +811,162 @@ export async function syncOrionDocumentState(
     bag,
     fileId: primaryId,
   };
+}
+
+export type RepairOrionDocumentResult = {
+  requestId: number;
+  fileId: string;
+  orionDocumentId: string | null;
+  rebuiltPdf: boolean;
+  versions: number;
+  signedCount: number;
+  error?: string;
+};
+
+/**
+ * Corrige documentos ya firmados: regenera PDF en Orion + reconstruye versiones en Kronos.
+ */
+export async function repairOrionDocuments(
+  pool: SqlPool,
+  params: { requestId?: number | null; all?: boolean } = {}
+): Promise<{ repaired: RepairOrionDocumentResult[]; total: number }> {
+  const requestIds: number[] = [];
+
+  if (params.requestId != null && Number.isInteger(params.requestId) && params.requestId > 0) {
+    requestIds.push(params.requestId);
+  } else if (params.all) {
+    const rows = await pool.request().query(`
+      SELECT DISTINCT rfv.id_request_general AS id_request
+      FROM request_form_value rfv
+      INNER JOIN process_form_field pff ON pff.id = rfv.id_form_field
+      WHERE pff.field_type = 'orion_signature'
+        AND rfv.value_text IS NOT NULL
+        AND LEN(LTRIM(RTRIM(rfv.value_text))) > 2
+      ORDER BY rfv.id_request_general DESC
+    `);
+    for (const row of rows.recordset as Array<{ id_request: number }>) {
+      const id = Number(row.id_request);
+      if (Number.isInteger(id) && id > 0) requestIds.push(id);
+    }
+  } else {
+    throw Object.assign(new Error('Indique requestId o all=true'), { status: 400 });
+  }
+
+  const repaired: RepairOrionDocumentResult[] = [];
+
+  for (const requestId of requestIds) {
+    const loaded = await loadOrionFormBag(pool, requestId);
+    if (!loaded) {
+      repaired.push({
+        requestId,
+        fileId: ORION_LEGACY_FILE_ID,
+        orionDocumentId: null,
+        rebuiltPdf: false,
+        versions: 0,
+        signedCount: 0,
+        error: 'Sin campo orion_signature',
+      });
+      continue;
+    }
+
+    let bag = loaded.bag;
+    const fileIds = Object.keys(bag.documents);
+    if (fileIds.length === 0) {
+      repaired.push({
+        requestId,
+        fileId: ORION_LEGACY_FILE_ID,
+        orionDocumentId: null,
+        rebuiltPdf: false,
+        versions: 0,
+        signedCount: 0,
+        error: 'Sin documentos en bag',
+      });
+      continue;
+    }
+
+    for (const fileId of fileIds) {
+      const current = getOrionDocumentFromBag(bag, fileId);
+      const orionDocumentId = String(current.orionDocumentId || '').trim() || null;
+      if (!orionDocumentId) {
+        repaired.push({
+          requestId,
+          fileId,
+          orionDocumentId: null,
+          rebuiltPdf: false,
+          versions: current.versions?.length ?? 0,
+          signedCount: 0,
+          error: 'Sin orionDocumentId',
+        });
+        continue;
+      }
+
+      let rebuiltPdf = false;
+      let error: string | undefined;
+      const signedCount = (current.signers ?? []).filter((s) => isSignerCompleted(s.status)).length;
+
+      if (signedCount > 0) {
+        const resolved = await resolveOriginalPdfBase64({
+          fileId,
+          originalFileUrl: current.originalFileUrl,
+          versions: current.versions,
+        });
+
+        const rebuild = await rebuildOrionSignedPdf(orionDocumentId, {
+          originalPdfBase64: resolved.base64,
+        });
+
+        if (rebuild.ok) {
+          rebuiltPdf = true;
+          error = undefined;
+          if (resolved.sourceUrl && !current.originalFileUrl) {
+            bag = setOrionDocumentInBag(bag, fileId, {
+              ...current,
+              originalFileUrl: resolved.sourceUrl,
+            });
+          }
+        } else {
+          error = rebuild.error || `Orion rebuild ${rebuild.status}`;
+          if (!resolved.base64) {
+            error = `${error} (sin PDF original en bag/OneDrive)`;
+          }
+        }
+      }
+
+      const live = await getOrionDocument(orionDocumentId);
+      const externalRef =
+        current.externalRef ||
+        buildOrionExternalRef(requestId, fileId === ORION_LEGACY_FILE_ID ? null : fileId);
+      const latest = getOrionDocumentFromBag(bag, fileId);
+      let state =
+        live.ok && live.data
+          ? mergeOrionSignatureState(
+              latest,
+              mapOrionResponseToState(externalRef, live.data, fileId, latest.fileName)
+            )
+          : { ...latest };
+
+      state = rebuildOrionVersionHistory(
+        state,
+        state.originalFileUrl ?? latest.originalFileUrl ?? null,
+        buildOrionSignedFileApiUrl(orionDocumentId)
+      );
+      bag = setOrionDocumentInBag(bag, fileId, state);
+
+      repaired.push({
+        requestId,
+        fileId,
+        orionDocumentId,
+        rebuiltPdf,
+        versions: state.versions?.length ?? 0,
+        signedCount,
+        error,
+      });
+    }
+
+    await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
+  }
+
+  return { repaired, total: repaired.length };
 }
 
 export async function persistOrionSignatureFields(
@@ -672,31 +1045,105 @@ export async function persistOrionSignatureFields(
   return { state: merged, bag };
 }
 
+export async function userHasOrionFirmaManage(
+  pool: SqlPool,
+  userId: string,
+  _isAdmin = false
+): Promise<boolean> {
+  // No bypass por role admin: crear/ver FIRMA y gestionar Orion
+  // requieren el subproceso "Firma digital" en la persona.
+  void _isAdmin;
+  if (!userId) return false;
+
+  // Permiso sobre la PERSONA (no sobre la empresa).
+  // En Admin → Usuarios la fila se guarda vía company_user (modelo actual),
+  // pero basta con tener "Firma digital" en cualquier empresa del usuario.
+  const { ORION_FIRMA_MANAGE_URL } = await import('./access');
+  const permitted = await pool
+    .request()
+    .input('id_user', sql.NVarChar(255), userId)
+    .input('url', sql.NVarChar(255), ORION_FIRMA_MANAGE_URL)
+    .query(`
+      SELECT TOP 1 suc.id_subprocess_user_company AS id
+      FROM subprocess_user_company suc
+      INNER JOIN company_user cu
+        ON cu.id_company_user = suc.id_company_user
+      INNER JOIN subprocess s
+        ON s.id_subprocess = suc.id_subprocess
+      WHERE cu.id_user = @id_user
+        AND (
+          LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N'')))) = LOWER(LTRIM(RTRIM(@url)))
+          OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N'')))) LIKE N'%firma digital%'
+        )
+    `);
+
+  return Boolean(permitted.recordset[0]?.id);
+}
+
 export async function userCanManageOrionRequest(
   pool: SqlPool,
   requestId: number,
   userId: string,
   isAdmin: boolean
 ): Promise<boolean> {
-  if (isAdmin) return true;
+  void requestId;
+  return userHasOrionFirmaManage(pool, userId, isAdmin);
+}
 
-  const assigned = await pool
-    .request()
-    .input('id_request', sql.Int, requestId)
-    .input('id_user', sql.NVarChar(255), userId)
-    .query(`
-      SELECT TOP 1 trg.id
-      FROM task_request_general trg
-      WHERE trg.id_request_general = @id_request
-        AND trg.id_assigned = @id_user
-        AND trg.id_status NOT IN (2, 3)
-        -- Tareas Orion de firmante/auth no otorgan rol de coordinador
-        AND CHARINDEX(N'[orionFile:', ISNULL(trg.resolution, N'')) = 0
-        AND CHARINDEX(N'[orionAuth]', ISNULL(trg.resolution, N'')) = 0
-        AND CHARINDEX(N'Pendiente de firma', ISNULL(trg.resolution, N'')) = 0
-    `);
+/**
+ * Edición de preparación: Firma digital + creador + abierta + sin firmas completadas.
+ */
+export async function assertUserCanEditOrionPreparation(
+  pool: SqlPool,
+  params: {
+    requestId: number;
+    userId: string;
+    userEmail: string;
+    isAdmin?: boolean;
+    fileId?: string | null;
+  }
+): Promise<{ ctx: RequestOrionContext; state: OrionSignatureState | null }> {
+  const { canEditOrionPreparation } = await import('./permissions');
+  const canManage = await userCanManageOrionRequest(
+    pool,
+    params.requestId,
+    params.userId,
+    Boolean(params.isAdmin)
+  );
+  const locked = await isOrionRequestWorkflowLocked(pool, params.requestId);
+  const ctx = await getRequestOrionContext(pool, params.requestId);
+  if (!ctx) {
+    throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+  }
 
-  return Boolean(assigned.recordset[0]);
+  let state: OrionSignatureState | null = null;
+  if (params.fileId) {
+    const loaded = await loadOrionFormBag(pool, params.requestId);
+    if (loaded) {
+      state = getOrionDocumentFromBag(loaded.bag, params.fileId);
+    }
+  }
+
+  const allowed = canEditOrionPreparation({
+    canManage,
+    workflowLocked: locked,
+    state,
+    currentUserEmail: params.userEmail,
+    currentUserId: params.userId,
+    createdByEmail: ctx.requester_email,
+    requesterId: ctx.id_requester,
+  });
+
+  if (!allowed) {
+    throw Object.assign(
+      new Error(
+        'Solo el creador puede editar el documento, firmantes o posiciones mientras la solicitud esté abierta y nadie haya firmado.'
+      ),
+      { status: 403 }
+    );
+  }
+
+  return { ctx, state };
 }
 
 /** Solicitud cerrada (resuelta/cancelada) → no editar firmantes. */
@@ -727,6 +1174,10 @@ export async function finalizeSignerTurn(
     userId: string;
     userEmail: string;
     fileId?: string | null;
+    /** Rúbrica opcional enviada en el mismo accept-sign (Orion la persiste si falta). */
+    signatureDataUrl?: string | null;
+    /** Identidad del firmante (nombre, CC/NIT, cargo) para el sello Orion. */
+    identity?: SignerAcceptIdentity | null;
   }
 ): Promise<{
   state: OrionSignatureState;
@@ -796,71 +1247,106 @@ export async function finalizeSignerTurn(
     throw Object.assign(new Error('Aún no es su turno para firmar'), { status: 403 });
   }
 
-  // Aplicar firma con la rúbrica guardada (sin embed de gestión Orion)
+  // Plazo 24h vive en el bag Kronos (Orion no lo gestiona).
+  const localPending = getCurrentPendingSigner(current.signers);
+  if (isMyTurn && !alreadyCompleted && isSignerTurnExpired(localPending)) {
+    throw Object.assign(
+      new Error(
+        'Su plazo de 24 horas para firmar venció. Solicite firmar este documento al líder del proceso.'
+      ),
+      { status: 403 }
+    );
+  }
+
+  // Aplicar firma real en Orion (rúbrica guardada o signatureDataUrl)
   if (isMyTurn && !alreadyCompleted) {
-    const accept = await acceptOrionSignerTurn(current.orionDocumentId, params.userEmail);
-    let acceptedLocally = false;
+    const identity = params.identity
+      ? normalizeSignerIdentity(params.identity, mySigner.name || params.userEmail)
+      : null;
+    // Cliente omite signatureDataUrl si Orion ya tiene rúbrica (hasSignature).
+    const acceptPayload = {
+      signatureDataUrl: params.signatureDataUrl,
+      ...(identity
+        ? {
+            fullName: identity.fullName,
+            idDocumentType: identity.idDocumentType,
+            idNumber: identity.idNumber,
+            companySlug: identity.companySlug,
+            companyName: identity.companyName,
+            companyNit: identity.companyNit,
+            jobTitle: identity.jobTitle,
+          }
+        : {}),
+    };
 
-    if (accept.ok && accept.data) {
-      liveState = mergeOrionSignatureState(
-        liveState,
-        mapOrionResponseToState(externalRef, accept.data, fileId, current.fileName)
-      );
-    } else {
-      console.warn(
-        '[orion/finalizeSignerTurn] accept-sign no disponible, confirmación local:',
-        accept.error || accept.status
-      );
-      acceptedLocally = true;
-      liveState = {
-        ...liveState,
-        signers: (liveState.signers ?? []).map((s) =>
-          normalizeSignerEmail(s.email) === me
-            ? {
-                ...s,
-                status: 'FIRMADO',
-                signedAt: s.signedAt ?? new Date().toISOString(),
-              }
-            : s
-        ),
-      };
-    }
+    let accept = await acceptOrionSignerTurn(
+      current.orionDocumentId,
+      params.userEmail,
+      acceptPayload
+    );
 
-    const refreshed = await getOrionDocument(current.orionDocumentId);
-    if (refreshed.ok && refreshed.data) {
-      const refreshedState = mergeOrionSignatureState(
-        liveState,
-        mapOrionResponseToState(externalRef, refreshed.data, fileId, current.fileName)
-      );
-      const meRefreshed = refreshedState.signers?.find(
-        (s) => normalizeSignerEmail(s.email) === me
-      );
-      // Si accept-sign falló y Orion aún no refleja FIRMADO, no pisar el cierre local
-      // (si no, el turno no avanza y el firmante debe "firmar dos veces").
-      if (acceptedLocally && meRefreshed && !isSignerCompleted(meRefreshed.status)) {
-        liveState = {
-          ...refreshedState,
-          signers: (refreshedState.signers ?? []).map((s) =>
-            normalizeSignerEmail(s.email) === me
-              ? {
-                  ...s,
-                  status: 'FIRMADO',
-                  signedAt: s.signedAt ?? new Date().toISOString(),
-                }
-              : s
+    // Orion a veces pierde el PDF en disco; reenviar el original desde OneDrive y reintentar.
+    const needsOriginalPdf =
+      !accept.ok &&
+      /original|almacenamiento|storage|pdf/i.test(String(accept.error || '')) &&
+      (accept.status === 422 || accept.status === 404 || accept.status === 409);
+
+    if (needsOriginalPdf) {
+      const resolved = await resolveOriginalPdfBase64({
+        fileId,
+        originalFileUrl: current.originalFileUrl ?? null,
+        versions: current.versions,
+      });
+      if (resolved.base64) {
+        if (resolved.sourceUrl && resolved.sourceUrl !== current.originalFileUrl) {
+          liveState = {
+            ...liveState,
+            originalFileUrl: resolved.sourceUrl,
+          };
+        }
+        // Restaurar PDF en Orion y luego reintentar la firma.
+        await rebuildOrionSignedPdf(String(current.orionDocumentId), {
+          originalPdfBase64: resolved.base64,
+        });
+        accept = await acceptOrionSignerTurn(current.orionDocumentId, params.userEmail, {
+          ...acceptPayload,
+          originalPdfBase64: resolved.base64,
+        });
+      } else if (!accept.ok) {
+        throw Object.assign(
+          new Error(
+            'PDF original no disponible en OneDrive/almacenamiento. Vuelva a adjuntar el documento o reabra la gestión del PDF.'
           ),
-        };
-      } else {
-        liveState = refreshedState;
+          { status: 422 }
+        );
       }
     }
+
+    if (!accept.ok || !accept.data) {
+      const status = accept.status || 502;
+      const raw = String(accept.error || '').trim();
+      const message =
+        raw ||
+        (status === 422
+          ? 'No se pudo aplicar la firma. Verifique su rúbrica e intente de nuevo.'
+          : status === 409
+            ? 'Aún no es su turno para firmar.'
+            : 'No se pudo confirmar la firma en GSS Firma (Orion).');
+      throw Object.assign(new Error(message), { status: status === 404 ? 502 : status });
+    }
+
+    liveState = mergeOrionSignatureState(
+      liveState,
+      mapOrionResponseToState(externalRef, accept.data, fileId, current.fileName)
+    );
+    // accept ya trae estado usable: no segundo GET Orion.
   }
 
   liveState = applyOrionVersionHistory({
     previous: current,
     next: liveState,
     previousSigners,
-    originalUrl: current.originalFileUrl ?? null,
+    originalUrl: liveState.originalFileUrl ?? current.originalFileUrl ?? null,
   });
 
   const statusUpper = String(liveState.status || 'EN_PROCESO').toUpperCase();
@@ -871,6 +1357,8 @@ export async function finalizeSignerTurn(
     noteAuthorUserId: params.userId,
     patch: liveState,
     fileId,
+    bag,
+    fieldId: loaded.field.id_form_field,
   });
 
   const completed = newlyCompletedSigners(previousSigners, outcome.state.signers);
@@ -879,9 +1367,21 @@ export async function finalizeSignerTurn(
     completed.some((s) => normalizeSignerEmail(s.email) === me) ||
     Boolean(meAfter && isSignerCompleted(meAfter.status));
 
+  // Tras avanzar turno: nuevo plazo 24h para el firmante pendiente.
+  let finalState = outcome.state;
+  let finalBag = outcome.bag;
+  if (signerCompleted && !allSignersCompleted(outcome.state.signers)) {
+    finalState = {
+      ...outcome.state,
+      signers: applyPendingSignerTurnDeadline(outcome.state.signers),
+    };
+    finalBag = setOrionDocumentInBag(outcome.bag, fileId, finalState);
+    await upsertOrionFormBag(pool, params.requestId, loaded.field.id_form_field, finalBag);
+  }
+
   return {
-    state: outcome.state,
-    bag: outcome.bag,
+    state: finalState,
+    bag: finalBag,
     fileId: outcome.fileId,
     signerCompleted,
     tasksUpdated: outcome.tasksUpdated,
@@ -889,5 +1389,127 @@ export async function finalizeSignerTurn(
     signerTasksClosed: outcome.signerTasksClosed,
     signerTasksOpened: outcome.signerTasksOpened,
     currentSignerEmail: outcome.currentSignerEmail,
+  };
+}
+
+/**
+ * Firmante en turno devuelve el documento al coordinador (Orion DEVUELTO).
+ * No cierra la solicitud Kronos.
+ */
+export async function returnDocumentFromSigner(
+  pool: SqlPool,
+  params: {
+    requestId: number;
+    userId: string;
+    userEmail: string;
+    fileId?: string | null;
+    reason: string;
+  }
+): Promise<{
+  state: OrionSignatureState;
+  bag: OrionSignatureBagBag;
+  fileId: string;
+  tasksUpdated: number;
+  requestClosed: boolean;
+}> {
+  const reason = String(params.reason || '').trim();
+  if (reason.length < 3) {
+    throw Object.assign(new Error('Indique el motivo de la devolución (mín. 3 caracteres).'), {
+      status: 400,
+    });
+  }
+
+  const loaded = await loadOrionFormBag(pool, params.requestId);
+  if (!loaded) {
+    throw Object.assign(new Error('Campo orion_signature no encontrado'), { status: 404 });
+  }
+
+  const me = normalizeSignerEmail(params.userEmail);
+  let fileId = String(params.fileId || '').trim();
+  if (!fileId) {
+    for (const [fid, doc] of Object.entries(loaded.bag.documents)) {
+      const pending = getCurrentPendingSigner(doc.signers);
+      if (pending && normalizeSignerEmail(pending.email) === me) {
+        fileId = fid;
+        break;
+      }
+    }
+  }
+  if (!fileId) {
+    fileId = Object.keys(loaded.bag.documents)[0] || ORION_LEGACY_FILE_ID;
+  }
+
+  const current = getOrionDocumentFromBag(loaded.bag, fileId);
+  if (!current.orionDocumentId) {
+    throw Object.assign(new Error('No hay documento Orion para este archivo'), { status: 422 });
+  }
+
+  const pending = getCurrentPendingSigner(current.signers);
+  if (!pending || normalizeSignerEmail(pending.email) !== me) {
+    throw Object.assign(new Error('Solo el firmante en turno puede devolver el documento'), {
+      status: 403,
+    });
+  }
+
+  const returned = await returnOrionDocument(current.orionDocumentId, {
+    email: params.userEmail,
+    reason,
+  });
+
+  const externalRef =
+    current.externalRef ||
+    buildOrionExternalRef(params.requestId, fileId === ORION_LEGACY_FILE_ID ? null : fileId);
+
+  let patch: OrionSignatureState;
+  if (returned.ok && returned.data) {
+    patch = mapOrionResponseToState(externalRef, returned.data, fileId, current.fileName);
+  } else {
+    // Orion puede no exponer /return o fallar (502): en Kronos igual marcamos DEVUELTO
+    // para que quien gestiona pueda corregir y reenviar.
+    console.warn(
+      '[orion/return] Orion no devolvió OK; aplicando DEVUELTO local:',
+      returned.status,
+      returned.error
+    );
+    patch = {
+      ...current,
+      fileId,
+      externalRef,
+      status: 'DEVUELTO',
+      returnReason: reason,
+      returnedBy: params.userEmail,
+      auditSummary: `Devuelto por ${params.userEmail}: ${reason}`,
+      signers: (current.signers ?? []).map((s) => ({
+        ...s,
+        status: 'PENDIENTE',
+        signedAt: null,
+      })),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  const outcome = await applyOrionWebhookToRequest(pool, {
+    requestId: params.requestId,
+    status: 'DEVUELTO',
+    auditSummary:
+      patch.auditSummary ||
+      `Devuelto por ${params.userEmail}: ${reason}`,
+    noteAuthorUserId: params.userId,
+    fileId,
+    patch: {
+      ...patch,
+      status: 'DEVUELTO',
+      returnReason: reason,
+      returnedBy: params.userEmail,
+      auditSummary: `Devuelto por ${params.userEmail}: ${reason}`,
+    },
+  });
+
+  return {
+    state: outcome.state,
+    bag: outcome.bag,
+    fileId: outcome.fileId,
+    tasksUpdated: outcome.tasksUpdated,
+    requestClosed: outcome.requestClosed,
   };
 }

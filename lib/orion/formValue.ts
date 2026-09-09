@@ -115,8 +115,9 @@ export function getOrionDocumentFromBag(
 }
 
 /**
- * Resuelve el estado Orion de un adjunto aunque el fileId de OneDrive
- * no coincida exactamente con la clave del bag (legacy, rename, etc.).
+ * Resuelve el estado Orion de un adjunto.
+ * Cada PDF es independiente: no reutilizar el estado de otro fileId
+ * (aunque solo haya un documento Orion en el bag).
  */
 export function resolveOrionDocumentForAttachment(params: {
   fileId: string;
@@ -132,9 +133,13 @@ export function resolveOrionDocumentForAttachment(params: {
   }
 
   const fallback = params.fallback;
+  const fallbackFileId = String(fallback?.fileId || '').trim();
   if (
     fallback &&
-    (fallback.orionDocumentId || (fallback.signers?.length ?? 0) > 0 || fallback.status)
+    (fallback.orionDocumentId || (fallback.signers?.length ?? 0) > 0 || fallback.status) &&
+    (!fallbackFileId ||
+      fallbackFileId === fileId ||
+      fallbackFileId === ORION_LEGACY_FILE_ID)
   ) {
     return { ...fallback, fileId: fallback.fileId || fileId };
   }
@@ -142,31 +147,18 @@ export function resolveOrionDocumentForAttachment(params: {
   const entries = Object.entries(docs);
   if (entries.length === 0) return byId ? { ...byId, fileId } : {};
 
-  const name = String(params.fileName || '')
-    .trim()
-    .toLowerCase();
-  if (name) {
-    const byName = entries.find(([, doc]) => {
-      const docName = String(doc.fileName || '')
-        .trim()
-        .toLowerCase();
-      return docName && docName === name;
-    });
-    if (byName) {
-      return { ...byName[1], fileId: byName[1].fileId || byName[0] || fileId };
-    }
-  }
-
-  // Un solo documento en la solicitud → usarlo para el PDF adjunto
-  if (entries.length === 1) {
-    const [key, doc] = entries[0];
-    return { ...doc, fileId: doc.fileId || key || fileId };
-  }
-
-  // Legacy
+  // Solo legacy sin clave real: adoptar por nombre o por ser el único legacy
   const legacy = docs[ORION_LEGACY_FILE_ID];
-  if (legacy) {
-    return { ...legacy, fileId: legacy.fileId || fileId || ORION_LEGACY_FILE_ID };
+  if (legacy && (legacy.orionDocumentId || (legacy.signers?.length ?? 0) > 0 || legacy.status)) {
+    const name = String(params.fileName || '')
+      .trim()
+      .toLowerCase();
+    const legacyName = String(legacy.fileName || '')
+      .trim()
+      .toLowerCase();
+    if (!name || !legacyName || name === legacyName || entries.length === 1) {
+      return { ...legacy, fileId: fileId || ORION_LEGACY_FILE_ID };
+    }
   }
 
   return byId ? { ...byId, fileId } : {};
@@ -233,6 +225,18 @@ export function mergeOrionSigners(
   return merged;
 }
 
+function mergeOrionVersions(
+  current?: OrionSignatureState['versions'],
+  patch?: OrionSignatureState['versions']
+): OrionSignatureState['versions'] {
+  if (patch == null) return current;
+  if (current == null || current.length === 0) return patch;
+  const byId = new Map<string, NonNullable<OrionSignatureState['versions']>[number]>();
+  for (const v of current) byId.set(v.id, v);
+  for (const v of patch) byId.set(v.id, v);
+  return [...byId.values()];
+}
+
 export function mergeOrionSignatureState(
   current: OrionSignatureState,
   patch: Partial<OrionSignatureState>
@@ -242,7 +246,12 @@ export function mergeOrionSignatureState(
     ...patch,
     signers: mergeOrionSigners(current.signers, patch.signers),
     signatureFields: patch.signatureFields ?? current.signatureFields,
-    versions: patch.versions ?? current.versions,
+    versions: mergeOrionVersions(current.versions, patch.versions),
+    // No degradar URL firmada si el patch no trae una nueva
+    signedFileUrl:
+      patch.signedFileUrl !== undefined && patch.signedFileUrl !== null && patch.signedFileUrl !== ''
+        ? patch.signedFileUrl
+        : (current.signedFileUrl ?? patch.signedFileUrl ?? null),
     originalFileUrl: patch.originalFileUrl ?? current.originalFileUrl,
     updatedAt: new Date().toISOString(),
   };

@@ -13,6 +13,59 @@ export function isOrionProtectedFileUrl(url: string | null | undefined): boolean
   return /\/api\/integrations\/synerlink\/documents\/[^/]+\/signed-file/i.test(value);
 }
 
+/**
+ * ¿Se puede pedir al servidor que descargue esta URL?
+ * Evita SSRF: solo Orion protegido, OneDrive/SharePoint/Graph, o http(s) público
+ * que no apunte a loopback / link-local / metadata.
+ */
+export function isAllowedServerPdfFetchUrl(url: string | null | undefined): boolean {
+  const value = String(url || '').trim();
+  if (!value) return false;
+  if (isOrionProtectedFileUrl(value)) return true;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+
+  const host = parsed.hostname.toLowerCase();
+  if (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '0.0.0.0' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    host === 'metadata.google.internal'
+  ) {
+    return false;
+  }
+
+  // Orígenes habituales de adjuntos SynerLink / Graph.
+  if (
+    host.endsWith('sharepoint.com') ||
+    host.endsWith('sharepointonline.com') ||
+    host.endsWith('1drv.ms') ||
+    host.endsWith('onedrive.live.com') ||
+    host.endsWith('microsoft.com') ||
+    host.endsWith('microsoftonline.com') ||
+    host.endsWith('graph.microsoft.com') ||
+    host.endsWith('blob.core.windows.net')
+  ) {
+    return true;
+  }
+
+  // Relativo same-app no se fetcha como URL externa aquí.
+  return false;
+}
+
 export function buildOrionSignedFileProxyUrl(params: {
   requestId: number;
   fileId: string;
@@ -32,6 +85,9 @@ export function buildOrionSignedFileProxyUrl(params: {
  * URL para ver/descargar en el cliente:
  * - OneDrive original → directo
  * - PDF firmado Orion → proxy SynerLink (Bearer server-side)
+ *
+ * Vista "vigente": sin versionId, para que Orion regenere el PDF con todas las firmas.
+ * (Si se fija la 1.ª versión parcial por URL duplicada, se puede ver solo la 1.ª firma.)
  */
 export function resolveOrionPdfAccessUrl(
   state: OrionSignatureState | undefined | null,
@@ -56,7 +112,6 @@ export function resolveOrionPdfAccessUrl(
   return buildOrionSignedFileProxyUrl({
     requestId: ctx.requestId,
     fileId: ctx.fileId,
-    versionId: matchedVersion?.id,
   });
 }
 

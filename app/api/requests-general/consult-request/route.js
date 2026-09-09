@@ -1,10 +1,17 @@
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../auth/[...nextauth]/route';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
+import { isFirmaRequestCategoryOrProcess } from '../../../../lib/orion/access';
+import { userHasOrionFirmaManage } from '../../../../lib/orion/service';
 
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const companyId = searchParams.get('companyId');
+
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id ? String(session.user.id) : '';
 
     const queryCompanies = `
       SELECT 
@@ -74,31 +81,82 @@ export async function GET(req) {
       ORDER BY u.name
     `;
 
-    const [companiesRes, categoriesRes, processCategoriesRes, assignedUsersRes, categoriesNewRes, processCategoriesNewRes] =
-      await withMssqlPool(async (pool) => {
-        const categoriesRequest = pool.request();
-        if (companyId) {
-          categoriesRequest.input('companyId', sql.Int, Number(companyId));
-        }
+    const [
+      companiesRes,
+      categoriesRes,
+      processCategoriesRes,
+      assignedUsersRes,
+      categoriesNewRes,
+      processCategoriesNewRes,
+      canCreateFirma,
+    ] = await withMssqlPool(async (pool) => {
+      const categoriesRequest = pool.request();
+      if (companyId) {
+        categoriesRequest.input('companyId', sql.Int, Number(companyId));
+      }
 
-        return Promise.all([
-          pool.request().query(queryCompanies),
-          categoriesRequest.query(queryCategories),
-          pool.request().query(queryProcessCategories),
-          pool.request().query(queryAssignedUsers),
-          pool.request().query(queryCategoriesNew),
-          pool.request().query(queryProcessCategoriesNew),
-        ]);
-      });
+      const [
+        companies,
+        categories,
+        processCategories,
+        assignedUsers,
+        categoriesNew,
+        processCategoriesNew,
+      ] = await Promise.all([
+        pool.request().query(queryCompanies),
+        categoriesRequest.query(queryCategories),
+        pool.request().query(queryProcessCategories),
+        pool.request().query(queryAssignedUsers),
+        pool.request().query(queryCategoriesNew),
+        pool.request().query(queryProcessCategoriesNew),
+      ]);
+
+      const hasFirma = userId ? await userHasOrionFirmaManage(pool, userId) : false;
+
+      return [
+        companies,
+        categories,
+        processCategories,
+        assignedUsers,
+        categoriesNew,
+        processCategoriesNew,
+        hasFirma,
+      ];
+    });
+
+    const categories = canCreateFirma
+      ? categoriesRes.recordset
+      : categoriesRes.recordset.filter(
+          (c) => !isFirmaRequestCategoryOrProcess(c.category, null)
+        );
+
+    const processCategories = canCreateFirma
+      ? processCategoriesRes.recordset
+      : processCategoriesRes.recordset.filter(
+          (p) => !isFirmaRequestCategoryOrProcess(p.category, p.process)
+        );
+
+    const categoriesNew = canCreateFirma
+      ? categoriesNewRes.recordset
+      : categoriesNewRes.recordset.filter(
+          (c) => !isFirmaRequestCategoryOrProcess(c.category, null)
+        );
+
+    const processCategoriesNew = canCreateFirma
+      ? processCategoriesNewRes.recordset
+      : processCategoriesNewRes.recordset.filter(
+          (p) => !isFirmaRequestCategoryOrProcess(null, p.process)
+        );
 
     return NextResponse.json(
       {
         companies: companiesRes.recordset,
-        categories: categoriesRes.recordset,
-        processCategories: processCategoriesRes.recordset,
+        categories,
+        processCategories,
         assignedUsers: assignedUsersRes.recordset,
-        categoriesNew: categoriesNewRes.recordset,
-        processCategoriesNew: processCategoriesNewRes.recordset,
+        categoriesNew,
+        processCategoriesNew,
+        canCreateFirma,
       },
       { status: 200 }
     );

@@ -3,22 +3,27 @@ import { NextResponse } from 'next/server';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { sendOrionDocument } from '@/lib/orion/client';
 import { getOrionConfig } from '@/lib/orion/config';
-import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
+import {
+  getOrionDocumentFromBag,
+  setOrionDocumentInBag,
+} from '@/lib/orion/formValue';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import {
+  assertUserCanEditOrionPreparation,
   getRequestOrionContext,
   loadOrionFormBag,
   syncOrionDocumentState,
-  userCanManageOrionRequest,
+  upsertOrionFormBag,
 } from '@/lib/orion/service';
 import { syncOrionSignerTasks } from '@/lib/orion/signerTasks';
 import { createOrionSignerAuthorizations } from '@/lib/orion/signerAuthorizations';
+import { applyPendingSignerTurnDeadline } from '@/lib/orion/signerDeadline';
 
 /** POST /api/integrations/orion/send — enviar documento a firma en Orion */
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session?.user?.email || !session.user.id) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
@@ -36,17 +41,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'fileId es obligatorio' }, { status: 400 });
     }
 
-    const userId = session.user.id;
     const isAdmin = session.user.role === 'admin' || session.user.role === 'superadmin';
-    const canManage = userId
-      ? await withMssqlPool((pool) => userCanManageOrionRequest(pool, requestId, userId, isAdmin))
-      : isAdmin;
-
-    if (!canManage) {
-      return NextResponse.json({ error: 'Sin permiso para enviar a firma' }, { status: 403 });
-    }
 
     const outcome = await withMssqlPool(async (pool) => {
+      await assertUserCanEditOrionPreparation(pool, {
+        requestId,
+        userId: String(session.user.id),
+        userEmail: String(session.user.email),
+        isAdmin,
+        fileId,
+      });
+
       const loaded = await loadOrionFormBag(pool, requestId);
       if (!loaded) throw Object.assign(new Error('Campo orion_signature no encontrado'), { status: 404 });
 
@@ -65,10 +70,16 @@ export async function POST(req: Request) {
       }
 
       const synced = await syncOrionDocumentState(pool, requestId, fileId);
-      const nextState = synced?.state ?? current;
+      let nextState = synced?.state ?? current;
+      nextState = {
+        ...nextState,
+        signers: applyPendingSignerTurnDeadline(nextState.signers),
+      };
+      const bag = setOrionDocumentInBag(synced?.bag ?? loaded.bag, fileId, nextState);
+      await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
+
       const ctx = await getRequestOrionContext(pool, requestId);
 
-      // 1) Autorización Kronos por firmante (Autoriza → ve → firma)
       const authResult = await createOrionSignerAuthorizations(pool, {
         requestId,
         fileId,
@@ -77,7 +88,6 @@ export async function POST(req: Request) {
         subject: ctx?.subject_request ?? null,
       });
 
-      // 2) Tareas de firma por firmante×documento (quedan listas tras autorizar)
       await syncOrionSignerTasks(pool, {
         requestId,
         state: nextState,
@@ -90,7 +100,7 @@ export async function POST(req: Request) {
 
       return {
         state: nextState,
-        documents: synced?.bag.documents ?? loaded.bag.documents,
+        documents: bag.documents,
         fileId,
         authorizationsCreated: authResult.created,
         authorizationsSkipped: authResult.skipped,

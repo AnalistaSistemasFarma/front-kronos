@@ -6,11 +6,10 @@ import { getOrionConfig } from '@/lib/orion/config';
 import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import {
-  isOrionRequestWorkflowLocked,
+  assertUserCanEditOrionPreparation,
+  getRequestOrionContext,
   loadOrionFormBag,
   syncOrionDocumentState,
-  userCanManageOrionRequest,
-  getRequestOrionContext,
 } from '@/lib/orion/service';
 import { syncOrionSignerTasks } from '@/lib/orion/signerTasks';
 import type { OrionAssignSignersPayload } from '@/lib/orion/types';
@@ -19,7 +18,7 @@ import type { OrionAssignSignersPayload } from '@/lib/orion/types';
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session?.user?.email || !session.user.id) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
@@ -42,23 +41,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'mode y signers son obligatorios' }, { status: 400 });
     }
 
-    const userId = session.user.id;
     const isAdmin = session.user.role === 'admin' || session.user.role === 'superadmin';
-    const canManage = userId
-      ? await withMssqlPool((pool) => userCanManageOrionRequest(pool, requestId, userId, isAdmin))
-      : isAdmin;
-
-    if (!canManage) {
-      return NextResponse.json({ error: 'Sin permiso para asignar firmantes' }, { status: 403 });
-    }
 
     const result = await withMssqlPool(async (pool) => {
-      if (await isOrionRequestWorkflowLocked(pool, requestId)) {
-        throw Object.assign(
-          new Error('La solicitud está cerrada. No se puede modificar la asignación de firmantes.'),
-          { status: 409 }
-        );
-      }
+      await assertUserCanEditOrionPreparation(pool, {
+        requestId,
+        userId: String(session.user.id),
+        userEmail: String(session.user.email),
+        isAdmin,
+        fileId,
+      });
 
       const loaded = await loadOrionFormBag(pool, requestId);
       if (!loaded) throw Object.assign(new Error('Campo orion_signature no encontrado'), { status: 404 });

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { fetchPdfArrayBuffer } from './pdfFetchCache';
 
 export type PdfPageImage = {
   page: number;
@@ -8,15 +9,6 @@ export type PdfPageImage = {
   width: number;
   height: number;
 };
-
-async function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
 
 export function usePdfPageImages(src: string | null | undefined, scale = 1.2) {
   const [pages, setPages] = useState<PdfPageImage[]>([]);
@@ -39,17 +31,21 @@ export function usePdfPageImages(src: string | null | undefined, scale = 1.2) {
       setLoading(true);
       setError(null);
       try {
-        let dataUrl = src!;
-        if (!dataUrl.startsWith('data:')) {
-          const res = await fetch(dataUrl);
-          if (!res.ok) throw new Error('No se pudo cargar el PDF');
-          dataUrl = await blobToDataUrl(await res.blob());
+        let bytes: Uint8Array;
+        if (src!.startsWith('data:')) {
+          const base64 = src!.includes(',') ? src!.split(',')[1]! : src!;
+          const binary = atob(base64);
+          bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        } else if (src!.startsWith('blob:')) {
+          const res = await fetch(src!);
+          if (!res.ok) throw new Error(`No se pudo leer el PDF (${res.status})`);
+          bytes = new Uint8Array(await res.arrayBuffer());
+        } else {
+          const buffer = await fetchPdfArrayBuffer(src!);
+          if (cancelled || requestId.current !== id) return;
+          bytes = new Uint8Array(buffer);
         }
-
-        const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1]! : dataUrl;
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
         const pdfjs = await import('pdfjs-dist');
         pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';

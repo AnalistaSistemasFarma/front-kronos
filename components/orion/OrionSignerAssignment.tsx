@@ -118,7 +118,8 @@ export default function OrionSignerAssignment({
           Asignar firmantes
         </Text>
         <Text size='xs' c='dimmed' mb='md'>
-          Busque cada firmante por nombre o correo. Use las flechas para cambiar el orden.
+          Busque cada firmante por nombre o correo. Use las flechas para cambiar el orden. Plazo por
+          turno: 24 horas.
         </Text>
 
         <Stack gap='sm'>

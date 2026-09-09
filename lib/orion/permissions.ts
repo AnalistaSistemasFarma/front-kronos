@@ -1,31 +1,37 @@
-import { getCurrentPendingSigner } from './signerStatus';
+import { getCurrentPendingSigner, isSignerCompleted } from './signerStatus';
 import type { OrionSignatureState } from './types';
 
-/** Dos perfiles de usuario en el flujo de firma */
+/** Perfiles de UI en el flujo de firma (derivados del permiso, no roles de admin). */
 export type OrionUserRole = 'coordinator' | 'signer' | 'waiting' | 'viewer';
 
 export type OrionUiPermissions = {
   userRole: OrionUserRole;
-  /** Coordinador: carga documento, ubica firmas y asigna firmantes */
+  /** Con permiso de firma: carga documento, ubica firmas y asigna firmantes */
   canUploadDocument: boolean;
   canUseAttachment: boolean;
   canAssignSigners: boolean;
   canPlaceSignatures: boolean;
   canManageWorkflow: boolean;
-  /** Editar lista/orden de firmantes (tarea y solicitud abiertas) */
+  /** Editar lista/orden de firmantes (solicitud abierta) */
   canEditAssignments: boolean;
   /** Firmante: dibuja su firma y acepta cuando es su turno */
   canDrawSignature: boolean;
   canViewDocument: boolean;
   canAcceptSign: boolean;
+  /** Creador/líder: renovar plazo 24h aunque ya haya firmas */
+  canRenewDeadline: boolean;
   isSigner: boolean;
   isMyTurn: boolean;
+  isRequestCreator: boolean;
+  hasCompletedSignature: boolean;
   isReadOnly: boolean;
   roleLabel: string;
 };
 
 function normalizeEmail(email?: string | null): string {
-  return String(email || '').trim().toLowerCase();
+  return String(email || '')
+    .trim()
+    .toLowerCase();
 }
 
 function isTerminalStatus(status?: string | null): boolean {
@@ -33,20 +39,72 @@ function isTerminalStatus(status?: string | null): boolean {
   return value === 'FIRMADO' || value === 'RECHAZADO';
 }
 
+function isReturnedStatus(status?: string | null): boolean {
+  return String(status || '').toUpperCase() === 'DEVUELTO';
+}
+
 function isSigningPhase(status?: string | null, state?: OrionSignatureState | null): boolean {
   const value = String(status || '').toUpperCase();
   if (value === 'EN_PROCESO' || value === 'PENDIENTE_FIRMA') return true;
-  // Bag con firmantes y documento Orion = flujo de firma activo aunque falte status
-  if (state?.orionDocumentId && (state.signers?.length ?? 0) > 0 && !isTerminalStatus(value)) {
+  if (value === 'BORRADOR' || isReturnedStatus(value) || isTerminalStatus(value)) return false;
+  if (!value && state?.orionDocumentId && (state.signers?.length ?? 0) > 0) {
     return true;
   }
   return false;
+}
+
+export function hasAnyCompletedOrionSignature(
+  state?: OrionSignatureState | null
+): boolean {
+  return (state?.signers ?? []).some((s) => isSignerCompleted(s.status));
+}
+
+export function isOrionRequestCreator(params: {
+  currentUserEmail?: string | null;
+  currentUserId?: string | null;
+  createdByEmail?: string | null;
+  requesterId?: string | null;
+}): boolean {
+  const me = normalizeEmail(params.currentUserEmail);
+  const creatorEmail = normalizeEmail(params.createdByEmail);
+  if (me && creatorEmail && me === creatorEmail) return true;
+
+  const uid = String(params.currentUserId || '').trim();
+  const rid = String(params.requesterId || '').trim();
+  return Boolean(uid && rid && uid === rid);
+}
+
+/**
+ * Edición de documento/firmantes/posiciones:
+ * permiso Firma digital + creador + solicitud abierta + nadie ha firmado.
+ */
+export function canEditOrionPreparation(params: {
+  canManage: boolean;
+  workflowLocked?: boolean;
+  state?: OrionSignatureState | null;
+  currentUserEmail?: string | null;
+  currentUserId?: string | null;
+  createdByEmail?: string | null;
+  requesterId?: string | null;
+}): boolean {
+  if (!params.canManage || params.workflowLocked) return false;
+  if (isTerminalStatus(params.state?.status)) return false;
+  if (hasAnyCompletedOrionSignature(params.state)) return false;
+  return isOrionRequestCreator({
+    currentUserEmail: params.currentUserEmail,
+    currentUserId: params.currentUserId,
+    createdByEmail: params.createdByEmail,
+    requesterId: params.requesterId,
+  });
 }
 
 export function resolveOrionPermissions(params: {
   canManage: boolean;
   isAdmin?: boolean;
   currentUserEmail?: string | null;
+  currentUserId?: string | null;
+  createdByEmail?: string | null;
+  requesterId?: string | null;
   state?: OrionSignatureState | null;
   hasAttachment?: boolean;
   participantEmails?: string[];
@@ -56,20 +114,30 @@ export function resolveOrionPermissions(params: {
 }): OrionUiPermissions {
   const {
     canManage,
-    isAdmin = false,
     currentUserEmail,
+    currentUserId,
+    createdByEmail,
+    requesterId,
     state,
     hasAttachment = false,
     participantEmails = [],
     hasPersonalSignature = false,
     workflowLocked = false,
   } = params;
+  void params.isAdmin;
 
   const me = normalizeEmail(currentUserEmail);
   const statusUpper = String(state?.status || '').toUpperCase();
   const isTerminal = isTerminalStatus(statusUpper);
   const signingPhase = isSigningPhase(statusUpper, state);
   const hasDocument = Boolean(state?.orionDocumentId && state?.embedUrl);
+  const hasCompletedSignature = hasAnyCompletedOrionSignature(state);
+  const isCreator = isOrionRequestCreator({
+    currentUserEmail,
+    currentUserId,
+    createdByEmail,
+    requesterId,
+  });
 
   const signerEmails = new Set(
     (state?.signers ?? [])
@@ -98,10 +166,9 @@ export function resolveOrionPermissions(params: {
     if (iCompleted) userRole = 'viewer';
     else if (isMyTurn) userRole = 'signer';
     else if (isSigner) userRole = 'waiting';
-    // En fase de firma, un firmante nunca es coordinador aunque tenga otras tareas
-    else if ((canManage || isAdmin) && !workflowLocked) userRole = 'coordinator';
+    else if (canManage && isCreator && !workflowLocked) userRole = 'coordinator';
     else userRole = 'viewer';
-  } else if (canManage || isAdmin) {
+  } else if (canManage && isCreator) {
     userRole = 'coordinator';
   } else if (isSigner && !iCompleted) {
     userRole = 'waiting';
@@ -112,31 +179,45 @@ export function resolveOrionPermissions(params: {
   const isWaitingSigner = userRole === 'waiting';
 
   let roleLabel = 'Consulta';
-  if (isAdmin && isCoordinator) roleLabel = 'Coordinador (admin)';
-  else if (isCoordinator) roleLabel = 'Coordinador de firma';
+  if (isCoordinator && isReturnedStatus(statusUpper))
+    roleLabel = 'Gestión de firma — documento devuelto';
+  else if (isCoordinator) roleLabel = 'Gestión de firma';
   else if (isSignerUser) roleLabel = 'Firmante — su turno';
   else if (isWaitingSigner) roleLabel = 'Firmante — en espera';
   else if (isTerminal) roleLabel = 'Proceso finalizado';
 
-  const canManageRequest =
-    (canManage || isAdmin) && !workflowLocked && !isTerminal;
+  const canEditPrep = canEditOrionPreparation({
+    canManage,
+    workflowLocked,
+    state,
+    currentUserEmail,
+    currentUserId,
+    createdByEmail,
+    requesterId,
+  });
 
-  const canEditAssignments =
-    canManageRequest && hasDocument && userRole === 'coordinator';
-  const canManageWorkflow =
-    canManageRequest && (userRole === 'coordinator' || !signingPhase);
-  const canUploadDocument = canManageRequest && !hasDocument && userRole === 'coordinator';
-  const canUseAttachment =
-    canManageRequest && hasAttachment && !hasDocument && userRole === 'coordinator';
+  const canManageWorkflow = canEditPrep;
+  const canEditAssignments = canEditPrep && hasDocument;
+  const canUploadDocument = canEditPrep && !hasDocument;
+  const canUseAttachment = canEditPrep && hasAttachment && !hasDocument;
   const canAssignSigners = canEditAssignments;
   const canPlaceSignatures = canEditAssignments;
   const canDrawSignature = isSignerUser && !isTerminal;
   const canViewDocument =
-    (isSignerUser || isWaitingSigner || isCoordinator) &&
+    (isSignerUser || isWaitingSigner || isCoordinator || isCreator) &&
     (hasDocument || hasAttachment || Boolean(state?.signedFileUrl));
-  const canAcceptSign = isSignerUser && hasDocument && hasPersonalSignature;
+  const turnExpired =
+    isMyTurn &&
+    Boolean(
+      pendingSigner &&
+        pendingSigner.expiresAt &&
+        new Date(pendingSigner.expiresAt).getTime() < Date.now()
+    );
+  const canAcceptSign =
+    isSignerUser && hasDocument && hasPersonalSignature && !turnExpired;
+  const canRenewDeadline = isCreator && !workflowLocked && !isTerminal && signingPhase;
 
-  const isReadOnly = userRole === 'viewer' && !isTerminal;
+  const isReadOnly = !canEditPrep && !isSignerUser;
 
   return {
     userRole,
@@ -149,8 +230,11 @@ export function resolveOrionPermissions(params: {
     canDrawSignature,
     canViewDocument,
     canAcceptSign,
+    canRenewDeadline,
     isSigner,
     isMyTurn,
+    isRequestCreator: isCreator,
+    hasCompletedSignature,
     isReadOnly,
     roleLabel,
   };

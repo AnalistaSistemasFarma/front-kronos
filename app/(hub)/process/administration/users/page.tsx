@@ -1228,7 +1228,12 @@ function UserManagement() {
                                             'dashboard-solicitante'
                                           )
                                         ? 'Da acceso a Dashboard solicitudes en el menú'
-                                        : 'Da acceso al dashboard en el menú'}
+                                        : (subprocess.subprocess_url ?? '').includes('/firma/manage') ||
+                                            String(subprocess.subprocess || '')
+                                              .toLowerCase()
+                                              .includes('firma digital')
+                                          ? 'Permiso de la persona: ver categoría FIRMA + crear PDF y asignar firmantes'
+                                          : 'Da acceso al dashboard en el menú'}
                                   </Badge>
                                 ) : null}
                               </div>

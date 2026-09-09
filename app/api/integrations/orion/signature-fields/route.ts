@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import type { SignatureFieldPlacement } from '@/lib/orion/signatureFields';
-import { persistOrionSignatureFields, userCanManageOrionRequest } from '@/lib/orion/service';
+import { persistOrionSignatureFields, assertUserCanEditOrionPreparation } from '@/lib/orion/service';
 
 /**
  * Guarda ubicaciones de firma en Orion (embed API) y en el bag local.
@@ -32,19 +32,17 @@ export async function POST(req: Request) {
 
     const role = session.user?.role;
     const isAdmin = role === 'admin' || role === 'superadmin';
-    const canManage = await withMssqlPool((pool) =>
-      userCanManageOrionRequest(pool, requestId, String(userId), isAdmin)
-    );
-    if (!canManage) {
-      return NextResponse.json(
-        { error: 'No tiene permiso para gestionar ubicaciones de firma' },
-        { status: 403 }
-      );
-    }
 
-    const result = await withMssqlPool((pool) =>
-      persistOrionSignatureFields(pool, { requestId, fileId, fields })
-    );
+    const result = await withMssqlPool(async (pool) => {
+      await assertUserCanEditOrionPreparation(pool, {
+        requestId,
+        userId: String(userId),
+        userEmail: email,
+        isAdmin,
+        fileId,
+      });
+      return persistOrionSignatureFields(pool, { requestId, fileId, fields });
+    });
 
     return NextResponse.json(
       {

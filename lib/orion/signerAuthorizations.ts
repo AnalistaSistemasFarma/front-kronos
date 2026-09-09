@@ -323,7 +323,7 @@ export async function closePendingOrionSignerAuth(
 
 /**
  * Cierra una autorización por id de tarea (sin gate secuencial).
- * El firmante puede verla por tipo/departamento aunque no esté en id_assigned.
+ * Solo el asignado (id_assigned) puede cerrarla; evita robar autorizaciones ajenas.
  */
 export async function closeAuthorizationTaskById(
   pool: SqlPool,
@@ -337,20 +337,26 @@ export async function closeAuthorizationTaskById(
   const loaded = await pool
     .request()
     .input('id', sql.Int, params.taskId)
+    .input('id_user', sql.NVarChar(255), String(params.userId))
     .query(`
       SELECT
         trg.id,
         trg.id_request_general,
         trg.resolution,
         trg.id_status,
+        trg.id_assigned,
         tpc.is_authorization
       FROM task_request_general trg
       INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
       WHERE trg.id = @id
+        AND (
+          trg.id_assigned = @id_user
+          OR CAST(trg.id_assigned AS NVARCHAR(255)) = @id_user
+        )
     `);
 
   const row = loaded.recordset[0];
-      if (!row || !(Number(row.is_authorization) === 1 || row.is_authorization === true)) {
+  if (!row || !(Number(row.is_authorization) === 1 || row.is_authorization === true)) {
     return { closed: false, requestId: null, fileId: null, resolution: null };
   }
   if (Number(row.id_status) === 2 || Number(row.id_status) === 3) {
@@ -363,7 +369,7 @@ export async function closeAuthorizationTaskById(
   }
 
   const fileId = parseOrionFileIdFromResolution(row.resolution);
-  await pool
+  const updated = await pool
     .request()
     .input('id', sql.Int, params.taskId)
     .input('id_user', sql.NVarChar(255), String(params.userId))
@@ -375,17 +381,22 @@ export async function closeAuthorizationTaskById(
     .query(`
       UPDATE task_request_general
       SET id_status = 2,
-          id_assigned = @id_user,
           end_date = GETDATE(),
           start_date = COALESCE(start_date, GETDATE()),
           date_resolution = GETDATE(),
           id_executor_final = @id_user,
           resolution = @resolution
-      WHERE id = @id AND id_status NOT IN (2, 3)
+      WHERE id = @id
+        AND id_status NOT IN (2, 3)
+        AND (
+          id_assigned = @id_user
+          OR CAST(id_assigned AS NVARCHAR(255)) = @id_user
+        )
     `);
 
+  const closed = Number(updated.rowsAffected?.[0] || 0) > 0;
   return {
-    closed: true,
+    closed,
     requestId: row.id_request_general ?? null,
     fileId,
     resolution: row.resolution ?? null,

@@ -237,6 +237,34 @@ El proxy valida sesión del usuario y descarga el PDF con la integration key.
 - [ ] Firmante 2 al abrir el documento ve/descarga el PDF **con la firma del firmante 1** (vía proxy `/api/integrations/orion/signed-file`, no URL Orion directa).
 - [ ] Tras firmante 2, `signedFileUrl` incluye ambas firmas; webhook con `EN_PROCESO` o `FIRMADO` según corresponda.
 - [ ] Admin/solicitante ven **Versiones** con original + parciales + final.
+
+---
+
+## Procedencia SynerLink (mostrar en Orion)
+
+Al crear el documento, SynerLink envía en `metadata`:
+
+```json
+{
+  "source": "synerlink",
+  "synerlinkRequestId": 2123,
+  "synerlinkCompanyId": 7,
+  "companyName": "GROUP SHARED SERVICES",
+  "processName": "...",
+  "categoryName": "FIRMA",
+  "fileId": "...",
+  "fileName": "contrato.pdf",
+  "createdByEmail": "lider@empresa.com"
+}
+```
+
+**Pedido a Orion:** en listados (“Documentos empresas”), detalle y logs, mostrar:
+
+- Origen: **SynerLink** (vs documentos nativos Orion).
+- Empresa alineada al `tenantId` / `synerlinkCompanyId` / `companyName`.
+- Misma trazabilidad en auditoría que un documento creado en GSS Firma.
+
+También: `tenantId` se resuelve con `ORION_TENANT_MAP` / `SYNERLINK_TENANT_MAP` (misma clave `id_company` → tenant).
 - [ ] Descarga ZIP en adjuntos incluye PDF `-firmado.pdf` con firmas visibles.
 
 ---

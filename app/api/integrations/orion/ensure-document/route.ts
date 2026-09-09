@@ -5,19 +5,15 @@ import { withMssqlPool } from '@/lib/mssqlPool';
 import { getOrionConfig } from '@/lib/orion/config';
 import {
   applyOrionWebhookToRequest,
+  assertUserCanEditOrionPreparation,
   ensureOrionDocumentForRequest,
   getRequestOrionContext,
   loadOrionFormBag,
   syncOrionDocumentState,
-  upsertOrionFormBag,
   userCanManageOrionRequest,
 } from '@/lib/orion/service';
 import { syncOrionSignerTasks } from '@/lib/orion/signerTasks';
-import {
-  getOrionDocumentFromBag,
-  mergeOrionSignatureState,
-  setOrionDocumentInBag,
-} from '@/lib/orion/formValue';
+import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
 import type { OrionSignatureState } from '@/lib/orion/types';
 import { resolveOrionPermissions } from '@/lib/orion/permissions';
 import { userHasPendingOrionSignerAuth } from '@/lib/orion/signerAuthorizations';
@@ -35,6 +31,11 @@ function readFileId(source: { get?: (k: string) => string | null } | Record<stri
 /**
  * Consulta estado actual desde Orion (polling). Cualquier usuario autenticado.
  * GET /api/integrations/orion/ensure-document?requestId=123&fileId=...
+ *
+ * Query flags:
+ * - lite=1  → solo BD + canManage (rápido; bootstrap UI)
+ * - soft=1  → sync Orion GET sin rebuild de PDF ni tareas (polling)
+ * - rebuild=1 → sync completo con rebuild de PDF firmado
  */
 export async function GET(req: Request) {
   try {
@@ -54,6 +55,9 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const requestId = Number(searchParams.get('requestId'));
     const fileId = readFileId(searchParams);
+    const lite = searchParams.get('lite') === '1';
+    const soft = lite || searchParams.get('soft') === '1';
+    const rebuildSigned = searchParams.get('rebuild') === '1';
     if (!Number.isInteger(requestId) || requestId <= 0) {
       return NextResponse.json({ error: 'requestId inválido' }, { status: 400 });
     }
@@ -62,82 +66,165 @@ export async function GET(req: Request) {
     const role = session.user?.role;
     const isAdmin = role === 'admin' || role === 'superadmin';
 
-    const canManage = userId
-      ? await withMssqlPool((pool) => userCanManageOrionRequest(pool, requestId, userId, isAdmin))
-      : isAdmin;
+    // Bootstrap rápido: sin llamadas a Orion ni sync de tareas.
+    if (lite) {
+      const boot = await withMssqlPool(async (pool) => {
+        const [canManage, loaded] = await Promise.all([
+          userId
+            ? userCanManageOrionRequest(pool, requestId, userId, isAdmin)
+            : Promise.resolve(false),
+          loadOrionFormBag(pool, requestId),
+        ]);
+        return {
+          canManage,
+          bag: loaded?.bag ?? { documents: {} as Record<string, OrionSignatureState> },
+        };
+      });
+      const state = fileId ? getOrionDocumentFromBag(boot.bag, fileId) : {};
+      return NextResponse.json(
+        {
+          success: true,
+          lite: true,
+          state,
+          documents: boot.bag.documents,
+          fileId: fileId || null,
+          canManage: boot.canManage,
+          isAdmin,
+          pendingAuthorization: false,
+          embedOrigin: cfg.embedOrigin,
+        },
+        { status: 200 }
+      );
+    }
 
-    const payload = await withMssqlPool(async (pool) => {
-      const synced = await syncOrionDocumentState(pool, requestId, fileId);
-      if (!synced) return null;
+    // Soft/sync: un solo pool para canManage + bag + pending auth.
+    const me = String(session.user.email || '')
+      .trim()
+      .toLowerCase();
 
-      const documents = synced.bag.documents;
-      for (const [fid, doc] of Object.entries(documents)) {
-        const statusUpper = String(doc.status || '').toUpperCase();
-        const terminal = statusUpper === 'FIRMADO' || statusUpper === 'RECHAZADO';
-        if (!terminal && doc.orionDocumentId && (doc.signers?.length ?? 0) > 0) {
-          const ctx = await getRequestOrionContext(pool, requestId);
-          await syncOrionSignerTasks(pool, {
-            requestId,
-            state: doc,
-            subject: ctx?.subject_request ?? null,
-            documentStatus: statusUpper || 'BORRADOR',
-            fileId: fid,
-            fileName: doc.fileName,
-          });
+    const result = await withMssqlPool(async (pool) => {
+      const canManage = userId
+        ? await userCanManageOrionRequest(pool, requestId, userId, isAdmin)
+        : false;
+
+      const synced = await syncOrionDocumentState(pool, requestId, fileId, {
+        rebuildSigned,
+      });
+      if (!synced) {
+        return {
+          canManage,
+          payload: null as Awaited<ReturnType<typeof syncOrionDocumentState>>,
+          pendingAuthorization: false,
+          pendingAuthorizationByFile: {} as Record<string, boolean>,
+        };
+      }
+
+      // Tareas de firmantes: solo sync completo (no soft) y preferible con fileId.
+      if (!soft) {
+        const documents = synced.bag.documents;
+        const entries: Array<[string, (typeof documents)[string]]> =
+          fileId && documents[fileId]
+            ? [[fileId, documents[fileId]]]
+            : Object.entries(documents);
+        for (const [fid, doc] of entries) {
+          if (!doc) continue;
+          const statusUpper = String(doc.status || '').toUpperCase();
+          const terminal = statusUpper === 'FIRMADO' || statusUpper === 'RECHAZADO';
+          if (!terminal && doc.orionDocumentId && (doc.signers?.length ?? 0) > 0) {
+            const ctx = await getRequestOrionContext(pool, requestId);
+            await syncOrionSignerTasks(pool, {
+              requestId,
+              state: doc,
+              subject: ctx?.subject_request ?? null,
+              documentStatus: statusUpper || 'BORRADOR',
+              fileId: fid,
+              fileName: doc.fileName,
+            });
+          }
         }
       }
 
-      return synced;
+      const pendingAuthorizationByFile: Record<string, boolean> = {};
+      if (userId) {
+        const authTargets =
+          fileId && synced.bag.documents[fileId]
+            ? [fileId]
+            : Object.keys(synced.bag.documents);
+        await Promise.all(
+          authTargets.map(async (fid) => {
+            const docState = getOrionDocumentFromBag(synced.bag, fid);
+            const pendingSigner = getCurrentPendingSigner(docState.signers);
+            const isMyTurn = Boolean(
+              me &&
+                pendingSigner &&
+                String(pendingSigner.email || '').trim().toLowerCase() === me
+            );
+            if (!isMyTurn) {
+              pendingAuthorizationByFile[fid] = false;
+              return;
+            }
+            const hasOpenAuth = await userHasPendingOrionSignerAuth(pool, {
+              requestId,
+              userId: String(userId),
+              fileId: fid,
+            });
+            pendingAuthorizationByFile[fid] = hasOpenAuth && isMyTurn;
+          })
+        );
+      }
+
+      const pendingAuthorization = fileId
+        ? Boolean(pendingAuthorizationByFile[fileId])
+        : Object.values(pendingAuthorizationByFile).some(Boolean);
+
+      return {
+        canManage,
+        payload: synced,
+        pendingAuthorization,
+        pendingAuthorizationByFile,
+      };
     });
 
-    if (!payload) {
-      return NextResponse.json({ error: 'Campo orion_signature no encontrado' }, { status: 404 });
+    if (!result.payload) {
+      // Solicitud nueva / aún sin bag: igual devolvemos canManage para no bloquear Gestionar.
+      return NextResponse.json(
+        {
+          success: true,
+          state: {},
+          documents: {},
+          fileId: fileId || null,
+          canManage: result.canManage,
+          isAdmin,
+          pendingAuthorization: false,
+          pendingAuthorizationByFile: {},
+          embedOrigin: cfg.embedOrigin,
+        },
+        { status: 200 }
+      );
     }
 
     const state = fileId
-      ? getOrionDocumentFromBag(payload.bag, fileId)
-      : payload.state;
+      ? getOrionDocumentFromBag(result.payload.bag, fileId)
+      : result.payload.state;
 
     const permissions = resolveOrionPermissions({
-      canManage,
+      canManage: result.canManage,
       isAdmin,
       currentUserEmail: session.user.email,
       state,
     });
 
-    let pendingAuthorization = false;
-    if (userId && fileId) {
-      const me = String(session.user.email || '')
-        .trim()
-        .toLowerCase();
-      const pendingSigner = getCurrentPendingSigner(state.signers);
-      const isMyTurn = Boolean(
-        me && pendingSigner && String(pendingSigner.email || '').trim().toLowerCase() === me
-      );
-
-      const hasOpenAuth = await withMssqlPool((pool) =>
-        userHasPendingOrionSignerAuth(pool, {
-          requestId,
-          userId: String(userId),
-          fileId,
-        })
-      );
-
-      // Auth pendiente solo si es su turno. No cerrar la del siguiente firmante
-      // si Orion aún no marcó el turno (desfase local vs Orion).
-      pendingAuthorization = hasOpenAuth && isMyTurn;
-    }
-
     return NextResponse.json(
       {
         success: true,
         state,
-        documents: payload.bag.documents,
-        fileId: payload.fileId,
-        canManage,
+        documents: result.payload.bag.documents,
+        fileId: result.payload.fileId,
+        canManage: result.canManage,
         isAdmin,
         permissions,
-        pendingAuthorization,
+        pendingAuthorization: result.pendingAuthorization,
+        pendingAuthorizationByFile: result.pendingAuthorizationByFile,
         embedOrigin: cfg.embedOrigin,
       },
       { status: 200 }
@@ -186,24 +273,40 @@ export async function POST(req: Request) {
     const role = session.user?.role;
     const isAdmin = role === 'admin' || role === 'superadmin';
 
-    const canManage = userId
-      ? await withMssqlPool((pool) => userCanManageOrionRequest(pool, requestId, userId, isAdmin))
-      : isAdmin;
-
-    if (!canManage) {
-      return NextResponse.json(
-        { error: 'No tiene permiso para gestionar la firma de esta solicitud' },
-        { status: 403 }
-      );
-    }
-
     const pdfBase64 =
       typeof body.pdfBase64 === 'string' && body.pdfBase64.trim()
         ? body.pdfBase64.trim()
         : undefined;
 
-    const result = await withMssqlPool((pool) =>
-      ensureOrionDocumentForRequest(pool, {
+    const result = await withMssqlPool(async (pool) => {
+      const loaded = await loadOrionFormBag(pool, requestId);
+      const current = loaded ? getOrionDocumentFromBag(loaded.bag, fileId) : null;
+      const isCreateOrReplace = !current?.orionDocumentId || Boolean(pdfBase64);
+
+      if (isCreateOrReplace) {
+        if (!userId) {
+          throw Object.assign(new Error('No autorizado'), { status: 401 });
+        }
+        await assertUserCanEditOrionPreparation(pool, {
+          requestId,
+          userId: String(userId),
+          userEmail: email,
+          isAdmin,
+          fileId,
+        });
+      } else {
+        const canManage = userId
+          ? await userCanManageOrionRequest(pool, requestId, String(userId), isAdmin)
+          : false;
+        if (!canManage) {
+          throw Object.assign(
+            new Error('No tiene permiso para gestionar la firma de esta solicitud'),
+            { status: 403 }
+          );
+        }
+      }
+
+      return ensureOrionDocumentForRequest(pool, {
         requestId,
         createdByEmail: String(body.createdByEmail || email),
         title: body.title ? String(body.title) : undefined,
@@ -211,8 +314,8 @@ export async function POST(req: Request) {
         refresh: Boolean(body.refresh),
         fileId,
         fileName: body.fileName ? String(body.fileName) : undefined,
-      })
-    );
+      });
+    });
 
     return NextResponse.json(
       {
@@ -239,6 +342,9 @@ export async function POST(req: Request) {
 /**
  * Actualiza el JSON del campo orion_signature (postMessage del iframe) para un fileId.
  * PATCH /api/integrations/orion/ensure-document
+ *
+ * No confía en status/signedFileUrl/signers del cliente: sincroniza desde Orion
+ * y solo entonces aplica efectos de cierre/turno.
  */
 export async function PATCH(req: Request) {
   try {
@@ -249,12 +355,21 @@ export async function PATCH(req: Request) {
 
     const body = await req.json().catch(() => ({}));
     const requestId = Number(body.requestId);
-    const patch = (body.patch ?? {}) as Partial<OrionSignatureState>;
-    const fileId = readFileId(body);
+    const fileId = readFileId(body) || String((body.patch as { fileId?: string } | undefined)?.fileId || '').trim() || null;
 
     if (!Number.isInteger(requestId) || requestId <= 0) {
       return NextResponse.json({ error: 'requestId inválido' }, { status: 400 });
     }
+    if (!fileId) {
+      return NextResponse.json({ error: 'fileId requerido' }, { status: 400 });
+    }
+
+    const userId = session.user?.id != null ? String(session.user.id) : '';
+    const role = session.user?.role;
+    const isAdmin = role === 'admin' || role === 'superadmin';
+    const me = String(session.user.email || '')
+      .trim()
+      .toLowerCase();
 
     await withMssqlPool(async (pool) => {
       const loaded = await loadOrionFormBag(pool, requestId);
@@ -262,33 +377,41 @@ export async function PATCH(req: Request) {
         throw Object.assign(new Error('Campo orion_signature no encontrado'), { status: 404 });
       }
 
-      const resolvedFileId =
-        fileId ||
-        String(patch.fileId || '').trim() ||
-        Object.keys(loaded.bag.documents)[0];
-
-      if (!resolvedFileId) {
-        throw Object.assign(new Error('fileId requerido para actualizar el documento'), {
-          status: 400,
-        });
+      const current = getOrionDocumentFromBag(loaded.bag, fileId);
+      const canManage = userId
+        ? await userCanManageOrionRequest(pool, requestId, userId, isAdmin)
+        : false;
+      const isSigner = (current.signers ?? []).some(
+        (s) => String(s.email || '').trim().toLowerCase() === me
+      );
+      if (!canManage && !isSigner && !isAdmin) {
+        throw Object.assign(
+          new Error('No tiene permiso para actualizar el estado de firma de esta solicitud'),
+          { status: 403 }
+        );
       }
 
-      const current = getOrionDocumentFromBag(loaded.bag, resolvedFileId);
-      const merged = mergeOrionSignatureState(current, { ...patch, fileId: resolvedFileId });
-      const bag = setOrionDocumentInBag(loaded.bag, resolvedFileId, merged);
+      // Fuente de verdad: Orion (no el patch del cliente → evita falsificar FIRMADO / SSRF).
+      const synced = await syncOrionDocumentState(pool, requestId, fileId, {
+        rebuildSigned: false,
+      });
+      if (!synced) {
+        throw Object.assign(new Error('No se pudo sincronizar el documento'), { status: 404 });
+      }
 
-      await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
-
-      const statusUpper = String(patch.status || merged.status || '').toUpperCase();
-      if (['FIRMADO', 'RECHAZADO', 'EN_PROCESO', 'PENDIENTE_FIRMA'].includes(statusUpper)) {
+      const live = synced.state;
+      const statusUpper = String(live.status || '').toUpperCase();
+      if (['FIRMADO', 'RECHAZADO', 'EN_PROCESO', 'PENDIENTE_FIRMA', 'DEVUELTO'].includes(statusUpper)) {
         const ctx = await getRequestOrionContext(pool, requestId);
         await applyOrionWebhookToRequest(pool, {
           requestId,
           status: statusUpper,
-          auditSummary: patch.auditSummary ?? merged.auditSummary,
-          noteAuthorUserId: ctx?.id_requester ?? null,
-          patch: merged,
-          fileId: resolvedFileId,
+          auditSummary: live.auditSummary,
+          noteAuthorUserId: userId || ctx?.id_requester || null,
+          patch: live,
+          fileId,
+          bag: synced.bag,
+          fieldId: loaded.field.id_form_field,
         });
       }
     });

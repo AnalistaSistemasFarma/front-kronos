@@ -46,12 +46,28 @@ export async function POST(req: NextRequest) {
 
     const statusUpper = String(body.status).toUpperCase();
     if (
-      !['FIRMADO', 'RECHAZADO', 'EN_PROCESO', 'PENDIENTE_FIRMA', 'BORRADOR'].includes(statusUpper)
+      ![
+        'FIRMADO',
+        'RECHAZADO',
+        'EN_PROCESO',
+        'PENDIENTE_FIRMA',
+        'BORRADOR',
+        'DEVUELTO',
+      ].includes(statusUpper)
     ) {
       return NextResponse.json({ error: 'status no reconocido' }, { status: 400 });
     }
 
     const fileId = parseFileIdFromExternalRef(body.externalRef);
+    const returnNote =
+      statusUpper === 'DEVUELTO'
+        ? [
+            body.returnedBy ? `Devuelto por ${body.returnedBy}` : null,
+            body.returnReason ? `Motivo: ${body.returnReason}` : null,
+          ]
+            .filter(Boolean)
+            .join('. ')
+        : null;
 
     const outcome = await withMssqlPool(async (pool) => {
       const ctx = await getRequestOrionContext(pool, requestId);
@@ -60,7 +76,7 @@ export async function POST(req: NextRequest) {
       const currentState = await applyOrionWebhookToRequest(pool, {
         requestId,
         status: statusUpper,
-        auditSummary: body.auditSummary,
+        auditSummary: body.auditSummary || returnNote || null,
         noteAuthorUserId: ctx.id_requester,
         fileId,
         patch: {
@@ -70,7 +86,7 @@ export async function POST(req: NextRequest) {
           signedFileUrl: body.signedFileUrl ?? null,
           signedAt: body.signedAt ?? null,
           signers: body.signers,
-          auditSummary: body.auditSummary ?? null,
+          auditSummary: body.auditSummary || returnNote || null,
         },
       });
 

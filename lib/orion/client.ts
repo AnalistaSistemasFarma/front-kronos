@@ -39,15 +39,26 @@ async function orionFetch<T>(
   }
 
   const url = `${cfg.apiBaseUrl}${path.startsWith('/') ? path : `/${path}`}`;
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${cfg.integrationApiKey}`,
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    cache: 'no-store',
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${cfg.integrationApiKey}`,
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+      cache: 'no-store',
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      status: 503,
+      data: null,
+      error: `Motor de firma Orion no disponible (${cfg.apiBaseUrl}). ${message}`,
+    };
+  }
 
   const text = await res.text();
   let data: T | null = null;
@@ -61,11 +72,19 @@ async function orionFetch<T>(
 
   if (!res.ok) {
     const errBody = data as { error?: string; message?: string } | null;
+    const looksLikeHtml =
+      /^\s*</.test(text) || /<!DOCTYPE|This page could not be found/i.test(text);
+    const fallback =
+      res.status === 404 && looksLikeHtml
+        ? `Orion no expone ${path} (404). Reinicie GSS Firma / front-orion para cargar las rutas de integración SynerLink.`
+        : looksLikeHtml
+          ? `Respuesta no válida de Orion (${res.status}) en ${path}`
+          : text || res.statusText;
     return {
       ok: false,
       status: res.status,
       data,
-      error: errBody?.error || errBody?.message || text || res.statusText,
+      error: errBody?.error || errBody?.message || fallback,
     };
   }
 
@@ -122,13 +141,89 @@ export async function sendOrionDocument(
 /** Firmante interno acepta y aplica su rúbrica guardada (sin embed de gestión). */
 export async function acceptOrionSignerTurn(
   orionDocumentId: string,
-  email: string
+  email: string,
+  options?: {
+    signatureDataUrl?: string | null;
+    originalPdfBase64?: string | null;
+    fullName?: string | null;
+    idDocumentType?: string | null;
+    idNumber?: string | null;
+    companySlug?: string | null;
+    companyName?: string | null;
+    companyNit?: string | null;
+    jobTitle?: string | null;
+  }
 ): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+  const payload: Record<string, string> = {
+    email: email.trim().toLowerCase(),
+  };
+  const dataUrl = String(options?.signatureDataUrl || '').trim();
+  if (dataUrl.startsWith('data:image/')) {
+    payload.signatureDataUrl = dataUrl;
+  }
+  const originalPdfBase64 = String(options?.originalPdfBase64 || '')
+    .trim()
+    .replace(/^data:application\/pdf;base64,/i, '');
+  if (originalPdfBase64) {
+    payload.originalPdfBase64 = originalPdfBase64;
+  }
+  const fullName = String(options?.fullName || '').trim();
+  if (fullName) payload.fullName = fullName;
+  const idDocumentType = String(options?.idDocumentType || '').trim();
+  if (idDocumentType) payload.idDocumentType = idDocumentType;
+  const idNumber = String(options?.idNumber || '').trim();
+  if (idNumber) payload.idNumber = idNumber;
+  const companySlug = String(options?.companySlug || '').trim();
+  if (companySlug) payload.companySlug = companySlug;
+  const companyName = String(options?.companyName || '').trim();
+  if (companyName) payload.companyName = companyName;
+  const companyNit = String(options?.companyNit || '').trim();
+  if (companyNit) payload.companyNit = companyNit;
+  const jobTitle = String(options?.jobTitle || '').trim();
+  if (jobTitle) payload.jobTitle = jobTitle;
+
   return orionFetch<OrionDocumentResponse>(
     `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/accept-sign`,
     {
       method: 'POST',
-      body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+/** Regenera PDF acumulado en Orion (corrige documentos con solo la 1.ª firma). */
+export async function rebuildOrionSignedPdf(
+  orionDocumentId: string,
+  options?: { originalPdfBase64?: string | null }
+): Promise<{
+  ok: boolean;
+  status: number;
+  data: (OrionDocumentResponse & { rebuilt?: boolean; signerCount?: number }) | null;
+  error?: string;
+}> {
+  const payload: { originalPdfBase64?: string } = {};
+  const b64 = String(options?.originalPdfBase64 || '').trim();
+  if (b64) payload.originalPdfBase64 = b64.replace(/^data:application\/pdf;base64,/i, '');
+
+  return orionFetch(
+    `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/rebuild-signed-pdf`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+}
+
+/** Firmante en turno devuelve el documento al coordinador (sin cerrar la solicitud). */
+export async function returnOrionDocument(
+  orionDocumentId: string,
+  payload: { email: string; reason: string }
+): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+  return orionFetch<OrionDocumentResponse>(
+    `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/return`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        email: payload.email.trim().toLowerCase(),
+        reason: String(payload.reason || '').trim(),
+      }),
     }
   );
 }
@@ -282,6 +377,8 @@ export async function fetchOrionProtectedFile(url: string): Promise<{
 export async function fetchOrionSignedFileContent(params: {
   orionDocumentId?: string | null;
   signedFileUrl?: string | null;
+  /** Solo firmas con order <= maxOrder (versión histórica parcial). */
+  maxSignerOrder?: number | null;
 }): Promise<{
   ok: boolean;
   status: number;
@@ -289,10 +386,21 @@ export async function fetchOrionSignedFileContent(params: {
   contentType: string | null;
   error?: string;
 }> {
+  const withMaxOrder = (url: string): string => {
+    if (params.maxSignerOrder == null || !Number.isFinite(params.maxSignerOrder)) {
+      return url;
+    }
+    const u = new URL(url);
+    u.searchParams.set('maxOrder', String(params.maxSignerOrder));
+    return u.toString();
+  };
+
   const candidates = [
     params.orionDocumentId ? buildOrionSignedFileApiUrl(params.orionDocumentId) : null,
     resolveOrionAbsoluteUrl(params.signedFileUrl),
-  ].filter((url, index, list): url is string => Boolean(url) && list.indexOf(url) === index);
+  ]
+    .filter((url, index, list): url is string => Boolean(url) && list.indexOf(url) === index)
+    .map(withMaxOrder);
 
   if (candidates.length === 0) {
     return {

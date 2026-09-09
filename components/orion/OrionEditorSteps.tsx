@@ -5,7 +5,7 @@ import { Box, Text } from '@mantine/core';
 const STEPS = [
   { label: 'Documento', desc: 'Archivo y tipo de firma' },
   { label: 'Firmantes', desc: 'Quién firma (incl. usted)' },
-  { label: 'Ubicación', desc: 'Dónde firman' },
+  { label: 'Ubicación', desc: 'Dónde firman en el PDF' },
 ] as const;
 
 type Props = {
@@ -60,5 +60,5 @@ export default function OrionEditorSteps({ active }: Props) {
 export function editorStepSubtitle(active: number): string {
   const step = STEPS[active];
   if (!step) return '';
-  return `${step.label} · Paso ${active + 1} de ${STEPS.length} · ${step.desc}`;
+  return `Paso ${active + 1} de ${STEPS.length} — ${step.desc}`;
 }

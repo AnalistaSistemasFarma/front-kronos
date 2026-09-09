@@ -1,45 +1,87 @@
 'use client';
 
 import { useState } from 'react';
-import {
-  Badge,
-  Button,
-  Group,
-  Modal,
-  Stack,
-  Text,
-  ThemeIcon,
-} from '@mantine/core';
+import { Box, Button, Group, Modal, Stack, Text, UnstyledButton } from '@mantine/core';
 import toast from 'react-hot-toast';
-import { IconDownload, IconHistory } from '@tabler/icons-react';
-import type { OrionSignatureState } from '../../lib/orion/types';
-import { listOrionDocumentVersions, ensureOriginalOrionVersion } from '../../lib/orion/documentVersions';
+import {
+  IconArrowLeft,
+  IconCheck,
+  IconDownload,
+  IconFile,
+  IconHistory,
+  IconSignature,
+} from '@tabler/icons-react';
+import type { OrionDocumentVersion, OrionSignatureState } from '../../lib/orion/types';
+import {
+  ensureOriginalOrionVersion,
+  listOrionDocumentVersionsForViewer,
+} from '../../lib/orion/documentVersions';
 import { resolveOrionVersionAccessUrl } from '../../lib/orion/signedFileAccess';
 
 type Props = {
   state?: OrionSignatureState | null;
   fileName?: string;
+  /** Historial completo (creador/admin). Si false, solo la última versión firmada. */
   canView?: boolean;
+  /** true = creador/admin (todas); false = firmante (solo última). */
+  fullHistory?: boolean;
   fallbackOriginalUrl?: string | null;
   requestId: number;
   fileId: string;
 };
 
-function kindColor(kind: string): string {
-  switch (kind) {
-    case 'original':
-      return 'gray';
-    case 'final':
-      return 'green';
-    default:
-      return 'blue';
+function kindMeta(kind: string): {
+  label: string;
+  color: string;
+  tone: 'original' | 'partial' | 'final';
+} {
+  if (kind === 'original') {
+    return { label: 'Original', color: 'var(--mantine-color-gray-6)', tone: 'original' };
   }
+  if (kind === 'final') {
+    return { label: 'Final', color: 'var(--mantine-color-teal-6)', tone: 'final' };
+  }
+  return { label: 'Parcial', color: 'var(--mantine-color-blue-6)', tone: 'partial' };
+}
+
+function VersionDot({ tone }: { tone: 'original' | 'partial' | 'final' }) {
+  const bg =
+    tone === 'final'
+      ? 'var(--mantine-color-teal-6)'
+      : tone === 'partial'
+        ? 'var(--mantine-color-blue-6)'
+        : 'var(--mantine-color-gray-5)';
+  return (
+    <Box
+      style={{
+        width: 28,
+        height: 28,
+        borderRadius: 999,
+        display: 'grid',
+        placeItems: 'center',
+        flexShrink: 0,
+        background: bg,
+        color: '#fff',
+        position: 'relative',
+        zIndex: 1,
+      }}
+    >
+      {tone === 'final' ? (
+        <IconCheck size={14} stroke={3} />
+      ) : tone === 'partial' ? (
+        <IconSignature size={14} stroke={2} />
+      ) : (
+        <IconFile size={14} stroke={2} />
+      )}
+    </Box>
+  );
 }
 
 export default function OrionDocumentVersionsButton({
   state,
   fileName,
   canView,
+  fullHistory = true,
   fallbackOriginalUrl,
   requestId,
   fileId,
@@ -47,11 +89,12 @@ export default function OrionDocumentVersionsButton({
   const [opened, setOpened] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  const versions = listOrionDocumentVersions(
-    ensureOriginalOrionVersion(state ?? {}, fallbackOriginalUrl)
+  const versions = listOrionDocumentVersionsForViewer(
+    ensureOriginalOrionVersion(state ?? {}, fallbackOriginalUrl),
+    { fullHistory }
   );
 
-  const handleDownload = async (version: (typeof versions)[number]) => {
+  const handleDownload = async (version: OrionDocumentVersion) => {
     const href = resolveOrionVersionAccessUrl({
       requestId,
       fileId,
@@ -90,82 +133,211 @@ export default function OrionDocumentVersionsButton({
       setDownloadingId(null);
     }
   };
+
   if (!canView || !state?.orionDocumentId || versions.length === 0) return null;
+
+  const docTitle = fileName || state?.fileName || 'Documento';
+  const statusUpper = String(state?.status || '').toUpperCase();
+  const statusLabel =
+    statusUpper === 'FIRMADO'
+      ? 'Firmado'
+      : statusUpper === 'RECHAZADO'
+        ? 'Rechazado'
+        : statusUpper === 'EN_PROCESO' || statusUpper === 'PENDIENTE_FIRMA'
+          ? 'En proceso'
+          : statusUpper === 'BORRADOR'
+            ? 'Borrador'
+            : statusUpper || 'Documento';
+  const statusColor =
+    statusUpper === 'FIRMADO'
+      ? 'var(--mantine-color-teal-6)'
+      : statusUpper === 'RECHAZADO'
+        ? 'var(--mantine-color-red-6)'
+        : statusUpper === 'BORRADOR'
+          ? 'var(--mantine-color-gray-6)'
+          : 'var(--mantine-color-blue-6)';
 
   return (
     <>
-      <Button
-        size='compact-xs'
-        variant='light'
-        color='violet'
-        leftSection={<IconHistory size={12} />}
+      <UnstyledButton
         onClick={() => setOpened(true)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          width: '100%',
+          padding: '6px 8px',
+          borderRadius: 6,
+          fontSize: 13,
+          fontWeight: 500,
+          color: 'var(--mantine-color-text)',
+          textAlign: 'left',
+        }}
       >
-        Versiones
-      </Button>
+        <IconHistory size={15} stroke={1.6} />
+        {fullHistory ? 'Versiones' : 'Descargar PDF'}
+      </UnstyledButton>
 
       <Modal
         opened={opened}
         onClose={() => setOpened(false)}
-        title={`Versiones — ${fileName || state?.fileName || 'Documento'}`}
-        size='md'
+        withCloseButton={false}
         centered
+        size={440}
+        padding={0}
+        radius='lg'
+        overlayProps={{ backgroundOpacity: 0.35, blur: 1 }}
+        styles={{
+          content: {
+            background: 'var(--mantine-color-body)',
+            boxShadow: '0 16px 48px rgba(15, 23, 42, 0.12)',
+          },
+          body: { padding: 0 },
+        }}
       >
-        <Stack gap='sm'>
-          <Text size='sm' c='dimmed'>
-            Solo el administrador y quien creó la solicitud pueden ver este historial.
-          </Text>
-          {versions.map((version) => (
-            <Group
-              key={version.id}
-              justify='space-between'
-              align='flex-start'
-              p='sm'
+        <Box
+          style={{
+            background: 'var(--mantine-color-body)',
+            color: 'var(--mantine-color-text)',
+            borderRadius: 16,
+            border: '1px solid var(--mantine-color-default-border)',
+            padding: '22px 22px 18px',
+          }}
+        >
+          <Group justify='space-between' align='flex-start' mb={6} wrap='nowrap' gap='md'>
+            <Text
+              size='11px'
+              fw={700}
+              c='dimmed'
+              style={{ letterSpacing: 1.2, textTransform: 'uppercase' }}
+            >
+              Historial de versiones
+            </Text>
+            <Box
+              px={10}
+              py={3}
               style={{
-                border: '1px solid var(--app-border)',
-                borderRadius: 8,
-                background: 'var(--app-surface-raised)',
+                borderRadius: 999,
+                border: `1px solid ${statusColor}`,
+                color: statusColor,
+                fontSize: 12,
+                fontWeight: 600,
+                whiteSpace: 'nowrap',
               }}
             >
-              <Group align='flex-start' gap='sm' wrap='nowrap'>
-                <ThemeIcon size={32} radius='md' variant='light' color={kindColor(version.kind)}>
-                  <IconHistory size={16} />
-                </ThemeIcon>
-                <Stack gap={2}>
-                  <Text size='sm' fw={600}>
-                    {version.label}
-                  </Text>
-                  <Text size='xs' c='dimmed'>
-                    {new Date(version.createdAt).toLocaleString('es-CO')}
-                  </Text>
-                  {version.signerName && (
-                    <Text size='xs' c='dimmed'>
-                      {version.signerName}
-                      {version.signerEmail ? ` · ${version.signerEmail}` : ''}
-                    </Text>
-                  )}
-                </Stack>
-              </Group>
-              <Stack gap={4} align='flex-end'>
-                <Badge size='xs' color={kindColor(version.kind)} variant='light'>
-                  {version.kind === 'original'
-                    ? 'Original'
-                    : version.kind === 'final'
-                      ? 'Final'
-                      : 'Parcial'}
-                </Badge>
-                <Button
-                  size='compact-xs'
-                  variant='light'
-                  leftSection={<IconDownload size={12} />}
-                  loading={downloadingId === version.id}
-                  onClick={() => handleDownload(version)}
+              {statusLabel}
+            </Box>
+          </Group>
+
+          <Text fw={800} style={{ fontSize: 22, lineHeight: 1.2, letterSpacing: -0.3 }} mb={4}>
+            {docTitle}
+          </Text>
+          <Text size='sm' c='dimmed' mb='lg'>
+            {fullHistory
+              ? `${versions.length} versión(es) · original → firmas acumuladas`
+              : 'Solo la última versión disponible para descarga'}
+          </Text>
+
+          <Stack gap={0} mb='lg'>
+            {versions.map((version, index) => {
+              const meta = kindMeta(version.kind);
+              const isLast = index === versions.length - 1;
+              const lineColor =
+                meta.tone === 'final'
+                  ? 'var(--mantine-color-teal-5)'
+                  : meta.tone === 'partial'
+                    ? 'var(--mantine-color-blue-5)'
+                    : 'var(--mantine-color-gray-4)';
+
+              return (
+                <Group
+                  key={version.id}
+                  align='flex-start'
+                  wrap='nowrap'
+                  gap='sm'
+                  style={{ position: 'relative' }}
                 >
-                  Descargar
-                </Button>              </Stack>
-            </Group>
-          ))}
-        </Stack>
+                  <Box style={{ position: 'relative', width: 28, flexShrink: 0 }}>
+                    {!isLast && (
+                      <Box
+                        style={{
+                          position: 'absolute',
+                          left: '50%',
+                          top: 28,
+                          bottom: -8,
+                          width: 2,
+                          transform: 'translateX(-50%)',
+                          background: lineColor,
+                        }}
+                      />
+                    )}
+                    <VersionDot tone={meta.tone} />
+                  </Box>
+
+                  <Group
+                    justify='space-between'
+                    align='flex-start'
+                    style={{ flex: 1, minWidth: 0 }}
+                    wrap='nowrap'
+                    gap='md'
+                    pb={isLast ? 0 : 'md'}
+                  >
+                    <Box style={{ minWidth: 0 }}>
+                      <Text size='sm' fw={700} lineClamp={1}>
+                        {version.label}
+                      </Text>
+                      <Text size='xs' c='dimmed'>
+                        {new Date(version.createdAt).toLocaleString('es-CO')}
+                      </Text>
+                      {(version.signerName || version.signerEmail) && (
+                        <Text size='xs' c='dimmed' lineClamp={1}>
+                          {[version.signerName, version.signerEmail].filter(Boolean).join(' · ')}
+                        </Text>
+                      )}
+                      <UnstyledButton
+                        onClick={() => void handleDownload(version)}
+                        disabled={downloadingId === version.id}
+                        style={{
+                          marginTop: 6,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: 'var(--mantine-color-blue-6)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          textDecoration: 'underline',
+                          textUnderlineOffset: 3,
+                          opacity: downloadingId === version.id ? 0.6 : 1,
+                        }}
+                      >
+                        <IconDownload size={13} />
+                        {downloadingId === version.id ? 'Descargando…' : 'Descargar'}
+                      </UnstyledButton>
+                    </Box>
+                    <Text size='sm' fw={600} style={{ color: meta.color, whiteSpace: 'nowrap' }}>
+                      {meta.label}
+                    </Text>
+                  </Group>
+                </Group>
+              );
+            })}
+          </Stack>
+
+          <Button
+            fullWidth
+            variant='default'
+            leftSection={<IconArrowLeft size={16} />}
+            onClick={() => setOpened(false)}
+            styles={{
+              root: {
+                height: 42,
+                borderRadius: 10,
+              },
+            }}
+          >
+            Volver a documentos
+          </Button>
+        </Box>
       </Modal>
     </>
   );

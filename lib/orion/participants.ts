@@ -12,77 +12,28 @@ function normalizeEmail(email?: string | null): string {
   return String(email || '').trim().toLowerCase();
 }
 
-function normalizeName(name?: string | null): string {
-  return String(name || '').trim().toLowerCase();
-}
-
 function parseUserLabelName(label: string): string {
   const idx = label.indexOf(' - ');
   return idx > 0 ? label.slice(0, idx).trim() : label.trim();
 }
 
-type UserEmailOption = { value: string; label: string };
-
-function resolveEmailByName(name: string | undefined, users: UserEmailOption[]): string {
-  const target = normalizeName(name);
-  if (!target) return '';
-  const exact = users.find((u) => normalizeName(parseUserLabelName(u.label)) === target);
-  if (exact?.value) return normalizeEmail(exact.value);
-  const partial = users.find((u) => {
-    const labelName = normalizeName(parseUserLabelName(u.label));
-    return labelName.includes(target) || target.includes(labelName);
-  });
-  return partial?.value ? normalizeEmail(partial.value) : '';
-}
-
-export function buildOrionParticipants(input: {
+/** Firmantes se eligen en el editor; no se prellenan desde el flujo. */
+export function buildOrionParticipants(_input?: {
   requesterName?: string | null;
   requesterEmail?: string | null;
   assigneeName?: string | null;
   assigneeEmail?: string | null;
   currentUserEmail?: string | null;
   currentUserSignature?: string | null;
-  users?: UserEmailOption[];
+  users?: Array<{ value: string; label: string }>;
   tasks?: Array<{ name?: string; id_assigned?: number }>;
 }): OrionParticipant[] {
-  const users = input.users ?? [];
-  const list: OrionParticipant[] = [];
-  const seen = new Set<string>();
-
-  const add = (
-    email: string | undefined,
-    name: string | undefined,
-    role: OrionParticipantRole,
-    signatureDataUrl?: string | null
-  ) => {
-    let resolvedEmail = normalizeEmail(email);
-    if (!resolvedEmail && name) resolvedEmail = resolveEmailByName(name, users);
-    if (!resolvedEmail) return;
-    if (seen.has(resolvedEmail)) return;
-    seen.add(resolvedEmail);
-    const me = normalizeEmail(input.currentUserEmail);
-    list.push({
-      order: list.length + 1,
-      email: resolvedEmail,
-      name: name?.trim() || resolvedEmail,
-      role,
-      signatureDataUrl:
-        signatureDataUrl ?? (me && resolvedEmail === me ? input.currentUserSignature : null),
-    });
-  };
-
-  add(input.requesterEmail ?? undefined, input.requesterName ?? undefined, 'Solicitante');
-  add(
-    input.assigneeEmail ?? undefined,
-    input.assigneeName ?? undefined,
-    'Asignado'
-  );
-
-  for (const task of input.tasks ?? []) {
-    if (task.name) add(undefined, task.name, 'Firmante');
-  }
-
-  return list;
+  // Firmantes Orion = elección explícita en el editor (orden y personas).
+  // No prellenar con solicitante / encargado / responsables de tareas del flujo:
+  // en FIRMA la 1.ª tarea "Preparar documento…" estaba asignada a Juan Fonseca
+  // y terminaba como firmante 1 en modo secuencial (los demás quedaban en espera).
+  void _input;
+  return [];
 }
 
 export type OrionUserOption = { value: string; label: string };

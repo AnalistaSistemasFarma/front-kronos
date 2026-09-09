@@ -2,6 +2,7 @@ export type OrionDocumentStatus =
   | 'BORRADOR'
   | 'PENDIENTE_FIRMA'
   | 'EN_PROCESO'
+  | 'DEVUELTO'
   | 'FIRMADO'
   | 'RECHAZADO'
   | string;
@@ -14,6 +15,12 @@ export type OrionSignerState = {
   signUrl?: string | null;
   order?: number;
   type?: 'internal' | 'external' | string;
+  /** Inicio del turno activo (ISO). */
+  turnStartedAt?: string | null;
+  /** Vencimiento del turno (ISO). Por defecto turnStartedAt + 24h. */
+  expiresAt?: string | null;
+  /** El firmante pidió renovar el plazo al líder. */
+  extensionRequestedAt?: string | null;
 };
 
 export type OrionDocumentVersionKind = 'original' | 'partial' | 'final';
@@ -41,6 +48,9 @@ export type OrionSignatureState = {
   signedFileUrl?: string | null;
   signedAt?: string | null;
   auditSummary?: string | null;
+  /** Solo cuando status = DEVUELTO */
+  returnReason?: string | null;
+  returnedBy?: string | null;
   signers?: OrionSignerState[];
   /** Historial de versiones (original + tras cada firma) */
   versions?: OrionDocumentVersion[];
@@ -73,10 +83,15 @@ export type OrionCreateDocumentPayload = {
   createdByEmail: string;
   pdfBase64?: string;
   metadata?: {
+    source?: 'synerlink' | string;
+    synerlinkRequestId?: number;
+    synerlinkCompanyId?: number;
+    companyName?: string;
     processName?: string;
     categoryName?: string;
     fileId?: string;
     fileName?: string;
+    createdByEmail?: string;
   };
 };
 
@@ -121,6 +136,10 @@ export type OrionWebhookPayload = {
   signedAt?: string | null;
   signers?: OrionSignerState[];
   auditSummary?: string | null;
+  /** Solo en DEVUELTO */
+  returnReason?: string | null;
+  returnedBy?: string | null;
+  completedSignerEmail?: string | null;
 };
 
 export type OrionPostMessageEvent =
