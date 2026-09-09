@@ -1,93 +1,50 @@
 /**
-
- * Permiso de gestión de firma digital (Orion / GSS Firma).
-
+ * Acceso / naming legacy Orion.
  *
-
- * No es un “rol coordinador”: es un subproceso asignable en
-
- * Administración → Usuarios. El permiso es de la PERSONA (válido en cualquier
-
- * empresa/solicitud); la empresa del selector del admin solo es el canal de
-
- * guardado del modelo subprocess_user_company.
-
- *
-
- * Quien lo tenga puede:
-
- * - Ver la categoría FIRMA al crear solicitudes
-
- * - Crear/cargar PDF, ubicar firmas, asignar firmantes y enviar
-
- *
-
- * URL estable (permiso; no abre página en el hub).
-
+ * La gestión de firma ya no depende del subproceso “Firma digital” ni de
+ * categoría/proceso FIRMA: el creador marca PDFs “Para firmar” en cualquier
+ * solicitud normal. Estas constantes se usan solo para:
+ * - Ocultar categoría/proceso FIRMA en listados de creación
+ * - Ocultar el subproceso de permiso en el hub
+ * - Compat con seeds / admin antiguos
  */
 
-
-
 export const ORION_FIRMA_MANAGE_URL = '/process/firma/manage';
-
 export const ORION_FIRMA_MANAGE_NAME = 'Firma digital';
 
-
-
-/** Categoría o proceso de solicitud de firma (UI / gates de creación). */
-
+/** Categoría o proceso legacy de firma (ocultar en UI de creación). */
 export function isFirmaRequestCategoryOrProcess(
-
   category?: string | null,
-
   process?: string | null
-
 ): boolean {
-
   return /FIRMA/i.test(String(category || '')) || /FIRMA/i.test(String(process || ''));
-
 }
 
-
-
-/** Subproceso de permiso (oculto en el hub de Procesos). */
-
+/** Subproceso de permiso “Firma digital” (oculto en el hub de Procesos). */
 export function isOrionFirmaManageSubprocess(subprocess: {
-
   subprocess?: string | null;
-
   subprocess_url?: string | null;
-
 }): boolean {
-
   const url = String(subprocess.subprocess_url || '')
-
     .toLowerCase()
-
     .trim();
-
   if (url === ORION_FIRMA_MANAGE_URL.toLowerCase()) return true;
-
-  if (url.includes('/firma/manage')) return true;
-
-
-
   const name = String(subprocess.subprocess || '')
-
     .toLowerCase()
-
     .trim();
-
-  return (
-
-    name === 'firma digital' ||
-
-    name === 'permiso de firma' ||
-
-    name.includes('firma digital')
-
-  );
-
+  return name.includes('firma digital') && (url.includes('/firma/') || !url);
 }
 
-
+/**
+ * Subprocesos que no deben mostrarse como tarjetas del hub
+ * (permisos técnicos / invisibles).
+ */
+export function isHubHiddenSubprocess(params: {
+  url?: string | null;
+  name?: string | null;
+}): boolean {
+  return isOrionFirmaManageSubprocess({
+    subprocess: params.name,
+    subprocess_url: params.url,
+  });
+}

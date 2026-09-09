@@ -3,6 +3,10 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 
+/** Cache en memoria del proceso (evita N consultas iguales en ráfaga). */
+const userIdByNameCache = new Map();
+const USER_ID_CACHE_TTL_MS = 5 * 60_000;
+
 const logAuditEvent = (event, userId, userName, ipAddress, success, details) => {
   const timestamp = new Date().toISOString();
   const logEntry = {
@@ -61,6 +65,23 @@ export async function GET(req) {
       );
     }
 
+    const cacheKey = userName.trim().toLowerCase();
+    const cached = userIdByNameCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < USER_ID_CACHE_TTL_MS) {
+      return NextResponse.json(
+        {
+          success: true,
+          userId: cached.userId,
+          message: 'Usuario encontrado exitosamente',
+          cached: true,
+        },
+        {
+          status: 200,
+          headers: { 'Cache-Control': 'private, max-age=60' },
+        }
+      );
+    }
+
     const result = await withMssqlPool(async (pool) => {
       return pool
         .request()
@@ -94,6 +115,7 @@ export async function GET(req) {
     }
 
     const userId = result.recordset[0].id;
+    userIdByNameCache.set(cacheKey, { userId, ts: Date.now() });
     logAuditEvent(
       'USER_FOUND',
       session.user.email,
@@ -109,7 +131,10 @@ export async function GET(req) {
         userId,
         message: 'Usuario encontrado exitosamente',
       },
-      { status: 200 }
+      {
+        status: 200,
+        headers: { 'Cache-Control': 'private, max-age=60' },
+      }
     );
   } catch (error) {
     const duration = Date.now() - startTime;

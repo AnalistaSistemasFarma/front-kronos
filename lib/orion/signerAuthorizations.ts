@@ -4,12 +4,13 @@ import { buildAppUrl, resolveEmailByUserId } from '../notificationEvents.js';
 import { createAndSendNotifications } from '../notifications.js';
 import type { OrionSignerState } from './types';
 import { findUserIdByEmail } from './signerTasks';
-import { getCurrentPendingSigner, orderedSigners } from './signerStatus';
+import { getCurrentPendingSigner } from './signerStatus';
 import {
   buildOrionAuthResolution,
   buildOrionFileTaskMarker,
   parseOrionFileIdFromResolution,
 } from './signerAuthMarkers';
+import { ensureOrionSignerWorkflowTemplates } from './workflowTemplates';
 
 type SqlPool = import('mssql').ConnectionPool;
 
@@ -75,6 +76,7 @@ async function findExistingSignerAuth(
       WHERE id_request_general = @id_request
         AND id_task = @id_task
         AND id_assigned = @id_user
+        AND id_status NOT IN (2, 3)
         AND CHARINDEX(@fileNeedle, ISNULL(resolution, N'')) > 0
         AND CHARINDEX(N'[orionAuth]', ISNULL(resolution, N'')) > 0
       ORDER BY id DESC
@@ -114,14 +116,16 @@ export async function createOrionSignerAuthorizations(
     return { created: 0, skipped: 0, templateId: null, errors: ['fileId vacío'] };
   }
 
-  const template = await findFirmaAuthorizationTemplate(pool, params.requestId);
+  const ensured = await ensureOrionSignerWorkflowTemplates(pool, params.requestId);
+  const template =
+    ensured.authTemplate ?? (await findFirmaAuthorizationTemplate(pool, params.requestId));
   if (!template) {
     return {
       created: 0,
       skipped: 0,
       templateId: null,
       errors: [
-        'No hay plantilla de autorización FIRMA en el proceso. Configure una tarea is_authorization con tipo Firma — *.',
+        'No hay plantilla de autorización en el proceso. Configure una tarea de autorización (is_authorization) para firmantes.',
       ],
     };
   }
@@ -206,7 +210,10 @@ export async function createOrionSignerAuthorizations(
   return { created, skipped, templateId: template.id, errors };
 }
 
-/** Abre autorización Kronos para el primer firmante pendiente que aún no tenga una (abierta o cerrada). */
+/**
+ * Abre autorización Kronos + notificación solo para el firmante pendiente actual
+ * (el siguiente turno tras cerrar el anterior).
+ */
 export async function openNextOrionSignerAuthorization(
   pool: SqlPool,
   params: {
@@ -217,29 +224,28 @@ export async function openNextOrionSignerAuthorization(
     subject?: string | null;
   }
 ): Promise<CreateOrionSignerAuthorizationsResult> {
-  const pending = orderedSigners(params.signers).filter((s) => {
-    const status = String(s.status || '').toUpperCase();
-    return !['FIRMADO', 'SIGNED', 'COMPLETED', 'RECHAZADO', 'REJECTED'].includes(status);
-  });
-  if (pending.length === 0) {
+  const current = getCurrentPendingSigner(params.signers);
+  if (!current?.email) {
     return { created: 0, skipped: 0, templateId: null, errors: [] };
   }
 
-  let last: CreateOrionSignerAuthorizationsResult = {
-    created: 0,
-    skipped: 0,
-    templateId: null,
-    errors: [],
-  };
-  for (const signer of pending) {
-    last = await createOrionSignerAuthorizations(pool, {
-      ...params,
-      signers: [signer],
-      onlyCurrentTurn: false,
-    });
-    if (last.created > 0) return last;
+  const result = await createOrionSignerAuthorizations(pool, {
+    ...params,
+    signers: [current],
+    onlyCurrentTurn: false,
+  });
+
+  if (result.errors.length > 0) {
+    console.warn(
+      '[orion/openNextAuth] Solicitud',
+      params.requestId,
+      'firmante',
+      current.email,
+      result.errors
+    );
   }
-  return last;
+
+  return result;
 }
 
 /** ¿El usuario tiene autorización FIRMA pendiente para este fileId? */
@@ -247,24 +253,44 @@ export async function userHasPendingOrionSignerAuth(
   pool: SqlPool,
   params: { requestId: number; userId: string; fileId: string }
 ): Promise<boolean> {
+  const map = await userHasPendingOrionSignerAuthBatch(pool, {
+    requestId: params.requestId,
+    userId: params.userId,
+    fileIds: [params.fileId],
+  });
+  return Boolean(map[params.fileId]);
+}
+
+/** Una sola query para varios fileIds (evita N+1 en soft/lite). */
+export async function userHasPendingOrionSignerAuthBatch(
+  pool: SqlPool,
+  params: { requestId: number; userId: string; fileIds: string[] }
+): Promise<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  const fileIds = [...new Set(params.fileIds.map((f) => String(f || '').trim()).filter(Boolean))];
+  for (const fid of fileIds) out[fid] = false;
+  if (!params.userId || fileIds.length === 0) return out;
+
   const result = await pool
     .request()
     .input('id_request', sql.Int, params.requestId)
     .input('id_user', sql.NVarChar(255), params.userId)
-    .input('fileNeedle', sql.NVarChar(400), `[orionFile:${params.fileId}]`)
     .query(`
-      SELECT TOP 1 trg.id
+      SELECT trg.resolution
       FROM task_request_general trg
       INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
       WHERE trg.id_request_general = @id_request
         AND trg.id_assigned = @id_user
         AND trg.id_status NOT IN (2, 3)
         AND tpc.is_authorization = 1
-        AND CHARINDEX(@fileNeedle, ISNULL(trg.resolution, N'')) > 0
         AND CHARINDEX(N'[orionAuth]', ISNULL(trg.resolution, N'')) > 0
     `);
 
-  return Boolean(result.recordset[0]);
+  for (const row of result.recordset as Array<{ resolution?: string | null }>) {
+    const fid = parseOrionFileIdFromResolution(row.resolution);
+    if (fid && fid in out) out[fid] = true;
+  }
+  return out;
 }
 
 /**

@@ -2,16 +2,21 @@
 
 import { Button, Stack, Text, UnstyledButton } from '@mantine/core';
 import { IconSignature } from '@tabler/icons-react';
-import { useMemo, useState } from 'react';
-import { resolveOrionDocumentForAttachment } from '../../lib/orion/formValue';
+import { useCallback, useMemo, useState } from 'react';
+import {
+  isOrionSignDocument,
+  resolveOrionDocumentForAttachment,
+  resolveOrionSignatureIntent,
+} from '../../lib/orion/formValue';
 import { resolveOrionPermissions } from '../../lib/orion/permissions';
 import { isSignerTurnExpired } from '../../lib/orion/signerDeadline';
 import {
+  allSlotsCompletedForEmail,
   getCurrentPendingSigner,
   isSignerCompleted,
   orderedSigners,
 } from '../../lib/orion/signerStatus';
-import type { OrionSignatureState } from '../../lib/orion/types';
+import type { OrionSignatureIntent, OrionSignatureState } from '../../lib/orion/types';
 import { useOrionSignatureApi } from './OrionSignatureContext';
 import OrionSignatureFlow from './OrionSignatureFlow';
 
@@ -54,6 +59,7 @@ export function orionStatusOutline(status?: string | null): { label: string; col
 export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps) {
   const api = useOrionSignatureApi();
   const {
+    requestId,
     fileId,
     fileName,
     pdfUrl,
@@ -65,7 +71,9 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     allDocuments = null,
     workflowLocked = false,
     forceSignerUi = false,
+    onDocumentsUpdate,
   } = props;
+  const [intentLoading, setIntentLoading] = useState(false);
 
   const state = useMemo(() => {
     const fromApi = api?.documents ?? null;
@@ -80,7 +88,8 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
       Boolean(
         fallbackState?.orionDocumentId ||
           (fallbackState?.signers?.length ?? 0) > 0 ||
-          fallbackState?.status
+          fallbackState?.status ||
+          fallbackState?.signatureIntent
       );
     if (fallbackBelongsHere && fallbackState) {
       if (!merged[fileId]?.orionDocumentId && !(merged[fileId]?.signers?.length)) {
@@ -95,12 +104,17 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     });
   }, [allDocuments, api?.documents, fallbackState, fileId, fileName]);
 
+  const signatureIntent = resolveOrionSignatureIntent(state);
+  const forSigning = isOrionSignDocument(state);
+
   const enabled =
     /\.pdf$/i.test(fileName) &&
     Boolean(fileId) &&
     (Boolean(api?.enabled) ||
       Boolean(state.orionDocumentId || state.status || (state.signers?.length ?? 0) > 0) ||
-      forceSignerUi);
+      Boolean(state.signatureIntent) ||
+      forceSignerUi ||
+      Boolean(api?.canManage));
 
   const permissions = resolveOrionPermissions({
     canManage: api?.canManage ?? false,
@@ -109,17 +123,14 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     currentUserId,
     createdByEmail,
     requesterId,
-    state,
+    state: forSigning ? state : { ...state, status: state.status || 'BORRADOR' },
     hasAttachment: true,
     hasPersonalSignature: api?.hasSignature ?? false,
     workflowLocked,
   });
 
   const me = normalizeEmail(currentUserEmail);
-  const mySigner = me
-    ? state.signers?.find((s) => normalizeEmail(s.email) === me)
-    : undefined;
-  const currentUserCompleted = Boolean(mySigner && isSignerCompleted(mySigner.status));
+  const currentUserCompleted = me ? allSlotsCompletedForEmail(state.signers, me) : false;
   const pendingSigner = getCurrentPendingSigner(state.signers);
   const isMyTurn = Boolean(
     me && pendingSigner && normalizeEmail(pendingSigner.email) === me
@@ -129,16 +140,17 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
   const isTerminal = statusUpper === 'FIRMADO' || statusUpper === 'RECHAZADO';
   const isCoordinatorUi = permissions.userRole === 'coordinator';
   const inSigningPhase =
-    (!isTerminal && forceSignerUi && !isCoordinatorUi) ||
-    statusUpper === 'EN_PROCESO' ||
-    statusUpper === 'PENDIENTE_FIRMA' ||
-    Boolean(
-      statusUpper !== 'BORRADOR' &&
-        state.orionDocumentId &&
-        (state.signers?.length ?? 0) > 0 &&
-        !isTerminal
-    ) ||
-    Boolean(api?.pendingAuthorizationByFile?.[fileId]);
+    forSigning &&
+    ((!isTerminal && forceSignerUi && !isCoordinatorUi) ||
+      statusUpper === 'EN_PROCESO' ||
+      statusUpper === 'PENDIENTE_FIRMA' ||
+      Boolean(
+        statusUpper !== 'BORRADOR' &&
+          state.orionDocumentId &&
+          (state.signers?.length ?? 0) > 0 &&
+          !isTerminal
+      ) ||
+      Boolean(api?.pendingAuthorizationByFile?.[fileId]));
 
   const signers = orderedSigners(state.signers);
   const completedCount = signers.filter((s) => isSignerCompleted(s.status)).length;
@@ -150,26 +162,29 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
       : '—');
 
   const canManageAttachment =
+    forSigning &&
     isCoordinatorUi &&
     Boolean(api?.enabled) &&
     Boolean(api) &&
     !isTerminal &&
     permissions.canManageWorkflow;
 
-  // Editar expediente: no depende del rol UI del turno (creador puede ser también firmante).
   const canEditDocument =
+    forSigning &&
     Boolean(api?.enabled) &&
     Boolean(api) &&
     !isTerminal &&
     permissions.canManageWorkflow;
 
   const canPrepareDocument =
+    forSigning &&
     Boolean(api?.enabled) &&
     Boolean(api?.canManage || api?.isAdmin) &&
     !isTerminal &&
     !state.orionDocumentId;
 
   const canSignNow =
+    forSigning &&
     !canManageAttachment &&
     !currentUserCompleted &&
     !isTerminal &&
@@ -178,21 +193,70 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     (forceSignerUi || isMyTurn || permissions.userRole === 'signer');
 
   const isWaiting =
+    forSigning &&
     !canManageAttachment &&
     !currentUserCompleted &&
     !isTerminal &&
     inSigningPhase &&
-    Boolean(mySigner) &&
+    Boolean(me && signers.some((s) => normalizeEmail(s.email) === me)) &&
     !isMyTurn;
 
-  const displayStatus = orionStatusOutline(
-    state.status ||
-      (state.orionDocumentId
-        ? statusUpper === 'BORRADOR' || statusUpper === 'DEVUELTO'
-          ? statusUpper
-          : 'EN_PROCESO'
-        : 'SIN INICIAR')
+  const hasCompletedSignatures = (state.signers ?? []).some((s) => isSignerCompleted(s.status));
+  const canToggleIntent =
+    Boolean(api?.canManage || api?.isAdmin) &&
+    !workflowLocked &&
+    !isTerminal &&
+    !(signatureIntent === 'sign' && hasCompletedSignatures);
+
+  const setSignatureIntent = useCallback(
+    async (intent: OrionSignatureIntent) => {
+      if (!canToggleIntent || intentLoading) return false;
+      setIntentLoading(true);
+      try {
+        const res = await fetch('/api/integrations/orion/signature-intent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId,
+            fileId,
+            fileName,
+            intent,
+            originalFileUrl: pdfUrl || null,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'No se pudo actualizar el documento');
+        if (data.documents) {
+          onDocumentsUpdate?.(data.documents as Record<string, OrionSignatureState>);
+        }
+        return true;
+      } catch {
+        return false;
+      } finally {
+        setIntentLoading(false);
+      }
+    },
+    [
+      canToggleIntent,
+      fileId,
+      fileName,
+      intentLoading,
+      onDocumentsUpdate,
+      pdfUrl,
+      requestId,
+    ]
   );
+
+  const displayStatus = forSigning
+    ? orionStatusOutline(
+        state.status ||
+          (state.orionDocumentId
+            ? statusUpper === 'BORRADOR' || statusUpper === 'DEVUELTO'
+              ? statusUpper
+              : 'EN_PROCESO'
+            : 'SIN INICIAR')
+      )
+    : { label: 'Solo ver', color: 'gray' };
 
   const meta = { fileId, fileName, pdfUrl: pdfUrl || `#orion-file-${fileId}` };
   const hasOrionDoc = Boolean(
@@ -220,6 +284,11 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     turnExpired,
     isMyTurn,
     needsSignaturePad: Boolean(api?.enabled) && !api!.hasSignature,
+    signatureIntent,
+    forSigning,
+    canToggleIntent,
+    intentLoading,
+    setSignatureIntent,
   };
 }
 

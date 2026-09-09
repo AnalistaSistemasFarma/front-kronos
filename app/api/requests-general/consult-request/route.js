@@ -3,7 +3,6 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 import { isFirmaRequestCategoryOrProcess } from '../../../../lib/orion/access';
-import { userHasOrionFirmaManage } from '../../../../lib/orion/service';
 
 export async function GET(req) {
   try {
@@ -11,7 +10,7 @@ export async function GET(req) {
     const companyId = searchParams.get('companyId');
 
     const session = await getServerSession(authOptions);
-    const userId = session?.user?.id ? String(session.user.id) : '';
+    void session;
 
     const queryCompanies = `
       SELECT 
@@ -88,21 +87,13 @@ export async function GET(req) {
       assignedUsersRes,
       categoriesNewRes,
       processCategoriesNewRes,
-      canCreateFirma,
     ] = await withMssqlPool(async (pool) => {
       const categoriesRequest = pool.request();
       if (companyId) {
         categoriesRequest.input('companyId', sql.Int, Number(companyId));
       }
 
-      const [
-        companies,
-        categories,
-        processCategories,
-        assignedUsers,
-        categoriesNew,
-        processCategoriesNew,
-      ] = await Promise.all([
+      return Promise.all([
         pool.request().query(queryCompanies),
         categoriesRequest.query(queryCategories),
         pool.request().query(queryProcessCategories),
@@ -110,43 +101,21 @@ export async function GET(req) {
         pool.request().query(queryCategoriesNew),
         pool.request().query(queryProcessCategoriesNew),
       ]);
-
-      const hasFirma = userId ? await userHasOrionFirmaManage(pool, userId) : false;
-
-      return [
-        companies,
-        categories,
-        processCategories,
-        assignedUsers,
-        categoriesNew,
-        processCategoriesNew,
-        hasFirma,
-      ];
     });
 
-    const categories = canCreateFirma
-      ? categoriesRes.recordset
-      : categoriesRes.recordset.filter(
-          (c) => !isFirmaRequestCategoryOrProcess(c.category, null)
-        );
-
-    const processCategories = canCreateFirma
-      ? processCategoriesRes.recordset
-      : processCategoriesRes.recordset.filter(
-          (p) => !isFirmaRequestCategoryOrProcess(p.category, p.process)
-        );
-
-    const categoriesNew = canCreateFirma
-      ? categoriesNewRes.recordset
-      : categoriesNewRes.recordset.filter(
-          (c) => !isFirmaRequestCategoryOrProcess(c.category, null)
-        );
-
-    const processCategoriesNew = canCreateFirma
-      ? processCategoriesNewRes.recordset
-      : processCategoriesNewRes.recordset.filter(
-          (p) => !isFirmaRequestCategoryOrProcess(null, p.process)
-        );
+    // La firma va en solicitudes normales: no ofrecer categoría/proceso FIRMA.
+    const categories = categoriesRes.recordset.filter(
+      (c) => !isFirmaRequestCategoryOrProcess(c.category, null)
+    );
+    const processCategories = processCategoriesRes.recordset.filter(
+      (p) => !isFirmaRequestCategoryOrProcess(p.category, p.process)
+    );
+    const categoriesNew = categoriesNewRes.recordset.filter(
+      (c) => !isFirmaRequestCategoryOrProcess(c.category, null)
+    );
+    const processCategoriesNew = processCategoriesNewRes.recordset.filter(
+      (p) => !isFirmaRequestCategoryOrProcess(null, p.process)
+    );
 
     return NextResponse.json(
       {
@@ -156,7 +125,7 @@ export async function GET(req) {
         assignedUsers: assignedUsersRes.recordset,
         categoriesNew,
         processCategoriesNew,
-        canCreateFirma,
+        canCreateFirma: false,
       },
       { status: 200 }
     );

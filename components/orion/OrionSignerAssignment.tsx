@@ -36,13 +36,19 @@ type Props = {
   readOnly?: boolean;
 };
 
-function statusFor(email: string, signerStatuses: Record<string, string>) {
-  const raw = signerStatuses[email.toLowerCase()] ?? '';
+function statusFor(
+  person: { order: number; email: string },
+  signerStatuses: Record<string, string>
+) {
+  const raw =
+    signerStatuses[`order:${person.order}`] ??
+    (person.email ? signerStatuses[person.email.toLowerCase()] : '') ??
+    '';
   const upper = raw.toUpperCase();
   if (['FIRMADO', 'SIGNED', 'COMPLETED'].includes(upper)) {
     return { label: 'Firmado', color: 'green', done: true };
   }
-  if (email) return { label: 'Asignado', color: 'blue', done: true };
+  if (person.email) return { label: 'Asignado', color: 'blue', done: true };
   return { label: 'Sin asignar', color: 'gray', done: false };
 }
 
@@ -63,10 +69,6 @@ export default function OrionSignerAssignment({
   onReorder,
   readOnly = false,
 }: Props) {
-  const usedEmails = new Set(
-    participants.map((p) => p.email.toLowerCase()).filter(Boolean)
-  );
-
   const slots = Array.from({ length: signerCount }, (_, idx) => {
     const order = idx + 1;
     return (
@@ -84,7 +86,7 @@ export default function OrionSignerAssignment({
       <Group align='flex-end' wrap='wrap'>
         <NumberInput
           label='Cantidad de firmas'
-          description='Puede definir entre 1 y 10 firmantes.'
+          description='Puede definir entre 1 y 10 firmantes (se puede repetir la misma persona).'
           value={signerCount}
           min={1}
           max={10}
@@ -118,20 +120,16 @@ export default function OrionSignerAssignment({
           Asignar firmantes
         </Text>
         <Text size='xs' c='dimmed' mb='md'>
-          Busque cada firmante por nombre o correo. Use las flechas para cambiar el orden. Plazo por
-          turno: 24 horas.
+          Busque cada firmante por nombre o correo. La misma persona puede firmar más de una vez
+          (distintos turnos). Use las flechas para cambiar el orden. Plazo por turno: 24 horas.
         </Text>
 
         <Stack gap='sm'>
           {slots.map((person, idx) => {
-            const status = statusFor(person.email, signerStatuses);
+            const status = statusFor(person, signerStatuses);
             const canMoveUp = Boolean(onReorder) && idx > 0;
             const canMoveDown = Boolean(onReorder) && idx < slots.length - 1;
-            const options = availableUsers.filter(
-              (u) =>
-                !usedEmails.has(u.value.toLowerCase()) ||
-                u.value.toLowerCase() === person.email.toLowerCase()
-            );
+            const options = availableUsers;
 
             return (
               <Paper

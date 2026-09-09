@@ -31,17 +31,19 @@ import {
 } from './documentVersions';
 import {
   allSignersCompleted,
+  allSlotsCompletedForEmail,
   getCurrentPendingSigner,
   isSignerCompleted,
   newlyCompletedSigners,
   orderedSigners,
+  signerSlotKey,
 } from './signerStatus';
 import {
   cancelOpenSignerTasks,
   findOrionSignatureTaskTemplate,
   syncOrionSignerTasks,
 } from './signerTasks';
-import { createOrionSignerAuthorizations, openNextOrionSignerAuthorization } from './signerAuthorizations';
+import { openNextOrionSignerAuthorization } from './signerAuthorizations';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken.jsx';
 import type { SignerAcceptIdentity } from './signerIdentity';
 import { normalizeSignerIdentity } from './signerIdentity';
@@ -186,6 +188,81 @@ export async function findOrionSignatureField(
   return result.recordset[0] ?? null;
 }
 
+/**
+ * Asegura campo orion_signature en el proceso de la solicitud
+ * (solicitudes normales sin plantilla FIRMA previa).
+ */
+export async function ensureOrionSignatureFieldForRequest(
+  pool: SqlPool,
+  requestId: number
+): Promise<{ id_form_field: number; value_text: string | null; rfv_id: number | null }> {
+  const existing = await findOrionSignatureField(pool, requestId);
+  if (existing) return existing;
+
+  const pc = await pool
+    .request()
+    .input('id', sql.Int, requestId)
+    .query(`
+      SELECT TOP 1 id_process_category
+      FROM process_category_request_general
+      WHERE id_request_general = @id
+      ORDER BY id
+    `);
+  const idProcessCategory = Number(pc.recordset[0]?.id_process_category);
+  if (!Number.isInteger(idProcessCategory) || idProcessCategory <= 0) {
+    throw Object.assign(
+      new Error('La solicitud no tiene proceso asociado para firma digital'),
+      { status: 422 }
+    );
+  }
+
+  const found = await pool
+    .request()
+    .input('pc', sql.Int, idProcessCategory)
+    .input('fieldType', sql.NVarChar(30), ORION_SIGNATURE_FIELD_TYPE)
+    .query(`
+      SELECT TOP 1 id, active
+      FROM process_form_field
+      WHERE id_process_category = @pc AND field_type = @fieldType
+      ORDER BY id
+    `);
+
+  let formFieldId = Number(found.recordset[0]?.id);
+  if (Number.isInteger(formFieldId) && formFieldId > 0) {
+    if (!(Number(found.recordset[0]?.active) === 1 || found.recordset[0]?.active === true)) {
+      await pool
+        .request()
+        .input('id', sql.Int, formFieldId)
+        .query(`UPDATE process_form_field SET active = 1 WHERE id = @id`);
+    }
+  } else {
+    const inserted = await pool
+      .request()
+      .input('pc', sql.Int, idProcessCategory)
+      .input('label', sql.NVarChar(255), 'Firma digital')
+      .input('fieldType', sql.NVarChar(30), ORION_SIGNATURE_FIELD_TYPE)
+      .query(`
+        INSERT INTO process_form_field
+          (id_process_category, field_label, field_type, required, active, display_order)
+        OUTPUT INSERTED.id
+        VALUES (@pc, @label, @fieldType, 0, 1, 900)
+      `);
+    formFieldId = Number(inserted.recordset[0]?.id);
+  }
+
+  if (!Number.isInteger(formFieldId) || formFieldId <= 0) {
+    throw Object.assign(new Error('No se pudo crear el campo de firma digital'), {
+      status: 500,
+    });
+  }
+
+  return {
+    id_form_field: formFieldId,
+    value_text: null,
+    rfv_id: null,
+  };
+}
+
 export async function upsertOrionFormBag(
   executor: SqlPool | SqlTransaction,
   requestId: number,
@@ -266,6 +343,18 @@ export async function loadOrionFormBag(
   return { field, bag: parseOrionSignatureBagBag(field.value_text) };
 }
 
+/** Carga el bag; si el proceso no tiene campo orion_signature, lo crea. */
+export async function loadOrionFormBagEnsured(
+  pool: SqlPool,
+  requestId: number
+): Promise<{
+  field: { id_form_field: number; value_text: string | null; rfv_id: number | null };
+  bag: OrionSignatureBagBag;
+}> {
+  const field = await ensureOrionSignatureFieldForRequest(pool, requestId);
+  return { field, bag: parseOrionSignatureBagBag(field.value_text) };
+}
+
 export async function ensureOrionDocumentForRequest(
   pool: SqlPool,
   params: {
@@ -290,13 +379,7 @@ export async function ensureOrionDocumentForRequest(
     throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
   }
 
-  const field = await findOrionSignatureField(pool, params.requestId);
-  if (!field) {
-    throw Object.assign(
-      new Error('El proceso de esta solicitud no tiene campo de firma digital (orion_signature)'),
-      { status: 422 }
-    );
-  }
+  const field = await ensureOrionSignatureFieldForRequest(pool, params.requestId);
 
   let bag = parseOrionSignatureBagBag(field.value_text);
   const requestedFileId = String(params.fileId || '').trim();
@@ -408,6 +491,7 @@ export async function ensureOrionDocumentForRequest(
       next: mergeOrionSignatureState(current, {
         ...mapOrionResponseToState(externalRef, doc, fileId, params.fileName ?? current.fileName),
         originalFileUrl: resolvedOriginalUrl,
+        signatureIntent: 'sign',
       }),
       previousSigners: current.signers,
       originalUrl: resolvedOriginalUrl,
@@ -426,6 +510,7 @@ export async function ensureOrionDocumentForRequest(
         params.originalFileUrl ??
         current.originalFileUrl ??
         null,
+      signatureIntent: current.signatureIntent || 'sign',
     }),
     previousSigners: current.signers,
     originalUrl: params.originalFileUrl ?? current.originalFileUrl ?? null,
@@ -546,20 +631,23 @@ export async function applyOrionWebhookToRequest(
 
   tasksUpdated += syncResult.tasksClosed + syncResult.tasksOpened;
 
-  // Asegura autorización Kronos del firmante en turno (el que aún no tiene [orionAuth]).
+  // Asegura autorización Kronos del firmante en turno (notificación → Autorizaciones).
   if (
     statusUpper !== 'RECHAZADO' &&
     statusUpper !== 'BORRADOR' &&
     statusUpper !== 'DEVUELTO'
   ) {
     try {
-      await openNextOrionSignerAuthorization(pool, {
+      const authNext = await openNextOrionSignerAuthorization(pool, {
         requestId: params.requestId,
         fileId,
         fileName: state.fileName,
         signers: state.signers,
         subject: ctx?.subject_request ?? null,
       });
+      if (authNext.errors.length) {
+        console.warn('[orion/applyWebhook] Auth siguiente firmante:', authNext.errors);
+      }
     } catch (err) {
       console.warn('[orion/applyWebhook] No se pudo crear auth del siguiente firmante:', err);
     }
@@ -707,6 +795,8 @@ export async function syncOrionDocumentState(
   options?: {
     /** Regenerar PDF acumulado en Orion (lento; solo cuando haga falta). */
     rebuildSigned?: boolean;
+    /** Solo docs en flujo activo (omite FIRMADO/RECHAZADO/BORRADOR). */
+    activeOnly?: boolean;
   }
 ): Promise<{ state: OrionSignatureState; bag: OrionSignatureBagBag; fileId: string } | null> {
   const rebuildSigned = Boolean(options?.rebuildSigned);
@@ -717,11 +807,18 @@ export async function syncOrionDocumentState(
   const bagBefore = serializeOrionSignatureBagBag(bag);
   const requested = String(fileId || '').trim();
 
-  const targets = requested
+  let targets = requested
     ? [requested]
     : Object.keys(bag.documents).length > 0
       ? Object.keys(bag.documents)
       : [];
+
+  if (options?.activeOnly && !requested) {
+    targets = targets.filter((fid) => {
+      const st = String(getOrionDocumentFromBag(bag, fid).status || '').toUpperCase();
+      return st === 'PENDIENTE_FIRMA' || st === 'EN_PROCESO' || st === 'DEVUELTO';
+    });
+  }
 
   if (targets.length === 0) {
     return {
@@ -1086,12 +1183,17 @@ export async function userCanManageOrionRequest(
   userId: string,
   isAdmin: boolean
 ): Promise<boolean> {
-  void requestId;
-  return userHasOrionFirmaManage(pool, userId, isAdmin);
+  if (!userId) return false;
+  if (isAdmin) return true;
+  if (!Number.isInteger(requestId) || requestId <= 0) return false;
+
+  const ctx = await getRequestOrionContext(pool, requestId);
+  if (!ctx?.id_requester) return false;
+  return String(ctx.id_requester) === String(userId);
 }
 
 /**
- * Edición de preparación: Firma digital + creador + abierta + sin firmas completadas.
+ * Edición de preparación: creador/admin + abierta + sin firmas completadas.
  */
 export async function assertUserCanEditOrionPreparation(
   pool: SqlPool,
@@ -1144,6 +1246,75 @@ export async function assertUserCanEditOrionPreparation(
   }
 
   return { ctx, state };
+}
+
+/** Marca un PDF como para firmar o solo ver (creador/admin). */
+export async function setOrionDocumentSignatureIntent(
+  pool: SqlPool,
+  params: {
+    requestId: number;
+    userId: string;
+    userEmail: string;
+    isAdmin?: boolean;
+    fileId: string;
+    fileName?: string | null;
+    intent: 'sign' | 'view';
+    originalFileUrl?: string | null;
+  }
+): Promise<{ state: OrionSignatureState; bag: OrionSignatureBagBag; fileId: string }> {
+  const fileId = String(params.fileId || '').trim();
+  if (!fileId) {
+    throw Object.assign(new Error('fileId es obligatorio'), { status: 400 });
+  }
+  if (params.intent !== 'sign' && params.intent !== 'view') {
+    throw Object.assign(new Error('intent inválido'), { status: 400 });
+  }
+
+  const canManage = await userCanManageOrionRequest(
+    pool,
+    params.requestId,
+    params.userId,
+    Boolean(params.isAdmin)
+  );
+  if (!canManage) {
+    throw Object.assign(
+      new Error('Solo el creador de la solicitud puede marcar documentos para firma'),
+      { status: 403 }
+    );
+  }
+
+  const locked = await isOrionRequestWorkflowLocked(pool, params.requestId);
+  if (locked) {
+    throw Object.assign(new Error('La solicitud está cerrada'), { status: 403 });
+  }
+
+  const { field, bag: loadedBag } = await loadOrionFormBagEnsured(pool, params.requestId);
+  const current = getOrionDocumentFromBag(loadedBag, fileId);
+
+  if (params.intent === 'view' && hasAnyCompletedSignatureLocal(current)) {
+    throw Object.assign(
+      new Error('No se puede quitar de firma un documento que ya tiene firmas'),
+      { status: 422 }
+    );
+  }
+
+  const next: OrionSignatureState = {
+    ...current,
+    fileId,
+    fileName: params.fileName ?? current.fileName ?? null,
+    originalFileUrl: params.originalFileUrl ?? current.originalFileUrl ?? null,
+    signatureIntent: params.intent,
+  };
+
+  const bag = setOrionDocumentInBag(loadedBag, fileId, next);
+  await upsertOrionFormBag(pool, params.requestId, field.id_form_field, bag);
+  return { state: next, bag, fileId };
+}
+
+function hasAnyCompletedSignatureLocal(state: OrionSignatureState | null | undefined): boolean {
+  return (state?.signers ?? []).some((s) =>
+    ['FIRMADO', 'SIGNED', 'COMPLETED'].includes(String(s.status || '').toUpperCase())
+  );
 }
 
 /** Solicitud cerrada (resuelta/cancelada) → no editar firmantes. */
@@ -1234,22 +1405,27 @@ export async function finalizeSignerTurn(
     mapOrionResponseToState(externalRef, live.data, fileId, current.fileName)
   );
 
-  const mySigner = liveState.signers?.find((s) => normalizeSignerEmail(s.email) === me);
-  if (!mySigner) {
+  const mySlots = liveState.signers?.filter(
+    (s) => normalizeSignerEmail(s.email) === me
+  );
+  if (!mySlots?.length) {
     throw Object.assign(new Error('No es firmante de este documento'), { status: 403 });
   }
 
   const pending = getCurrentPendingSigner(liveState.signers);
   const isMyTurn = Boolean(pending && normalizeSignerEmail(pending.email) === me);
-  const alreadyCompleted = isSignerCompleted(mySigner.status);
+  // Completó todas sus apariciones (mismo email puede tener varios slots).
+  const alreadyCompletedAll = allSlotsCompletedForEmail(liveState.signers, me);
+  // Firmante activo de ESTE turno (no el primer slot del email).
+  const turnSigner = isMyTurn && pending ? pending : mySlots[0]!;
 
-  if (!isMyTurn && !alreadyCompleted) {
+  if (!isMyTurn && !alreadyCompletedAll) {
     throw Object.assign(new Error('Aún no es su turno para firmar'), { status: 403 });
   }
 
   // Plazo 24h vive en el bag Kronos (Orion no lo gestiona).
   const localPending = getCurrentPendingSigner(current.signers);
-  if (isMyTurn && !alreadyCompleted && isSignerTurnExpired(localPending)) {
+  if (isMyTurn && isSignerTurnExpired(localPending)) {
     throw Object.assign(
       new Error(
         'Su plazo de 24 horas para firmar venció. Solicite firmar este documento al líder del proceso.'
@@ -1259,9 +1435,9 @@ export async function finalizeSignerTurn(
   }
 
   // Aplicar firma real en Orion (rúbrica guardada o signatureDataUrl)
-  if (isMyTurn && !alreadyCompleted) {
+  if (isMyTurn) {
     const identity = params.identity
-      ? normalizeSignerIdentity(params.identity, mySigner.name || params.userEmail)
+      ? normalizeSignerIdentity(params.identity, turnSigner.name || params.userEmail)
       : null;
     // Cliente omite signatureDataUrl si Orion ya tiene rúbrica (hasSignature).
     const acceptPayload = {
@@ -1339,7 +1515,26 @@ export async function finalizeSignerTurn(
       liveState,
       mapOrionResponseToState(externalRef, accept.data, fileId, current.fileName)
     );
-    // accept ya trae estado usable: no segundo GET Orion.
+    // Si Orion no marcó el slot, forzar FIRMADO del turno para abrir auth/tarea del siguiente.
+    const turnKey = signerSlotKey(turnSigner);
+    const forcedSigners = orderedSigners(liveState.signers).map((s, idx) => {
+      if (signerSlotKey(s, idx) !== turnKey) return s;
+      if (isSignerCompleted(s.status)) return s;
+      return {
+        ...s,
+        status: 'FIRMADO' as const,
+        signedAt: s.signedAt || new Date().toISOString(),
+      };
+    });
+    liveState = {
+      ...liveState,
+      signers: forcedSigners,
+      status: allSignersCompleted(forcedSigners)
+        ? 'FIRMADO'
+        : liveState.status && String(liveState.status).toUpperCase() !== 'BORRADOR'
+          ? liveState.status
+          : 'EN_PROCESO',
+    };
   }
 
   liveState = applyOrionVersionHistory({
@@ -1362,10 +1557,21 @@ export async function finalizeSignerTurn(
   });
 
   const completed = newlyCompletedSigners(previousSigners, outcome.state.signers);
-  const meAfter = outcome.state.signers?.find((s) => normalizeSignerEmail(s.email) === me);
+  const turnOrder = Number(turnSigner.order);
+  const justCompletedThisTurn = completed.some((s) => {
+    if (Number.isFinite(turnOrder) && turnOrder > 0) {
+      return Number(s.order) === turnOrder;
+    }
+    return normalizeSignerEmail(s.email) === me;
+  });
   const signerCompleted =
-    completed.some((s) => normalizeSignerEmail(s.email) === me) ||
-    Boolean(meAfter && isSignerCompleted(meAfter.status));
+    justCompletedThisTurn ||
+    (isMyTurn &&
+      outcome.state.signers?.some(
+        (s) =>
+          Number(s.order) === turnOrder && isSignerCompleted(s.status)
+      )) ||
+    allSlotsCompletedForEmail(outcome.state.signers, me);
 
   // Tras avanzar turno: nuevo plazo 24h para el firmante pendiente.
   let finalState = outcome.state;

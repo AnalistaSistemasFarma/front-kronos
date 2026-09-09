@@ -12,8 +12,10 @@ function normalizeEmail(email?: string | null): string {
 
 function versionIdForSigner(signer: OrionSignerState): string {
   const email = normalizeEmail(signer.email) || 'unknown';
+  const order = Number(signer.order);
+  const orderPart = Number.isFinite(order) && order > 0 ? String(order) : 'x';
   const at = signer.signedAt || 'pending';
-  return `sign-${email}-${at}`;
+  return `sign-${email}-${orderPart}-${at}`;
 }
 
 /** Admin o quien creó la solicitud puede ver el historial completo de versiones. */
@@ -70,19 +72,27 @@ export function listOrionDocumentVersions(
   state: OrionSignatureState | undefined | null
 ): OrionDocumentVersion[] {
   const versions = [...(state?.versions ?? [])];
-  const orderByEmail = new Map<string, number>();
+  const orderBySlot = new Map<string, number>();
   for (const signer of state?.signers ?? []) {
     const email = normalizeEmail(signer.email);
-    if (!email) continue;
     const order = Number(signer.order);
-    orderByEmail.set(email, Number.isFinite(order) ? order : 999);
+    const slotOrder = Number.isFinite(order) && order > 0 ? order : 999;
+    // Preferir orden del slot; si hay varios del mismo email, cada versión se
+    // desempatará por createdAt.
+    if (email) orderBySlot.set(email, Math.min(orderBySlot.get(email) ?? 999, slotOrder));
+    if (Number.isFinite(order) && order > 0) {
+      orderBySlot.set(`order:${order}`, order);
+    }
   }
 
   const rank = (v: OrionDocumentVersion): number => {
     if (v.kind === 'original') return 0;
     if (v.kind === 'final') return 10_000;
     const email = normalizeEmail(v.signerEmail);
-    const signerOrder = email ? orderByEmail.get(email) : undefined;
+    // Si la versión guarda order implícito vía id sign-email-order-..., usarlo.
+    const fromId = String(v.id || '').match(/^sign-[^-]+-(\d+)-/);
+    if (fromId?.[1]) return 100 + Number(fromId[1]);
+    const signerOrder = email ? orderBySlot.get(email) : undefined;
     return 100 + (signerOrder ?? 999);
   };
 

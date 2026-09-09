@@ -1,6 +1,6 @@
 'use client';
 
-import { Badge, Button, Stack, Table, Text, UnstyledButton } from '@mantine/core';
+import { Badge, Button, SegmentedControl, Stack, Table, Text, UnstyledButton } from '@mantine/core';
 import {
   IconFile,
   IconPencil,
@@ -200,21 +200,37 @@ export default function OrionAttachmentTableRow({
       </Table.Td>
 
       <Table.Td data-label='Estado' className='doc-cell'>
-        {d.enabled ? (
-          <Badge
-            variant='outline'
-            color={statusColor}
-            size='sm'
-            radius='xl'
-            styles={{ label: { textTransform: 'none', fontWeight: 600 } }}
-          >
-            {d.displayStatus.label}
-          </Badge>
-        ) : (
-          <Text size='sm' c='dimmed'>
-            —
-          </Text>
-        )}
+        <Stack gap={6}>
+          {d.canToggleIntent ? (
+            <SegmentedControl
+              size='xs'
+              value={d.signatureIntent}
+              disabled={d.intentLoading}
+              onChange={(value) => {
+                void d.setSignatureIntent(value as 'sign' | 'view');
+              }}
+              data={[
+                { label: 'Para firmar', value: 'sign' },
+                { label: 'Solo ver', value: 'view' },
+              ]}
+            />
+          ) : null}
+          {d.enabled || d.forSigning ? (
+            <Badge
+              variant='outline'
+              color={statusColor}
+              size='sm'
+              radius='xl'
+              styles={{ label: { textTransform: 'none', fontWeight: 600 } }}
+            >
+              {d.displayStatus.label}
+            </Badge>
+          ) : (
+            <Text size='sm' c='dimmed'>
+              —
+            </Text>
+          )}
+        </Stack>
       </Table.Td>
 
       <Table.Td data-label='Firmantes' className='doc-cell'>
@@ -241,10 +257,34 @@ export default function OrionAttachmentTableRow({
           verticalAlign: 'top',
         }}
       >
-        {!d.enabled ? (
+        {!d.enabled && !d.canToggleIntent ? (
           <Text size='sm' c='dimmed'>
             —
           </Text>
+        ) : !d.forSigning ? (
+          <div className='doc-dossier'>
+            <div className='doc-dossier__rail' />
+            <Stack gap={4} className='doc-dossier__body'>
+              <Text
+                size='10px'
+                c='dimmed'
+                tt='uppercase'
+                fw={700}
+                style={{ letterSpacing: 0.6 }}
+              >
+                Consulta
+              </Text>
+              <Text size='xs' c='dimmed'>
+                Este documento no está marcado para firma.
+              </Text>
+              <ActionLink
+                icon={<IconFile size={15} stroke={1.6} />}
+                label='Abrir / descargar'
+                href={openUrl || originalFileHref}
+                disabled={!openUrl && !originalFileHref}
+              />
+            </Stack>
+          </div>
         ) : (
           <div className={isClosed ? 'doc-dossier doc-dossier--closed' : 'doc-dossier'}>
             <div className='doc-dossier__rail' />

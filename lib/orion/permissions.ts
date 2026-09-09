@@ -1,4 +1,8 @@
-import { getCurrentPendingSigner, isSignerCompleted } from './signerStatus';
+import {
+  allSlotsCompletedForEmail,
+  getCurrentPendingSigner,
+  isSignerCompleted,
+} from './signerStatus';
 import type { OrionSignatureState } from './types';
 
 /** Perfiles de UI en el flujo de firma (derivados del permiso, no roles de admin). */
@@ -76,7 +80,7 @@ export function isOrionRequestCreator(params: {
 
 /**
  * Edición de documento/firmantes/posiciones:
- * permiso Firma digital + creador + solicitud abierta + nadie ha firmado.
+ * creador/admin (canManage) + solicitud abierta + nadie ha firmado.
  */
 export function canEditOrionPreparation(params: {
   canManage: boolean;
@@ -90,12 +94,8 @@ export function canEditOrionPreparation(params: {
   if (!params.canManage || params.workflowLocked) return false;
   if (isTerminalStatus(params.state?.status)) return false;
   if (hasAnyCompletedOrionSignature(params.state)) return false;
-  return isOrionRequestCreator({
-    currentUserEmail: params.currentUserEmail,
-    currentUserId: params.currentUserId,
-    createdByEmail: params.createdByEmail,
-    requesterId: params.requesterId,
-  });
+  // canManage ya implica creador o admin en el servidor.
+  return true;
 }
 
 export function resolveOrionPermissions(params: {
@@ -153,10 +153,8 @@ export function resolveOrionPermissions(params: {
   const isMyTurn = Boolean(
     me && pendingSigner && normalizeEmail(pendingSigner.email) === me
   );
-  const mySigner = (state?.signers ?? []).find((s) => normalizeEmail(s.email) === me);
-  const iCompleted =
-    mySigner &&
-    ['FIRMADO', 'SIGNED', 'COMPLETED'].includes(String(mySigner.status || '').toUpperCase());
+  // Completó TODAS sus apariciones; si aún tiene un slot pendiente, puede volver a firmar.
+  const iCompleted = me ? allSlotsCompletedForEmail(state?.signers, me) : false;
 
   let userRole: OrionUserRole = 'viewer';
 
@@ -166,9 +164,9 @@ export function resolveOrionPermissions(params: {
     if (iCompleted) userRole = 'viewer';
     else if (isMyTurn) userRole = 'signer';
     else if (isSigner) userRole = 'waiting';
-    else if (canManage && isCreator && !workflowLocked) userRole = 'coordinator';
+    else if (canManage && !workflowLocked) userRole = 'coordinator';
     else userRole = 'viewer';
-  } else if (canManage && isCreator) {
+  } else if (canManage) {
     userRole = 'coordinator';
   } else if (isSigner && !iCompleted) {
     userRole = 'waiting';

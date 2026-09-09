@@ -130,8 +130,13 @@ export default function OrionDocumentEditor({
   }, [activeOrder, orderedParticipants]);
 
   const signerStatuses = useMemo(() => {
+    // Clave por orden de slot (mismo email puede aparecer varias veces).
     const map: Record<string, string> = {};
     for (const s of state.signers ?? []) {
+      const order = Number(s.order);
+      if (Number.isFinite(order) && order > 0) {
+        map[`order:${order}`] = String(s.status || 'PENDIENTE');
+      }
       if (s.email) map[s.email.toLowerCase()] = String(s.status || 'PENDIENTE');
     }
     return map;
@@ -176,20 +181,22 @@ export default function OrionDocumentEditor({
       if (!me) return;
 
       if (checked) {
+        // Solo asegura el slot 1; no quita el mismo email de otros slots
+        // (una persona puede firmar varias veces en el documento).
         setOrderedParticipants((prev) => {
-          const withoutMe = prev.filter((p) => normalizeEmail(p.email) !== me);
-          const self: OrionParticipant = {
+          const next = [...prev];
+          const slot1 = next.find((p) => p.order === 1) ?? emptySignerSlot(1);
+          const updated = {
+            ...slot1,
             order: 1,
             email: me,
             name: currentUserName?.trim() || me,
-            role: 'Firmante',
+            role: 'Firmante' as const,
           };
-          const filled = [self, ...withoutMe.filter((p) => p.email)];
-          const padded = resizeParticipantSlots(
-            [...filled, ...withoutMe.filter((p) => !p.email)],
-            signerCount
+          const without1 = next.filter((p) => p.order !== 1);
+          return reindexParticipants(
+            resizeParticipantSlots([updated, ...without1], signerCount)
           );
-          return reindexParticipants(padded);
         });
         return;
       }
@@ -197,7 +204,7 @@ export default function OrionDocumentEditor({
       setOrderedParticipants((prev) =>
         resizeParticipantSlots(
           prev.map((p) =>
-            normalizeEmail(p.email) === me ? emptySignerSlot(p.order) : p
+            p.order === 1 && normalizeEmail(p.email) === me ? emptySignerSlot(p.order) : p
           ),
           signerCount
         )
@@ -232,10 +239,6 @@ export default function OrionDocumentEditor({
     const pending = orderedParticipants.filter((p) => !p.email);
     if (pending.length > 0) {
       return `Asigne todos los firmantes (${pending.length} pendiente(s)).`;
-    }
-    const emails = orderedParticipants.map((p) => p.email.toLowerCase());
-    if (new Set(emails).size !== emails.length) {
-      return 'No puede repetir el mismo firmante.';
     }
     return null;
   }, [orderedParticipants]);

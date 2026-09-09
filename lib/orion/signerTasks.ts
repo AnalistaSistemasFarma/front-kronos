@@ -9,11 +9,13 @@ import {
   isSignerRejected,
   newlyCompletedSigners,
   orderedSigners,
+  signerSlotKey,
 } from './signerStatus';
 import {
   buildOrionFileTaskMarker,
   parseOrionFileIdFromResolution,
 } from './signerAuthMarkers';
+import { ensureOrionSignerWorkflowTemplates } from './workflowTemplates';
 
 export {
   buildOrionFileTaskMarker,
@@ -64,6 +66,7 @@ export async function findOrionSignatureTaskTemplate(
     INNER JOIN task_process_category tpc ON tpc.id_process_category = pcr.id_process_category
     WHERE pcr.id_request_general = @id_request
       AND tpc.active = 1
+      AND ISNULL(tpc.is_authorization, 0) = 0
       AND (
         LOWER(tpc.task) LIKE '%firma%'
         OR LOWER(tpc.task) LIKE '%firmar%'
@@ -298,6 +301,7 @@ export async function syncOrionSignerTasks(
     fileName?: string | null;
   }
 ): Promise<SyncOrionSignerTasksResult> {
+  await ensureOrionSignerWorkflowTemplates(pool, params.requestId);
   const template = await findOrionSignatureTaskTemplate(pool, params.requestId);
   if (!template) {
     console.warn(
@@ -327,6 +331,8 @@ export async function syncOrionSignerTasks(
   const fileId = String(params.fileId || params.state.fileId || '').trim() || null;
   const fileName = params.fileName ?? params.state.fileName ?? null;
   const marker = buildOrionFileTaskMarker(fileId);
+  const currentPending = getCurrentPendingSigner(signers);
+  const currentTurnKey = currentPending ? signerSlotKey(currentPending) : null;
 
   const activeSignerEmails = new Set(
     signers
@@ -347,7 +353,8 @@ export async function syncOrionSignerTasks(
     );
   }
 
-  for (const signer of signers) {
+  for (let index = 0; index < signers.length; index += 1) {
+    const signer = signers[index]!;
     const email = String(signer.email || '').trim();
     if (!email) continue;
 
@@ -393,6 +400,9 @@ export async function syncOrionSignerTasks(
     }
 
     if (!shouldManageTasks) continue;
+
+    // Solo el firmante en turno recibe tarea + notificación (el siguiente al avanzar).
+    if (!currentTurnKey || signerSlotKey(signer, index) !== currentTurnKey) continue;
 
     const opened = await openSignerTask(pool, {
       requestId: params.requestId,

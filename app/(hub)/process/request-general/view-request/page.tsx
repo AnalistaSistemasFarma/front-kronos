@@ -437,7 +437,7 @@ function ViewRequestPage() {
     void fetchFolderContents();
     void loadRelatedData();
 
-    // Tras crear FIRMA el listado de OneDrive a veces aún no refleja el PDF.
+    // Tras crear con PDF el listado de OneDrive a veces aún no refleja el archivo.
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     if (from === 'create-request' || orionActionParam === 'manage') {
       retryTimer = setTimeout(() => {
@@ -451,7 +451,7 @@ function ViewRequestPage() {
     };
   }, [request?.id, from, orionActionParam]);
 
-  // consult-request (empresas/categorías/procesos) solo al editar: no satura carga FIRMA.
+  // consult-request (empresas/categorías/procesos) solo al editar: no satura la carga inicial.
   const consultOptionsLoadedRef = useRef(false);
   useEffect(() => {
     if (!isEditing || consultOptionsLoadedRef.current) return;
@@ -1836,11 +1836,11 @@ function ViewRequestPage() {
   const hasOrionSignatureField = requestFormValues.some(
     (fv) => fv.field_type === ORION_SIGNATURE_FIELD_TYPE
   );
-  const isFirmaTask =
-    (request?.category ?? '').toUpperCase().includes('FIRMA') ||
-    (request?.process ?? '').toUpperCase().includes('FIRMA');
   const hasOrionDocuments = Object.keys(orionInitialDocuments).length > 0;
-  const showOrionPanel = isFirmaTask || hasOrionSignatureField || hasOrionDocuments;
+  const hasPdfAttachments = folderContents.some((f) => /\.pdf$/i.test(f.name));
+  // Firma en solicitud normal: basta con PDFs adjuntos (o bag Orion).
+  const showOrionPanel =
+    hasPdfAttachments || hasOrionSignatureField || hasOrionDocuments;
   const currentUserEmailNorm = String(session?.user?.email || '')
     .trim()
     .toLowerCase();
@@ -1873,8 +1873,7 @@ function ViewRequestPage() {
     !autoOpenFile &&
     (from === 'authorization' ||
       orionActionParam === 'sign' ||
-      orionActionParam === 'manage' ||
-      from === 'create-request')
+      orionActionParam === 'manage')
       ? folderContents.find((f) => /\.pdf$/i.test(f.name))
       : undefined;
   const deepLinkFileId = autoOpenFile
@@ -1890,9 +1889,7 @@ function ViewRequestPage() {
       ? orionActionParam
       : from === 'authorization' || orionFileIdParam
         ? 'sign'
-        : from === 'create-request'
-          ? 'manage'
-          : null;
+        : null;
 
   const chatDocumentItems = [
     ...folderContents

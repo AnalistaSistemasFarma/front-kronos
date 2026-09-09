@@ -88,7 +88,10 @@ export default function OrionSignersList({
       {participants.map((person, idx) => {
         const placed = fields.some((f) => f.signerOrder === person.order);
         const isActive = person.order === activeOrder;
-        const rawStatus = signerStatuses[person.email.toLowerCase()] ?? (placed ? 'UBICADA' : 'SIN UBICAR');
+        const rawStatus =
+          signerStatuses[`order:${person.order}`] ??
+          signerStatuses[person.email.toLowerCase()] ??
+          (placed ? 'UBICADA' : 'SIN UBICAR');
         const statusInfo = signerStatusLabel(rawStatus, placed, variant);
         const canMoveUp = Boolean(onReorder) && idx > 0;
         const canMoveDown = Boolean(onReorder) && idx < participants.length - 1;

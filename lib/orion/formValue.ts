@@ -1,5 +1,9 @@
 import { ORION_LEGACY_FILE_ID } from './config';
-import type { OrionSignatureBagBag, OrionSignatureState } from './types';
+import type {
+  OrionSignatureBagBag,
+  OrionSignatureIntent,
+  OrionSignatureState,
+} from './types';
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -25,6 +29,31 @@ function isLegacyFlatState(parsed: Record<string, unknown>): boolean {
 
 export function emptyOrionFormBag(): OrionSignatureBagBag {
   return { documents: {} };
+}
+
+/**
+ * Resuelve si el PDF es para firmar o solo ver.
+ * Compat: sin flag, si ya hay flujo Orion → sign; si no → view.
+ */
+export function resolveOrionSignatureIntent(
+  state?: OrionSignatureState | null
+): OrionSignatureIntent {
+  const raw = String(state?.signatureIntent || '')
+    .trim()
+    .toLowerCase();
+  if (raw === 'sign' || raw === 'view') return raw;
+  if (
+    state?.orionDocumentId ||
+    (state?.signers?.length ?? 0) > 0 ||
+    Boolean(state?.status)
+  ) {
+    return 'sign';
+  }
+  return 'view';
+}
+
+export function isOrionSignDocument(state?: OrionSignatureState | null): boolean {
+  return resolveOrionSignatureIntent(state) === 'sign';
 }
 
 /**
@@ -128,7 +157,13 @@ export function resolveOrionDocumentForAttachment(params: {
   const fileId = String(params.fileId || '').trim();
   const docs = params.documents ?? {};
   const byId = fileId ? docs[fileId] : undefined;
-  if (byId && (byId.orionDocumentId || (byId.signers?.length ?? 0) > 0 || byId.status)) {
+  if (
+    byId &&
+    (byId.orionDocumentId ||
+      (byId.signers?.length ?? 0) > 0 ||
+      byId.status ||
+      byId.signatureIntent)
+  ) {
     return { ...byId, fileId: byId.fileId || fileId };
   }
 
@@ -189,40 +224,50 @@ function isCompletedSignerStatus(status?: string | null): boolean {
   return ['FIRMADO', 'SIGNED', 'COMPLETED', 'RECHAZADO', 'REJECTED'].includes(value);
 }
 
-/** No degradar un firmante FIRMADO a PENDIENTE si Orion/webhook llega atrasado. */
+/** No degradar un firmante FIRMADO a PENDIENTE si Orion/webhook llega atrasado.
+ * Merge por orden (slot): el mismo email puede firmar varias veces en el documento.
+ */
 export function mergeOrionSigners(
   current?: OrionSignatureState['signers'],
   patch?: OrionSignatureState['signers']
 ): OrionSignatureState['signers'] {
   if (patch == null) return current;
   const currentList = Array.isArray(current) ? current : [];
-  const byEmail = new Map<string, (typeof currentList)[number]>();
-  for (const signer of currentList) {
-    const email = String(signer.email || '').trim().toLowerCase();
-    if (email) byEmail.set(email, signer);
-  }
+  const byOrder = new Map<number, (typeof currentList)[number]>();
+  currentList.forEach((signer, index) => {
+    const order = Number(signer.order);
+    const key = Number.isFinite(order) && order > 0 ? order : index + 1;
+    byOrder.set(key, signer);
+  });
 
-  const merged = patch.map((signer) => {
-    const email = String(signer.email || '').trim().toLowerCase();
-    const prev = email ? byEmail.get(email) : undefined;
+  const merged = patch.map((signer, index) => {
+    const order = Number(signer.order);
+    const key = Number.isFinite(order) && order > 0 ? order : index + 1;
+    const prev = byOrder.get(key);
     if (prev && isCompletedSignerStatus(prev.status) && !isCompletedSignerStatus(signer.status)) {
       return {
         ...signer,
+        order: key,
         status: prev.status,
         signedAt: prev.signedAt ?? signer.signedAt,
       };
     }
-    return signer;
+    return { ...signer, order: Number.isFinite(order) && order > 0 ? order : key };
   });
 
-  for (const signer of currentList) {
-    const email = String(signer.email || '').trim().toLowerCase();
-    if (email && !merged.some((s) => String(s.email || '').trim().toLowerCase() === email)) {
-      merged.push(signer);
+  const patchOrders = new Set(
+    merged.map((s, i) => {
+      const order = Number(s.order);
+      return Number.isFinite(order) && order > 0 ? order : i + 1;
+    })
+  );
+  for (const [order, signer] of byOrder) {
+    if (!patchOrders.has(order)) {
+      merged.push({ ...signer, order });
     }
   }
 
-  return merged;
+  return merged.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
 }
 
 function mergeOrionVersions(

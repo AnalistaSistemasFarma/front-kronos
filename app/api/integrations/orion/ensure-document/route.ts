@@ -16,7 +16,7 @@ import { syncOrionSignerTasks } from '@/lib/orion/signerTasks';
 import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
 import type { OrionSignatureState } from '@/lib/orion/types';
 import { resolveOrionPermissions } from '@/lib/orion/permissions';
-import { userHasPendingOrionSignerAuth } from '@/lib/orion/signerAuthorizations';
+import { userHasPendingOrionSignerAuthBatch } from '@/lib/orion/signerAuthorizations';
 import { getCurrentPendingSigner } from '@/lib/orion/signerStatus';
 
 function readFileId(source: { get?: (k: string) => string | null } | Record<string, unknown>): string | null {
@@ -102,14 +102,65 @@ export async function GET(req: Request) {
       .trim()
       .toLowerCase();
 
-    const result = await withMssqlPool(async (pool) => {
-      const canManage = userId
-        ? await userCanManageOrionRequest(pool, requestId, userId, isAdmin)
-        : false;
+    // soft sin fileId = bootstrap liviano (solo BD). Orion GET solo con fileId o rebuild.
+    const softBagOnly = soft && !fileId && !rebuildSigned;
 
-      const synced = await syncOrionDocumentState(pool, requestId, fileId, {
-        rebuildSigned,
-      });
+    const result = await withMssqlPool(async (pool) => {
+      const canManagePromise = userId
+        ? userCanManageOrionRequest(pool, requestId, userId, isAdmin)
+        : Promise.resolve(false);
+
+      if (softBagOnly) {
+        const [canManage, loaded] = await Promise.all([
+          canManagePromise,
+          loadOrionFormBag(pool, requestId),
+        ]);
+        const bag = loaded?.bag ?? { documents: {} as Record<string, OrionSignatureState> };
+        const pendingAuthorizationByFile: Record<string, boolean> = {};
+        if (userId && Object.keys(bag.documents).length > 0) {
+          const authTargets = Object.keys(bag.documents);
+          const myTurnFiles = authTargets.filter((fid) => {
+            const docState = getOrionDocumentFromBag(bag, fid);
+            const pendingSigner = getCurrentPendingSigner(docState.signers);
+            return Boolean(
+              me &&
+                pendingSigner &&
+                String(pendingSigner.email || '').trim().toLowerCase() === me
+            );
+          });
+          if (myTurnFiles.length > 0) {
+            const pendingMap = await userHasPendingOrionSignerAuthBatch(pool, {
+              requestId,
+              userId: String(userId),
+              fileIds: myTurnFiles,
+            });
+            for (const fid of authTargets) {
+              pendingAuthorizationByFile[fid] = Boolean(pendingMap[fid]);
+            }
+          } else {
+            for (const fid of authTargets) pendingAuthorizationByFile[fid] = false;
+          }
+        }
+        return {
+          canManage,
+          payload: loaded
+            ? {
+                state: {},
+                bag,
+                fileId: fileId || Object.keys(bag.documents)[0] || '',
+              }
+            : null,
+          pendingAuthorization: Object.values(pendingAuthorizationByFile).some(Boolean),
+          pendingAuthorizationByFile,
+        };
+      }
+
+      const [canManage, synced] = await Promise.all([
+        canManagePromise,
+        syncOrionDocumentState(pool, requestId, fileId, {
+          rebuildSigned,
+        }),
+      ]);
       if (!synced) {
         return {
           canManage,
@@ -150,27 +201,27 @@ export async function GET(req: Request) {
           fileId && synced.bag.documents[fileId]
             ? [fileId]
             : Object.keys(synced.bag.documents);
-        await Promise.all(
-          authTargets.map(async (fid) => {
-            const docState = getOrionDocumentFromBag(synced.bag, fid);
-            const pendingSigner = getCurrentPendingSigner(docState.signers);
-            const isMyTurn = Boolean(
-              me &&
-                pendingSigner &&
-                String(pendingSigner.email || '').trim().toLowerCase() === me
-            );
-            if (!isMyTurn) {
-              pendingAuthorizationByFile[fid] = false;
-              return;
-            }
-            const hasOpenAuth = await userHasPendingOrionSignerAuth(pool, {
-              requestId,
-              userId: String(userId),
-              fileId: fid,
-            });
-            pendingAuthorizationByFile[fid] = hasOpenAuth && isMyTurn;
-          })
-        );
+        const myTurnFiles = authTargets.filter((fid) => {
+          const docState = getOrionDocumentFromBag(synced.bag, fid);
+          const pendingSigner = getCurrentPendingSigner(docState.signers);
+          return Boolean(
+            me &&
+              pendingSigner &&
+              String(pendingSigner.email || '').trim().toLowerCase() === me
+          );
+        });
+        if (myTurnFiles.length > 0) {
+          const pendingMap = await userHasPendingOrionSignerAuthBatch(pool, {
+            requestId,
+            userId: String(userId),
+            fileIds: myTurnFiles,
+          });
+          for (const fid of authTargets) {
+            pendingAuthorizationByFile[fid] = Boolean(pendingMap[fid]);
+          }
+        } else {
+          for (const fid of authTargets) pendingAuthorizationByFile[fid] = false;
+        }
       }
 
       const pendingAuthorization = fileId

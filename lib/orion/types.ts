@@ -35,6 +35,9 @@ export type OrionDocumentVersion = {
   signerName?: string | null;
 };
 
+/** Intent de firma por adjunto: gestionar/firmar vs solo ver. */
+export type OrionSignatureIntent = 'sign' | 'view';
+
 /** Estado Orion de un PDF concreto (por fileId de OneDrive). */
 export type OrionSignatureState = {
   orionDocumentId?: string | null;
@@ -43,6 +46,11 @@ export type OrionSignatureState = {
   fileName?: string | null;
   /** URL del PDF adjunto original en OneDrive/SynerLink */
   originalFileUrl?: string | null;
+  /**
+   * Para firmar (`sign`) o solo consulta (`view`).
+   * Ausente en bags viejos: se infiere (flujo Orion activo → sign).
+   */
+  signatureIntent?: OrionSignatureIntent | null;
   status?: OrionDocumentStatus;
   embedUrl?: string | null;
   signedFileUrl?: string | null;

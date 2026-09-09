@@ -219,7 +219,8 @@ function ViewRequestPage() {
   const [loadingNotes, setLoadingNotes] = useState(false);
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
-  const [userId, setUserId] = useState<number | null>(null);
+  const [userId, setUserId] = useState<string | number | null>(null);
+  const userIdFetchRef = useRef(false);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -402,15 +403,21 @@ function ViewRequestPage() {
   };
 
   useEffect(() => {
-    if (status === 'authenticated' && userName && !userId) {
-      getUserIdByName(userName).then((id) => {
-        if (id) {
-          setUserId(id);
-          console.log('ID de usuario obtenido:', id);
-        }
-      });
+    if (status !== 'authenticated') return;
+    if (session?.user?.id != null) {
+      setUserId(session.user.id);
+      return;
     }
-  }, [status, userName, userId, getUserIdByName]);
+    if (!userName || userId || userIdFetchRef.current) return;
+    userIdFetchRef.current = true;
+    getUserIdByName(userName)
+      .then((id) => {
+        if (id) setUserId(id);
+      })
+      .finally(() => {
+        userIdFetchRef.current = false;
+      });
+  }, [status, session?.user?.id, userName, userId]);
 
   useEffect(() => {
     if (request && session) {
@@ -1235,17 +1242,15 @@ function ViewRequestPage() {
     );
   }
 
-  const isFirmaTask =
-    (request.category ?? '').toUpperCase().includes('FIRMA') ||
-    (request.process ?? '').toUpperCase().includes('FIRMA');
   const hasOrionSignatureField = requestFormValues.some(
     (fv) => fv.field_type === ORION_SIGNATURE_FIELD_TYPE
   );
   const hasOrionDocuments = Object.keys(orionInitialDocuments).length > 0;
   const taskOrionFileId = parseOrionFileIdFromResolution(request?.resolution);
   const taskPendingOrionAuth = isOrionSignerAuthResolution(request?.resolution);
+  const hasPdfAttachments = folderContents.some((f) => /\.pdf$/i.test(f.name));
   const showOrionPanel =
-    isFirmaTask ||
+    hasPdfAttachments ||
     hasOrionSignatureField ||
     hasOrionDocuments ||
     Boolean(taskOrionFileId) ||

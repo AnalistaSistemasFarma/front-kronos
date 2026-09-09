@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   adoptLegacyOrionDocument,
+  isOrionSignDocument,
   mergeOrionSignatureState,
   parseOrionSignatureBagBag,
   parseOrionSignatureState,
   resolveOrionDocumentForAttachment,
+  resolveOrionSignatureIntent,
   serializeOrionSignatureBagBag,
   serializeOrionSignatureState,
 } from '../formValue';
@@ -40,10 +42,28 @@ describe('orion signerStatus', () => {
     expect(getCurrentPendingSigner(signers)?.email).toBe('juan@test.com');
   });
 
-  it('detecta firmantes recién completados', () => {
-    const previous = [{ email: 'a@test.com', order: 1, status: 'PENDIENTE' }];
-    const next = [{ email: 'a@test.com', order: 1, status: 'FIRMADO' }];
-    expect(newlyCompletedSigners(previous, next)).toHaveLength(1);
+  it('permite el mismo email en varios slots y detecta el siguiente turno', () => {
+    const signers = [
+      { email: 'a@test.com', order: 1, status: 'FIRMADO' },
+      { email: 'b@test.com', order: 2, status: 'FIRMADO' },
+      { email: 'a@test.com', order: 3, status: 'PENDIENTE' },
+    ];
+    expect(getCurrentPendingSigner(signers)?.order).toBe(3);
+    expect(getCurrentPendingSigner(signers)?.email).toBe('a@test.com');
+  });
+
+  it('detecta firmantes recién completados por slot (mismo email dos veces)', () => {
+    const previous = [
+      { email: 'a@test.com', order: 1, status: 'FIRMADO' },
+      { email: 'a@test.com', order: 2, status: 'PENDIENTE' },
+    ];
+    const next = [
+      { email: 'a@test.com', order: 1, status: 'FIRMADO' },
+      { email: 'a@test.com', order: 2, status: 'FIRMADO' },
+    ];
+    const completed = newlyCompletedSigners(previous, next);
+    expect(completed).toHaveLength(1);
+    expect(completed[0]?.order).toBe(2);
   });
 });
 
@@ -81,9 +101,9 @@ describe('orion permissions', () => {
     expect(perms.canAcceptSign).toBe(false);
   });
 
-  it('con permiso Firma digital pero no creador no edita', () => {
+  it('sin canManage no edita (gestión solo creador/admin vía API)', () => {
     const perms = resolveOrionPermissions({
-      canManage: true,
+      canManage: false,
       currentUserEmail: 'otro@test.com',
       createdByEmail: 'coord@test.com',
       state: { status: 'BORRADOR', orionDocumentId: 'doc-1', embedUrl: 'https://orion/embed' },
@@ -91,6 +111,18 @@ describe('orion permissions', () => {
     });
     expect(perms.canEditAssignments).toBe(false);
     expect(perms.canManageWorkflow).toBe(false);
+  });
+
+  it('canManage permite editar aunque el email no coincida (admin/creador ya validado en API)', () => {
+    const perms = resolveOrionPermissions({
+      canManage: true,
+      currentUserEmail: 'admin@test.com',
+      createdByEmail: 'coord@test.com',
+      state: { status: 'BORRADOR', orionDocumentId: 'doc-1', embedUrl: 'https://orion/embed' },
+      hasAttachment: true,
+    });
+    expect(perms.userRole).toBe('coordinator');
+    expect(perms.canManageWorkflow).toBe(true);
   });
 
   it('creador listado como firmante en BORRADOR sigue siendo coordinador', () => {
@@ -212,7 +244,7 @@ describe('orion permissions', () => {
     expect(perms.canPlaceSignatures).toBe(false);
   });
 
-  it('admin sin subproceso Firma digital no gestiona', () => {
+  it('sin canManage no gestiona aunque isAdmin en el cliente', () => {
     const perms = resolveOrionPermissions({
       canManage: false,
       isAdmin: true,
@@ -224,6 +256,16 @@ describe('orion permissions', () => {
     expect(perms.userRole).toBe('viewer');
     expect(perms.canAssignSigners).toBe(false);
     expect(perms.canManageWorkflow).toBe(false);
+  });
+});
+
+describe('orion signatureIntent', () => {
+  it('infiere sign si hay flujo Orion y view si está vacío', () => {
+    expect(resolveOrionSignatureIntent({})).toBe('view');
+    expect(resolveOrionSignatureIntent({ signatureIntent: 'sign' })).toBe('sign');
+    expect(resolveOrionSignatureIntent({ signatureIntent: 'view' })).toBe('view');
+    expect(isOrionSignDocument({ orionDocumentId: 'x', status: 'BORRADOR' })).toBe(true);
+    expect(isOrionSignDocument({ signatureIntent: 'view', orionDocumentId: 'x' })).toBe(false);
   });
 });
 

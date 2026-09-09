@@ -44,7 +44,7 @@ interface Notification {
   created_at: string;
 }
 
-const POLL_INTERVAL_MS = 30_000;
+const POLL_INTERVAL_MS = 90_000;
 
 function formatRelative(date: string) {
   const diff = Date.now() - new Date(date).getTime();
@@ -179,8 +179,11 @@ export default function NotificationBell() {
       void fetchNotifications();
     };
 
-    const initialTimer = window.setTimeout(run, 800);
-    const interval = window.setInterval(run, POLL_INTERVAL_MS);
+    const initialTimer = window.setTimeout(run, 4000);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      run();
+    }, POLL_INTERVAL_MS);
 
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {

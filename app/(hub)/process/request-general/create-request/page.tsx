@@ -846,13 +846,8 @@ function RequestBoard() {
     const hasOrionSignatureField = visibleFields.some(
       (f) => f.field_type === ORION_SIGNATURE_FIELD_TYPE
     );
-    const categoryLabel =
-      categories.find((c) => c.value === formData.category)?.label || '';
-    const processLabel =
-      processCategories.find((p) => p.value === formData.process)?.label || '';
-    const isFirmaProcess =
-      /FIRMA/i.test(categoryLabel) || /FIRMA/i.test(processLabel);
-    if (hasOrionSignatureField || isFirmaProcess) {
+    // PDF obligatorio solo si el formulario del proceso aún trae campo orion_signature.
+    if (hasOrionSignatureField) {
       const isPdf = (name: string) => /\.pdf$/i.test(name || '');
       const pdfFromRequired = Object.values(filesByDoc)
         .flat()
@@ -994,19 +989,10 @@ function RequestBoard() {
         toast.success(`Solicitud #${requestId} creada correctamente.`);
       }
 
-      const categoryLabel =
-        categories.find((c) => c.value === formData.category)?.label || '';
-      const processLabel =
-        processCategories.find((p) => p.value === formData.process)?.label || '';
-      const isFirmaFlow =
-        visibleFields.some((f) => f.field_type === ORION_SIGNATURE_FIELD_TYPE) ||
-        /FIRMA/i.test(categoryLabel) ||
-        /FIRMA/i.test(processLabel);
-
-      // FIRMA: abrir la solicitud y el modal Orion (mismo flujo que GSS Firma)
-      if (uploadOk && isFirmaFlow && Number.isInteger(requestId) && requestId > 0) {
+      // Tras crear: ir a la solicitud; el creador marca qué PDFs van a firma.
+      if (uploadOk && Number.isInteger(requestId) && requestId > 0) {
         router.push(
-          `/process/request-general/view-request?id=${requestId}&from=create-request&orionAction=manage`
+          `/process/request-general/view-request?id=${requestId}&from=create-request`
         );
         return;
       }
@@ -2053,9 +2039,8 @@ function RequestBoard() {
                       >
                         {isOrionSignatureField ? (
                           <Alert color='blue' title={field.field_label} icon={<IconLink size={16} />}>
-                            Tras crear la solicitud se abrirá el asistente de firma (como en GSS
-                            Firma): documento, firmantes y ubicación de firmas. Adjunte al menos un
-                            PDF.
+                            Tras crear la solicitud podrá marcar PDFs para firmar o solo ver, y
+                            configurar firmantes. Adjunte al menos un PDF.
                           </Alert>
                         ) : isTableField ? (
                           <TableFieldInput

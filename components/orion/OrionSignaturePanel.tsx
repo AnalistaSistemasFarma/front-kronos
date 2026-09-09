@@ -17,7 +17,7 @@ import type { OrionPostMessage, OrionSignatureState } from '../../lib/orion/type
 import type { OrionParticipant, OrionUserOption } from '../../lib/orion/participants';
 import type { SignatureFieldPlacement } from '../../lib/orion/signatureFields';
 import { resolveOrionPdfAccessUrl } from '../../lib/orion/signedFileAccess';
-import { getCurrentPendingSigner, isSignerCompleted } from '../../lib/orion/signerStatus';
+import { allSlotsCompletedForEmail, getCurrentPendingSigner, isSignerCompleted } from '../../lib/orion/signerStatus';
 import { resolveOrionPermissions } from '../../lib/orion/permissions';
 import SignaturePad from './SignaturePad';
 import PdfInlineViewer from './PdfInlineViewer';
@@ -339,13 +339,14 @@ export default function OrionSignaturePanel({
       return;
     }
     mountedRef.current = true;
-    // 1) lite: permiso + bag en BD (ms) → desbloquea Gestionar
-    // 2) soft en background: sync Orion sin rebuild pesado (incluye pendingAuthorization)
-    // signature-embed: lazy al abrir pad / firmar (no en mount)
-    void (async () => {
-      await refreshState(undefined, { lite: true, markReady: true });
+    // Solo lite al montar (BD, ms). Soft Orion se difiere / se hace con fileId al firmar.
+    void refreshState(undefined, { lite: true, markReady: true });
+    const softTimer = window.setTimeout(() => {
+      if (document.visibilityState !== 'visible') return;
+      // Soft liviano: sin fileId el API ya no llama Orion (solo BD + pending auth).
       void refreshState(undefined, { soft: true });
-    })();
+    }, 2500);
+    return () => window.clearTimeout(softTimer);
   }, [isValidRequestId, refreshState]);
 
   // Si el bag llega después (form values async), incorporar documentos sin pisar sync en vivo
@@ -500,6 +501,8 @@ export default function OrionSignaturePanel({
   const mySigner = useMemo(() => {
     const me = normalizeEmail(currentUserEmail);
     if (!me || !state.signers?.length) return null;
+    const pending = getCurrentPendingSigner(state.signers);
+    if (pending && normalizeEmail(pending.email) === me) return pending;
     return state.signers.find((s) => normalizeEmail(s.email) === me) ?? null;
   }, [currentUserEmail, state.signers]);
 
@@ -676,12 +679,7 @@ export default function OrionSignaturePanel({
       });
 
       if (!filePerms.canManageWorkflow) {
-        setError('No tiene permiso de Firma digital para configurar el documento.');
-        return false;
-      }
-      const hasRubric = await loadUserSignature();
-      if (!hasRubric && filePerms.canDrawSignature) {
-        setSignatureModalOpen(true);
+        setError('Solo el creador de la solicitud puede configurar la firma del documento.');
         return false;
       }
 
@@ -697,15 +695,20 @@ export default function OrionSignaturePanel({
           : null) ||
         file.pdfUrl;
 
+      // Abrir modal ya; rúbrica en paralelo (no bloquear preview).
+      const rubricPromise = loadUserSignature();
+
       if (fileState.orionDocumentId && fileState.embedUrl) {
-        // Doc ya listo: no POST ensure/refresh; una sola URL de preview.
         setActiveFile({ ...file, pdfUrl: previewUrl || file.pdfUrl });
+        const hasRubric = await rubricPromise;
+        if (!hasRubric && filePerms.canDrawSignature) {
+          setSignatureModalOpen(true);
+          return false;
+        }
         return true;
       }
       setUploading(true);
       try {
-        // Vista previa en paralelo; el servidor resuelve el PDF desde OneDrive (más rápido
-        // que descargar en el browser y reenviar base64).
         if (isLikelyPdfFetchUrl(file.pdfUrl)) {
           void fetchUrlAsBase64(file.pdfUrl)
             .then((pdfBase64) => {
@@ -719,10 +722,16 @@ export default function OrionSignaturePanel({
               /* preview opcional */
             });
         }
-        const ok = await ensureDocument({
-          ...file,
-          pdfUrl: file.pdfUrl,
-        });
+        const [hasRubric, ok] = await Promise.all([
+          rubricPromise,
+          ensureDocument({
+            ...file,
+            pdfUrl: file.pdfUrl,
+          }),
+        ]);
+        if (!hasRubric && filePerms.canDrawSignature) {
+          setSignatureModalOpen(true);
+        }
         if (previewUrl) {
           setActiveFile((prev) =>
             prev?.fileId === file.fileId ? { ...prev, pdfUrl: previewUrl } : prev
@@ -766,14 +775,17 @@ export default function OrionSignaturePanel({
       setError(null);
       const skipAuthRedirect = Boolean(opts?.skipAuthRedirect || fromAuthorization);
       try {
-        const hasRubric = await loadUserSignature();
         const qs = new URLSearchParams({
           requestId: String(requestId),
           fileId: file.fileId,
           soft: '1',
         });
-        const res = await fetch(`/api/integrations/orion/ensure-document?${qs}`);
-        const data = await res.json().catch(() => ({}));
+        const [hasRubric, ensureRes] = await Promise.all([
+          loadUserSignature(),
+          fetch(`/api/integrations/orion/ensure-document?${qs}`),
+        ]);
+        const data = await ensureRes.json().catch(() => ({}));
+        const res = ensureRes;
         if (res.ok) {
           if (data.documents) {
             notifyDocuments(data.documents as Record<string, OrionSignatureState>);
@@ -1003,7 +1015,10 @@ export default function OrionSignaturePanel({
     const active = ['PENDIENTE_FIRMA', 'EN_PROCESO'].includes(statusUpper);
     // Solo el coordinador hace polling de estado; la firma se confirma con el botón
     if (active && hasDocument && documentModalOpen && permissions.userRole === 'coordinator') {
-      pollRef.current = setInterval(() => void refreshState(activeFile?.fileId, { soft: true }), 20000);
+      pollRef.current = setInterval(() => {
+        if (document.visibilityState !== 'visible') return;
+        void refreshState(activeFile?.fileId, { soft: true });
+      }, 45000);
     }
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -1032,7 +1047,7 @@ export default function OrionSignaturePanel({
       if (!permissionsReady) return;
       if (!canManage) {
         autoOpenedRef.current = true;
-        setError('No tiene permiso de Firma digital para configurar el documento.');
+        setError('Solo el creador de la solicitud puede configurar la firma del documento.');
         return;
       }
     }
@@ -1123,11 +1138,10 @@ export default function OrionSignaturePanel({
           workflowLocked,
         });
         const me = normalizeEmail(currentUserEmail);
-        const mine = fileState.signers?.find((s) => normalizeEmail(s.email) === me);
         return {
           state: fileState,
           permissions: perms,
-          currentUserCompleted: Boolean(mine && isSignerCompleted(mine.status)),
+          currentUserCompleted: me ? allSlotsCompletedForEmail(fileState.signers, me) : false,
         };
       },
       actions: {
@@ -1506,6 +1520,30 @@ export default function OrionSignaturePanel({
               background: 'var(--app-surface-raised)',
             }}
           />
+        ) : signerModalIntent === 'manage' && activeFile && !hasDocument ? (
+          <Stack gap='md' style={{ flex: 1, minHeight: 0 }}>
+            <Alert color='red' variant='light' title='No se pudo preparar el documento'>
+              {error ||
+                'GSS Firma (Orion) no está disponible. Inicie el servicio Orion (ORION_API_BASE_URL) y pulse Reintentar.'}
+            </Alert>
+            <Group>
+              <Button
+                loading={loading || uploading}
+                onClick={() => void openDocumentEditor(activeFile)}
+              >
+                Reintentar preparación
+              </Button>
+            </Group>
+            {activeFile.pdfUrl ? (
+              <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+                <PdfInlineViewer
+                  src={activeFile.pdfUrl}
+                  fileName={activeFile.fileName}
+                  minHeight={280}
+                />
+              </div>
+            ) : null}
+          </Stack>
         ) : activeFile?.pdfUrl && !hasDocument ? (
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
             <PdfInlineViewer

@@ -6,9 +6,6 @@ import {
 import { syncRequestToSapsend } from "../../../../lib/sapsend/treasury.js";
 import { createGeneralRequest } from "../../../../lib/requests-general/createGeneralRequest.js";
 import { authOptions } from "../../auth/[...nextauth]/route";
-import { sql, withMssqlPool } from "../../../../lib/mssqlPool";
-import { isFirmaRequestCategoryOrProcess } from "../../../../lib/orion/access";
-import { userHasOrionFirmaManage } from "../../../../lib/orion/service";
 
 export async function POST(req) {
   try {
@@ -33,37 +30,7 @@ export async function POST(req) {
 
     const session = await getServerSession(authOptions);
     const userId = session?.user?.id ? String(session.user.id) : String(createdby || "");
-
-    const processMeta = await withMssqlPool(async (pool) => {
-      const result = await pool
-        .request()
-        .input("process", sql.Int, Number(process))
-        .query(`
-          SELECT TOP 1 cr.category, pc.process
-          FROM process_category pc
-          INNER JOIN category_request cr ON cr.id = pc.id_category_request
-          WHERE pc.id = @process
-        `);
-      return result.recordset[0] || null;
-    });
-
-    if (
-      processMeta &&
-      isFirmaRequestCategoryOrProcess(processMeta.category, processMeta.process)
-    ) {
-      const canCreateFirma = await withMssqlPool((pool) =>
-        userHasOrionFirmaManage(pool, userId)
-      );
-      if (!canCreateFirma) {
-        return new Response(
-          JSON.stringify({
-            error:
-              "No tiene permiso de Firma digital para crear solicitudes de esta categoría.",
-          }),
-          { status: 403 }
-        );
-      }
-    }
+    void userId;
 
     let result;
     try {

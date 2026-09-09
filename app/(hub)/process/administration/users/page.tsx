@@ -1232,7 +1232,7 @@ function UserManagement() {
                                             String(subprocess.subprocess || '')
                                               .toLowerCase()
                                               .includes('firma digital')
-                                          ? 'Permiso de la persona: ver categoría FIRMA + crear PDF y asignar firmantes'
+                                          ? 'Permiso legacy (oculto): la firma la gestiona el creador en cualquier solicitud'
                                           : 'Da acceso al dashboard en el menú'}
                                   </Badge>
                                 ) : null}
