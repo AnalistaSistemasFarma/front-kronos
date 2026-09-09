@@ -29,6 +29,28 @@ interface Banner {
   modificado: string;
 }
 
+/**
+ * Lee la respuesta como JSON SIN reventar cuando no lo es.
+ *
+ * Pasa de verdad: si el servidor está reiniciándose —un despliegue, por
+ * ejemplo— responde una página de error en HTML, y `res.json()` lanza
+ * «Unexpected token '<'». Al usuario le aparecía ese texto tal cual, que no
+ * le dice nada y parece un error de la aplicación. Le pasó a Cristian el
+ * 2026-09-09 justo mientras se desplegaba pruebas.
+ */
+export async function leerJson(res: Response): Promise<Record<string, unknown>> {
+  const texto = await res.text();
+  try {
+    return texto ? (JSON.parse(texto) as Record<string, unknown>) : {};
+  } catch {
+    throw new Error(
+      res.ok
+        ? 'El servidor respondió algo inesperado. Intente de nuevo en un momento.'
+        : 'El servicio no está disponible en este momento. Intente de nuevo en un minuto.'
+    );
+  }
+}
+
 export const archivoUrl = (ruta: string) => `/api/portal/file?ruta=${encodeURIComponent(ruta)}`;
 
 const pesoLegible = (bytes: number) =>
@@ -63,11 +85,11 @@ export function usePortalContenido(): EstadoPortal & {
         setBanners([]);
         return;
       }
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? 'No se pudo cargar el contenido.');
-      setEmail(data.email);
-      setDocumentos(data.documentos ?? []);
-      setBanners(data.banners ?? []);
+      const data = await leerJson(res);
+      if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo cargar el contenido.'));
+      setEmail(typeof data.email === 'string' ? data.email : null);
+      setDocumentos(Array.isArray(data.documentos) ? (data.documentos as Documento[]) : []);
+      setBanners(Array.isArray(data.banners) ? (data.banners as Banner[]) : []);
     } catch (e) {
       setError((e as Error).message);
     } finally {

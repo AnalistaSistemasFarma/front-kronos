@@ -10,12 +10,14 @@
  * herramienta de escritura, así que el portal no puede alterar el SharePoint
  * ni por error ni por un fallo.
  */
+import ExcelJS from 'exceljs';
 import {
   ARCHIVO_EXCEPCIONES,
   CARPETA_BANNERS,
   CARPETA_DOCUMENTOS,
   CARPETA_IMAGENES,
   CONECTOR_SHAREPOINT_GSS,
+  EXCEPCIONES_CACHE_MS,
   SITIO_TH,
 } from './config';
 
@@ -156,13 +158,88 @@ export async function leerContenido(): Promise<ContenidoPortal> {
   };
 }
 
+const CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 /**
- * Los correos autorizados que no pertenecen a un dominio del grupo.
+ * Saca los correos de un Excel.
  *
- * Lo mantiene Talento Humano en el SharePoint. Si el archivo no existe, no hay
- * excepciones y punto — el portal sigue funcionando con los dominios.
+ * Busca primero la columna cuyo encabezado hable de correo; si no la
+ * encuentra, recoge cualquier celda que parezca un correo. Es a propósito
+ * tolerante: el archivo lo mantiene a mano Talento Humano y va a crecer con
+ * columnas que hoy no existen —nombre, empresa, hasta cuándo—. Un lector
+ * estricto se rompería el día que alguien agregue una columna, y ese día nadie
+ * se acordaría de este archivo.
+ */
+async function correosDeExcel(binario: Buffer): Promise<string[]> {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(binario as unknown as ArrayBuffer);
+
+  const encontrados: string[] = [];
+  for (const hoja of wb.worksheets) {
+    // ¿Hay una columna de correo declarada en la primera fila?
+    let columnaCorreo = -1;
+    const cabecera = hoja.getRow(1);
+    cabecera.eachCell({ includeEmpty: false }, (celda, col) => {
+      const texto = String(celda.text ?? '').trim().toLowerCase();
+      // El `!CORREO.test` no sobra: `persona@gmail.com` CONTIENE "mail", así
+      // que sin esa condición una lista sin encabezado tomaba su primera fila
+      // por título y se comía un correo. Lo cazó la prueba, no una revisión.
+      if (columnaCorreo < 0 && !CORREO.test(texto) && (texto.includes('correo') || texto.includes('mail'))) {
+        columnaCorreo = col;
+      }
+    });
+
+    hoja.eachRow({ includeEmpty: false }, (fila, n) => {
+      if (n === 1 && columnaCorreo > 0) return; // el encabezado no es un dato
+      if (columnaCorreo > 0) {
+        const valor = String(fila.getCell(columnaCorreo).text ?? '').trim().toLowerCase();
+        if (CORREO.test(valor)) encontrados.push(valor);
+        return;
+      }
+      fila.eachCell({ includeEmpty: false }, (celda) => {
+        const valor = String(celda.text ?? '').trim().toLowerCase();
+        if (CORREO.test(valor)) encontrados.push(valor);
+      });
+    });
+  }
+  return encontrados;
+}
+
+/** Un correo por línea; se ignoran las vacías y las que empiezan por `#`. */
+function correosDeTexto(binario: Buffer): string[] {
+  return binario
+    .toString('utf8')
+    .split(/\r?\n/)
+    .map((l) => l.trim().toLowerCase())
+    .filter((l) => l && !l.startsWith('#') && CORREO.test(l));
+}
+
+/**
+ * Se exponen los dos parseadores SOLO para poder probarlos.
+ *
+ * Es lo único que de verdad se rompe aquí —la descarga la hace el conector y
+ * ya está probada—, y el archivo lo mantiene a mano Talento Humano, así que su
+ * forma va a cambiar con el tiempo.
+ */
+export const __soloParaPruebas = { correosDeExcel, correosDeTexto };
+
+/** Memoria de corto plazo, para no ir a SharePoint en cada intento. */
+let cacheExcepciones: { cuando: number; correos: Set<string> } | null = null;
+
+/**
+ * Los correos autorizados que NO pertenecen a un dominio del grupo.
+ *
+ * Lo mantiene Talento Humano en el SharePoint, en Excel. Si el archivo no
+ * existe o no se puede leer, se devuelve vacío: el portal sigue funcionando
+ * con los dominios, que es el camino del 99 % de la gente. Fallar el ingreso
+ * de todos porque un archivo de excepciones no está sería el remedio peor que
+ * la enfermedad.
  */
 export async function leerExcepciones(): Promise<Set<string>> {
+  if (cacheExcepciones && Date.now() - cacheExcepciones.cuando < EXCEPCIONES_CACHE_MS) {
+    return cacheExcepciones.correos;
+  }
+
   try {
     const data = (await llamarConector('sharepoint_get_download_url', {
       driveName: `site:${SITIO_TH}`,
@@ -170,16 +247,21 @@ export async function leerExcepciones(): Promise<Set<string>> {
       includeContent: true,
     })) as { content_base64?: string } | null;
 
-    if (!data?.content_base64) return new Set();
+    if (!data?.content_base64) {
+      cacheExcepciones = { cuando: Date.now(), correos: new Set() };
+      return cacheExcepciones.correos;
+    }
 
-    const texto = Buffer.from(data.content_base64, 'base64').toString('utf8');
-    const correos = texto
-      .split(/\r?\n/)
-      .map((l) => l.trim().toLowerCase())
-      .filter((l) => l && !l.startsWith('#') && l.includes('@'));
-    return new Set(correos);
+    const binario = Buffer.from(data.content_base64, 'base64');
+    const esExcel = ARCHIVO_EXCEPCIONES.toLowerCase().endsWith('.xlsx');
+    const correos = esExcel ? await correosDeExcel(binario) : correosDeTexto(binario);
+
+    cacheExcepciones = { cuando: Date.now(), correos: new Set(correos) };
+    return cacheExcepciones.correos;
   } catch (error) {
     console.warn('[portal] no se pudo leer la lista de excepciones:', (error as Error).message);
+    // NO se cachea el fallo: si fue un tropiezo de red, el siguiente intento
+    // vuelve a probar en vez de quedarse una hora con la lista vacía.
     return new Set();
   }
 }

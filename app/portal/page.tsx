@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import PortalContenido, { usePortalContenido } from '../../components/portal/PortalContenido';
+import PortalContenido, { leerJson, usePortalContenido } from '../../components/portal/PortalContenido';
 
 /**
  * PORTAL DE TALENTO HUMANO — entrada ABIERTA, con código al correo.
@@ -38,10 +38,10 @@ export default function PortalAbierto() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: correo }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? 'No se pudo enviar el código.');
+      const data = await leerJson(res);
+      if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo enviar el código.'));
       setPidioCodigo(true);
-      setAviso(data.mensaje);
+      setAviso(String(data.mensaje ?? ''));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -58,8 +58,8 @@ export default function PortalAbierto() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: correo, code: codigo }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? 'No se pudo validar el código.');
+      const data = await leerJson(res);
+      if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo validar el código.'));
       setCodigo('');
       setPidioCodigo(false);
       await recargar();
