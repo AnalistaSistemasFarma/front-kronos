@@ -11,10 +11,8 @@ import {
   Badge,
   Box,
   Button,
-  Center,
   Grid,
   Group,
-  Loader,
   SimpleGrid,
   Text,
   TextInput,
@@ -38,6 +36,7 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
+import { EsqueletoPantallaChat } from './ChatSkeletons';
 import ChatBroadcastModal from './ChatBroadcastModal';
 import ChatGroupModal from './ChatGroupModal';
 import ChatThread from './ChatThread';
@@ -448,13 +447,7 @@ export default function ChatWorkspace({
   /* ───────────────────────────── Estados base ──────────────────────────── */
 
   if (!overview.ready) {
-    return (
-      <div className='app-page-shell app-page-shell--fill min-h-screen'>
-        <Center py='xl'>
-          <Loader size='sm' />
-        </Center>
-      </div>
-    );
+    return <EsqueletoPantallaChat />;
   }
 
   if (!overview.canUseChat) {

@@ -8,7 +8,6 @@ import {
   Button,
   Checkbox,
   Group,
-  Loader,
   Modal,
   ScrollArea,
   Select,
@@ -18,6 +17,7 @@ import {
 } from '@mantine/core';
 import { IconAlertCircle, IconInfoCircle, IconUsersGroup } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
+import { EsqueletoListaAgentes } from './ChatSkeletons';
 import {
   chatFetch,
   chatGetJson,
@@ -202,11 +202,7 @@ export default function ChatGroupModal({
           allowDeselect={false}
         />
 
-        {cargando && (
-          <Group justify='center' py='md'>
-            <Loader size='sm' />
-          </Group>
-        )}
+        {cargando && <EsqueletoListaAgentes filas={4} />}
 
         {candidatos && (
           <>

@@ -8,7 +8,6 @@ import {
   Button,
   Center,
   Group,
-  Loader,
   ScrollArea,
   Stack,
   Text,
@@ -23,6 +22,7 @@ import {
 import AgentAvatar from './AgentAvatar';
 import AgentTaskTable from './AgentTaskTable';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
+import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
 import { useChatConversation, type ChatTarget } from './useChatConversation';
 import { useAltoVisible } from './useAltoVisible';
@@ -624,11 +624,7 @@ export default function ChatThread({
             </Center>
           )}
 
-          {thread.loading && thread.messages.length === 0 && (
-            <Center py='xl'>
-              <Loader size='sm' />
-            </Center>
-          )}
+          {thread.loading && thread.messages.length === 0 && <EsqueletoHilo />}
 
           {!thread.loading && thread.messages.length === 0 && !thread.error && (
             <Center py='xl'>
