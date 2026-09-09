@@ -461,7 +461,7 @@ export default function ChatWorkspace({
       <div className='app-page-shell app-page-shell--fill min-h-screen'>
         <div className='max-w-3xl mx-auto py-10 px-4'>
           <Alert icon={<IconLock size={18} />} color='yellow' radius='lg' title='Sin acceso'>
-            No tiene habilitado el módulo de Asistentes IA. Solicítelo a la administración de
+            No tiene habilitado el módulo de Chat. Solicítelo a la administración de
             SynerLink para la empresa correspondiente.
           </Alert>
         </div>
@@ -849,7 +849,7 @@ export default function ChatWorkspace({
         }
       >
         <header className='mb-6' hidden={Boolean(conversacionSola && hayAlgoAbierto)}>
-          <h1 className='ios-process-hub__title text-3xl sm:text-4xl mb-2'>Asistentes IA</h1>
+          <h1 className='ios-process-hub__title text-3xl sm:text-4xl mb-2'>Chat</h1>
           <p className='ios-process-hub__subtitle mb-5'>
             Sus asistentes agrupados por empresa, y sus grupos. Elija uno para conversar.
           </p>

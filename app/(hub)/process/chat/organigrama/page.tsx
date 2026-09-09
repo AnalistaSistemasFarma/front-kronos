@@ -161,7 +161,7 @@ export default function OrganigramaAgentesPage() {
           <Link href='/process/chat' className='chat-text-muted' style={{ fontSize: 13 }}>
             <Group gap={4} wrap='nowrap'>
               <IconArrowLeft size={14} />
-              <span>Volver a Asistentes IA</span>
+              <span>Volver a Chat</span>
             </Group>
           </Link>
         </Group>
