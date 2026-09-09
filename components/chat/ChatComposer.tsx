@@ -7,8 +7,6 @@ import {
   Box,
   Group,
   Menu,
-  Popover,
-  ScrollArea,
   Text,
   Textarea,
   Tooltip,
@@ -21,7 +19,6 @@ import {
   IconEyeOff,
   IconItalic,
   IconList,
-  IconMoodSmile,
   IconPaperclip,
   IconSend,
   IconX,
@@ -38,7 +35,7 @@ import {
 /**
  * Entrada de texto del chat — v1: Markdown CRUDO con ayudas.
  *
- * DISPOSICIÓN: una sola fila, como WhatsApp — emoji · caja · clip · ⋯ · enviar.
+ * DISPOSICIÓN: una sola fila, como WhatsApp — caja · clip · enviar.
  * Antes eran tres filas apiladas (barra de siete botones, caja de dos renglones
  * mínimos y el renglón del recordatorio con el botón de enviar): unos 155 px que
  * le quitaba a la conversación. Ahora son ~55 px, unos tres renglones más de
@@ -56,32 +53,7 @@ import {
  * problema antes de subir 20 MB por nada. Es comodidad, no seguridad: la
  * validación que manda es la de la API, que vuelve a correr exactamente esa
  * misma comprobación.
- *
- * El selector de emojis es una rejilla propia con una selección curada: las
- * librerías de emojis pesan cientos de kilobytes (traen catálogo completo,
- * índice de búsqueda y a veces sprites remotos) para un botón secundario.
- * Además, el sistema operativo ya trae su propio selector.
  */
-
-/** Emojis frecuentes en conversación de trabajo, agrupados por intención. */
-const EMOJI_GROUPS: { label: string; emojis: string[] }[] = [
-  {
-    label: 'Frecuentes',
-    emojis: ['👍', '🙏', '✅', '❌', '⚠️', '📌', '🔧', '📊', '🚀', '🔥', '⏰', '📎'],
-  },
-  {
-    label: 'Caras',
-    emojis: ['🙂', '😀', '😅', '😉', '😍', '🤔', '😐', '😴', '😬', '😊', '🥳', '😎'],
-  },
-  {
-    label: 'Trabajo',
-    emojis: ['📁', '📄', '📥', '📤', '💡', '🧾', '🗓️', '🔍', '🖥️', '🛠️', '📈', '📉'],
-  },
-  {
-    label: 'Señales',
-    emojis: ['🟢', '🟡', '🔴', '⭐', '❗', '❓', '➡️', '⬅️', '🔁', '🔒', '🔓', '💬'],
-  },
-];
 
 type WrapKind = 'bold' | 'italic' | 'code' | 'list';
 
@@ -149,7 +121,6 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
 ) {
   const [value, setValue] = useState('');
   const [preview, setPreview] = useState(false);
-  const [emojiOpen, setEmojiOpen] = useState(false);
   // Con teclado TÁCTIL el Enter hace salto de línea y para enviar está el
   // botón. Se detecta por `pointer: coarse` y no por ancho de pantalla a
   // propósito: lo que manda no es que la pantalla sea angosta sino que el
@@ -370,20 +341,6 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     });
   }, [value]);
 
-  const insertEmoji = useCallback((emoji: string) => {
-    const el = textareaRef.current;
-    const start = el?.selectionStart ?? value.length;
-    const end = el?.selectionEnd ?? value.length;
-    const next = value.slice(0, start) + emoji + value.slice(end);
-    setValue(next);
-    setEmojiOpen(false);
-    requestAnimationFrame(() => {
-      el?.focus();
-      const pos = start + emoji.length;
-      el?.setSelectionRange(pos, pos);
-    });
-  }, [value]);
-
   const submit = useCallback(async () => {
     if (!canSend) return;
     const body = value.trim();
@@ -546,49 +503,6 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
       )}
 
       <Group gap={2} align='flex-end' wrap='nowrap'>
-        <Popover opened={emojiOpen} onChange={setEmojiOpen} position='top-start' withArrow shadow='md' width={260}>
-          <Popover.Target>
-            <Tooltip label='Emojis' withArrow>
-              <ActionIcon
-                variant='subtle'
-                color='gray'
-                size={34}
-                radius='xl'
-                disabled={disabled}
-                onClick={() => setEmojiOpen((o) => !o)}
-                aria-label='Insertar emoji'
-              >
-                <IconMoodSmile size={18} />
-              </ActionIcon>
-            </Tooltip>
-          </Popover.Target>
-          <Popover.Dropdown p='xs' className='chat-surface'>
-            <ScrollArea.Autosize mah={220}>
-              {EMOJI_GROUPS.map((group) => (
-                <Box key={group.label} mb={6}>
-                  <Text size='xs' c='dimmed' mb={2}>
-                    {group.label}
-                  </Text>
-                  <Group gap={2}>
-                    {group.emojis.map((emoji) => (
-                      <ActionIcon
-                        key={emoji}
-                        variant='subtle'
-                        color='gray'
-                        size='md'
-                        onClick={() => insertEmoji(emoji)}
-                        aria-label={`Insertar ${emoji}`}
-                      >
-                        <span style={{ fontSize: 16, lineHeight: 1 }}>{emoji}</span>
-                      </ActionIcon>
-                    ))}
-                  </Group>
-                </Box>
-              ))}
-            </ScrollArea.Autosize>
-          </Popover.Dropdown>
-        </Popover>
-
         {preview ? (
           <Box
             className='chat-composer__preview'

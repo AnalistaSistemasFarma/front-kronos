@@ -13,6 +13,7 @@
  * vienen con valor (`participants` y `agentStatuses` solo tienen sentido en un
  * grupo; `agentStatus`, en un hilo directo).
  */
+import type { Prisma } from '../../app/generated/prisma';
 import { prisma } from '../prisma';
 import { getChatAccess } from './access';
 import { toPreview } from './constants';
@@ -367,38 +368,60 @@ export function serializeConversation(
  * comprueba `assertGroupAccess`, y por el mismo motivo: que un permiso
  * revocado cierre también lo viejo.
  */
+/**
+ * QUÉ CONVERSACIONES ALCANZA ESTE USUARIO — la condición de acceso, en un
+ * solo sitio.
+ *
+ * Devuelve el `OR` que hay que meterle a cualquier consulta sobre
+ * conversaciones (o sobre mensajes, a través de la relación), y `null` cuando
+ * la persona no tiene el módulo habilitado en ninguna empresa.
+ *
+ * Está extraído a propósito: la bandeja y el buscador de mensajes tienen que
+ * ver EXACTAMENTE lo mismo. Con la condición copiada en dos consultas, el día
+ * que se ajuste una se olvida la otra, y esa clase de olvido no se nota
+ * probando —se nota cuando alguien encuentra por el buscador un mensaje de una
+ * conversación que no le corresponde—.
+ *
+ * Las dos ramas dicen lo mismo que `assertGroupAccess`, y por el mismo motivo:
+ * que un permiso revocado cierre también lo viejo.
+ */
+export async function conversationScopeFor(
+  userId: string,
+  userEmail: string
+): Promise<Prisma.ChatConversationWhereInput[] | null> {
+  const access = await getChatAccess(userEmail);
+  if (!access.canUseChat) return null;
+
+  const allowedAgentIds = access.agents.map((a) => a.idAgent);
+  const empresasDelModulo = access.companies.map((c) => c.idCompany);
+
+  return [
+    // Hilos directos: suyos y con un agente que todavía puede usar.
+    ...(allowedAgentIds.length > 0
+      ? [{ kind: 'direct', id_user: userId, id_agent: { in: allowedAgentIds } }]
+      : []),
+    // Grupos: es participante y conserva el módulo en esa empresa.
+    {
+      kind: 'group',
+      participants: { some: { id_user: userId } },
+      OR: [
+        { id_company: null },
+        ...(empresasDelModulo.length > 0 ? [{ id_company: { in: empresasDelModulo } }] : []),
+      ],
+    },
+  ];
+}
+
 export async function listUserConversations(
   userId: string,
   userEmail: string,
   opts: { archived: boolean }
 ): Promise<ChatConversationPayload[]> {
-  const access = await getChatAccess(userEmail);
-  if (!access.canUseChat) return [];
-
-  const allowedAgentIds = access.agents.map((a) => a.idAgent);
-  const empresasDelModulo = access.companies.map((c) => c.idCompany);
+  const alcance = await conversationScopeFor(userId, userEmail);
+  if (!alcance) return [];
 
   const rows = await prisma.chatConversation.findMany({
-    where: {
-      archived: opts.archived,
-      OR: [
-        // Hilos directos: suyos y con un agente que todavía puede usar.
-        ...(allowedAgentIds.length > 0
-          ? [{ kind: 'direct', id_user: userId, id_agent: { in: allowedAgentIds } }]
-          : []),
-        // Grupos: es participante y conserva el módulo en esa empresa.
-        {
-          kind: 'group',
-          participants: { some: { id_user: userId } },
-          OR: [
-            { id_company: null },
-            ...(empresasDelModulo.length > 0
-              ? [{ id_company: { in: empresasDelModulo } }]
-              : []),
-          ],
-        },
-      ],
-    },
+    where: { archived: opts.archived, OR: alcance },
     include: conversationInclude,
     orderBy: [{ last_message_at: 'desc' }, { id: 'desc' }],
   });
