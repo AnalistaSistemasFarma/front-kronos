@@ -1026,6 +1026,10 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   border-radius: 1rem;
   border: 1px solid transparent;
   overflow-wrap: anywhere;
+  /* Para el gesto de citar y para el resalte al saltar a un mensaje. Anima
+     sobre todo el REGRESO del arrastre: mientras el dedo empuja, el
+     componente escribe `transform` en cada movimiento. */
+  transition: transform 160ms ease, box-shadow 220ms ease;
 }
 
 .chat-bubble--agent {
@@ -1066,6 +1070,59 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   opacity: 0.75;
   font-size: 12px;
 }
+
+/* ── CITAR Y RESPONDER ─────────────────────────────────────────────────────
+   Pedido de Nicolás (2026-09-09). La cita se pinta en dos sitios con el mismo
+   aspecto —encima de la caja mientras se escribe, y dentro de la burbuja una
+   vez enviada— porque es la misma cosa: a esto estoy respondiendo. La barrita
+   de la izquierda es la señal que usan WhatsApp y Telegram y ya nadie tiene
+   que aprender. */
+.chat-cita {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  text-align: left;
+  border-radius: 10px;
+  padding: 6px 8px;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  overflow: hidden;
+}
+
+.chat-cita__barra {
+  flex: 0 0 3px;
+  border-radius: 2px;
+  background-color: var(--app-accent, #2563eb);
+}
+
+/* Dentro de la burbuja va pegada al texto que la responde, no separada: se
+   lee como un bloque. */
+.chat-cita--burbuja {
+  width: 100%;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+/* En la burbuja del usuario el fondo es azul, así que la cita necesita su
+   propio contraste o desaparece. */
+.chat-bubble--user .chat-cita--burbuja {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+.chat-bubble--user .chat-cita--burbuja .chat-text-muted,
+.chat-bubble--user .chat-cita--burbuja .mantine-Text-root {
+  color: #ffffff;
+}
+
+.chat-bubble--user .chat-cita--burbuja .chat-cita__barra {
+  background-color: #ffffff;
+}
+
+/* Resalte momentáneo al saltar a un mensaje citado: sin esto uno llega al
+   sitio y no sabe cuál de los mensajes era. */
+.chat-bubble--resaltada {
+  box-shadow: 0 0 0 2px var(--app-accent, #2563eb);
+}
+
 
 .chat-bubble--user .chat-bubble__meta,
 .chat-bubble--user .chat-md,
