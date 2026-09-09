@@ -2314,3 +2314,88 @@ body.chat-inmersivo .chat-page-thread--completa {
   font-size: 0.86rem;
   color: var(--pth-tinta-3);
 }
+
+/* ── VISTA PREVIA DE UN DOCUMENTO ──────────────────────────────────────────
+   Pedido de Cristian (2026-09-09): "cada vez que abra un documento quiero que
+   me lo abra en una ventana de vista previa, no en una pestaña nueva". Abrir
+   una pestaña saca a la persona del portal y la deja mirando el visor del
+   navegador, con el título interno del PDF —"Scanned Document"— en vez del
+   nombre del documento. */
+.portal-th__visor {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 2vmin;
+  background-color: rgba(15, 26, 44, 0.72);
+}
+
+.portal-th__visor-caja {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 96vw);
+  height: min(92vh, 100%);
+  overflow: hidden;
+  background-color: #fff;
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(15, 26, 44, 0.35);
+}
+
+.portal-th__visor-barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__visor-barra strong {
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-th__visor-acciones {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.portal-th__visor-acciones a {
+  color: #fff;
+  font-size: 0.78rem;
+  text-decoration: underline;
+}
+
+.portal-th__visor-acciones button {
+  border: 0;
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.portal-th__visor iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background-color: var(--pth-azul-50);
+}
+
+/* La tarjeta pasó de enlace a botón: hay que devolverle el aspecto, porque un
+   <button> trae borde, fondo y alineación propios del navegador. */
+.portal-th__tarjeta {
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}

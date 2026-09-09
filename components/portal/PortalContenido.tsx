@@ -111,6 +111,28 @@ export default function PortalContenido({
   documentos: Documento[];
   banners: Banner[];
 }) {
+  // El documento que se está viendo, o null. Pedido de Cristian (2026-09-09):
+  // que abrir un documento no lo saque del portal a otra pestaña.
+  const [abierto, setAbierto] = useState<Documento | null>(null);
+
+  // Cerrar con Escape: en una ventana que tapa la pantalla, buscar la ✕ con el
+  // mouse cuando uno solo quería salir es incómodo.
+  useEffect(() => {
+    if (!abierto) return;
+    const alTeclear = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAbierto(null);
+    };
+    window.addEventListener('keydown', alTeclear);
+    // Mientras la vista previa está abierta, el fondo no se desplaza: si no,
+    // uno cree que mueve el documento y está moviendo la página de atrás.
+    const overflowPrevio = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', alTeclear);
+      document.body.style.overflow = overflowPrevio;
+    };
+  }, [abierto]);
+
   return (
     <>
       {banners.length > 0 && (
@@ -132,12 +154,12 @@ export default function PortalContenido({
         ) : (
           <div className='portal-th__tarjetas'>
             {documentos.map((d) => (
-              <a
+              <button
+                type='button'
                 key={d.ruta}
                 className='portal-th__tarjeta'
-                href={archivoUrl(d.ruta)}
-                target='_blank'
-                rel='noopener noreferrer'
+                onClick={() => setAbierto(d)}
+                aria-label={`Ver ${d.titulo}`}
               >
                 {d.portada ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -149,11 +171,44 @@ export default function PortalContenido({
                   <strong>{d.titulo}</strong>
                   <span>{pesoLegible(d.tamano)}</span>
                 </div>
-              </a>
+              </button>
             ))}
           </div>
         )}
       </section>
+
+      {/* VISTA PREVIA dentro del portal.
+          El PDF se muestra en un marco con el visor del propio navegador. Se
+          deja SIEMPRE el enlace "abrir aparte": en el iPhone, Safari a veces
+          no pinta un PDF dentro de un marco, y sin esa salida la persona se
+          queda mirando un recuadro en blanco sin saber qué hacer. */}
+      {abierto && (
+        <div
+          className='portal-th__visor'
+          role='dialog'
+          aria-modal='true'
+          aria-label={abierto.titulo}
+          onClick={(e) => {
+            // Solo cierra si se toca el fondo, no el documento.
+            if (e.target === e.currentTarget) setAbierto(null);
+          }}
+        >
+          <div className='portal-th__visor-caja'>
+            <header className='portal-th__visor-barra'>
+              <strong>{abierto.titulo}</strong>
+              <div className='portal-th__visor-acciones'>
+                <a href={archivoUrl(abierto.ruta)} target='_blank' rel='noopener noreferrer'>
+                  Abrir aparte
+                </a>
+                <button type='button' onClick={() => setAbierto(null)} aria-label='Cerrar'>
+                  ✕
+                </button>
+              </div>
+            </header>
+            <iframe src={archivoUrl(abierto.ruta)} title={abierto.titulo} />
+          </div>
+        </div>
+      )}
     </>
   );
 }
