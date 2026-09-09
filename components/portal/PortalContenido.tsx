@@ -52,6 +52,13 @@ export async function leerJson(res: Response): Promise<Record<string, unknown>> 
   }
 }
 
+/** Lo que la ventana de vista previa necesita saber, sea PDF o anuncio. */
+interface Vista {
+  titulo: string;
+  url: string;
+  esImagen: boolean;
+}
+
 /** Ancho al que se reduce un anuncio antes de subirlo. */
 const ANCHO_MAXIMO = 1600;
 
@@ -197,9 +204,15 @@ export default function PortalContenido({
     }
   };
 
-  // El documento que se está viendo, o null. Pedido de Cristian (2026-09-09):
-  // que abrir un documento no lo saque del portal a otra pestaña.
-  const [abierto, setAbierto] = useState<Documento | null>(null);
+  /**
+   * Lo que se está viendo en la ventana de vista previa, o null.
+   *
+   * No es "un documento": desde el 2026-09-09 también se abren así los
+   * anuncios de la cartelera, a pedido de Cristian. Por eso el estado guarda
+   * lo mínimo que la ventana necesita —título, dirección y si es imagen— y no
+   * la fila entera de un tipo u otro.
+   */
+  const [abierto, setAbierto] = useState<Vista | null>(null);
 
   // Cerrar con Escape: en una ventana que tapa la pantalla, buscar la ✕ con el
   // mouse cuando uno solo quería salir es incómodo.
@@ -255,8 +268,18 @@ export default function PortalContenido({
             <div className='portal-th__banners'>
               {banners.map((b) => (
                 <figure key={b.id} className='portal-th__banner'>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={b.url} alt={b.titulo} loading='lazy' />
+                  {/* El botón envuelve solo la imagen y NO la ✕: un <button>
+                      dentro de otro no es HTML válido y el navegador lo
+                      reacomoda por su cuenta. */}
+                  <button
+                    type='button'
+                    className='portal-th__banner-abrir'
+                    onClick={() => setAbierto({ titulo: b.titulo, url: b.url, esImagen: true })}
+                    aria-label={`Ver ${b.titulo}`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={b.url} alt={b.titulo} loading='lazy' />
+                  </button>
                   {puedeEditar && (
                     <button
                       type='button'
@@ -286,7 +309,9 @@ export default function PortalContenido({
                 type='button'
                 key={d.ruta}
                 className='portal-th__tarjeta'
-                onClick={() => setAbierto(d)}
+                onClick={() =>
+                  setAbierto({ titulo: d.titulo, url: archivoUrl(d.ruta), esImagen: false })
+                }
                 aria-label={`Ver ${d.titulo}`}
               >
                 {d.portada ? (
@@ -327,7 +352,7 @@ export default function PortalContenido({
             <header className='portal-th__visor-barra'>
               <strong>{abierto.titulo}</strong>
               <div className='portal-th__visor-acciones'>
-                <a href={archivoUrl(abierto.ruta)} target='_blank' rel='noopener noreferrer'>
+                <a href={abierto.url} target='_blank' rel='noopener noreferrer'>
                   Abrir aparte
                 </a>
                 <button type='button' onClick={() => setAbierto(null)} aria-label='Cerrar'>
@@ -335,7 +360,15 @@ export default function PortalContenido({
                 </button>
               </div>
             </header>
-            <iframe src={archivoUrl(abierto.ruta)} title={abierto.titulo} />
+            {/* Una imagen NO va en un marco: el navegador la pondría arriba a
+                la izquierda, a tamaño real y con barras de desplazamiento. Se
+                pinta directa y se deja que quepa entera. */}
+            {abierto.esImagen ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img className='portal-th__visor-imagen' src={abierto.url} alt={abierto.titulo} />
+            ) : (
+              <iframe src={abierto.url} title={abierto.titulo} />
+            )}
           </div>
         </div>
       )}
