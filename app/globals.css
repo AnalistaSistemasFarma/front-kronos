@@ -2290,3 +2290,27 @@ body.chat-inmersivo .chat-page-thread--completa {
   color: var(--pth-tinta-3);
   border-top: 1px solid var(--pth-linea);
 }
+
+/* El portal DENTRO del hub: sin barra propia ni fondo de pantalla completa —
+   la barra y el marco ya los pone SynerLink—, pero con los mismos colores y
+   las mismas tarjetas que la versión abierta. */
+.portal-th--modulo {
+  min-height: 0;
+  background-color: transparent;
+}
+
+.portal-th__encabezado-modulo {
+  margin-bottom: 20px;
+}
+
+.portal-th__encabezado-modulo h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  color: var(--pth-azul);
+}
+
+.portal-th__encabezado-modulo p {
+  margin: 4px 0 0;
+  font-size: 0.86rem;
+  color: var(--pth-tinta-3);
+}

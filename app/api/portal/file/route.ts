@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { leerSesion } from '../../../../lib/portal/auth';
+import { identificar } from '../../../../lib/portal/acceso';
 import {
   CARPETA_BANNERS,
   CARPETA_DOCUMENTOS,
   CARPETA_IMAGENES,
-  COOKIE_SESION,
 } from '../../../../lib/portal/config';
 import { descargarArchivo } from '../../../../lib/portal/sharepoint';
 
@@ -36,12 +35,12 @@ function rutaSegura(ruta: string): boolean {
 }
 
 export async function GET(request: NextRequest) {
-  const correo = leerSesion(request.cookies.get(COOKIE_SESION)?.value);
-  if (!correo) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
+  const quien = await identificar(request);
+  if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
 
   const ruta = request.nextUrl.searchParams.get('ruta') ?? '';
   if (!rutaSegura(ruta)) {
-    console.warn(`[portal] ruta rechazada (${correo}): ${ruta}`);
+    console.warn(`[portal] ruta rechazada (${quien.correo}): ${ruta}`);
     return NextResponse.json({ error: 'Ruta no permitida.' }, { status: 400 });
   }
 

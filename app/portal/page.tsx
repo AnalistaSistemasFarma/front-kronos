@@ -1,77 +1,32 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
+import PortalContenido, { usePortalContenido } from '../../components/portal/PortalContenido';
 
 /**
- * PORTAL DE TALENTO HUMANO.
+ * PORTAL DE TALENTO HUMANO — entrada ABIERTA, con código al correo.
  *
- * Pedido de Cristian Baldión (2026-09-09): un sitio donde cualquier
- * colaborador del grupo consulte las políticas y los reglamentos, y vea los
- * anuncios de Talento Humano.
+ * Para los colaboradores del grupo que NO tienen usuario en SynerLink, que son
+ * la mayoría: la plataforma tiene unos cien usuarios y el grupo es más grande.
+ * Quien sí tiene usuario entra por el módulo del hub (`/process/portal-th`) y
+ * no necesita ningún código.
  *
- * ESTA PÁGINA VIVE FUERA DE `(hub)` A PROPÓSITO. El portal no usa la sesión de
- * SynerLink: entra gente que no tiene usuario en la plataforma, y por eso su
- * ingreso es un código enviado al correo. Ponerla dentro del hub la habría
- * dejado detrás del login de SynerLink, que es justo lo que no queríamos.
+ * ESTA PÁGINA VIVE FUERA DE `(hub)` A PROPÓSITO: ponerla adentro la habría
+ * dejado detrás del login de SynerLink, que es justo lo que aquí no aplica.
  *
- * Sin dependencias de Mantine: es una página pública, y cuanto menos cargue,
- * mejor abre en un celular con mala señal.
+ * Sin Mantine: es una página pública y cuanto menos cargue, mejor abre en un
+ * celular con mala señal.
  */
+export default function PortalAbierto() {
+  const { cargando, email, error: errorContenido, recargar, documentos, banners } =
+    usePortalContenido();
 
-interface Documento {
-  titulo: string;
-  ruta: string;
-  tamano: number;
-  modificado: string;
-  portada: string | null;
-}
-interface Banner {
-  titulo: string;
-  ruta: string;
-  modificado: string;
-}
-
-const archivoUrl = (ruta: string) => `/api/portal/file?ruta=${encodeURIComponent(ruta)}`;
-
-const pesoLegible = (bytes: number) =>
-  bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
-
-export default function PortalTalentoHumano() {
-  const [cargando, setCargando] = useState(true);
-  const [email, setEmail] = useState<string | null>(null);
-  const [documentos, setDocumentos] = useState<Documento[]>([]);
-  const [banners, setBanners] = useState<Banner[]>([]);
-
-  /* Ingreso */
   const [correo, setCorreo] = useState('');
   const [codigo, setCodigo] = useState('');
   const [pidioCodigo, setPidioCodigo] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const cargarContenido = useCallback(async () => {
-    try {
-      const res = await fetch('/api/portal/content', { cache: 'no-store' });
-      if (res.status === 401) {
-        setEmail(null);
-        return;
-      }
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? 'No se pudo cargar el contenido.');
-      setEmail(data.email);
-      setDocumentos(data.documentos ?? []);
-      setBanners(data.banners ?? []);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setCargando(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void cargarContenido();
-  }, [cargarContenido]);
 
   const pedirCodigo = async () => {
     setError(null);
@@ -107,8 +62,7 @@ export default function PortalTalentoHumano() {
       if (!res.ok) throw new Error(data?.error ?? 'No se pudo validar el código.');
       setCodigo('');
       setPidioCodigo(false);
-      setCargando(true);
-      await cargarContenido();
+      await recargar();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -118,11 +72,9 @@ export default function PortalTalentoHumano() {
 
   const salir = async () => {
     await fetch('/api/portal/logout', { method: 'POST' });
-    setEmail(null);
-    setDocumentos([]);
-    setBanners([]);
     setCorreo('');
     setPidioCodigo(false);
+    await recargar();
   };
 
   return (
@@ -151,9 +103,7 @@ export default function PortalTalentoHumano() {
         {!cargando && !email && (
           <section className='portal-th__ingreso'>
             <h2>Ingrese con su correo</h2>
-            <p>
-              Le enviamos un código de seis dígitos. Sirve una sola vez y vence en 10 minutos.
-            </p>
+            <p>Le enviamos un código de seis dígitos. Sirve una sola vez y vence en 10 minutos.</p>
 
             {!pidioCodigo ? (
               <form
@@ -183,8 +133,8 @@ export default function PortalTalentoHumano() {
                 }}
               >
                 <input
-                  // `inputMode` numérico para que en el celular salga el teclado
-                  // de números y no el alfabético.
+                  // Teclado numérico en el celular, y `one-time-code` para que
+                  // iOS ofrezca pegarlo desde el correo.
                   inputMode='numeric'
                   pattern='[0-9]*'
                   maxLength={6}
@@ -217,53 +167,10 @@ export default function PortalTalentoHumano() {
           </section>
         )}
 
-        {!cargando && email && (
-          <>
-            {banners.length > 0 && (
-              <section className='portal-th__seccion'>
-                <h2>Anuncios</h2>
-                <div className='portal-th__banners'>
-                  {banners.map((b) => (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img key={b.ruta} src={archivoUrl(b.ruta)} alt={b.titulo} loading='lazy' />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            <section className='portal-th__seccion'>
-              <h2>Políticas y reglamentos</h2>
-              {documentos.length === 0 ? (
-                <p className='portal-th__estado'>Todavía no hay documentos publicados.</p>
-              ) : (
-                <div className='portal-th__tarjetas'>
-                  {documentos.map((d) => (
-                    <a
-                      key={d.ruta}
-                      className='portal-th__tarjeta'
-                      href={archivoUrl(d.ruta)}
-                      target='_blank'
-                      rel='noopener noreferrer'
-                    >
-                      {d.portada ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={archivoUrl(d.portada)} alt='' loading='lazy' />
-                      ) : (
-                        <div className='portal-th__sinportada'>PDF</div>
-                      )}
-                      <div className='portal-th__tarjeta-pie'>
-                        <strong>{d.titulo}</strong>
-                        <span>{pesoLegible(d.tamano)}</span>
-                      </div>
-                    </a>
-                  ))}
-                </div>
-              )}
-            </section>
-          </>
+        {!cargando && email && <PortalContenido documentos={documentos} banners={banners} />}
+        {!cargando && email && errorContenido && (
+          <p className='portal-th__error'>{errorContenido}</p>
         )}
-
-        {!cargando && error && email && <p className='portal-th__error'>{error}</p>}
       </main>
 
       <footer className='portal-th__pie'>
