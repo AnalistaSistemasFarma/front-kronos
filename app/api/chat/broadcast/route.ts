@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
 
     const access = await getChatAccess(user.email);
     if (!access.canUseChat || access.agents.length === 0) {
-      return jsonNoStore({ error: 'No tiene habilitado el módulo de Asistentes IA.' }, { status: 403 });
+      return jsonNoStore({ error: 'No tiene habilitado el módulo de Chat.' }, { status: 403 });
     }
 
     // Selección opcional. Se valida contra lo que el usuario YA podía usar.
