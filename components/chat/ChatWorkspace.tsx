@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -68,6 +68,11 @@ import {
  * existiría y la carpeta donde mostrarlo no. La agrupación vive en
  * groupAgentsByCompany() (lib/chat/client.ts).
  */
+
+/**
+ * Lo que está abierto: un asistente, un grupo, o nada. Nunca las dos cosas.
+ */
+type Seleccion = { tipo: 'agente'; code: string } | { tipo: 'grupo'; id: number } | null;
 
 function AgentCard({
   agent,
@@ -245,7 +250,6 @@ export default function ChatWorkspace({
   initialGroupId?: number;
 }) {
   const overview = useChatOverview();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session } = useSession();
 
@@ -255,12 +259,26 @@ export default function ChatWorkspace({
 
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [selectedCode, setSelectedCode] = useState<string | null>(initialAgentCode ?? null);
-  // La selección es UNA sola cosa: un asistente o un grupo. Se guardan en dos
-  // estados por comodidad, pero abrir uno siempre limpia el otro (ver
-  // `selectAgent` y `selectGroup`): con los dos puestos a la vez, la pantalla
-  // no sabría qué mostrar.
-  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(initialGroupId ?? null);
+  // LA SELECCIÓN ES UNA SOLA COSA, y por eso vive en UN SOLO estado.
+  //
+  // Antes eran dos (`selectedCode` y `selectedGroupId`) que se limpiaban a
+  // mano el uno al otro. Con dos estados independientes el "y si quedan los
+  // dos puestos" siempre es posible, y cuando pasaba ganaba el grupo —el
+  // render preguntaba primero por él—, así que el chat directo no había forma
+  // de abrirlo. Nicolás, 2026-09-09: "cuando es un grupo es un grupo y cuando
+  // es chat interno es chat interno, son 2 cosas separadas". Con una unión
+  // etiquetada eso no es una regla que haya que recordar: es imposible por
+  // construcción.
+  const [seleccion, setSeleccion] = useState<Seleccion>(
+    initialAgentCode
+      ? { tipo: 'agente', code: initialAgentCode }
+      : initialGroupId
+        ? { tipo: 'grupo', id: initialGroupId }
+        : null
+  );
+  // Se derivan para no tocar el resto de la pantalla, que ya leía estos dos.
+  const selectedCode = seleccion?.tipo === 'agente' ? seleccion.code : null;
+  const selectedGroupId = seleccion?.tipo === 'grupo' ? seleccion.id : null;
   const [grupoNuevoAbierto, setGrupoNuevoAbierto] = useState(false);
 
   // En pantallas angostas las dos columnas de la rejilla se APILAN: la lista de
@@ -367,12 +385,9 @@ export default function ChatWorkspace({
   // lo que usa el botón "abrir en la página de chats" del panel flotante.
   useEffect(() => {
     const fromUrl = searchParams.get('agent');
-    if (fromUrl) {
-      setSelectedCode(fromUrl);
-      // Si venía un grupo abierto, se cierra: `?agent=` es una orden explícita
-      // de abrir a ESE asistente.
-      setSelectedGroupId(null);
-    }
+    // `?agent=` es una orden explícita de abrir a ESE asistente, así que
+    // reemplaza la selección completa —incluido un grupo que estuviera abierto.
+    if (fromUrl) setSeleccion({ tipo: 'agente', code: fromUrl });
   }, [searchParams]);
 
   const filteredAgents = useMemo(() => {
@@ -391,25 +406,36 @@ export default function ChatWorkspace({
 
   // `selectedCode` puede venir del `code` real, del nombre visible (así llega
   // /process/chat/orus) o del handle: findAgentByRouteKey los reconcilia.
+  /**
+   * Refleja lo abierto en la dirección del navegador SIN navegar.
+   *
+   * Escoger en la lista no puede ser un cambio de ruta. `/process/chat` y
+   * `/process/chat/grupo/[id]` son páginas distintas y las dos se arman en el
+   * servidor en cada visita (`force-dynamic`): mientras el servidor responde,
+   * el navegador sigue pintando la pantalla ANTERIOR. Estando dentro de un
+   * grupo, tocar un asistente dejaba el grupo en pantalla unos segundos —y en
+   * el celular con red lenta parecía que abrir el chat directo "lo llevaba al
+   * grupal"—. Con `replaceState` el cambio es instantáneo, porque lo que manda
+   * es el estado; la dirección solo queda escrita para poder compartirla o
+   * recargar. Las rutas siguen existiendo y funcionando como enlace de entrada.
+   */
+  const verEnLaUrl = (url: string) => {
+    if (typeof window !== 'undefined') window.history.replaceState(null, '', url);
+  };
+
   const selectedAgent = useMemo(
     () => findAgentByRouteKey(overview.agents, selectedCode),
     [overview.agents, selectedCode]
   );
 
   const selectAgent = (agent: ChatAgentDto) => {
-    setSelectedCode(agent.code);
-    // Abrir un asistente cierra el grupo que estuviera abierto: la selección es
-    // una sola.
-    setSelectedGroupId(null);
-    // Se refleja en la URL para poder compartir/volver al mismo hilo, sin
-    // recargar la página.
-    router.replace(`/process/chat?agent=${encodeURIComponent(agent.code)}`, { scroll: false });
+    setSeleccion({ tipo: 'agente', code: agent.code });
+    verEnLaUrl(`/process/chat?agent=${encodeURIComponent(agent.code)}`);
   };
 
   const selectGroup = (id: number) => {
-    setSelectedGroupId(id);
-    setSelectedCode(null);
-    router.replace(`/process/chat/grupo/${id}`, { scroll: false });
+    setSeleccion({ tipo: 'grupo', id });
+    verEnLaUrl(`/process/chat/grupo/${id}`);
   };
 
   // El grupo abierto, resuelto contra la bandeja. Se toma de ahí y no de un
@@ -635,10 +661,9 @@ export default function ChatWorkspace({
     ) : null;
 
   const cerrarConversacion = () => {
-    setSelectedCode(null);
-    setSelectedGroupId(null);
+    setSeleccion(null);
     setSoloConversacion(false);
-    router.replace('/process/chat', { scroll: false });
+    verEnLaUrl('/process/chat');
   };
 
   // Se define una sola vez y se monta en los dos armazones (escritorio y
