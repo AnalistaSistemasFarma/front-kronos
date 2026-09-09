@@ -70,11 +70,27 @@ export const CARPETA_BANNERS = process.env.PORTAL_TH_CARPETA_BANNERS ?? 'BANNERS
 /**
  * Archivo con los correos autorizados que NO son de un dominio del grupo
  * —contratistas, personal sin correo corporativo—. Lo mantiene Talento Humano
- * en el mismo SharePoint: un correo por línea, y las líneas que empiezan por
- * `#` se ignoran. Si el archivo no existe, sencillamente no hay excepciones.
+ * en el mismo SharePoint. Si el archivo no existe, no hay excepciones y el
+ * portal sigue funcionando con los dominios.
+ *
+ * Es un EXCEL porque así lo creó Cristian el 2026-09-09, y tiene sentido: es
+ * la herramienta con la que Talento Humano trabaja, y pedirles un .txt para
+ * ahorrarme diez líneas de código sería cargarles a ellos mi comodidad. El
+ * lector acepta las dos cosas —`.xlsx` y texto plano—, así que si mañana
+ * cambian de formato tampoco se rompe.
  */
 export const ARCHIVO_EXCEPCIONES =
-  process.env.PORTAL_TH_EXCEPCIONES ?? 'CORREOS AUTORIZADOS.txt';
+  process.env.PORTAL_TH_EXCEPCIONES ?? 'USUARIOS/Cuentas Autorizadas.xlsx';
+
+/**
+ * Cuánto se recuerda la lista de excepciones antes de volver a leerla.
+ *
+ * Sin esto, cada intento de ingreso sería un viaje a SharePoint. Un minuto es
+ * el equilibrio: agregar a alguien se refleja casi de inmediato y no se
+ * castiga a quien está entrando. Cada instancia del clúster tiene la suya, y
+ * no importa: es una lista de solo lectura.
+ */
+export const EXCEPCIONES_CACHE_MS = 60_000;
 
 /**
  * El subproceso que ES el permiso del módulo dentro del hub, igual que en el
