@@ -7,6 +7,35 @@
  * payloads que devuelven las rutas de app/api/chat) y los ayudantes de fetch.
  */
 
+/* ─────────────────────── Buscador de mensajes ──────────────────────────── */
+
+/** Mínimo de caracteres para buscar. Con uno o dos, todo coincide con todo. */
+export const MIN_SEARCH_CHARS = 3;
+/** Tope de resultados. El buscador es para encontrar, no para exportar. */
+export const MAX_SEARCH_HITS = 40;
+
+/**
+ * Un mensaje encontrado, con lo justo para pintarlo y para poder abrirlo.
+ *
+ * Vive aquí y no en lib/chat/search.ts porque ese módulo importa prisma y no
+ * puede entrar en un bundle de cliente; el buscador de la pantalla sí necesita
+ * este tipo y el mínimo de caracteres.
+ */
+export interface ChatSearchHit {
+  idMessage: number;
+  idConversation: number;
+  kind: 'direct' | 'group';
+  /** Nombre del agente en un hilo directo; título en un grupo. */
+  conversationTitle: string;
+  /** `code` del agente: es con lo que la interfaz abre un hilo directo. */
+  agentCode: string | null;
+  /** Quién escribió: la persona, el agente, o el sistema. */
+  author: string;
+  /** Extracto alrededor de la coincidencia, en texto plano. */
+  snippet: string;
+  createdAt: string;
+}
+
 /* ────────────────── Tipos que devuelve la API (fase 2b) ────────────────── */
 
 export interface ChatAgentCompanyDto {
