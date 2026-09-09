@@ -939,6 +939,28 @@ model ChatParticipant {
 }
 
 /// Un mensaje del hilo.
+/// Anuncios del PORTAL DE TALENTO HUMANO, cargados desde el propio portal.
+///
+/// En la base y no en SharePoint: el conector que lee ese sitio es de SOLO
+/// LECTURA a propósito, y darle escritura significaría poder escribir en todo
+/// el tenant con una credencial que ya tiene de más. Para subir un anuncio no
+/// vale la pena abrir esa puerta.
+model PortalBanner {
+  id          Int      @id @default(autoincrement())
+  file_name   String   @db.NVarChar(255)
+  mime        String   @db.NVarChar(100)
+  contenido   Bytes    @db.VarBinary(Max)
+  /// Para ordenarlos a mano más adelante sin migrar otra vez.
+  orden       Int      @default(0)
+  /// Quién lo subió: si aparece un anuncio que nadie reconoce, hay que poder
+  /// saber de dónde salió.
+  uploaded_by String   @db.NVarChar(255)
+  created_at  DateTime @default(now())
+
+  @@index([orden, id(sort: Desc)])
+  @@map("portal_banner")
+}
+
 /// Códigos de un solo uso del PORTAL DE TALENTO HUMANO.
 ///
 /// El portal no usa la sesión de SynerLink: entra cualquier colaborador con

@@ -61,11 +61,6 @@ export const CONECTOR_SHAREPOINT_GSS =
 /** Carpetas dentro de la biblioteca "Documentos" del sitio. */
 export const CARPETA_DOCUMENTOS = process.env.PORTAL_TH_CARPETA_DOCS ?? 'POLITICAS Y REGLAMENTOS';
 export const CARPETA_IMAGENES = process.env.PORTAL_TH_CARPETA_IMGS ?? 'IMAGENES';
-/**
- * Carpeta de anuncios y cumpleaños. Separada de las portadas a propósito: una
- * portada acompaña a un documento y vive con él; un anuncio va y viene.
- */
-export const CARPETA_BANNERS = process.env.PORTAL_TH_CARPETA_BANNERS ?? 'BANNERS';
 
 /**
  * Archivo con los correos autorizados que NO son de un dominio del grupo
@@ -98,6 +93,33 @@ export const EXCEPCIONES_CACHE_MS = 60_000;
  * En minúsculas porque así se compara en la consulta.
  */
 export const SUBPROCESO_PORTAL = '/process/portal-th';
+
+/**
+ * Quién puede CARGAR y BORRAR los anuncios del portal.
+ *
+ * Cristian pidió que "únicamente yo" pueda modificarlos. Va como lista y no
+ * como un solo correo para que no haya que desplegar el día que se vaya de
+ * vacaciones o entre alguien más de Talento Humano. Se sobrescribe con
+ * `PORTAL_TH_EDITORES` (separados por coma).
+ *
+ * OJO: ser editor NO es lo mismo que ser administrador de SynerLink. Un
+ * administrador de la plataforma no debería poder cambiar la cartelera de
+ * Talento Humano solo por serlo.
+ */
+export function editoresDeBanners(): string[] {
+  const crudo = (process.env.PORTAL_TH_EDITORES ?? '').trim();
+  const lista = crudo
+    ? crudo.split(',').map((c) => c.trim().toLowerCase()).filter(Boolean)
+    : ['cristian.baldion@gsslatam.com', 'nicolas.rivera@gsslatam.com'];
+  return [...new Set(lista)];
+}
+
+/** Tope de una imagen de anuncio. El navegador ya la reduce antes de subir. */
+export const MAX_BANNER_BYTES = 2 * 1024 * 1024;
+/** Ancho máximo al que el navegador reduce la imagen antes de subirla. */
+export const BANNER_ANCHO = 1600;
+/** Formatos que se aceptan. */
+export const BANNER_MIMES_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp'];
 
 /** Cuánto vive un código. Corto: es un dato que viaja por correo. */
 export const CODIGO_VIGENCIA_MINUTOS = 10;

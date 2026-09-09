@@ -18,7 +18,7 @@ import PortalContenido, { leerJson, usePortalContenido } from '../../components/
  * celular con mala señal.
  */
 export default function PortalAbierto() {
-  const { cargando, email, error: errorContenido, recargar, documentos, banners } =
+  const { cargando, email, error: errorContenido, recargar, documentos, banners, puedeEditar } =
     usePortalContenido();
 
   const [correo, setCorreo] = useState('');
@@ -167,7 +167,14 @@ export default function PortalAbierto() {
           </section>
         )}
 
-        {!cargando && email && <PortalContenido documentos={documentos} banners={banners} />}
+        {!cargando && email && (
+          <PortalContenido
+            documentos={documentos}
+            banners={banners}
+            puedeEditar={puedeEditar}
+            onCambioEnBanners={recargar}
+          />
+        )}
         {!cargando && email && errorContenido && (
           <p className='portal-th__error'>{errorContenido}</p>
         )}

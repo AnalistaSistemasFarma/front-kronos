@@ -14,7 +14,8 @@ import PortalContenido, { usePortalContenido } from '../../../../components/port
  * que un arreglo en uno no se quede sin hacer en el otro.
  */
 export default function PortalTalentoHumanoModulo() {
-  const { cargando, email, error, documentos, banners } = usePortalContenido();
+  const { cargando, email, error, recargar, documentos, banners, puedeEditar } =
+    usePortalContenido();
 
   return (
     <div className='app-page-shell app-page-shell--fill min-h-screen'>
@@ -37,7 +38,14 @@ export default function PortalTalentoHumanoModulo() {
             </p>
           )}
 
-          {!cargando && email && <PortalContenido documentos={documentos} banners={banners} />}
+          {!cargando && email && (
+            <PortalContenido
+              documentos={documentos}
+              banners={banners}
+              puedeEditar={puedeEditar}
+              onCambioEnBanners={recargar}
+            />
+          )}
           {!cargando && error && <p className='portal-th__error'>{error}</p>}
         </div>
       </div>

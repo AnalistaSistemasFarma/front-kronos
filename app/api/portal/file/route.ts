@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { identificar } from '../../../../lib/portal/acceso';
-import {
-  CARPETA_BANNERS,
-  CARPETA_DOCUMENTOS,
-  CARPETA_IMAGENES,
-} from '../../../../lib/portal/config';
+import { CARPETA_DOCUMENTOS, CARPETA_IMAGENES } from '../../../../lib/portal/config';
 import { descargarArchivo } from '../../../../lib/portal/sharepoint';
 
 /**
@@ -17,12 +13,14 @@ import { descargarArchivo } from '../../../../lib/portal/sharepoint';
  * enlaces de descarga de Graph caducan a la hora. El portal sirve el archivo
  * por su propio camino y así funciona para todos.
  *
- * ⚠️ LA RUTA LLEGA DEL NAVEGADOR, así que se valida contra las TRES carpetas
+ * ⚠️ LA RUTA LLEGA DEL NAVEGADOR, así que se valida contra las carpetas
  * conocidas. Sin esa reja, un `ruta=../../otra cosa` convertiría este endpoint
  * en un lector de todo el SharePoint de GSS para cualquiera con una sesión del
  * portal.
  */
-const CARPETAS_PERMITIDAS = [CARPETA_DOCUMENTOS, CARPETA_IMAGENES, CARPETA_BANNERS];
+// Solo las dos carpetas de SharePoint. Los anuncios ya no salen de allá: se
+// sirven desde /api/portal/banners, que lee de la base.
+const CARPETAS_PERMITIDAS = [CARPETA_DOCUMENTOS, CARPETA_IMAGENES];
 
 function rutaSegura(ruta: string): boolean {
   if (!ruta || ruta.includes('..') || ruta.includes('\\') || ruta.startsWith('/')) return false;

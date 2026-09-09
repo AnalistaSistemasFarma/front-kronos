@@ -2226,6 +2226,75 @@ body.chat-inmersivo .chat-page-thread--completa {
   background-color: #fff;
 }
 
+/* ── Cartelera administrable ─────────────────────────────────────────────────
+   Solo la ve así quien puede editar (Talento Humano). Para todos los demás la
+   sección es exactamente la de antes: imágenes y nada más. */
+.portal-th__seccion-barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.portal-th__seccion-barra h2 {
+  margin-bottom: 12px;
+}
+
+/* Es un <label> encima de un <input type="file"> escondido: así el botón se ve
+   como los demás y el selector de archivos sigue siendo el nativo. */
+.portal-th__cargar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 7px 14px;
+  border: 1px solid var(--pth-azul);
+  border-radius: 999px;
+  background-color: #fff;
+  color: var(--pth-azul);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.portal-th__cargar:hover {
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__cargar input {
+  display: none;
+}
+
+.portal-th__banner {
+  position: relative;
+  margin: 0;
+}
+
+.portal-th__banner-quitar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  /* Oscuro y no rojo: el rojo llama a picarlo. Esto borra de verdad. */
+  background-color: rgba(15, 26, 44, 0.65);
+  color: #fff;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.portal-th__banner-quitar:hover {
+  background-color: rgba(15, 26, 44, 0.9);
+}
+
 /* ── Documentos ──────────────────────────────────────────────────────────── */
 .portal-th__tarjetas {
   display: grid;
@@ -2250,12 +2319,21 @@ body.chat-inmersivo .chat-page-thread--completa {
   box-shadow: 0 6px 18px rgba(15, 26, 44, 0.12);
 }
 
+/* La portada más baja: son ICONOS sobre fondo, no fotos. Con 4/3 ocupaban
+   media pantalla y el título quedaba abajo del todo. Pedido de Cristian
+   (2026-09-09): "que los iconos de las políticas sean más pequeños". */
 .portal-th__tarjeta img,
 .portal-th__sinportada {
   width: 100%;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 16 / 7;
   object-fit: cover;
   background-color: var(--pth-azul-50);
+}
+
+/* Y las tarjetas más angostas, para que quepan más por fila y ninguna quede
+   sola en un renglón como pasaba con cinco documentos. */
+.portal-th__tarjetas {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
 }
 
 .portal-th__sinportada {
