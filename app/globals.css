@@ -1408,7 +1408,11 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   /* El aire de adentro. Subió de 7 a 10 px y NO le cuesta alto a la
      conversación: la fila la gobierna el botón de enviar, que mide 46 px, y la
      caja sigue quedando por debajo. */
-  padding: 10px 16px;
+  /* El borde derecho deja sitio al clip, que ahora vive DENTRO de la caja.
+     Hay que escribirlo aquí: Mantine reserva ese espacio con su propia
+     variable de relleno y esta regla la pisa, así que sin el 44 px el texto
+     se metería debajo del botón. */
+  padding: 10px 44px 10px 16px;
   min-height: 42px;
   /* SIN transición de alto, a propósito (2026-09-09, por el reporte de
      lentitud de Nicolás). Animar `height` obliga al navegador a rehacer el

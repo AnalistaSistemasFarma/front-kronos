@@ -7,8 +7,6 @@ import {
   Box,
   Group,
   Menu,
-  Popover,
-  ScrollArea,
   Text,
   Textarea,
   Tooltip,
@@ -21,7 +19,6 @@ import {
   IconEyeOff,
   IconItalic,
   IconList,
-  IconMoodSmile,
   IconPaperclip,
   IconSend,
   IconX,
@@ -38,7 +35,9 @@ import {
 /**
  * Entrada de texto del chat — v1: Markdown CRUDO con ayudas.
  *
- * DISPOSICIÓN: una sola fila, como WhatsApp — emoji · caja · clip · ⋯ · enviar.
+ * DISPOSICIÓN: una sola fila, como WhatsApp — caja (con el clip adentro) y el
+ * botón de enviar al lado. El panel de emojis se quitó el 2026-09-09: el
+ * teclado del sistema ya trae los suyos y ese botón solo robaba ancho.
  * Antes eran tres filas apiladas (barra de siete botones, caja de dos renglones
  * mínimos y el renglón del recordatorio con el botón de enviar): unos 155 px que
  * le quitaba a la conversación. Ahora son ~55 px, unos tres renglones más de
@@ -57,31 +56,11 @@ import {
  * validación que manda es la de la API, que vuelve a correr exactamente esa
  * misma comprobación.
  *
- * El selector de emojis es una rejilla propia con una selección curada: las
- * librerías de emojis pesan cientos de kilobytes (traen catálogo completo,
- * índice de búsqueda y a veces sprites remotos) para un botón secundario.
- * Además, el sistema operativo ya trae su propio selector.
+ * YA NO HAY SELECTOR DE EMOJIS. Tenía una rejilla propia con una selección
+ * curada —las librerías pesan cientos de kilobytes para un botón secundario—,
+ * pero se quitó el 2026-09-09: el teclado del sistema ya trae los suyos, y en
+ * el celular ese botón se comía ancho que le hacía falta a la caja de texto.
  */
-
-/** Emojis frecuentes en conversación de trabajo, agrupados por intención. */
-const EMOJI_GROUPS: { label: string; emojis: string[] }[] = [
-  {
-    label: 'Frecuentes',
-    emojis: ['👍', '🙏', '✅', '❌', '⚠️', '📌', '🔧', '📊', '🚀', '🔥', '⏰', '📎'],
-  },
-  {
-    label: 'Caras',
-    emojis: ['🙂', '😀', '😅', '😉', '😍', '🤔', '😐', '😴', '😬', '😊', '🥳', '😎'],
-  },
-  {
-    label: 'Trabajo',
-    emojis: ['📁', '📄', '📥', '📤', '💡', '🧾', '🗓️', '🔍', '🖥️', '🛠️', '📈', '📉'],
-  },
-  {
-    label: 'Señales',
-    emojis: ['🟢', '🟡', '🔴', '⭐', '❗', '❓', '➡️', '⬅️', '🔁', '🔒', '🔓', '💬'],
-  },
-];
 
 type WrapKind = 'bold' | 'italic' | 'code' | 'list';
 
@@ -149,7 +128,6 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
 ) {
   const [value, setValue] = useState('');
   const [preview, setPreview] = useState(false);
-  const [emojiOpen, setEmojiOpen] = useState(false);
   // Con teclado TÁCTIL el Enter hace salto de línea y para enviar está el
   // botón. Se detecta por `pointer: coarse` y no por ancho de pantalla a
   // propósito: lo que manda no es que la pantalla sea angosta sino que el
@@ -370,20 +348,6 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     });
   }, [value]);
 
-  const insertEmoji = useCallback((emoji: string) => {
-    const el = textareaRef.current;
-    const start = el?.selectionStart ?? value.length;
-    const end = el?.selectionEnd ?? value.length;
-    const next = value.slice(0, start) + emoji + value.slice(end);
-    setValue(next);
-    setEmojiOpen(false);
-    requestAnimationFrame(() => {
-      el?.focus();
-      const pos = start + emoji.length;
-      el?.setSelectionRange(pos, pos);
-    });
-  }, [value]);
-
   const submit = useCallback(async () => {
     if (!canSend) return;
     const body = value.trim();
@@ -453,6 +417,105 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
       }
     },
     [applyFormat, candidatos, insertarMencion, mencionIndice, mencionVisible, submit, tecladoTactil]
+  );
+
+  /*
+   * El clip vive DENTRO de la caja de escribir (`rightSection`), no al lado.
+   * Pedido de Nicolás (2026-09-09): "quita el panel de emojis y deja solo el
+   * clip dentro del input, muy similar a como lo hace WhatsApp".
+   *
+   * Se guarda en una variable porque se usa en los DOS caminos —la caja de
+   * escribir y la vista previa—: si viviera solo dentro del Textarea, al
+   * activar la vista previa se perdería la forma de adjuntar.
+   */
+  // UN SOLO botón secundario, y va DENTRO de la caja, como WhatsApp. Antes
+  // eran dos (clip y ⋯) y Nicolás lo pidió explícito: "solo hay un botón de
+  // clip y ese sí muestra todo". Adjuntar queda de primero porque es lo que la
+  // gente viene a buscar cuando toca un clip.
+  const menuClip = (
+    <Menu
+      opened={menuAbierto}
+      onChange={setMenuAbierto}
+      position='top-end'
+      withArrow
+      shadow='md'
+      width={225}
+    >
+      <Menu.Target>
+        <ActionIcon
+          variant='subtle'
+          color='gray'
+          size={34}
+          radius='xl'
+          disabled={disabled}
+          aria-label='Adjuntar y más opciones'
+          title='Adjuntar y más opciones'
+        >
+          <IconPaperclip size={19} />
+        </ActionIcon>
+      </Menu.Target>
+      <Menu.Dropdown className='chat-surface'>
+        {/* ETIQUETA, no botón con `.click()` por programa.
+            Abrir el selector desde JavaScript es frágil en el celular: se
+            pierde el gesto del usuario, el teclado se cierra y no pasa
+            nada más (Nicolás en iPhone, 2026-09-08 — el primer intento,
+            que solo dejó de esconder el input, no bastó). Con una <label>
+            amarrada por `htmlFor`, quien abre el selector es el navegador
+            de forma nativa: no hay gesto que perder.
+            `closeMenuOnClick={false}` es indispensable: si el menú se
+            desmonta con el mismo toque, la etiqueta desaparece antes de
+            que el navegador alcance a activar el input. El menú se cierra
+            en el `onChange` del input, cuando ya escogieron el archivo. */}
+        <Menu.Item
+          component='label'
+          htmlFor={fileInputId}
+          closeMenuOnClick={false}
+          leftSection={<IconPaperclip size={14} />}
+          disabled={files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
+          style={{ cursor: 'pointer' }}
+        >
+          Adjuntar archivos
+        </Menu.Item>
+        <Menu.Divider />
+        <Menu.Label>Formato</Menu.Label>
+        <Menu.Item
+          leftSection={<IconBold size={14} />}
+          rightSection={
+            <Text size='xs' c='dimmed'>
+              Ctrl+B
+            </Text>
+          }
+          onClick={() => applyFormat('bold')}
+        >
+          Negrita
+        </Menu.Item>
+        <Menu.Item
+          leftSection={<IconItalic size={14} />}
+          rightSection={
+            <Text size='xs' c='dimmed'>
+              Ctrl+I
+            </Text>
+          }
+          onClick={() => applyFormat('italic')}
+        >
+          Cursiva
+        </Menu.Item>
+        <Menu.Item leftSection={<IconList size={14} />} onClick={() => applyFormat('list')}>
+          Lista
+        </Menu.Item>
+        <Menu.Item leftSection={<IconCode size={14} />} onClick={() => applyFormat('code')}>
+          Código
+        </Menu.Item>
+        <Menu.Divider />
+        <Menu.Item
+          leftSection={preview ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+          onClick={() => setPreview((p) => !p)}
+          disabled={value.trim().length === 0}
+        >
+          {preview ? 'Volver a editar' : 'Vista previa'}
+        </Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
   );
 
   return (
@@ -546,49 +609,6 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
       )}
 
       <Group gap={2} align='flex-end' wrap='nowrap'>
-        <Popover opened={emojiOpen} onChange={setEmojiOpen} position='top-start' withArrow shadow='md' width={260}>
-          <Popover.Target>
-            <Tooltip label='Emojis' withArrow>
-              <ActionIcon
-                variant='subtle'
-                color='gray'
-                size={34}
-                radius='xl'
-                disabled={disabled}
-                onClick={() => setEmojiOpen((o) => !o)}
-                aria-label='Insertar emoji'
-              >
-                <IconMoodSmile size={18} />
-              </ActionIcon>
-            </Tooltip>
-          </Popover.Target>
-          <Popover.Dropdown p='xs' className='chat-surface'>
-            <ScrollArea.Autosize mah={220}>
-              {EMOJI_GROUPS.map((group) => (
-                <Box key={group.label} mb={6}>
-                  <Text size='xs' c='dimmed' mb={2}>
-                    {group.label}
-                  </Text>
-                  <Group gap={2}>
-                    {group.emojis.map((emoji) => (
-                      <ActionIcon
-                        key={emoji}
-                        variant='subtle'
-                        color='gray'
-                        size='md'
-                        onClick={() => insertEmoji(emoji)}
-                        aria-label={`Insertar ${emoji}`}
-                      >
-                        <span style={{ fontSize: 16, lineHeight: 1 }}>{emoji}</span>
-                      </ActionIcon>
-                    ))}
-                  </Group>
-                </Box>
-              ))}
-            </ScrollArea.Autosize>
-          </Popover.Dropdown>
-        </Popover>
-
         {preview ? (
           <Box
             className='chat-composer__preview'
@@ -597,7 +617,9 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           >
             <ChatMarkdown content={value} />
           </Box>
-        ) : (
+        ) : null}
+        {preview && menuClip}
+        {!preview && (
           <Textarea
             ref={textareaRef}
             value={value}
@@ -625,96 +647,16 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
             style={{ flex: 1, minWidth: 0 }}
             classNames={{ input: 'chat-composer__input' }}
+            /* El clip va DENTRO de la caja. `rightSectionPointerEvents='all'`
+               no es opcional: por defecto Mantine le pone `pointer-events:
+               none` a esa zona —está pensada para iconos decorativos— y el
+               botón quedaría pintado pero muerto al tacto. */
+            rightSection={menuClip}
+            rightSectionWidth={42}
+            rightSectionPointerEvents='all'
           />
         )}
 
-        {/* UN SOLO botón secundario, como WhatsApp: el clip abre todo.
-            Antes eran dos (clip y ⋯) y Nicolás lo pidió explícito: "solo hay
-            un botón de clip y ese sí muestra todo". Adjuntar queda de primero
-            porque es lo que la gente viene a buscar cuando toca un clip. */}
-        <Menu
-          opened={menuAbierto}
-          onChange={setMenuAbierto}
-          position='top-end'
-          withArrow
-          shadow='md'
-          width={225}
-        >
-          <Menu.Target>
-            <ActionIcon
-              variant='subtle'
-              color='gray'
-              size={34}
-              radius='xl'
-              disabled={disabled}
-              aria-label='Adjuntar y más opciones'
-              title='Adjuntar y más opciones'
-            >
-              <IconPaperclip size={19} />
-            </ActionIcon>
-          </Menu.Target>
-          <Menu.Dropdown className='chat-surface'>
-            {/* ETIQUETA, no botón con `.click()` por programa.
-                Abrir el selector desde JavaScript es frágil en el celular: se
-                pierde el gesto del usuario, el teclado se cierra y no pasa
-                nada más (Nicolás en iPhone, 2026-09-08 — el primer intento,
-                que solo dejó de esconder el input, no bastó). Con una <label>
-                amarrada por `htmlFor`, quien abre el selector es el navegador
-                de forma nativa: no hay gesto que perder.
-                `closeMenuOnClick={false}` es indispensable: si el menú se
-                desmonta con el mismo toque, la etiqueta desaparece antes de
-                que el navegador alcance a activar el input. El menú se cierra
-                en el `onChange` del input, cuando ya escogieron el archivo. */}
-            <Menu.Item
-              component='label'
-              htmlFor={fileInputId}
-              closeMenuOnClick={false}
-              leftSection={<IconPaperclip size={14} />}
-              disabled={files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
-              style={{ cursor: 'pointer' }}
-            >
-              Adjuntar archivos
-            </Menu.Item>
-            <Menu.Divider />
-            <Menu.Label>Formato</Menu.Label>
-            <Menu.Item
-              leftSection={<IconBold size={14} />}
-              rightSection={
-                <Text size='xs' c='dimmed'>
-                  Ctrl+B
-                </Text>
-              }
-              onClick={() => applyFormat('bold')}
-            >
-              Negrita
-            </Menu.Item>
-            <Menu.Item
-              leftSection={<IconItalic size={14} />}
-              rightSection={
-                <Text size='xs' c='dimmed'>
-                  Ctrl+I
-                </Text>
-              }
-              onClick={() => applyFormat('italic')}
-            >
-              Cursiva
-            </Menu.Item>
-            <Menu.Item leftSection={<IconList size={14} />} onClick={() => applyFormat('list')}>
-              Lista
-            </Menu.Item>
-            <Menu.Item leftSection={<IconCode size={14} />} onClick={() => applyFormat('code')}>
-              Código
-            </Menu.Item>
-            <Menu.Divider />
-            <Menu.Item
-              leftSection={preview ? <IconEyeOff size={14} /> : <IconEye size={14} />}
-              onClick={() => setPreview((p) => !p)}
-              disabled={value.trim().length === 0}
-            >
-              {preview ? 'Volver a editar' : 'Vista previa'}
-            </Menu.Item>
-          </Menu.Dropdown>
-        </Menu>
 
         {/* El recordatorio de Enter / Shift+Enter era un renglón entero; ahora
             vive en el globo de este botón. */}
