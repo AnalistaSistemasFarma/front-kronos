@@ -142,6 +142,19 @@ export interface ChatAuthorDto {
   avatarUrl: string | null;
 }
 
+/**
+ * El mensaje CITADO, tal como se pinta encima de la respuesta.
+ *
+ * Viaja recortado (`preview`) y con el nombre del autor ya resuelto: la
+ * interfaz no tiene que volver a buscar nada, y un mensaje citado larguísimo
+ * no se manda entero para pintar dos renglones.
+ */
+export interface ChatReplyToDto {
+  idMessage: number;
+  author: string;
+  preview: string;
+}
+
 export interface ChatMessageDto {
   id: number;
   role: string;
@@ -151,6 +164,8 @@ export interface ChatMessageDto {
   readAt: string | null;
   attachments: ChatAttachmentDto[];
   author?: ChatAuthorDto | null;
+  /** El mensaje al que responde, o null. */
+  replyTo?: ChatReplyToDto | null;
   /** Marca local: mensaje aún no confirmado por el servidor (envío optimista). */
   pending?: boolean;
   /** Marca local: el envío falló y el usuario puede reintentar. */

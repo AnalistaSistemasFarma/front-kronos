@@ -35,6 +35,19 @@ export interface ChatAuthorPayload {
   avatarUrl: string | null;
 }
 
+/**
+ * El mensaje CITADO, tal como se pinta encima de la respuesta.
+ *
+ * Viaja recortado (`preview`) y con el nombre del autor ya resuelto: la
+ * interfaz no tiene que volver a buscar nada, y un mensaje citado larguísimo
+ * no se manda entero para pintar dos renglones.
+ */
+export interface ChatReplyToPayload {
+  idMessage: number;
+  author: string;
+  preview: string;
+}
+
 export interface ChatMessagePayload {
   id: number;
   role: string;
@@ -44,6 +57,8 @@ export interface ChatMessagePayload {
   readAt: string | null;
   attachments: ChatAttachmentPayload[];
   author: ChatAuthorPayload | null;
+  /** El mensaje al que responde, o null. */
+  replyTo: ChatReplyToPayload | null;
 }
 
 /**
@@ -143,6 +158,14 @@ type MessageRow = {
   }[];
   userAuthor?: { id: string; name: string | null; email: string; image: string | null } | null;
   agentAuthor?: { id_agent: number; display_name: string; avatar_url: string | null } | null;
+  /** El mensaje citado, UN solo nivel (ver messageInclude). */
+  replyTo?: {
+    id: number;
+    body: string;
+    role: string;
+    userAuthor?: { name: string | null; email: string } | null;
+    agentAuthor?: { display_name: string } | null;
+  } | null;
 };
 
 /**
@@ -154,6 +177,19 @@ export const messageInclude = {
   attachments: true,
   userAuthor: { select: { id: true, name: true, email: true, image: true } },
   agentAuthor: { select: { id_agent: true, display_name: true, avatar_url: true } },
+  // El mensaje CITADO, un solo nivel. Sin recursión a propósito: si A cita a B
+  // y B cita a C, la cita de A muestra a B y ahí se para. Traer la cadena
+  // completa serían tantas consultas como saltos, y en pantalla no se pinta
+  // más de un nivel.
+  replyTo: {
+    select: {
+      id: true,
+      body: true,
+      role: true,
+      userAuthor: { select: { name: true, email: true } },
+      agentAuthor: { select: { display_name: true } },
+    },
+  },
 } as const;
 
 export function serializeMessage(row: MessageRow): ChatMessagePayload {
@@ -185,6 +221,20 @@ export function serializeMessage(row: MessageRow): ChatMessagePayload {
     readAt: row.read_at ? row.read_at.toISOString() : null,
     attachments: (row.attachments ?? []).map(serializeAttachment),
     author,
+    replyTo: row.replyTo
+      ? {
+          idMessage: row.replyTo.id,
+          author:
+            row.replyTo.userAuthor?.name?.trim() ||
+            row.replyTo.userAuthor?.email ||
+            row.replyTo.agentAuthor?.display_name ||
+            (row.replyTo.role === 'agent' ? 'Asistente' : 'Sistema'),
+          // Se recorta ACÁ y no en el navegador: el cuerpo citado puede ser un
+          // mensaje larguísimo y no tiene sentido mandarlo entero para pintar
+          // dos renglones.
+          preview: toPreview(row.replyTo.body),
+        }
+      : null,
   };
 }
 

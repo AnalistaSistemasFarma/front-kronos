@@ -10,6 +10,7 @@ import {
   type ChatMessageDto,
   type ChatAgentStatusDto,
   type ChatPollDto,
+  type ChatReplyToDto,
   type ChatStatusDto,
 } from '../../lib/chat/client';
 import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
@@ -61,7 +62,8 @@ export interface ChatThreadState {
   error: string | null;
   hasOlder: boolean;
   loadingOlder: boolean;
-  send: (body: string, files?: File[]) => Promise<boolean>;
+  /** `cita` = mensaje al que responde, o null. */
+  send: (body: string, files?: File[], cita?: ChatReplyToDto | null) => Promise<boolean>;
   loadOlder: () => Promise<void>;
   markRead: () => Promise<void>;
 }
@@ -311,7 +313,11 @@ export function useChatConversation(
   /* ─────────────────────────────── Acciones ───────────────────────────── */
 
   const send = useCallback(
-    async (body: string, files: File[] = []): Promise<boolean> => {
+    async (
+      body: string,
+      files: File[] = [],
+      cita: ChatReplyToDto | null = null
+    ): Promise<boolean> => {
       const conversationId = conversationIdRef.current;
       const text = body.trim();
       // Con adjuntos el texto puede ir vacío; sin nada de nada, no se envía.
@@ -339,6 +345,9 @@ export function useChatConversation(
             sizeBytes: file.size,
             downloadUrl: '',
           })),
+          // La cita se pinta de una en el mensaje optimista: el usuario tiene
+          // que ver a qué respondió sin esperar la vuelta del servidor.
+          replyTo: cita,
           pending: true,
         },
       ]);
@@ -350,6 +359,7 @@ export function useChatConversation(
         if (files.length > 0) {
           const form = new FormData();
           form.append('body', text);
+          if (cita) form.append('replyTo', String(cita.idMessage));
           for (const file of files) form.append('files', file);
           // Sin `Content-Type` a mano: el navegador tiene que ponerlo con su
           // propio `boundary`, si no el servidor no puede leer el formulario.
@@ -363,7 +373,7 @@ export function useChatConversation(
         } else {
           res = await chatFetch(`/api/chat/conversations/${conversationId}/messages`, {
             method: 'POST',
-            body: JSON.stringify({ body: text }),
+            body: JSON.stringify({ body: text, ...(cita ? { replyTo: cita.idMessage } : {}) }),
           });
         }
 
