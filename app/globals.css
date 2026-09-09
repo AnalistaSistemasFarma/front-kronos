@@ -2273,6 +2273,19 @@ body.chat-inmersivo .chat-page-thread--completa {
   margin: 0;
 }
 
+/* El anuncio se abre en la vista previa, igual que las políticas. Es un
+   <button> para que funcione con teclado y lector de pantalla; hay que
+   quitarle el aspecto que trae el navegador. */
+.portal-th__banner-abrir {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: zoom-in;
+}
+
 .portal-th__banner-quitar {
   position: absolute;
   top: 8px;
@@ -2467,6 +2480,17 @@ body.chat-inmersivo .chat-page-thread--completa {
   width: 100%;
   border: 0;
   background-color: var(--pth-azul-50);
+}
+
+/* Un anuncio se ve entero y centrado, sin recortarse ni estirarse. El fondo
+   oscuro es a propósito: una imagen con fondo blanco sobre blanco no deja ver
+   dónde termina. */
+.portal-th__visor-imagen {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  background-color: #101828;
 }
 
 /* La tarjeta pasó de enlace a botón: hay que devolverle el aspecto, porque un
