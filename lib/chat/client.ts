@@ -7,6 +7,34 @@
  * payloads que devuelven las rutas de app/api/chat) y los ayudantes de fetch.
  */
 
+/* ──────────────────────── Foto de un asistente ─────────────────────────── */
+
+/** Tope de la imagen ya reducida. 512×512 en JPEG no llega ni a 100 KB. */
+export const MAX_AVATAR_BYTES = 512 * 1024;
+/** Formatos que se aceptan al subir. */
+export const AVATAR_MIMES_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp'];
+/** Lado del cuadrado al que el navegador reduce la imagen antes de subirla. */
+export const AVATAR_LADO = 512;
+
+/**
+ * De dónde sale la imagen de un asistente.
+ *
+ * Si le subieron una, va por el endpoint que la lee de la base, CON la versión
+ * en la URL: así se puede cachear un año y aun así cambiar al instante cuando
+ * la reemplacen. Si no, se queda con la ruta de siempre dentro de /public, y
+ * si tampoco hay, `null` y la interfaz cae al avatar por inicial.
+ */
+export function agentAvatarSrc(agent: {
+  code: string;
+  avatarUrl: string | null;
+  avatarVersion?: number | null;
+}): string | null {
+  if (agent.avatarVersion) {
+    return `/api/chat/agents/${encodeURIComponent(agent.code)}/avatar?v=${agent.avatarVersion}`;
+  }
+  return agent.avatarUrl || null;
+}
+
 /* ─────────────────────── Buscador de mensajes ──────────────────────────── */
 
 /** Mínimo de caracteres para buscar. Con uno o dos, todo coincide con todo. */
@@ -50,6 +78,9 @@ export interface ChatAgentDto {
   displayName: string;
   handle: string | null;
   avatarUrl: string | null;
+  /** Marca de tiempo de la foto SUBIDA, o null si no le han subido ninguna.
+   *  Es también el número de versión de la URL (ver `agentAvatarSrc`). */
+  avatarVersion: number | null;
   description: string | null;
   sortOrder: number;
   companies: ChatAgentCompanyDto[];
