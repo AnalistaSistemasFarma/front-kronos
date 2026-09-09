@@ -939,6 +939,34 @@ model ChatParticipant {
 }
 
 /// Un mensaje del hilo.
+/// Códigos de un solo uso del PORTAL DE TALENTO HUMANO.
+///
+/// El portal no usa la sesión de SynerLink: entra cualquier colaborador con
+/// correo de una empresa del grupo (o de la lista de excepciones), y la
+/// identidad se comprueba con un código enviado a ese correo.
+///
+/// Vive en la base y no en memoria porque producción corre en clúster de dos
+/// instancias: un código emitido por una y verificado por la otra fallaría de
+/// forma intermitente.
+model PortalAccessCode {
+  id         Int       @id @default(autoincrement())
+  /// Siempre en minúsculas: es como se consulta.
+  email      String    @db.NVarChar(255)
+  /// SHA-256 del código. NUNCA el código en claro: quien lea la tabla —o un
+  /// respaldo— no puede entrar con lo que ve.
+  code_hash  String    @db.NVarChar(64)
+  created_at DateTime  @default(now())
+  expires_at DateTime
+  /// Marca de uso: un código sirve UNA vez.
+  used_at    DateTime?
+  /// Intentos fallidos. Seis dígitos sin tope se prueban en minutos.
+  attempts   Int       @default(0)
+
+  @@index([email, id(sort: Desc)])
+  @@index([expires_at])
+  @@map("portal_access_code")
+}
+
 model ChatMessage {
   id              Int    @id @default(autoincrement())
   id_conversation Int

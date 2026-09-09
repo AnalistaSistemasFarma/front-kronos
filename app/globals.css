@@ -2028,3 +2028,265 @@ body.chat-inmersivo .chat-page-thread--completa {
     opacity: 1;
   }
 }
+
+/* ══════════════════════ PORTAL DE TALENTO HUMANO ══════════════════════════
+   Pedido de Cristian Baldión (2026-09-09). Es una página PÚBLICA —fuera del
+   hub y de la sesión de SynerLink—, así que sus estilos viven aquí con prefijo
+   propio y no reutilizan nada de la aplicación interna: cambiar el chat no
+   puede despeinar el portal, ni al revés.
+
+   Colores del design system de GSS (--gss-blue #1a3c6e y su escala). Se
+   declaran locales al portal para no meter variables nuevas al resto de la
+   hoja. */
+.portal-th {
+  --pth-azul: #1a3c6e;
+  --pth-azul-700: #15315a;
+  --pth-azul-50: #f5f7fa;
+  --pth-tinta: #0f1a2c;
+  --pth-tinta-2: #38445a;
+  --pth-tinta-3: #6a7689;
+  --pth-linea: #d8dde6;
+
+  min-height: 100vh;
+  background-color: var(--pth-azul-50);
+  color: var(--pth-tinta);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.portal-th__barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 20px;
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__marca {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.portal-th__logo {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.16);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.portal-th__marca h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.portal-th__marca p {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+
+.portal-th__sesion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.82rem;
+}
+
+.portal-th__sesion button,
+.portal-th__ingreso button[type='submit'] {
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.portal-th__sesion button {
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.portal-th__cuerpo {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+.portal-th__seccion {
+  margin-bottom: 32px;
+}
+
+.portal-th__seccion h2 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  color: var(--pth-azul);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+/* ── Ingreso ─────────────────────────────────────────────────────────────── */
+.portal-th__ingreso {
+  max-width: 420px;
+  margin: 40px auto;
+  padding: 24px;
+  background-color: #fff;
+  border: 1px solid var(--pth-linea);
+  border-radius: 16px;
+}
+
+.portal-th__ingreso h2 {
+  margin: 0 0 6px;
+  font-size: 1.1rem;
+  color: var(--pth-azul);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.portal-th__ingreso p {
+  margin: 0 0 16px;
+  font-size: 0.86rem;
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__ingreso form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.portal-th__ingreso input {
+  padding: 12px 14px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 12px;
+  /* 16 px: por debajo de eso Safari en iPhone hace zoom solo al enfocar y
+     descoloca la página. Misma razón que en el compositor del chat. */
+  font-size: 16px;
+  color: var(--pth-tinta);
+}
+
+.portal-th__codigo {
+  text-align: center;
+  letter-spacing: 8px;
+  font-size: 22px !important;
+  font-weight: 700;
+}
+
+.portal-th__ingreso button[type='submit'] {
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__ingreso button[type='submit']:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.portal-th__enlace {
+  background: none;
+  border: 0;
+  color: var(--pth-tinta-3);
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.portal-th__aviso,
+.portal-th__error,
+.portal-th__estado {
+  margin: 12px 0 0;
+  font-size: 0.84rem;
+}
+
+.portal-th__aviso { color: var(--pth-azul); }
+.portal-th__error { color: #b3261e; }
+.portal-th__estado { color: var(--pth-tinta-3); }
+
+/* ── Anuncios ────────────────────────────────────────────────────────────── */
+.portal-th__banners {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.portal-th__banners img {
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid var(--pth-linea);
+  background-color: #fff;
+}
+
+/* ── Documentos ──────────────────────────────────────────────────────────── */
+.portal-th__tarjetas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.portal-th__tarjeta {
+  display: flex;
+  flex-direction: column;
+  background-color: #fff;
+  border: 1px solid var(--pth-linea);
+  border-radius: 14px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
+.portal-th__tarjeta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(15, 26, 44, 0.12);
+}
+
+.portal-th__tarjeta img,
+.portal-th__sinportada {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background-color: var(--pth-azul-50);
+}
+
+.portal-th__sinportada {
+  display: grid;
+  place-items: center;
+  color: var(--pth-tinta-3);
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.portal-th__tarjeta-pie {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px 12px;
+}
+
+.portal-th__tarjeta-pie strong {
+  font-size: 0.88rem;
+  line-height: 1.25;
+}
+
+.portal-th__tarjeta-pie span {
+  font-size: 0.75rem;
+  color: var(--pth-tinta-3);
+}
+
+.portal-th__pie {
+  padding: 18px;
+  text-align: center;
+  font-size: 0.76rem;
+  color: var(--pth-tinta-3);
+  border-top: 1px solid var(--pth-linea);
+}
