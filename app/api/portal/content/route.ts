@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { leerSesion } from '../../../../lib/portal/auth';
-import { COOKIE_SESION } from '../../../../lib/portal/config';
+import { identificar } from '../../../../lib/portal/acceso';
 import { leerContenido } from '../../../../lib/portal/sharepoint';
 
 /**
@@ -8,17 +7,18 @@ import { leerContenido } from '../../../../lib/portal/sharepoint';
  *
  *   GET /api/portal/content
  *
- * Exige la sesión del portal. No se cachea en el navegador: Talento Humano
- * sube un anuncio y tiene que verse, no aparecer mañana.
+ * Exige identidad: la sesión de SynerLink con el módulo asignado, o el código
+ * del portal abierto. No se cachea en el navegador: Talento Humano sube un
+ * anuncio y tiene que verse, no aparecer mañana.
  */
 export async function GET(request: NextRequest) {
-  const correo = leerSesion(request.cookies.get(COOKIE_SESION)?.value);
-  if (!correo) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
+  const quien = await identificar(request);
+  if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
 
   try {
     const contenido = await leerContenido();
     return NextResponse.json(
-      { ...contenido, email: correo },
+      { ...contenido, email: quien.correo, via: quien.via },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } }
     );
   } catch (error) {

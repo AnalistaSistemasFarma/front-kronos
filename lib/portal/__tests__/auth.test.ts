@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 // El secreto tiene que existir ANTES de importar el módulo: `firmarSesion`
@@ -53,7 +54,6 @@ describe('sesión del portal', () => {
     // y aun así no debe servir.
     const ayer = Date.now() - 86_400_000;
     const cuerpo = `${correo}.${ayer}`;
-    const { createHmac } = require('node:crypto') as typeof import('node:crypto');
     const firma = createHmac('sha256', process.env.NEXTAUTH_SECRET as string)
       .update(cuerpo)
       .digest('base64url');

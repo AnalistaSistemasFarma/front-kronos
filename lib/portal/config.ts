@@ -76,6 +76,13 @@ export const CARPETA_BANNERS = process.env.PORTAL_TH_CARPETA_BANNERS ?? 'BANNERS
 export const ARCHIVO_EXCEPCIONES =
   process.env.PORTAL_TH_EXCEPCIONES ?? 'CORREOS AUTORIZADOS.txt';
 
+/**
+ * El subproceso que ES el permiso del módulo dentro del hub, igual que en el
+ * resto de la plataforma. Se asigna desde Administración → Usuarios.
+ * En minúsculas porque así se compara en la consulta.
+ */
+export const SUBPROCESO_PORTAL = '/process/portal-th';
+
 /** Cuánto vive un código. Corto: es un dato que viaja por correo. */
 export const CODIGO_VIGENCIA_MINUTOS = 10;
 /** Intentos antes de invalidar el código. */
