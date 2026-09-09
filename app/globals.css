@@ -1403,8 +1403,13 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
      (2026-09-08). No la baje de 16. */
   font-size: 16px;
   /* Cápsula, como la caja de WhatsApp. Con un renglón queda redonda y al crecer
-     se ve como una caja de bordes suaves. */
-  border-radius: 18px;
+     se ve como una caja de bordes suaves.
+     21 px = la MITAD del `min-height` de 42 px, o sea el radio máximo que
+     todavía es una cápsula de verdad. Estaba en 18 y al lado del botón de
+     enviar —un círculo de 46 px— se veía cuadrada (Nicolás, 2026-09-09: "el
+     input tiene un round muy pequeño en comparación con el botón"). Si algún
+     día sube el `min-height`, suba este radio a la mitad del nuevo alto. */
+  border-radius: 21px;
   /* El aire de adentro. Subió de 7 a 10 px y NO le cuesta alto a la
      conversación: la fila la gobierna el botón de enviar, que mide 46 px, y la
      caja sigue quedando por debajo. */
