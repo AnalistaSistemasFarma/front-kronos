@@ -1664,25 +1664,6 @@ body.chat-inmersivo .chat-page-thread--completa {
   height: calc(var(--alto-visible, 100dvh) - var(--app-header-height));
 }
 
-/* ── Botón "bajar al mensaje más reciente" ──
-   Flotante sobre la conversación, justo encima del compositor. Va por CSS y no
-   dentro del flujo para que no le quite alto a los mensajes ni empuje la caja
-   de escribir. */
-.chat-thread__bajar {
-  position: absolute;
-  right: 14px;
-  /* Por encima del compositor, no sobre él. */
-  bottom: 84px;
-  z-index: 6;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .chat-thread__bajar {
-    animation: chat-burbuja-entra 140ms ease-out both;
-  }
-}
-
 /* ── Avatar del agente: punto de estado y contador ──
    Posición explícita en vez de `Indicator` anidados de Mantine. El punto va
    ABAJO A LA DERECHA y el contador ARRIBA A LA DERECHA, por encima; los dos
