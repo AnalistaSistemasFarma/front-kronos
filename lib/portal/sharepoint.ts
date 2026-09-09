@@ -9,11 +9,15 @@
  * Todo lo de aquí es de SOLO LECTURA: el conector no expone ninguna
  * herramienta de escritura, así que el portal no puede alterar el SharePoint
  * ni por error ni por un fallo.
+ *
+ * LOS ANUNCIOS YA NO SALEN DE AQUÍ. Se cargan desde el propio portal y viven
+ * en la base (`portal_banner`), porque subirlos a SharePoint habría exigido
+ * darle escritura sobre todo el tenant a una credencial que ya tiene de más.
+ * De SharePoint solo vienen los documentos y sus portadas.
  */
 import ExcelJS from 'exceljs';
 import {
   ARCHIVO_EXCEPCIONES,
-  CARPETA_BANNERS,
   CARPETA_DOCUMENTOS,
   CARPETA_IMAGENES,
   CONECTOR_SHAREPOINT_GSS,
@@ -42,15 +46,8 @@ export interface DocumentoPortal {
   portada: string | null;
 }
 
-export interface BannerPortal {
-  titulo: string;
-  ruta: string;
-  modificado: string;
-}
-
 export interface ContenidoPortal {
   documentos: DocumentoPortal[];
-  banners: BannerPortal[];
 }
 
 let contadorLlamadas = 0;
@@ -124,10 +121,9 @@ const sinExtension = (nombre: string) => nombre.replace(/\.[^.]+$/, '');
  * que sin imagen.
  */
 export async function leerContenido(): Promise<ContenidoPortal> {
-  const [docs, imgs, banners] = await Promise.all([
+  const [docs, imgs] = await Promise.all([
     listarCarpeta(CARPETA_DOCUMENTOS),
     listarCarpeta(CARPETA_IMAGENES),
-    listarCarpeta(CARPETA_BANNERS),
   ]);
 
   const portadaPorNombre = new Map<string, string>();
@@ -146,15 +142,6 @@ export async function leerContenido(): Promise<ContenidoPortal> {
         portada: portadaPorNombre.get(sinExtension(d.name).toLowerCase()) ?? null,
       }))
       .sort((a, b) => a.titulo.localeCompare(b.titulo, 'es')),
-    banners: banners
-      .filter((b) => /\.(jpe?g|png|webp|gif)$/i.test(b.name))
-      .map((b) => ({
-        titulo: sinExtension(b.name),
-        ruta: `${CARPETA_BANNERS}/${b.name}`,
-        modificado: b.modificado,
-      }))
-      // Lo más reciente primero: un anuncio nuevo tiene que verse de entrada.
-      .sort((a, b) => b.modificado.localeCompare(a.modificado)),
   };
 }
 
