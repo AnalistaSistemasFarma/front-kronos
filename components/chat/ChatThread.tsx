@@ -553,10 +553,10 @@ export default function ChatThread({
       const viewport = viewportRef.current;
       if (!viewport || !stickToBottomRef.current) return;
       // En el mismo cuadro el navegador todavía no reacomodó el layout con el
-      // alto nuevo; se espera al siguiente. Y se baja con `smooth` para que la
-      // conversación acompañe al teclado en vez de saltar de golpe.
+      // alto nuevo; se espera al siguiente. No encadenar animaciones smooth
+      // mientras el teclado cambia el viewport en cada cuadro.
       requestAnimationFrame(() => {
-        viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
+        viewport.scrollTop = viewport.scrollHeight;
       });
     }, [])
   );
