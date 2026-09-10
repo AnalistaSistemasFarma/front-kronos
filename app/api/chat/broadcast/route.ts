@@ -4,6 +4,7 @@ import { getChatAccess } from '../../../../lib/chat/access';
 import { checkAdminPrivileges } from '../../../../lib/access-control';
 import { serializeMessage } from '../../../../lib/chat/conversations';
 import { MAX_USER_MESSAGE_CHARS, normalizeMessageBody } from '../../../../lib/chat/constants';
+import { readClientOrigin } from '../../../../lib/chat/client-origin';
 import {
   badRequest,
   jsonNoStore,
@@ -65,6 +66,9 @@ export async function POST(request: NextRequest) {
     if (!normalized.ok) return badRequest(normalized.error);
     const body = normalized.body;
 
+    // Origen de la conexión, para la auditoría (ver lib/chat/client-origin.ts).
+    const { clientIp, userAgent } = readClientOrigin(request);
+
     const access = await getChatAccess(user.email);
     if (!access.canUseChat || access.agents.length === 0) {
       return jsonNoStore({ error: 'No tiene habilitado el módulo de Chat.' }, { status: 403 });
@@ -121,7 +125,16 @@ export async function POST(request: NextRequest) {
 
         const mensaje = await prisma.$transaction(async (tx) => {
           const creado = await tx.chatMessage.create({
-            data: { id_conversation: idConversation, role: 'user', body, created_at: now },
+            data: {
+              id_conversation: idConversation,
+              role: 'user',
+              body,
+              created_at: now,
+              // Mismo origen para todos los destinatarios del masivo: es una
+              // sola petición de una sola persona.
+              client_ip: clientIp,
+              user_agent: userAgent,
+            },
             include: { attachments: true },
           });
           await tx.chatConversation.update({
