@@ -130,6 +130,7 @@ export default function AgentChatPanel({
                   )}
                   <AgentAvatar
                     code={agent.code}
+                    working={agent.busy}
                     displayName={agent.displayName}
                     avatarUrl={agent.avatarUrl}
                     status={status}
