@@ -132,7 +132,7 @@ Seeds SQL en `prisma/seeds/`:
 | `firma-proceso-84-workflow.sql` | Fase A: tarea **Preparar documento y firmantes** + tipos `Firma — *` |
 | `firma-proceso-84-workflow-phase-b.sql` | Fase B: pares autorización → aceptar turno por rol |
 
-Aplicar: `node scripts/apply-firma-workflow.cjs` y `node scripts/apply-firma-workflow-phase-b.cjs`.
+Aplicar manualmente en SQL Server los `.sql` de `prisma/seeds/` (en prod no se corre `prisma migrate` a ciegas).
 
 ## Pendiente (roadmap Orion)
 
