@@ -227,7 +227,7 @@ function getFolderPdfDownloadUrl(file: FolderFile): string | null {
   return null;
 }
 
-/** Fecha en hora Colombia (+5h). Evita RangeError si el valor no es parseable. */
+/** Fecha en zona Colombia. Evita RangeError si el valor no es parseable. */
 function formatDateCO(
   value?: string | null,
   options?: { month?: 'long' | 'short'; fallback?: string }
@@ -244,7 +244,8 @@ function formatDateCO(
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
-    }).format(new Date(parsed.getTime() + 5 * 60 * 60 * 1000));
+      timeZone: 'America/Bogota',
+    }).format(parsed);
   } catch {
     return fallback;
   }
@@ -333,26 +334,43 @@ function ViewRequestPage() {
   >([]);
 
   useEffect(() => {
+    const urlId = id != null && String(id).trim() !== '' ? Number(id) : NaN;
+    const hasUrlId = Number.isInteger(urlId) && urlId > 0;
+
     const storedRaw = sessionStorage.getItem('selectedRequest');
     let storedRequest: Request | null = null;
 
     if (storedRaw) {
       try {
         storedRequest = JSON.parse(storedRaw) as Request;
-        setRequest(storedRequest);
-        setOriginalRequest(storedRequest);
-        setLoading(false);
+        const storedId = Number(storedRequest?.id);
+        // Solo reutilizar cache si coincide con el id de la URL (evita historial/notas de otra solicitud).
+        if (hasUrlId && storedId !== urlId) {
+          sessionStorage.removeItem('selectedRequest');
+          storedRequest = null;
+        } else if (!hasUrlId && storedRequest) {
+          setRequest(storedRequest);
+          setOriginalRequest(storedRequest);
+          setLoading(false);
+        }
       } catch {
         sessionStorage.removeItem('selectedRequest');
+        storedRequest = null;
       }
     }
 
-    if (!id) {
+    if (!hasUrlId) {
       if (!storedRequest) setLoading(false);
       return;
     }
 
-    fetch(`/api/requests-general/view-request?id=${id}`)
+    // Al cambiar de solicitud, limpiar estado que no debe cruzarse.
+    setNotes([]);
+    setFolderContents([]);
+    setTaskRQ([]);
+    setRequestFormValues([]);
+
+    fetch(`/api/requests-general/view-request?id=${urlId}`)
       .then((res) => {
         if (!res.ok) throw new Error('Error al cargar la solicitud');
         return res.json();
@@ -391,11 +409,13 @@ function ViewRequestPage() {
           sapsend_files_error: data.sapsend_files_error,
         };
 
-        // Base: datos de la lista (forma que el formulario espera). Si no hay, usar la API.
-        const base: Request = storedRequest ?? (data as Request);
-        const merged: Request = { ...base };
+        // Base: cache solo si es la misma solicitud; si no, la API.
+        const base: Request =
+          storedRequest && Number(storedRequest.id) === urlId
+            ? storedRequest
+            : (data as Request);
+        const merged: Request = { ...base, id: urlId };
 
-        // Sobreponer solo valores presentes para no borrar datos buenos con nulos.
         (Object.keys(apiFields) as (keyof Request)[]).forEach((key) => {
           const value = apiFields[key];
           if (value !== undefined && value !== null && value !== '') {
@@ -406,14 +426,20 @@ function ViewRequestPage() {
         // El correo y el id del solicitante deben venir siempre de la API.
         merged.requester_email = data.requester_email ?? merged.requester_email;
         merged.id_requester = data.id_requester ?? merged.id_requester;
+        merged.id = urlId;
 
         setRequest(merged);
         setOriginalRequest(merged);
         setLoading(false);
+        try {
+          sessionStorage.setItem('selectedRequest', JSON.stringify(merged));
+        } catch {
+          /* ignore quota */
+        }
       })
       .catch((err) => {
         console.error('Error fetching request:', err);
-        if (!storedRequest) {
+        if (!storedRequest || Number(storedRequest.id) !== urlId) {
           setError('No se pudo cargar la solicitud. Por favor intente nuevamente.');
         }
         setLoading(false);
@@ -423,8 +449,14 @@ function ViewRequestPage() {
   useEffect(() => {
     if (!request?.id) return;
 
+    const urlId = id != null ? Number(id) : NaN;
+    // No cargar notas/archivos de otra solicitud si el cache aún no coincide con la URL.
+    if (Number.isInteger(urlId) && urlId > 0 && Number(request.id) !== urlId) {
+      return;
+    }
+
     const controller = new AbortController();
-    const requestId = request.id;
+    const requestId = Number(request.id);
 
     const loadRelatedData = async () => {
       await Promise.all([
@@ -449,7 +481,7 @@ function ViewRequestPage() {
       controller.abort();
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [request?.id, from, orionActionParam]);
+  }, [request?.id, id, from, orionActionParam]);
 
   // consult-request (empresas/categorías/procesos) solo al editar: no satura la carga inicial.
   const consultOptionsLoadedRef = useRef(false);
@@ -525,6 +557,11 @@ function ViewRequestPage() {
     isAdmin,
     currentUserId: session?.user?.id,
     requesterId: request?.id_requester,
+    currentUserEmail: session?.user?.email,
+    requesterEmail: request?.requester_email,
+    isSigner: Object.values({ ...orionInitialDocuments, ...orionDocuments }).some((doc) =>
+      isOrionDocumentSigner(doc, session?.user?.email)
+    ),
   });
 
   const handleOrionDocumentsChange = useCallback(
@@ -2174,7 +2211,10 @@ function ViewRequestPage() {
                 createdByEmail={request?.requester_email}
                 requesterId={request?.id_requester != null ? String(request.id_requester) : null}
                 currentUserEmail={session?.user?.email ?? undefined}
-                currentUserId={session?.user?.id != null ? String(session.user.id) : undefined}
+                currentUserId={
+                  userId ||
+                  (session?.user?.id != null ? String(session.user.id) : undefined)
+                }
                 participants={orionParticipants}
                 availableUsers={availableUsers}
                 currentUserName={session?.user?.name ?? undefined}
@@ -2663,11 +2703,7 @@ function ViewRequestPage() {
                             <OrionDocumentVersionsButton
                               state={orionState}
                               fileName={file.name}
-                              canView={
-                                canViewOrionVersions ||
-                                isOrionDocumentSigner(orionState, session?.user?.email)
-                              }
-                              fullHistory={canViewOrionVersions}
+                              canView={canViewOrionVersions}
                               fallbackOriginalUrl={
                                 getFolderPdfDownloadUrl(file) || getFolderFileUrl(file) || null
                               }

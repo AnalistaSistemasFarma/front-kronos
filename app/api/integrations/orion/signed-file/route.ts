@@ -4,16 +4,16 @@ import { authOptions } from '../../../auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import { fetchOrionSignedFileContent } from '@/lib/orion/client';
 import {
-  canViewOrionDocumentVersions,
   listOrionDocumentVersions,
   resolveOrionPdfUrl,
+  canViewOrionDocumentVersions,
+  isOrionDocumentSigner,
 } from '@/lib/orion/documentVersions';
 import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
 import {
   getRequestOrionContext,
   loadOrionFormBag,
   resolveOriginalPdfBase64,
-  userCanManageOrionRequest,
 } from '@/lib/orion/service';
 import { isOrionProtectedFileUrl, isAllowedServerPdfFetchUrl } from '@/lib/orion/signedFileAccess';
 
@@ -55,37 +55,32 @@ export async function GET(req: Request) {
       if (!loaded) return null;
 
       const state = getOrionDocumentFromBag(loaded.bag, fileId);
-      const canManageOrion = userId
-        ? await userCanManageOrionRequest(pool, requestId, userId, isAdmin).catch(() => false)
-        : false;
 
-      let isCreatorOrAdmin = isAdmin;
-      if (!isCreatorOrAdmin && userId) {
-        try {
-          const ctx = await getRequestOrionContext(pool, requestId);
-          isCreatorOrAdmin = canViewOrionDocumentVersions({
-            isAdmin,
-            currentUserId: userId,
-            requesterId: ctx?.id_requester ?? null,
-          });
-          if (!isCreatorOrAdmin && me && normalizeEmail(ctx?.requester_email) === me) {
-            isCreatorOrAdmin = true;
-          }
-        } catch {
-          isCreatorOrAdmin = false;
-        }
+      let canViewVersions = false;
+      try {
+        const ctx = await getRequestOrionContext(pool, requestId);
+        const isSigner = isOrionDocumentSigner(state, me);
+        canViewVersions = canViewOrionDocumentVersions({
+          isAdmin,
+          currentUserId: userId,
+          requesterId: ctx?.id_requester ?? null,
+          currentUserEmail: me,
+          requesterEmail: ctx?.requester_email ?? null,
+          isSigner,
+        });
+      } catch {
+        canViewVersions = false;
       }
 
-      return { state, canManageOrion, isCreatorOrAdmin };
+      return { state, canViewVersions };
     });
 
     if (!auth) {
       return NextResponse.json({ error: 'Documento no encontrado' }, { status: 404 });
     }
 
-    const { state, canManageOrion, isCreatorOrAdmin } = auth;
+    const { state, canViewVersions } = auth;
     const orderedVersions = listOrionDocumentVersions(state);
-    const isSigner = (state.signers ?? []).some((s) => normalizeEmail(s.email) === me);
 
     let targetUrl: string | null = null;
     let maxSignerOrder: number | null = null;
@@ -93,11 +88,11 @@ export async function GET(req: Request) {
       ? orderedVersions.find((v) => v.id === versionId) ?? null
       : null;
 
+    // Historial / original: solo quien creó el flujo (solicitante) o admin.
     if (versionId === 'original') {
-      // Original: creador de la solicitud, admin, o quien tiene permiso Preparar firma.
-      if (!isCreatorOrAdmin && !canManageOrion) {
+      if (!canViewVersions) {
         return NextResponse.json(
-          { error: 'No tiene permiso para descargar el original' },
+          { error: 'Solo quien creó el flujo puede descargar el original' },
           { status: 403 }
         );
       }
@@ -106,21 +101,14 @@ export async function GET(req: Request) {
         orderedVersions.find((v) => v.kind === 'original')?.url ??
         null;
     } else if (versionId && selectedVersion) {
-      const signedOrdered = orderedVersions.filter((v) => v.kind !== 'original');
-      const latest = signedOrdered[signedOrdered.length - 1] ?? null;
-      const isLatest = latest?.id === selectedVersion.id;
-
-      // Firmante: solo la última versión firmada
-      if (!isCreatorOrAdmin && isSigner && !isLatest) {
+      if (!canViewVersions) {
         return NextResponse.json(
-          { error: 'Como firmante solo puede descargar la última versión' },
+          { error: 'Solo quien creó el flujo puede descargar versiones' },
           { status: 403 }
         );
       }
-      if (!isCreatorOrAdmin && !isSigner) {
-        return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-      }
 
+      const signedOrdered = orderedVersions.filter((v) => v.kind !== 'original');
       targetUrl = selectedVersion.url;
       if (selectedVersion.kind === 'partial' || selectedVersion.kind === 'final') {
         const email = normalizeEmail(selectedVersion.signerEmail);
@@ -129,20 +117,18 @@ export async function GET(req: Request) {
         if (Number.isFinite(order) && order > 0) {
           maxSignerOrder = order;
         } else if (selectedVersion.kind === 'partial') {
-          // Fallback: posición en la lista de parciales
           const partialIdx = signedOrdered
             .filter((v) => v.kind === 'partial')
             .findIndex((v) => v.id === selectedVersion!.id);
           if (partialIdx >= 0) maxSignerOrder = partialIdx + 1;
         }
-        // final → sin maxOrder (todas las firmas)
         if (selectedVersion.kind === 'final') maxSignerOrder = null;
       }
     } else if (versionId) {
       return NextResponse.json({ error: 'Versión no encontrada' }, { status: 404 });
     } else {
       targetUrl = resolveOrionPdfUrl(state, state.originalFileUrl ?? null);
-      // Vista vigente: PDF completo acumulado (sin maxOrder)
+      // Vista vigente: PDF acumulado — firmantes pueden ver al firmar (sin versionId)
     }
 
     if (!targetUrl) {

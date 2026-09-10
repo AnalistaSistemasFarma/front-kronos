@@ -24,13 +24,13 @@ export default function PushNotificationBell() {
     }
 
     if (isSubscribed) {
-      const ok = await unsubscribe();
+      const { ok, error } = await unsubscribe();
       if (ok) toast.success('Notificaciones desactivadas');
-      else toast.error('No se pudieron desactivar las notificaciones');
+      else toast.error(error || 'No se pudieron desactivar las notificaciones');
     } else {
-      const ok = await subscribe();
+      const { ok, error } = await subscribe();
       if (ok) toast.success('Notificaciones activadas');
-      else toast.error('No se pudieron activar las notificaciones en este entorno', { duration: 5000 });
+      else toast.error(error || 'No se pudieron activar las notificaciones', { duration: 7000 });
     }
   };
 

@@ -112,6 +112,23 @@ describe('signedFileAccess', () => {
     ).toBe('/api/integrations/orion/signed-file?requestId=1&fileId=file-1');
   });
 
+  it('uses proxy when a signer already completed even without signedFileUrl', () => {
+    const doc: OrionSignatureState = {
+      orionDocumentId: 'doc-1',
+      status: 'EN_PROCESO',
+      signers: [
+        { email: 'a@test.com', order: 1, status: 'FIRMADO' },
+        { email: 'b@test.com', order: 2, status: 'PENDIENTE' },
+      ],
+    };
+    expect(
+      resolveOrionPdfAccessUrl(doc, 'https://onedrive.example.com/original.pdf', {
+        requestId: 1,
+        fileId: 'file-1',
+      })
+    ).toBe('/api/integrations/orion/signed-file?requestId=1&fileId=file-1');
+  });
+
   it('keeps OneDrive URL when no Orion signed file', () => {
     const doc: OrionSignatureState = { orionDocumentId: 'doc-1' };
     const original = 'https://onedrive.example.com/original.pdf';

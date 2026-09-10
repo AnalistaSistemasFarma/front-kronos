@@ -19,6 +19,7 @@ import {
 } from '../config';
 import {
   allSignersCompleted,
+  allSlotsCompletedForEmail,
   getCurrentPendingSigner,
   newlyCompletedSigners,
 } from '../signerStatus';
@@ -109,6 +110,20 @@ describe('orion signerStatus', () => {
     ];
     expect(getCurrentPendingSigner(signers)?.order).toBe(3);
     expect(getCurrentPendingSigner(signers)?.email).toBe('a@test.com');
+  });
+
+  it('trata signedAt como firmado aunque el status siga pendiente', () => {
+    const signers = [
+      {
+        email: 'a@test.com',
+        order: 1,
+        status: 'PENDIENTE',
+        signedAt: '2026-09-10T15:00:00.000Z',
+      },
+      { email: 'b@test.com', order: 2, status: 'PENDIENTE' },
+    ];
+    expect(getCurrentPendingSigner(signers)?.email).toBe('b@test.com');
+    expect(allSlotsCompletedForEmail(signers, 'a@test.com')).toBe(true);
   });
 
   it('detecta firmantes recién completados por slot (mismo email dos veces)', () => {
@@ -324,7 +339,17 @@ describe('orion signatureIntent', () => {
     expect(resolveOrionSignatureIntent({ signatureIntent: 'sign' })).toBe('sign');
     expect(resolveOrionSignatureIntent({ signatureIntent: 'view' })).toBe('view');
     expect(isOrionSignDocument({ orionDocumentId: 'x', status: 'BORRADOR' })).toBe(true);
-    expect(isOrionSignDocument({ signatureIntent: 'view', orionDocumentId: 'x' })).toBe(false);
+    // Flujo ya iniciado: no quedar atrapado en "view" residual
+    expect(isOrionSignDocument({ signatureIntent: 'view', orionDocumentId: 'x' })).toBe(true);
+    expect(
+      isOrionSignDocument({
+        signatureIntent: 'view',
+        signers: [{ email: 'a@test.com', order: 1, status: 'PENDIENTE' }],
+      })
+    ).toBe(true);
+    expect(
+      isOrionSignDocument({ signatureIntent: 'view', status: 'EN_PROCESO' })
+    ).toBe(true);
   });
 });
 
@@ -549,9 +574,10 @@ describe('documentVersions', () => {
       'sign-a',
       'sign-b',
     ]);
-    expect(listOrionDocumentVersionsForViewer(state, { fullHistory: false }).map((v) => v.id)).toEqual([
-      'sign-b',
-    ]);
+    // Firmantes no listan historial: el gate es canViewVersions; sin fullHistory → vacío.
+    expect(listOrionDocumentVersionsForViewer(state, { fullHistory: false }).map((v) => v.id)).toEqual(
+      []
+    );
   });
 
   it('rebuildOrionVersionHistory reconstruye original + firmantes en orden', async () => {
@@ -587,10 +613,91 @@ describe('documentVersions', () => {
     expect(rebuilt.versions?.[2]?.signerEmail).toBe('b@test.com');
   });
 
-  it('canViewOrionDocumentVersions solo admin o solicitante', async () => {
+  it('canViewOrionDocumentVersions: creador siempre; admin solo si no es firmante', async () => {
     const { canViewOrionDocumentVersions } = await import('../documentVersions');
-    expect(canViewOrionDocumentVersions({ isAdmin: true, currentUserId: 'a', requesterId: 'b' })).toBe(true);
-    expect(canViewOrionDocumentVersions({ isAdmin: false, currentUserId: 'a', requesterId: 'a' })).toBe(true);
-    expect(canViewOrionDocumentVersions({ isAdmin: false, currentUserId: 'a', requesterId: 'b' })).toBe(false);
+    expect(canViewOrionDocumentVersions({ isAdmin: true, currentUserId: 'x', requesterId: 'y' })).toBe(
+      true
+    );
+    expect(
+      canViewOrionDocumentVersions({
+        isAdmin: true,
+        isSigner: true,
+        currentUserId: 'x',
+        requesterId: 'y',
+      })
+    ).toBe(false);
+    expect(
+      canViewOrionDocumentVersions({
+        isAdmin: true,
+        isSigner: true,
+        currentUserId: 'owner',
+        requesterId: 'owner',
+      })
+    ).toBe(true);
+    expect(
+      canViewOrionDocumentVersions({ isAdmin: false, currentUserId: 'a', requesterId: 'a' })
+    ).toBe(true);
+    expect(
+      canViewOrionDocumentVersions({
+        isAdmin: false,
+        currentUserEmail: 'owner@test.com',
+        requesterEmail: 'owner@test.com',
+      })
+    ).toBe(true);
+    expect(
+      canViewOrionDocumentVersions({ isAdmin: false, currentUserId: 'a', requesterId: 'b' })
+    ).toBe(false);
+    expect(
+      canViewOrionDocumentVersions({
+        isAdmin: false,
+        canManage: true,
+        currentUserId: 'signer',
+        requesterId: 'owner',
+      })
+    ).toBe(false);
+  });
+
+  it('pone la fecha del original antes de la primera firma', async () => {
+    const { ensureOriginalOrionVersion, rebuildOrionVersionHistory } = await import(
+      '../documentVersions'
+    );
+    const state = {
+      status: 'FIRMADO' as const,
+      updatedAt: '2026-09-10T15:58:30.000Z',
+      originalFileUrl: 'https://onedrive.example.com/doc.pdf',
+      signedFileUrl: 'https://orion.example.com/signed.pdf',
+      signers: [
+        {
+          email: 'a@test.com',
+          order: 1,
+          status: 'FIRMADO',
+          signedAt: '2026-09-10T14:28:22.000Z',
+        },
+        {
+          email: 'b@test.com',
+          order: 2,
+          status: 'FIRMADO',
+          signedAt: '2026-09-10T14:32:26.000Z',
+        },
+      ],
+      versions: [
+        {
+          id: 'original',
+          kind: 'original' as const,
+          label: 'Original (v1)',
+          url: 'https://onedrive.example.com/doc.pdf',
+          createdAt: '2026-09-10T15:58:30.000Z',
+        },
+      ],
+    };
+    const fixed = ensureOriginalOrionVersion(state);
+    const originalAt = Date.parse(String(fixed.versions?.[0]?.createdAt));
+    expect(originalAt).toBeLessThan(Date.parse('2026-09-10T14:28:22.000Z'));
+
+    const rebuilt = rebuildOrionVersionHistory(state, state.originalFileUrl, state.signedFileUrl);
+    const rebuiltOriginalAt = Date.parse(
+      String(rebuilt.versions?.find((v) => v.kind === 'original')?.createdAt)
+    );
+    expect(rebuiltOriginalAt).toBeLessThan(Date.parse('2026-09-10T14:28:22.000Z'));
   });
 });

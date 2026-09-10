@@ -1,6 +1,7 @@
 import { getOrionConfig } from './config';
-import type { OrionSignatureState } from './types';
 import { resolveOrionPdfUrl } from './documentVersions';
+import { isSignerCompleted } from './signerStatus';
+import type { OrionSignatureState } from './types';
 
 /** URLs de PDF firmado en Orion exigen Bearer; no abrir en el navegador sin proxy. */
 export function isOrionProtectedFileUrl(url: string | null | undefined): boolean {
@@ -94,6 +95,26 @@ export function resolveOrionPdfAccessUrl(
   originalUrl: string | null | undefined,
   ctx: { requestId: number; fileId: string } | null
 ): string | null {
+  // Con firmas acumuladas: siempre proxy Orion (PDF vigente con todas las firmas),
+  // aunque falte signedFileUrl en el form value o aún apunte al original.
+  if (ctx && state?.orionDocumentId) {
+    const hasCompletedSigner = (state.signers ?? []).some((s) =>
+      isSignerCompleted(s.status)
+    );
+    const status = String(state.status || '').toUpperCase();
+    const signedReady =
+      hasCompletedSigner ||
+      status === 'FIRMADO' ||
+      status === 'SIGNED' ||
+      status === 'COMPLETED';
+    if (signedReady) {
+      return buildOrionSignedFileProxyUrl({
+        requestId: ctx.requestId,
+        fileId: ctx.fileId,
+      });
+    }
+  }
+
   const raw = resolveOrionPdfUrl(state, originalUrl);
   if (!raw) return null;
   if (!ctx) return raw;

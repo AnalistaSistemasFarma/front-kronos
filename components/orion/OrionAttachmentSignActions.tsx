@@ -217,6 +217,7 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     !workflowLocked &&
     !isTerminal &&
     !(signatureIntent === 'sign' && hasCompletedSignatures);
+  const permissionsPending = Boolean(api) && api?.permissionsReady === false;
 
   const setSignatureIntent = useCallback(
     async (intent: OrionSignatureIntent) => {
@@ -298,6 +299,7 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     signatureIntent,
     forSigning,
     canToggleIntent,
+    permissionsPending,
     intentLoading,
     setSignatureIntent,
   };
@@ -389,7 +391,7 @@ export default function OrionAttachmentSignActions(props: OrionAttachmentSignAct
 
       {d.canManageAttachment && d.api ? (
         <UnstyledButton
-          onClick={() => d.api!.actions.openDocumentEditor(d.meta)}
+          onClick={() => d.api!.actions.openDocumentEditor(d.meta, { initialStep: 0 })}
           style={{ fontSize: 13, color: 'var(--mantine-color-blue-6)', fontWeight: 600 }}
         >
           {!d.state.orionDocumentId ? 'Preparar' : 'Gestionar'}
@@ -398,7 +400,7 @@ export default function OrionAttachmentSignActions(props: OrionAttachmentSignAct
 
       {d.canEditDocument && d.api && !d.canManageAttachment ? (
         <UnstyledButton
-          onClick={() => d.api!.actions.openDocumentEditor(d.meta)}
+          onClick={() => d.api!.actions.openDocumentEditor(d.meta, { initialStep: 0 })}
           style={{ fontSize: 13, color: 'var(--mantine-color-blue-6)', fontWeight: 600 }}
         >
           Editar expediente

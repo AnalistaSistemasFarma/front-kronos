@@ -939,6 +939,10 @@ function RequestBoard() {
 
       const newTicket = await response.json();
       const requestId = Number(newTicket.id_request);
+      // Refrescar campana (encargado/asignado en la misma sesión la ve al instante).
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('synerlink:notifications-refresh'));
+      }
       const filesToUpload: { file: File; label?: string }[] = [
         ...visibleRequiredFiles.flatMap((doc) =>
           (filesByDoc[doc.id] || []).map((f) => ({ file: f.file, label: doc.file_label }))
@@ -990,6 +994,18 @@ function RequestBoard() {
 
       // Ir de inmediato a la solicitud creada (creador marca PDFs / sigue el flujo).
       if (Number.isInteger(requestId) && requestId > 0) {
+        try {
+          sessionStorage.setItem(
+            'selectedRequest',
+            JSON.stringify({
+              id: requestId,
+              subject: formData.subject,
+              description: formData.descripcion,
+            })
+          );
+        } catch {
+          sessionStorage.removeItem('selectedRequest');
+        }
         router.replace(
           `/process/request-general/view-request?id=${requestId}&from=create-request`
         );

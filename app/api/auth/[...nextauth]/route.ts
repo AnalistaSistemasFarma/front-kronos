@@ -126,6 +126,7 @@ export const authOptions: AuthOptions = {
         try {
           const rows = await prisma.$queryRaw<
             Array<{
+              id: string;
               role: string;
               image: string | null;
               themePalette: string | null;
@@ -133,12 +134,17 @@ export const authOptions: AuthOptions = {
               nit: string | null;
             }>
           >`
-            SELECT TOP 1 role, image, themePalette, colorScheme, nit
+            SELECT TOP 1 id, role, image, themePalette, colorScheme, nit
             FROM [user]
             WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${email})))
           `;
           const dbUser = rows[0];
           token.email = email;
+          // Id Kronos (cuid), no el sub de Azure/OIDC.
+          if (dbUser?.id) {
+            token.kronosUserId = dbUser.id;
+            token.sub = dbUser.id;
+          }
           token.role = dbUser?.role;
           token.nit = dbUser?.nit ?? undefined;
           token.themePalette = dbUser?.themePalette ?? undefined;
@@ -157,7 +163,10 @@ export const authOptions: AuthOptions = {
     },
     async session({ session, token }: { session: Session; token: JWT }) {
       if (token && session.user) {
-        session.user.id = token.sub;
+        const kronosId =
+          (token.kronosUserId as string | undefined) ||
+          (typeof token.sub === 'string' ? token.sub : undefined);
+        if (kronosId) session.user.id = kronosId;
         session.user.image = token.image as string;
         session.user.role = token.role as string | undefined;
         session.user.nit = token.nit as string | undefined;

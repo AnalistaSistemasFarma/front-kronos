@@ -23,7 +23,9 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const statusFilter = searchParams.get('status') === 'read' ? 'read' : 'unread';
 
-    const userEmail = session.user.email;
+    const userEmail = String(session.user.email || '')
+      .trim()
+      .toLowerCase();
 
     return await withMssqlPool(async (pool) => {
       if (statusFilter === 'read') {
@@ -33,7 +35,7 @@ export async function GET(request) {
           .query(
             `SELECT TOP 50 id, title, body, url, read_at, created_at
            FROM notifications
-           WHERE email = @email AND read_at IS NOT NULL
+           WHERE LOWER(LTRIM(RTRIM(email))) = @email AND read_at IS NOT NULL
            ORDER BY read_at DESC`
           );
 
@@ -59,7 +61,7 @@ export async function GET(request) {
         .query(
           `SELECT TOP 50 id, title, body, url, read_at, created_at
          FROM notifications
-         WHERE email = @email AND read_at IS NULL
+         WHERE LOWER(LTRIM(RTRIM(email))) = @email AND read_at IS NULL
          ORDER BY created_at DESC`
         );
 

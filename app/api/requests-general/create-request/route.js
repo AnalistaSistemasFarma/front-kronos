@@ -1,11 +1,12 @@
-import { getServerSession } from "next-auth";
+import { getServerSession } from 'next-auth';
 import {
   fireAndForgetNotification,
   notifyNewRequest,
-} from "../../../../lib/notificationEvents.js";
-import { syncRequestToSapsend } from "../../../../lib/sapsend/treasury.js";
-import { createGeneralRequest } from "../../../../lib/requests-general/createGeneralRequest.js";
-import { authOptions } from "../../auth/[...nextauth]/route";
+  resolveEmailByUserId,
+} from '../../../../lib/notificationEvents.js';
+import { syncRequestToSapsend } from '../../../../lib/sapsend/treasury.js';
+import { createGeneralRequest } from '../../../../lib/requests-general/createGeneralRequest.js';
+import { authOptions } from '../../auth/[...nextauth]/route';
 
 export async function POST(req) {
   try {
@@ -22,15 +23,15 @@ export async function POST(req) {
     } = body;
 
     if (!company || !subject || !process || !descripcion) {
-      return new Response(
-        JSON.stringify({ message: "Campos obligatorios faltantes" }),
-        { status: 400 }
-      );
+      return new Response(JSON.stringify({ message: 'Campos obligatorios faltantes' }), {
+        status: 400,
+      });
     }
 
     const session = await getServerSession(authOptions);
-    const userId = session?.user?.id ? String(session.user.id) : String(createdby || "");
-    void userId;
+    // Preferir sesión: evita que un `createdby` del body deje otro usuario como solicitante.
+    const userId = session?.user?.id ? String(session.user.id) : String(createdby || '');
+    const requesterId = String(userId || createdby || '');
 
     let result;
     try {
@@ -39,29 +40,36 @@ export async function POST(req) {
         subject,
         descripcion,
         process,
-        createdby,
+        createdby: requesterId || createdby,
         url,
         formValues,
       });
     } catch (dbError) {
-      console.error("Error en transacción:", dbError);
+      console.error('Error en transacción:', dbError);
       return new Response(
         JSON.stringify({
-          error: "Error al crear la solicitud",
+          error: 'Error al crear la solicitud',
           details: dbError.message,
         }),
         { status: 500 }
       );
     }
 
-    const { id_request: newRequestId, processEmail, taskEmails } = result;
+    const { id_request: newRequestId, processEmail, processEmails, taskEmails } = result;
+
+    const creatorEmail =
+      (session?.user?.email && String(session.user.email).trim()) ||
+      (await resolveEmailByUserId(requesterId)) ||
+      null;
 
     fireAndForgetNotification(
       notifyNewRequest({
         requestId: newRequestId,
         subject,
         processEmail,
+        processEmails,
         taskEmails,
+        creatorEmail,
         requestUrl: url,
       })
     );
@@ -73,21 +81,23 @@ export async function POST(req) {
 
     return new Response(
       JSON.stringify({
-        message: "Solicitud creada correctamente",
+        message: 'Solicitud creada correctamente',
         id_request: newRequestId,
         notifications: {
           processEmail,
+          processEmails,
           taskEmails,
+          creatorEmail,
         },
       }),
       { status: 201 }
     );
   } catch (err) {
-    console.error("Error general:", err);
+    console.error('Error general:', err);
 
     return new Response(
       JSON.stringify({
-        error: "Error general",
+        error: 'Error general',
         details: err.message,
       }),
       { status: 500 }

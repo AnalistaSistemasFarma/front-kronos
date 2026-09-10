@@ -18,6 +18,7 @@ import type { OrionParticipant, OrionUserOption } from '../../lib/orion/particip
 import type { SignatureFieldPlacement } from '../../lib/orion/signatureFields';
 import { resolveOrionPdfAccessUrl } from '../../lib/orion/signedFileAccess';
 import { allSlotsCompletedForEmail, getCurrentPendingSigner, isSignerCompleted } from '../../lib/orion/signerStatus';
+import { canViewOrionDocumentVersions, isOrionDocumentSigner } from '../../lib/orion/documentVersions';
 import { resolveOrionPermissions } from '../../lib/orion/permissions';
 import SignaturePad from './SignaturePad';
 import PdfInlineViewer from './PdfInlineViewer';
@@ -140,6 +141,8 @@ export default function OrionSignaturePanel({
 }: Props) {
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
+  const [editorInitialStep, setEditorInitialStep] = useState<0 | 1 | 2>(0);
+  const [editorOpenNonce, setEditorOpenNonce] = useState(0);
   const [hasSignature, setHasSignature] = useState(false);
   const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
   const [signatureSaving, setSignatureSaving] = useState(false);
@@ -514,6 +517,9 @@ export default function OrionSignaturePanel({
   const hasDocument = Boolean(state.orionDocumentId && state.embedUrl);
   const isTerminal = statusUpper === 'FIRMADO' || statusUpper === 'RECHAZADO';
   const isMyTurn = permissions.isMyTurn;
+  const currentUserCompleted = currentUserEmail
+    ? allSlotsCompletedForEmail(state.signers, currentUserEmail)
+    : false;
 
   const confirmSign = useCallback(
     async (identity?: SignerAcceptIdentity | null) => {
@@ -563,6 +569,16 @@ export default function OrionSignaturePanel({
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           const msg = String(data.error || `No se pudo confirmar la firma (${res.status})`);
+          // Orion a veces responde así tras un doble envío; ya quedó firmado.
+          if (/ya complet[oó]|already\s*complet|already\s*sign|firmante ya/i.test(msg)) {
+            setIdentityModalOpen(false);
+            setIdentityError(null);
+            setSignSuccessMessage('Su firma ya estaba registrada. Continúe con el flujo.');
+            setDocumentModalOpen(false);
+            setSignerModalIntent('view');
+            void refreshState(file.fileId, { soft: true });
+            return true;
+          }
           setIdentityError(msg);
           setError(msg);
           return false;
@@ -624,7 +640,7 @@ export default function OrionSignaturePanel({
         setAcceptLoading(false);
       }
     },
-    [activeFile, applyFileState, hasSignature, notifyDocuments, requestId, signaturePreview]
+    [activeFile, applyFileState, hasSignature, notifyDocuments, refreshState, requestId, signaturePreview]
   );
 
   const confirmReturnDocument = useCallback(async () => {
@@ -682,11 +698,14 @@ export default function OrionSignaturePanel({
   }, [activeFile, applyFileState, notifyDocuments, requestId, returnReason]);
 
   const openDocumentEditor = useCallback(
-    async (file: OrionFileMeta) => {
+    async (file: OrionFileMeta, options?: { initialStep?: 0 | 1 | 2 }) => {
       setError(null);
       setActiveFile(file);
       setSignerModalIntent('manage');
       stableEmbedSrcRef.current = null;
+      const step = options?.initialStep;
+      setEditorInitialStep(step === 1 || step === 2 ? step : 0);
+      setEditorOpenNonce((n) => n + 1);
 
       const fileState = documents[file.fileId] ?? {};
       const filePerms = resolveOrionPermissions({
@@ -873,6 +892,33 @@ export default function OrionSignaturePanel({
           }
         }
 
+        const syncedDocs =
+          data.documents && typeof data.documents === 'object'
+            ? (data.documents as Record<string, OrionSignatureState>)
+            : null;
+        const fileState =
+          syncedDocs?.[file.fileId] ??
+          (data.state as OrionSignatureState | undefined) ??
+          documents[file.fileId] ??
+          {};
+        const me = normalizeEmail(currentUserEmail);
+        const alreadyDone = me ? allSlotsCompletedForEmail(fileState.signers, me) : false;
+        const fileStatus = String(fileState.status || '').toUpperCase();
+        const fileTerminal = fileStatus === 'FIRMADO' || fileStatus === 'RECHAZADO';
+
+        // Ya firmó (o doc cerrado): no volver a pedir “Confirmar firma”.
+        if (alreadyDone || fileTerminal) {
+          setSignSuccessMessage(
+            alreadyDone
+              ? 'Su firma ya estaba registrada en el documento. No es necesario firmar de nuevo.'
+              : 'Este documento ya está cerrado. No hay firma pendiente.'
+          );
+          setSignerModalIntent('view');
+          setDocumentModalOpen(false);
+          setError(null);
+          return;
+        }
+
         if (!hasRubric) {
           continueToSignAfterPadRef.current = true;
           setSignerModalIntent('sign');
@@ -880,8 +926,6 @@ export default function OrionSignaturePanel({
           return;
         }
 
-        const fileState =
-          (data.state as OrionSignatureState | undefined) ?? documents[file.fileId] ?? {};
         const filePerms = resolveOrionPermissions({
           canManage,
           isAdmin,
@@ -1192,6 +1236,18 @@ export default function OrionSignaturePanel({
     [documents, requestId]
   );
 
+  const canViewVersions = canViewOrionDocumentVersions({
+    isAdmin,
+    currentUserId,
+    requesterId,
+    currentUserEmail,
+    requesterEmail: createdByEmail,
+    // Admin que también es firmante no ve historial (salvo que sea el creador).
+    isSigner: Object.values(documents).some((doc) =>
+      isOrionDocumentSigner(doc, currentUserEmail)
+    ),
+  });
+
   useEffect(() => {
     if (!registerOrionApi) return;
 
@@ -1201,7 +1257,9 @@ export default function OrionSignaturePanel({
       pendingAuthorizationByFile,
       canManage,
       canSignPermission,
+      permissionsReady,
       isAdmin,
+      canViewVersions,
       hasSignature,
       acceptLoading,
       resolveForFile: (fileId: string) => {
@@ -1231,7 +1289,7 @@ export default function OrionSignaturePanel({
         },
         openSignFlow: (file) => void handleAcceptSign(file),
         openViewDocument: openSignerView,
-        openDocumentEditor: (file) => void openDocumentEditor(file),
+        openDocumentEditor: (file, options) => void openDocumentEditor(file, options),
         openSignedDocument,
       },
     };
@@ -1242,7 +1300,10 @@ export default function OrionSignaturePanel({
     acceptLoading,
     canManage,
     canSignPermission,
+    canViewVersions,
     currentUserEmail,
+    currentUserId,
+    createdByEmail,
     documents,
     handleAcceptSign,
     hasSignature,
@@ -1252,7 +1313,9 @@ export default function OrionSignaturePanel({
     openSignerView,
     loadUserSignature,
     pendingAuthorizationByFile,
+    permissionsReady,
     registerOrionApi,
+    requesterId,
     workflowLocked,
   ]);
 
@@ -1272,17 +1335,24 @@ export default function OrionSignaturePanel({
     permissions.userRole === 'signer' ||
     permissions.userRole === 'waiting';
   const hasCompletedSigner = (state.signers ?? []).some((s) => isSignerCompleted(s.status));
-  // Vista en modal: siempre priorizar el adjunto original (OneDrive downloadUrl).
-  // El proxy signed-file solo cuando ya hay firmas y como intento secundario.
-  const signerPdfFallback = activeFile?.pdfUrl ?? null;
-  const signerPdfUrl = activeFile
+  // Vista en modal: con firmas previas priorizar PDF acumulado (proxy Orion);
+  // el original OneDrive queda como fallback si el firmado aún no está listo (409).
+  const signerPdfOriginal = activeFile?.pdfUrl ?? null;
+  const signerPdfSigned = activeFile
     ? hasCompletedSigner
       ? resolveOrionPdfAccessUrl(state, activeFile.pdfUrl ?? null, {
           requestId,
           fileId: activeFile.fileId,
-        }) || activeFile.pdfUrl
-      : activeFile.pdfUrl || null
+        })
+      : null
     : null;
+  const signerPdfUrl = signerPdfSigned || signerPdfOriginal;
+  const signerPdfFallback =
+    signerPdfSigned &&
+    signerPdfOriginal &&
+    signerPdfSigned !== signerPdfOriginal
+      ? signerPdfOriginal
+      : null;
 
   // Silencia warning de pendingSigner no usado en host-only
   void getCurrentPendingSigner(state.signers);
@@ -1454,7 +1524,22 @@ export default function OrionSignaturePanel({
           },
         }}
       >
-        {signOnlyMode && signerModalIntent === 'sign' && activeFile && (
+        {signOnlyMode &&
+          signerModalIntent === 'sign' &&
+          activeFile &&
+          (currentUserCompleted || isTerminal) && (
+          <Alert color='teal' variant='light' mb='md'>
+            {currentUserCompleted
+              ? 'Su firma ya está registrada en este documento. No es necesario confirmar de nuevo.'
+              : 'Este documento ya está cerrado. No hay firma pendiente.'}
+          </Alert>
+        )}
+
+        {signOnlyMode &&
+          signerModalIntent === 'sign' &&
+          activeFile &&
+          !currentUserCompleted &&
+          !isTerminal && (
           <Group justify='space-between' mb='md' align='center' wrap='wrap'>
             <Alert color='green' variant='light' style={{ flex: 1, minWidth: 220 }}>
               Revise el documento y pulse <strong>Confirmar firma</strong>. Se le pedirán sus
@@ -1553,6 +1638,8 @@ export default function OrionSignaturePanel({
             onStateUpdate={(next) => applyFileState(activeFile.fileId, next)}
             onClose={() => setDocumentModalOpen(false)}
             assignmentsEditable={permissions.canEditAssignments}
+            initialStep={editorInitialStep}
+            openNonce={editorOpenNonce}
           />
         ) : signOnlyMode &&
           (signerModalIntent === 'view' || signerModalIntent === 'sign') &&
@@ -1567,23 +1654,8 @@ export default function OrionSignaturePanel({
             }}
           >
             <PdfInlineViewer
-              src={
-                // Primero el original del adjunto (embebe bien); firmado solo si es distinto.
-                signerPdfFallback &&
-                (!signerPdfUrl ||
-                  signerPdfUrl.includes('/api/integrations/orion/signed-file'))
-                  ? signerPdfFallback
-                  : signerPdfUrl || signerPdfFallback
-              }
-              fallbackSrc={
-                signerPdfUrl &&
-                signerPdfFallback &&
-                signerPdfUrl !== signerPdfFallback
-                  ? signerPdfUrl.includes('/api/integrations/orion/signed-file')
-                    ? signerPdfFallback
-                    : signerPdfUrl
-                  : null
-              }
+              src={signerPdfUrl}
+              fallbackSrc={signerPdfFallback}
               fileName={activeFile?.fileName ?? 'Documento.pdf'}
               minHeight={520}
             />

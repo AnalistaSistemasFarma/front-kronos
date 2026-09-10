@@ -17,13 +17,17 @@ import {
   listOrionDocumentVersionsForViewer,
 } from '../../lib/orion/documentVersions';
 import { resolveOrionVersionAccessUrl } from '../../lib/orion/signedFileAccess';
+import { useOrionSignatureApi } from './OrionSignatureContext';
 
 type Props = {
   state?: OrionSignatureState | null;
   fileName?: string;
-  /** Historial completo (creador/admin). Si false, solo la última versión firmada. */
+  /**
+   * Fallback si no hay OrionSignatureApi en contexto.
+   * Con API: solo el creador del flujo (solicitante) o admin.
+   */
   canView?: boolean;
-  /** true = creador/admin (todas); false = firmante (solo última). */
+  /** @deprecated El dueño del flujo siempre ve el historial completo. */
   fullHistory?: boolean;
   fallbackOriginalUrl?: string | null;
   requestId: number;
@@ -80,18 +84,26 @@ function VersionDot({ tone }: { tone: 'original' | 'partial' | 'final' }) {
 export default function OrionDocumentVersionsButton({
   state,
   fileName,
-  canView,
-  fullHistory = true,
+  canView: canViewProp,
+  fullHistory: _fullHistoryIgnored,
   fallbackOriginalUrl,
   requestId,
   fileId,
 }: Props) {
+  const api = useOrionSignatureApi();
   const [opened, setOpened] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
+  // Solo el creador del flujo (solicitante) o admin. Firmantes no ven versiones.
+  // Si hay API Orion, usarla; si aún no cargó canViewVersions, no mostrar (evitar fuga a firmantes).
+  const canView =
+    api != null
+      ? Boolean(api.canViewVersions)
+      : Boolean(canViewProp);
+
   const versions = listOrionDocumentVersionsForViewer(
     ensureOriginalOrionVersion(state ?? {}, fallbackOriginalUrl),
-    { fullHistory }
+    { fullHistory: true }
   );
 
   const handleDownload = async (version: OrionDocumentVersion) => {
@@ -175,7 +187,7 @@ export default function OrionDocumentVersionsButton({
         }}
       >
         <IconHistory size={15} stroke={1.6} />
-        {fullHistory ? 'Versiones' : 'Descargar PDF'}
+        Versiones
       </UnstyledButton>
 
       <Modal
@@ -233,9 +245,7 @@ export default function OrionDocumentVersionsButton({
             {docTitle}
           </Text>
           <Text size='sm' c='dimmed' mb='lg'>
-            {fullHistory
-              ? `${versions.length} versión(es) · original → firmas acumuladas`
-              : 'Solo la última versión disponible para descarga'}
+            {`${versions.length} versión(es) · original → firmas acumuladas`}
           </Text>
 
           <Stack gap={0} mb='lg'>

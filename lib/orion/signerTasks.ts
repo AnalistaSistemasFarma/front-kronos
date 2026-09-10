@@ -5,8 +5,8 @@ import type { OrionSignatureState, OrionSignerState } from './types';
 import {
   allSignersCompleted,
   getCurrentPendingSigner,
-  isSignerCompleted,
   isSignerRejected,
+  isSignerSlotCompleted,
   newlyCompletedSigners,
   orderedSigners,
   signerSlotKey,
@@ -208,6 +208,8 @@ async function openSignerTask(
     subject?: string | null;
     fileId?: string | null;
     fileName?: string | null;
+    /** Si la tarea ya existía, igual notificar (avance de turno). */
+    notifyExistingTurn?: boolean;
   }
 ): Promise<{ taskId: number; created: boolean } | null> {
   const existing = await findOpenSignerTask(
@@ -237,6 +239,22 @@ async function openSignerTask(
           END
           WHERE id = @id AND id_status NOT IN (2, 3)
         `);
+    }
+    // Reavisar al firmante en turno aunque la tarea ya existiera.
+    if (params.notifyExistingTurn) {
+      try {
+        await notifyActivityAssigned({
+          taskId: existing,
+          userId: params.userId,
+          requestId: params.requestId,
+          subject: params.subject ?? undefined,
+          taskName: params.fileName
+            ? `${params.template.task} (${params.fileName})`
+            : params.template.task,
+        });
+      } catch (err) {
+        console.warn('[orion/signerTasks] Re-notificación de tarea existente falló:', err);
+      }
     }
     return { taskId: existing, created: false };
   }
@@ -365,7 +383,7 @@ export async function syncOrionSignerTasks(
     }
 
     const shouldClose =
-      isSignerCompleted(signer.status) ||
+      isSignerSlotCompleted(signer) ||
       isSignerRejected(signer.status) ||
       documentRejected ||
       documentReturned ||
@@ -412,6 +430,8 @@ export async function syncOrionSignerTasks(
       subject: params.subject,
       fileId,
       fileName,
+      // Si ya había tarea abierta, igual avisar: acaba de pasar a ser su turno.
+      notifyExistingTurn: Boolean(params.previousSigners?.length),
     });
 
     if (opened?.created) tasksOpened += 1;

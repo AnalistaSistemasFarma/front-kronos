@@ -20,7 +20,11 @@ export type OrionSignatureActions = {
   openConfigureSignature: () => void;
   openSignFlow: (file: OrionFileMeta) => void;
   openViewDocument: (file: OrionFileMeta) => void;
-  openDocumentEditor: (file: OrionFileMeta) => void;
+  /** initialStep: 0 documento, 1 firmantes, 2 ubicar firmas */
+  openDocumentEditor: (
+    file: OrionFileMeta,
+    options?: { initialStep?: 0 | 1 | 2 }
+  ) => void;
   openSignedDocument: (fileId: string) => void;
 };
 
@@ -32,7 +36,11 @@ export type OrionSignatureApi = {
   canManage: boolean;
   /** Permiso subproceso “Firmar documento” (obligatorio para firmar). */
   canSignPermission: boolean;
+  /** true cuando ya respondió el primer ensure-document (canManage fiable). */
+  permissionsReady: boolean;
   isAdmin: boolean;
+  /** Solo creador del flujo (solicitante) o admin: ver/descargar historial de versiones. */
+  canViewVersions: boolean;
   hasSignature: boolean;
   acceptLoading: boolean;
   resolveForFile: (fileId: string) => OrionFileView;

@@ -160,6 +160,22 @@ export async function createOrionSignerAuthorizations(
     );
     if (existing) {
       skipped += 1;
+      // Aunque la auth ya exista, avisar que es su turno (campana + push si está activo).
+      try {
+        const emailAddr = await resolveEmailByUserId(user.id);
+        if (emailAddr) {
+          await createAndSendNotifications([emailAddr], {
+            title: 'Su turno de firma · SynerLink',
+            body: `Solicitud #${params.requestId}${
+              params.fileName ? ` · ${params.fileName}` : ''
+            }${params.subject ? ` — ${params.subject}` : ''}. Ya puede autorizar y firmar el documento.`,
+            url: buildAppUrl('/process/authorization'),
+            tag: `orion-auth-turn-${existing}`,
+          });
+        }
+      } catch (err) {
+        console.warn('[orion/signerAuthorizations] Re-notificación de turno falló:', err);
+      }
       continue;
     }
 

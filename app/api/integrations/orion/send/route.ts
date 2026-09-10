@@ -18,6 +18,12 @@ import {
 import { syncOrionSignerTasks } from '@/lib/orion/signerTasks';
 import { createOrionSignerAuthorizations } from '@/lib/orion/signerAuthorizations';
 import { applyPendingSignerTurnDeadline } from '@/lib/orion/signerDeadline';
+import {
+  fireAndForgetNotification,
+  notifyOrionSignatureProgress,
+  notifyOrionSignerInvited,
+} from '@/lib/notificationEvents.js';
+import { getCurrentPendingSigner } from '@/lib/orion/signerStatus';
 
 /** POST /api/integrations/orion/send — enviar documento a firma en Orion */
 export async function POST(req: Request) {
@@ -97,6 +103,29 @@ export async function POST(req: Request) {
         fileId,
         fileName: nextState.fileName,
       });
+
+      const pending = getCurrentPendingSigner(nextState.signers);
+      const signerEmails = (nextState.signers ?? [])
+        .map((s) => String(s.email || '').trim())
+        .filter(Boolean);
+
+      fireAndForgetNotification(
+        notifyOrionSignerInvited({
+          requestId,
+          subject: ctx?.subject_request ?? null,
+          signerEmails,
+          currentSignerEmail: pending?.email ?? null,
+        })
+      );
+      fireAndForgetNotification(
+        notifyOrionSignatureProgress({
+          requestId,
+          subject: ctx?.subject_request ?? null,
+          fileName: nextState.fileName ?? current.fileName ?? null,
+          event: 'sent',
+          excludeEmail: String(session.user.email || '').trim() || null,
+        })
+      );
 
       return {
         state: nextState,

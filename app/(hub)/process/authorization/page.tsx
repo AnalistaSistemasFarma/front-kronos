@@ -443,7 +443,31 @@ function AuthorizationBoard() {
         fileId?: string | null;
         signTaskId?: number | null;
     }) => {
-        toast('Abriendo documento para firmar…', { icon: '✍️' });
+        toast.custom(
+            (t) => (
+                <div
+                    role='status'
+                    style={{
+                        minWidth: 280,
+                        maxWidth: 420,
+                        padding: '12px 16px',
+                        borderRadius: 12,
+                        background: 'var(--app-surface, #ffffff)',
+                        color: 'var(--app-text, #111827)',
+                        border: '1px solid var(--app-border, #e5e7eb)',
+                        boxShadow: '0 10px 28px rgba(0,0,0,0.14)',
+                        fontWeight: 600,
+                        fontSize: 14,
+                        lineHeight: 1.35,
+                        opacity: t.visible ? 1 : 0,
+                        transition: 'opacity 0.2s ease',
+                    }}
+                >
+                    Abriendo el documento para firmar…
+                </div>
+            ),
+            { duration: 3500 }
+        );
         const qs = new URLSearchParams({
             from: 'authorization',
             orionAction: 'sign',

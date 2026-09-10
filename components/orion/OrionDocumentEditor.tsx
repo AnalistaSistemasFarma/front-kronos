@@ -30,6 +30,8 @@ import PdfInlineViewer from './PdfInlineViewer';
 import SignaturePlacementCanvas from './SignaturePlacementCanvas';
 import { usePdfBlobPreview } from './usePdfBlobPreview';
 
+type EditorStep = 0 | 1 | 2;
+
 type Props = {
   requestId: number;
   documentId: string;
@@ -48,9 +50,17 @@ type Props = {
   onStateUpdate: (state: OrionSignatureState) => void;
   onClose?: () => void;
   assignmentsEditable?: boolean;
+  /** 0 = documento, 1 = firmantes, 2 = ubicar firmas */
+  initialStep?: EditorStep;
+  /** Cambia al reabrir el editor para resetear el paso aunque sea el mismo. */
+  openNonce?: number;
 };
 
 const EDITOR_HEIGHT = 'min(62vh, 680px)';
+
+function clampStep(step: number): EditorStep {
+  return step <= 0 ? 0 : step >= 2 ? 2 : 1;
+}
 
 function normalizeEmail(email?: string | null): string {
   return String(email || '').trim().toLowerCase();
@@ -95,8 +105,14 @@ export default function OrionDocumentEditor({
   onStateUpdate,
   onClose,
   assignmentsEditable = true,
+  initialStep = 0,
+  openNonce = 0,
 }: Props) {
-  const [editorStep, setEditorStep] = useState(0);
+  const [editorStep, setEditorStep] = useState<EditorStep>(() => clampStep(initialStep));
+
+  useEffect(() => {
+    setEditorStep(clampStep(initialStep));
+  }, [initialStep, openNonce, documentId, fileId]);
   // Una sola carga de blob compartida entre preview (paso 0) y canvas (paso 2).
   const { blobUrl: sharedPdfBlob } = usePdfBlobPreview(pdfSrc, Boolean(pdfSrc));
   const sharedPdfSrc = sharedPdfBlob || pdfSrc;
@@ -344,7 +360,7 @@ export default function OrionDocumentEditor({
       }
       return;
     }
-    setEditorStep((s) => Math.min(2, s + 1));
+    setEditorStep((s) => clampStep(s + 1));
   }, [assignSigners, editorStep, validateAssignments]);
 
   if (!pdfSrc) {
@@ -629,7 +645,7 @@ export default function OrionDocumentEditor({
 
         <Group>
           {editorStep > 0 && (
-            <Button variant='default' onClick={() => setEditorStep((s) => s - 1)} disabled={saving}>
+            <Button variant='default' onClick={() => setEditorStep((s) => clampStep(s - 1))} disabled={saving}>
               Atrás
             </Button>
           )}

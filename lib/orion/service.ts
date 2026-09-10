@@ -48,6 +48,10 @@ import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/micr
 import type { SignerAcceptIdentity } from './signerIdentity';
 import { normalizeSignerIdentity } from './signerIdentity';
 import {
+  fireAndForgetNotification,
+  notifyOrionSignatureProgress,
+} from '../notificationEvents.js';
+import {
   applyPendingSignerTurnDeadline,
   isSignerTurnExpired,
 } from './signerDeadline';
@@ -425,6 +429,14 @@ export async function ensureOrionDocumentForRequest(
 
   if (!doc) {
     const tenantId = resolveOrionTenantId(ctx.id_company);
+    if (!tenantId) {
+      throw Object.assign(
+        new Error(
+          `Empresa SynerLink id_company=${ctx.id_company} (${ctx.company_name || 'sin nombre'}) no está mapeada a un tenant Orion. Configure ORION_TENANT_MAP (p. ej. {"1":"farmalogica"}).`
+        ),
+        { status: 422 }
+      );
+    }
     const createdByEmail =
       params.createdByEmail?.trim() ||
       ctx.requester_email?.trim() ||
@@ -457,7 +469,7 @@ export async function ensureOrionDocumentForRequest(
       externalRef,
       synerlinkRequestId: params.requestId,
       synerlinkCompanyId: ctx.id_company,
-      tenantId: tenantId ?? undefined,
+      tenantId,
       title:
         params.title ||
         params.fileName ||
@@ -510,7 +522,8 @@ export async function ensureOrionDocumentForRequest(
         params.originalFileUrl ??
         current.originalFileUrl ??
         null,
-      signatureIntent: current.signatureIntent || 'sign',
+      // Siempre "sign" al tocar el doc en Orion: evita residual "view" que bloquea Firmar
+      signatureIntent: 'sign',
     }),
     previousSigners: current.signers,
     originalUrl: params.originalFileUrl ?? current.originalFileUrl ?? null,
@@ -694,6 +707,8 @@ export async function applyOrionWebhookToRequest(
       fileId
     );
   } else if (statusUpper === 'FIRMADO' && allSigned) {
+    // Firmas completas: avanza el workflow secuencial de firma, pero NO cierra la
+    // solicitud. Pueden quedar otras tareas (p. ej. Validación Planeación).
     const template = await findOrionSignatureTaskTemplate(pool, params.requestId);
     if (template) {
       await advanceSequentialTask(pool, {
@@ -704,21 +719,6 @@ export async function applyOrionWebhookToRequest(
         subject_request: ctx?.subject_request ?? null,
       });
     }
-
-    await pool
-      .request()
-      .input('id', sql.Int, params.requestId)
-      .input('resolution', sql.NVarChar(sql.MAX), resolution)
-      .input('executor', sql.NVarChar(255), params.noteAuthorUserId)
-      .query(`
-        UPDATE requests_general
-        SET status_req = 2,
-            resolution = @resolution,
-            date_resolution = GETDATE(),
-            id_executor_final = COALESCE(@executor, id_executor_final)
-        WHERE id = @id AND status_req NOT IN (2, 3)
-      `);
-    requestClosed = true;
   }
 
   if (params.noteAuthorUserId) {
@@ -743,6 +743,38 @@ export async function applyOrionWebhookToRequest(
           `GSS Firma (${state.fileName || fileId}): ${positionLabel} — ${signer.name || signer.email} completó su firma.`,
           params.noteAuthorUserId
         );
+        fireAndForgetNotification(
+          notifyOrionSignatureProgress({
+            requestId: params.requestId,
+            subject: ctx?.subject_request ?? null,
+            fileName: state.fileName || null,
+            event: 'signer_completed',
+            signerLabel: signer.name || signer.email || null,
+            positionLabel,
+            excludeEmail: signer.email || null,
+          })
+        );
+      }
+      if (statusUpper === 'FIRMADO' && allSigned) {
+        fireAndForgetNotification(
+          notifyOrionSignatureProgress({
+            requestId: params.requestId,
+            subject: ctx?.subject_request ?? null,
+            fileName: state.fileName || null,
+            event: 'all_signed',
+          })
+        );
+      } else if (syncResult.currentSignerEmail) {
+        fireAndForgetNotification(
+          notifyOrionSignatureProgress({
+            requestId: params.requestId,
+            subject: ctx?.subject_request ?? null,
+            fileName: state.fileName || null,
+            event: 'turn',
+            nextSignerEmail: syncResult.currentSignerEmail,
+            excludeEmail: syncResult.currentSignerEmail,
+          })
+        );
       }
     } else if (statusUpper === 'FIRMADO' && allSigned) {
       await insertRequestNote(
@@ -751,12 +783,28 @@ export async function applyOrionWebhookToRequest(
         `GSS Firma: todos los documentos firmados. ${resolution}`,
         params.noteAuthorUserId
       );
+      fireAndForgetNotification(
+        notifyOrionSignatureProgress({
+          requestId: params.requestId,
+          subject: ctx?.subject_request ?? null,
+          fileName: state.fileName || null,
+          event: 'all_signed',
+        })
+      );
     } else if (statusUpper === 'RECHAZADO') {
       await insertRequestNote(
         pool,
         params.requestId,
         `GSS Firma: documento rechazado. ${resolution}`,
         params.noteAuthorUserId
+      );
+      fireAndForgetNotification(
+        notifyOrionSignatureProgress({
+          requestId: params.requestId,
+          subject: ctx?.subject_request ?? null,
+          fileName: state.fileName || null,
+          event: 'rejected',
+        })
       );
     } else if (statusUpper === 'DEVUELTO') {
       await insertRequestNote(
@@ -765,12 +813,108 @@ export async function applyOrionWebhookToRequest(
         `GSS Firma: documento devuelto para corrección. ${resolution}`,
         params.noteAuthorUserId
       );
+      fireAndForgetNotification(
+        notifyOrionSignatureProgress({
+          requestId: params.requestId,
+          subject: ctx?.subject_request ?? null,
+          fileName: state.fileName || null,
+          event: 'returned',
+        })
+      );
     } else if (statusUpper === 'EN_PROCESO' && syncResult.tasksOpened > 0) {
       await insertRequestNote(
         pool,
         params.requestId,
         `GSS Firma (${state.fileName || fileId}): turno de firma para ${syncResult.currentSignerEmail}.`,
         params.noteAuthorUserId
+      );
+      fireAndForgetNotification(
+        notifyOrionSignatureProgress({
+          requestId: params.requestId,
+          subject: ctx?.subject_request ?? null,
+          fileName: state.fileName || null,
+          event: 'turn',
+          nextSignerEmail: syncResult.currentSignerEmail,
+          excludeEmail: syncResult.currentSignerEmail,
+        })
+      );
+    }
+  } else {
+    // Webhook Orion sin autor de nota: igual notificar progreso al solicitante.
+    const completed = newlyCompletedSigners(previousSigners, state.signers);
+    const totalSigners = orderedSigners(state.signers).length;
+    if (completed.length > 0 && statusUpper !== 'RECHAZADO' && statusUpper !== 'DEVUELTO') {
+      for (const signer of completed) {
+        const order = Number(signer.order);
+        const position =
+          Number.isFinite(order) && order > 0
+            ? order
+            : orderedSigners(state.signers).findIndex(
+                (s) =>
+                  String(s.email || '').trim().toLowerCase() ===
+                  String(signer.email || '').trim().toLowerCase()
+              ) + 1;
+        const positionLabel =
+          totalSigners > 0 && position > 0 ? `firmante ${position}/${totalSigners}` : 'firmante';
+        fireAndForgetNotification(
+          notifyOrionSignatureProgress({
+            requestId: params.requestId,
+            subject: ctx?.subject_request ?? null,
+            fileName: state.fileName || null,
+            event: 'signer_completed',
+            signerLabel: signer.name || signer.email || null,
+            positionLabel,
+            excludeEmail: signer.email || null,
+          })
+        );
+      }
+      if (statusUpper === 'FIRMADO' && allSigned) {
+        fireAndForgetNotification(
+          notifyOrionSignatureProgress({
+            requestId: params.requestId,
+            subject: ctx?.subject_request ?? null,
+            fileName: state.fileName || null,
+            event: 'all_signed',
+          })
+        );
+      } else if (syncResult.currentSignerEmail) {
+        fireAndForgetNotification(
+          notifyOrionSignatureProgress({
+            requestId: params.requestId,
+            subject: ctx?.subject_request ?? null,
+            fileName: state.fileName || null,
+            event: 'turn',
+            nextSignerEmail: syncResult.currentSignerEmail,
+            excludeEmail: syncResult.currentSignerEmail,
+          })
+        );
+      }
+    } else if (statusUpper === 'FIRMADO' && allSigned) {
+      fireAndForgetNotification(
+        notifyOrionSignatureProgress({
+          requestId: params.requestId,
+          subject: ctx?.subject_request ?? null,
+          fileName: state.fileName || null,
+          event: 'all_signed',
+        })
+      );
+    } else if (statusUpper === 'RECHAZADO') {
+      fireAndForgetNotification(
+        notifyOrionSignatureProgress({
+          requestId: params.requestId,
+          subject: ctx?.subject_request ?? null,
+          fileName: state.fileName || null,
+          event: 'rejected',
+        })
+      );
+    } else if (statusUpper === 'DEVUELTO') {
+      fireAndForgetNotification(
+        notifyOrionSignatureProgress({
+          requestId: params.requestId,
+          subject: ctx?.subject_request ?? null,
+          fileName: state.fileName || null,
+          event: 'returned',
+        })
       );
     }
   }
@@ -864,6 +1008,29 @@ export async function syncOrionDocumentState(
       current,
       mapOrionResponseToState(externalRef, live.data, fid, current.fileName)
     );
+
+    // Solo normalizar slots con evidencia de firma (signedAt / status).
+    // No marcar PENDIENTE→FIRMADO solo porque Orion diga FIRMADO: eso bloquea
+    // la notificación/autorización del siguiente firmante.
+    const liveStatus = String(state.status || '').toUpperCase();
+    if ((state.signers?.length ?? 0) > 0) {
+      const normalized = (state.signers ?? []).map((s) => {
+        if (isSignerCompleted(s.status) || !s.signedAt) return s;
+        return { ...s, status: 'FIRMADO' as const };
+      });
+      const changed = normalized.some((s, i) => s !== state.signers![i]);
+      if (changed || (['FIRMADO', 'SIGNED', 'COMPLETED'].includes(liveStatus) && allSignersCompleted(normalized))) {
+        state = {
+          ...state,
+          signers: normalized,
+          status: allSignersCompleted(normalized)
+            ? 'FIRMADO'
+            : state.status && liveStatus !== 'BORRADOR'
+              ? state.status
+              : 'EN_PROCESO',
+        };
+      }
+    }
 
     const signedCount = (state.signers ?? []).filter((s) => isSignerCompleted(s.status)).length;
     // Documentos ya firmados: regenera PDF acumulado en Orion (corrige solo-1.ª-firma).
@@ -1188,6 +1355,33 @@ export async function userHasOrionPreparePermission(
   return Boolean(permitted.recordset[0]?.id);
 }
 
+/** Resuelve id Kronos desde sesión (id o email). */
+export async function resolveOrionActorUserId(
+  pool: SqlPool,
+  params: { userId?: string | null; email?: string | null }
+): Promise<string | null> {
+  const uid = String(params.userId || '').trim();
+  if (uid) {
+    const byId = await pool
+      .request()
+      .input('id', sql.NVarChar(255), uid)
+      .query(`SELECT TOP 1 id FROM [user] WHERE id = @id`);
+    if (byId.recordset[0]?.id) return String(byId.recordset[0].id);
+  }
+  const email = String(params.email || '')
+    .trim()
+    .toLowerCase();
+  if (!email) return null;
+  const byEmail = await pool
+    .request()
+    .input('email', sql.NVarChar(255), email)
+    .query(`
+      SELECT TOP 1 id FROM [user]
+      WHERE LOWER(LTRIM(RTRIM(email))) = @email
+    `);
+  return byEmail.recordset[0]?.id ? String(byEmail.recordset[0].id) : null;
+}
+
 /** Permiso Firmar documento. Sin bypass admin. */
 export async function userHasOrionSignPermission(
   pool: SqlPool,
@@ -1481,13 +1675,45 @@ export async function finalizeSignerTurn(
   // Firmante activo de ESTE turno (no el primer slot del email).
   const turnSigner = isMyTurn && pending ? pending : mySlots[0]!;
 
-  if (!isMyTurn && !alreadyCompletedAll) {
+  if (alreadyCompletedAll) {
+    // Idempotente: Orion/Kronos ya tienen su firma. No volver a llamar accept-sign.
+    liveState = applyOrionVersionHistory({
+      previous: current,
+      next: liveState,
+      previousSigners,
+      originalUrl: liveState.originalFileUrl ?? current.originalFileUrl ?? null,
+    });
+    const statusUpperDone = String(liveState.status || 'EN_PROCESO').toUpperCase();
+    const outcomeDone = await applyOrionWebhookToRequest(pool, {
+      requestId: params.requestId,
+      status: statusUpperDone,
+      auditSummary: liveState.auditSummary,
+      noteAuthorUserId: params.userId,
+      patch: liveState,
+      fileId,
+      bag,
+      fieldId: loaded.field.id_form_field,
+    });
+    return {
+      state: outcomeDone.state,
+      bag: outcomeDone.bag,
+      fileId: outcomeDone.fileId,
+      signerCompleted: true,
+      tasksUpdated: outcomeDone.tasksUpdated,
+      requestClosed: outcomeDone.requestClosed,
+      signerTasksClosed: outcomeDone.signerTasksClosed,
+      signerTasksOpened: outcomeDone.signerTasksOpened,
+      currentSignerEmail: outcomeDone.currentSignerEmail,
+    };
+  }
+
+  if (!isMyTurn) {
     throw Object.assign(new Error('Aún no es su turno para firmar'), { status: 403 });
   }
 
   // Plazo 24h vive en el bag Kronos (Orion no lo gestiona).
   const localPending = getCurrentPendingSigner(current.signers);
-  if (isMyTurn && isSignerTurnExpired(localPending)) {
+  if (isSignerTurnExpired(localPending)) {
     throw Object.assign(
       new Error(
         'Su plazo de 24 horas para firmar venció. Solicite firmar este documento al líder del proceso.'
@@ -1497,7 +1723,7 @@ export async function finalizeSignerTurn(
   }
 
   // Aplicar firma real en Orion (rúbrica guardada o signatureDataUrl)
-  if (isMyTurn) {
+  {
     const identity = params.identity
       ? normalizeSignerIdentity(params.identity, turnSigner.name || params.userEmail)
       : null;
@@ -1560,7 +1786,41 @@ export async function finalizeSignerTurn(
       }
     }
 
-    if (!accept.ok || !accept.data) {
+    const alreadyDoneOnOrion =
+      !accept.ok &&
+      /ya complet[oó]|already\s*complet|already\s*sign|firmante ya/i.test(
+        String(accept.error || '')
+      );
+
+    if (alreadyDoneOnOrion) {
+      // Orion ya registró la firma (doble clic / reintento). Sincronizar y tratar como OK.
+      const refreshed = await getOrionDocument(current.orionDocumentId);
+      if (refreshed.ok && refreshed.data) {
+        liveState = mergeOrionSignatureState(
+          liveState,
+          mapOrionResponseToState(externalRef, refreshed.data, fileId, current.fileName)
+        );
+      }
+      const turnKeyDone = signerSlotKey(turnSigner);
+      const forcedDone = orderedSigners(liveState.signers).map((s, idx) => {
+        if (signerSlotKey(s, idx) !== turnKeyDone) return s;
+        if (isSignerCompleted(s.status)) return s;
+        return {
+          ...s,
+          status: 'FIRMADO' as const,
+          signedAt: s.signedAt || new Date().toISOString(),
+        };
+      });
+      liveState = {
+        ...liveState,
+        signers: forcedDone,
+        status: allSignersCompleted(forcedDone)
+          ? 'FIRMADO'
+          : liveState.status && String(liveState.status).toUpperCase() !== 'BORRADOR'
+            ? liveState.status
+            : 'EN_PROCESO',
+      };
+    } else if (!accept.ok || !accept.data) {
       const status = accept.status || 502;
       const raw = String(accept.error || '').trim();
       const message =
@@ -1571,32 +1831,32 @@ export async function finalizeSignerTurn(
             ? 'Aún no es su turno para firmar.'
             : 'No se pudo confirmar la firma en GSS Firma (Orion).');
       throw Object.assign(new Error(message), { status: status === 404 ? 502 : status });
-    }
-
-    liveState = mergeOrionSignatureState(
-      liveState,
-      mapOrionResponseToState(externalRef, accept.data, fileId, current.fileName)
-    );
-    // Si Orion no marcó el slot, forzar FIRMADO del turno para abrir auth/tarea del siguiente.
-    const turnKey = signerSlotKey(turnSigner);
-    const forcedSigners = orderedSigners(liveState.signers).map((s, idx) => {
-      if (signerSlotKey(s, idx) !== turnKey) return s;
-      if (isSignerCompleted(s.status)) return s;
-      return {
-        ...s,
-        status: 'FIRMADO' as const,
-        signedAt: s.signedAt || new Date().toISOString(),
+    } else {
+      liveState = mergeOrionSignatureState(
+        liveState,
+        mapOrionResponseToState(externalRef, accept.data, fileId, current.fileName)
+      );
+      // Si Orion no marcó el slot, forzar FIRMADO del turno para abrir auth/tarea del siguiente.
+      const turnKey = signerSlotKey(turnSigner);
+      const forcedSigners = orderedSigners(liveState.signers).map((s, idx) => {
+        if (signerSlotKey(s, idx) !== turnKey) return s;
+        if (isSignerCompleted(s.status)) return s;
+        return {
+          ...s,
+          status: 'FIRMADO' as const,
+          signedAt: s.signedAt || new Date().toISOString(),
+        };
+      });
+      liveState = {
+        ...liveState,
+        signers: forcedSigners,
+        status: allSignersCompleted(forcedSigners)
+          ? 'FIRMADO'
+          : liveState.status && String(liveState.status).toUpperCase() !== 'BORRADOR'
+            ? liveState.status
+            : 'EN_PROCESO',
       };
-    });
-    liveState = {
-      ...liveState,
-      signers: forcedSigners,
-      status: allSignersCompleted(forcedSigners)
-        ? 'FIRMADO'
-        : liveState.status && String(liveState.status).toUpperCase() !== 'BORRADOR'
-          ? liveState.status
-          : 'EN_PROCESO',
-    };
+    }
   }
 
   liveState = applyOrionVersionHistory({

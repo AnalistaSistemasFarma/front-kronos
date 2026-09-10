@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Box, Loader, ScrollArea, Stack, Text } from '@mantine/core';
 import {
   clampFieldSize,
@@ -30,6 +30,21 @@ function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
 }
 
+type DragState = {
+  mode: 'move' | 'resize';
+  fieldId: string;
+  page: number;
+  offsetX: number;
+  offsetY: number;
+  pointerId: number;
+  moved: boolean;
+  startClientX: number;
+  startClientY: number;
+};
+
+const CLICK_SUPPRESS_MS = 280;
+const MOVE_THRESHOLD_PX = 4;
+
 export default function SignaturePlacementCanvas({
   pdfSrc,
   documentId,
@@ -41,130 +56,215 @@ export default function SignaturePlacementCanvas({
   const { pages, loading, error } = usePdfPageImages(pdfSrc);
   const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const imgRefs = useRef<Record<number, HTMLImageElement | null>>({});
-  const [drag, setDrag] = useState<{
-    fieldId: string;
-    page: number;
-    offsetX: number;
-    offsetY: number;
-  } | null>(null);
-  const [resize, setResize] = useState<{ fieldId: string; page: number } | null>(null);
+  const fieldsRef = useRef(fields);
+  const onChangeRef = useRef(onChange);
+  const dragRef = useRef<DragState | null>(null);
+  const suppressClickUntilRef = useRef(0);
+  const [, setInteractionTick] = useState(0);
+
+  useEffect(() => {
+    fieldsRef.current = fields;
+  }, [fields]);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   const activePerson = participants.find((p) => p.order === activeOrder);
 
-  function getPageRect(page: number): DOMRect | null {
+  const getPageRect = useCallback((page: number): DOMRect | null => {
     const img = imgRefs.current[page];
     if (img) return img.getBoundingClientRect();
     const el = pageRefs.current[page];
     return el ? el.getBoundingClientRect() : null;
-  }
+  }, []);
 
-  function clientToPct(page: number, clientX: number, clientY: number) {
-    const rect = getPageRect(page);
-    if (!rect) return null;
-    return pctFromClientPoint(rect, clientX, clientY);
-  }
+  const clientToPct = useCallback(
+    (page: number, clientX: number, clientY: number) => {
+      const rect = getPageRect(page);
+      if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+      return pctFromClientPoint(rect, clientX, clientY);
+    },
+    [getPageRect]
+  );
 
-  function placeAt(page: number, xPct: number, yPct: number) {
-    const signer = participants.find((p) => p.order === activeOrder);
-    const existing = fields.find((f) => f.signerOrder === activeOrder);
-    const width = clamp(existing?.width ?? DEFAULT_FIELD_WIDTH, MIN_FIELD_WIDTH, MAX_FIELD_WIDTH);
-    const height = clamp(existing?.height ?? DEFAULT_FIELD_HEIGHT, MIN_FIELD_HEIGHT, MAX_FIELD_HEIGHT);
-    const x = clamp(xPct - width / 2, 0, 100 - width);
-    const y = clamp(yPct - height / 2, 0, 100 - height);
-
-    if (existing) {
-      onChange(
-        fields.map((f) =>
-          f.id === existing.id
-            ? clampFieldSize({ ...f, page, x, y, label: signer?.name || f.label })
-            : f
-        )
+  const placeAt = useCallback(
+    (page: number, xPct: number, yPct: number) => {
+      const currentFields = fieldsRef.current;
+      const signer = participants.find((p) => p.order === activeOrder);
+      const existing = currentFields.find((f) => f.signerOrder === activeOrder);
+      const width = clamp(existing?.width ?? DEFAULT_FIELD_WIDTH, MIN_FIELD_WIDTH, MAX_FIELD_WIDTH);
+      const height = clamp(
+        existing?.height ?? DEFAULT_FIELD_HEIGHT,
+        MIN_FIELD_HEIGHT,
+        MAX_FIELD_HEIGHT
       );
-      return;
-    }
+      const x = clamp(xPct - width / 2, 0, 100 - width);
+      const y = clamp(yPct - height / 2, 0, 100 - height);
 
-    onChange([
-      ...fields,
-      clampFieldSize({
-        id: createFieldId(),
-        documentId,
-        signerOrder: activeOrder,
-        page,
-        x,
-        y,
-        width,
-        height,
-        label: signer?.name || `Firma ${activeOrder}`,
-      }),
-    ]);
-  }
+      if (existing) {
+        onChangeRef.current(
+          currentFields.map((f) =>
+            f.id === existing.id
+              ? clampFieldSize({ ...f, page, x, y, label: signer?.name || f.label })
+              : f
+          )
+        );
+        return;
+      }
 
-  function handlePageClick(page: number, e: MouseEvent<HTMLDivElement>) {
-    if (drag || resize) return;
+      onChangeRef.current([
+        ...currentFields,
+        clampFieldSize({
+          id: createFieldId(),
+          documentId,
+          signerOrder: activeOrder,
+          page,
+          x,
+          y,
+          width,
+          height,
+          label: signer?.name || `Firma ${activeOrder}`,
+        }),
+      ]);
+    },
+    [activeOrder, documentId, participants]
+  );
+
+  const handlePageClick = (page: number, e: React.MouseEvent<HTMLDivElement>) => {
+    if (Date.now() < suppressClickUntilRef.current) return;
+    if (dragRef.current) return;
     const pct = clientToPct(page, e.clientX, e.clientY);
     if (!pct) return;
     placeAt(page, pct.x, pct.y);
-  }
+  };
 
-  useEffect(() => {
-    if (!drag) return;
-    const activeDrag = drag;
-
-    function onMove(e: globalThis.MouseEvent) {
-      const pct = clientToPct(activeDrag.page, e.clientX, e.clientY);
+  const updateFieldFromPointer = useCallback(
+    (clientX: number, clientY: number) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const pct = clientToPct(drag.page, clientX, clientY);
       if (!pct) return;
-      const field = fields.find((f) => f.id === activeDrag.fieldId);
+      const currentFields = fieldsRef.current;
+      const field = currentFields.find((f) => f.id === drag.fieldId);
       if (!field) return;
-      const width = field.width;
-      const height = field.height;
-      const x = clamp(pct.x - activeDrag.offsetX, 0, 100 - width);
-      const y = clamp(pct.y - activeDrag.offsetY, 0, 100 - height);
-      onChange(
-        fields.map((f) => (f.id === activeDrag.fieldId ? clampFieldSize({ ...f, x, y }) : f))
-      );
-    }
 
-    function onUp() {
-      setDrag(null);
-    }
+      if (drag.mode === 'move') {
+        const x = clamp(pct.x - drag.offsetX, 0, 100 - field.width);
+        const y = clamp(pct.y - drag.offsetY, 0, 100 - field.height);
+        onChangeRef.current(
+          currentFields.map((f) =>
+            f.id === drag.fieldId ? clampFieldSize({ ...f, x, y }) : f
+          )
+        );
+        return;
+      }
 
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, [drag, fields, onChange]);
-
-  useEffect(() => {
-    if (!resize) return;
-    const activeResize = resize;
-
-    function onMove(e: globalThis.MouseEvent) {
-      const pct = clientToPct(activeResize.page, e.clientX, e.clientY);
-      if (!pct) return;
-      const field = fields.find((f) => f.id === activeResize.fieldId);
-      if (!field) return;
       const width = clamp(pct.x - field.x, MIN_FIELD_WIDTH, MAX_FIELD_WIDTH);
       const height = clamp(pct.y - field.y, MIN_FIELD_HEIGHT, MAX_FIELD_HEIGHT);
-      onChange(
-        fields.map((f) =>
-          f.id === activeResize.fieldId ? clampFieldSize({ ...f, width, height }) : f
+      onChangeRef.current(
+        currentFields.map((f) =>
+          f.id === drag.fieldId ? clampFieldSize({ ...f, width, height }) : f
         )
       );
+    },
+    [clientToPct]
+  );
+
+  const endInteraction = useCallback((pointerId?: number) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    if (pointerId != null && drag.pointerId !== pointerId) return;
+
+    if (drag.moved) {
+      suppressClickUntilRef.current = Date.now() + CLICK_SUPPRESS_MS;
+    }
+    dragRef.current = null;
+    setInteractionTick((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    function onMove(e: PointerEvent) {
+      const drag = dragRef.current;
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      const dx = e.clientX - drag.startClientX;
+      const dy = e.clientY - drag.startClientY;
+      if (!drag.moved && dx * dx + dy * dy >= MOVE_THRESHOLD_PX * MOVE_THRESHOLD_PX) {
+        drag.moved = true;
+      }
+      if (drag.moved) {
+        e.preventDefault();
+        updateFieldFromPointer(e.clientX, e.clientY);
+      }
     }
 
-    function onUp() {
-      setResize(null);
+    function onUp(e: PointerEvent) {
+      endInteraction(e.pointerId);
     }
 
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
     return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
     };
-  }, [resize, fields, onChange]);
+  }, [endInteraction, updateFieldFromPointer]);
+
+  const startMove = (
+    e: ReactPointerEvent<HTMLDivElement>,
+    field: SignatureFieldPlacement,
+    page: number
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pct = clientToPct(page, e.clientX, e.clientY);
+    if (!pct) return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    dragRef.current = {
+      mode: 'move',
+      fieldId: field.id,
+      page,
+      offsetX: pct.x - field.x,
+      offsetY: pct.y - field.y,
+      pointerId: e.pointerId,
+      moved: false,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+    };
+    setInteractionTick((n) => n + 1);
+  };
+
+  const startResize = (
+    e: ReactPointerEvent<HTMLDivElement>,
+    field: SignatureFieldPlacement,
+    page: number
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    dragRef.current = {
+      mode: 'resize',
+      fieldId: field.id,
+      page,
+      offsetX: 0,
+      offsetY: 0,
+      pointerId: e.pointerId,
+      moved: false,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+    };
+    setInteractionTick((n) => n + 1);
+  };
 
   if (loading) {
     return (
@@ -187,6 +287,8 @@ export default function SignaturePlacementCanvas({
     );
   }
 
+  const interacting = Boolean(dragRef.current);
+
   return (
     <Stack gap='sm' style={{ height: '100%', minHeight: 0 }}>
       <Box
@@ -203,8 +305,8 @@ export default function SignaturePlacementCanvas({
           Ubique la firma de {activePerson?.name ?? 'firmante'}
         </Text>
         <Text size='xs' c='dimmed' mt={4}>
-          Clic para colocar · arrastre para mover · esquina inferior para redimensionar ({MIN_FIELD_WIDTH}–
-          {MAX_FIELD_WIDTH}% × {MIN_FIELD_HEIGHT}–{MAX_FIELD_HEIGHT}%).
+          Clic para colocar · arrastre para mover · esquina inferior para redimensionar (
+          {MIN_FIELD_WIDTH}–{MAX_FIELD_WIDTH}% × {MIN_FIELD_HEIGHT}–{MAX_FIELD_HEIGHT}%).
         </Text>
       </Box>
       <ScrollArea
@@ -229,11 +331,13 @@ export default function SignaturePlacementCanvas({
                 position: 'relative',
                 width: '100%',
                 maxWidth: 720,
-                cursor: 'crosshair',
+                cursor: interacting ? 'grabbing' : 'crosshair',
                 boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
                 borderRadius: 4,
                 overflow: 'hidden',
                 background: '#fff',
+                userSelect: 'none',
+                touchAction: 'none',
               }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -243,7 +347,7 @@ export default function SignaturePlacementCanvas({
                 }}
                 src={page.dataUrl}
                 alt={`Página ${page.page}`}
-                style={{ display: 'block', width: '100%', height: 'auto' }}
+                style={{ display: 'block', width: '100%', height: 'auto', pointerEvents: 'none' }}
                 draggable={false}
               />
               {fields
@@ -254,17 +358,7 @@ export default function SignaturePlacementCanvas({
                   return (
                     <Box
                       key={field.id}
-                      onMouseDown={(e) => {
-                        e.stopPropagation();
-                        const pct = clientToPct(page.page, e.clientX, e.clientY);
-                        if (!pct) return;
-                        setDrag({
-                          fieldId: field.id,
-                          page: page.page,
-                          offsetX: pct.x - field.x,
-                          offsetY: pct.y - field.y,
-                        });
-                      }}
+                      onPointerDown={(e) => startMove(e, field, page.page)}
                       style={{
                         position: 'absolute',
                         left: `${field.x}%`,
@@ -281,9 +375,10 @@ export default function SignaturePlacementCanvas({
                         alignItems: 'center',
                         justifyContent: 'center',
                         overflow: 'hidden',
-                        cursor: 'move',
+                        cursor: interacting ? 'grabbing' : 'grab',
                         boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
                         boxSizing: 'border-box',
+                        touchAction: 'none',
                       }}
                     >
                       {person?.signatureDataUrl ? (
@@ -296,6 +391,7 @@ export default function SignaturePlacementCanvas({
                             maxHeight: '58%',
                             objectFit: 'contain',
                             flexShrink: 0,
+                            pointerEvents: 'none',
                           }}
                           draggable={false}
                         />
@@ -306,27 +402,25 @@ export default function SignaturePlacementCanvas({
                         ta='center'
                         px={4}
                         fw={600}
-                        style={{ lineHeight: 1.2, marginTop: 2 }}
+                        style={{ lineHeight: 1.2, marginTop: 2, pointerEvents: 'none' }}
                       >
                         {(person?.name || field.label || 'Firmante').toUpperCase()}
                       </Text>
                       <Box
-                        onMouseDown={(e) => {
-                          e.stopPropagation();
-                          setResize({ fieldId: field.id, page: page.page });
-                        }}
+                        onPointerDown={(e) => startResize(e, field, page.page)}
                         style={{
                           position: 'absolute',
                           right: 2,
                           bottom: 2,
-                          width: 12,
-                          height: 12,
+                          width: 14,
+                          height: 14,
                           borderRadius: 2,
                           background: isActive
                             ? 'var(--mantine-color-blue-6)'
                             : 'var(--mantine-color-green-6)',
                           cursor: 'nwse-resize',
                           border: '1px solid #fff',
+                          touchAction: 'none',
                         }}
                         title='Redimensionar'
                       />

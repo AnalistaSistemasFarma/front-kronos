@@ -27,8 +27,8 @@ interface UsePushNotifications {
   permission: NotificationPermission | 'default';
   loading: boolean;
   lastError: string | null;
-  subscribe: () => Promise<boolean>;
-  unsubscribe: () => Promise<boolean>;
+  subscribe: () => Promise<{ ok: boolean; error: string | null }>;
+  unsubscribe: () => Promise<{ ok: boolean; error: string | null }>;
 }
 
 export function usePushNotifications(userEmail: string | null | undefined): UsePushNotifications {
@@ -58,25 +58,29 @@ export function usePushNotifications(userEmail: string | null | undefined): UseP
       .catch(() => setIsSubscribed(false));
   }, []);
 
-  const subscribe = useCallback(async (): Promise<boolean> => {
+  const subscribe = useCallback(async (): Promise<{ ok: boolean; error: string | null }> => {
     if (!isSupported) {
-      setLastError('Este navegador no soporta notificaciones push.');
-      return false;
+      const error = 'Este navegador no soporta notificaciones push.';
+      setLastError(error);
+      return { ok: false, error };
     }
 
     if (!isSecureNotificationContext()) {
-      setLastError(formatPushSubscribeError(new Error('insecure context')));
-      return false;
+      const error = formatPushSubscribeError(new Error('insecure context'));
+      setLastError(error);
+      return { ok: false, error };
     }
 
     if (!isVapidConfigured()) {
-      setLastError(formatPushSubscribeError(new Error('vapid missing')));
-      return false;
+      const error = formatPushSubscribeError(new Error('vapid missing'));
+      setLastError(error);
+      return { ok: false, error };
     }
 
     if (!userEmail) {
-      setLastError('Debes iniciar sesión para activar las notificaciones push.');
-      return false;
+      const error = 'Debes iniciar sesión para activar las notificaciones push.';
+      setLastError(error);
+      return { ok: false, error };
     }
 
     setLoading(true);
@@ -86,8 +90,9 @@ export function usePushNotifications(userEmail: string | null | undefined): UseP
       const result = await Notification.requestPermission();
       setPermission(result);
       if (result !== 'granted') {
-        setLastError('Permiso de notificaciones denegado.');
-        return false;
+        const error = 'Permiso de notificaciones denegado.';
+        setLastError(error);
+        return { ok: false, error };
       }
 
       const reg = await waitForServiceWorkerRegistration();
@@ -108,21 +113,21 @@ export function usePushNotifications(userEmail: string | null | undefined): UseP
       if (!res.ok) throw new Error(`POST /api/push/subscribe falló (${res.status})`);
 
       setIsSubscribed(true);
-      return true;
+      return { ok: true, error: null };
     } catch (err) {
-      const message = formatPushSubscribeError(err);
-      setLastError(message);
+      const error = formatPushSubscribeError(err);
+      setLastError(error);
       if (!isBenignPushError(err)) {
         console.warn('[usePushNotifications] Error en subscribe:', err);
       }
-      return false;
+      return { ok: false, error };
     } finally {
       setLoading(false);
     }
   }, [isSupported, userEmail]);
 
-  const unsubscribe = useCallback(async (): Promise<boolean> => {
-    if (!isSupported) return false;
+  const unsubscribe = useCallback(async (): Promise<{ ok: boolean; error: string | null }> => {
+    if (!isSupported) return { ok: false, error: 'No soportado' };
 
     setLoading(true);
     setLastError(null);
@@ -132,7 +137,7 @@ export function usePushNotifications(userEmail: string | null | undefined): UseP
       const sub = await reg.pushManager.getSubscription();
       if (!sub) {
         setIsSubscribed(false);
-        return true;
+        return { ok: true, error: null };
       }
 
       await fetch('/api/push/subscribe', {
@@ -143,14 +148,14 @@ export function usePushNotifications(userEmail: string | null | undefined): UseP
       });
       await sub.unsubscribe();
       setIsSubscribed(false);
-      return true;
+      return { ok: true, error: null };
     } catch (err) {
-      const message = formatPushSubscribeError(err);
-      setLastError(message);
+      const error = formatPushSubscribeError(err);
+      setLastError(error);
       if (!isBenignPushError(err)) {
         console.warn('[usePushNotifications] Error en unsubscribe:', err);
       }
-      return false;
+      return { ok: false, error };
     } finally {
       setLoading(false);
     }

@@ -16,8 +16,9 @@ ORION_API_BASE_URL=http://localhost:3000
 # Origen permitido para postMessage del iframe
 ORION_EMBED_ORIGIN=http://localhost:3000
 
-# Mapeo SynerLink id_company → tenant Orion
-ORION_TENANT_MAP={"7":"farmaceutica-abc"}
+# Mapeo SynerLink id_company → tenant Orion (slug)
+# 1 FARMALOGICA, 2 RYAN, 3 ONELATAMPHARMA, 5 UNIDOSIS, 7 FARMADOSIS, 8 GSS, 9 ABAMIA
+ORION_TENANT_MAP={"1":"farmalogica","2":"ryan","3":"farmalogica-1","5":"unidosis","7":"farmadosis","8":"gss","9":"abamia"}
 
 # Opcional: URL directa al perfil de firma embebido (por defecto vía API embed/signature-url)
 ORION_SIGNATURE_PROFILE_URL=
@@ -27,10 +28,14 @@ En Orion debe existir:
 
 ```env
 SYNERLINK_INTEGRATION_API_KEY=<shared-integration-api-key>
+SYNERLINK_INTEGRATION_API_KEY_TENANT=gss
 SYNERLINK_WEBHOOK_URL=http://localhost:8080/api/integrations/orion/document-status
 SYNERLINK_ALLOWED_ORIGINS=http://localhost:8080
-SYNERLINK_TENANT_MAP={"7":"farmaceutica-abc"}
+# Mismo mapa que ORION_TENANT_MAP (id_company → slug Orion)
+SYNERLINK_TENANT_MAP={"1":"farmalogica","2":"ryan","3":"farmalogica-1","5":"unidosis","7":"farmadosis","8":"gss","9":"abamia"}
 ```
+
+La clave de integración SynerLink actúa como **hub multi-empresa**: el documento se crea en el tenant del `id_company` de la solicitud (vía el mapa), no siempre en GSS.
 
 ## Campo de formulario
 
@@ -73,9 +78,11 @@ Compatibilidad: JSON plano legacy (1 doc / solicitud) se lee como `documents._le
    - Orion recibe el documento.
    - Se crea **1 autorización Kronos por firmante** de ese PDF (`[orionFile:…][orionAuth]`), notificada a **Autorizaciones**.
    - Se crea **1 tarea de firma por firmante×documento** (Tareas asignadas).
+   - Campana/push: firmantes invitados + solicitante/encargados (“documento enviado a firma”).
 6. Camino del firmante: **Autoriza → ve el documento → firma** (deep-link con `orionFileId` + `orionAction=sign`).
-7. Orion → webhook `document-status` → Kronos actualiza ese `fileId`; la solicitud se cierra cuando **todos** los PDFs están `FIRMADO`.
-8. **Versiones** (solo admin + solicitante): original + una entrada por cada firma parcial/final (`state.versions[]`).
+7. Orion → webhook `document-status` → Kronos actualiza ese `fileId`. Al completar **todas** las firmas de los PDFs se avanzan las tareas de firma; la **solicitud no se cierra** automáticamente (pueden quedar otras tareas del workflow).
+   - En cada avance: nota en el historial + notificación al solicitante/encargados (firma parcial, siguiente turno, firmado completo, rechazo/devolución).
+8. **Versiones** (solo quien **creó la solicitud**/flujo; admin solo si no es firmante de ese documento): original + firmas parciales/final. Firmantes no ven ni descargan el historial.
 9. **Descarga / vista del firmante siguiente**: usa el PDF con firmas acumuladas (`signedFileUrl` o última versión), no el adjunto original de OneDrive.
 
 No hay tarjetas hub de firma: el host Orion es invisible y solo registra acciones para adjuntos + modales. Los permisos son subprocesos ocultos asignables en **Administración → Usuarios**.
@@ -84,7 +91,7 @@ No hay tarjetas hub de firma: el host Orion es invisible y solo registra accione
 
 | Quién | Qué puede hacer |
 |-------|-----------------|
-| Subproceso **Preparar firma** (`/process/firma/prepare`; legacy `/process/firma/manage`) | **Preparar / Gestionar** por PDF (marcar, firmantes, ubicar, enviar). El creador o `admin` **no** omiten este permiso. |
+| Subproceso **Preparar firma** (`/process/firma/prepare`; legacy `/process/firma/manage`) | **Preparar / Gestionar** por PDF (marcar, firmantes, ubicar, enviar). El creador o `admin` **no** omiten este permiso. El historial de **versiones** lo ve el **creador de la solicitud** (o admin), no cualquier gestora ni firmantes. |
 | Subproceso **Firmar documento** (`/process/firma/sign`) **y** ser firmante en turno | **Autorizar** → **Firmar**. Sin el subproceso no puede firmar aunque esté en la lista. |
 | Cualquier usuario | Dibujar/guardar firma personal (rúbrica) |
 

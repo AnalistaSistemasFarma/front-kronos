@@ -1,8 +1,28 @@
 import type { OrionSignerState } from './types';
 
 export function isSignerCompleted(status?: string | null): boolean {
-  const value = String(status || '').toUpperCase();
-  return ['FIRMADO', 'SIGNED', 'COMPLETED'].includes(value);
+  const value = String(status || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_');
+  return [
+    'FIRMADO',
+    'SIGNED',
+    'COMPLETED',
+    'DONE',
+    'APPLIED',
+    'SIGNATURE_APPLIED',
+    'SIGNED_OFF',
+  ].includes(value);
+}
+
+/** Slot firmado: status terminal o signedAt (Orion a veces deja status viejo tras accept-sign). */
+export function isSignerSlotCompleted(
+  signer?: Pick<OrionSignerState, 'status' | 'signedAt'> | null
+): boolean {
+  if (!signer) return false;
+  if (isSignerCompleted(signer.status)) return true;
+  return Boolean(String(signer.signedAt || '').trim());
 }
 
 export function isSignerRejected(status?: string | null): boolean {
@@ -54,12 +74,12 @@ export function allSlotsCompletedForEmail(
   email?: string | null
 ): boolean {
   const mine = signersForEmail(signers, email);
-  return mine.length > 0 && mine.every((s) => isSignerCompleted(s.status));
+  return mine.length > 0 && mine.every((s) => isSignerSlotCompleted(s));
 }
 
 export function getCurrentPendingSigner(signers?: OrionSignerState[] | null): OrionSignerState | null {
   for (const signer of orderedSigners(signers)) {
-    if (!isSignerCompleted(signer.status) && !isSignerRejected(signer.status)) {
+    if (!isSignerSlotCompleted(signer) && !isSignerRejected(signer.status)) {
       return signer;
     }
   }
@@ -68,7 +88,7 @@ export function getCurrentPendingSigner(signers?: OrionSignerState[] | null): Or
 
 export function allSignersCompleted(signers?: OrionSignerState[] | null): boolean {
   const list = orderedSigners(signers);
-  return list.length > 0 && list.every((signer) => isSignerCompleted(signer.status));
+  return list.length > 0 && list.every((signer) => isSignerSlotCompleted(signer));
 }
 
 export function newlyCompletedSigners(
@@ -82,10 +102,10 @@ export function newlyCompletedSigners(
 
   const completed: OrionSignerState[] = [];
   orderedSigners(next).forEach((signer, index) => {
-    if (!isSignerCompleted(signer.status)) return;
+    if (!isSignerSlotCompleted(signer)) return;
     const key = signerSlotKey(signer, index);
     const before = prevBySlot.get(key);
-    if (!before || !isSignerCompleted(before.status)) {
+    if (!before || !isSignerSlotCompleted(before)) {
       completed.push(signer);
     }
   });

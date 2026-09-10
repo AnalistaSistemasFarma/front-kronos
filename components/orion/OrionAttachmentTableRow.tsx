@@ -147,13 +147,11 @@ export default function OrionAttachmentTableRow({
     window.dispatchEvent(new CustomEvent('orion-open-sign', { detail: d.meta }));
   };
 
-  const openEditor = () => {
-    if (d.api?.enabled) d.api.actions.openDocumentEditor(d.meta);
+  const openEditor = (initialStep: 0 | 1 | 2 = 0) => {
+    if (d.api?.enabled) d.api.actions.openDocumentEditor(d.meta, { initialStep });
   };
 
-  // "Archivo" siempre debe abrir el original sin firmas.
-  // Si el documento ya está vinculado a Orion, usamos el proxy same-origin con versionId=original
-  // para evitar URLs temporales expiradas de SharePoint/OneDrive.
+  // Original vía proxy (versionId=original): solo creador del flujo / admin.
   const originalFileHref =
     d.hasOrionDoc && props.requestId && props.fileId
       ? buildOrionSignedFileProxyUrl({
@@ -172,7 +170,8 @@ export default function OrionAttachmentTableRow({
   const isClosed =
     String(d.state.status || '').toUpperCase() === 'FIRMADO' ||
     (d.signers.length > 0 && d.completedCount === d.signers.length);
-  const canAccessOriginalFile = Boolean(d.api?.canManage || d.api?.isAdmin);
+  // Misma regla que Versiones: no firmantes ni solo “Preparar firma”.
+  const canAccessOriginalFile = Boolean(d.api?.canViewVersions);
 
   return (
     <Table.Tr className={isClosed ? 'doc-row doc-row--closed' : 'doc-row'}>
@@ -201,7 +200,11 @@ export default function OrionAttachmentTableRow({
 
       <Table.Td data-label='Estado' className='doc-cell'>
         <Stack gap={6}>
-          {d.canToggleIntent ? (
+          {d.permissionsPending ? (
+            <Text size='xs' c='dimmed'>
+              Cargando permisos…
+            </Text>
+          ) : d.canToggleIntent ? (
             <SegmentedControl
               size='xs'
               value={d.signatureIntent}
@@ -339,22 +342,22 @@ export default function OrionAttachmentTableRow({
                   <ActionLink
                     icon={<IconUsers size={15} stroke={1.6} />}
                     label='Firmantes'
-                    onClick={openEditor}
+                    onClick={() => openEditor(1)}
                   />
                   <ActionLink
                     icon={<IconPencil size={15} stroke={1.6} />}
                     label='Colocar firmas'
-                    onClick={openEditor}
+                    onClick={() => openEditor(2)}
                   />
                   <ActionLink
                     icon={<IconSparkles size={15} stroke={1.6} />}
                     label='Editar expediente'
-                    onClick={openEditor}
+                    onClick={() => openEditor(0)}
                   />
                 </>
               ) : null}
 
-              {versionsSlot ? (
+              {versionsSlot && d.api?.canViewVersions ? (
                 <div>{versionsSlot}</div>
               ) : null}
 

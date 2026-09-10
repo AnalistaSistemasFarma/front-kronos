@@ -18,15 +18,36 @@ function versionIdForSigner(signer: OrionSignerState): string {
   return `sign-${email}-${orderPart}-${at}`;
 }
 
-/** Admin o quien creó la solicitud puede ver el historial completo de versiones. */
+/**
+ * Historial de versiones / descargas:
+ * - Siempre: quien creó la solicitud (dueño del flujo).
+ * - Admin: solo si NO es firmante de ese documento (evita fuga a firmantes con rol admin).
+ * Firmantes y “Preparar firma” no ven el historial.
+ */
 export function canViewOrionDocumentVersions(params: {
   isAdmin?: boolean;
   currentUserId?: string | number | null;
   requesterId?: string | number | null;
+  currentUserEmail?: string | null;
+  requesterEmail?: string | null;
+  /** Firmante del documento (aunque sea admin): no ve versiones salvo que sea el creador. */
+  isSigner?: boolean;
+  /** @deprecated Ignorado: Preparar firma no otorga ver versiones. */
+  canManage?: boolean;
 }): boolean {
-  if (params.isAdmin) return true;
-  if (params.currentUserId == null || params.requesterId == null) return false;
-  return String(params.currentUserId) === String(params.requesterId);
+  const isRequester =
+    (params.currentUserId != null &&
+      params.requesterId != null &&
+      String(params.currentUserId) === String(params.requesterId)) ||
+    (() => {
+      const me = normalizeEmail(params.currentUserEmail);
+      const owner = normalizeEmail(params.requesterEmail);
+      return Boolean(me && owner && me === owner);
+    })();
+
+  if (isRequester) return true;
+  if (params.isAdmin && !params.isSigner) return true;
+  return false;
 }
 
 /** ¿El usuario actual es firmante del documento (no necesariamente creador)? */
@@ -104,19 +125,46 @@ export function listOrionDocumentVersions(
 }
 
 /**
- * Creador/admin: todas las versiones (ordenadas).
- * Firmante: únicamente la última versión firmada (no el original ni parciales intermedias).
+ * Gestor (fullHistory): todas las versiones ordenadas.
+ * Sin historial: vacío (firmantes y resto no listan descargas de versiones).
  */
 export function listOrionDocumentVersionsForViewer(
   state: OrionSignatureState | undefined | null,
   options: { fullHistory: boolean }
 ): OrionDocumentVersion[] {
-  const ordered = listOrionDocumentVersions(state);
-  if (options.fullHistory) return ordered;
+  if (!options.fullHistory) return [];
+  return listOrionDocumentVersions(state);
+}
 
-  const signed = ordered.filter((v) => v.kind !== 'original');
-  if (signed.length === 0) return [];
-  return [signed[signed.length - 1]!];
+function earliestCompletedSignerTime(state: OrionSignatureState): number | null {
+  const times = (state.signers ?? [])
+    .map((s) => Date.parse(String(s.signedAt || '')))
+    .filter((n) => Number.isFinite(n));
+  return times.length > 0 ? Math.min(...times) : null;
+}
+
+/**
+ * Fecha del original: nunca posterior a la 1.ª firma.
+ * Evita que un rebuild/sync ponga el original “después” de las parciales.
+ */
+export function resolveOriginalVersionCreatedAt(
+  state: OrionSignatureState,
+  existingCreatedAt?: string | null
+): string {
+  const earliestSign = earliestCompletedSignerTime(state);
+  const existing = Date.parse(String(existingCreatedAt || ''));
+
+  if (earliestSign != null) {
+    if (Number.isFinite(existing) && existing < earliestSign) {
+      return new Date(existing).toISOString();
+    }
+    return new Date(earliestSign - 1000).toISOString();
+  }
+
+  if (Number.isFinite(existing)) return new Date(existing).toISOString();
+  const updated = Date.parse(String(state.updatedAt || ''));
+  if (Number.isFinite(updated)) return new Date(updated).toISOString();
+  return new Date().toISOString();
 }
 
 export function ensureOriginalOrionVersion(
@@ -127,14 +175,27 @@ export function ensureOriginalOrionVersion(
   if (!url) return state;
 
   const versions = [...(state.versions ?? [])];
-  if (!versions.some((v) => v.kind === 'original')) {
+  const originalIdx = versions.findIndex((v) => v.kind === 'original');
+
+  if (originalIdx < 0) {
     versions.unshift({
       id: 'original',
       kind: 'original',
       label: 'Original (v1)',
       url,
-      createdAt: state.updatedAt ?? new Date().toISOString(),
+      createdAt: resolveOriginalVersionCreatedAt(state),
     });
+  } else {
+    const prev = versions[originalIdx]!;
+    const fixedAt = resolveOriginalVersionCreatedAt(state, prev.createdAt);
+    if (fixedAt !== prev.createdAt || (url && !prev.url)) {
+      versions[originalIdx] = {
+        ...prev,
+        url: prev.url || url,
+        createdAt: fixedAt,
+        label: prev.label || 'Original (v1)',
+      };
+    }
   }
 
   return {
@@ -218,11 +279,13 @@ export function rebuildOrionVersionHistory(
 ): OrionSignatureState {
   const workingUrl =
     String(state.signedFileUrl || signedFileUrlFallback || '').trim() || null;
+  const prevOriginal = (state.versions ?? []).find((v) => v.kind === 'original');
   const base = ensureOriginalOrionVersion(
     {
       ...state,
       signedFileUrl: workingUrl ?? state.signedFileUrl ?? null,
-      versions: undefined,
+      // Conservar el original previo (fecha) al reconstruir el historial.
+      versions: prevOriginal ? [prevOriginal] : undefined,
     },
     originalUrl ?? state.originalFileUrl ?? null
   );

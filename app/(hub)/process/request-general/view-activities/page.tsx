@@ -660,6 +660,11 @@ function ViewRequestPage() {
     isAdmin,
     currentUserId: session?.user?.id,
     requesterId: request?.id_requester,
+    currentUserEmail: session?.user?.email,
+    requesterEmail: request?.requester_email,
+    isSigner: Object.values({ ...orionInitialDocuments, ...orionDocuments }).some((doc) =>
+      isOrionDocumentSigner(doc, session?.user?.email)
+    ),
   });
 
   const handleOrionDocumentsChange = useCallback(
@@ -1430,7 +1435,7 @@ function ViewRequestPage() {
                         }}
                       >
                         <Text size='xs' c='dimmed' fw={500} mb={6}>
-                          {request.name_requester || 'Solicitud'}
+                          Documento
                         </Text>
                         <ChatDocumentChip
                           name={doc.name}
@@ -1495,11 +1500,8 @@ function ViewRequestPage() {
                                   hour: '2-digit',
                                   minute: '2-digit',
                                   hour12: true,
-                                }).format(
-                                  new Date(
-                                    new Date(note.creation_date).getTime() + 5 * 60 * 60 * 1000 
-                                  )
-                                )}
+                                  timeZone: 'America/Bogota',
+                                }).format(new Date(note.creation_date))}
                               </Text>
                             )}
                           </div>
@@ -2102,11 +2104,7 @@ function ViewRequestPage() {
                             <OrionDocumentVersionsButton
                               state={orionState}
                               fileName={file.name}
-                              canView={
-                                canViewOrionVersions ||
-                                isOrionDocumentSigner(orionState, session?.user?.email)
-                              }
-                              fullHistory={canViewOrionVersions}
+                              canView={canViewOrionVersions}
                               fallbackOriginalUrl={getFolderFileUrl(file)}
                               requestId={request.id_request_general}
                               fileId={fileId}

@@ -33,7 +33,8 @@ export function emptyOrionFormBag(): OrionSignatureBagBag {
 
 /**
  * Resuelve si el PDF es para firmar o solo ver.
- * Compat: sin flag, si ya hay flujo Orion → sign; si no → view.
+ * Si ya hay flujo Orion (doc, firmantes o estado activo), siempre es "sign"
+ * aunque quede un signatureIntent:"view" residual (evita bloquear al firmante).
  */
 export function resolveOrionSignatureIntent(
   state?: OrionSignatureState | null
@@ -41,14 +42,16 @@ export function resolveOrionSignatureIntent(
   const raw = String(state?.signatureIntent || '')
     .trim()
     .toLowerCase();
-  if (raw === 'sign' || raw === 'view') return raw;
-  if (
-    state?.orionDocumentId ||
+  const statusUpper = String(state?.status || '')
+    .trim()
+    .toUpperCase();
+  const hasActiveSignFlow =
+    Boolean(state?.orionDocumentId) ||
     (state?.signers?.length ?? 0) > 0 ||
-    Boolean(state?.status)
-  ) {
-    return 'sign';
-  }
+    Boolean(statusUpper && statusUpper !== 'BORRADOR');
+
+  if (hasActiveSignFlow) return 'sign';
+  if (raw === 'sign' || raw === 'view') return raw;
   return 'view';
 }
 

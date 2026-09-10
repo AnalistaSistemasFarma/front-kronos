@@ -90,7 +90,7 @@ export default function NotificationBell() {
   const router = useRouter();
   const userEmail = session?.user?.email;
   const isAuthenticated = status === 'authenticated' && Boolean(userEmail);
-  const { isSupported, isAvailable, isSubscribed, permission, loading: pushLoading, subscribe, unsubscribe } =
+  const { isSupported, isAvailable, isSubscribed, permission, loading: pushLoading, lastError, subscribe, unsubscribe } =
     usePushNotifications(userEmail);
 
   const [opened, setOpened] = useState(false);
@@ -190,12 +190,17 @@ export default function NotificationBell() {
         void fetchNotifications();
       }
     };
+    const onRefresh = () => {
+      void fetchNotifications();
+    };
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('synerlink:notifications-refresh', onRefresh);
 
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('synerlink:notifications-refresh', onRefresh);
       abortRef.current?.abort();
     };
   }, [isAuthenticated, fetchNotifications]);
@@ -326,13 +331,16 @@ export default function NotificationBell() {
       return;
     }
     if (isSubscribed) {
-      const ok = await unsubscribe();
+      const { ok, error } = await unsubscribe();
       if (ok) toast.success('Notificaciones push desactivadas');
-      else toast.error('No se pudieron desactivar las notificaciones push');
+      else toast.error(error || 'No se pudieron desactivar las notificaciones push');
     } else {
-      const ok = await subscribe();
+      const { ok, error } = await subscribe();
       if (ok) toast.success('Notificaciones push activadas');
-      else toast.error('No se pudieron activar las notificaciones push en este entorno', { duration: 5000 });
+      else
+        toast.error(error || lastError || 'No se pudieron activar las notificaciones push', {
+          duration: 7000,
+        });
     }
   };
 
