@@ -457,6 +457,9 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
       withArrow
       shadow='md'
       width={225}
+      trapFocus={!tecladoTactil}
+      returnFocus={!tecladoTactil}
+      menuItemTabIndex={0}
     >
       <Menu.Target>
         <ActionIcon
@@ -467,6 +470,9 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           disabled={disabled}
           aria-label='Adjuntar y más opciones'
           title='Adjuntar y más opciones'
+          onMouseDown={(event) => {
+            if (document.activeElement === textareaRef.current) event.preventDefault();
+          }}
         >
           <IconPaperclip size={19} />
         </ActionIcon>
@@ -659,7 +665,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           diferencia se reparte mitad arriba y mitad abajo y no se nota.
           El `gap` sube de 2 a 8 px por lo mismo que reportó Nicolás
           (2026-09-10): pegados así la fila se ve amontonada, no espaciada. */}
-      <Group gap={8} align='center' wrap='nowrap'>
+      <Group gap={8} align='center' wrap='nowrap' className='chat-composer__row'>
         {preview ? (
           <Box
             className='chat-composer__preview'
@@ -697,6 +703,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             autoCorrect='off'
             autoCapitalize='off'
             autosize
+            radius={23}
             /* Arranca en UN renglón, como WhatsApp, y crece al escribir. */
             minRows={1}
             maxRows={6}
@@ -704,7 +711,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             autoFocus={autoFocus}
             error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
             style={{ flex: 1, minWidth: 0 }}
-            classNames={{ input: 'chat-composer__input' }}
+            classNames={{ root: 'chat-composer__field', input: 'chat-composer__input' }}
             /* El clip va DENTRO de la caja. `rightSectionPointerEvents='all'`
                no es opcional: por defecto Mantine le pone `pointer-events:
                none` a esa zona —está pensada para iconos decorativos— y el
@@ -730,6 +737,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           withArrow
         >
           <ActionIcon
+            className='chat-composer__send'
             size={46}
             radius='xl'
             variant='filled'
@@ -782,6 +790,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           // Se limpia para que escoger DOS VECES el mismo archivo vuelva a
           // disparar el onChange.
           event.currentTarget.value = '';
+          textareaRef.current?.focus({ preventScroll: true });
         }}
       />
     </Box>

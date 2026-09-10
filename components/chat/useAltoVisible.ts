@@ -37,12 +37,19 @@ export function useAltoVisible(alCambiar?: () => void) {
     if (!vv) return;
 
     const raiz = document.documentElement;
+    let ultimoAlto = -1;
+    let ultimoOffset = -1;
 
     const escribir = () => {
       // `Math.round` a propósito: los decimales del visual viewport hacen
       // parpadear el layout en cada micro-scroll.
-      raiz.style.setProperty('--alto-visible', `${Math.round(vv.height)}px`);
-      raiz.style.setProperty('--desplazamiento-visible', `${Math.round(vv.offsetTop)}px`);
+      const alto = Math.round(vv.height);
+      const offset = Math.round(vv.offsetTop);
+      if (alto === ultimoAlto && offset === ultimoOffset) return;
+      ultimoAlto = alto;
+      ultimoOffset = offset;
+      raiz.style.setProperty('--alto-visible', `${alto}px`);
+      raiz.style.setProperty('--desplazamiento-visible', `${offset}px`);
       avisar.current?.();
     };
 
