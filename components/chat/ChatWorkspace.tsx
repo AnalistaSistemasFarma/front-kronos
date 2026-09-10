@@ -14,9 +14,7 @@ import {
   Grid,
   Group,
   Loader,
-  Modal,
   SimpleGrid,
-  Stack,
   Text,
   TextInput,
   Tooltip,
@@ -35,7 +33,6 @@ import {
   IconLock,
   IconPlus,
   IconSearch,
-  IconTrash,
   IconUsersGroup,
   IconX,
 } from '@tabler/icons-react';
@@ -298,11 +295,6 @@ export default function ChatWorkspace({
   // nombre y la foto—, como en WhatsApp se toca el contacto: la tarjeta de la
   // lista sigue abriendo el chat, que es lo que uno espera de una lista.
   const [detalleAbierto, setDetalleAbierto] = useState(false);
-  // Borrar un grupo: el grupo que se va a borrar (null = no hay confirmación
-  // abierta) y si la petición está en curso.
-  const [grupoABorrar, setGrupoABorrar] = useState<ChatConversationDto | null>(null);
-  const [borrando, setBorrando] = useState(false);
-  const [errorBorrar, setErrorBorrar] = useState<string | null>(null);
 
   // En pantallas angostas las dos columnas de la rejilla se APILAN: la lista de
   // asistentes arriba y la conversación debajo. Al llegar desde una
@@ -557,43 +549,6 @@ export default function ChatWorkspace({
   // Las carpetas por empresa. `comoLista` las apila en una sola columna: es lo
   // que necesita la barra lateral del escritorio, donde no caben tarjetas de
   // dos columnas.
-  /**
-   * ¿Puede esta persona borrar este grupo?
-   *
-   * El DUEÑO o un administrador. No cualquier integrante: en un grupo de doce
-   * personas, que cualquiera desaparezca la conversación de todos es un
-   * accidente esperando ocurrir. La reja de verdad está en el endpoint; esto
-   * solo decide si se pinta el botón.
-   */
-  const puedeBorrarGrupo = (grupo: ChatConversationDto): boolean => {
-    if (overview.canBroadcast) return true;
-    return (grupo.participants ?? []).some(
-      (p) => p.kind === 'user' && String(p.id) === miId && p.role === 'owner'
-    );
-  };
-
-  const borrarGrupo = async () => {
-    if (!grupoABorrar) return;
-    setBorrando(true);
-    setErrorBorrar(null);
-    try {
-      const res = await fetch(`/api/chat/groups/${grupoABorrar.id}`, { method: 'DELETE' });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error ?? `No se pudo borrar (${res.status}).`);
-
-      // Se cierra lo que estaba abierto —el grupo ya no existe— y se recarga
-      // la bandeja para que desaparezca de la lista.
-      setGrupoABorrar(null);
-      setSeleccion(null);
-      verEnLaUrl('/process/chat');
-      overview.refresh();
-    } catch (e) {
-      setErrorBorrar((e as Error).message);
-    } finally {
-      setBorrando(false);
-    }
-  };
-
   /**
    * Abrir la conversación de un resultado.
    *
@@ -857,49 +812,6 @@ export default function ChatWorkspace({
    * misma razón: se monta en los dos armazones y duplicarla llevaría a que uno
    * se quede sin los arreglos del otro.
    */
-  /**
-   * Confirmación de borrado.
-   *
-   * Con confirmación y diciendo QUÉ se pierde, porque esto no se deshace: se
-   * van los mensajes de todos, no solo los míos. Un borrado destructivo detrás
-   * de un solo clic es de las cosas que uno lamenta una sola vez.
-   */
-  const modalDeBorrado = (
-    <Modal
-      opened={grupoABorrar !== null}
-      onClose={() => (borrando ? undefined : setGrupoABorrar(null))}
-      title='Borrar el grupo'
-      radius='lg'
-      centered
-      classNames={{ content: 'chat-surface' }}
-    >
-      <Stack gap='sm'>
-        <Text size='sm'>
-          Va a borrar <strong>{grupoABorrar?.title ?? 'este grupo'}</strong> y{' '}
-          <strong>toda su conversación</strong>, para todos los integrantes.
-        </Text>
-        <Text size='xs' className='chat-text-muted'>
-          Esto no se puede deshacer.
-        </Text>
-
-        {errorBorrar && (
-          <Alert color='red' radius='md' p='xs'>
-            <Text size='xs'>{errorBorrar}</Text>
-          </Alert>
-        )}
-
-        <Group justify='flex-end' gap='xs'>
-          <Button variant='subtle' color='gray' onClick={() => setGrupoABorrar(null)} disabled={borrando}>
-            Cancelar
-          </Button>
-          <Button color='red' onClick={() => void borrarGrupo()} loading={borrando}>
-            Borrar el grupo
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
-  );
-
   const modalDeDetalle = (
     <AgentDetailModal
       agent={selectedAgent}
@@ -986,24 +898,7 @@ export default function ChatWorkspace({
               </Text>
             </Box>
           </Group>
-          <Group gap={4} wrap='nowrap'>
-            {puedeBorrarGrupo(selectedGroup) && (
-              <Tooltip label='Borrar el grupo' withArrow>
-                <ActionIcon
-                  variant='subtle'
-                  color='red'
-                  onClick={() => {
-                    setErrorBorrar(null);
-                    setGrupoABorrar(selectedGroup);
-                  }}
-                  aria-label='Borrar el grupo'
-                >
-                  <IconTrash size={18} />
-                </ActionIcon>
-              </Tooltip>
-            )}
-            {botonesDelEncabezado}
-          </Group>
+          {botonesDelEncabezado}
         </Group>
 
         <ChatThread
@@ -1117,7 +1012,6 @@ export default function ChatWorkspace({
 
         {modalDeGrupo}
         {modalDeDetalle}
-        {modalDeBorrado}
       </div>
     );
   }
@@ -1248,7 +1142,6 @@ export default function ChatWorkspace({
 
       {modalDeGrupo}
         {modalDeDetalle}
-        {modalDeBorrado}
     </div>
   );
 }
