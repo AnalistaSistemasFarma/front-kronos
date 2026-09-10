@@ -1,0 +1,7 @@
+# Los avatares de los agentes van aqui, referenciados desde agent.avatar_url
+# como /agents/<archivo>. Hay dos: orus.jpg y mechita.jpg (512x512 los dos,
+# las fotos que entrego Nicolas el 2026-09-07). No se usan URLs externas: son
+# fragiles y se caen. El recorte se hace cuadrado y centrado en el sujeto,
+# porque la interfaz los pinta en circulo.
+# Si un agente no tiene archivo aqui, la interfaz cae al avatar por inicial
+# (ver components/chat/AgentAvatar.tsx y prisma/seeds/chat-agents.sql).

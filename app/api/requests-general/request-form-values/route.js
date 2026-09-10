@@ -13,8 +13,10 @@ export async function GET(req) {
       );
     }
 
-    const result = await withMssqlPool(async (pool) => {
-      return pool
+    const { values, options } = await withMssqlPool(async (pool) => {
+      // Orion: LEFT JOIN desde process_form_field para devolver todos los campos
+      // activos del proceso (incl. firma Orion sin valor aún). Testing: editable + options.
+      const valuesResult = await pool
         .request()
         .input('idRequest', sql.Int, parseInt(idRequest, 10))
         .query(`
@@ -23,6 +25,7 @@ export async function GET(req) {
           pff.id AS id_form_field,
           pff.field_label,
           pff.field_type,
+          pff.editable,
           pff.config_json,
           rfv.id_option,
           o.option_label,
@@ -36,9 +39,41 @@ export async function GET(req) {
         WHERE pcr.id_request_general = @idRequest
         ORDER BY pff.display_order, pff.id
       `);
+
+      const optionsResult = await pool
+        .request()
+        .input('idRequest', sql.Int, parseInt(idRequest, 10))
+        .query(`
+        SELECT o.id, o.id_form_field, o.option_label
+        FROM process_form_field_option o
+        INNER JOIN process_form_field ff ON ff.id = o.id_form_field
+        INNER JOIN process_category_request_general pcr
+          ON pcr.id_process_category = ff.id_process_category
+        WHERE o.active = 1
+          AND ff.editable = 1
+          AND ff.active = 1
+          AND pcr.id_request_general = @idRequest
+        ORDER BY o.display_order, o.id
+      `);
+
+      return { values: valuesResult.recordset, options: optionsResult.recordset };
     });
 
-    return NextResponse.json(result.recordset, { status: 200 });
+    const optionsByField = {};
+    for (const opt of options) {
+      (optionsByField[opt.id_form_field] ||= []).push({
+        id: opt.id,
+        option_label: opt.option_label,
+      });
+    }
+
+    const response = values.map((v) => ({
+      ...v,
+      editable: Boolean(v.editable),
+      options: optionsByField[v.id_form_field] || [],
+    }));
+
+    return NextResponse.json(response, { status: 200 });
   } catch (err) {
     console.error('Error en request-form-values:', err);
     return NextResponse.json(

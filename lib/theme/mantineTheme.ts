@@ -23,11 +23,12 @@ const appDark: MantineColorsTuple = [
 const makeShared = (primaryColor: string) => ({
   primaryColor,
   defaultRadius: 'md' as const,
-  fontFamily:
-    'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  // Una sola fuente de verdad: `--font-sans` en app/globals.css. Así la
+  // preferencia de tipografía por perfil solo tendrá que redefinir esa
+  // variable, sin tocar el tema ni recompilar nada.
+  fontFamily: 'var(--font-sans, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
   headings: {
-    fontFamily:
-      'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    fontFamily: 'var(--font-sans, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
     fontWeight: '700',
   },
   autoContrast: true,

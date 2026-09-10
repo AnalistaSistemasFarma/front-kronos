@@ -131,10 +131,11 @@ export const authOptions: AuthOptions = {
               image: string | null;
               themePalette: string | null;
               colorScheme: string | null;
+              uiFont: string | null;
               nit: string | null;
             }>
           >`
-            SELECT TOP 1 id, role, image, themePalette, colorScheme, nit
+            SELECT TOP 1 id, role, image, themePalette, colorScheme, uiFont, nit
             FROM [user]
             WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${email})))
           `;
@@ -148,6 +149,7 @@ export const authOptions: AuthOptions = {
           token.role = dbUser?.role;
           token.nit = dbUser?.nit ?? undefined;
           token.themePalette = dbUser?.themePalette ?? undefined;
+          token.uiFont = dbUser?.uiFont ?? undefined;
           token.colorScheme = dbUser?.colorScheme ?? undefined;
           if (dbUser?.image) {
             token.image = dbUser.image;
@@ -171,6 +173,7 @@ export const authOptions: AuthOptions = {
         session.user.role = token.role as string | undefined;
         session.user.nit = token.nit as string | undefined;
         session.user.themePalette = token.themePalette as string | undefined;
+        session.user.uiFont = token.uiFont as string | undefined;
         session.user.colorScheme = token.colorScheme as string | undefined;
       }
       return session;

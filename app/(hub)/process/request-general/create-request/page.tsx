@@ -38,6 +38,7 @@ import {
   Progress,
   RingProgress,
   Loader,
+  FileInput,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -63,6 +64,7 @@ import {
   IconDownload,
   IconLink,
   IconTrash,
+  IconUpload,
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
@@ -72,6 +74,7 @@ import {
   uploadFileToOneDriveFolder,
 } from '../../../../../lib/onedrive/graphFolderUpload';
 import { isSapField } from '../../../../../lib/requests-general/sapSources';
+import { DOCUMENT_WORKFLOW_PROCESS_NAME } from '../../../../../lib/document-management/workflowStates';
 import {
   TABLE_FIELD_TYPE,
   parseTableConfig,
@@ -203,6 +206,7 @@ function RequestBoard() {
       id_category_request: number;
       email?: string;
       description?: string;
+      isDocumentManagement?: boolean;
     }[]
   >([]);
   const [processSearch, setProcessSearch] = useState('');
@@ -262,6 +266,30 @@ function RequestBoard() {
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // Gestión Documental (parametrizado): al seleccionar ese proceso, el formulario
+  // reemplaza "Asunto"/"Descripción" (reusados como Título/Comentario del documento —
+  // son campos UNIVERSALES de toda solicitud, no específicos de este proceso) y
+  // mantiene un campo de archivo propio (el contenido versionado del documento, con su
+  // propia ruta de OneDrive — no un adjunto genérico). El resto de los campos
+  // específicos del documento (tipo de documento, código, próxima fecha de revisión,
+  // restringido) YA NO son estado aparte: se leen y validan igual que cualquier otro
+  // campo de proceso, vía el bloque genérico "Información adicional" más abajo
+  // (visibleFields/fieldValues), sembrados en process_form_field para
+  // id_process_category=86 — ver prisma/seeds/document-management-generic-fields.sql y
+  // app/api/document-management/create-request/route.ts.
+  const [docTitle, setDocTitle] = useState('');
+  const [docComments, setDocComments] = useState('');
+  const [docFile, setDocFile] = useState<File | null>(null);
+
+  const isDocumentManagementProcess =
+    processCategories.find((p) => p.value === formData.process)?.isDocumentManagement ?? false;
+
+  const resetDocumentFields = () => {
+    setDocTitle('');
+    setDocComments('');
+    setDocFile(null);
+  };
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -705,6 +733,7 @@ function RequestBoard() {
               id_category_request: p.id_category_request,
               email: p.email,
               description: p.description,
+              isDocumentManagement: p.process === DOCUMENT_WORKFLOW_PROCESS_NAME,
             }))
         );
         if (data.assignedUsers) {
@@ -792,39 +821,19 @@ function RequestBoard() {
     }));
   };
 
-  const validateForm = () => {
+  // Validación genérica de los campos dinámicos de proceso (process_form_field). Es la
+  // MISMA para cualquier proceso, incluida Gestión Documental (id_process_category=86,
+  // que aquí valida "Tipo de documento"/"Código del documento"/etc. sin saber nada
+  // específico de ellos — son campos genéricos como cualquier otro).
+  const collectVisibleFieldErrors = (): Record<string, string> => {
     const errors: Record<string, string> = {};
-
-    if (!formData.company) {
-      errors.company = 'La empresa es obligatoria';
-    }
-    if (!formData.subject.trim()) {
-      errors.subject = 'El asunto es obligatorio';
-    }
-    if (!formData.category) {
-      errors.category = 'La categoría es obligatoria';
-    }
-    if (!formData.process) {
-      errors.process = 'El proceso es obligatorio';
-    }
-    if (!formData.descripcion.trim()) {
-      errors.descripcion = 'La descripción es obligatoria';
-    } else if (formData.descripcion.trim().length < 10) {
-      errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
-    }
-
     for (const field of visibleFields) {
       if (field.field_type === ORION_SIGNATURE_FIELD_TYPE) continue;
       const val = fieldValues[field.id];
       if (field.field_type === TABLE_FIELD_TYPE) {
         const columns = parseTableConfig(field.config_json).columns;
         const rows = Array.isArray(val) ? (val as TableRow[]) : [];
-        const tableError = validateTableRows(
-          columns,
-          rows,
-          field.required,
-          field.field_label
-        );
+        const tableError = validateTableRows(columns, rows, field.required, field.field_label);
         if (tableError) errors[`field_${field.id}`] = tableError;
         continue;
       }
@@ -836,10 +845,47 @@ function RequestBoard() {
             : `Debe completar: ${field.field_label}`;
       }
     }
+    return errors;
+  };
 
-    for (const doc of visibleRequiredFiles) {
-      if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
-        errors[`file_${doc.id}`] = `Debe adjuntar el documento: ${doc.file_label}`;
+  const validateForm = () => {
+    const errors: Record<string, string> = {};
+
+    if (!formData.company) {
+      errors.company = 'La empresa es obligatoria';
+    }
+    if (!formData.category) {
+      errors.category = 'La categoría es obligatoria';
+    }
+    if (!formData.process) {
+      errors.process = 'El proceso es obligatorio';
+    }
+
+    if (isDocumentManagementProcess) {
+      // Gestión Documental: "Asunto"/"Descripción" quedan reusados como Título/Comentario
+      // del documento (ver JSX) — son campos universales de toda solicitud, se validan
+      // como tales. El archivo también es propio (contenido versionado del documento).
+      // El resto (tipo de documento, código, fecha, restringido) son campos genéricos
+      // sembrados en process_form_field — misma validación que cualquier otro proceso.
+      if (!docTitle.trim()) errors.docTitle = 'El título del documento es obligatorio';
+      if (!docFile) errors.docFile = 'Adjunte el archivo del documento';
+      Object.assign(errors, collectVisibleFieldErrors());
+    } else {
+      if (!formData.subject.trim()) {
+        errors.subject = 'El asunto es obligatorio';
+      }
+      if (!formData.descripcion.trim()) {
+        errors.descripcion = 'La descripción es obligatoria';
+      } else if (formData.descripcion.trim().length < 10) {
+        errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
+      }
+
+      Object.assign(errors, collectVisibleFieldErrors());
+
+      for (const doc of visibleRequiredFiles) {
+        if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
+          errors[`file_${doc.id}`] = `Debe adjuntar el documento: ${doc.file_label}`;
+        }
       }
     }
 
@@ -863,10 +909,111 @@ function RequestBoard() {
     return Object.keys(errors).length === 0;
   };
 
+  // Serializa las respuestas de los campos dinámicos de proceso al formato que espera
+  // el motor genérico ([{ id_field, id_option? | value_text? }] -- ver
+  // createGeneralRequest.js y, para Gestión Documental,
+  // lib/document-management/genericFields.ts). Compartido entre el camino genérico
+  // (handleCreateTicket) y el de Gestión Documental
+  // (handleCreateDocumentManagementRequest) para no duplicar esta lógica.
+  const buildFormValuesPayload = () =>
+    visibleFields
+      .filter((f) => {
+        const v = fieldValues[f.id];
+        if (f.field_type === TABLE_FIELD_TYPE) {
+          const columns = parseTableConfig(f.config_json).columns;
+          const rows = Array.isArray(v) ? (v as TableRow[]) : [];
+          return rows.some((r) => !isRowEmpty(r, columns));
+        }
+        return v !== undefined && v !== null && v !== '';
+      })
+      .map((f) => {
+        const v = fieldValues[f.id];
+        if (f.field_type === TABLE_FIELD_TYPE) {
+          const columns = parseTableConfig(f.config_json).columns;
+          const rows = (Array.isArray(v) ? (v as TableRow[]) : []).filter(
+            (r) => !isRowEmpty(r, columns)
+          );
+          return { id_field: f.id, value_text: serializeTableValue(rows) };
+        }
+        return f.field_type === 'select'
+          ? { id_field: f.id, id_option: v }
+          : { id_field: f.id, value_text: String(v) };
+      });
+
   const handleCreateTicketWithValidation = async () => {
     if (isSubmittingRef.current) return;
     if (!validateForm()) return;
-    await handleCreateTicket();
+    if (isDocumentManagementProcess) {
+      await handleCreateDocumentManagementRequest();
+    } else {
+      await handleCreateTicket();
+    }
+  };
+
+  const handleCreateDocumentManagementRequest = async () => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+
+    try {
+      setCreateLoading(true);
+      setError(null);
+
+      const fd = new FormData();
+      fd.append('companyId', formData.company);
+      fd.append('title', docTitle.trim());
+      if (docComments.trim()) fd.append('comments', docComments.trim());
+      fd.append('formValues', JSON.stringify(buildFormValuesPayload()));
+      if (docFile) fd.append('file', docFile);
+
+      let response: Response;
+      try {
+        response = await fetch('/api/document-management/create-request', {
+          method: 'POST',
+          body: fd,
+        });
+      } catch (networkErr) {
+        console.error('Error de red al crear la solicitud de documento:', networkErr);
+        setError('No se pudo crear la solicitud. Intente de nuevo.');
+        toast.error('No se pudo crear la solicitud. Intente de nuevo.');
+        return;
+      }
+
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const errorData = await response.json();
+          detail = errorData.error || '';
+        } catch {
+        }
+        console.error('Fallo al crear la solicitud de documento:', detail);
+        setError(detail || 'No se pudo crear la solicitud. Intente de nuevo.');
+        toast.error(detail || 'No se pudo crear la solicitud. Intente de nuevo.');
+        return;
+      }
+
+      const created = await response.json();
+      const createdCode = created?.document?.code || docTitle.trim();
+      toast.success(
+        `Solicitud de documento "${createdCode}" creada correctamente. Quedó en estado "En creación".`
+      );
+      console.log('Documento/solicitud creados:', created);
+
+      resetDocumentFields();
+      setFormData({
+        company: '',
+        subject: '',
+        category: '',
+        process: '',
+        descripcion: '',
+        url: '',
+      });
+
+      fetchTickets();
+      setModalOpened(false);
+    } finally {
+      setCreateLoading(false);
+      isSubmittingRef.current = false;
+    }
   };
 
   const handleCreateTicket = async () => {
@@ -892,29 +1039,7 @@ function RequestBoard() {
             process: parseInt(formData.process),
             createdby: userId,
             url: formData.url,
-            formValues: visibleFields
-              .filter((f) => {
-                const v = fieldValues[f.id];
-                if (f.field_type === TABLE_FIELD_TYPE) {
-                  const columns = parseTableConfig(f.config_json).columns;
-                  const rows = Array.isArray(v) ? (v as TableRow[]) : [];
-                  return rows.some((r) => !isRowEmpty(r, columns));
-                }
-                return v !== undefined && v !== null && v !== '';
-              })
-              .map((f) => {
-                const v = fieldValues[f.id];
-                if (f.field_type === TABLE_FIELD_TYPE) {
-                  const columns = parseTableConfig(f.config_json).columns;
-                  const rows = (Array.isArray(v) ? (v as TableRow[]) : []).filter(
-                    (r) => !isRowEmpty(r, columns)
-                  );
-                  return { id_field: f.id, value_text: serializeTableValue(rows) };
-                }
-                return f.field_type === 'select'
-                  ? { id_field: f.id, id_option: v }
-                  : { id_field: f.id, value_text: String(v) };
-              }),
+            formValues: buildFormValuesPayload(),
           }),
         });
       } catch (networkErr) {
@@ -1787,6 +1912,7 @@ function RequestBoard() {
             setSearchResults([]);
             setShowActivitySearch(false);
             setError(null);
+            resetDocumentFields();
             setFormData({
               company: '',
               subject: '',
@@ -1804,7 +1930,19 @@ function RequestBoard() {
               </Text>
             </Group>
           }
-          size='xl'
+          /* 90 % del ancho de la ventana, no 'xl' (que son 900 px fijos).
+             Pedido de Nicolás Rojas, y es el MISMO cambio de su commit 9309276
+             del PR #241: "hacer más grande el modal de creación, ya que si
+             tenemos campos de tabla que son extensos en columnas puedan
+             visualizarse sin ningún problema".
+             El commit original no se pudo traer entero porque su otra mitad
+             —un refactor del reseteo del formulario— choca con lo que `testing`
+             reescribió al entrar los campos de tabla dinámicos y Gestión
+             Documental. Esta es su intención aplicada sobre el código de hoy.
+             La tabla ya venía con su propio desplazamiento horizontal
+             (ScrollArea en TableFieldInput), así que con el ancho extra las
+             columnas se ven sin pelear. */
+          size='90%'
           radius='md'
           overlayProps={{ blur: 4 }}
         >
@@ -1839,16 +1977,31 @@ function RequestBoard() {
 
               <Grid.Col span={{ base: 12, md: 12 }}>
                 <TextInput
-                  label={parseInt(formData.process) == 4 ? 'Cargo' : 'Asunto'}
-                  placeholder='Ingrese el asunto de la solicitud'
-                  value={formData.subject}
+                  label={
+                    isDocumentManagementProcess
+                      ? 'Título del documento'
+                      : parseInt(formData.process) == 4
+                        ? 'Cargo'
+                        : 'Asunto'
+                  }
+                  placeholder={
+                    isDocumentManagementProcess
+                      ? 'Ingrese el título del documento'
+                      : 'Ingrese el asunto de la solicitud'
+                  }
+                  value={isDocumentManagementProcess ? docTitle : formData.subject}
                   onChange={(e) => {
-                    setFormData({ ...formData, subject: e.target.value });
-                    if (formErrors.subject) {
-                      setFormErrors({ ...formErrors, subject: '' });
+                    if (isDocumentManagementProcess) {
+                      setDocTitle(e.target.value);
+                      if (formErrors.docTitle) setFormErrors({ ...formErrors, docTitle: '' });
+                    } else {
+                      setFormData({ ...formData, subject: e.target.value });
+                      if (formErrors.subject) {
+                        setFormErrors({ ...formErrors, subject: '' });
+                      }
                     }
                   }}
-                  error={formErrors.subject}
+                  error={isDocumentManagementProcess ? formErrors.docTitle : formErrors.subject}
                   required
                   maxLength={254}
                   leftSection={<IconFileDescription size={16} />}
@@ -1985,21 +2138,56 @@ function RequestBoard() {
               </Grid.Col>
             </Grid>
 
+            {/* Gestión Documental: el archivo sigue siendo un campo propio (contenido
+                versionado del documento, con su propia ruta de OneDrive -- no un adjunto
+                genérico). "Tipo de documento", "Código del documento", "Próxima fecha de
+                revisión" y "Documento restringido" YA NO están aquí: se leen/validan como
+                cualquier otro campo de proceso en el bloque genérico "Información
+                adicional" más abajo (visibleFields), sembrados en process_form_field para
+                este proceso -- ver prisma/seeds/document-management-generic-fields.sql. */}
+            {isDocumentManagementProcess && (
+              <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
+                <FileInput
+                  label='Archivo (primera versión)'
+                  placeholder='Seleccione el archivo'
+                  required
+                  value={docFile}
+                  onChange={setDocFile}
+                  leftSection={<IconUpload size={16} />}
+                  error={formErrors.docFile}
+                />
+              </Card>
+            )}
+
             <Textarea
-              label={parseInt(formData.process) == 4 ? 'Conocimientos - Experiencia' : 'Descripción Detallada'}
-              placeholder='Describa detalladamente la solicitud. Incluya toda la información relevante para una mejor atención.'
-              value={formData.descripcion}
+              label={
+                isDocumentManagementProcess
+                  ? 'Comentario (opcional, queda en la versión)'
+                  : parseInt(formData.process) == 4
+                    ? 'Conocimientos - Experiencia'
+                    : 'Descripción Detallada'
+              }
+              placeholder={
+                isDocumentManagementProcess
+                  ? 'Comentario opcional sobre esta versión del documento.'
+                  : 'Describa detalladamente la solicitud. Incluya toda la información relevante para una mejor atención.'
+              }
+              value={isDocumentManagementProcess ? docComments : formData.descripcion}
               onChange={(e) => {
-                setFormData({ ...formData, descripcion: e.target.value });
-                if (formErrors.descripcion) {
-                  setFormErrors({ ...formErrors, descripcion: '' });
+                if (isDocumentManagementProcess) {
+                  setDocComments(e.target.value);
+                } else {
+                  setFormData({ ...formData, descripcion: e.target.value });
+                  if (formErrors.descripcion) {
+                    setFormErrors({ ...formErrors, descripcion: '' });
+                  }
                 }
               }}
-              error={formErrors.descripcion}
-              required
-              minRows={5}
+              error={isDocumentManagementProcess ? undefined : formErrors.descripcion}
+              required={!isDocumentManagementProcess}
+              minRows={isDocumentManagementProcess ? 2 : 5}
               maxLength={1000}
-              description='Mínimo 10 caracteres, máximo 1000 caracteres'
+              description={isDocumentManagementProcess ? undefined : 'Mínimo 10 caracteres, máximo 1000 caracteres'}
               autosize
             />
 
@@ -2230,23 +2418,28 @@ function RequestBoard() {
               </Stack>
             )}
 
-            {/* Subida libre: siempre disponible para adjuntar documentos adicionales */}
-            <div>
-              <Text fw={600} mb='xs'>
-                {requiredFiles.length > 0 ? 'Archivos adicionales (Opcional)' : 'Archivos Adjuntos (Opcional)'}
-              </Text>
-              <FileUpload
-                ticketId={0}
-                onFilesChange={setAttachedFiles}
-                autoUpload={false}
-                disabled={formDataLoading}
-              />
-              {formErrors.orion_pdf && (
-                <Text size='sm' c='red' mt='xs'>
-                  {formErrors.orion_pdf}
+            {/* Subida libre: siempre disponible para adjuntar documentos adicionales.
+                Se oculta en Gestión Documental: ese proceso ya tiene su propio campo
+                de archivo arriba (la primera versión del documento) y no debe
+                confundirse con un adjunto genérico de la solicitud. */}
+            {!isDocumentManagementProcess && (
+              <div>
+                <Text fw={600} mb='xs'>
+                  {requiredFiles.length > 0 ? 'Archivos adicionales (Opcional)' : 'Archivos Adjuntos (Opcional)'}
                 </Text>
-              )}
-            </div>
+                <FileUpload
+                  ticketId={0}
+                  onFilesChange={setAttachedFiles}
+                  autoUpload={false}
+                  disabled={formDataLoading}
+                />
+                {formErrors.orion_pdf && (
+                  <Text size='sm' c='red' mt='xs'>
+                    {formErrors.orion_pdf}
+                  </Text>
+                )}
+              </div>
+            )}
 
             <Divider />
 
@@ -2261,6 +2454,7 @@ function RequestBoard() {
                   setSearchResults([]);
                   setShowActivitySearch(false);
                   setError(null);
+                  resetDocumentFields();
                 }}
                 size='md'
               >

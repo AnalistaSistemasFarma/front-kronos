@@ -17,6 +17,7 @@ import {
   ThemeIcon,
   LoadingOverlay,
   Box,
+  Button,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -33,11 +34,24 @@ import {
   IconFile,
   IconUserCheck,
   IconCategory,
+  IconFileDescription,
+  IconExternalLink,
+  IconVersions,
+  IconPencil,
 } from '@tabler/icons-react';
 import axios from 'axios';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../lib/orion/fieldType';
 import { parseOrionSignatureBagBag } from '../../../../lib/orion/formValue';
+
+// Nombre EXACTO del tipo sembrado en `types_authorization` por
+// prisma/seeds/document-management-authorization-type.sql (Sprint 6) para la
+// tarea "En aprobación" del flujo documental -- es el `type_authorization`
+// que trae cada fila del listado genérico de /process/authorization (ver
+// app/api/authorization/authorization-activities/route.js). Se define acá,
+// como literal local (no importado de lib/document-management/workflowStates.ts),
+// para no acoplar este componente a ese módulo por un solo string.
+const DOCUMENT_APPROVAL_AUTHORIZATION_TYPE_NAME = 'Autorización de documento';
 
 // Item mínimo que llega desde el panel de autorización (subconjunto de AuthorizationRequest).
 interface RequestSummary {
@@ -83,6 +97,19 @@ interface FolderFile {
   lastModifiedDateTime: string;
   webUrl: string;
   '@microsoft.graph.downloadUrl'?: string;
+}
+
+// Detalle específico de una autorización de tipo "Autorización de documento"
+// (Sprint 6), resuelto vía /api/authorization/document-detail. code/title
+// vienen de `document`, versionNumber/elaboratedBy de `document_version`.
+interface DocumentAuthorizationDetail {
+  idDocument: number;
+  idDocumentVersion: number;
+  code: string;
+  title: string;
+  versionNumber: number;
+  status: string;
+  elaboratedBy: string | null;
 }
 
 interface Props {
@@ -194,7 +221,11 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
 
+  const [docDetail, setDocDetail] = useState<DocumentAuthorizationDetail | null>(null);
+  const [docLoading, setDocLoading] = useState(false);
+
   const idReqGen = request?.id_request_general;
+  const isDocumentApproval = request?.type_authorization === DOCUMENT_APPROVAL_AUTHORIZATION_TYPE_NAME;
 
   useEffect(() => {
     if (!opened || !idReqGen) return;
@@ -207,6 +238,7 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
     setNotes([]);
     setFiles([]);
     setFilesError(null);
+    setDocDetail(null);
 
     // Datos internos (SQL): detalle + valores del formulario + notas.
     const loadData = async () => {
@@ -260,13 +292,36 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
       }
     };
 
+    // Detalle del documento (código, título, versión, elaborador): solo para
+    // autorizaciones de tipo "Autorización de documento" (Sprint 6). Independiente
+    // de loadData/loadFiles: si no hay documento asociado (404) no debe romper
+    // el resto del modal, solo se omite la sección.
+    const loadDocumentDetail = async () => {
+      if (!isDocumentApproval) return;
+      setDocLoading(true);
+      try {
+        const res = await fetch(`/api/authorization/document-detail?id_request_general=${idReqGen}`);
+        if (!active) return;
+        if (res.ok) {
+          setDocDetail(await res.json());
+        } else {
+          setDocDetail(null);
+        }
+      } catch {
+        if (active) setDocDetail(null);
+      } finally {
+        if (active) setDocLoading(false);
+      }
+    };
+
     loadData();
     loadFiles();
+    loadDocumentDetail();
 
     return () => {
       active = false;
     };
-  }, [opened, idReqGen]);
+  }, [opened, idReqGen, isDocumentApproval]);
 
   const subject = detail?.subject_request || request?.subject || '';
 
@@ -313,6 +368,67 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                 </Badge>
               )}
             </div>
+
+            {/* Detalle del documento (solo "Autorización de documento", Sprint 6): qué
+                documento es, qué versión, quién la elaboró y link para revisar el archivo
+                antes de autorizar/rechazar -- lo que Nicolás reportó que faltaba. */}
+            {isDocumentApproval && (
+              <Card withBorder radius='md' p='md' bg='var(--mantine-color-indigo-light)'>
+                {docLoading ? (
+                  <Group gap='sm'>
+                    <Loader size={16} />
+                    <Text size='sm' c='dimmed'>Cargando detalle del documento...</Text>
+                  </Group>
+                ) : docDetail ? (
+                  <Stack gap='sm'>
+                    <Group gap={6}>
+                      <IconFileDescription size={18} className='text-gray-500' />
+                      <Text fw={600}>Documento a autorizar</Text>
+                    </Group>
+                    <Grid>
+                      <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <Text size='xs' c='dimmed' fw={500}>Código</Text>
+                        <Text size='sm' fw={600}>{docDetail.code}</Text>
+                      </Grid.Col>
+                      <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <Group gap={6} wrap='nowrap'>
+                          <IconVersions size={14} className='text-gray-400' />
+                          <Text size='xs' c='dimmed' fw={500}>Versión</Text>
+                        </Group>
+                        <Text size='sm' fw={600}>v{docDetail.versionNumber}</Text>
+                      </Grid.Col>
+                      <Grid.Col span={12}>
+                        <Text size='xs' c='dimmed' fw={500}>Título</Text>
+                        <Text size='sm' fw={600}>{docDetail.title}</Text>
+                      </Grid.Col>
+                      <Grid.Col span={12}>
+                        <Group gap={6} wrap='nowrap'>
+                          <IconPencil size={14} className='text-gray-400' />
+                          <Text size='xs' c='dimmed' fw={500}>Elaborado por</Text>
+                        </Group>
+                        <Text size='sm' fw={600}>{docDetail.elaboratedBy || '—'}</Text>
+                      </Grid.Col>
+                    </Grid>
+                    <Button
+                      variant='light'
+                      size='xs'
+                      leftSection={<IconExternalLink size={14} />}
+                      component='a'
+                      href={`/api/document-management/documents/${docDetail.idDocument}/versions/${docDetail.idDocumentVersion}/open`}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      style={{ alignSelf: 'flex-start' }}
+                    >
+                      Abrir archivo para revisar
+                    </Button>
+                  </Stack>
+                ) : (
+                  <Text size='sm' c='dimmed'>
+                    No se pudo cargar el detalle del documento asociado a esta autorización.
+                  </Text>
+                )}
+              </Card>
+            )}
 
             <Divider />
 
@@ -501,3 +617,4 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
     </Modal>
   );
 }
+

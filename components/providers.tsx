@@ -40,6 +40,13 @@ import {
   buildLightTheme,
 } from '../lib/theme/mantineTheme';
 import { runThemeTransition } from '../lib/theme/motion';
+import {
+  DEFAULT_FONT_KEY,
+  FONT_STORAGE_KEY,
+  applyFontToDocument,
+  isValidFontKey,
+  readStoredFont,
+} from '../lib/theme/fonts';
 
 interface ThemeContextType {
   theme: AppTheme;
@@ -50,6 +57,10 @@ interface ThemeContextType {
   palette: string;
   /** Cambia la paleta de color activa */
   setPalette: (key: string) => void;
+  /** Clave de la tipografía activa */
+  font: string;
+  /** Cambia la tipografía activa */
+  setFont: (key: string) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -68,20 +79,27 @@ function ThemeProvider({ children }: { children: ReactNode }) {
   const isLanding = isPublicLandingPath(pathname);
   const [theme, setTheme] = useState<AppTheme>('light');
   const [palette, setPaletteState] = useState<string>(DEFAULT_PALETTE_KEY);
+  const [font, setFontState] = useState<string>(DEFAULT_FONT_KEY);
   const [mounted, setMounted] = useState(false);
   const visualTheme: AppTheme = isLanding ? 'light' : theme;
   const visualPalette = isLanding ? DEFAULT_PALETTE_KEY : palette;
+  // La portada es pública y no debe heredar preferencias de nadie.
+  const visualFont = isLanding ? DEFAULT_FONT_KEY : font;
 
   // Estado inicial desde localStorage (antes de que llegue la sesión)
   useEffect(() => {
     setTheme(readStoredAppTheme() ?? 'light');
     setPaletteState(readStoredPalette() ?? DEFAULT_PALETTE_KEY);
+    // Desde localStorage primero: así la tipografía no pega un salto visible
+    // mientras llega la sesión.
+    setFontState(readStoredFont() ?? DEFAULT_FONT_KEY);
     setMounted(true);
   }, []);
 
   // Sincroniza con lo persistido en el perfil cuando llega la sesión
   const sessionPalette = session?.user?.themePalette;
   const sessionColorScheme = session?.user?.colorScheme;
+  const sessionFont = session?.user?.uiFont;
   useEffect(() => {
     if (!mounted) return;
     if (isValidPaletteKey(sessionPalette)) {
@@ -90,7 +108,10 @@ function ThemeProvider({ children }: { children: ReactNode }) {
     if (sessionColorScheme === 'light' || sessionColorScheme === 'dark') {
       setTheme(sessionColorScheme);
     }
-  }, [sessionPalette, sessionColorScheme, mounted]);
+    if (isValidFontKey(sessionFont)) {
+      setFontState(sessionFont);
+    }
+  }, [sessionPalette, sessionColorScheme, sessionFont, mounted]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -116,6 +137,14 @@ function ThemeProvider({ children }: { children: ReactNode }) {
     applyPaletteAppearanceToDocument(palette, theme);
   }, [palette, theme, mounted, isLanding]);
 
+  // Independiente del tema y de la paleta: la tipografía solo redefine
+  // --font-sans en :root, y de ahí la toman el CSS propio y Mantine.
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem(FONT_STORAGE_KEY, font);
+    applyFontToDocument(visualFont);
+  }, [font, visualFont, mounted]);
+
   const setThemeMode = (mode: AppTheme) => {
     if (mode === theme) return;
     runThemeTransition(() => setTheme(mode));
@@ -127,6 +156,9 @@ function ThemeProvider({ children }: { children: ReactNode }) {
   };
   const setPalette = (key: string) => {
     if (isValidPaletteKey(key)) setPaletteState(key);
+  };
+  const setFont = (key: string) => {
+    if (isValidFontKey(key)) setFontState(key);
   };
 
   const primaryColor = resolvePrimaryColor(visualPalette);
@@ -140,7 +172,7 @@ function ThemeProvider({ children }: { children: ReactNode }) {
 
   return (
     <ThemeContext.Provider
-      value={{ theme, toggleTheme, setThemeMode, palette, setPalette }}
+      value={{ theme, toggleTheme, setThemeMode, palette, setPalette, font, setFont }}
     >
       <MantineProvider
         theme={mantineTheme}

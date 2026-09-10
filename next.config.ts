@@ -51,6 +51,13 @@ const nextConfig: NextConfig = {
   },
 };
 
+// next-pwa está DESACTIVADO (`disable: true`): no genera ningún service worker
+// y por lo tanto tampoco concatena el custom worker de `worker/index.js`.
+// El service worker que realmente corre es `public/sw.js` (escrito a mano y
+// registrado por `components/ServiceWorkerRegistrar.tsx`) — esa es la fuente de
+// verdad. Si algún día se pone `disable: false`, next-pwa SOBRESCRIBIRÁ
+// `public/sw.js` con el suyo y pasará a mandar `worker/index.js`: ambos
+// archivos deben estar sincronizados antes de hacer ese cambio.
 export default withPWA({
   dest: 'public',
   register: true,

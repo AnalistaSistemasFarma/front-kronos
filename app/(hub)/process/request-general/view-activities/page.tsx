@@ -10,6 +10,7 @@ import { useSession } from 'next-auth/react';
 import {
   showClosureNotification,
 } from '../../../../../lib/notifications/showClosureNotification';
+import { DOCUMENT_WORKFLOW_PROCESS_NAME } from '../../../../../lib/document-management/workflowStates';
 import {
   Title,
   Paper,
@@ -123,6 +124,8 @@ interface Request {
   date_resolution?: string;
   start_date?:string;
   executor_final: string;
+  /** Solo presente cuando la tarea pertenece al flujo de Gestión Documental. */
+  id_document?: number | null;
 }
 
 interface Option {
@@ -856,6 +859,17 @@ function ViewRequestPage() {
     }
     */}
 
+    // Candado de Gestión Documental: defensa en profundidad — el backend ya rechaza esto
+    // con 400, pero ni siquiera se debería poder llegar aquí porque el control de estado
+    // está deshabilitado para estas tareas (ver isDocumentManagementTask más abajo).
+    if (isDocumentManagementTask) {
+      setUpdateMessage({
+        type: 'error',
+        text: 'Esta tarea es parte del flujo de Gestión Documental y no se puede resolver desde aquí. Use las acciones de transición en la página del documento.',
+      });
+      return;
+    }
+
     // Tareas secuenciales: si esta tarea está bloqueada (la anterior no está cerrada), no permitir
     const lockedNow = taskRQ.find((t) => t.id === request?.id)?.locked;
     if (lockedNow) {
@@ -1000,6 +1014,18 @@ function ViewRequestPage() {
 
   // Tarea actual bloqueada por secuencia (la anterior no está cerrada)
   const currentTaskLocked = taskRQ.find((t) => t.id === request?.id)?.locked ?? false;
+
+  // Candado de Gestión Documental (bug reportado por Nicolás el 2026-09-02): esta pantalla
+  // genérica de "Cambiar Estado de la Tarea" solo ofrece los 2 estados genéricos (En
+  // progreso/Resuelto) y avanza por display_order — no conoce el grafo de 14 estados de
+  // lib/document-management/workflowStates.ts. Resolver una tarea del flujo documental desde
+  // acá rompe el flujo en silencio (ver el mismo candado en el backend,
+  // app/api/requests-general/update-activities/route.js). Por eso, para estas tareas, se
+  // deshabilita la edición del estado y se enlaza a las acciones reales del documento.
+  const isDocumentManagementTask = request?.process === DOCUMENT_WORKFLOW_PROCESS_NAME;
+  const documentManagementUrl = request?.id_document
+    ? `/process/document-management/${request.id_document}`
+    : '/process/document-management';
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -1817,7 +1843,24 @@ function ViewRequestPage() {
                     Cambiar Estado de la Tarea
                   </Title>
 
-                  {isEditing ? (
+                  {isDocumentManagementTask ? (
+                    <Stack>
+                      <Alert color='blue' icon={<IconLock size={16} />} title='Tarea del flujo de Gestión Documental'>
+                        {`El estado real de esta tarea es "${request.task}" — no se puede cambiar desde esta pantalla genérica, `}
+                        porque no respeta las reglas de aprobar/rechazar/reelaborar/reasignar del flujo documental.
+                        Use las acciones de transición en la página del documento.
+                      </Alert>
+                      <Button
+                        component={Link}
+                        href={documentManagementUrl}
+                        variant='light'
+                        color='blue'
+                        leftSection={<IconFileDescription size={16} />}
+                      >
+                        Ir a la página del documento
+                      </Button>
+                    </Stack>
+                  ) : isEditing ? (
                     <Stack>
                       <Select
                         label='Estado de la Tarea'
@@ -1920,7 +1963,7 @@ function ViewRequestPage() {
                           color='blue'
                           onClick={handleStartEditing}
                           leftSection={<IconTicket size={16} />}
-                          disabled={isRequestResolved() || currentTaskLocked}
+                          disabled={isRequestResolved() || currentTaskLocked || isDocumentManagementTask}
                         >
                           Editar Tarea
                         </Button>
@@ -2249,7 +2292,7 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
-                  disabled={isRequestResolved() || currentTaskLocked}
+                  disabled={isRequestResolved() || currentTaskLocked || isDocumentManagementTask}
                 >
                   Editar Tarea
                 </Button>
@@ -2438,7 +2481,7 @@ function ViewRequestPage() {
                           <Text size="sm" c="dimmed">
                             Asignado:
                           </Text>
-                          <Text size="sm">{task.name}</Text>
+                          <Text size="sm">{task.name || 'Sin asignar'}</Text>
                         </Group>
                         <Group gap="lg">
                           <Text size="xs" c="dimmed">

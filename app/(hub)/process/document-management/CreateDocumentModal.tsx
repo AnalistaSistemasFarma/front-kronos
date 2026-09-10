@@ -36,6 +36,16 @@ interface Props {
   onCreated: () => void;
 }
 
+/**
+ * Atajo de Asuntos Regulatorios (Sprint 5): crea un documento nuevo directo,
+ * sin pasar por el formulario largo de "crear solicitud" de SynerLink. Por
+ * debajo llama a /api/document-management/documents (POST), que produce la
+ * MISMA estructura de datos (Document + DocumentVersion + solicitud interna,
+ * arrancando en flujo) que el camino estándar — ver
+ * lib/document-management/documents.ts. La empresa de este modal ya viene
+ * filtrada por el permiso de Asuntos Regulatorios (`canUploadDirect`, ver
+ * app/(hub)/process/document-management/page.tsx).
+ */
 export default function CreateDocumentModal({ opened, onClose, companies, types, onCreated }: Props) {
   const [companyId, setCompanyId] = useState<string | null>(
     companies[0] ? String(companies[0].idCompany) : null
@@ -142,7 +152,7 @@ export default function CreateDocumentModal({ opened, onClose, companies, types,
   };
 
   return (
-    <Modal opened={opened} onClose={onClose} title="Cargar documento (carga inicial)" size="lg">
+    <Modal opened={opened} onClose={onClose} title="Cargar documento (atajo de Asuntos Regulatorios)" size="lg">
       <Stack gap="sm">
         {error && <Alert color="red">{error}</Alert>}
 
@@ -219,7 +229,7 @@ export default function CreateDocumentModal({ opened, onClose, companies, types,
           onChange={(e) => setIsRestricted(e.currentTarget.checked)}
         />
         <FileInput
-          label="Archivo (versión vigente)"
+          label="Archivo (primera versión)"
           placeholder="Seleccione el archivo"
           required
           value={file}

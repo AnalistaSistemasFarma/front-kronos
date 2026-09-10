@@ -31,6 +31,7 @@ import {
   Checkbox,
   MultiSelect,
   CopyButton,
+  Tooltip,
 } from '@mantine/core';
 import {
   IconBuilding,
@@ -66,6 +67,15 @@ import {
 } from '../../../../../lib/requests-general/tableField';
 import TableColumnsEditor from '../_components/TableColumnsEditor';
 import toast from 'react-hot-toast';
+// WorkflowDiagram deshabilitado temporalmente (2026-09-02): el diagrama se veía
+// desordenado (ramas cruzadas) a criterio de producto. Pendiente rediseño.
+// import WorkflowDiagram from '../../../../../components/workflow/WorkflowDiagram';
+// import {
+//   DOCUMENT_WORKFLOW_PROCESS_NAME,
+//   DOCUMENT_WORKFLOW_TRANSITIONS,
+//   MAIN_SEQUENCE_STATES,
+// } from '../../../../../lib/document-management/workflowStates';
+import { DOCUMENT_WORKFLOW_STATES } from '../../../../../lib/document-management/workflowStates';
 
 interface WorkFlow {
   id: number;
@@ -96,6 +106,7 @@ interface Task {
   type_authorization: number | null;
   type_authorization_label?: string | null;
   conditions: number[];
+  display_order?: number | null;
 }
 
 interface Note {
@@ -122,6 +133,7 @@ interface FormFieldDef {
   field_label: string;
   field_type: string;
   required: boolean;
+  editable: boolean;
   options: FieldOptionDef[];
   conditions: number[];
   // Solo para field_type === 'table': definición de columnas de la tabla.
@@ -161,6 +173,24 @@ const ADMIN_USER_IDS = [
   'cmgicd6470000ekpi1a33o581',
   'cmgqz404x0000ct9k1j8xdet1',
 ];
+
+// Candado de Gestión Documental (mismo candado aplicado en el backend, ver
+// app/api/requests-general/update-workflow-complete/route.js): estas 14 tareas del
+// proceso id_process_category=86 ("Gestión Documental — Ciclo de vida del
+// documento") están hardcodeadas por NOMBRE en lib/document-management/workflowStates.ts
+// y en el grafo WORKFLOW_ACTIONS que las consume. Renombrarlas o borrarlas desde esta
+// pantalla genérica rompería el flujo documental en silencio, así que aquí solo se
+// deshabilita visualmente renombrar/borrar para ESAS filas puntuales — el resto de la
+// fila (costo, centro de costo, orden, activo) y cualquier otro proceso siguen
+// editables igual que siempre. La validación real (la que no se puede saltar) vive en
+// el backend; esto es solo UX.
+const DOCUMENT_MANAGEMENT_PROCESS_CATEGORY_ID = 86;
+
+const isLockedDocumentTask = (workflowId: number | undefined, task: Task | undefined | null) =>
+  workflowId === DOCUMENT_MANAGEMENT_PROCESS_CATEGORY_ID &&
+  !!task &&
+  task.id > 0 &&
+  (DOCUMENT_WORKFLOW_STATES as readonly string[]).includes(task.task);
 
 function ViewWorkFlowPage() {
   const searchParams = useSearchParams();
@@ -397,6 +427,7 @@ function ViewWorkFlowPage() {
             field_label: string;
             field_type?: string;
             required: boolean | number;
+            editable?: boolean | number;
             options: { id: number; option_label: string }[];
             conditions: number[];
             config_json?: string | null;
@@ -405,6 +436,7 @@ function ViewWorkFlowPage() {
             field_label: f.field_label,
             field_type: f.field_type || 'select',
             required: Boolean(f.required),
+            editable: Boolean(f.editable),
             options: f.options || [],
             conditions: f.conditions || [],
             columns:
@@ -583,6 +615,7 @@ function ViewWorkFlowPage() {
       field_label: '',
       field_type: 'select',
       required: true,
+      editable: false,
       options: [],
       conditions: [],
       columns: [],
@@ -805,7 +838,9 @@ function ViewWorkFlowPage() {
         const orig = originalFormFields.find((of) => of.id === f.id);
         if (!orig) return false;
         const labelChanged =
-          orig.field_label !== f.field_label || Boolean(orig.required) !== Boolean(f.required);
+          orig.field_label !== f.field_label ||
+          Boolean(orig.required) !== Boolean(f.required) ||
+          Boolean(orig.editable) !== Boolean(f.editable);
         const newOpts = f.options.filter((o) => o.id < 0 && o.option_label.trim());
         const deletedOpts = orig.options.filter((oo) => !f.options.find((o) => o.id === oo.id));
         const updatedOpts = f.options.filter((o) => {
@@ -892,6 +927,7 @@ function ViewWorkFlowPage() {
         field_label?: string;
         field_type?: string;
         required?: boolean;
+        editable?: boolean;
         condition_option_ids?: number[];
         options?: OptionToProcess[];
         config_json?: string | null;
@@ -1026,6 +1062,7 @@ function ViewWorkFlowPage() {
             field_label: field.field_label,
             field_type: field.field_type,
             required: field.required,
+            editable: field.editable,
             condition_option_ids: field.conditions,
             options: buildOptionActions(field),
             config_json: fieldConfigJson(field),
@@ -1037,6 +1074,7 @@ function ViewWorkFlowPage() {
               id: field.id,
               field_label: field.field_label,
               required: field.required,
+              editable: field.editable,
               condition_option_ids: field.conditions,
               options: buildOptionActions(field, orig),
               ...(field.field_type === TABLE_FIELD_TYPE
@@ -1598,6 +1636,42 @@ function ViewWorkFlowPage() {
           </Grid.Col>
 
           <Grid.Col span={{ base: 12, lg: 8 }}>
+            {/* Diagrama visual del flujo deshabilitado temporalmente (2026-09-02) — se veía
+                desordenado (ramas cruzadas) a criterio de producto. Pendiente rediseño.
+                La data de tareas (tasks) sigue igual; solo se quitó la renderización visual.
+            {tasks.length > 0 && (
+              <Card shadow='sm' p='xl' radius='md' withBorder mb='lg'>
+                <Group mb='md'>
+                  <Box
+                    className='bg-indigo-500 p-2 rounded-lg'
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <IconProgress size={24} color='white' />
+                  </Box>
+                  <Title order={2} className='text-indigo-700'>
+                    Diagrama del Flujo
+                  </Title>
+                </Group>
+                <WorkflowDiagram
+                  tasks={tasks.map((t, i) => ({
+                    id: t.id,
+                    task: t.task,
+                    display_order: t.display_order ?? i,
+                  }))}
+                  transitions={
+                    workflow.process === DOCUMENT_WORKFLOW_PROCESS_NAME
+                      ? DOCUMENT_WORKFLOW_TRANSITIONS
+                      : undefined
+                  }
+                  mainSequenceStates={
+                    workflow.process === DOCUMENT_WORKFLOW_PROCESS_NAME
+                      ? MAIN_SEQUENCE_STATES
+                      : undefined
+                  }
+                />
+              </Card>
+            )}
+            */}
             <Card
               shadow='sm'
               p='xl'
@@ -1707,15 +1781,31 @@ function ViewWorkFlowPage() {
                                 <Group justify='space-between' align='flex-start'>
                                   <div style={{ flex: 1 }}>
                                     {isEditing ? (
-                                      <TextInput
-                                        value={editedTasks[index]?.task || ''}
-                                        onChange={(e) => {
-                                          const newTasks = [...editedTasks];
-                                          newTasks[index] = { ...newTasks[index], task: e.target.value };
-                                          setEditedTasks(newTasks);
-                                        }}
-                                        placeholder='Nombre de la tarea'
-                                      />
+                                      isLockedDocumentTask(workflow?.id, editedTasks[index]) ? (
+                                        <Tooltip
+                                          label='Esta tarea es parte del flujo de Gestión Documental y no se puede renombrar desde aquí. Contacte al equipo técnico si necesita cambiarla.'
+                                          withArrow
+                                          multiline
+                                          w={260}
+                                        >
+                                          <TextInput
+                                            value={editedTasks[index]?.task || ''}
+                                            readOnly
+                                            placeholder='Nombre de la tarea'
+                                            styles={{ input: { cursor: 'not-allowed', backgroundColor: 'var(--mantine-color-default)' } }}
+                                          />
+                                        </Tooltip>
+                                      ) : (
+                                        <TextInput
+                                          value={editedTasks[index]?.task || ''}
+                                          onChange={(e) => {
+                                            const newTasks = [...editedTasks];
+                                            newTasks[index] = { ...newTasks[index], task: e.target.value };
+                                            setEditedTasks(newTasks);
+                                          }}
+                                          placeholder='Nombre de la tarea'
+                                        />
+                                      )
                                     ) : (
                                       <Group gap='xs'>
                                         <Text size='md' fw={600} className='mb-1'>
@@ -1759,15 +1849,33 @@ function ViewWorkFlowPage() {
                                       >
                                         <IconChevronDown size={18} />
                                       </ActionIcon>
-                                      <ActionIcon
-                                        color='red'
-                                        variant='subtle'
-                                        size='lg'
-                                        onClick={() => handleRemoveTask(task.id)}
-                                        title='Eliminar tarea'
-                                      >
-                                        <IconTrash size={18} />
-                                      </ActionIcon>
+                                      {isLockedDocumentTask(workflow?.id, task) ? (
+                                        <Tooltip
+                                          label='Esta tarea es parte del flujo de Gestión Documental y no se puede eliminar desde aquí. Contacte al equipo técnico si necesita cambiarla.'
+                                          withArrow
+                                          multiline
+                                          w={260}
+                                        >
+                                          <ActionIcon
+                                            color='gray'
+                                            variant='subtle'
+                                            size='lg'
+                                            style={{ cursor: 'not-allowed' }}
+                                          >
+                                            <IconTrash size={18} />
+                                          </ActionIcon>
+                                        </Tooltip>
+                                      ) : (
+                                        <ActionIcon
+                                          color='red'
+                                          variant='subtle'
+                                          size='lg'
+                                          onClick={() => handleRemoveTask(task.id)}
+                                          title='Eliminar tarea'
+                                        >
+                                          <IconTrash size={18} />
+                                        </ActionIcon>
+                                      )}
                                     </Group>
                                   )}
                                 </Group>
@@ -2118,6 +2226,19 @@ function ViewWorkFlowPage() {
                           }}
                           mb={8}
                         />
+                        <Checkbox
+                          label='Editable en proceso'
+                          checked={editedFormFields[fieldIndex]?.editable || false}
+                          onChange={(e) => {
+                            const next = [...editedFormFields];
+                            next[fieldIndex] = {
+                              ...next[fieldIndex],
+                              editable: e.currentTarget.checked,
+                            };
+                            setEditedFormFields(next);
+                          }}
+                          mb={8}
+                        />
                         <ActionIcon
                           color='red'
                           variant='subtle'
@@ -2243,6 +2364,11 @@ function ViewWorkFlowPage() {
                           <Badge color={field.required ? 'red' : 'gray'} variant='light' size='sm'>
                             {field.required ? 'Obligatorio' : 'Opcional'}
                           </Badge>
+                          {field.editable && (
+                            <Badge color='teal' variant='light' size='sm'>
+                              Editable en proceso
+                            </Badge>
+                          )}
                         </Group>
                       </Group>
                       <Group gap='xs'>

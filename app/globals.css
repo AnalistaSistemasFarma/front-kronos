@@ -23,7 +23,15 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Fuente del sistema, UNA sola fuente de verdad: el tema de Mantine también
+     lee esta variable, así que cambiarla aquí cambia toda la aplicación.
+     `Roboto` se quitó a propósito (2026-09-08, pedido de Nicolás): estaba
+     escrito de forma explícita, así que en Android la cadena se quedaba SIEMPRE
+     en Roboto y nunca alcanzaba `sans-serif`, que es el alias que respeta la
+     fuente configurada en el equipo. Chrome tampoco lee la fuente del tema del
+     fabricante, así que esto ayuda pero no garantiza: la vía confiable es la
+     preferencia por perfil. */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
     'Courier New', monospace;
 }
@@ -33,7 +41,9 @@ body {
   min-height: 100%;
   background-color: var(--app-bg, var(--background));
   color: var(--app-text, var(--foreground));
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Con respaldo: si la variable no llegara a :root, un var() pelado
+     dejaría la página en la fuente por defecto del navegador. */
+  font-family: var(--font-sans, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
 }
 
 /* Portada: siempre clara, sin tema ni paleta del usuario */
@@ -995,4 +1005,1707 @@ html[data-mantine-color-scheme='dark'] .notification-bell-text-muted,
 html[data-mantine-color-scheme='dark'] .notification-bell-accent,
 [data-mantine-color-scheme='dark'] .notification-bell-accent {
   color: var(--app-accent, #5eb3e8) !important;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Chat de agentes (módulo "Asistentes IA").
+   AÑADIDO al final del archivo: no se modificó ni se reordenó nada de lo
+   anterior. Todos los colores salen de los tokens --app-* para que el módulo
+   respete el modo oscuro y la paleta que elija el usuario.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Superficie genérica de los popovers del módulo. */
+.chat-surface.mantine-Popover-dropdown {
+  background-color: var(--app-surface, var(--surface)) !important;
+  border-color: var(--app-border, var(--border-subtle)) !important;
+  color: var(--app-text, var(--foreground)) !important;
+}
+
+.chat-text-muted {
+  color: var(--app-text-muted, #64748b) !important;
+}
+
+/* ── Barra de avatares en la cabecera ── */
+.chat-agent-bar {
+  margin-right: 2px;
+}
+
+.chat-agent-bar__item {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.chat-agent-bar__item:hover {
+  transform: translateY(-1px);
+}
+
+.chat-agent-bar__item--active {
+  box-shadow: 0 0 0 2px var(--app-accent, #2563eb);
+}
+
+.chat-list-row {
+  display: block;
+  transition: background-color 120ms ease;
+  border-bottom: 1px solid var(--app-border, var(--border-subtle));
+}
+
+.chat-list-row:hover {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+/* ── Panel flotante ── */
+.chat-panel {
+  background-color: var(--app-surface, var(--surface)) !important;
+  border-color: var(--app-border, var(--border-subtle)) !important;
+  color: var(--app-text, var(--foreground));
+}
+
+.chat-panel__header {
+  border-bottom: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+/* ── Hilo ── */
+.chat-thread {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.chat-thread__scroll {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chat-thread__scroll .mantine-ScrollArea-viewport {
+  overscroll-behavior-y: contain;
+}
+
+/* ── Arrastrar y soltar archivos sobre la conversación ──
+   El aviso es una capa por encima de TODO el hilo (mensajes + compositor).
+   Va con pointer-events:none a propósito: si capturara el puntero, el propio
+   aviso se interpondría y el navegador dispararía dragleave sin parar. */
+.chat-thread {
+  position: relative;
+}
+
+.chat-thread--dragging {
+  outline: 2px dashed var(--app-primary, #1a3c6e);
+  outline-offset: -4px;
+  border-radius: 0.5rem;
+}
+
+.chat-thread__dropzone {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+  padding: 16px;
+  color: var(--app-text, var(--foreground));
+  /* Respaldo para navegadores sin color-mix: mejor un velo fijo que ninguno. */
+  background-color: rgba(255, 255, 255, 0.88);
+  background-color: color-mix(in srgb, var(--app-surface, #ffffff) 88%, transparent);
+}
+
+/* Fila FIJA de abajo del hilo: nunca se encoge ni se va con el scroll. Lo que
+   scrollea es solo .chat-thread__scroll, que es el hermano de arriba con
+   flex:1 y min-height:0. Las fichas de los archivos elegidos se pintan dentro
+   de este bloque, así que tampoco empujan el layout ni tapan el último
+   mensaje. */
+.chat-thread__composer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface, var(--surface));
+  /* Ajustado con el compositor de una fila: cada píxel de aquí es texto que la
+     conversación deja de mostrar. */
+  padding: 6px 8px 8px;
+}
+
+.chat-empty__icon {
+  color: var(--app-text-muted, #64748b);
+}
+
+/* ── Burbujas ── */
+.chat-bubble {
+  max-width: min(78%, 640px);
+  padding: 8px 12px;
+  border-radius: 1rem;
+  border: 1px solid transparent;
+  overflow-wrap: anywhere;
+  /* Para el gesto de citar y para el resalte al saltar a un mensaje. Anima
+     sobre todo el REGRESO del arrastre: mientras el dedo empuja, el
+     componente escribe `transform` en cada movimiento. */
+  transition: transform 160ms ease, box-shadow 220ms ease;
+}
+
+.chat-bubble--agent {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  border-color: var(--app-border, var(--border-subtle));
+  color: var(--app-text, var(--foreground));
+  border-bottom-left-radius: 0.35rem;
+}
+
+.chat-bubble--user {
+  background-color: var(--app-accent, #2563eb);
+  color: #ffffff;
+  border-bottom-right-radius: 0.35rem;
+}
+
+.chat-bubble--system {
+  background-color: transparent;
+  border: 1px dashed var(--app-border, var(--border-subtle));
+  color: var(--app-text-muted, #64748b);
+  max-width: 90%;
+}
+
+.chat-bubble--pending {
+  opacity: 0.65;
+}
+
+.chat-bubble--failed {
+  border-color: #e03131;
+}
+
+.chat-bubble__author {
+  color: var(--app-accent, #2563eb);
+  margin-bottom: 2px;
+}
+
+.chat-bubble__meta {
+  margin-top: 4px;
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+/* ── CITAR Y RESPONDER ─────────────────────────────────────────────────────
+   Pedido de Nicolás (2026-09-09). La cita se pinta en dos sitios con el mismo
+   aspecto —encima de la caja mientras se escribe, y dentro de la burbuja una
+   vez enviada— porque es la misma cosa: a esto estoy respondiendo. La barrita
+   de la izquierda es la señal que usan WhatsApp y Telegram y ya nadie tiene
+   que aprender. */
+.chat-cita {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  text-align: left;
+  border-radius: 10px;
+  padding: 6px 8px;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  overflow: hidden;
+}
+
+.chat-cita__barra {
+  flex: 0 0 3px;
+  border-radius: 2px;
+  background-color: var(--app-accent, #2563eb);
+}
+
+/* Dentro de la burbuja va pegada al texto que la responde, no separada: se
+   lee como un bloque. */
+.chat-cita--burbuja {
+  width: 100%;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+/* En la burbuja del usuario el fondo es azul, así que la cita necesita su
+   propio contraste o desaparece. */
+.chat-bubble--user .chat-cita--burbuja {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+.chat-bubble--user .chat-cita--burbuja .chat-text-muted,
+.chat-bubble--user .chat-cita--burbuja .mantine-Text-root {
+  color: #ffffff;
+}
+
+.chat-bubble--user .chat-cita--burbuja .chat-cita__barra {
+  background-color: #ffffff;
+}
+
+/* Resalte momentáneo al saltar a un mensaje citado: sin esto uno llega al
+   sitio y no sabe cuál de los mensajes era. */
+.chat-bubble--resaltada {
+  box-shadow: 0 0 0 2px var(--app-accent, #2563eb);
+}
+
+
+.chat-bubble--user .chat-bubble__meta,
+.chat-bubble--user .chat-md,
+.chat-bubble--user .chat-md__link {
+  color: #ffffff;
+}
+
+.chat-bubble--user .chat-md__code-inline,
+.chat-bubble--user /* ── Botón de copiar en bloques de código y enlaces ──
+   Pedido de Nicolás: "para no tener que seleccionar todo". Seleccionar un
+   bloque de código a mano en el celular es incómodo y casi siempre se lleva un
+   salto de línea de más. */
+.chat-md__pre-wrap {
+  position: relative;
+}
+
+.chat-copiar--codigo {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  /* Discreto mientras no se necesita: el código es lo que hay que leer. */
+  opacity: 0;
+  transition: opacity 140ms ease;
+  background-color: var(--app-surface, var(--surface));
+  border: 1px solid var(--app-border, var(--border-subtle));
+}
+
+.chat-md__pre-wrap:hover .chat-copiar--codigo,
+.chat-copiar--codigo:focus-visible {
+  opacity: 1;
+}
+
+/* En pantallas sin puntero NO hay "hover": si se dejara escondido, en el
+   celular el botón sería invisible — y el celular es justo donde más molesta
+   seleccionar a mano. */
+@media (hover: none) {
+  .chat-copiar--codigo {
+    opacity: 0.85;
+  }
+}
+
+/* El botón flota sobre la esquina, así que se le abre espacio para que no
+   tape el final de la primera línea. */
+.chat-md__pre-wrap .chat-md__pre {
+  padding-right: 34px;
+}
+
+.chat-md__link-wrap {
+  display: inline;
+}
+
+.chat-copiar--enlace {
+  /* Pegado al enlace, alineado con el texto y sin romper el renglón. */
+  display: inline-flex;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  opacity: 0.55;
+  transition: opacity 140ms ease;
+}
+
+.chat-copiar--enlace:hover,
+.chat-copiar--enlace:focus-visible {
+  opacity: 1;
+}
+
+/* Dentro de la burbuja del usuario el fondo es azul: el botón se aclara para
+   no desaparecer. */
+.chat-bubble--user .chat-copiar--codigo {
+  background-color: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+
+.chat-md__pre {
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+/* ── Indicador "qué está haciendo el agente" ── */
+.chat-activity__label {
+  color: var(--app-text-muted, #64748b);
+}
+
+.chat-typing {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.chat-typing i {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background-color: var(--app-accent, #2563eb);
+  animation: chat-typing-bounce 1.1s infinite ease-in-out;
+}
+
+.chat-typing i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat-typing i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes chat-typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-typing i {
+    animation: none;
+    opacity: 0.8;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Suavizado del chat
+   ──────────────────────────────────────────────────────────────────────
+   Nicolás (2026-09-07): "las animaciones se sienten un poco rústicas,
+   incluso escribiendo". Lo que se sentía duro eran los saltos secos: la
+   burbuja que aparece de golpe, la caja que crece de un tirón, el velo del
+   arrastre que se enciende sin transición.
+
+   Todo va con duraciones cortas (130-200 ms) y curvas de salida: lo justo
+   para que el ojo siga el cambio sin que la interfaz se sienta lenta. Y
+   todo está envuelto en `prefers-reduced-motion`, que es una preferencia de
+   accesibilidad del sistema: quien la activa NO debe ver nada de esto.
+   ══════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: no-preference) {
+  /* SOLO se anima lo que llega después de abrir el hilo (`--nueva`, marcada
+     por ChatThread). Animar todo hacía que al entrar a una conversación larga
+     se sacudiera la pantalla entera, que es lo contrario de lo que se busca. */
+
+  /* Lo que manda el AGENTE: entra desde su lado, subiendo apenas. */
+  .chat-bubble--nueva {
+    animation: chat-burbuja-entra 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    transform-origin: bottom left;
+  }
+
+  /* Lo que manda UNO: la animación de envío, al estilo iMessage. La burbuja
+     sale del lado de la caja de escribir —de ahí el `transform-origin` abajo a
+     la derecha—, empieza más pequeña y baja, y se acomoda con un pequeño
+     rebote. La curva con valores fuera de 0..1 es lo que produce ese
+     sobrepaso: crece un pelo de más y vuelve. Sin eso se siente mecánico. */
+  .chat-bubble--user.chat-bubble--nueva {
+    animation: chat-envio 340ms cubic-bezier(0.22, 1.28, 0.42, 1) both;
+    transform-origin: bottom right;
+  }
+
+  .chat-attachment--draft {
+    animation: chat-burbuja-entra 150ms ease-out both;
+  }
+
+  .chat-thread__dropzone {
+    animation: chat-velo-entra 140ms ease-out both;
+  }
+
+  .chat-tasks {
+    animation: chat-burbuja-entra 160ms ease-out both;
+  }
+
+  /* Botones de la barra y del envío: el color y el hundido al presionar. */
+  .chat-composer .mantine-ActionIcon-root {
+    transition:
+      background-color 140ms ease,
+      color 140ms ease,
+      transform 110ms ease;
+  }
+
+  .chat-composer .mantine-ActionIcon-root:active {
+    transform: scale(0.94);
+  }
+
+  .chat-agent-card {
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      transform 140ms ease;
+  }
+
+  .chat-agent-card:active {
+    transform: scale(0.99);
+  }
+}
+
+@keyframes chat-envio {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes chat-burbuja-entra {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes chat-velo-entra {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ── Icono del grupo en la lista ──
+   Los grupos comparten la tarjeta de los asistentes (`chat-agent-card`) para
+   que la lista se vea de una sola pieza. Lo único propio es este icono: un
+   grupo no tiene cara, así que en el lugar del avatar va un círculo del mismo
+   tamaño con el símbolo de varias personas. Sin el círculo, el icono suelto
+   rompe la alineación de toda la columna. */
+.chat-grupo__icono {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background-color: var(--app-surface-hover, rgb(0 0 0 / 6%));
+  color: var(--app-text-muted, var(--foreground));
+}
+
+.chat-grupo__icono--grande {
+  width: 36px;
+  height: 36px;
+}
+
+/* ── Contador de no leídos de un grupo ──
+   Igual que el de los avatares de los agentes, pero anclado al icono del
+   grupo. Va con z-index explícito por la misma razón que allá: sin él, el
+   punto de estado se le montaba encima y tapaba el número. */
+.chat-grupo__contador {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  z-index: 2;
+}
+
+/* ── Lista de menciones (@) en un grupo ──
+   Va DENTRO del compositor, como primer hijo, así que aparece encima de la
+   caja de escribir. Se hizo así y no con un menú flotante a propósito: en el
+   celular, un menú posicionado debajo del campo queda tapado por el teclado, y
+   uno posicionado con `fixed` se descoloca con el viewport visual — el mismo
+   problema que costó tres pases arreglar en este chat. Aquí es un bloque más
+   del flujo y no puede descolocarse. */
+.chat-menciones {
+  margin-bottom: 6px;
+  max-height: 208px;
+  overflow-y: auto;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  border-radius: 12px;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  box-shadow: 0 6px 18px rgb(0 0 0 / 12%);
+  padding: 4px;
+}
+
+.chat-menciones__item {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--app-text, var(--foreground));
+  transition: background-color 120ms ease;
+}
+
+/* El resaltado es del TECLADO, no del ratón: es el que se mueve con las
+   flechas y el que Enter escoge. */
+.chat-menciones__item--activo,
+.chat-menciones__item:hover {
+  background-color: var(--app-surface-hover, rgb(0 0 0 / 6%));
+}
+
+/* ── Caja de escritura ── */
+/* ── La fila del compositor NO puede desbordar ──
+   Nicolás, desde Android: "el botón de enviar está haciendo que aparezcan
+   barras de scroll horizontal" — en la captura el círculo de enviar sale
+   cortado contra el borde derecho.
+
+   La regla del compositor es: **la caja de texto cede, los botones nunca**.
+   Los botones llevan su tamaño fijo (34, 34 y 46 px) y el texto se queda con
+   lo que sobre. Sin `flex: 0 0 auto` los botones también son encogibles y el
+   reparto queda a merced de los tamaños mínimos de cada uno; sin `min-width:0`
+   en la fila, un hijo con contenido ancho la estira por dentro.
+
+   El `overflow-x: clip` del contenedor es un tope de seguridad, no el arreglo:
+   si algo vuelve a crecer de más, que se quede adentro en vez de sacarle una
+   barra horizontal a toda la página. */
+.chat-composer,
+.chat-composer > .mantine-Group-root {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-composer .mantine-ActionIcon-root {
+  flex: 0 0 auto;
+}
+
+/* Explicit tracks keep long drafts and Mantine wrappers from pushing Send
+   beyond a narrow PWA viewport. Only the editor track may shrink. */
+.chat-composer .chat-composer__row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.chat-composer .chat-composer__field {
+  flex: 1 1 0%;
+  width: 0;
+  min-width: 0;
+}
+
+.chat-composer .chat-composer__send {
+  flex: 0 0 46px;
+}
+
+.chat-composer .chat-composer__input {
+  border-radius: 23px;
+  min-height: 46px;
+  line-height: 24px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  box-sizing: border-box;
+}
+
+.chat-thread__composer {
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.chat-composer__input {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  border-color: var(--app-border, var(--border-subtle));
+  color: var(--app-text, var(--foreground));
+  /* 16 px NO es capricho de tamaño: es el umbral de Safari en iPhone. Con
+     cualquier cosa por debajo, al enfocar la caja hace zoom solo, y ese zoom
+     corre el viewport y descoloca el chat entero. Estaba en 15 px con un
+     parche que solo subía a 16 por debajo de 768 px; el parche no bastó y
+     además se leía chiquito en el computador. Ahora son 16 px SIEMPRE, que es
+     lo que Nicolás pidió y de paso mata el zoom en todos los anchos
+     (2026-09-08). No la baje de 16. */
+  font-size: 16px;
+  /* Cápsula, como la caja de WhatsApp. Con un renglón queda redonda y al crecer
+     se ve como una caja de bordes suaves.
+     21 px = la MITAD del `min-height` de 42 px, o sea el radio máximo que
+     todavía es una cápsula de verdad. Estaba en 18 y al lado del botón de
+     enviar —un círculo de 46 px— se veía cuadrada (Nicolás, 2026-09-09: "el
+     input tiene un round muy pequeño en comparación con el botón"). Si algún
+     día sube el `min-height`, suba este radio a la mitad del nuevo alto. */
+  border-radius: 21px;
+  /* El aire de adentro. Subió de 7 a 10 px y NO le cuesta alto a la
+     conversación: la fila la gobierna el botón de enviar, que mide 46 px, y la
+     caja sigue quedando por debajo. */
+  /* El borde derecho deja sitio al clip, que ahora vive DENTRO de la caja.
+     Hay que escribirlo aquí: Mantine reserva ese espacio con su propia
+     variable de relleno y esta regla la pisa, así que sin el 44 px el texto
+     se metería debajo del botón. */
+  padding: 10px 44px 10px 16px;
+  min-height: 42px;
+  /* SIN transición de `height`, a propósito (2026-09-09, por el reporte de
+     lentitud de Nicolás). Animarla obliga al navegador a rehacer el diseño en
+     CADA cuadro, y aquí se disparaba con cada salto de renglón — o sea,
+     mientras la persona escribe, que es el peor momento posible. El salto de
+     un renglón es de unos pocos píxeles y sin la transición ni se nota; lo
+     que sí se notaba era el tirón.
+     El resto SÍ se suavizó (Nicolás, mismo día: "una animación al teclear que
+     sea más suave"): borde y sombra del foco usan la misma curva cubic-bezier
+     de las burbujas del chat, así que enfocar/teclear se siente fluido sin
+     tocar el layout. */
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+/* Foco suave del input: el borde toma el acento y aparece un halo tenue, en
+   lugar del cambio brusco por defecto. Coherente con el resto del chat. */
+.chat-composer__input:focus,
+.chat-composer__input:focus-within {
+  border-color: var(--app-accent, #2563eb);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent, #2563eb) 18%, transparent);
+}
+
+/* Respeta a quien pide menos movimiento: sin transiciones. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer__input {
+    transition: border-color 160ms ease, box-shadow 160ms ease;
+  }
+}
+
+/* ── iOS: el ZOOM AUTOMÁTICO al enfocar la caja ──
+   Safari en iPhone hace zoom sobre cualquier campo con letra MENOR a 16 px en
+   cuanto recibe el foco. Y ese zoom no es cosmético: encoge el área visible,
+   corre el viewport y descoloca todo lo que esté anclado a la pantalla. Es la
+   otra mitad del reporte "se pierde el máximo del chat… cuando sale el teclado
+   se vuelve loco".
+   La caja del compositor ya NO depende de esta regla: se subió a 16 px en su
+   propia declaración, porque este parche por ancho no alcanzó (Nicolás seguía
+   viendo el zoom en el iPhone) y además dejaba la letra chiquita en el
+   computador. Esta regla se queda por los OTROS campos del panel, que sí
+   siguen con el tamaño de Mantine. */
+@media (max-width: 768px) {
+  .chat-panel input,
+  .chat-panel textarea {
+    font-size: 16px;
+  }
+}
+
+.chat-composer__preview {
+  min-height: 66px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px dashed var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  color: var(--app-text, var(--foreground));
+}
+
+/* ── Página de chats ── */
+.chat-folder__icon {
+  color: var(--app-accent, #2563eb);
+}
+
+.chat-agent-card {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface, var(--surface));
+  color: var(--app-text, var(--foreground));
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.chat-agent-card:hover {
+  border-color: var(--app-accent, #2563eb);
+  transform: translateY(-1px);
+  box-shadow: var(--app-card-shadow, 0 6px 18px rgba(15, 23, 42, 0.08));
+}
+
+.chat-agent-card--compact {
+  padding: 9px 10px;
+  border-radius: 12px;
+}
+
+.chat-agent-card--selected {
+  border-color: var(--app-accent, #2563eb);
+  background-color: color-mix(in srgb, var(--app-accent, #2563eb) 10%, var(--app-surface, #fff));
+}
+
+.chat-page-thread {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  border-radius: 16px;
+  overflow: hidden;
+  background-color: var(--app-surface, var(--surface));
+  position: sticky;
+  top: calc(var(--app-header-height) + 16px);
+  /* Altura ACOTADA para que el hilo scrollee POR DENTRO y el compositor quede
+     siempre visible abajo. Sin este tope, el bloque crecía con el contenido y
+     la caja de escribir se iba con el scroll de la página.
+
+     Se usa `dvh` y no `vh` por el móvil: cuando sale el teclado de iOS/Android
+     la unidad `vh` sigue valiendo lo que medía la pantalla completa y el
+     compositor queda DEBAJO del teclado. La primera declaración, en `vh`, es
+     el respaldo para navegadores que no entienden `dvh`. */
+  height: calc(100vh - var(--app-header-height) - 32px);
+  height: calc(100dvh - var(--app-header-height) - 32px);
+}
+
+/* ── La conversación sola: llegar por la notificación y poder escribir ──
+   Cuando el hilo se muestra SIN la columna de carpetas (enlace directo o
+   pantalla angosta) ocupa exactamente el alto REALMENTE visible y se pega
+   arriba. Así no queda nada que desplazar: se llega con los últimos mensajes
+   y la caja de escribir a la vista.
+
+   `--alto-visible` la publica el hook useAltoVisible con el visual viewport,
+   que es lo único que refleja el teclado del celular: `dvh` no se encoge
+   cuando el teclado sale en iOS, y por eso el compositor terminaba debajo del
+   teclado y tocaba hacer scroll. Si no hay hook o el navegador no soporta la
+   API, cae a `dvh` y se comporta como antes. */
+/* ── Chat de escritorio: barra lateral + conversación a pantalla completa ──
+   Con una conversación abierta en pantalla ancha la página deja de ser una
+   rejilla de tarjetas y se comporta como una aplicación de mensajería.
+
+   La clave es que el marco va CLAVADO a la pantalla (`fixed`), debajo de la
+   barra superior de SynerLink — que en escritorio sí se conserva, porque es la
+   navegación de toda la aplicación. Así no queda absolutamente nada que
+   desplazar en la página: lo único que corre es el interior de la barra
+   lateral y el de la lista de mensajes. El intento anterior acotaba el alto
+   con la rejilla de Mantine y no funcionaba: el contenedor interno de la
+   rejilla no hereda el alto, las columnas se quedaban del tamaño de su
+   contenido y la página seguía teniendo su propio desplazamiento por detrás. */
+.chat-escritorio {
+  position: fixed;
+  top: var(--app-header-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  overflow: hidden;
+  background-color: var(--app-bg, var(--background));
+  color: var(--app-text, var(--foreground));
+}
+
+/* Mientras el marco está puesto, la página de atrás no se desplaza. */
+body.chat-escritorio-abierto {
+  overflow: hidden;
+}
+
+.chat-escritorio__lateral {
+  flex: 0 0 340px;
+  width: 340px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface, var(--surface));
+}
+
+/* El buscador queda fijo arriba de la barra lateral: es lo primero que uno
+   busca cuando tiene una docena de asistentes. */
+.chat-escritorio__buscador {
+  flex: 0 0 auto;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--app-border, var(--border-subtle));
+}
+
+.chat-escritorio__lista {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.chat-escritorio__principal {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* El hilo como PANEL: llena la columna y pierde la tarjeta (borde, esquinas
+   redondeadas y posición pegajosa). Los bordes ya los da la división de la
+   pantalla. */
+.chat-page-thread--panel {
+  position: static;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  border: none;
+  border-radius: 0;
+}
+
+/* En pantallas anchas de verdad la barra lateral puede respirar un poco más. */
+@media (min-width: 1500px) {
+  .chat-escritorio__lateral {
+    flex-basis: 380px;
+    width: 380px;
+  }
+}
+
+/* Sin márgenes ni ancho máximo: con la conversación sola, el hilo va de borde
+   a borde. El contenedor normal (max-w-7xl + padding) dejaba franjas a los
+   lados y arriba, y en el celular eso se ve como una tarjeta metida dentro de
+   la página en vez de una pantalla de chat. */
+/* ── Modo inmersivo del chat ──
+   Con la conversación abierta a pantalla completa (llegada por notificación o
+   pantalla angosta) se esconde la barra superior de la aplicación y se anula
+   el espacio que reservaba. La marca la pone y la QUITA ChatWorkspace; si
+   alguna vez quedara pegada, la aplicación se quedaría sin navegación, así que
+   ese `cleanup` no es opcional. */
+body.chat-inmersivo .app-header {
+  display: none;
+}
+
+body.chat-inmersivo .app-page-shell {
+  padding-top: 0;
+}
+
+/* Escritorio expandido: sin la barra de SynerLink, el marco recupera el alto
+   que ella ocupaba. Sin esta regla queda una franja muerta del tamaño de la
+   barra escondida. */
+body.chat-inmersivo .chat-escritorio {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* En modo inmersivo la página NO se desplaza: la conversación es la pantalla
+   completa y cada columna trae su propio desplazamiento. Sin esto el navegador
+   podía correr el documento para dejar el campo a la vista —al adjuntar un
+   archivo, la ficha empuja la caja hacia abajo y el navegador reacciona— y el
+   bloque entero se subía, dejando un vacío entre la caja y el teclado. */
+body.chat-inmersivo {
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  overscroll-behavior: none;
+}
+
+html.chat-inmersivo {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.chat-inmersivo .chat-thread__composer {
+  padding-left: max(8px, env(safe-area-inset-left));
+  padding-right: max(8px, env(safe-area-inset-right));
+}
+
+/* Anclado a lo que DE VERDAD se ve, no al viewport de diseño.
+   `sticky` no sirve aquí: solo se pega mientras le quede recorrido dentro de
+   su contenedor, y en modo inmersivo el contenedor mide lo mismo que el
+   elemento, así que no tenía dónde pegarse y se iba con el desplazamiento.
+   `fixed` más el desplazamiento del visual viewport lo dejan calcado sobre el
+   área visible, salga o no el teclado. */
+body.chat-inmersivo .chat-page-thread--completa {
+  position: fixed;
+  top: 0;
+  top: var(--desplazamiento-visible, 0px);
+  left: 0;
+  right: 0;
+  height: 100dvh;
+  height: var(--alto-visible, 100dvh);
+}
+
+/* La transición de alto al salir el teclado SE QUITÓ (2026-09-09, por el
+   reporte de lentitud de Nicolás).
+
+   Acompañaba bonito al teclado, pero animaba `height` sobre un contenedor
+   `fixed` que tiene toda la conversación adentro: un recálculo completo del
+   diseño por cuadro, justo en el momento en que el teléfono ya está ocupado
+   animando su propio teclado. Era la animación más cara del chat y en el peor
+   instante. El movimiento del teclado del sistema ya da la sensación de
+   continuidad; no hacía falta duplicarla. */
+
+.chat-page-shell--completa {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chat-page-thread--completa {
+  position: sticky;
+  top: var(--app-header-height);
+  border: none;
+  border-radius: 0;
+  height: calc(100dvh - var(--app-header-height));
+  height: calc(var(--alto-visible, 100dvh) - var(--app-header-height));
+}
+
+/* ── Avatar del agente: punto de estado y contador ──
+   Posición explícita en vez de `Indicator` anidados de Mantine. El punto va
+   ABAJO A LA DERECHA y el contador ARRIBA A LA DERECHA, por encima; los dos
+   con borde del color del fondo para separarse del avatar y entre sí. Nicolás
+   reportó el contador tapado por el punto cuando esto dependía del
+   anidamiento. */
+.agent-avatar {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.agent-avatar__estado {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  border-radius: 999px;
+  border: 2px solid var(--app-surface, var(--surface));
+  box-sizing: content-box;
+}
+
+
+/* ── Aro de "trabajando" ──
+   Pedido de Nicolás (2026-09-09): un aro alrededor de la foto del agente
+   mientras atiende un turno, visible para TODOS y no solo para quien tiene el
+   hilo abierto — para eso ya está el indicador de la conversación.
+
+   Va como elemento aparte y no como `border` del avatar: un borde le cambiaría
+   la caja al avatar y correría el punto de estado y el contador, que están
+   anclados a esa caja.
+
+   Solo anima `transform` y `opacity`, que el navegador resuelve sin recalcular
+   el diseño. El chat pinta muchos avatares a la vez y una animación que toque
+   el layout se sentiría en todos. */
+.agent-avatar__aro {
+  position: absolute;
+  inset: -3px;
+  border-radius: 999px;
+  border: 2px solid var(--app-accent, #2563eb);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .agent-avatar__aro {
+    animation: agent-avatar-aro 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes agent-avatar-aro {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.95;
+  }
+  50% {
+    transform: scale(1.09);
+    opacity: 0.35;
+  }
+}
+
+.agent-avatar__contador {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  /* Por encima del punto de estado, siempre. Era justo lo que fallaba. */
+  z-index: 2;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 2px solid var(--app-surface, var(--surface));
+  background-color: var(--mantine-color-red-filled, #e03131);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  box-sizing: content-box;
+}
+
+/* ── Fichas de adjuntos ── */
+.chat-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  color: var(--app-text, var(--foreground));
+  text-decoration: none;
+}
+
+.chat-attachment__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-attachment__size {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+/* Ficha de un archivo TODAVÍA no enviado, dentro del compositor. */
+.chat-attachment--draft {
+  max-width: 240px;
+  font-size: 12px;
+}
+
+.chat-attachment--link {
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.chat-attachment--link:hover {
+  border-color: var(--app-accent, #2563eb);
+  background-color: var(--app-surface, var(--surface));
+}
+
+/* Dentro de la burbuja del usuario (fondo de color) la ficha se aclara para
+   conservar el contraste; el resto de la paleta sale de los tokens --app-*. */
+.chat-bubble--user .chat-attachment {
+  background-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+
+.chat-bubble--user .chat-attachment--link:hover {
+  background-color: rgba(255, 255, 255, 0.28);
+  border-color: #ffffff;
+}
+
+/* Markdown de los mensajes */
+.chat-md {
+  /* +2 pt sobre los 13.5 originales, a pedido de Nicolás (2026-09-07): en el
+     celular el texto se leía chico. La interlínea sube un poco con él para que
+     el bloque no quede apretado. */
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+
+.chat-md__p {
+  margin: 0 0 6px;
+}
+
+.chat-md > *:last-child {
+  margin-bottom: 0;
+}
+
+.chat-md__ul,
+.chat-md__ol {
+  margin: 0 0 6px;
+  padding-left: 20px;
+}
+
+.chat-md__ul {
+  list-style: disc;
+}
+
+.chat-md__ol {
+  list-style: decimal;
+}
+
+.chat-md__li {
+  margin-bottom: 2px;
+}
+
+.chat-md__h {
+  margin: 6px 0 4px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.chat-md__h1 {
+  font-size: 1.05rem;
+}
+
+.chat-md__h2 {
+  font-size: 0.97rem;
+}
+
+.chat-md__h3 {
+  font-size: 0.9rem;
+}
+
+.chat-md__quote {
+  margin: 0 0 6px;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--app-border, var(--border-subtle));
+  opacity: 0.9;
+}
+
+.chat-md__hr {
+  border: 0;
+  border-top: 1px solid var(--app-border, var(--border-subtle));
+  margin: 8px 0;
+}
+
+.chat-md__link {
+  color: var(--app-accent, #2563eb);
+  text-decoration: underline;
+}
+
+.chat-md__code-inline {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-md__pre {
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  overflow-x: auto;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  border: 1px solid var(--app-border, var(--border-subtle));
+}
+
+.chat-md__code-block {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  white-space: pre;
+  background: transparent;
+  padding: 0;
+}
+
+.chat-md__table-wrap {
+  overflow-x: auto;
+  margin-bottom: 6px;
+}
+
+.chat-md__table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+.chat-md__th,
+.chat-md__td {
+  border: 1px solid var(--app-border, var(--border-subtle));
+  padding: 4px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.chat-md__th {
+  font-weight: 700;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+/* ── Tablita de sub-agentes en curso (indicador del chat de agentes) ── */
+.chat-tasks {
+  margin-top: 6px;
+  margin-left: 32px; /* alineada bajo el texto, no bajo el avatar */
+  padding: 8px 10px;
+  border: 1px solid var(--app-border, #e2e8f0);
+  border-radius: 10px;
+  background-color: var(--app-surface-muted, rgba(148, 163, 184, 0.08));
+  max-width: 100%;
+}
+
+.chat-tasks__title {
+  color: var(--app-text-muted, #64748b);
+  margin-bottom: 4px;
+}
+
+.chat-tasks__table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.chat-tasks__cell {
+  padding: 2px 0;
+  vertical-align: middle;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.chat-tasks__cell:first-child {
+  width: 14px;
+}
+
+.chat-tasks__desc {
+  color: var(--app-text, #1e293b);
+  /* Una descripción larga no debe empujar la tabla ni partir el globo. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-tasks__time {
+  width: 68px;
+  text-align: right;
+  color: var(--app-text-muted, #64748b);
+  font-variant-numeric: tabular-nums; /* el número no baila cada segundo */
+  white-space: nowrap;
+}
+
+.chat-tasks__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background-color: var(--app-accent, #2563eb);
+  animation: chat-tasks-pulse 1.4s infinite ease-in-out;
+}
+
+@keyframes chat-tasks-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ══════════════════════ PORTAL DE TALENTO HUMANO ══════════════════════════
+   Pedido de Cristian Baldión (2026-09-09). Es una página PÚBLICA —fuera del
+   hub y de la sesión de SynerLink—, así que sus estilos viven aquí con prefijo
+   propio y no reutilizan nada de la aplicación interna: cambiar el chat no
+   puede despeinar el portal, ni al revés.
+
+   Colores del design system de GSS (--gss-blue #1a3c6e y su escala). Se
+   declaran locales al portal para no meter variables nuevas al resto de la
+   hoja. */
+.portal-th {
+  --pth-azul: #1a3c6e;
+  --pth-azul-700: #15315a;
+  --pth-azul-50: #f5f7fa;
+  --pth-tinta: #0f1a2c;
+  --pth-tinta-2: #38445a;
+  --pth-tinta-3: #6a7689;
+  --pth-linea: #d8dde6;
+
+  min-height: 100vh;
+  background-color: var(--pth-azul-50);
+  color: var(--pth-tinta);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.portal-th__barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 20px;
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__marca {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.portal-th__logo {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.16);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.portal-th__marca h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.portal-th__marca p {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+
+.portal-th__sesion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.82rem;
+}
+
+.portal-th__sesion button,
+.portal-th__ingreso button[type='submit'] {
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.portal-th__sesion button {
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.portal-th__cuerpo {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+.portal-th__seccion {
+  margin-bottom: 32px;
+}
+
+.portal-th__seccion h2 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  color: var(--pth-azul);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+/* ── Ingreso ─────────────────────────────────────────────────────────────── */
+.portal-th__ingreso {
+  max-width: 420px;
+  margin: 40px auto;
+  padding: 24px;
+  background-color: #fff;
+  border: 1px solid var(--pth-linea);
+  border-radius: 16px;
+}
+
+.portal-th__ingreso h2 {
+  margin: 0 0 6px;
+  font-size: 1.1rem;
+  color: var(--pth-azul);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.portal-th__ingreso p {
+  margin: 0 0 16px;
+  font-size: 0.86rem;
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__ingreso form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.portal-th__ingreso input {
+  padding: 12px 14px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 12px;
+  /* 16 px: por debajo de eso Safari en iPhone hace zoom solo al enfocar y
+     descoloca la página. Misma razón que en el compositor del chat. */
+  font-size: 16px;
+  color: var(--pth-tinta);
+}
+
+.portal-th__codigo {
+  text-align: center;
+  letter-spacing: 8px;
+  font-size: 22px !important;
+  font-weight: 700;
+}
+
+.portal-th__ingreso button[type='submit'] {
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__ingreso button[type='submit']:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.portal-th__enlace {
+  background: none;
+  border: 0;
+  color: var(--pth-tinta-3);
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.portal-th__aviso,
+.portal-th__error,
+.portal-th__estado {
+  margin: 12px 0 0;
+  font-size: 0.84rem;
+}
+
+.portal-th__aviso { color: var(--pth-azul); }
+.portal-th__error { color: #b3261e; }
+.portal-th__estado { color: var(--pth-tinta-3); }
+
+/* ── Anuncios ────────────────────────────────────────────────────────────── */
+.portal-th__banners {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.portal-th__banners img {
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid var(--pth-linea);
+  background-color: #fff;
+}
+
+/* ── Cartelera administrable ─────────────────────────────────────────────────
+   Solo la ve así quien puede editar (Talento Humano). Para todos los demás la
+   sección es exactamente la de antes: imágenes y nada más. */
+.portal-th__seccion-barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.portal-th__seccion-barra h2 {
+  margin-bottom: 12px;
+}
+
+/* Es un <label> encima de un <input type="file"> escondido: así el botón se ve
+   como los demás y el selector de archivos sigue siendo el nativo. */
+.portal-th__cargar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 7px 14px;
+  border: 1px solid var(--pth-azul);
+  border-radius: 999px;
+  background-color: #fff;
+  color: var(--pth-azul);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.portal-th__cargar:hover {
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__cargar input {
+  display: none;
+}
+
+.portal-th__banner {
+  position: relative;
+  margin: 0;
+}
+
+/* El anuncio se abre en la vista previa, igual que las políticas. Es un
+   <button> para que funcione con teclado y lector de pantalla; hay que
+   quitarle el aspecto que trae el navegador. */
+.portal-th__banner-abrir {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: zoom-in;
+}
+
+.portal-th__banner-quitar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  /* Oscuro y no rojo: el rojo llama a picarlo. Esto borra de verdad. */
+  background-color: rgba(15, 26, 44, 0.65);
+  color: #fff;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.portal-th__banner-quitar:hover {
+  background-color: rgba(15, 26, 44, 0.9);
+}
+
+/* ── Documentos ──────────────────────────────────────────────────────────── */
+.portal-th__tarjetas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.portal-th__tarjeta {
+  display: flex;
+  flex-direction: column;
+  background-color: #fff;
+  border: 1px solid var(--pth-linea);
+  border-radius: 14px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
+.portal-th__tarjeta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(15, 26, 44, 0.12);
+}
+
+/* La portada más baja: son ICONOS sobre fondo, no fotos. Con 4/3 ocupaban
+   media pantalla y el título quedaba abajo del todo. Pedido de Cristian
+   (2026-09-09): "que los iconos de las políticas sean más pequeños". */
+.portal-th__tarjeta img,
+.portal-th__sinportada {
+  width: 100%;
+  aspect-ratio: 16 / 7;
+  object-fit: cover;
+  background-color: var(--pth-azul-50);
+}
+
+/* Y las tarjetas más angostas, para que quepan más por fila y ninguna quede
+   sola en un renglón como pasaba con cinco documentos. */
+.portal-th__tarjetas {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
+.portal-th__sinportada {
+  display: grid;
+  place-items: center;
+  color: var(--pth-tinta-3);
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.portal-th__tarjeta-pie {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px 12px;
+}
+
+.portal-th__tarjeta-pie strong {
+  font-size: 0.88rem;
+  line-height: 1.25;
+}
+
+.portal-th__tarjeta-pie span {
+  font-size: 0.75rem;
+  color: var(--pth-tinta-3);
+}
+
+.portal-th__pie {
+  padding: 18px;
+  text-align: center;
+  font-size: 0.76rem;
+  color: var(--pth-tinta-3);
+  border-top: 1px solid var(--pth-linea);
+}
+
+/* El portal DENTRO del hub: sin barra propia ni fondo de pantalla completa —
+   la barra y el marco ya los pone SynerLink—, pero con los mismos colores y
+   las mismas tarjetas que la versión abierta. */
+.portal-th--modulo {
+  min-height: 0;
+  background-color: transparent;
+}
+
+.portal-th__encabezado-modulo {
+  margin-bottom: 20px;
+}
+
+.portal-th__encabezado-modulo h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  color: var(--pth-azul);
+}
+
+.portal-th__encabezado-modulo p {
+  margin: 4px 0 0;
+  font-size: 0.86rem;
+  color: var(--pth-tinta-3);
+}
+
+/* ── VISTA PREVIA DE UN DOCUMENTO ──────────────────────────────────────────
+   Pedido de Cristian (2026-09-09): "cada vez que abra un documento quiero que
+   me lo abra en una ventana de vista previa, no en una pestaña nueva". Abrir
+   una pestaña saca a la persona del portal y la deja mirando el visor del
+   navegador, con el título interno del PDF —"Scanned Document"— en vez del
+   nombre del documento. */
+.portal-th__visor {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 2vmin;
+  background-color: rgba(15, 26, 44, 0.72);
+}
+
+.portal-th__visor-caja {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 96vw);
+  height: min(92vh, 100%);
+  overflow: hidden;
+  background-color: #fff;
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(15, 26, 44, 0.35);
+}
+
+.portal-th__visor-barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__visor-barra strong {
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-th__visor-acciones {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.portal-th__visor-acciones a {
+  color: #fff;
+  font-size: 0.78rem;
+  text-decoration: underline;
+}
+
+.portal-th__visor-acciones button {
+  border: 0;
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.portal-th__visor iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background-color: var(--pth-azul-50);
+}
+
+/* Un anuncio se ve entero y centrado, sin recortarse ni estirarse. El fondo
+   oscuro es a propósito: una imagen con fondo blanco sobre blanco no deja ver
+   dónde termina. */
+.portal-th__visor-imagen {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  background-color: #101828;
+}
+
+/* La tarjeta pasó de enlace a botón: hay que devolverle el aspecto, porque un
+   <button> trae borde, fondo y alineación propios del navegador. */
+.portal-th__tarjeta {
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
