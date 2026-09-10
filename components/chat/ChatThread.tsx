@@ -12,6 +12,7 @@ import {
   Stack,
   Text,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -36,6 +37,7 @@ import {
   type ChatParticipantDto,
 } from '../../lib/chat/client';
 import { formatBytes } from '../../lib/chat/attachments';
+import type { ChatReplyToDto } from '../../lib/chat/client';
 
 /**
  * El hilo de conversación: burbujas con Markdown real, indicador de qué está
@@ -110,6 +112,8 @@ function MessageBubble({
   currentUserId,
   enGrupo = false,
   nueva = false,
+  onCitar,
+  onIrAlCitado,
 }: {
   message: ChatMessageDto;
   /** El agente del hilo directo. En un grupo no hay "uno". */
@@ -119,8 +123,59 @@ function MessageBubble({
   enGrupo?: boolean;
   /** Llegó DESPUÉS de abrir el hilo: solo esas se animan (ver ChatThread). */
   nueva?: boolean;
+  /** Citar ESTE mensaje. Sin esto, los gestos quedan inertes. */
+  onCitar?: (message: ChatMessageDto) => void;
+  /** Saltar al mensaje que este cita. */
+  onIrAlCitado?: (idMessage: number) => void;
 }) {
   const isSystem = message.role === 'system';
+
+  /*
+   * CÓMO SE CITA, según el aparato.
+   *
+   * Es lo que hacen los grandes, y por buenas razones:
+   *   - En el CELULAR, deslizar el mensaje a la derecha (WhatsApp, Telegram,
+   *     Signal). No hay clic derecho y una presión larga pelea con la
+   *     selección de texto del sistema.
+   *   - En ESCRITORIO, clic derecho (Telegram) — en Slack es una barra al
+   *     pasar el mouse, pero eso pide rediseñar la burbuja; el menú del clic
+   *     derecho da lo mismo sin tocar el diseño.
+   *
+   * El umbral son 55 px para que un desplazamiento vertical de la
+   * conversación no dispare la cita por accidente, y solo cuenta si el gesto
+   * fue MÁS horizontal que vertical.
+   */
+  const gesto = useRef<{ x: number; y: number } | null>(null);
+  const [arrastre, setArrastre] = useState(0);
+  const UMBRAL = 55;
+
+  const puedeCitar = Boolean(onCitar) && !message.pending && !message.failed && message.id > 0;
+
+  const alTocar = (event: React.TouchEvent) => {
+    if (!puedeCitar) return;
+    const toque = event.touches[0];
+    gesto.current = { x: toque.clientX, y: toque.clientY };
+  };
+
+  const alMover = (event: React.TouchEvent) => {
+    if (!gesto.current || !puedeCitar) return;
+    const toque = event.touches[0];
+    const dx = toque.clientX - gesto.current.x;
+    const dy = toque.clientY - gesto.current.y;
+    // Solo a la derecha, y solo si el gesto es horizontal: si no, es la
+    // conversación desplazándose y hay que dejarla en paz.
+    if (dx <= 0 || Math.abs(dy) > Math.abs(dx)) {
+      setArrastre(0);
+      return;
+    }
+    setArrastre(Math.min(dx, UMBRAL + 15));
+  };
+
+  const alSoltar = () => {
+    if (arrastre >= UMBRAL && puedeCitar) onCitar?.(message);
+    gesto.current = null;
+    setArrastre(0);
+  };
 
   // ⚠️ EN UN GRUPO, "mío" NO es lo mismo que role='user'. Con el criterio del
   // hilo directo, los mensajes de las OTRAS personas del grupo se pintarían
@@ -141,7 +196,10 @@ function MessageBubble({
   if (isSystem) {
     return (
       <Center>
-        <Box className={`chat-bubble chat-bubble--system${nueva ? ' chat-bubble--nueva' : ''}`}>
+        <Box
+          id={`msg-${message.id}`}
+          className={`chat-bubble chat-bubble--system${nueva ? ' chat-bubble--nueva' : ''}`}
+        >
           <ChatMarkdown content={message.body} />
           <MessageAttachments message={message} />
         </Box>
@@ -170,6 +228,8 @@ function MessageBubble({
       )}
 
       <Box
+        // El ancla con la que se salta a este mensaje desde una cita.
+        id={`msg-${message.id}`}
         className={[
           'chat-bubble',
           isUser ? 'chat-bubble--user' : 'chat-bubble--agent',
@@ -179,11 +239,43 @@ function MessageBubble({
         ]
           .filter(Boolean)
           .join(' ')}
+        style={arrastre > 0 ? { transform: `translateX(${arrastre}px)` } : undefined}
+        onTouchStart={alTocar}
+        onTouchMove={alMover}
+        onTouchEnd={alSoltar}
+        onContextMenu={(event) => {
+          if (!puedeCitar) return;
+          // Se reemplaza el menú del navegador: ofrecer "inspeccionar" sobre
+          // un mensaje no le sirve a nadie, y responder sí.
+          event.preventDefault();
+          onCitar?.(message);
+        }}
       >
         {!isUser && (
           <Text size='xs' fw={600} className='chat-bubble__author'>
             {nombreAutor}
           </Text>
+        )}
+
+        {/* El mensaje CITADO, dentro de la burbuja y encima del texto. Al
+            tocarlo salta al original, que es la otra mitad de la función:
+            citar sin poder volver al contexto sirve a medias. */}
+        {message.replyTo && (
+          <UnstyledButton
+            className='chat-cita chat-cita--burbuja'
+            onClick={() => onIrAlCitado?.(message.replyTo!.idMessage)}
+            aria-label={`Ir al mensaje de ${message.replyTo.author}`}
+          >
+            <Box className='chat-cita__barra' aria-hidden />
+            <Box style={{ minWidth: 0 }}>
+              <Text size='xs' fw={600} lineClamp={1}>
+                {message.replyTo.author}
+              </Text>
+              <Text size='xs' className='chat-text-muted' lineClamp={2}>
+                {message.replyTo.preview}
+              </Text>
+            </Box>
+          </UnstyledButton>
         )}
 
         {message.body.trim().length > 0 && <ChatMarkdown content={message.body} />}
@@ -392,6 +484,46 @@ export default function ChatThread({
       : null;
 
   const thread = useChatConversation(target, active);
+
+  /* ─────────────────────────── Citar y responder ───────────────────────── */
+
+  const [cita, setCita] = useState<ChatReplyToDto | null>(null);
+
+  /**
+   * Pone un mensaje como cita y deja el cursor listo para escribir.
+   *
+   * El extracto se arma AQUÍ y no se pide al servidor: el mensaje ya está en
+   * pantalla, así que pedirlo otra vez sería un viaje para nada. El servidor
+   * vuelve a resolverlo cuando devuelve el mensaje creado, y esa es la versión
+   * que queda.
+   */
+  const citar = useCallback((message: ChatMessageDto) => {
+    const autor =
+      message.author?.name ??
+      (message.role === 'agent' ? (agent?.displayName ?? 'Asistente') : 'Usted');
+    const plano = message.body.replace(/\s+/g, ' ').trim();
+    setCita({
+      idMessage: message.id,
+      author: autor,
+      preview: plano.length > 140 ? `${plano.slice(0, 139)}…` : plano || '(adjunto)',
+    });
+    composerRef.current?.focus();
+  }, [agent]);
+
+  /**
+   * Salta al mensaje citado y lo resalta un momento.
+   *
+   * Si no está montado —quedó en una página anterior del historial— no se
+   * hace nada: traerlo pediría cargar hacia atrás hasta encontrarlo, y eso es
+   * una función aparte que vale la pena hacer bien y no de paso.
+   */
+  const irAlMensaje = useCallback((idMessage: number) => {
+    const nodo = document.getElementById(`msg-${idMessage}`);
+    if (!nodo) return;
+    nodo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    nodo.classList.add('chat-bubble--resaltada');
+    window.setTimeout(() => nodo.classList.remove('chat-bubble--resaltada'), 1600);
+  }, []);
 
   // Asistentes del grupo, para el autocompletado del `@`. Se toman de la
   // ficha que devuelve el servidor cuando está disponible: si se tomaran solo
@@ -651,6 +783,8 @@ export default function ChatThread({
               currentUserId={currentUserId}
               enGrupo={enGrupo}
               nueva={yaEstaban.current ? !yaEstaban.current.has(message.id) : false}
+              onCitar={citar}
+              onIrAlCitado={irAlMensaje}
             />
           ))}
 
@@ -689,7 +823,14 @@ export default function ChatThread({
       <Box className='chat-thread__composer'>
         <ChatComposer
           ref={composerRef}
-          onSend={(body, files) => thread.send(body, files)}
+          onSend={async (body, files) => {
+            const enviado = await thread.send(body, files, cita);
+            // La cita se limpia solo si el mensaje SALIÓ: si falló, el usuario
+            // reintenta y la cita tiene que seguir puesta.
+            if (enviado) setCita(null);
+          }}
+          cita={cita}
+          onQuitarCita={() => setCita(null)}
           sending={thread.sending}
           disabled={composerDisabled}
           placeholder={

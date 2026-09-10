@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -13,7 +13,10 @@ import {
   Button,
   Grid,
   Group,
+  Loader,
+  Modal,
   SimpleGrid,
+  Stack,
   Text,
   TextInput,
   Tooltip,
@@ -32,11 +35,13 @@ import {
   IconLock,
   IconPlus,
   IconSearch,
+  IconTrash,
   IconUsersGroup,
   IconX,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import { EsqueletoPantallaChat } from './ChatSkeletons';
+import AgentDetailModal from './AgentDetailModal';
 import ChatBroadcastModal from './ChatBroadcastModal';
 import ChatGroupModal from './ChatGroupModal';
 import ChatThread from './ChatThread';
@@ -46,9 +51,11 @@ import {
   findAgentByRouteKey,
   formatChatTime,
   groupAgentsByCompany,
+  MIN_SEARCH_CHARS,
   toPlainPreview,
   type ChatAgentDto,
   type ChatConversationDto,
+  type ChatSearchHit,
 } from '../../lib/chat/client';
 
 /**
@@ -67,6 +74,11 @@ import {
  * existiría y la carpeta donde mostrarlo no. La agrupación vive en
  * groupAgentsByCompany() (lib/chat/client.ts).
  */
+
+/**
+ * Lo que está abierto: un asistente, un grupo, o nada. Nunca las dos cosas.
+ */
+type Seleccion = { tipo: 'agente'; code: string } | { tipo: 'grupo'; id: number } | null;
 
 function AgentCard({
   agent,
@@ -107,6 +119,7 @@ function AgentCard({
           working={agent.busy}
           displayName={agent.displayName}
           avatarUrl={agent.avatarUrl}
+          avatarVersion={agent.avatarVersion}
           unread={unread}
           status={status}
           size={compact ? 34 : 42}
@@ -245,7 +258,6 @@ export default function ChatWorkspace({
   initialGroupId?: number;
 }) {
   const overview = useChatOverview();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session } = useSession();
 
@@ -254,14 +266,43 @@ export default function ChatWorkspace({
   const miId = session?.user?.id;
 
   const [search, setSearch] = useState('');
+  // Resultados del BUSCADOR DE MENSAJES. La misma caja hace dos cosas: filtra
+  // la lista por nombre —al instante, sin red— y busca dentro de los mensajes
+  // —contra el servidor, que es el único que sabe qué puede ver esta persona—.
+  const [resultados, setResultados] = useState<ChatSearchHit[]>([]);
+  const [buscandoMensajes, setBuscandoMensajes] = useState(false);
+  const abortoBusqueda = useRef<AbortController | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [selectedCode, setSelectedCode] = useState<string | null>(initialAgentCode ?? null);
-  // La selección es UNA sola cosa: un asistente o un grupo. Se guardan en dos
-  // estados por comodidad, pero abrir uno siempre limpia el otro (ver
-  // `selectAgent` y `selectGroup`): con los dos puestos a la vez, la pantalla
-  // no sabría qué mostrar.
-  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(initialGroupId ?? null);
+  // LA SELECCIÓN ES UNA SOLA COSA, y por eso vive en UN SOLO estado.
+  //
+  // Antes eran dos (`selectedCode` y `selectedGroupId`) que se limpiaban a
+  // mano el uno al otro. Con dos estados independientes el "y si quedan los
+  // dos puestos" siempre es posible, y cuando pasaba ganaba el grupo —el
+  // render preguntaba primero por él—, así que el chat directo no había forma
+  // de abrirlo. Nicolás, 2026-09-09: "cuando es un grupo es un grupo y cuando
+  // es chat interno es chat interno, son 2 cosas separadas". Con una unión
+  // etiquetada eso no es una regla que haya que recordar: es imposible por
+  // construcción.
+  const [seleccion, setSeleccion] = useState<Seleccion>(
+    initialAgentCode
+      ? { tipo: 'agente', code: initialAgentCode }
+      : initialGroupId
+        ? { tipo: 'grupo', id: initialGroupId }
+        : null
+  );
+  // Se derivan para no tocar el resto de la pantalla, que ya leía estos dos.
+  const selectedCode = seleccion?.tipo === 'agente' ? seleccion.code : null;
+  const selectedGroupId = seleccion?.tipo === 'grupo' ? seleccion.id : null;
   const [grupoNuevoAbierto, setGrupoNuevoAbierto] = useState(false);
+  // Ficha del asistente. Se abre desde el ENCABEZADO de la conversación —el
+  // nombre y la foto—, como en WhatsApp se toca el contacto: la tarjeta de la
+  // lista sigue abriendo el chat, que es lo que uno espera de una lista.
+  const [detalleAbierto, setDetalleAbierto] = useState(false);
+  // Borrar un grupo: el grupo que se va a borrar (null = no hay confirmación
+  // abierta) y si la petición está en curso.
+  const [grupoABorrar, setGrupoABorrar] = useState<ChatConversationDto | null>(null);
+  const [borrando, setBorrando] = useState(false);
+  const [errorBorrar, setErrorBorrar] = useState<string | null>(null);
 
   // En pantallas angostas las dos columnas de la rejilla se APILAN: la lista de
   // asistentes arriba y la conversación debajo. Al llegar desde una
@@ -363,16 +404,51 @@ export default function ChatWorkspace({
     };
   }, [inmersivo]);
 
+  /**
+   * Busca en los mensajes mientras se escribe.
+   *
+   * Con espera de 300 ms y cancelando la petición anterior: escribir "cargue"
+   * son seis pulsaciones, y sin esto serían seis consultas de las que solo
+   * importa la última —y la que llegue tarde sobrescribiría a la buena—.
+   */
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < MIN_SEARCH_CHARS) {
+      abortoBusqueda.current?.abort();
+      setResultados([]);
+      setBuscandoMensajes(false);
+      return;
+    }
+
+    setBuscandoMensajes(true);
+    const reloj = window.setTimeout(() => {
+      abortoBusqueda.current?.abort();
+      const control = new AbortController();
+      abortoBusqueda.current = control;
+
+      fetch(`/api/chat/search?q=${encodeURIComponent(q)}`, {
+        signal: control.signal,
+        cache: 'no-store',
+      })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+        .then((data) => setResultados(Array.isArray(data?.results) ? data.results : []))
+        .catch((error) => {
+          // Cancelar es lo normal aquí, no un fallo: no se pinta nada.
+          if ((error as Error)?.name !== 'AbortError') setResultados([]);
+        })
+        .finally(() => setBuscandoMensajes(false));
+    }, 300);
+
+    return () => window.clearTimeout(reloj);
+  }, [search]);
+
   // El código del agente también puede llegar por la URL (?agent=orus), que es
   // lo que usa el botón "abrir en la página de chats" del panel flotante.
   useEffect(() => {
     const fromUrl = searchParams.get('agent');
-    if (fromUrl) {
-      setSelectedCode(fromUrl);
-      // Si venía un grupo abierto, se cierra: `?agent=` es una orden explícita
-      // de abrir a ESE asistente.
-      setSelectedGroupId(null);
-    }
+    // `?agent=` es una orden explícita de abrir a ESE asistente, así que
+    // reemplaza la selección completa —incluido un grupo que estuviera abierto.
+    if (fromUrl) setSeleccion({ tipo: 'agente', code: fromUrl });
   }, [searchParams]);
 
   const filteredAgents = useMemo(() => {
@@ -391,25 +467,36 @@ export default function ChatWorkspace({
 
   // `selectedCode` puede venir del `code` real, del nombre visible (así llega
   // /process/chat/orus) o del handle: findAgentByRouteKey los reconcilia.
+  /**
+   * Refleja lo abierto en la dirección del navegador SIN navegar.
+   *
+   * Escoger en la lista no puede ser un cambio de ruta. `/process/chat` y
+   * `/process/chat/grupo/[id]` son páginas distintas y las dos se arman en el
+   * servidor en cada visita (`force-dynamic`): mientras el servidor responde,
+   * el navegador sigue pintando la pantalla ANTERIOR. Estando dentro de un
+   * grupo, tocar un asistente dejaba el grupo en pantalla unos segundos —y en
+   * el celular con red lenta parecía que abrir el chat directo "lo llevaba al
+   * grupal"—. Con `replaceState` el cambio es instantáneo, porque lo que manda
+   * es el estado; la dirección solo queda escrita para poder compartirla o
+   * recargar. Las rutas siguen existiendo y funcionando como enlace de entrada.
+   */
+  const verEnLaUrl = (url: string) => {
+    if (typeof window !== 'undefined') window.history.replaceState(null, '', url);
+  };
+
   const selectedAgent = useMemo(
     () => findAgentByRouteKey(overview.agents, selectedCode),
     [overview.agents, selectedCode]
   );
 
   const selectAgent = (agent: ChatAgentDto) => {
-    setSelectedCode(agent.code);
-    // Abrir un asistente cierra el grupo que estuviera abierto: la selección es
-    // una sola.
-    setSelectedGroupId(null);
-    // Se refleja en la URL para poder compartir/volver al mismo hilo, sin
-    // recargar la página.
-    router.replace(`/process/chat?agent=${encodeURIComponent(agent.code)}`, { scroll: false });
+    setSeleccion({ tipo: 'agente', code: agent.code });
+    verEnLaUrl(`/process/chat?agent=${encodeURIComponent(agent.code)}`);
   };
 
   const selectGroup = (id: number) => {
-    setSelectedGroupId(id);
-    setSelectedCode(null);
-    router.replace(`/process/chat/grupo/${id}`, { scroll: false });
+    setSeleccion({ tipo: 'grupo', id });
+    verEnLaUrl(`/process/chat/grupo/${id}`);
   };
 
   // El grupo abierto, resuelto contra la bandeja. Se toma de ahí y no de un
@@ -455,7 +542,7 @@ export default function ChatWorkspace({
       <div className='app-page-shell app-page-shell--fill min-h-screen'>
         <div className='max-w-3xl mx-auto py-10 px-4'>
           <Alert icon={<IconLock size={18} />} color='yellow' radius='lg' title='Sin acceso'>
-            No tiene habilitado el módulo de Asistentes IA. Solicítelo a la administración de
+            No tiene habilitado el módulo de Chat. Solicítelo a la administración de
             SynerLink para la empresa correspondiente.
           </Alert>
         </div>
@@ -470,6 +557,119 @@ export default function ChatWorkspace({
   // Las carpetas por empresa. `comoLista` las apila en una sola columna: es lo
   // que necesita la barra lateral del escritorio, donde no caben tarjetas de
   // dos columnas.
+  /**
+   * ¿Puede esta persona borrar este grupo?
+   *
+   * El DUEÑO o un administrador. No cualquier integrante: en un grupo de doce
+   * personas, que cualquiera desaparezca la conversación de todos es un
+   * accidente esperando ocurrir. La reja de verdad está en el endpoint; esto
+   * solo decide si se pinta el botón.
+   */
+  const puedeBorrarGrupo = (grupo: ChatConversationDto): boolean => {
+    if (overview.canBroadcast) return true;
+    return (grupo.participants ?? []).some(
+      (p) => p.kind === 'user' && String(p.id) === miId && p.role === 'owner'
+    );
+  };
+
+  const borrarGrupo = async () => {
+    if (!grupoABorrar) return;
+    setBorrando(true);
+    setErrorBorrar(null);
+    try {
+      const res = await fetch(`/api/chat/groups/${grupoABorrar.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? `No se pudo borrar (${res.status}).`);
+
+      // Se cierra lo que estaba abierto —el grupo ya no existe— y se recarga
+      // la bandeja para que desaparezca de la lista.
+      setGrupoABorrar(null);
+      setSeleccion(null);
+      verEnLaUrl('/process/chat');
+      overview.refresh();
+    } catch (e) {
+      setErrorBorrar((e as Error).message);
+    } finally {
+      setBorrando(false);
+    }
+  };
+
+  /**
+   * Abrir la conversación de un resultado.
+   *
+   * Un grupo se abre por su id; un hilo directo, buscando el agente en la
+   * bandeja y pasando por `selectAgent` —no tocando la selección a mano— para
+   * que abrir desde el buscador y abrir desde la lista hagan exactamente lo
+   * mismo. Si el agente ya no está en su bandeja (le revocaron el permiso
+   * entre la búsqueda y el clic), no pasa nada: el servidor tampoco lo
+   * dejaría entrar.
+   */
+  const abrirResultado = (hit: ChatSearchHit) => {
+    if (hit.kind === 'group') {
+      selectGroup(hit.idConversation);
+      return;
+    }
+    const agente = overview.agents.find((a) => a.code === hit.agentCode);
+    if (agente) selectAgent(agente);
+  };
+
+  /**
+   * Los MENSAJES encontrados, arriba de todo mientras se busca.
+   *
+   * Va primero porque cuando uno escribe tres letras o más ya no está
+   * escogiendo con quién hablar: está buscando algo que se dijo.
+   */
+  const renderResultados = (comoLista: boolean) => {
+    if (search.trim().length < MIN_SEARCH_CHARS) return null;
+
+    return (
+      <Box mb={comoLista ? 'md' : 'lg'} className='chat-folder'>
+        <Group gap='xs' mb='sm' className='chat-folder__header' wrap='nowrap'>
+          <IconSearch size={18} className='chat-folder__icon' />
+          <Text fw={700} size='sm'>
+            Mensajes
+          </Text>
+          {buscandoMensajes ? (
+            <Loader size={12} />
+          ) : (
+            <Badge size='xs' variant='light' color='gray'>
+              {resultados.length}
+            </Badge>
+          )}
+        </Group>
+
+        {!buscandoMensajes && resultados.length === 0 ? (
+          <Text size='xs' className='chat-text-muted'>
+            Ningún mensaje con “{search.trim()}”.
+          </Text>
+        ) : (
+          <SimpleGrid cols={1} spacing='xs'>
+            {resultados.map((hit) => (
+              <UnstyledButton
+                key={hit.idMessage}
+                onClick={() => abrirResultado(hit)}
+                className='chat-agent-card chat-agent-card--compact'
+                aria-label={`Abrir ${hit.conversationTitle}`}
+              >
+                <Group gap={6} wrap='nowrap' justify='space-between'>
+                  <Text size='xs' fw={600} lineClamp={1}>
+                    {hit.conversationTitle} · {hit.author}
+                  </Text>
+                  <Text size='xs' className='chat-text-muted' style={{ flexShrink: 0 }}>
+                    {formatChatTime(hit.createdAt)}
+                  </Text>
+                </Group>
+                <Text size='xs' className='chat-text-muted' lineClamp={2}>
+                  {hit.snippet}
+                </Text>
+              </UnstyledButton>
+            ))}
+          </SimpleGrid>
+        )}
+      </Box>
+    );
+  };
+
   /**
    * La carpeta de GRUPOS, que va ANTES de las de empresa.
    *
@@ -629,10 +829,9 @@ export default function ChatWorkspace({
     ) : null;
 
   const cerrarConversacion = () => {
-    setSelectedCode(null);
-    setSelectedGroupId(null);
+    setSeleccion(null);
     setSoloConversacion(false);
-    router.replace('/process/chat', { scroll: false });
+    verEnLaUrl('/process/chat');
   };
 
   // Se define una sola vez y se monta en los dos armazones (escritorio y
@@ -652,6 +851,70 @@ export default function ChatWorkspace({
       }}
     />
   ) : null;
+
+  /**
+   * La FICHA del asistente abierto. Se define junto al modal de grupo y por la
+   * misma razón: se monta en los dos armazones y duplicarla llevaría a que uno
+   * se quede sin los arreglos del otro.
+   */
+  /**
+   * Confirmación de borrado.
+   *
+   * Con confirmación y diciendo QUÉ se pierde, porque esto no se deshace: se
+   * van los mensajes de todos, no solo los míos. Un borrado destructivo detrás
+   * de un solo clic es de las cosas que uno lamenta una sola vez.
+   */
+  const modalDeBorrado = (
+    <Modal
+      opened={grupoABorrar !== null}
+      onClose={() => (borrando ? undefined : setGrupoABorrar(null))}
+      title='Borrar el grupo'
+      radius='lg'
+      centered
+      classNames={{ content: 'chat-surface' }}
+    >
+      <Stack gap='sm'>
+        <Text size='sm'>
+          Va a borrar <strong>{grupoABorrar?.title ?? 'este grupo'}</strong> y{' '}
+          <strong>toda su conversación</strong>, para todos los integrantes.
+        </Text>
+        <Text size='xs' className='chat-text-muted'>
+          Esto no se puede deshacer.
+        </Text>
+
+        {errorBorrar && (
+          <Alert color='red' radius='md' p='xs'>
+            <Text size='xs'>{errorBorrar}</Text>
+          </Alert>
+        )}
+
+        <Group justify='flex-end' gap='xs'>
+          <Button variant='subtle' color='gray' onClick={() => setGrupoABorrar(null)} disabled={borrando}>
+            Cancelar
+          </Button>
+          <Button color='red' onClick={() => void borrarGrupo()} loading={borrando}>
+            Borrar el grupo
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+
+  const modalDeDetalle = (
+    <AgentDetailModal
+      agent={selectedAgent}
+      status={selectedAgent ? (overview.statusByAgent.get(selectedAgent.idAgent) ?? null) : null}
+      puedeEditar={overview.canBroadcast}
+      abierto={detalleAbierto && Boolean(selectedAgent)}
+      onCerrar={() => setDetalleAbierto(false)}
+      onFotoCambiada={() => {
+        // Se recarga la bandeja completa: de ahí sale la versión nueva de la
+        // foto, y con ella la URL cambia y el navegador pide la imagen nueva
+        // sin que nadie tenga que recargar la página.
+        overview.refresh();
+      }}
+    />
+  );
 
   // Los dos botones de la derecha del encabezado. Iguales para el hilo de un
   // asistente y para el de un grupo: un encabezado que cambia de botones según
@@ -723,7 +986,24 @@ export default function ChatWorkspace({
               </Text>
             </Box>
           </Group>
-          {botonesDelEncabezado}
+          <Group gap={4} wrap='nowrap'>
+            {puedeBorrarGrupo(selectedGroup) && (
+              <Tooltip label='Borrar el grupo' withArrow>
+                <ActionIcon
+                  variant='subtle'
+                  color='red'
+                  onClick={() => {
+                    setErrorBorrar(null);
+                    setGrupoABorrar(selectedGroup);
+                  }}
+                  aria-label='Borrar el grupo'
+                >
+                  <IconTrash size={18} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            {botonesDelEncabezado}
+          </Group>
         </Group>
 
         <ChatThread
@@ -747,25 +1027,32 @@ export default function ChatWorkspace({
     ) : selectedAgent ? (
       <Box className={clase}>
         <Group justify='space-between' p='sm' className='chat-panel__header' wrap='nowrap'>
-          <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
-            <AgentAvatar
-              code={selectedAgent.code}
-              working={selectedAgent.busy}
-              displayName={selectedAgent.displayName}
-              avatarUrl={selectedAgent.avatarUrl}
-              status={overview.statusByAgent.get(selectedAgent.idAgent) ?? null}
-              size={36}
-              withTooltip={false}
-            />
-            <Box style={{ minWidth: 0 }}>
-              <Text fw={600} size='sm' lineClamp={1}>
-                {selectedAgent.displayName}
-              </Text>
-              <Text size='xs' className='chat-text-muted' lineClamp={1}>
-                {describeAgentStatus(overview.statusByAgent.get(selectedAgent.idAgent) ?? null).label}
-              </Text>
-            </Box>
-          </Group>
+          <UnstyledButton
+            onClick={() => setDetalleAbierto(true)}
+            style={{ minWidth: 0, flex: 1 }}
+            aria-label={`Ver el detalle de ${selectedAgent.displayName}`}
+          >
+            <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
+              <AgentAvatar
+                code={selectedAgent.code}
+                working={selectedAgent.busy}
+                displayName={selectedAgent.displayName}
+                avatarUrl={selectedAgent.avatarUrl}
+                avatarVersion={selectedAgent.avatarVersion}
+                status={overview.statusByAgent.get(selectedAgent.idAgent) ?? null}
+                size={36}
+                withTooltip={false}
+              />
+              <Box style={{ minWidth: 0 }}>
+                <Text fw={600} size='sm' lineClamp={1}>
+                  {selectedAgent.displayName}
+                </Text>
+                <Text size='xs' className='chat-text-muted' lineClamp={1}>
+                  {describeAgentStatus(overview.statusByAgent.get(selectedAgent.idAgent) ?? null).label}
+                </Text>
+              </Box>
+            </Group>
+          </UnstyledButton>
           {botonesDelEncabezado}
         </Group>
 
@@ -810,6 +1097,7 @@ export default function ChatWorkspace({
             />
           </div>
           <div className='chat-escritorio__lista'>
+            {renderResultados(true)}
             {renderGrupos(true)}
             {renderCarpetas(true)}
             {pieDeLista}
@@ -828,6 +1116,8 @@ export default function ChatWorkspace({
         />
 
         {modalDeGrupo}
+        {modalDeDetalle}
+        {modalDeBorrado}
       </div>
     );
   }
@@ -844,7 +1134,7 @@ export default function ChatWorkspace({
         }
       >
         <header className='mb-6' hidden={Boolean(conversacionSola && hayAlgoAbierto)}>
-          <h1 className='ios-process-hub__title text-3xl sm:text-4xl mb-2'>Asistentes IA</h1>
+          <h1 className='ios-process-hub__title text-3xl sm:text-4xl mb-2'>Chat</h1>
           <p className='ios-process-hub__subtitle mb-5'>
             Sus asistentes agrupados por empresa, y sus grupos. Elija uno para conversar.
           </p>
@@ -931,6 +1221,7 @@ export default function ChatWorkspace({
           {/* Columna de carpetas */}
           {!(conversacionSola && hayAlgoAbierto) && (
             <Grid.Col span={{ base: 12, lg: hayAlgoAbierto ? 5 : 12 }}>
+              {renderResultados(false)}
               {renderGrupos(false)}
               {renderCarpetas(false)}
               {pieDeLista}
@@ -956,6 +1247,8 @@ export default function ChatWorkspace({
       />
 
       {modalDeGrupo}
+        {modalDeDetalle}
+        {modalDeBorrado}
     </div>
   );
 }

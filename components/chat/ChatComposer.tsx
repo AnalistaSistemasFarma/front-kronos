@@ -31,6 +31,7 @@ import {
   formatBytes,
   getChatAttachmentError,
 } from '../../lib/chat/attachments';
+import type { ChatReplyToDto } from '../../lib/chat/client';
 
 /**
  * Entrada de texto del chat — v1: Markdown CRUDO con ayudas.
@@ -92,6 +93,9 @@ function conNombreUtil(file: File, index: number): File {
 export type ChatComposerHandle = {
   /** Agrega archivos a la bandeja del mensaje, con la misma validación del clip. */
   addFiles: (incoming: FileList | File[] | null) => void;
+  /** Pone el cursor en la caja. Lo usa el hilo al citar un mensaje: citar y
+   *  tener que tocar la caja aparte sobraría. */
+  focus: () => void;
 };
 
 /** Un candidato del autocompletado del `@` (los asistentes de un grupo). */
@@ -115,6 +119,13 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
    * apaga el autocompletado por completo.
    */
   menciones?: MencionCandidato[];
+  /**
+   * Mensaje que se está CITANDO. Se pinta como una tarjeta encima de la caja,
+   * con el autor y un extracto, igual que en WhatsApp y Telegram. Quién la
+   * manda es el hilo: el compositor solo la muestra y ofrece quitarla.
+   */
+  cita?: ChatReplyToDto | null;
+  onQuitarCita?: () => void;
 }>(function ChatComposer(
   {
     onSend,
@@ -123,6 +134,8 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     placeholder = 'Escriba su mensaje… (Markdown: **negrita**, _cursiva_, - viñetas)',
     autoFocus = false,
     menciones = [],
+    cita = null,
+    onQuitarCita,
   },
   ref
 ) {
@@ -284,7 +297,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   // El arrastrar-y-soltar vive en el hilo (para poder soltar sobre toda la
   // conversación, no solo sobre la caja de texto), pero los archivos y su
   // validación viven aquí. Esta es la única puerta entre los dos.
-  useImperativeHandle(ref, () => ({ addFiles }), [addFiles]);
+  useImperativeHandle(
+    ref,
+    () => ({ addFiles, focus: () => textareaRef.current?.focus() }),
+    [addFiles]
+  );
 
   /**
    * Pegar una imagen del portapapeles (Ctrl+V / Cmd+V) — el caso de todos los
@@ -600,6 +617,32 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         </Text>
       )}
 
+      {/* La cita, encima de la caja y cancelable. Va ARRIBA y no dentro de la
+          caja para no robarle renglones al texto: el compositor arranca en una
+          sola fila y así se queda. */}
+      {cita && (
+        <Group gap={6} wrap='nowrap' mb={6} className='chat-cita chat-cita--compositor'>
+          <Box className='chat-cita__barra' aria-hidden />
+          <Box style={{ flex: 1, minWidth: 0 }}>
+            <Text size='xs' fw={600} lineClamp={1}>
+              Respondiendo a {cita.author}
+            </Text>
+            <Text size='xs' className='chat-text-muted' lineClamp={1}>
+              {cita.preview}
+            </Text>
+          </Box>
+          <ActionIcon
+            size='sm'
+            variant='subtle'
+            color='gray'
+            onClick={() => onQuitarCita?.()}
+            aria-label='Quitar la cita'
+          >
+            <IconX size={14} />
+          </ActionIcon>
+        </Group>
+      )}
+
       {/* El contador solo aparece cerca del tope; el resto del tiempo no ocupa
           renglón, que es justamente lo que se buscaba. */}
       {value.length > MAX_USER_MESSAGE_CHARS * 0.8 && (
@@ -638,6 +681,13 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             placeholder={placeholder}
+            /* Sin corrector del navegador: nada de subrayado rojo ni
+               autocorrección/mayúsculas automáticas en la caja del chat
+               (Nicolás, 2026-09-09). spellCheck apaga el subrayado; autoCorrect
+               y autoCapitalize evitan que el móvil "arregle" lo que se escribe. */
+            spellCheck={false}
+            autoCorrect='off'
+            autoCapitalize='off'
             autosize
             /* Arranca en UN renglón, como WhatsApp, y crece al escribir. */
             minRows={1}

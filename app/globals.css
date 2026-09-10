@@ -1026,6 +1026,10 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   border-radius: 1rem;
   border: 1px solid transparent;
   overflow-wrap: anywhere;
+  /* Para el gesto de citar y para el resalte al saltar a un mensaje. Anima
+     sobre todo el REGRESO del arrastre: mientras el dedo empuja, el
+     componente escribe `transform` en cada movimiento. */
+  transition: transform 160ms ease, box-shadow 220ms ease;
 }
 
 .chat-bubble--agent {
@@ -1066,6 +1070,59 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   opacity: 0.75;
   font-size: 12px;
 }
+
+/* ── CITAR Y RESPONDER ─────────────────────────────────────────────────────
+   Pedido de Nicolás (2026-09-09). La cita se pinta en dos sitios con el mismo
+   aspecto —encima de la caja mientras se escribe, y dentro de la burbuja una
+   vez enviada— porque es la misma cosa: a esto estoy respondiendo. La barrita
+   de la izquierda es la señal que usan WhatsApp y Telegram y ya nadie tiene
+   que aprender. */
+.chat-cita {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  text-align: left;
+  border-radius: 10px;
+  padding: 6px 8px;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  overflow: hidden;
+}
+
+.chat-cita__barra {
+  flex: 0 0 3px;
+  border-radius: 2px;
+  background-color: var(--app-accent, #2563eb);
+}
+
+/* Dentro de la burbuja va pegada al texto que la responde, no separada: se
+   lee como un bloque. */
+.chat-cita--burbuja {
+  width: 100%;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+/* En la burbuja del usuario el fondo es azul, así que la cita necesita su
+   propio contraste o desaparece. */
+.chat-bubble--user .chat-cita--burbuja {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+.chat-bubble--user .chat-cita--burbuja .chat-text-muted,
+.chat-bubble--user .chat-cita--burbuja .mantine-Text-root {
+  color: #ffffff;
+}
+
+.chat-bubble--user .chat-cita--burbuja .chat-cita__barra {
+  background-color: #ffffff;
+}
+
+/* Resalte momentáneo al saltar a un mensaje citado: sin esto uno llega al
+   sitio y no sabe cuál de los mensajes era. */
+.chat-bubble--resaltada {
+  box-shadow: 0 0 0 2px var(--app-accent, #2563eb);
+}
+
 
 .chat-bubble--user .chat-bubble__meta,
 .chat-bubble--user .chat-md,
@@ -1403,8 +1460,13 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
      (2026-09-08). No la baje de 16. */
   font-size: 16px;
   /* Cápsula, como la caja de WhatsApp. Con un renglón queda redonda y al crecer
-     se ve como una caja de bordes suaves. */
-  border-radius: 18px;
+     se ve como una caja de bordes suaves.
+     21 px = la MITAD del `min-height` de 42 px, o sea el radio máximo que
+     todavía es una cápsula de verdad. Estaba en 18 y al lado del botón de
+     enviar —un círculo de 46 px— se veía cuadrada (Nicolás, 2026-09-09: "el
+     input tiene un round muy pequeño en comparación con el botón"). Si algún
+     día sube el `min-height`, suba este radio a la mitad del nuevo alto. */
+  border-radius: 21px;
   /* El aire de adentro. Subió de 7 a 10 px y NO le cuesta alto a la
      conversación: la fila la gobierna el botón de enviar, que mide 46 px, y la
      caja sigue quedando por debajo. */
@@ -1414,12 +1476,35 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
      se metería debajo del botón. */
   padding: 10px 44px 10px 16px;
   min-height: 42px;
-  /* SIN transición de alto, a propósito (2026-09-09, por el reporte de
-     lentitud de Nicolás). Animar `height` obliga al navegador a rehacer el
-     diseño en CADA cuadro, y aquí se disparaba con cada salto de renglón —
-     o sea, mientras la persona escribe, que es el peor momento posible.
-     El salto de un renglón es de unos pocos píxeles y sin la transición ni
-     se nota; lo que sí se notaba era el tirón. */
+  /* SIN transición de `height`, a propósito (2026-09-09, por el reporte de
+     lentitud de Nicolás). Animarla obliga al navegador a rehacer el diseño en
+     CADA cuadro, y aquí se disparaba con cada salto de renglón — o sea,
+     mientras la persona escribe, que es el peor momento posible. El salto de
+     un renglón es de unos pocos píxeles y sin la transición ni se nota; lo
+     que sí se notaba era el tirón.
+     El resto SÍ se suavizó (Nicolás, mismo día: "una animación al teclear que
+     sea más suave"): borde y sombra del foco usan la misma curva cubic-bezier
+     de las burbujas del chat, así que enfocar/teclear se siente fluido sin
+     tocar el layout. */
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+/* Foco suave del input: el borde toma el acento y aparece un halo tenue, en
+   lugar del cambio brusco por defecto. Coherente con el resto del chat. */
+.chat-composer__input:focus,
+.chat-composer__input:focus-within {
+  border-color: var(--app-accent, #2563eb);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent, #2563eb) 18%, transparent);
+}
+
+/* Respeta a quien pide menos movimiento: sin transiciones. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer__input {
+    transition: border-color 160ms ease, box-shadow 160ms ease;
+  }
 }
 
 /* ── iOS: el ZOOM AUTOMÁTICO al enfocar la caja ──
@@ -1992,4 +2077,477 @@ body.chat-inmersivo .chat-page-thread--completa {
   50% {
     opacity: 1;
   }
+}
+
+/* ══════════════════════ PORTAL DE TALENTO HUMANO ══════════════════════════
+   Pedido de Cristian Baldión (2026-09-09). Es una página PÚBLICA —fuera del
+   hub y de la sesión de SynerLink—, así que sus estilos viven aquí con prefijo
+   propio y no reutilizan nada de la aplicación interna: cambiar el chat no
+   puede despeinar el portal, ni al revés.
+
+   Colores del design system de GSS (--gss-blue #1a3c6e y su escala). Se
+   declaran locales al portal para no meter variables nuevas al resto de la
+   hoja. */
+.portal-th {
+  --pth-azul: #1a3c6e;
+  --pth-azul-700: #15315a;
+  --pth-azul-50: #f5f7fa;
+  --pth-tinta: #0f1a2c;
+  --pth-tinta-2: #38445a;
+  --pth-tinta-3: #6a7689;
+  --pth-linea: #d8dde6;
+
+  min-height: 100vh;
+  background-color: var(--pth-azul-50);
+  color: var(--pth-tinta);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.portal-th__barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 20px;
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__marca {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.portal-th__logo {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.16);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.portal-th__marca h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.portal-th__marca p {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+
+.portal-th__sesion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.82rem;
+}
+
+.portal-th__sesion button,
+.portal-th__ingreso button[type='submit'] {
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.portal-th__sesion button {
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.portal-th__cuerpo {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+.portal-th__seccion {
+  margin-bottom: 32px;
+}
+
+.portal-th__seccion h2 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  color: var(--pth-azul);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+/* ── Ingreso ─────────────────────────────────────────────────────────────── */
+.portal-th__ingreso {
+  max-width: 420px;
+  margin: 40px auto;
+  padding: 24px;
+  background-color: #fff;
+  border: 1px solid var(--pth-linea);
+  border-radius: 16px;
+}
+
+.portal-th__ingreso h2 {
+  margin: 0 0 6px;
+  font-size: 1.1rem;
+  color: var(--pth-azul);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.portal-th__ingreso p {
+  margin: 0 0 16px;
+  font-size: 0.86rem;
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__ingreso form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.portal-th__ingreso input {
+  padding: 12px 14px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 12px;
+  /* 16 px: por debajo de eso Safari en iPhone hace zoom solo al enfocar y
+     descoloca la página. Misma razón que en el compositor del chat. */
+  font-size: 16px;
+  color: var(--pth-tinta);
+}
+
+.portal-th__codigo {
+  text-align: center;
+  letter-spacing: 8px;
+  font-size: 22px !important;
+  font-weight: 700;
+}
+
+.portal-th__ingreso button[type='submit'] {
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__ingreso button[type='submit']:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.portal-th__enlace {
+  background: none;
+  border: 0;
+  color: var(--pth-tinta-3);
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.portal-th__aviso,
+.portal-th__error,
+.portal-th__estado {
+  margin: 12px 0 0;
+  font-size: 0.84rem;
+}
+
+.portal-th__aviso { color: var(--pth-azul); }
+.portal-th__error { color: #b3261e; }
+.portal-th__estado { color: var(--pth-tinta-3); }
+
+/* ── Anuncios ────────────────────────────────────────────────────────────── */
+.portal-th__banners {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.portal-th__banners img {
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid var(--pth-linea);
+  background-color: #fff;
+}
+
+/* ── Cartelera administrable ─────────────────────────────────────────────────
+   Solo la ve así quien puede editar (Talento Humano). Para todos los demás la
+   sección es exactamente la de antes: imágenes y nada más. */
+.portal-th__seccion-barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.portal-th__seccion-barra h2 {
+  margin-bottom: 12px;
+}
+
+/* Es un <label> encima de un <input type="file"> escondido: así el botón se ve
+   como los demás y el selector de archivos sigue siendo el nativo. */
+.portal-th__cargar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 7px 14px;
+  border: 1px solid var(--pth-azul);
+  border-radius: 999px;
+  background-color: #fff;
+  color: var(--pth-azul);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.portal-th__cargar:hover {
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__cargar input {
+  display: none;
+}
+
+.portal-th__banner {
+  position: relative;
+  margin: 0;
+}
+
+/* El anuncio se abre en la vista previa, igual que las políticas. Es un
+   <button> para que funcione con teclado y lector de pantalla; hay que
+   quitarle el aspecto que trae el navegador. */
+.portal-th__banner-abrir {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: zoom-in;
+}
+
+.portal-th__banner-quitar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  /* Oscuro y no rojo: el rojo llama a picarlo. Esto borra de verdad. */
+  background-color: rgba(15, 26, 44, 0.65);
+  color: #fff;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.portal-th__banner-quitar:hover {
+  background-color: rgba(15, 26, 44, 0.9);
+}
+
+/* ── Documentos ──────────────────────────────────────────────────────────── */
+.portal-th__tarjetas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.portal-th__tarjeta {
+  display: flex;
+  flex-direction: column;
+  background-color: #fff;
+  border: 1px solid var(--pth-linea);
+  border-radius: 14px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
+.portal-th__tarjeta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(15, 26, 44, 0.12);
+}
+
+/* La portada más baja: son ICONOS sobre fondo, no fotos. Con 4/3 ocupaban
+   media pantalla y el título quedaba abajo del todo. Pedido de Cristian
+   (2026-09-09): "que los iconos de las políticas sean más pequeños". */
+.portal-th__tarjeta img,
+.portal-th__sinportada {
+  width: 100%;
+  aspect-ratio: 16 / 7;
+  object-fit: cover;
+  background-color: var(--pth-azul-50);
+}
+
+/* Y las tarjetas más angostas, para que quepan más por fila y ninguna quede
+   sola en un renglón como pasaba con cinco documentos. */
+.portal-th__tarjetas {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
+.portal-th__sinportada {
+  display: grid;
+  place-items: center;
+  color: var(--pth-tinta-3);
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.portal-th__tarjeta-pie {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px 12px;
+}
+
+.portal-th__tarjeta-pie strong {
+  font-size: 0.88rem;
+  line-height: 1.25;
+}
+
+.portal-th__tarjeta-pie span {
+  font-size: 0.75rem;
+  color: var(--pth-tinta-3);
+}
+
+.portal-th__pie {
+  padding: 18px;
+  text-align: center;
+  font-size: 0.76rem;
+  color: var(--pth-tinta-3);
+  border-top: 1px solid var(--pth-linea);
+}
+
+/* El portal DENTRO del hub: sin barra propia ni fondo de pantalla completa —
+   la barra y el marco ya los pone SynerLink—, pero con los mismos colores y
+   las mismas tarjetas que la versión abierta. */
+.portal-th--modulo {
+  min-height: 0;
+  background-color: transparent;
+}
+
+.portal-th__encabezado-modulo {
+  margin-bottom: 20px;
+}
+
+.portal-th__encabezado-modulo h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  color: var(--pth-azul);
+}
+
+.portal-th__encabezado-modulo p {
+  margin: 4px 0 0;
+  font-size: 0.86rem;
+  color: var(--pth-tinta-3);
+}
+
+/* ── VISTA PREVIA DE UN DOCUMENTO ──────────────────────────────────────────
+   Pedido de Cristian (2026-09-09): "cada vez que abra un documento quiero que
+   me lo abra en una ventana de vista previa, no en una pestaña nueva". Abrir
+   una pestaña saca a la persona del portal y la deja mirando el visor del
+   navegador, con el título interno del PDF —"Scanned Document"— en vez del
+   nombre del documento. */
+.portal-th__visor {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 2vmin;
+  background-color: rgba(15, 26, 44, 0.72);
+}
+
+.portal-th__visor-caja {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 96vw);
+  height: min(92vh, 100%);
+  overflow: hidden;
+  background-color: #fff;
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(15, 26, 44, 0.35);
+}
+
+.portal-th__visor-barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__visor-barra strong {
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-th__visor-acciones {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.portal-th__visor-acciones a {
+  color: #fff;
+  font-size: 0.78rem;
+  text-decoration: underline;
+}
+
+.portal-th__visor-acciones button {
+  border: 0;
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.portal-th__visor iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background-color: var(--pth-azul-50);
+}
+
+/* Un anuncio se ve entero y centrado, sin recortarse ni estirarse. El fondo
+   oscuro es a propósito: una imagen con fondo blanco sobre blanco no deja ver
+   dónde termina. */
+.portal-th__visor-imagen {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  background-color: #101828;
+}
+
+/* La tarjeta pasó de enlace a botón: hay que devolverle el aspecto, porque un
+   <button> trae borde, fondo y alineación propios del navegador. */
+.portal-th__tarjeta {
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }

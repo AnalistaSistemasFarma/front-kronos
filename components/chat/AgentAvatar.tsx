@@ -2,6 +2,7 @@
 
 import { Avatar, Tooltip } from '@mantine/core';
 import {
+  agentAvatarSrc,
   agentColor,
   agentInitials,
   describeAgentStatus,
@@ -23,6 +24,7 @@ export default function AgentAvatar({
   code,
   displayName,
   avatarUrl,
+  avatarVersion = null,
   unread = 0,
   status = null,
   size = 34,
@@ -33,6 +35,8 @@ export default function AgentAvatar({
   code: string;
   displayName: string;
   avatarUrl: string | null;
+  /** Foto subida desde la interfaz. Cuando viene, manda sobre `avatarUrl`. */
+  avatarVersion?: number | null;
   unread?: number;
   status?: ChatStatusDto | null;
   size?: number;
@@ -49,7 +53,7 @@ export default function AgentAvatar({
 
   const avatar = (
     <Avatar
-      src={avatarUrl || undefined}
+      src={agentAvatarSrc({ code, avatarUrl, avatarVersion }) || undefined}
       alt={displayName}
       size={size}
       radius='xl'

@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { messageInclude, serializeMessage } from '../../../../../../lib/chat/conversations';
 import { calcularEntregas } from '../../../../../../lib/chat/groups';
+import { readClientOrigin } from '../../../../../../lib/chat/client-origin';
 import {
   MAX_USER_MESSAGE_CHARS,
   MESSAGES_PAGE_DEFAULT,
@@ -153,7 +154,36 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       body = normalized.body;
     }
 
+    /*
+     * EL MENSAJE CITADO SE VALIDA CONTRA ESTA CONVERSACIÓN.
+     *
+     * No basta con que el id exista: si se aceptara cualquiera, alguien podría
+     * citar un mensaje de OTRA conversación y la cita —que viaja con el
+     * extracto ya resuelto— le mostraría contenido que no le corresponde. Es
+     * un id que llega del cliente, así que se comprueba dueño y todo.
+     */
+    let idReplyTo: number | null = null;
+    const rawReply = payload.fields.replyTo;
+    if (rawReply !== undefined && rawReply !== null && rawReply !== '') {
+      const candidato = Number(rawReply);
+      if (!Number.isInteger(candidato) || candidato <= 0) {
+        return badRequest('El mensaje citado no es válido.');
+      }
+      const citado = await prisma.chatMessage.findUnique({
+        where: { id: candidato },
+        select: { id_conversation: true },
+      });
+      if (!citado || citado.id_conversation !== guard.conversationId) {
+        return badRequest('Solo se puede citar un mensaje de esta misma conversación.');
+      }
+      idReplyTo = candidato;
+    }
+
     const now = new Date();
+
+    // Origen de la conexión, para la auditoría. Sale de las cabeceras de la
+    // petición, nunca del cuerpo; queda NULL si el proxy no las manda.
+    const { clientIp, userAgent } = readClientOrigin(request);
 
     // OneDrive primero (operación externa, no transaccional). Si falla, se
     // responde sin haber escrito nada: no hay mensaje ni adjunto a medias.
@@ -194,6 +224,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           created_at: now,
           // El autor sale de la SESIÓN, nunca del payload.
           id_user_author: guard.user.id,
+          // Desde dónde se escribió. Solo se guarda en los mensajes de
+          // personas: el agente entra por la API con su llave, sin navegador.
+          client_ip: clientIp,
+          user_agent: userAgent,
+          ...(idReplyTo !== null ? { id_reply_to: idReplyTo } : {}),
           // Mensaje y adjuntos, una sola escritura: o entran los dos o ninguno.
           ...(uploaded.length > 0 ? { attachments: { create: uploaded } } : {}),
           // Mensaje y entregas, también: ver la nota de arriba.

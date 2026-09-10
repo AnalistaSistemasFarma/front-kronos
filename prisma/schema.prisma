@@ -798,6 +798,17 @@ model Agent {
   /// interfaz cae al avatar por inicial. A propósito no se guardan URLs
   /// externas: las fotos de usuario que hoy apuntan a postimg.cc son frágiles.
   avatar_url    String?  @db.NVarChar(500)
+  /// Avatar SUBIDO desde la interfaz, guardado aquí y no en /public: Next
+  /// resuelve esa carpeta con una lista de tiempo de compilación, así que un
+  /// archivo nuevo daría 404 hasta el siguiente despliegue. Lo sirve
+  /// GET /api/chat/agents/<code>/avatar. NULL = no le han subido ninguna y la
+  /// interfaz sigue con `avatar_url` o con la inicial.
+  avatar_blob       Bytes?    @db.VarBinary(Max)
+  avatar_mime       String?   @db.NVarChar(100)
+  /// Cuándo se subió. Sirve para saber si hay imagen sin traerse los bytes, y
+  /// como número de versión en la URL (?v=…) para poder cachearla fuerte y que
+  /// igual cambie al instante cuando la reemplacen.
+  avatar_updated_at DateTime?
   description   String?  @db.NVarChar(500)
   is_active     Boolean  @default(true)
   sort_order    Int      @default(0)
@@ -818,6 +829,7 @@ model Agent {
   messagesAuthored ChatMessage[]         @relation("ChatMessageAgentAuthor")
   deliveries       ChatMessageDelivery[]
   statuses         ChatAgentStatus[]
+  turnUsage        ChatAgentTurnUsage[]
 
   @@unique([code])
   @@map("agent")
@@ -889,6 +901,7 @@ model ChatConversation {
   participants ChatParticipant[]
   /// Un indicador POR AGENTE: en un grupo hay varios trabajando a la vez.
   statuses     ChatAgentStatus[]
+  turnUsage    ChatAgentTurnUsage[]
 
   @@index([id_user, archived, last_message_at(sort: Desc)])
   @@index([id_agent])
@@ -928,6 +941,56 @@ model ChatParticipant {
 }
 
 /// Un mensaje del hilo.
+/// Anuncios del PORTAL DE TALENTO HUMANO, cargados desde el propio portal.
+///
+/// En la base y no en SharePoint: el conector que lee ese sitio es de SOLO
+/// LECTURA a propósito, y darle escritura significaría poder escribir en todo
+/// el tenant con una credencial que ya tiene de más. Para subir un anuncio no
+/// vale la pena abrir esa puerta.
+model PortalBanner {
+  id          Int      @id @default(autoincrement())
+  file_name   String   @db.NVarChar(255)
+  mime        String   @db.NVarChar(100)
+  contenido   Bytes    @db.VarBinary(Max)
+  /// Para ordenarlos a mano más adelante sin migrar otra vez.
+  orden       Int      @default(0)
+  /// Quién lo subió: si aparece un anuncio que nadie reconoce, hay que poder
+  /// saber de dónde salió.
+  uploaded_by String   @db.NVarChar(255)
+  created_at  DateTime @default(now())
+
+  @@index([orden, id(sort: Desc)])
+  @@map("portal_banner")
+}
+
+/// Códigos de un solo uso del PORTAL DE TALENTO HUMANO.
+///
+/// El portal no usa la sesión de SynerLink: entra cualquier colaborador con
+/// correo de una empresa del grupo (o de la lista de excepciones), y la
+/// identidad se comprueba con un código enviado a ese correo.
+///
+/// Vive en la base y no en memoria porque producción corre en clúster de dos
+/// instancias: un código emitido por una y verificado por la otra fallaría de
+/// forma intermitente.
+model PortalAccessCode {
+  id         Int       @id @default(autoincrement())
+  /// Siempre en minúsculas: es como se consulta.
+  email      String    @db.NVarChar(255)
+  /// SHA-256 del código. NUNCA el código en claro: quien lea la tabla —o un
+  /// respaldo— no puede entrar con lo que ve.
+  code_hash  String    @db.NVarChar(64)
+  created_at DateTime  @default(now())
+  expires_at DateTime
+  /// Marca de uso: un código sirve UNA vez.
+  used_at    DateTime?
+  /// Intentos fallidos. Seis dígitos sin tope se prueban en minutos.
+  attempts   Int       @default(0)
+
+  @@index([email, id(sort: Desc)])
+  @@index([expires_at])
+  @@map("portal_access_code")
+}
+
 model ChatMessage {
   id              Int    @id @default(autoincrement())
   id_conversation Int
@@ -948,7 +1011,30 @@ model ChatMessage {
   /// Autor AGENTE. NULL en los mensajes de personas y en los de sistema.
   id_agent_author Int?
 
+  /// El mensaje AL QUE RESPONDE, cuando se citó uno. NULL = mensaje normal,
+  /// que es la enorme mayoría. Normalizado y no con el texto copiado: el id
+  /// hace falta igual para poder SALTAR al original, y así una corrección del
+  /// original no deja la cita diciendo lo viejo.
+  id_reply_to  Int?
+
   created_at   DateTime  @default(now())
+
+  /// ORIGEN DE LA CONEXIÓN de quien escribió — auditoría (pedido de Nicolás
+  /// el 2026-09-10: "la ip de dónde enviaron el mensaje y la hora").
+  ///
+  /// Se llenan SOLO en los mensajes de personas: en los del agente no hay
+  /// navegador ni IP de cliente, el mensaje entra por la API con su llave.
+  ///
+  /// Sale de la petición HTTP, nunca del payload: `x-forwarded-for` que pone
+  /// el proxy de IIS (ARR) delante de la aplicación. Queda NULL cuando la
+  /// cabecera no llega, que es lo honesto — una IP inventada es peor que no
+  /// tener el dato. Ver lib/chat/client-origin.ts.
+  client_ip    String?   @db.NVarChar(64)
+  /// Navegador declarado por el cliente. Es un dato que el cliente controla y
+  /// puede mentir; sirve para distinguir un celular de un equipo de escritorio
+  /// en una revisión, no como prueba.
+  user_agent   String?   @db.NVarChar(400)
+
   /// Momento en que el agente confirmó la recepción (puente con Telegram).
   /// SOLO SIRVE EN HILOS DIRECTOS, donde hay un único agente. En un grupo la
   /// entrega se lleva en ChatMessageDelivery, una fila por agente: si se usara
@@ -958,6 +1044,12 @@ model ChatMessage {
   read_at      DateTime?
 
   conversation ChatConversation      @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+  /// NO ACTION y no Cascade: es una FK a la MISMA tabla y ya existe un camino
+  /// de borrado en cascada (id_conversation), que SQL Server rechaza combinar.
+  /// Hoy nada borra mensajes; si algún día se agrega, esto falla ruidosamente
+  /// en vez de dejar citas apuntando al vacío.
+  replyTo      ChatMessage?          @relation("ChatMessageReplyTo", fields: [id_reply_to], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  replies      ChatMessage[]         @relation("ChatMessageReplyTo")
   attachments  ChatAttachment[]
   userAuthor   User?                 @relation("ChatMessageUserAuthor", fields: [id_user_author], references: [id], onDelete: NoAction, onUpdate: NoAction)
   agentAuthor  Agent?                @relation("ChatMessageAgentAuthor", fields: [id_agent_author], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
@@ -966,6 +1058,7 @@ model ChatMessage {
   @@index([id_conversation, id(sort: Desc)])
   @@index([id_conversation, created_at])
   @@index([id_agent_author])
+  @@index([id_reply_to])
   @@map("chat_message")
 }
 
@@ -1011,6 +1104,71 @@ model ChatAttachment {
 
   @@index([id_message])
   @@map("chat_attachment")
+}
+
+/// CONSUMO EN TOKENS de un turno de un agente — auditoría.
+///
+/// POR QUÉ EXISTE (pedido de Nicolás el 2026-09-10, auditoría de permisos):
+/// las conversaciones ya quedan registradas en `chat_message`, pero el COSTO de
+/// atenderlas no queda en ninguna parte. Sin esto no hay forma de revisar si un
+/// agente se está usando para algo desproporcionado.
+///
+/// POR QUÉ LO REPORTA EL CONECTOR Y NO LA APLICACIÓN: los tokens los informa la
+/// API del modelo al proceso del agente (Claude Code), que los escribe en la
+/// bitácora de su sesión. La aplicación NUNCA los ve. Por eso cada agente los
+/// manda por POST /api/chat/agent/usage al cerrar el turno, con su propia
+/// llave — y el `id_agent` sale de la llave, no del payload.
+///
+/// UNA FILA POR TURNO Y POR CONVERSACIÓN: si un turno atendió a dos
+/// conversaciones a la vez, el agente reporta el mismo consumo para cada una,
+/// porque no hay manera de partir el gasto de un turno compartido. Al sumar por
+/// conversación eso se debe tener presente; `session_id` + `turn_started_at`
+/// permiten reconocer las filas que son el mismo turno.
+model ChatAgentTurnUsage {
+  id              Int    @id @default(autoincrement())
+  id_conversation Int
+  id_agent        Int
+
+  /// Sesión del proceso del agente. Junto con turn_started_at identifica el
+  /// turno, y permite reconocer un mismo turno repartido en varias filas.
+  session_id      String? @db.NVarChar(120)
+  /// Modelos que atendieron el turno, separados por coma (p. ej. 'claude-opus-5').
+  models          String? @db.NVarChar(300)
+  /// Llamados a la API que hizo el turno (no mensajes del chat: un turno
+  /// publica una respuesta pero puede hacer decenas de llamados).
+  api_messages    Int     @default(0)
+  /// De esos llamados, los que hicieron los sub-agentes.
+  api_messages_subagents Int @default(0)
+
+  /// Renglones del consumo. Se guardan separados y no solo el total porque no
+  /// cuestan lo mismo: la lectura de caché es una fracción del precio de la
+  /// entrada normal, y un total único no permite revisar nada.
+  input_tokens           Int @default(0)
+  cache_creation_tokens  Int @default(0)
+  cache_read_tokens      Int @default(0)
+  output_tokens          Int @default(0)
+  /// Parte de la salida que fue razonamiento. YA ESTÁ DENTRO de output_tokens;
+  /// se guarda aparte para poder mirarlo, no para sumarlo otra vez.
+  thinking_tokens        Int @default(0)
+  /// entrada + creación de caché + lectura de caché + salida. Redundante a
+  /// propósito: es la cifra por la que se ordena y se filtra el tablero, y
+  /// calcularla en cada consulta obliga a leer toda la tabla.
+  total_tokens           Int @default(0)
+
+  /// Ventana del turno según la bitácora del agente. NULL si no se pudo
+  /// determinar.
+  turn_started_at DateTime?
+  turn_ended_at   DateTime?
+  /// Momento en que se recibió el reporte.
+  created_at      DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+  agent        Agent            @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_conversation, created_at])
+  @@index([id_agent, created_at])
+  @@index([created_at])
+  @@map("chat_agent_turn_usage")
 }
 
 /// Estado en vivo del agente dentro de una conversación — alimenta el

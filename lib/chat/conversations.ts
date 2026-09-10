@@ -13,6 +13,7 @@
  * vienen con valor (`participants` y `agentStatuses` solo tienen sentido en un
  * grupo; `agentStatus`, en un hilo directo).
  */
+import type { Prisma } from '../../app/generated/prisma';
 import { prisma } from '../prisma';
 import { getChatAccess } from './access';
 import { toPreview } from './constants';
@@ -34,6 +35,19 @@ export interface ChatAuthorPayload {
   avatarUrl: string | null;
 }
 
+/**
+ * El mensaje CITADO, tal como se pinta encima de la respuesta.
+ *
+ * Viaja recortado (`preview`) y con el nombre del autor ya resuelto: la
+ * interfaz no tiene que volver a buscar nada, y un mensaje citado larguísimo
+ * no se manda entero para pintar dos renglones.
+ */
+export interface ChatReplyToPayload {
+  idMessage: number;
+  author: string;
+  preview: string;
+}
+
 export interface ChatMessagePayload {
   id: number;
   role: string;
@@ -43,6 +57,8 @@ export interface ChatMessagePayload {
   readAt: string | null;
   attachments: ChatAttachmentPayload[];
   author: ChatAuthorPayload | null;
+  /** El mensaje al que responde, o null. */
+  replyTo: ChatReplyToPayload | null;
 }
 
 /**
@@ -142,6 +158,14 @@ type MessageRow = {
   }[];
   userAuthor?: { id: string; name: string | null; email: string; image: string | null } | null;
   agentAuthor?: { id_agent: number; display_name: string; avatar_url: string | null } | null;
+  /** El mensaje citado, UN solo nivel (ver messageInclude). */
+  replyTo?: {
+    id: number;
+    body: string;
+    role: string;
+    userAuthor?: { name: string | null; email: string } | null;
+    agentAuthor?: { display_name: string } | null;
+  } | null;
 };
 
 /**
@@ -153,6 +177,19 @@ export const messageInclude = {
   attachments: true,
   userAuthor: { select: { id: true, name: true, email: true, image: true } },
   agentAuthor: { select: { id_agent: true, display_name: true, avatar_url: true } },
+  // El mensaje CITADO, un solo nivel. Sin recursión a propósito: si A cita a B
+  // y B cita a C, la cita de A muestra a B y ahí se para. Traer la cadena
+  // completa serían tantas consultas como saltos, y en pantalla no se pinta
+  // más de un nivel.
+  replyTo: {
+    select: {
+      id: true,
+      body: true,
+      role: true,
+      userAuthor: { select: { name: true, email: true } },
+      agentAuthor: { select: { display_name: true } },
+    },
+  },
 } as const;
 
 export function serializeMessage(row: MessageRow): ChatMessagePayload {
@@ -184,6 +221,20 @@ export function serializeMessage(row: MessageRow): ChatMessagePayload {
     readAt: row.read_at ? row.read_at.toISOString() : null,
     attachments: (row.attachments ?? []).map(serializeAttachment),
     author,
+    replyTo: row.replyTo
+      ? {
+          idMessage: row.replyTo.id,
+          author:
+            row.replyTo.userAuthor?.name?.trim() ||
+            row.replyTo.userAuthor?.email ||
+            row.replyTo.agentAuthor?.display_name ||
+            (row.replyTo.role === 'agent' ? 'Asistente' : 'Sistema'),
+          // Se recorta ACÁ y no en el navegador: el cuerpo citado puede ser un
+          // mensaje larguísimo y no tiene sentido mandarlo entero para pintar
+          // dos renglones.
+          preview: toPreview(row.replyTo.body),
+        }
+      : null,
   };
 }
 
@@ -367,38 +418,60 @@ export function serializeConversation(
  * comprueba `assertGroupAccess`, y por el mismo motivo: que un permiso
  * revocado cierre también lo viejo.
  */
+/**
+ * QUÉ CONVERSACIONES ALCANZA ESTE USUARIO — la condición de acceso, en un
+ * solo sitio.
+ *
+ * Devuelve el `OR` que hay que meterle a cualquier consulta sobre
+ * conversaciones (o sobre mensajes, a través de la relación), y `null` cuando
+ * la persona no tiene el módulo habilitado en ninguna empresa.
+ *
+ * Está extraído a propósito: la bandeja y el buscador de mensajes tienen que
+ * ver EXACTAMENTE lo mismo. Con la condición copiada en dos consultas, el día
+ * que se ajuste una se olvida la otra, y esa clase de olvido no se nota
+ * probando —se nota cuando alguien encuentra por el buscador un mensaje de una
+ * conversación que no le corresponde—.
+ *
+ * Las dos ramas dicen lo mismo que `assertGroupAccess`, y por el mismo motivo:
+ * que un permiso revocado cierre también lo viejo.
+ */
+export async function conversationScopeFor(
+  userId: string,
+  userEmail: string
+): Promise<Prisma.ChatConversationWhereInput[] | null> {
+  const access = await getChatAccess(userEmail);
+  if (!access.canUseChat) return null;
+
+  const allowedAgentIds = access.agents.map((a) => a.idAgent);
+  const empresasDelModulo = access.companies.map((c) => c.idCompany);
+
+  return [
+    // Hilos directos: suyos y con un agente que todavía puede usar.
+    ...(allowedAgentIds.length > 0
+      ? [{ kind: 'direct', id_user: userId, id_agent: { in: allowedAgentIds } }]
+      : []),
+    // Grupos: es participante y conserva el módulo en esa empresa.
+    {
+      kind: 'group',
+      participants: { some: { id_user: userId } },
+      OR: [
+        { id_company: null },
+        ...(empresasDelModulo.length > 0 ? [{ id_company: { in: empresasDelModulo } }] : []),
+      ],
+    },
+  ];
+}
+
 export async function listUserConversations(
   userId: string,
   userEmail: string,
   opts: { archived: boolean }
 ): Promise<ChatConversationPayload[]> {
-  const access = await getChatAccess(userEmail);
-  if (!access.canUseChat) return [];
-
-  const allowedAgentIds = access.agents.map((a) => a.idAgent);
-  const empresasDelModulo = access.companies.map((c) => c.idCompany);
+  const alcance = await conversationScopeFor(userId, userEmail);
+  if (!alcance) return [];
 
   const rows = await prisma.chatConversation.findMany({
-    where: {
-      archived: opts.archived,
-      OR: [
-        // Hilos directos: suyos y con un agente que todavía puede usar.
-        ...(allowedAgentIds.length > 0
-          ? [{ kind: 'direct', id_user: userId, id_agent: { in: allowedAgentIds } }]
-          : []),
-        // Grupos: es participante y conserva el módulo en esa empresa.
-        {
-          kind: 'group',
-          participants: { some: { id_user: userId } },
-          OR: [
-            { id_company: null },
-            ...(empresasDelModulo.length > 0
-              ? [{ id_company: { in: empresasDelModulo } }]
-              : []),
-          ],
-        },
-      ],
-    },
+    where: { archived: opts.archived, OR: alcance },
     include: conversationInclude,
     orderBy: [{ last_message_at: 'desc' }, { id: 'desc' }],
   });

@@ -69,6 +69,9 @@ export interface ChatAgentAccess {
   displayName: string;
   handle: string | null;
   avatarUrl: string | null;
+  /** Marca de tiempo de la foto subida, o null. NO viajan los bytes: el
+   *  avatar se pide aparte, por su endpoint, y así se cachea. */
+  avatarVersion: number | null;
   description: string | null;
   sortOrder: number;
   /** Empresas donde el usuario tiene permiso sobre ESTE agente. */
@@ -182,6 +185,7 @@ export async function getChatAccess(userEmail: string): Promise<ChatAccess> {
       displayName: agent.display_name,
       handle: agent.handle,
       avatarUrl: agent.avatar_url,
+      avatarVersion: agent.avatar_updated_at ? agent.avatar_updated_at.getTime() : null,
       description: agent.description,
       sortOrder: agent.sort_order,
       companies,
