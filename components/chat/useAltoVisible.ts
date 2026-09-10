@@ -38,7 +38,7 @@ export function useAltoVisible(alCambiar?: () => void) {
 
     const raiz = document.documentElement;
 
-    const actualizar = () => {
+    const escribir = () => {
       // `Math.round` a propósito: los decimales del visual viewport hacen
       // parpadear el layout en cada micro-scroll.
       raiz.style.setProperty('--alto-visible', `${Math.round(vv.height)}px`);
@@ -46,11 +46,33 @@ export function useAltoVisible(alCambiar?: () => void) {
       avisar.current?.();
     };
 
-    actualizar();
+    /*
+     * AGRUPADO POR CUADRO (2026-09-09, por el reporte de lentitud de Nicolás).
+     *
+     * `scroll` del visual viewport se dispara muchas veces por segundo con el
+     * dedo puesto. Antes cada evento escribía dos variables CSS y llamaba al
+     * aviso, y cada escritura invalida el diseño de todo lo que depende de
+     * esas variables — que es el contenedor completo del chat. Se hacía el
+     * mismo trabajo varias veces por cuadro y solo se veía el último.
+     *
+     * Con requestAnimationFrame se escribe UNA vez por cuadro, que es la única
+     * que el usuario alcanza a ver. El resto se descarta.
+     */
+    let pendiente = 0;
+    const actualizar = () => {
+      if (pendiente) return;
+      pendiente = window.requestAnimationFrame(() => {
+        pendiente = 0;
+        escribir();
+      });
+    };
+
+    escribir();
     vv.addEventListener('resize', actualizar);
     vv.addEventListener('scroll', actualizar);
 
     return () => {
+      if (pendiente) window.cancelAnimationFrame(pendiente);
       vv.removeEventListener('resize', actualizar);
       vv.removeEventListener('scroll', actualizar);
       raiz.style.removeProperty('--alto-visible');

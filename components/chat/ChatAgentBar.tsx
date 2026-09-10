@@ -126,6 +126,7 @@ export default function ChatAgentBar() {
             >
               <AgentAvatar
                 code={agent.code}
+                working={agent.busy}
                 displayName={agent.displayName}
                 avatarUrl={agent.avatarUrl}
                 unread={unread}
@@ -188,6 +189,7 @@ export default function ChatAgentBar() {
                           <Group gap='sm' wrap='nowrap' px='md' py='sm'>
                             <AgentAvatar
                               code={agent.code}
+                              working={agent.busy}
                               displayName={agent.displayName}
                               avatarUrl={agent.avatarUrl}
                               unread={unread}

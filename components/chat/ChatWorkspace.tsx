@@ -11,7 +11,6 @@ import {
   Badge,
   Box,
   Button,
-  Center,
   Grid,
   Group,
   Loader,
@@ -38,6 +37,8 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
+import { EsqueletoPantallaChat } from './ChatSkeletons';
+import AgentDetailModal from './AgentDetailModal';
 import ChatBroadcastModal from './ChatBroadcastModal';
 import ChatGroupModal from './ChatGroupModal';
 import ChatThread from './ChatThread';
@@ -112,8 +113,10 @@ function AgentCard({
       <Group gap='sm' wrap='nowrap' align='flex-start'>
         <AgentAvatar
           code={agent.code}
+          working={agent.busy}
           displayName={agent.displayName}
           avatarUrl={agent.avatarUrl}
+          avatarVersion={agent.avatarVersion}
           unread={unread}
           status={status}
           size={compact ? 34 : 42}
@@ -288,6 +291,10 @@ export default function ChatWorkspace({
   const selectedCode = seleccion?.tipo === 'agente' ? seleccion.code : null;
   const selectedGroupId = seleccion?.tipo === 'grupo' ? seleccion.id : null;
   const [grupoNuevoAbierto, setGrupoNuevoAbierto] = useState(false);
+  // Ficha del asistente. Se abre desde el ENCABEZADO de la conversación —el
+  // nombre y la foto—, como en WhatsApp se toca el contacto: la tarjeta de la
+  // lista sigue abriendo el chat, que es lo que uno espera de una lista.
+  const [detalleAbierto, setDetalleAbierto] = useState(false);
 
   // En pantallas angostas las dos columnas de la rejilla se APILAN: la lista de
   // asistentes arriba y la conversación debajo. Al llegar desde una
@@ -519,13 +526,7 @@ export default function ChatWorkspace({
   /* ───────────────────────────── Estados base ──────────────────────────── */
 
   if (!overview.ready) {
-    return (
-      <div className='app-page-shell app-page-shell--fill min-h-screen'>
-        <Center py='xl'>
-          <Loader size='sm' />
-        </Center>
-      </div>
-    );
+    return <EsqueletoPantallaChat />;
   }
 
   if (!overview.canUseChat) {
@@ -806,6 +807,27 @@ export default function ChatWorkspace({
     />
   ) : null;
 
+  /**
+   * La FICHA del asistente abierto. Se define junto al modal de grupo y por la
+   * misma razón: se monta en los dos armazones y duplicarla llevaría a que uno
+   * se quede sin los arreglos del otro.
+   */
+  const modalDeDetalle = (
+    <AgentDetailModal
+      agent={selectedAgent}
+      status={selectedAgent ? (overview.statusByAgent.get(selectedAgent.idAgent) ?? null) : null}
+      puedeEditar={overview.canBroadcast}
+      abierto={detalleAbierto && Boolean(selectedAgent)}
+      onCerrar={() => setDetalleAbierto(false)}
+      onFotoCambiada={() => {
+        // Se recarga la bandeja completa: de ahí sale la versión nueva de la
+        // foto, y con ella la URL cambia y el navegador pide la imagen nueva
+        // sin que nadie tenga que recargar la página.
+        overview.refresh();
+      }}
+    />
+  );
+
   // Los dos botones de la derecha del encabezado. Iguales para el hilo de un
   // asistente y para el de un grupo: un encabezado que cambia de botones según
   // lo que uno abrió se siente como dos pantallas distintas.
@@ -900,24 +922,32 @@ export default function ChatWorkspace({
     ) : selectedAgent ? (
       <Box className={clase}>
         <Group justify='space-between' p='sm' className='chat-panel__header' wrap='nowrap'>
-          <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
-            <AgentAvatar
-              code={selectedAgent.code}
-              displayName={selectedAgent.displayName}
-              avatarUrl={selectedAgent.avatarUrl}
-              status={overview.statusByAgent.get(selectedAgent.idAgent) ?? null}
-              size={36}
-              withTooltip={false}
-            />
-            <Box style={{ minWidth: 0 }}>
-              <Text fw={600} size='sm' lineClamp={1}>
-                {selectedAgent.displayName}
-              </Text>
-              <Text size='xs' className='chat-text-muted' lineClamp={1}>
-                {describeAgentStatus(overview.statusByAgent.get(selectedAgent.idAgent) ?? null).label}
-              </Text>
-            </Box>
-          </Group>
+          <UnstyledButton
+            onClick={() => setDetalleAbierto(true)}
+            style={{ minWidth: 0, flex: 1 }}
+            aria-label={`Ver el detalle de ${selectedAgent.displayName}`}
+          >
+            <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
+              <AgentAvatar
+                code={selectedAgent.code}
+                working={selectedAgent.busy}
+                displayName={selectedAgent.displayName}
+                avatarUrl={selectedAgent.avatarUrl}
+                avatarVersion={selectedAgent.avatarVersion}
+                status={overview.statusByAgent.get(selectedAgent.idAgent) ?? null}
+                size={36}
+                withTooltip={false}
+              />
+              <Box style={{ minWidth: 0 }}>
+                <Text fw={600} size='sm' lineClamp={1}>
+                  {selectedAgent.displayName}
+                </Text>
+                <Text size='xs' className='chat-text-muted' lineClamp={1}>
+                  {describeAgentStatus(overview.statusByAgent.get(selectedAgent.idAgent) ?? null).label}
+                </Text>
+              </Box>
+            </Group>
+          </UnstyledButton>
           {botonesDelEncabezado}
         </Group>
 
@@ -981,6 +1011,7 @@ export default function ChatWorkspace({
         />
 
         {modalDeGrupo}
+        {modalDeDetalle}
       </div>
     );
   }
@@ -1110,6 +1141,7 @@ export default function ChatWorkspace({
       />
 
       {modalDeGrupo}
+        {modalDeDetalle}
     </div>
   );
 }

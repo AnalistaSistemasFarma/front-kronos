@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
-import { Center, Loader } from '@mantine/core';
 import ChatWorkspace from '../../../../../../components/chat/ChatWorkspace';
+import { EsqueletoPantallaChat } from '../../../../../../components/chat/ChatSkeletons';
 
 /**
  * UN grupo abierto — /process/chat/grupo/12.
@@ -28,11 +28,7 @@ export default async function ChatGroupPage({ params }: { params: Promise<{ id: 
   return (
     <Suspense
       fallback={
-        <div className='app-page-shell app-page-shell--fill min-h-screen'>
-          <Center py='xl'>
-            <Loader size='sm' />
-          </Center>
-        </div>
+        <EsqueletoPantallaChat />
       }
     >
       <ChatWorkspace

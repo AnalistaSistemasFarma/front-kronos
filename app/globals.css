@@ -1026,6 +1026,10 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   border-radius: 1rem;
   border: 1px solid transparent;
   overflow-wrap: anywhere;
+  /* Para el gesto de citar y para el resalte al saltar a un mensaje. Anima
+     sobre todo el REGRESO del arrastre: mientras el dedo empuja, el
+     componente escribe `transform` en cada movimiento. */
+  transition: transform 160ms ease, box-shadow 220ms ease;
 }
 
 .chat-bubble--agent {
@@ -1066,6 +1070,59 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   opacity: 0.75;
   font-size: 12px;
 }
+
+/* ── CITAR Y RESPONDER ─────────────────────────────────────────────────────
+   Pedido de Nicolás (2026-09-09). La cita se pinta en dos sitios con el mismo
+   aspecto —encima de la caja mientras se escribe, y dentro de la burbuja una
+   vez enviada— porque es la misma cosa: a esto estoy respondiendo. La barrita
+   de la izquierda es la señal que usan WhatsApp y Telegram y ya nadie tiene
+   que aprender. */
+.chat-cita {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  text-align: left;
+  border-radius: 10px;
+  padding: 6px 8px;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  overflow: hidden;
+}
+
+.chat-cita__barra {
+  flex: 0 0 3px;
+  border-radius: 2px;
+  background-color: var(--app-accent, #2563eb);
+}
+
+/* Dentro de la burbuja va pegada al texto que la responde, no separada: se
+   lee como un bloque. */
+.chat-cita--burbuja {
+  width: 100%;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+/* En la burbuja del usuario el fondo es azul, así que la cita necesita su
+   propio contraste o desaparece. */
+.chat-bubble--user .chat-cita--burbuja {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+.chat-bubble--user .chat-cita--burbuja .chat-text-muted,
+.chat-bubble--user .chat-cita--burbuja .mantine-Text-root {
+  color: #ffffff;
+}
+
+.chat-bubble--user .chat-cita--burbuja .chat-cita__barra {
+  background-color: #ffffff;
+}
+
+/* Resalte momentáneo al saltar a un mensaje citado: sin esto uno llega al
+   sitio y no sabe cuál de los mensajes era. */
+.chat-bubble--resaltada {
+  box-shadow: 0 0 0 2px var(--app-accent, #2563eb);
+}
+
 
 .chat-bubble--user .chat-bubble__meta,
 .chat-bubble--user .chat-md,
@@ -1413,11 +1470,41 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   /* El aire de adentro. Subió de 7 a 10 px y NO le cuesta alto a la
      conversación: la fila la gobierna el botón de enviar, que mide 46 px, y la
      caja sigue quedando por debajo. */
-  padding: 10px 16px;
+  /* El borde derecho deja sitio al clip, que ahora vive DENTRO de la caja.
+     Hay que escribirlo aquí: Mantine reserva ese espacio con su propia
+     variable de relleno y esta regla la pisa, así que sin el 44 px el texto
+     se metería debajo del botón. */
+  padding: 10px 44px 10px 16px;
   min-height: 42px;
-  /* El `autosize` de Mantine cambia el alto de golpe cada vez que el texto
-     salta de renglón; con la transición el crecimiento se siente continuo. */
-  transition: height 130ms ease;
+  /* SIN transición de `height`, a propósito (2026-09-09, por el reporte de
+     lentitud de Nicolás). Animarla obliga al navegador a rehacer el diseño en
+     CADA cuadro, y aquí se disparaba con cada salto de renglón — o sea,
+     mientras la persona escribe, que es el peor momento posible. El salto de
+     un renglón es de unos pocos píxeles y sin la transición ni se nota; lo
+     que sí se notaba era el tirón.
+     El resto SÍ se suavizó (Nicolás, mismo día: "una animación al teclear que
+     sea más suave"): borde y sombra del foco usan la misma curva cubic-bezier
+     de las burbujas del chat, así que enfocar/teclear se siente fluido sin
+     tocar el layout. */
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+/* Foco suave del input: el borde toma el acento y aparece un halo tenue, en
+   lugar del cambio brusco por defecto. Coherente con el resto del chat. */
+.chat-composer__input:focus,
+.chat-composer__input:focus-within {
+  border-color: var(--app-accent, #2563eb);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent, #2563eb) 18%, transparent);
+}
+
+/* Respeta a quien pide menos movimiento: sin transiciones. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer__input {
+    transition: border-color 160ms ease, box-shadow 160ms ease;
+  }
 }
 
 /* ── iOS: el ZOOM AUTOMÁTICO al enfocar la caja ──
@@ -1644,15 +1731,15 @@ body.chat-inmersivo .chat-page-thread--completa {
   height: var(--alto-visible, 100dvh);
 }
 
-/* El alto cambia cuando sale o se guarda el teclado. Sin transición, la
-   conversación pega un salto seco; con ella acompaña al teclado. Corta a
-   propósito (160 ms): el teclado del sistema tarda alrededor de eso, y una
-   transición más larga se sentiría rezagada. */
-@media (prefers-reduced-motion: no-preference) {
-  .chat-page-thread--completa {
-    transition: height 160ms ease-out;
-  }
-}
+/* La transición de alto al salir el teclado SE QUITÓ (2026-09-09, por el
+   reporte de lentitud de Nicolás).
+
+   Acompañaba bonito al teclado, pero animaba `height` sobre un contenedor
+   `fixed` que tiene toda la conversación adentro: un recálculo completo del
+   diseño por cuadro, justo en el momento en que el teléfono ya está ocupado
+   animando su propio teclado. Era la animación más cara del chat y en el peor
+   instante. El movimiento del teclado del sistema ya da la sensación de
+   continuidad; no hacía falta duplicarla. */
 
 .chat-page-shell--completa {
   max-width: none;
@@ -1691,22 +1778,42 @@ body.chat-inmersivo .chat-page-thread--completa {
   box-sizing: content-box;
 }
 
-/* Late mientras el agente trabaja: sin esto el chat parece congelado. */
+
+/* ── Aro de "trabajando" ──
+   Pedido de Nicolás (2026-09-09): un aro alrededor de la foto del agente
+   mientras atiende un turno, visible para TODOS y no solo para quien tiene el
+   hilo abierto — para eso ya está el indicador de la conversación.
+
+   Va como elemento aparte y no como `border` del avatar: un borde le cambiaría
+   la caja al avatar y correría el punto de estado y el contador, que están
+   anclados a esa caja.
+
+   Solo anima `transform` y `opacity`, que el navegador resuelve sin recalcular
+   el diseño. El chat pinta muchos avatares a la vez y una animación que toque
+   el layout se sentiría en todos. */
+.agent-avatar__aro {
+  position: absolute;
+  inset: -3px;
+  border-radius: 999px;
+  border: 2px solid var(--app-accent, #2563eb);
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: no-preference) {
-  .agent-avatar__estado--ocupado {
-    animation: agent-avatar-pulso 1.6s ease-in-out infinite;
+  .agent-avatar__aro {
+    animation: agent-avatar-aro 1.6s ease-in-out infinite;
   }
 }
 
-@keyframes agent-avatar-pulso {
+@keyframes agent-avatar-aro {
   0%,
   100% {
     transform: scale(1);
-    opacity: 1;
+    opacity: 0.95;
   }
   50% {
-    transform: scale(0.82);
-    opacity: 0.72;
+    transform: scale(1.09);
+    opacity: 0.35;
   }
 }
 

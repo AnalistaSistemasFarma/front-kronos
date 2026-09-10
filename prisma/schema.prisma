@@ -682,6 +682,17 @@ model Agent {
   /// interfaz cae al avatar por inicial. A propósito no se guardan URLs
   /// externas: las fotos de usuario que hoy apuntan a postimg.cc son frágiles.
   avatar_url    String?  @db.NVarChar(500)
+  /// Avatar SUBIDO desde la interfaz, guardado aquí y no en /public: Next
+  /// resuelve esa carpeta con una lista de tiempo de compilación, así que un
+  /// archivo nuevo daría 404 hasta el siguiente despliegue. Lo sirve
+  /// GET /api/chat/agents/<code>/avatar. NULL = no le han subido ninguna y la
+  /// interfaz sigue con `avatar_url` o con la inicial.
+  avatar_blob       Bytes?    @db.VarBinary(Max)
+  avatar_mime       String?   @db.NVarChar(100)
+  /// Cuándo se subió. Sirve para saber si hay imagen sin traerse los bytes, y
+  /// como número de versión en la URL (?v=…) para poder cachearla fuerte y que
+  /// igual cambie al instante cuando la reemplacen.
+  avatar_updated_at DateTime?
   description   String?  @db.NVarChar(500)
   is_active     Boolean  @default(true)
   sort_order    Int      @default(0)
@@ -834,6 +845,12 @@ model ChatMessage {
   /// Autor AGENTE. NULL en los mensajes de personas y en los de sistema.
   id_agent_author Int?
 
+  /// El mensaje AL QUE RESPONDE, cuando se citó uno. NULL = mensaje normal,
+  /// que es la enorme mayoría. Normalizado y no con el texto copiado: el id
+  /// hace falta igual para poder SALTAR al original, y así una corrección del
+  /// original no deja la cita diciendo lo viejo.
+  id_reply_to  Int?
+
   created_at   DateTime  @default(now())
 
   /// ORIGEN DE LA CONEXIÓN de quien escribió — auditoría (pedido de Nicolás
@@ -861,6 +878,12 @@ model ChatMessage {
   read_at      DateTime?
 
   conversation ChatConversation      @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+  /// NO ACTION y no Cascade: es una FK a la MISMA tabla y ya existe un camino
+  /// de borrado en cascada (id_conversation), que SQL Server rechaza combinar.
+  /// Hoy nada borra mensajes; si algún día se agrega, esto falla ruidosamente
+  /// en vez de dejar citas apuntando al vacío.
+  replyTo      ChatMessage?          @relation("ChatMessageReplyTo", fields: [id_reply_to], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  replies      ChatMessage[]         @relation("ChatMessageReplyTo")
   attachments  ChatAttachment[]
   userAuthor   User?                 @relation("ChatMessageUserAuthor", fields: [id_user_author], references: [id], onDelete: NoAction, onUpdate: NoAction)
   agentAuthor  Agent?                @relation("ChatMessageAgentAuthor", fields: [id_agent_author], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
@@ -869,6 +892,7 @@ model ChatMessage {
   @@index([id_conversation, id(sort: Desc)])
   @@index([id_conversation, created_at])
   @@index([id_agent_author])
+  @@index([id_reply_to])
   @@map("chat_message")
 }
 
