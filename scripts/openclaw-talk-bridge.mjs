@@ -1,5 +1,8 @@
 // Run on the OpenClaw host. Existing SynerLink connector credentials remain
 // local; OpenClaw's SDK uses its paired device, never a browser-supplied token.
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { finalTranscript, createVoiceAuditOutbox } from './voice-audit-outbox.mjs';
 import { GatewayClient } from '/opt/homebrew/lib/node_modules/openclaw/dist/plugin-sdk/gateway-runtime.js';
 
 if (!process.argv[2] || !process.argv[3]) throw new Error('Usage: node openclaw-talk-bridge.mjs <existing-connector-env> <testing-base-url>');
@@ -19,11 +22,12 @@ async function api(method, data) {
   if (!response.ok) throw new Error(`SynerLink voice HTTP ${response.status}`);
   return response.json();
 }
+const audit = createVoiceAuditOutbox(join(homedir(), '.openclaw', 'synerlink-voice-audit-testing'), data => api('POST', data));
 async function close(id) {
-  const call = sessions.get(id); if (!call) return;
-  sessions.delete(id); clearTimeout(call.timer);
+  const call = sessions.get(id); if (!call || call.closing) return;
+  call.closing = true; clearTimeout(call.timer);
   try { if (call.voiceSessionId) await call.client.request('talk.client.close', { sessionKey: call.sessionKey, voiceSessionId: call.voiceSessionId }); } catch { /* disconnect also fences authority */ }
-  call.client.stop();
+  sessions.delete(id); call.client.stop();
 }
 async function open(job) {
   if (!Number.isSafeInteger(job.conversation) || job.conversation <= 0 || typeof job.offer !== 'string') return;
@@ -33,6 +37,13 @@ async function open(job) {
   let ready, reject;
   const connected = new Promise((resolve, fail) => { ready = resolve; reject = fail; });
   const client = new GatewayClient({ url: 'ws://127.0.0.1:18789', clientName: 'cli', mode: 'cli', scopes: ['operator.read', 'operator.write'],
+    onEvent: frame => {
+      const transcript = finalTranscript(frame, sessions.get(job.id)?.voiceSessionId);
+      if (transcript) {
+        try { audit.enqueue(job.id, transcript); }
+        catch { console.error('Voice audit spool unavailable'); void close(job.id); }
+      }
+    },
     onHelloOk: ready, onConnectError: () => reject(new Error('Gateway connection rejected')),
     onClose: () => { if (sessions.has(job.id)) void close(job.id); },
   });
@@ -60,6 +71,8 @@ async function open(job) {
 }
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { quitting = true; });
 while (!quitting) {
+  // Independent from transport: audit downtime must not drop an active call.
+  void audit.drain().catch(() => console.error('Voice audit pending; retrying'));
   try {
     const result = await api('GET');
     for (const id of sessions.keys()) if (!result.active.includes(id)) await close(id);
@@ -72,3 +85,5 @@ while (!quitting) {
   await delay(1000);
 }
 await Promise.all([...sessions.keys()].map(close));
+
+await audit.drain().catch(() => console.error("Voice audit retained for next startup"));

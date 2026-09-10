@@ -398,9 +398,13 @@ export default function ChatWorkspace({
     (modoEscritorio && expandido);
   useEffect(() => {
     if (!inmersivo) return;
+    const scrollY = window.scrollY;
     document.body.classList.add('chat-inmersivo');
+    document.documentElement.classList.add('chat-inmersivo');
     return () => {
       document.body.classList.remove('chat-inmersivo');
+      document.documentElement.classList.remove('chat-inmersivo');
+      window.scrollTo({ top: scrollY, behavior: 'instant' });
     };
   }, [inmersivo]);
 

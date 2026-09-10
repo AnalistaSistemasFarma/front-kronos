@@ -1,6 +1,7 @@
 import { authenticateAgent } from '../../../../../lib/chat/agent-auth';
 import { jsonNoStore, unauthorized } from '../../../../../lib/chat/http';
 import { answerVoiceCall, pollVoiceCalls } from '../../../../../lib/chat/voice-broker';
+import { parseVoiceTranscript, saveVoiceTranscript } from '../../../../../lib/chat/voice-audit';
 export const runtime = 'nodejs';
 export async function GET(request: Request) {
   const agent = await authenticateAgent(request);
@@ -18,5 +19,16 @@ export async function POST(request: Request) {
   let body;
   try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return jsonNoStore({ error: 'JSON inválido.' }, { status: 400 }); }
   if (!body || typeof body.callId !== 'string' || (body.sdp !== undefined && (typeof body.sdp !== 'string' || body.sdp.length > 262144 || !body.sdp.startsWith('v=0')))) return jsonNoStore({ error: 'Respuesta inválida.' }, { status: 400 });
+  if (body.action === 'transcript') {
+    const transcript = parseVoiceTranscript(body.transcript);
+    if (!transcript) return jsonNoStore({ error: 'Transcripción inválida.' }, { status: 400 });
+    try {
+      const result = await saveVoiceTranscript(agent.idAgent, body.callId, transcript);
+      return result ? jsonNoStore({ ok: true, ...result }) : jsonNoStore({ error: 'Llamada no autorizada.' }, { status: 404 });
+    } catch {
+      return jsonNoStore({ error: 'Auditoría temporalmente no disponible.' }, { status: 503 });
+    }
+  }
+  if (body.action !== undefined) return jsonNoStore({ error: 'Acción inválida.' }, { status: 400 });
   return jsonNoStore({ ok: answerVoiceCall(agent.idAgent, body.callId, body.sdp) });
 }
