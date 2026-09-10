@@ -573,6 +573,13 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             placeholder={placeholder}
+            /* Sin corrector del navegador: nada de subrayado rojo ni
+               autocorrección/mayúsculas automáticas en la caja del chat
+               (Nicolás, 2026-09-09). spellCheck apaga el subrayado; autoCorrect
+               y autoCapitalize evitan que el móvil "arregle" lo que se escribe. */
+            spellCheck={false}
+            autoCorrect='off'
+            autoCapitalize='off'
             autosize
             /* Arranca en UN renglón, como WhatsApp, y crece al escribir. */
             minRows={1}
