@@ -36,8 +36,15 @@ function stripPort(raw: string): string {
   const value = raw.trim();
   if (!value) return '';
 
-  const bracketed = value.match(/^\[(.+)\](?::\d+)?$/);
-  if (bracketed) return bracketed[1];
+  // IPv6 entre corchetes, resuelta con búsqueda de texto y no con expresión
+  // regular: un patrón como /^\[(.+)\](?::\d+)?$/ es vulnerable a
+  // backtracking catastrófico con una entrada armada a propósito, y este valor
+  // viene de una cabecera HTTP que cualquiera puede llenar (lo marca
+  // security/detect-unsafe-regex).
+  if (value.startsWith('[')) {
+    const cierre = value.indexOf(']');
+    if (cierre > 1) return value.slice(1, cierre);
+  }
 
   const parts = value.split(':');
   if (parts.length === 2 && /^\d+$/.test(parts[1])) return parts[0];

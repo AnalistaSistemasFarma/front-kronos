@@ -250,9 +250,8 @@ export default function AuditoriaAgentesPage() {
   );
 
   useEffect(() => {
-    void consultar(1);
     // Solo al abrir: después se consulta con el botón o al cambiar de página.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void consultar(1);
   }, []);
 
   const totales = useMemo(() => {
