@@ -25,6 +25,7 @@ import AgentTaskTable from './AgentTaskTable';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
+import ChatVoice from './ChatVoice';
 import { useChatConversation, type ChatTarget } from './useChatConversation';
 import { useAltoVisible } from './useAltoVisible';
 import {
@@ -723,6 +724,7 @@ export default function ChatThread({
       onDrop={onDrop}
       onPaste={onPaste}
     >
+      {agent?.code === 'duo' && thread.conversation && <ChatVoice key={thread.conversation.id} conversationId={thread.conversation.id} />}
       {dragging && (
         <Box className='chat-thread__dropzone' aria-hidden>
           <Stack align='center' gap={4}>
