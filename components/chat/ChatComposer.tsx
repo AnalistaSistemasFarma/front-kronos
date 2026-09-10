@@ -651,7 +651,15 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         </Text>
       )}
 
-      <Group gap={2} align='flex-end' wrap='nowrap'>
+      {/* `align='center'` y no `flex-end`: la caja (min-height 42 px) y el
+          botón de enviar (46 px) tienen alturas DISTINTAS a propósito (ver el
+          comentario del radio en `.chat-composer__input`), pero alineándolos
+          por abajo esos pocos píxeles de diferencia quedan todos arriba de la
+          caja y se ve corrida hacia abajo respecto al botón. Centrados, la
+          diferencia se reparte mitad arriba y mitad abajo y no se nota.
+          El `gap` sube de 2 a 8 px por lo mismo que reportó Nicolás
+          (2026-09-10): pegados así la fila se ve amontonada, no espaciada. */}
+      <Group gap={8} align='center' wrap='nowrap'>
         {preview ? (
           <Box
             className='chat-composer__preview'
