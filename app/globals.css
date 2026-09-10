@@ -1473,8 +1473,31 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   padding: 10px 16px;
   min-height: 42px;
   /* El `autosize` de Mantine cambia el alto de golpe cada vez que el texto
-     salta de renglón; con la transición el crecimiento se siente continuo. */
-  transition: height 130ms ease;
+     salta de renglón; con la transición el crecimiento se siente continuo.
+     Se suavizó (Nicolás, 2026-09-09: "una animación al teclear que sea más
+     suave"): la curva es la misma cubic-bezier de las burbujas del chat, y
+     además se anima el borde y la sombra del foco para que enfocar/teclear se
+     sienta fluido en vez de un salto seco. */
+  transition:
+    height 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+/* Foco suave del input: el borde toma el acento y aparece un halo tenue, en
+   lugar del cambio brusco por defecto. Coherente con el resto del chat. */
+.chat-composer__input:focus,
+.chat-composer__input:focus-within {
+  border-color: var(--app-accent, #2563eb);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent, #2563eb) 18%, transparent);
+}
+
+/* Respeta a quien pide menos movimiento: sin transiciones de alto. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer__input {
+    transition: border-color 160ms ease, box-shadow 160ms ease;
+  }
 }
 
 /* ── iOS: el ZOOM AUTOMÁTICO al enfocar la caja ──
