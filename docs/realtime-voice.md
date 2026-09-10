@@ -41,6 +41,7 @@ acceso al servidor. No constituye un límite de facturación de OpenAI.
 ## Verificación
 
 Probado: creación y cierre de sesión Talk real con control Gateway, sin exponer
-credenciales. Pendiente: negociación SDP completa y voz audible desde testing.
+credenciales; negociación SDP HTTP 200 y conexión WebRTC desde Chrome headless.
+Pendiente: voz audible y recorrido completo desde la interfaz de testing.
 Prueba manual: HTTPS, micrófono, respuesta audible, interrupción, silencio,
 colgar y salir del hilo. Verificar liberación del micrófono y consulta a Duo.
