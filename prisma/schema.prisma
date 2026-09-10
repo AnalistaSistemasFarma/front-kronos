@@ -1054,6 +1054,7 @@ model ChatMessage {
   userAuthor   User?                 @relation("ChatMessageUserAuthor", fields: [id_user_author], references: [id], onDelete: NoAction, onUpdate: NoAction)
   agentAuthor  Agent?                @relation("ChatMessageAgentAuthor", fields: [id_agent_author], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
   deliveries   ChatMessageDelivery[]
+  voiceEvent   ChatVoiceEvent?
 
   @@index([id_conversation, id(sort: Desc)])
   @@index([id_conversation, created_at])
@@ -1200,4 +1201,29 @@ model ChatAgentStatus {
 
   @@id([id_conversation, id_agent])
   @@map("chat_agent_status")
+}
+
+/// Server-owned identity of a voice call; retained for delayed audit retries.
+model ChatVoiceCall {
+  id              String   @id @db.VarChar(36)
+  id_conversation Int
+  id_agent        Int
+  id_user         String   @db.NVarChar(1000)
+  client_ip       String?  @db.NVarChar(64)
+  user_agent      String?  @db.NVarChar(400)
+  created_at      DateTime @default(now())
+  expires_at      DateTime
+  events          ChatVoiceEvent[]
+  @@index([id_conversation])
+  @@map("chat_voice_call")
+}
+
+/// Durable receipt: retries of one Gateway event cannot create extra messages.
+model ChatVoiceEvent {
+  event_key    String @id @db.VarChar(64)
+  call_id      String @db.VarChar(36)
+  id_message   Int @unique
+  call         ChatVoiceCall @relation(fields: [call_id], references: [id], onDelete: Cascade)
+  message      ChatMessage @relation(fields: [id_message], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  @@map("chat_voice_event")
 }
