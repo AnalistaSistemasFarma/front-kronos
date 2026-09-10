@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { messageInclude, serializeMessage } from '../../../../../../lib/chat/conversations';
 import { calcularEntregas } from '../../../../../../lib/chat/groups';
+import { readClientOrigin } from '../../../../../../lib/chat/client-origin';
 import {
   MAX_USER_MESSAGE_CHARS,
   MESSAGES_PAGE_DEFAULT,
@@ -155,6 +156,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const now = new Date();
 
+    // Origen de la conexión, para la auditoría. Sale de las cabeceras de la
+    // petición, nunca del cuerpo; queda NULL si el proxy no las manda.
+    const { clientIp, userAgent } = readClientOrigin(request);
+
     // OneDrive primero (operación externa, no transaccional). Si falla, se
     // responde sin haber escrito nada: no hay mensaje ni adjunto a medias.
     let uploaded: UploadedChatAttachment[] = [];
@@ -194,6 +199,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           created_at: now,
           // El autor sale de la SESIÓN, nunca del payload.
           id_user_author: guard.user.id,
+          // Desde dónde se escribió. Solo se guarda en los mensajes de
+          // personas: el agente entra por la API con su llave, sin navegador.
+          client_ip: clientIp,
+          user_agent: userAgent,
           // Mensaje y adjuntos, una sola escritura: o entran los dos o ninguno.
           ...(uploaded.length > 0 ? { attachments: { create: uploaded } } : {}),
           // Mensaje y entregas, también: ver la nota de arriba.
