@@ -2,7 +2,7 @@
 
 Servidor único [Model Context Protocol](https://modelcontextprotocol.io) que expone la información de la aplicación front-kronos (código interno "SynerLink") para que la consulten varios agentes de IA: solicitudes (workflows), tickets/casos de mesa de ayuda, procesos, subprocesos, actividades, categorías, departamentos, notas y usuarios.
 
-> **El servidor YA NO es 100% de solo lectura.** De sus **13 tools**, **11 son de lectura** y **2 son de escritura**, ambas acotadas exclusivamente a **categorización** (`kronos_categorize_case` y `kronos_categorize_request`): por una **ruta de escritura separada**, transaccional, parametrizada y **auditada**. El candado de solo lectura del resto del servidor **sigue intacto** (ver §2.1 y §6).
+> **El servidor YA NO es 100% de solo lectura.** De sus **24 tools**, **19 son de lectura** y **5 son de escritura**. Las tools de Teams son de lectura y consultan Microsoft Graph con las credenciales app-only del MCP. El candado de solo lectura del SQL de Kronos **sigue intacto** (ver §2.1 y §6).
 
 Imita el patrón del MCP de SAP de la organización: transporte **Streamable HTTP** en la ruta `/mcp`, y tools tipo `query` / `get` / `metadata` (aquí con prefijo `kronos_`).
 
@@ -54,9 +54,9 @@ Los catálogos son globales (compartidos por todas las empresas), así que se ex
 
 ---
 
-## 2. Tools disponibles (13: 11 lectura + 2 escritura)
+## 2. Tools disponibles (24: 19 lectura + 5 escritura)
 
-### 2.1 Lectura (11)
+### 2.1 Lectura (19)
 
 | Tool | Descripción |
 |---|---|
@@ -71,6 +71,9 @@ Los catálogos son globales (compartidos por todas las empresas), así que se ex
 | `kronos_list_categories` | Categorías y subcategorías (catálogo global). |
 | `kronos_list_users` | Usuarios de las empresas del alcance. **Excluye** `password` y tokens. |
 | `kronos_search` | Búsqueda paginada sobre solicitudes y/o tickets (`text`, `dateFrom`, `dateTo`, `status`, `companyId`). |
+| `teams_list_meetings` | Lista reuniones online recientes del usuario Graph configurado. |
+| `teams_list_transcripts` | Lista las transcripciones disponibles para una reunión (`meetingId` o `joinUrl`). |
+| `teams_get_transcript` | Descarga la transcripción más reciente o una específica. Por defecto usa el formato sin atribución de hablante permitido por el tenant. |
 
 **Paginación:** todas usan `limit`/`offset` con tope máximo (`MCP_MAX_PAGE_SIZE`, default 200) y default (`MCP_DEFAULT_PAGE_SIZE`, default 50).
 
@@ -135,6 +138,13 @@ La comparación de keys es **timing-safe** (`src/auth.ts`, SHA-256 + `timingSafe
 | `MCP_DEFAULT_PAGE_SIZE` | `50` | Tamaño de página por defecto. |
 | `MCP_MAX_PAGE_SIZE` | `200` | Tope máximo de filas por consulta. |
 | `MCP_AUDIT_LOG_FILE` | `kronos-mcp-audit.log` | Archivo de auditoría (una línea JSON por llamada). |
+| `MICROSOFTCLIENTID` | — | Client ID de la aplicación app-only de Microsoft Graph. |
+| `MICROSOFTCLIENTSECRET` | — | Secreto de esa aplicación. No se versiona. |
+| `MICROSOFTTENANTID` | — | Tenant de Microsoft Entra ID de la aplicación. |
+| `MICROSOFTGRAPHUSERROUTE` | — | Ruta Graph existente de OneDrive (`.../users/<id>/drive/`); el MCP extrae de ella el usuario cuyas reuniones consulta. Puede sustituirse con `MICROSOFTGRAPHUSERID`. |
+| `MICROSOFTGRAPHUSERID` | — | Opcional; ID explícito del usuario Graph para reuniones y transcripts. |
+
+Para Teams, la aplicación necesita consentimiento de administrador para los permisos de aplicación `Calendars.Read`, `OnlineMeetings.Read.All` y `OnlineMeetingTranscript.Read.All`. El tenant actual no permite atribución de hablante, por lo que `teams_get_transcript` usa por defecto `Accept: application/vnd.microsoft.graph.transcript+text`; `format=vtt` requiere habilitar speaker attribution.
 
 Copie `.env.example` a `.env` y complete los valores. `.env` está en `.gitignore`.
 

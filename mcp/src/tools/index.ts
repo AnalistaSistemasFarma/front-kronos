@@ -17,6 +17,7 @@ import {
   requestFolderPath,
   type GraphFile,
 } from '../graph.js';
+import { loadTeamsGraphConfig, TeamsGraphClient } from '../teams.js';
 
 interface ToolContext {
   scope: AuthScope;
@@ -152,6 +153,16 @@ function getGraphClient(): GraphClient | null {
   return graphClientSingleton;
 }
 
+/** Cliente Teams app-only compartido y lazily inicializado. */
+let teamsGraphClientSingleton: TeamsGraphClient | null | undefined;
+function getTeamsGraphClient(): TeamsGraphClient | null {
+  if (teamsGraphClientSingleton === undefined) {
+    const cfg = loadTeamsGraphConfig();
+    teamsGraphClientSingleton = cfg ? new TeamsGraphClient(cfg) : null;
+  }
+  return teamsGraphClientSingleton;
+}
+
 /** Tamaño máximo para devolver contenido base64 inline en get_attachment. */
 const MAX_INLINE_BASE64_BYTES = 4 * 1024 * 1024; // 4 MB
 
@@ -272,7 +283,7 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 21,
+  totalTools: 24,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
@@ -290,6 +301,9 @@ export const TOOL_CAPABILITIES = {
     'kronos_list_categories',
     'kronos_list_users',
     'kronos_search',
+    'teams_list_meetings',
+    'teams_list_transcripts',
+    'teams_get_transcript',
   ],
   write: ['kronos_categorize_case', 'kronos_categorize_request', 'kronos_create_request', 'kronos_add_note', 'kronos_resolve_task'],
   writeNote:
@@ -298,6 +312,61 @@ export const TOOL_CAPABILITIES = {
 
 export function registerTools(server: McpServer, ctx: ToolContext): void {
   const prisma = getPrisma();
+
+  // ---------------------------------------------------------------------------
+  // Teams / transcripciones
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'teams_list_meetings',
+    'Lista las reuniones de Teams del usuario configurado en Microsoft Graph, más recientes primero. Requiere permisos de aplicación Calendars.Read; solo devuelve reuniones online por defecto.',
+    {
+      daysBack: z.number().int().min(0).max(365).default(30).describe('Días hacia atrás. Por defecto 30.'),
+      daysForward: z.number().int().min(0).max(365).default(0).describe('Días hacia adelante. Por defecto 0.'),
+      limit: z.number().int().min(1).max(100).default(25).describe('Máximo de reuniones. Por defecto 25.'),
+      onlyOnline: z.boolean().default(true).describe('Solo reuniones de Teams online. Por defecto true.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'teams_list_meetings', args, async () => {
+        const graph = getTeamsGraphClient();
+        if (!graph) throw new Error('Teams/Graph no está configurado: falta MICROSOFTGRAPHUSERROUTE o MICROSOFTGRAPHUSERID.');
+        const meetings = await graph.listMeetings(args);
+        return { result: { count: meetings.length, meetings }, rows: meetings.length };
+      })
+  );
+
+  server.tool(
+    'teams_list_transcripts',
+    'Lista las transcripciones disponibles para una reunión de Teams. Indique meetingId o joinUrl. Requiere OnlineMeetingTranscript.Read.All con consentimiento de administrador.',
+    {
+      meetingId: z.string().trim().min(1).optional().describe('Id onlineMeeting de Microsoft Graph.'),
+      joinUrl: z.string().trim().min(1).optional().describe('URL de unión de Teams; el MCP resuelve el meetingId.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'teams_list_transcripts', args, async () => {
+        const graph = getTeamsGraphClient();
+        if (!graph) throw new Error('Teams/Graph no está configurado: falta MICROSOFTGRAPHUSERROUTE o MICROSOFTGRAPHUSERID.');
+        const result = await graph.listTranscripts(args.meetingId, args.joinUrl);
+        return { result, rows: result.transcripts.length };
+      })
+  );
+
+  server.tool(
+    'teams_get_transcript',
+    'Obtiene el contenido de una transcripción de Teams. Por defecto devuelve texto con timestamps sin nombres de hablantes, formato permitido por el tenant actual; use format=vtt solo si el tenant habilitó speaker attribution.',
+    {
+      meetingId: z.string().trim().min(1).optional().describe('Id onlineMeeting de Microsoft Graph.'),
+      joinUrl: z.string().trim().min(1).optional().describe('URL de unión de Teams; el MCP resuelve el meetingId.'),
+      transcriptId: z.string().trim().min(1).optional().describe('Id de una transcripción concreta; por defecto la más reciente.'),
+      format: z.enum(['text', 'vtt']).default('text').describe('text (sin speaker attribution) o vtt (con speaker attribution).'),
+    },
+    async (args) =>
+      withAudit(ctx, 'teams_get_transcript', args, async () => {
+        const graph = getTeamsGraphClient();
+        if (!graph) throw new Error('Teams/Graph no está configurado: falta MICROSOFTGRAPHUSERROUTE o MICROSOFTGRAPHUSERID.');
+        const result = await graph.getTranscript(args);
+        return { result, rows: result.content ? 1 : 0 };
+      })
+  );
 
   // ---------------------------------------------------------------------------
   // kronos_metadata
