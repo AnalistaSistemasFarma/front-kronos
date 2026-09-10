@@ -2158,7 +2158,9 @@ body.chat-inmersivo .chat-page-thread--completa {
   gap: 12px;
   flex-wrap: wrap;
   padding: 14px 20px;
-  background-color: var(--pth-azul);
+  /* Degradado sutil azul → azul-700, del propio sistema de marca de GSS
+     (permitido para una franja "de portada" como esta). */
+  background-image: linear-gradient(180deg, var(--pth-azul) 0%, var(--pth-azul-700) 100%);
   color: #fff;
 }
 
@@ -2169,16 +2171,14 @@ body.chat-inmersivo .chat-page-thread--completa {
   min-width: 0;
 }
 
+/* Logo oficial de GSS: el monograma ya viene blanco y sin fondo (recortado
+   del asset de marca), así que no necesita caja ni relleno detrás — se ve
+   igual de nítido sobre el azul de la barra. */
 .portal-th__logo {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 42px;
   height: 42px;
   flex-shrink: 0;
-  border-radius: 12px;
-  background-color: rgba(255, 255, 255, 0.16);
-  font-weight: 800;
-  letter-spacing: 0.5px;
 }
 
 .portal-th__marca h1 {
@@ -2220,8 +2220,84 @@ body.chat-inmersivo .chat-page-thread--completa {
   padding: 20px 16px 40px;
 }
 
+/* ── Panel de navegación ─────────────────────────────────────────────────────
+   Pedido de Cristian (2026-09-10): botones al lado izquierdo que lleven a
+   cada sección del portal. En escritorio es una columna fija; en celular —la
+   entrada real de la mayoría, ver la nota de `app/portal/page.tsx`— se vuelve
+   una barra horizontal con scroll, para no robarle ancho al contenido. */
+.portal-th__layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.portal-th__nav {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  /* Que el scroll horizontal no se note como una barra fea en Windows. */
+  scrollbar-width: thin;
+}
+
+.portal-th__nav-boton {
+  flex-shrink: 0;
+  padding: 9px 16px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 999px;
+  background-color: #fff;
+  color: var(--pth-tinta-2);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.portal-th__nav-boton:hover {
+  border-color: var(--pth-azul);
+  color: var(--pth-azul);
+}
+
+.portal-th__nav-boton--activo {
+  background-color: var(--pth-azul);
+  border-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__contenido {
+  min-width: 0;
+}
+
+@media (min-width: 760px) {
+  .portal-th__layout {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .portal-th__nav {
+    flex-direction: column;
+    flex-shrink: 0;
+    width: 220px;
+    position: sticky;
+    top: 16px;
+    overflow-x: visible;
+  }
+
+  .portal-th__nav-boton {
+    width: 100%;
+    text-align: left;
+    border-radius: 10px;
+  }
+}
+
 .portal-th__seccion {
   margin-bottom: 32px;
+  /* Deja aire arriba cuando se llega por un botón del panel de navegación,
+     en vez de que el título quede pegado al borde de la pantalla. */
+  scroll-margin-top: 16px;
 }
 
 .portal-th__seccion h2 {
@@ -2310,18 +2386,74 @@ body.chat-inmersivo .chat-page-thread--completa {
 .portal-th__estado { color: var(--pth-tinta-3); }
 
 /* ── Anuncios ────────────────────────────────────────────────────────────── */
-.portal-th__banners {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 14px;
+/* ── Carrusel de anuncios ─────────────────────────────────────────────────────
+   Pedido de Cristian (2026-09-10): una imagen "principal" a la vez, rotando
+   sola entre todas las cargadas — ya no una grilla con todas al tiempo. */
+.portal-th__carrusel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.portal-th__banners img {
+.portal-th__carrusel-marco {
+  position: relative;
   width: 100%;
-  height: auto;
+  aspect-ratio: 21 / 9;
   border-radius: 14px;
+  overflow: hidden;
   border: 1px solid var(--pth-linea);
   background-color: #fff;
+}
+
+.portal-th__carrusel-abrir {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: zoom-in;
+}
+
+.portal-th__carrusel-imagen {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* La transición de entrada de cada anuncio: nada de saltos ni rebotes,
+     como pide el sistema de marca de GSS. */
+  animation: portal-th-carrusel-entra 420ms ease;
+}
+
+@keyframes portal-th-carrusel-entra {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.portal-th__carrusel-puntos {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.portal-th__carrusel-punto {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background-color: var(--pth-linea);
+  cursor: pointer;
+  transition: background-color 140ms ease, transform 140ms ease;
+}
+
+.portal-th__carrusel-punto--activo {
+  background-color: var(--pth-azul);
+  transform: scale(1.3);
 }
 
 /* ── Cartelera administrable ─────────────────────────────────────────────────
@@ -2364,24 +2496,6 @@ body.chat-inmersivo .chat-page-thread--completa {
 
 .portal-th__cargar input {
   display: none;
-}
-
-.portal-th__banner {
-  position: relative;
-  margin: 0;
-}
-
-/* El anuncio se abre en la vista previa, igual que las políticas. Es un
-   <button> para que funcione con teclado y lector de pantalla; hay que
-   quitarle el aspecto que trae el navegador. */
-.portal-th__banner-abrir {
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  cursor: zoom-in;
 }
 
 .portal-th__banner-quitar {
