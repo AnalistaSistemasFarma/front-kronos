@@ -1,6 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import PortalNavegacion, { useSeccionActiva, type SeccionNav } from './PortalNavegacion';
+
+/** Cada cuánto rota sola la imagen principal del carrusel de anuncios. */
+const ROTACION_CARRUSEL_MS = 6000;
+
+/** ids estables de sección, para el panel de navegación y el scroll-spy. */
+const ID_SECCION_ANUNCIOS = 'portal-th-anuncios';
+const ID_SECCION_POLITICAS = 'portal-th-politicas';
 
 /**
  * EL CONTENIDO DEL PORTAL DE TALENTO HUMANO — anuncios y documentos.
@@ -132,6 +140,30 @@ export default function PortalContenido({
   const [subiendo, setSubiendo] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
+  // ── Carrusel de anuncios ────────────────────────────────────────────────
+  // Índice de la imagen "principal" que se ve ahora mismo. Pedido de Cristian
+  // (2026-09-10): que se vea una imagen a la vez y vayan rotando solas entre
+  // todas las cargadas, no una grilla con todas al tiempo.
+  const [indiceCarrusel, setIndiceCarrusel] = useState(0);
+
+  // Si se borra un anuncio (o llega una lista más corta) y el índice quedó
+  // apuntando fuera de rango, vuelve al principio en vez de dejar el
+  // carrusel en blanco.
+  useEffect(() => {
+    if (indiceCarrusel >= banners.length && banners.length > 0) setIndiceCarrusel(0);
+  }, [banners.length, indiceCarrusel]);
+
+  useEffect(() => {
+    if (banners.length <= 1) return;
+    const temporizador = setInterval(() => {
+      setIndiceCarrusel((i) => (i + 1) % banners.length);
+    }, ROTACION_CARRUSEL_MS);
+    // Se reinicia también cuando la persona navega a mano (cambia
+    // `indiceCarrusel`): así no rota sola justo un segundo después de que
+    // alguien eligió ver otro anuncio.
+    return () => clearInterval(temporizador);
+  }, [banners.length, indiceCarrusel]);
+
   /**
    * Reduce la imagen antes de subirla: 1600 px de ancho es de sobra para una
    * cartelera y evita meter en la base la foto de 8 MB que salió del celular.
@@ -232,105 +264,155 @@ export default function PortalContenido({
     };
   }, [abierto]);
 
+  // ── Panel de navegación ─────────────────────────────────────────────────
+  // Misma condición que ya decide si se pinta la sección de Anuncios: si no
+  // hay ninguno y esta persona no administra, ese botón tampoco tiene sentido.
+  const mostrarAnuncios = banners.length > 0 || puedeEditar;
+  const secciones: SeccionNav[] = [
+    ...(mostrarAnuncios ? [{ id: ID_SECCION_ANUNCIOS, etiqueta: 'Anuncios' }] : []),
+    { id: ID_SECCION_POLITICAS, etiqueta: 'Políticas y reglamentos' },
+    // Cuando el portal tenga más secciones, se agregan acá — el panel de
+    // navegación no necesita ningún otro cambio.
+  ];
+  const idsSecciones = secciones.map((s) => s.id);
+  const activa = useSeccionActiva(idsSecciones);
+
+  const irASeccion = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
     <>
-      {/* La sección se pinta si hay anuncios O si esta persona los administra:
-          quien puede cargar tiene que ver dónde hacerlo aunque no haya
-          ninguno todavía. */}
-      {(banners.length > 0 || puedeEditar) && (
-        <section className='portal-th__seccion'>
-          <div className='portal-th__seccion-barra'>
-            <h2>Anuncios</h2>
-            {puedeEditar && (
-              <label className='portal-th__cargar'>
-                {subiendo ? 'Cargando…' : '+ Agregar anuncio'}
-                <input
-                  type='file'
-                  accept='image/jpeg,image/png,image/webp'
-                  disabled={subiendo}
-                  onChange={(e) => {
-                    const f = e.currentTarget.files?.[0];
-                    e.currentTarget.value = '';
-                    if (f) void subirBanner(f);
-                  }}
-                />
-              </label>
-            )}
-          </div>
+      <div className='portal-th__layout'>
+        <PortalNavegacion secciones={secciones} activa={activa} onSeleccionar={irASeccion} />
 
-          {errorBanner && <p className='portal-th__error'>{errorBanner}</p>}
+        <div className='portal-th__contenido'>
+          {/* La sección se pinta si hay anuncios O si esta persona los administra:
+              quien puede cargar tiene que ver dónde hacerlo aunque no haya
+              ninguno todavía. */}
+          {mostrarAnuncios && (
+            <section id={ID_SECCION_ANUNCIOS} className='portal-th__seccion'>
+              <div className='portal-th__seccion-barra'>
+                <h2>Anuncios</h2>
+                {puedeEditar && (
+                  <label className='portal-th__cargar'>
+                    {subiendo ? 'Cargando…' : '+ Agregar anuncio'}
+                    <input
+                      type='file'
+                      accept='image/jpeg,image/png,image/webp'
+                      disabled={subiendo}
+                      onChange={(e) => {
+                        const f = e.currentTarget.files?.[0];
+                        e.currentTarget.value = '';
+                        if (f) void subirBanner(f);
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
 
-          {banners.length === 0 ? (
-            <p className='portal-th__estado'>
-              Todavía no hay anuncios. Cargue una imagen y la verá aquí toda la empresa.
-            </p>
-          ) : (
-            <div className='portal-th__banners'>
-              {banners.map((b) => (
-                <figure key={b.id} className='portal-th__banner'>
-                  {/* El botón envuelve solo la imagen y NO la ✕: un <button>
-                      dentro de otro no es HTML válido y el navegador lo
-                      reacomoda por su cuenta. */}
+              {errorBanner && <p className='portal-th__error'>{errorBanner}</p>}
+
+              {banners.length === 0 ? (
+                <p className='portal-th__estado'>
+                  Todavía no hay anuncios. Cargue una imagen y la verá aquí toda la empresa.
+                </p>
+              ) : (
+                <div className='portal-th__carrusel'>
+                  {/* Se ve UNA imagen "principal" a la vez, con transición suave,
+                      y rota sola cada pocos segundos entre todas las cargadas —
+                      pedido de Cristian (2026-09-10). El `key={actual.id}` es lo
+                      que dispara la animación de entrada en cada cambio. */}
+                  <div className='portal-th__carrusel-marco'>
+                    {(() => {
+                      const actual = banners[Math.min(indiceCarrusel, banners.length - 1)];
+                      return (
+                        <button
+                          key={actual.id}
+                          type='button'
+                          className='portal-th__carrusel-abrir'
+                          onClick={() => setAbierto({ titulo: actual.titulo, url: actual.url, esImagen: true })}
+                          aria-label={`Ver ${actual.titulo}`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            className='portal-th__carrusel-imagen'
+                            src={actual.url}
+                            alt={actual.titulo}
+                          />
+                        </button>
+                      );
+                    })()}
+                    {puedeEditar && (
+                      <button
+                        type='button'
+                        className='portal-th__banner-quitar'
+                        onClick={() => void quitarBanner(banners[Math.min(indiceCarrusel, banners.length - 1)].id)}
+                        aria-label={`Quitar ${banners[Math.min(indiceCarrusel, banners.length - 1)].titulo}`}
+                        title='Quitar este anuncio'
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Puntos para saltar a un anuncio puntual sin esperar la
+                      rotación. Con uno solo no hace falta mostrarlos. */}
+                  {banners.length > 1 && (
+                    <div className='portal-th__carrusel-puntos' role='tablist' aria-label='Anuncios'>
+                      {banners.map((b, i) => (
+                        <button
+                          key={b.id}
+                          type='button'
+                          role='tab'
+                          aria-selected={i === indiceCarrusel}
+                          aria-label={`Ver anuncio: ${b.titulo}`}
+                          className={`portal-th__carrusel-punto${i === indiceCarrusel ? ' portal-th__carrusel-punto--activo' : ''}`}
+                          onClick={() => setIndiceCarrusel(i)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
+          <section id={ID_SECCION_POLITICAS} className='portal-th__seccion'>
+            <h2>Políticas y reglamentos</h2>
+            {documentos.length === 0 ? (
+              <p className='portal-th__estado'>Todavía no hay documentos publicados.</p>
+            ) : (
+              <div className='portal-th__tarjetas'>
+                {documentos.map((d) => (
                   <button
                     type='button'
-                    className='portal-th__banner-abrir'
-                    onClick={() => setAbierto({ titulo: b.titulo, url: b.url, esImagen: true })}
-                    aria-label={`Ver ${b.titulo}`}
+                    key={d.ruta}
+                    className='portal-th__tarjeta'
+                    onClick={() =>
+                      setAbierto({ titulo: d.titulo, url: archivoUrl(d.ruta), esImagen: false })
+                    }
+                    aria-label={`Ver ${d.titulo}`}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={b.url} alt={b.titulo} loading='lazy' />
+                    {d.portada ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={archivoUrl(d.portada)} alt='' loading='lazy' />
+                    ) : (
+                      <div className='portal-th__sinportada'>PDF</div>
+                    )}
+                    {/* Sin el peso del archivo: a quien entra a leer una política no
+                        le dice nada saber que pesa 3 MB, y llenaba el renglón de
+                        ruido. Pedido de Cristian (2026-09-09). */}
+                    <div className='portal-th__tarjeta-pie'>
+                      <strong>{d.titulo}</strong>
+                    </div>
                   </button>
-                  {puedeEditar && (
-                    <button
-                      type='button'
-                      className='portal-th__banner-quitar'
-                      onClick={() => void quitarBanner(b.id)}
-                      aria-label={`Quitar ${b.titulo}`}
-                      title='Quitar este anuncio'
-                    >
-                      ✕
-                    </button>
-                  )}
-                </figure>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      <section className='portal-th__seccion'>
-        <h2>Políticas y reglamentos</h2>
-        {documentos.length === 0 ? (
-          <p className='portal-th__estado'>Todavía no hay documentos publicados.</p>
-        ) : (
-          <div className='portal-th__tarjetas'>
-            {documentos.map((d) => (
-              <button
-                type='button'
-                key={d.ruta}
-                className='portal-th__tarjeta'
-                onClick={() =>
-                  setAbierto({ titulo: d.titulo, url: archivoUrl(d.ruta), esImagen: false })
-                }
-                aria-label={`Ver ${d.titulo}`}
-              >
-                {d.portada ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={archivoUrl(d.portada)} alt='' loading='lazy' />
-                ) : (
-                  <div className='portal-th__sinportada'>PDF</div>
-                )}
-                {/* Sin el peso del archivo: a quien entra a leer una política no
-                    le dice nada saber que pesa 3 MB, y llenaba el renglón de
-                    ruido. Pedido de Cristian (2026-09-09). */}
-                <div className='portal-th__tarjeta-pie'>
-                  <strong>{d.titulo}</strong>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
 
       {/* VISTA PREVIA dentro del portal.
           El PDF se muestra en un marco con el visor del propio navegador. Se
@@ -375,3 +457,4 @@ export default function PortalContenido({
     </>
   );
 }
+

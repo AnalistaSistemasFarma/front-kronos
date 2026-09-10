@@ -81,7 +81,10 @@ export default function PortalAbierto() {
     <div className='portal-th'>
       <header className='portal-th__barra'>
         <div className='portal-th__marca'>
-          <span className='portal-th__logo'>GSS</span>
+          {/* Logo oficial de GSS (el monograma de cuatro círculos), recortado
+              del asset de marca — no es un logo inventado ni bajado aparte. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className='portal-th__logo' src='/portal-th/logo-gss.png' alt='Group Shared Services Latinoamérica' />
           <div>
             <h1>Portal de Talento Humano</h1>
             <p>Group Shared Services Latinoamérica</p>
