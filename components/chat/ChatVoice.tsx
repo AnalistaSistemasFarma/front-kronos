@@ -8,7 +8,7 @@ export default function ChatVoice({ conversationId }: { conversationId: number }
   const [state, setState] = useState<'idle' | 'connecting' | 'connected'>('idle');
   const [error, setError] = useState('');
   const [muted, setMuted] = useState(false);
-  const resources = useRef<{ pc?: RTCPeerConnection; stream?: MediaStream; audio?: HTMLAudioElement; abort?: AbortController; timer?: ReturnType<typeof setTimeout> }>({});
+  const resources = useRef<{ pc?: RTCPeerConnection; stream?: MediaStream; audio?: HTMLAudioElement; abort?: AbortController; timer?: ReturnType<typeof setTimeout>; heartbeat?: ReturnType<typeof setInterval>; callId?: string; conversation?: number }>({});
   const generation = useRef(0);
   const stop = useCallback(() => {
     generation.current++;
@@ -16,6 +16,8 @@ export default function ChatVoice({ conversationId }: { conversationId: number }
     resources.current = {};
     r.abort?.abort();
     clearTimeout(r.timer);
+    clearInterval(r.heartbeat);
+    if (r.callId) void fetch(`/api/chat/conversations/${r.conversation}/voice`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'close', callId: r.callId }), keepalive: true }).catch(() => {});
     r.pc?.close();
     r.stream?.getTracks().forEach(t => t.stop());
     if (r.audio) { r.audio.pause(); r.audio.srcObject = null; }
@@ -40,6 +42,7 @@ export default function ChatVoice({ conversationId }: { conversationId: number }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       if (!current()) { stream.getTracks().forEach(t => t.stop()); return; }
       resources.current.stream = stream;
+      stream.getAudioTracks().forEach(track => { track.onended = () => { if (current()) { stop(); setError('El micrófono se desconectó.'); } }; });
       const pc = new RTCPeerConnection();
       const audio = new Audio();
       audio.autoplay = true;
@@ -49,34 +52,46 @@ export default function ChatVoice({ conversationId }: { conversationId: number }
         void audio.play().catch(() => { if (current()) { stop(); setError('El navegador bloqueó el audio. Permita reproducir sonido y vuelva a conectar.'); } });
       };
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
-      const channel = pc.createDataChannel('oai-events');
-      channel.onopen = () => {
-        if (!current()) return;
-        clearTimeout(resources.current.timer);
-        resources.current.timer = setTimeout(stop, 10 * 60_000);
-        setState('connected');
-      };
-      channel.onmessage = event => {
-        try {
-          if (JSON.parse(event.data).type === 'error' && current()) { stop(); setError('OpenAI interrumpió la sesión de voz. Intente de nuevo.'); }
-        } catch { /* Ignore non-JSON transport messages. */ }
-      };
+      // gateway-control-v1: audio only. OpenClaw owns the provider sideband.
       pc.onconnectionstatechange = () => {
+        if (current() && pc.connectionState === 'connected') {
+          clearTimeout(resources.current.timer);
+          resources.current.timer = setTimeout(stop, 10 * 60_000);
+          setState('connected');
+        }
         if (current() && ['failed', 'disconnected', 'closed'].includes(pc.connectionState)) { stop(); setError('La llamada terminó o perdió la conexión.'); }
       };
       const offer = await pc.createOffer();
       if (!current()) return;
       await pc.setLocalDescription(offer);
       const response = await fetch(`/api/chat/conversations/${conversationId}/voice`, {
-        method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: offer.sdp, signal: abort.signal,
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'offer', sdp: offer.sdp }), signal: abort.signal,
       });
       if (!current()) return;
       if (!response.ok) {
         const result = await response.json().catch(() => ({}));
         throw new Error(result.error || 'No se pudo iniciar la voz.');
       }
-      const sdp = await response.text();
-      if (current()) await pc.setRemoteDescription({ type: 'answer', sdp });
+      const { callId } = await response.json();
+      if (!current()) return;
+      Object.assign(resources.current, { callId, conversation: conversationId });
+      const poll = async () => {
+        const r = await fetch(`/api/chat/conversations/${conversationId}/voice`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'poll', callId }), signal: abort.signal });
+        const data = await r.json();
+        if (!r.ok || data.error) throw new Error(data.error || 'El puente de voz no está disponible.');
+        return data;
+      };
+      while (current()) {
+        const data = await poll();
+        if (!current()) return;
+        if (data.sdp) {
+          await pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+          if (!current()) return;
+          resources.current.heartbeat = setInterval(() => { void poll().catch(() => { if (current()) { stop(); setError('La conexión con OpenClaw terminó.'); } }); }, 15_000);
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     } catch (e) {
       if (!current()) return;
       stop();
@@ -93,7 +108,7 @@ export default function ChatVoice({ conversationId }: { conversationId: number }
         resources.current.stream?.getAudioTracks().forEach(t => { t.enabled = muted; }); setMuted(!muted);
       }}>{muted ? 'Activar micrófono' : 'Silenciar'}</Button>}
     </Group>
-    <Text size='xs' c='dimmed'>Voz IA · OpenAI Realtime · usa el contexto reciente del chat, sin herramientas SAP. El audio se envía a OpenAI; no se guarda en este chat. Máximo 10 minutos.</Text>
+    <Text size='xs' c='dimmed'>Voz IA · Duo mediante OpenClaw Talk. Usa su sesión y herramientas autorizadas. El audio se envía a OpenAI; las transcripciones se conservan en OpenClaw. Piloto para Nicolás · máximo 10 minutos.</Text>
     {error && <Alert color='orange' role='alert'>{error}</Alert>}
   </Stack>;
 }
