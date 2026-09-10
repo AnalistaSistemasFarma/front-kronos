@@ -84,6 +84,13 @@ export interface ChatAgentDto {
   description: string | null;
   sortOrder: number;
   companies: ChatAgentCompanyDto[];
+  /**
+   * El agente está atendiendo un turno EN CUALQUIER CONVERSACIÓN, no solo en
+   * la de quien pregunta. Es lo que pinta el aro alrededor del avatar: una
+   * señal global, a diferencia del indicador de estado, que es del hilo de
+   * cada quien.
+   */
+  busy: boolean;
 }
 
 export interface ChatAccessDto {

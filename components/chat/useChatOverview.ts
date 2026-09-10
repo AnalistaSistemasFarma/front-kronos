@@ -32,6 +32,48 @@ import {
 
 const OVERVIEW_POLL_MS = 30_000;
 
+/*
+ * CACHÉ EN MEMORIA, COMPARTIDA ENTRE MONTAJES.
+ *
+ * Pedido de Nicolás (2026-09-09): "quiero también añadir caching". El síntoma
+ * era este: el hook arrancaba con `access = null` y cero conversaciones EN CADA
+ * MONTAJE, así que cada vez que se entraba al chat o se cambiaba de asistente,
+ * la pantalla volvía a empezar de cero y aparecía el giratorio, aunque los
+ * datos hubieran llegado hace tres segundos.
+ *
+ * Ahora el primer render sale de lo último que se supo, y la petición corre
+ * detrás y actualiza en silencio: quien vuelve al chat lo ve poblado de
+ * inmediato. Lo viejo se ve un instante — es preferible a un vacío.
+ *
+ * ⚠️ SEPARADA POR USUARIO. Es memoria del proceso del navegador y sobrevive a
+ * los cambios de página; si dos personas usan la misma pestaña, la segunda
+ * NO puede alcanzar a ver las conversaciones de la primera. Por eso la caché
+ * guarda de quién es y se descarta entera si el correo no coincide.
+ *
+ * No se persiste en `localStorage` a propósito: son conversaciones de trabajo
+ * y no tienen por qué quedar escritas en el disco de nadie.
+ */
+type CacheChat = {
+  email: string;
+  access: ChatAccessDto | null;
+  conversations: ChatConversationDto[];
+};
+
+let cache: CacheChat | null = null;
+
+function leerCache(email: string | null | undefined): CacheChat | null {
+  if (!email || !cache || cache.email !== email) return null;
+  return cache;
+}
+
+function escribirCache(email: string | null | undefined, parcial: Partial<CacheChat>): void {
+  if (!email) return;
+  if (!cache || cache.email !== email) {
+    cache = { email, access: null, conversations: [] };
+  }
+  Object.assign(cache, parcial);
+}
+
 export interface ChatOverview {
   ready: boolean;
   loading: boolean;
@@ -59,8 +101,15 @@ export function useChatOverview(): ChatOverview {
   const { data: session, status } = useSession();
   const isAuthenticated = status === 'authenticated' && Boolean(session?.user?.email);
 
-  const [access, setAccess] = useState<ChatAccessDto | null>(null);
-  const [conversations, setConversations] = useState<ChatConversationDto[]>([]);
+  const email = session?.user?.email ?? null;
+  // El primer render sale de la caché, no de un vacío. Si no hay nada guardado
+  // para este usuario, se cae al estado de siempre y se ve el esqueleto.
+  const inicial = leerCache(email);
+
+  const [access, setAccess] = useState<ChatAccessDto | null>(inicial?.access ?? null);
+  const [conversations, setConversations] = useState<ChatConversationDto[]>(
+    inicial?.conversations ?? []
+  );
   const [loading, setLoading] = useState(false);
 
   const accessAbort = useRef<AbortController | null>(null);
@@ -76,13 +125,14 @@ export function useChatOverview(): ChatOverview {
       const data = await chatGetJson<ChatAccessDto>('/api/chat/access', controller.signal);
       if (controller.signal.aborted || !data) return;
       setAccess(data);
+      escribirCache(email, { access: data });
     } catch (err) {
       if (!isAbortError(err)) {
         // Silencioso a propósito: es una barra secundaria, no debe romper la
         // cabecera si la API falla un momento.
       }
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, email]);
 
   const fetchConversations = useCallback(async () => {
     if (!isAuthenticated || typeof document === 'undefined') return;
@@ -101,7 +151,9 @@ export function useChatOverview(): ChatOverview {
         controller.signal
       );
       if (controller.signal.aborted || !data) return;
-      setConversations(data.conversations ?? []);
+      const lista = data.conversations ?? [];
+      setConversations(lista);
+      escribirCache(email, { conversations: lista });
     } catch (err) {
       if (!isAbortError(err)) {
         /* ver arriba */
@@ -110,7 +162,7 @@ export function useChatOverview(): ChatOverview {
       inFlight.current = false;
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, email]);
 
   const refresh = useCallback(() => {
     void fetchAccess();
@@ -119,6 +171,9 @@ export function useChatOverview(): ChatOverview {
 
   useEffect(() => {
     if (!isAuthenticated) {
+      // Se cierra la sesión: fuera el estado Y la caché. Lo que se guardó es de
+      // alguien que ya no está en esta pestaña.
+      cache = null;
       setAccess(null);
       setConversations([]);
       return;

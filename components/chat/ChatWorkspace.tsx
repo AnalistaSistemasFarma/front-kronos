@@ -11,7 +11,6 @@ import {
   Badge,
   Box,
   Button,
-  Center,
   Grid,
   Group,
   Loader,
@@ -41,6 +40,7 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
+import { EsqueletoPantallaChat } from './ChatSkeletons';
 import AgentDetailModal from './AgentDetailModal';
 import ChatBroadcastModal from './ChatBroadcastModal';
 import ChatGroupModal from './ChatGroupModal';
@@ -116,6 +116,7 @@ function AgentCard({
       <Group gap='sm' wrap='nowrap' align='flex-start'>
         <AgentAvatar
           code={agent.code}
+          working={agent.busy}
           displayName={agent.displayName}
           avatarUrl={agent.avatarUrl}
           avatarVersion={agent.avatarVersion}
@@ -533,13 +534,7 @@ export default function ChatWorkspace({
   /* ───────────────────────────── Estados base ──────────────────────────── */
 
   if (!overview.ready) {
-    return (
-      <div className='app-page-shell app-page-shell--fill min-h-screen'>
-        <Center py='xl'>
-          <Loader size='sm' />
-        </Center>
-      </div>
-    );
+    return <EsqueletoPantallaChat />;
   }
 
   if (!overview.canUseChat) {
@@ -1040,6 +1035,7 @@ export default function ChatWorkspace({
             <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
               <AgentAvatar
                 code={selectedAgent.code}
+                working={selectedAgent.busy}
                 displayName={selectedAgent.displayName}
                 avatarUrl={selectedAgent.avatarUrl}
                 avatarVersion={selectedAgent.avatarVersion}
