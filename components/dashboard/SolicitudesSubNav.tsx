@@ -1,7 +1,7 @@
 'use client';
 
 import { Group, Paper, Text, ThemeIcon, UnstyledButton } from '@mantine/core';
-import { IconClipboardList, IconGitBranch } from '@tabler/icons-react';
+import { IconClipboardList, IconGitBranch, IconRobot } from '@tabler/icons-react';
 import {
   useSolicitudesSub,
   type SolicitudesSubView,
@@ -25,6 +25,12 @@ const subItems: {
     label: 'Procesos',
     description: 'Áreas y carga',
     icon: IconGitBranch,
+  },
+  {
+    view: 'agentes',
+    label: 'Agentes',
+    description: 'Uso y tendencia',
+    icon: IconRobot,
   },
 ];
 
