@@ -86,7 +86,7 @@ import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
 import { allSlotsCompletedForEmail, getCurrentPendingSigner, isSignerCompleted } from '../../../../../lib/orion/signerStatus';
 import {
   listSignedOrionDocuments,
-  parseOrionSignatureFormBag,
+  parseOrionSignatureBagBag,
   resolveOrionDocumentForAttachment,
 } from '../../../../../lib/orion/formValue';
 import {
