@@ -14,25 +14,30 @@ export async function GET(req) {
     }
 
     const { values, options } = await withMssqlPool(async (pool) => {
+      // Orion: LEFT JOIN desde process_form_field para devolver todos los campos
+      // activos del proceso (incl. firma Orion sin valor aún). Testing: editable + options.
       const valuesResult = await pool
         .request()
         .input('idRequest', sql.Int, parseInt(idRequest, 10))
         .query(`
         SELECT
-          rfv.id,
-          rfv.id_form_field,
-          ff.field_label,
-          ff.field_type,
-          ff.editable,
-          ff.config_json,
+          COALESCE(rfv.id, 0) AS id,
+          pff.id AS id_form_field,
+          pff.field_label,
+          pff.field_type,
+          pff.editable,
+          pff.config_json,
           rfv.id_option,
           o.option_label,
           rfv.value_text
-        FROM request_form_value rfv
-        INNER JOIN process_form_field ff ON ff.id = rfv.id_form_field
+        FROM process_category_request_general pcr
+        INNER JOIN process_form_field pff
+          ON pff.id_process_category = pcr.id_process_category AND pff.active = 1
+        LEFT JOIN request_form_value rfv
+          ON rfv.id_form_field = pff.id AND rfv.id_request_general = pcr.id_request_general
         LEFT JOIN process_form_field_option o ON o.id = rfv.id_option
-        WHERE rfv.id_request_general = @idRequest
-        ORDER BY ff.display_order, ff.id
+        WHERE pcr.id_request_general = @idRequest
+        ORDER BY pff.display_order, pff.id
       `);
 
       const optionsResult = await pool
@@ -42,13 +47,12 @@ export async function GET(req) {
         SELECT o.id, o.id_form_field, o.option_label
         FROM process_form_field_option o
         INNER JOIN process_form_field ff ON ff.id = o.id_form_field
+        INNER JOIN process_category_request_general pcr
+          ON pcr.id_process_category = ff.id_process_category
         WHERE o.active = 1
           AND ff.editable = 1
-          AND ff.id IN (
-            SELECT rfv.id_form_field
-            FROM request_form_value rfv
-            WHERE rfv.id_request_general = @idRequest
-          )
+          AND ff.active = 1
+          AND pcr.id_request_general = @idRequest
         ORDER BY o.display_order, o.id
       `);
 

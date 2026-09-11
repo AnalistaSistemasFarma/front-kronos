@@ -63,6 +63,7 @@ import {
   serializeTableConfig,
   type TableColumn,
 } from '../../../../../lib/requests-general/tableField';
+import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
 import TableColumnsEditor from '../_components/TableColumnsEditor';
 
 interface WorkFlow {
@@ -176,6 +177,7 @@ function RequestBoard() {
     number: 'Número',
     date: 'Fecha',
     [TABLE_FIELD_TYPE]: 'Tabla',
+    [ORION_SIGNATURE_FIELD_TYPE]: 'Firma digital (Orion)',
     ...Object.fromEntries(
       Object.entries(SAP_SOURCES).map(([key, s]) => [key, s.label])
     ),
@@ -190,6 +192,7 @@ function RequestBoard() {
         { value: 'number', label: 'Número' },
         { value: 'date', label: 'Fecha' },
         { value: TABLE_FIELD_TYPE, label: 'Tabla' },
+        { value: ORION_SIGNATURE_FIELD_TYPE, label: 'Firma digital (Orion)' },
       ],
     },
     {

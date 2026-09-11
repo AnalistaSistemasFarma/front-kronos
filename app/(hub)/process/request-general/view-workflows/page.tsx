@@ -512,7 +512,14 @@ function ViewWorkFlowPage() {
 
       if (response.ok) {
         const data: Note[] = await response.json();
-        setNotes(data);
+        const list = Array.isArray(data) ? [...data] : [];
+        list.sort((a, b) => {
+          const da = new Date(a.creation_date || 0).getTime();
+          const db = new Date(b.creation_date || 0).getTime();
+          if (da !== db) return da - db;
+          return Number(a.id_note || 0) - Number(b.id_note || 0);
+        });
+        setNotes(list);
       } else {
         console.error('Error al cargar notas');
       }

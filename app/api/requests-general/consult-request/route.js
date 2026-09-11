@@ -1,10 +1,16 @@
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../auth/[...nextauth]/route';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
+import { isFirmaRequestCategoryOrProcess } from '../../../../lib/orion/access';
 
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const companyId = searchParams.get('companyId');
+
+    const session = await getServerSession(authOptions);
+    void session;
 
     const queryCompanies = `
       SELECT 
@@ -74,35 +80,60 @@ export async function GET(req) {
       ORDER BY u.name
     `;
 
-    const [companiesRes, categoriesRes, processCategoriesRes, assignedUsersRes, categoriesNewRes, processCategoriesNewRes] =
-      await withMssqlPool(async (pool) => {
-        const categoriesRequest = pool.request();
-        if (companyId) {
-          categoriesRequest.input('companyId', sql.Int, Number(companyId));
-        }
+    const [
+      companiesRes,
+      categoriesRes,
+      processCategoriesRes,
+      assignedUsersRes,
+      categoriesNewRes,
+      processCategoriesNewRes,
+    ] = await withMssqlPool(async (pool) => {
+      const categoriesRequest = pool.request();
+      if (companyId) {
+        categoriesRequest.input('companyId', sql.Int, Number(companyId));
+      }
 
-        return Promise.all([
-          pool.request().query(queryCompanies),
-          categoriesRequest.query(queryCategories),
-          pool.request().query(queryProcessCategories),
-          pool.request().query(queryAssignedUsers),
-          pool.request().query(queryCategoriesNew),
-          pool.request().query(queryProcessCategoriesNew),
-        ]);
-      });
+      return Promise.all([
+        pool.request().query(queryCompanies),
+        categoriesRequest.query(queryCategories),
+        pool.request().query(queryProcessCategories),
+        pool.request().query(queryAssignedUsers),
+        pool.request().query(queryCategoriesNew),
+        pool.request().query(queryProcessCategoriesNew),
+      ]);
+    });
+
+    // La firma va en solicitudes normales: no ofrecer categoría/proceso FIRMA.
+    const categories = categoriesRes.recordset.filter(
+      (c) => !isFirmaRequestCategoryOrProcess(c.category, null)
+    );
+    const processCategories = processCategoriesRes.recordset.filter(
+      (p) => !isFirmaRequestCategoryOrProcess(p.category, p.process)
+    );
+    const categoriesNew = categoriesNewRes.recordset.filter(
+      (c) => !isFirmaRequestCategoryOrProcess(c.category, null)
+    );
+    const processCategoriesNew = processCategoriesNewRes.recordset.filter(
+      (p) => !isFirmaRequestCategoryOrProcess(null, p.process)
+    );
 
     return NextResponse.json(
       {
         companies: companiesRes.recordset,
-        categories: categoriesRes.recordset,
-        processCategories: processCategoriesRes.recordset,
+        categories,
+        processCategories,
         assignedUsers: assignedUsersRes.recordset,
-        categoriesNew: categoriesNewRes.recordset,
-        processCategoriesNew: processCategoriesNewRes.recordset,
+        categoriesNew,
+        processCategoriesNew,
+        canCreateFirma: false,
       },
       { status: 200 }
     );
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.toLowerCase().includes('abort')) {
+      return NextResponse.json({ error: 'Solicitud cancelada', code: 'ABORTED' }, { status: 499 });
+    }
     console.error('Error en el procesamiento de la solicitud:', err);
     return NextResponse.json(
       { error: 'Error procesando la solicitud', details: err.message },

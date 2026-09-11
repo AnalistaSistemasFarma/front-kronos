@@ -13,7 +13,7 @@ import { useSession } from 'next-auth/react';
 import {
   DASHBOARD_SOLICITANTE_URL,
   DASHBOARD_SOLICITADO_URL,
-} from './dashboardAccess';
+} from './dashboardRoutes';
 import { SUBPROCESS_ASSIGNMENTS_CHANGED } from '../process/subprocessAssignmentsEvents';
 
 export interface RequestRoleNavContextValue {

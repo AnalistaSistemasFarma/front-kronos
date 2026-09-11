@@ -1,9 +1,13 @@
+import 'server-only';
 import sql from 'mssql';
 import dbconfig from '../dbconfig';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const ensureDbHost = require('./db/ensureDatabaseHost.server.cjs') as {
+  ensureDatabaseHostResolved?: () => Promise<string>;
+  clearResolvedDatabaseHost?: () => void;
+};
 
 // `dbconfig` puede ser un objeto de configuración plano (dbconfig.js) o exponer helpers.
-// Soportamos ambos: si trae buildMssqlConfig/getDatabaseConfigKey los usamos; si no,
-// tratamos el propio objeto como la config de mssql y derivamos una clave estable.
 const dbAny = dbconfig as unknown as {
   buildMssqlConfig?: () => sql.config;
   getDatabaseConfigKey?: () => string;
@@ -64,9 +68,34 @@ export function isMssqlNotOpenError(error: unknown): boolean {
  * global se recicla durante una espera larga).
  */
 export function isRetryablePoolError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    if (error instanceof Error && error.message.toLowerCase().includes('abort')) {
+      return true;
+    }
+    return false;
+  }
+  const code = (error as { code: string }).code;
+  return (
+    code === 'ENOTOPEN' ||
+    code === 'ECONNCLOSED' ||
+    code === 'ESOCKET' ||
+    code === 'ETIMEOUT' ||
+    code === 'ABORT_ERR'
+  );
+}
+
+function isAbortedError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    if (msg === 'aborted' || msg.includes('abort')) return true;
+  }
+  return false;
+}
+
+function isSocketReachabilityError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null || !('code' in error)) return false;
   const code = (error as { code: string }).code;
-  return code === 'ENOTOPEN' || code === 'ECONNCLOSED';
+  return code === 'ESOCKET' || code === 'ETIMEOUT';
 }
 
 /**
@@ -97,9 +126,12 @@ export async function getPool(): Promise<sql.ConnectionPool> {
   invalidateGlobalPool();
 
   const connectPromise = (async () => {
+    if (typeof ensureDbHost.ensureDatabaseHostResolved === 'function') {
+      await ensureDbHost.ensureDatabaseHostResolved();
+    }
     const pool = await new sql.ConnectionPool(buildMssqlConfig()).connect();
     global.__kronosMssqlPool = pool;
-    global.__kronosMssqlPoolConfigKey = configKey;
+    global.__kronosMssqlPoolConfigKey = getDatabaseConfigKey();
     global.__kronosMssqlModule = sql;
     return pool;
   })();
@@ -118,16 +150,33 @@ export async function getPool(): Promise<sql.ConnectionPool> {
   }
 }
 
-/** Ejecuta una consulta reintentando una vez si el pool quedó cerrado (ENOTOPEN). */
+/** Ejecuta una consulta reintentando si el pool quedó cerrado o la conexión se abortó (dev/HMR). */
 export async function withMssqlPool<T>(
-  fn: (pool: sql.ConnectionPool) => Promise<T>
+  fn: (pool: sql.ConnectionPool) => Promise<T>,
+  attempt = 0
 ): Promise<T> {
+  const maxAttempts = 3;
   try {
     return await fn(await getPool());
   } catch (error) {
-    if (!isRetryablePoolError(error)) throw error;
-    invalidateGlobalPool();
-    return fn(await getPool());
+    if (attempt >= maxAttempts - 1) throw error;
+
+    if (isSocketReachabilityError(error) && typeof ensureDbHost.clearResolvedDatabaseHost === 'function') {
+      ensureDbHost.clearResolvedDatabaseHost();
+      invalidateGlobalPool();
+      if (typeof ensureDbHost.ensureDatabaseHostResolved === 'function') {
+        await ensureDbHost.ensureDatabaseHostResolved();
+      }
+      return withMssqlPool(fn, attempt + 1);
+    }
+
+    if (isRetryablePoolError(error) || isAbortedError(error)) {
+      invalidateGlobalPool();
+      await new Promise((resolve) => setTimeout(resolve, 40 * (attempt + 1)));
+      return withMssqlPool(fn, attempt + 1);
+    }
+
+    throw error;
   }
 }
 

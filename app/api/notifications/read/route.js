@@ -15,22 +15,28 @@ export async function PATCH(req) {
     const body = await req.json().catch(() => ({}));
     const { id, all } = body;
 
+    const userEmail = String(session.user.email || '')
+      .trim()
+      .toLowerCase();
+
     const pool = await getPool();
 
     if (all === true) {
       await pool
         .request()
-        .input('email', sql.NVarChar(255), session.user.email)
+        .input('email', sql.NVarChar(255), userEmail)
         .query(
-          `UPDATE notifications SET read_at = GETUTCDATE() WHERE email = @email AND read_at IS NULL`
+          `UPDATE notifications SET read_at = GETUTCDATE()
+           WHERE LOWER(LTRIM(RTRIM(email))) = @email AND read_at IS NULL`
         );
     } else if (id) {
       await pool
         .request()
         .input('id', sql.Int, id)
-        .input('email', sql.NVarChar(255), session.user.email)
+        .input('email', sql.NVarChar(255), userEmail)
         .query(
-          `UPDATE notifications SET read_at = GETUTCDATE() WHERE id = @id AND email = @email AND read_at IS NULL`
+          `UPDATE notifications SET read_at = GETUTCDATE()
+           WHERE id = @id AND LOWER(LTRIM(RTRIM(email))) = @email AND read_at IS NULL`
         );
     } else {
       return NextResponse.json({ error: 'Debe enviarse id o all=true' }, { status: 400 });

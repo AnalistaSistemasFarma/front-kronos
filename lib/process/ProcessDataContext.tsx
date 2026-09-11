@@ -79,16 +79,14 @@ export function ProcessDataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (status === 'authenticated') {
-      void fetchProcesses();
-    }
-  }, [status, fetchProcesses]);
-
-  useEffect(() => {
+    // /api/processes es pesado: solo en el hub de tarjetas de proceso.
     if (status !== 'authenticated') return;
-    if (pathname !== '/process') return;
+    if (pathname !== '/process') {
+      if (!loaded.current) setLoading(false);
+      return;
+    }
     void fetchProcesses({ silent: loaded.current });
-  }, [pathname, status, fetchProcesses]);
+  }, [status, pathname, fetchProcesses]);
 
   useEffect(() => {
     if (status !== 'authenticated') return;

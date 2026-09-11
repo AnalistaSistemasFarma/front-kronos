@@ -2,6 +2,7 @@ import { spawn, execSync } from 'child_process';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { resolveDatabaseHost } from './resolve-db-host.mjs';
 
 const PORT = Number(process.env.PORT || 8080);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -150,4 +151,7 @@ function startNextDev() {
 }
 
 ensurePortAvailable();
-startNextDev();
+
+void resolveDatabaseHost({ tryRoute: true, quiet: false }).finally(() => {
+  startNextDev();
+});

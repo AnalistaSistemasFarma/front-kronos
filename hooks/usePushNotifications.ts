@@ -1,6 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import {
+  formatPushSubscribeError,
+  isBenignPushError,
+  isBrowserPushSupported,
+  isPushFeatureEnabled,
+  isSecureNotificationContext,
+  isVapidConfigured,
+  waitForServiceWorkerRegistration,
+} from '../lib/push/client';
 
 function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -13,28 +22,35 @@ function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
 
 interface UsePushNotifications {
   isSupported: boolean;
+  isAvailable: boolean;
   isSubscribed: boolean;
   permission: NotificationPermission | 'default';
   loading: boolean;
-  subscribe: () => Promise<void>;
-  unsubscribe: () => Promise<void>;
+  lastError: string | null;
+  subscribe: () => Promise<{ ok: boolean; error: string | null }>;
+  unsubscribe: () => Promise<{ ok: boolean; error: string | null }>;
 }
 
 export function usePushNotifications(userEmail: string | null | undefined): UsePushNotifications {
   const [isSupported, setIsSupported] = useState(false);
+  const [isAvailable, setIsAvailable] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission | 'default'>('default');
   const [loading, setLoading] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const supported =
-      'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    const supported = isBrowserPushSupported();
     setIsSupported(supported);
+    setIsAvailable(isPushFeatureEnabled());
+
     if (!supported) return;
 
     setPermission(Notification.permission);
+
+    if (!isPushFeatureEnabled()) return;
 
     navigator.serviceWorker.ready
       .then((reg) => reg.pushManager.getSubscription())
@@ -42,28 +58,45 @@ export function usePushNotifications(userEmail: string | null | undefined): UseP
       .catch(() => setIsSubscribed(false));
   }, []);
 
-  const subscribe = useCallback(async () => {
-    if (!isSupported) return;
+  const subscribe = useCallback(async (): Promise<{ ok: boolean; error: string | null }> => {
+    if (!isSupported) {
+      const error = 'Este navegador no soporta notificaciones push.';
+      setLastError(error);
+      return { ok: false, error };
+    }
+
+    if (!isSecureNotificationContext()) {
+      const error = formatPushSubscribeError(new Error('insecure context'));
+      setLastError(error);
+      return { ok: false, error };
+    }
+
+    if (!isVapidConfigured()) {
+      const error = formatPushSubscribeError(new Error('vapid missing'));
+      setLastError(error);
+      return { ok: false, error };
+    }
+
     if (!userEmail) {
-      console.warn('[usePushNotifications] No hay email de usuario, no se puede suscribir');
-      return;
+      const error = 'Debes iniciar sesión para activar las notificaciones push.';
+      setLastError(error);
+      return { ok: false, error };
     }
 
     setLoading(true);
+    setLastError(null);
+
     try {
       const result = await Notification.requestPermission();
       setPermission(result);
-      if (result !== 'granted') return;
+      if (result !== 'granted') {
+        const error = 'Permiso de notificaciones denegado.';
+        setLastError(error);
+        return { ok: false, error };
+      }
 
-      const swReady = Promise.race([
-        navigator.serviceWorker.ready,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Service worker no disponible (¿estás en desarrollo?)')), 5000)
-        ),
-      ]);
-      const reg = await swReady;
-      const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-      if (!publicKey) throw new Error('NEXT_PUBLIC_VAPID_PUBLIC_KEY no configurada');
+      const reg = await waitForServiceWorkerRegistration();
+      const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!.trim();
 
       const subscription = await reg.pushManager.subscribe({
         userVisibleOnly: true,
@@ -78,23 +111,33 @@ export function usePushNotifications(userEmail: string | null | undefined): UseP
       });
 
       if (!res.ok) throw new Error(`POST /api/push/subscribe falló (${res.status})`);
+
       setIsSubscribed(true);
+      return { ok: true, error: null };
     } catch (err) {
-      console.error('[usePushNotifications] Error en subscribe:', err);
+      const error = formatPushSubscribeError(err);
+      setLastError(error);
+      if (!isBenignPushError(err)) {
+        console.warn('[usePushNotifications] Error en subscribe:', err);
+      }
+      return { ok: false, error };
     } finally {
       setLoading(false);
     }
   }, [isSupported, userEmail]);
 
-  const unsubscribe = useCallback(async () => {
-    if (!isSupported) return;
+  const unsubscribe = useCallback(async (): Promise<{ ok: boolean; error: string | null }> => {
+    if (!isSupported) return { ok: false, error: 'No soportado' };
+
     setLoading(true);
+    setLastError(null);
+
     try {
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
       if (!sub) {
         setIsSubscribed(false);
-        return;
+        return { ok: true, error: null };
       }
 
       await fetch('/api/push/subscribe', {
@@ -105,12 +148,27 @@ export function usePushNotifications(userEmail: string | null | undefined): UseP
       });
       await sub.unsubscribe();
       setIsSubscribed(false);
+      return { ok: true, error: null };
     } catch (err) {
-      console.error('[usePushNotifications] Error en unsubscribe:', err);
+      const error = formatPushSubscribeError(err);
+      setLastError(error);
+      if (!isBenignPushError(err)) {
+        console.warn('[usePushNotifications] Error en unsubscribe:', err);
+      }
+      return { ok: false, error };
     } finally {
       setLoading(false);
     }
   }, [isSupported]);
 
-  return { isSupported, isSubscribed, permission, loading, subscribe, unsubscribe };
+  return {
+    isSupported,
+    isAvailable,
+    isSubscribed,
+    permission,
+    loading,
+    lastError,
+    subscribe,
+    unsubscribe,
+  };
 }

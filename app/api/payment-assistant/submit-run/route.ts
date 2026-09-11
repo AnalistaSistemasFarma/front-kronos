@@ -23,7 +23,9 @@ const notifyNewRequestTyped = notifyNewRequest as (args: {
   requestId: number;
   subject: string;
   processEmail: string | null;
+  processEmails?: string[];
   taskEmails: string[];
+  creatorEmail?: string | null;
   requestUrl: string | null;
 }) => Promise<unknown>;
 
@@ -269,6 +271,7 @@ export async function POST(request: NextRequest) {
         subject,
         processEmail: null,
         taskEmails,
+        creatorEmail: userEmail,
         requestUrl: null,
       })
     );

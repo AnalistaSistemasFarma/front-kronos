@@ -15,11 +15,11 @@ export async function GET(req) {
     }
 
     const query = `
-      SELECT n.id_note, n.note, u.name as 'createdBy', n.creation_date
+      SELECT n.id_note, n.note, ISNULL(u.name, n.created_by) as 'createdBy', n.creation_date
       FROM notes n
-      INNER JOIN [user] u ON u.id = n.created_by
+      LEFT JOIN [user] u ON u.id = n.created_by
       WHERE n.id_request = @id_request
-      ORDER BY n.id_note DESC
+      ORDER BY n.creation_date ASC, n.id_note ASC
     `;
 
     const result = await withMssqlPool(async (pool) => {

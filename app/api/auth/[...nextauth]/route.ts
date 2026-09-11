@@ -30,9 +30,24 @@ export const authOptions: AuthOptions = {
         if (!credentials?.email || !credentials?.password) {
           return null;
         }
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
-        });
+        const emailInput = credentials.email.trim();
+        // Búsqueda case-insensitive (SQL Server): evita fallos por mayúsculas en el correo.
+        const rows = await prisma.$queryRaw<
+          Array<{
+            id: string;
+            name: string | null;
+            email: string;
+            password: string | null;
+            role: string;
+            isActive: boolean;
+            image: string | null;
+          }>
+        >`
+          SELECT TOP 1 id, name, email, password, role, isActive, image
+          FROM [user]
+          WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${emailInput})))
+        `;
+        const user = rows[0];
         if (!user || !user.password) {
           return null;
         }
@@ -108,27 +123,41 @@ export const authOptions: AuthOptions = {
       const email = (user?.email ?? token.email) as string | undefined;
 
       if (email) {
-        const dbUser = await prisma.user.findUnique({
-          where: { email },
-          select: {
-            role: true,
-            image: true,
-            themePalette: true,
-            colorScheme: true,
-            uiFont: true,
-            nit: true,
-          },
-        });
-        token.email = email;
-        token.role = dbUser?.role;
-        token.nit = dbUser?.nit ?? undefined;
-        token.themePalette = dbUser?.themePalette ?? undefined;
-        token.uiFont = dbUser?.uiFont ?? undefined;
-        token.colorScheme = dbUser?.colorScheme ?? undefined;
-        if (dbUser?.image) {
-          token.image = dbUser.image;
-        } else if (user?.image) {
-          token.image = user.image;
+        try {
+          const rows = await prisma.$queryRaw<
+            Array<{
+              id: string;
+              role: string;
+              image: string | null;
+              themePalette: string | null;
+              colorScheme: string | null;
+              uiFont: string | null;
+              nit: string | null;
+            }>
+          >`
+            SELECT TOP 1 id, role, image, themePalette, colorScheme, uiFont, nit
+            FROM [user]
+            WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${email})))
+          `;
+          const dbUser = rows[0];
+          token.email = email;
+          // Id Kronos (cuid), no el sub de Azure/OIDC.
+          if (dbUser?.id) {
+            token.kronosUserId = dbUser.id;
+            token.sub = dbUser.id;
+          }
+          token.role = dbUser?.role;
+          token.nit = dbUser?.nit ?? undefined;
+          token.themePalette = dbUser?.themePalette ?? undefined;
+          token.uiFont = dbUser?.uiFont ?? undefined;
+          token.colorScheme = dbUser?.colorScheme ?? undefined;
+          if (dbUser?.image) {
+            token.image = dbUser.image;
+          } else if (user?.image) {
+            token.image = user.image;
+          }
+        } catch (err) {
+          console.error('[nextauth] jwt callback error:', err);
         }
       }
 
@@ -136,7 +165,10 @@ export const authOptions: AuthOptions = {
     },
     async session({ session, token }: { session: Session; token: JWT }) {
       if (token && session.user) {
-        session.user.id = token.sub;
+        const kronosId =
+          (token.kronosUserId as string | undefined) ||
+          (typeof token.sub === 'string' ? token.sub : undefined);
+        if (kronosId) session.user.id = kronosId;
         session.user.image = token.image as string;
         session.user.role = token.role as string | undefined;
         session.user.nit = token.nit as string | undefined;
