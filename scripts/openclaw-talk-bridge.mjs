@@ -5,10 +5,14 @@ import { join } from 'node:path';
 import { finalTranscript, createVoiceAuditOutbox } from './voice-audit-outbox.mjs';
 import { GatewayClient } from '/opt/homebrew/lib/node_modules/openclaw/dist/plugin-sdk/gateway-runtime.js';
 
-if (!process.argv[2] || !process.argv[3]) throw new Error('Usage: node openclaw-talk-bridge.mjs <existing-connector-env> <testing-base-url>');
+if (!process.argv[2] || !process.argv[3] || !process.argv[4]) throw new Error('Usage: node openclaw-talk-bridge.mjs <existing-connector-env> <base-url> <testing|production>');
 process.loadEnvFile(process.argv[2]);
 const base = new URL(process.argv[3]);
-if (base.username || base.password || base.search || base.hash) throw new Error('Invalid testing origin');
+if (base.username || base.password || base.search || base.hash) throw new Error('Invalid origin');
+// Explicit, not inferred from the URL: independent databases can assign the
+// same numeric conversation id, so the namespace must never be guessed.
+const env = process.argv[4];
+if (env !== 'testing' && env !== 'production') throw new Error('Environment must be exactly "testing" or "production"');
 const key = process.env.SYNERLINK_AGENT_KEY;
 if (!key) throw new Error('Missing existing SynerLink connector credential');
 const sessions = new Map();
@@ -22,7 +26,7 @@ async function api(method, data) {
   if (!response.ok) throw new Error(`SynerLink voice HTTP ${response.status}`);
   return response.json();
 }
-const audit = createVoiceAuditOutbox(join(homedir(), '.openclaw', 'synerlink-voice-audit-testing'), data => api('POST', data));
+const audit = createVoiceAuditOutbox(join(homedir(), '.openclaw', `synerlink-voice-audit-${env}`), data => api('POST', data));
 async function close(id) {
   const call = sessions.get(id); if (!call || call.closing) return;
   call.closing = true; clearTimeout(call.timer);
@@ -31,9 +35,10 @@ async function close(id) {
 }
 async function open(job) {
   if (!Number.isSafeInteger(job.conversation) || job.conversation <= 0 || typeof job.offer !== 'string') return;
-  // Testing has its own namespace; never attach to a production conversation
-  // just because independent databases assigned the same numeric id.
-  const sessionKey = `agent:duo:synerlink-testing-${job.conversation}`;
+  // Each environment has its own namespace; never attach to a conversation
+  // from the other one just because independent databases assigned the same
+  // numeric id. `env` comes from an explicit CLI argument, never inferred.
+  const sessionKey = `agent:duo:synerlink-${env}-${job.conversation}`;
   let ready, reject;
   const connected = new Promise((resolve, fail) => { ready = resolve; reject = fail; });
   const client = new GatewayClient({ url: 'ws://127.0.0.1:18789', clientName: 'cli', mode: 'cli', scopes: ['operator.read', 'operator.write'],
@@ -51,7 +56,7 @@ async function open(job) {
   sessions.set(job.id, call);
   try {
     client.start(); await connected;
-    const config = await client.request('talk.client.create', { sessionKey, provider: 'openai', model: 'gpt-live-1-codex', mode: 'realtime', transport: 'webrtc', brain: 'agent-consult', capabilities: ['gateway-control-v1'] });
+    const config = await client.request('talk.client.create', { sessionKey, provider: 'openai', model: 'gpt-live-1-codex', voice: 'juniper', mode: 'realtime', transport: 'webrtc', brain: 'agent-consult', capabilities: ['gateway-control-v1'] });
     call.voiceSessionId = config.voiceSessionId;
     if (!sessions.has(job.id)) { await client.request('talk.client.close', { sessionKey, voiceSessionId: config.voiceSessionId }); return; }
     if (config.clientControl?.owner !== 'gateway' || config.offerUrl !== '/plugins/openai/realtime/calls') throw new Error('Unsupported Talk transport');
@@ -78,8 +83,9 @@ while (!quitting) {
     for (const id of sessions.keys()) if (!result.active.includes(id)) await close(id);
     for (const offer of result.offers) if (!sessions.has(offer.id)) void open(offer);
   } catch {
+    // A transient poll failure must never drop an active call; only
+    // SynerLink confirming the call ended (via result.active) closes it.
     console.error('SynerLink voice poll unavailable');
-    for (const id of sessions.keys()) await close(id);
     await delay(4000);
   }
   await delay(1000);

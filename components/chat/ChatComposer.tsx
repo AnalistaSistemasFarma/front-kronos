@@ -31,6 +31,7 @@ import {
   formatBytes,
   getChatAttachmentError,
 } from '../../lib/chat/attachments';
+import ChatVoice from './ChatVoice';
 import type { ChatReplyToDto } from '../../lib/chat/client';
 
 /**
@@ -126,6 +127,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
    */
   cita?: ChatReplyToDto | null;
   onQuitarCita?: () => void;
+  voiceConversationId?: number;
 }>(function ChatComposer(
   {
     onSend,
@@ -136,6 +138,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     menciones = [],
     cita = null,
     onQuitarCita,
+    voiceConversationId,
   },
   ref
 ) {
@@ -669,13 +672,12 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         {preview ? (
           <Box
             className='chat-composer__preview'
-            style={{ flex: 1, minWidth: 0 }}
+            style={{ minHeight: 42, paddingRight: voiceConversationId ? 84 : 42 }}
             onDoubleClick={() => setPreview(false)}
           >
             <ChatMarkdown content={value} />
           </Box>
         ) : null}
-        {preview && menuClip}
         {!preview && (
           <Textarea
             ref={textareaRef}
@@ -712,16 +714,26 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
             style={{ flex: 1, minWidth: 0 }}
             classNames={{ root: 'chat-composer__field', input: 'chat-composer__input' }}
-            /* El clip va DENTRO de la caja. `rightSectionPointerEvents='all'`
-               no es opcional: por defecto Mantine le pone `pointer-events:
-               none` a esa zona —está pensada para iconos decorativos— y el
-               botón quedaría pintado pero muerto al tacto. */
-            rightSection={menuClip}
-            rightSectionWidth={42}
+            /* El clip (y, si la conversación admite voz, el ícono de llamada)
+               va DENTRO de la caja. `rightSectionPointerEvents='all'` no es
+               opcional: por defecto Mantine le pone `pointer-events: none` a
+               esa zona —está pensada para iconos decorativos— y el botón
+               quedaría pintado pero muerto al tacto. El ancho y el padding
+               crecen de 42 a 84 px cuando hay ícono de voz, para que no se
+               encimen los dos botones. */
+            rightSection={
+              <Group gap={0} wrap='nowrap'>
+                {menuClip}
+                {voiceConversationId && (
+                  <ChatVoice key={voiceConversationId} conversationId={voiceConversationId} />
+                )}
+              </Group>
+            }
+            rightSectionWidth={voiceConversationId ? 84 : 42}
             rightSectionPointerEvents='all'
+            styles={{ input: { paddingRight: voiceConversationId ? 84 : 42 } }}
           />
         )}
-
 
         {/* El recordatorio de Enter / Shift+Enter era un renglón entero; ahora
             vive en el globo de este botón. */}

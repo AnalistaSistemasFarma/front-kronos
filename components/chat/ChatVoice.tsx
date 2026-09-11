@@ -1,15 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Group, Stack, Text } from '@mantine/core';
+import { ActionIcon, Alert, Button, Group, Popover, Stack, Text, Tooltip } from '@mantine/core';
 import { IconMicrophone, IconPhoneOff } from '@tabler/icons-react';
 
 export default function ChatVoice({ conversationId }: { conversationId: number }) {
   const [state, setState] = useState<'idle' | 'connecting' | 'connected'>('idle');
+  const [opened, setOpened] = useState(false);
   const [error, setError] = useState('');
   const [muted, setMuted] = useState(false);
   const resources = useRef<{ pc?: RTCPeerConnection; stream?: MediaStream; audio?: HTMLAudioElement; abort?: AbortController; timer?: ReturnType<typeof setTimeout>; heartbeat?: ReturnType<typeof setInterval>; callId?: string; conversation?: number }>({});
   const generation = useRef(0);
+  useEffect(() => { if (error) setOpened(true); }, [error]);
   const stop = useCallback(() => {
     generation.current++;
     const r = resources.current;
@@ -98,17 +100,32 @@ export default function ChatVoice({ conversationId }: { conversationId: number }
       setError(e instanceof Error ? e.message : 'No se pudo acceder al micrófono.');
     }
   }
-  return <Stack gap={4} p='xs'>
-    <Group gap='xs'>
-      <Button size='xs' variant='light' leftSection={<IconMicrophone size={16} />} onClick={() => void start()} disabled={state !== 'idle'}>
-        {state === 'connecting' ? 'Conectando…' : state === 'connected' ? 'Voz conectada' : 'Hablar en tiempo real'}
-      </Button>
-      {state !== 'idle' && <Button size='xs' color='red' variant='light' leftSection={<IconPhoneOff size={16} />} onClick={stop}>Colgar</Button>}
-      {state === 'connected' && <Button size='xs' variant='subtle' aria-pressed={muted} onClick={() => {
-        resources.current.stream?.getAudioTracks().forEach(t => { t.enabled = muted; }); setMuted(!muted);
-      }}>{muted ? 'Activar micrófono' : 'Silenciar'}</Button>}
-    </Group>
-    <Text size='xs' c='dimmed'>Voz IA · Duo mediante OpenClaw Talk. Usa su sesión y herramientas autorizadas. El audio se envía a OpenAI; las transcripciones se conservan en OpenClaw. Piloto para Nicolás · máximo 10 minutos.</Text>
-    {error && <Alert color='orange' role='alert'>{error}</Alert>}
-  </Stack>;
+  const label = state === 'connecting' ? 'Conectando…' : state === 'connected' ? 'Controles de llamada' : 'Hablar en tiempo real';
+  return <Popover opened={opened} onChange={setOpened} position='top-end' width={280} withArrow withinPortal>
+    <Popover.Target>
+      <Tooltip label={label} disabled={opened} withArrow>
+        <ActionIcon size={34} radius='xl' variant={state === 'idle' ? 'subtle' : 'light'} color='blue'
+          aria-label={label} aria-expanded={opened} onClick={() => {
+            setOpened(!opened);
+            if (state === 'idle') void start();
+          }}>
+          <IconMicrophone size={20} />
+        </ActionIcon>
+      </Tooltip>
+    </Popover.Target>
+    <Popover.Dropdown>
+      <Stack gap='xs'>
+        <Text size='sm' fw={600} role='status'>{state === 'connecting' ? 'Conectando…' : state === 'connected' ? 'Voz conectada' : 'Hablar en tiempo real'}</Text>
+        <Group gap='xs'>
+          {state === 'idle' && <Button size='xs' variant='light' onClick={() => void start()}>Iniciar llamada</Button>}
+          {state !== 'idle' && <Button size='xs' color='red' variant='light' leftSection={<IconPhoneOff size={16} />} onClick={stop}>Colgar</Button>}
+          {state === 'connected' && <Button size='xs' variant='subtle' aria-pressed={muted} onClick={() => {
+            resources.current.stream?.getAudioTracks().forEach(t => { t.enabled = muted; }); setMuted(!muted);
+          }}>{muted ? 'Activar micrófono' : 'Silenciar'}</Button>}
+        </Group>
+        <Text size='xs' c='dimmed'>Voz IA · Máximo 10 minutos.</Text>
+        {error && <Alert color='orange' role='alert'>{error}</Alert>}
+      </Stack>
+    </Popover.Dropdown>
+  </Popover>;
 }
