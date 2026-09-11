@@ -1,4 +1,4 @@
 /** Contenido renderizado en DashboardShell (vistas en caché). */
-export default function DashboardSolicitudesAgentesPage() {
+export default function DashboardAgentesPage() {
   return null;
 }

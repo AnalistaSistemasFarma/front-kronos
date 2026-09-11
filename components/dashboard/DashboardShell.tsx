@@ -10,6 +10,7 @@ import DashboardNav from './DashboardNav';
 import SolicitudesHubView from './SolicitudesHubView';
 import ActividadesAnalyticsView from './ActividadesAnalyticsView';
 import TicketsHubView from './TicketsHubView';
+import AgentesAnalyticsView from './AgentesAnalyticsView';
 import SolicitudesSubNav from './SolicitudesSubNav';
 import TicketsSubNav from './TicketsSubNav';
 import DashboardAdminGate from './DashboardAdminGate';
@@ -17,6 +18,7 @@ import DashboardAdminGate from './DashboardAdminGate';
 const MemoSolicitudesHub = memo(SolicitudesHubView);
 const MemoActividades = memo(ActividadesAnalyticsView);
 const MemoTickets = memo(TicketsHubView);
+const MemoAgentes = memo(AgentesAnalyticsView);
 
 const panelClass = (active: boolean) =>
   active ? 'dashboard-panel dashboard-panel--active' : 'dashboard-panel';
@@ -60,6 +62,9 @@ function DashboardViews() {
       </div>
       <div className={panelClass(activeTab === 'tickets')} aria-hidden={activeTab !== 'tickets'}>
         <MemoTickets />
+      </div>
+      <div className={panelClass(activeTab === 'agentes')} aria-hidden={activeTab !== 'agentes'}>
+        <MemoAgentes />
       </div>
     </div>
   );

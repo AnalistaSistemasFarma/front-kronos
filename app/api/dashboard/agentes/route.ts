@@ -9,10 +9,18 @@ export const dynamic = 'force-dynamic';
 /**
  * ANALÍTICA DE USO DE AGENTES — pestaña "Agentes" de /dashboard/solicitudes.
  *
- *   GET /api/dashboard/agentes?desde=&hasta=&agente=
+ *   GET /api/dashboard/agentes?desde=&hasta=&agente=&empresa=
  *
  * Pedido de Nicolás (2026-09-11): "analizar el comportamiento de la gente con
- * los agentes, para ver quien mas lo usa, tendencia de uso en el tiempo".
+ * los agentes, para ver quien mas lo usa, tendencia de uso en el tiempo" +
+ * "añade también el análisis por empresa".
+ *
+ * EMPRESA POR MENSAJE: en un hilo de GRUPO la empresa es la del grupo
+ * (`conversation.id_company`). En un hilo DIRECTO (la mayoría) esa columna
+ * es NULL a propósito — la empresa la define el permiso sobre el agente, no
+ * el hilo (ver comentario del modelo). Como proxy razonable se usa la
+ * empresa PRINCIPAL del agente (`agent_company.is_primary`); si un agente no
+ * tiene ninguna marcada como principal, se usa la primera que tenga.
  *
  * Misma reja que el módulo de auditoría (lib/chat/audit-access.ts): esto
  * expone quién usa cada agente y cuánto, así que es información reservada a
@@ -50,6 +58,7 @@ export async function GET(request: NextRequest) {
     const desde = fecha(sp.get('desde'));
     const hasta = fecha(sp.get('hasta'));
     const idAgent = Number(sp.get('agente')) || null;
+    const idCompanyFilter = Number(sp.get('empresa')) || null;
 
     // Igual que en /api/chat/auditoria: `hasta` llega como día (YYYY-MM-DD),
     // se toma completo o se pierde el día de hoy.
@@ -73,7 +82,7 @@ export async function GET(request: NextRequest) {
       ...(idAgent ? { id_agent: idAgent } : {}),
     } as const;
 
-    const [agentes, mensajes, usagePorAgente] = await Promise.all([
+    const [agentes, mensajes, usagePorAgente, agentCompanies, companies] = await Promise.all([
       prisma.agent.findMany({
         where: { is_active: true },
         select: { id_agent: true, code: true, display_name: true },
@@ -90,6 +99,7 @@ export async function GET(request: NextRequest) {
             select: {
               id: true,
               id_agent: true,
+              id_company: true,
               agent: { select: { id_agent: true, code: true, display_name: true } },
             },
           },
@@ -101,7 +111,48 @@ export async function GET(request: NextRequest) {
         _sum: { total_tokens: true },
         _count: { id: true },
       }),
+      prisma.agentCompany.findMany({
+        select: { id_agent: true, id_company: true, is_primary: true },
+        orderBy: [{ is_primary: 'desc' }],
+      }),
+      prisma.company.findMany({ select: { id_company: true, company: true } }),
     ]);
+
+    const companyNameById = new Map(companies.map((c) => [c.id_company, c.company]));
+
+    // Empresa principal por agente: la primera de la lista ya ordenada por
+    // `is_primary desc`, o sea la marcada como principal si existe.
+    const agentPrimaryCompanyId = new Map<number, number>();
+    for (const ac of agentCompanies) {
+      if (!agentPrimaryCompanyId.has(ac.id_agent)) {
+        agentPrimaryCompanyId.set(ac.id_agent, ac.id_company);
+      }
+    }
+
+    /** Empresa de un mensaje: la del grupo si es hilo de grupo, si no la
+     * principal del agente. `null` = sin empresa determinable. */
+    function companyIdOf(m: { conversation: { id_agent: number; id_company: number | null } }) {
+      return m.conversation.id_company ?? agentPrimaryCompanyId.get(m.conversation.id_agent) ?? null;
+    }
+
+    // --- Comparativo por empresa (SIEMPRE sobre todo el periodo/agente,
+    // nunca se filtra por `empresa` — es la vista que permite comparar) ---
+    const porEmpresaAgg = new Map<
+      number | null,
+      { mensajes: number; usuarios: Set<string>; conversaciones: Set<number> }
+    >();
+    for (const m of mensajes) {
+      const idCompanyMsg = companyIdOf(m);
+      const e = porEmpresaAgg.get(idCompanyMsg) ?? {
+        mensajes: 0,
+        usuarios: new Set<string>(),
+        conversaciones: new Set<number>(),
+      };
+      e.mensajes += 1;
+      e.usuarios.add(m.id_user_author as string);
+      e.conversaciones.add(m.conversation.id);
+      porEmpresaAgg.set(idCompanyMsg, e);
+    }
 
     // --- Ranking de usuarios --------------------------------------------
     const porUsuario = new Map<
@@ -117,7 +168,11 @@ export async function GET(request: NextRequest) {
     const porDia = new Map<string, number>();
     const porDiaPorAgente = new Map<number, Map<string, number>>();
 
-    for (const m of mensajes) {
+    const mensajesFiltrados = idCompanyFilter
+      ? mensajes.filter((m) => companyIdOf(m) === idCompanyFilter)
+      : mensajes;
+
+    for (const m of mensajesFiltrados) {
       const idUser = m.id_user_author as string;
       const idAgentMsg = m.conversation.id_agent;
       const diaKey = formatDateLocal(m.created_at);
@@ -174,6 +229,7 @@ export async function GET(request: NextRequest) {
     );
 
     const rankingAgentes = agentes
+      .filter((ag) => !idCompanyFilter || agentPrimaryCompanyId.get(ag.id_agent) === idCompanyFilter)
       .map((ag) => {
         const stat = porAgenteMsg.get(ag.id_agent);
         const usage = usageByAgent.get(ag.id_agent);
@@ -202,8 +258,18 @@ export async function GET(request: NextRequest) {
       : [];
 
     const usuariosActivos = porUsuario.size;
-    const totalMensajes = mensajes.length;
+    const totalMensajes = mensajesFiltrados.length;
     const agenteTop = rankingAgentes[0] ?? null;
+
+    const porEmpresa = Array.from(porEmpresaAgg.entries())
+      .map(([idCompany, v]) => ({
+        idCompany,
+        nombre: idCompany ? companyNameById.get(idCompany) ?? `Empresa ${idCompany}` : 'Sin empresa',
+        mensajes: v.mensajes,
+        usuariosActivos: v.usuarios.size,
+        conversaciones: v.conversaciones.size,
+      }))
+      .sort((a, b) => b.mensajes - a.mensajes);
 
     return jsonNoStore({
       desde: desde ? formatDateLocal(desde) : null,
@@ -212,7 +278,7 @@ export async function GET(request: NextRequest) {
       resumen: {
         totalMensajes,
         usuariosActivos,
-        totalConversaciones: new Set(mensajes.map((m) => m.conversation.id)).size,
+        totalConversaciones: new Set(mensajesFiltrados.map((m) => m.conversation.id)).size,
         agenteTop: agenteTop
           ? { displayName: agenteTop.displayName, mensajes: agenteTop.mensajes }
           : null,
@@ -221,6 +287,12 @@ export async function GET(request: NextRequest) {
       rankingAgentes,
       tendencia,
       tendenciaPorAgente,
+      // Comparativo por empresa: SIEMPRE sobre todo el periodo (no respeta
+      // `empresa`, es justamente lo que permite comparar entre empresas).
+      porEmpresa,
+      empresas: porEmpresa
+        .filter((e) => e.idCompany !== null)
+        .map((e) => ({ idCompany: e.idCompany as number, nombre: e.nombre })),
     });
   } catch (error) {
     return serverError('GET /api/dashboard/agentes', error);

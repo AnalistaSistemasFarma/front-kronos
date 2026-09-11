@@ -4,11 +4,9 @@ import { memo, useEffect } from 'react';
 import { useSolicitudesSub } from '../../lib/dashboard/SolicitudesSubContext';
 import SolicitudesAnalyticsView from './SolicitudesAnalyticsView';
 import ProcesosAnalyticsView from './ProcesosAnalyticsView';
-import AgentesAnalyticsView from './AgentesAnalyticsView';
 
 const MemoSolicitudes = memo(SolicitudesAnalyticsView);
 const MemoProcesos = memo(ProcesosAnalyticsView);
-const MemoAgentes = memo(AgentesAnalyticsView);
 
 const panelClass = (active: boolean) =>
   active ? 'dashboard-panel dashboard-panel--active' : 'dashboard-panel';
@@ -29,9 +27,6 @@ function SolicitudesPanels() {
       </div>
       <div className={panelClass(subView === 'procesos')} aria-hidden={subView !== 'procesos'}>
         <MemoProcesos />
-      </div>
-      <div className={panelClass(subView === 'agentes')} aria-hidden={subView !== 'agentes'}>
-        <MemoAgentes />
       </div>
     </div>
   );
