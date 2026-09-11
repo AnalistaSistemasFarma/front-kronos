@@ -25,6 +25,7 @@ import AgentTaskTable from './AgentTaskTable';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
+import ChatVoice from './ChatVoice';
 import { useChatConversation, type ChatTarget } from './useChatConversation';
 import { useAltoVisible } from './useAltoVisible';
 import {
@@ -552,10 +553,10 @@ export default function ChatThread({
       const viewport = viewportRef.current;
       if (!viewport || !stickToBottomRef.current) return;
       // En el mismo cuadro el navegador todavía no reacomodó el layout con el
-      // alto nuevo; se espera al siguiente. Y se baja con `smooth` para que la
-      // conversación acompañe al teclado en vez de saltar de golpe.
+      // alto nuevo; se espera al siguiente. No encadenar animaciones smooth
+      // mientras el teclado cambia el viewport en cada cuadro.
       requestAnimationFrame(() => {
-        viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
+        viewport.scrollTop = viewport.scrollHeight;
       });
     }, [])
   );
@@ -723,6 +724,7 @@ export default function ChatThread({
       onDrop={onDrop}
       onPaste={onPaste}
     >
+      {agent?.code === 'duo' && thread.conversation && <ChatVoice key={thread.conversation.id} conversationId={thread.conversation.id} />}
       {dragging && (
         <Box className='chat-thread__dropzone' aria-hidden>
           <Stack align='center' gap={4}>

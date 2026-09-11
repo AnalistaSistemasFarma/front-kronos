@@ -960,6 +960,7 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
 /* ── Hilo ── */
 .chat-thread {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   flex: 1;
   min-height: 0;
@@ -969,6 +970,12 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
 .chat-thread__scroll {
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chat-thread__scroll .mantine-ScrollArea-viewport {
+  overscroll-behavior-y: contain;
 }
 
 /* ── Arrastrar y soltar archivos sobre la conversación ──
@@ -1442,6 +1449,33 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   flex: 0 0 auto;
 }
 
+/* Explicit tracks keep long drafts and Mantine wrappers from pushing Send
+   beyond a narrow PWA viewport. Only the editor track may shrink. */
+.chat-composer .chat-composer__row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.chat-composer .chat-composer__field {
+  flex: 1 1 0%;
+  width: 0;
+  min-width: 0;
+}
+
+.chat-composer .chat-composer__send {
+  flex: 0 0 46px;
+}
+
+.chat-composer .chat-composer__input {
+  border-radius: 23px;
+  min-height: 46px;
+  line-height: 24px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  box-sizing: border-box;
+}
+
 .chat-thread__composer {
   min-width: 0;
   overflow-x: clip;
@@ -1713,6 +1747,20 @@ body.chat-inmersivo .chat-escritorio {
    bloque entero se subía, dejando un vacío entre la caja y el teclado. */
 body.chat-inmersivo {
   overflow: hidden;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  overscroll-behavior: none;
+}
+
+html.chat-inmersivo {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.chat-inmersivo .chat-thread__composer {
+  padding-left: max(8px, env(safe-area-inset-left));
+  padding-right: max(8px, env(safe-area-inset-right));
 }
 
 /* Anclado a lo que DE VERDAD se ve, no al viewport de diseño.
