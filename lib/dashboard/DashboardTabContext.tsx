@@ -11,17 +11,19 @@ import {
 } from 'react';
 import { usePathname } from 'next/navigation';
 
-export type DashboardTab = 'solicitudes' | 'actividades' | 'tickets';
+export type DashboardTab = 'solicitudes' | 'actividades' | 'tickets' | 'agentes';
 
 export const DASHBOARD_TAB_URL: Record<DashboardTab, string> = {
   solicitudes: '/dashboard/solicitudes',
   actividades: '/dashboard/actividades',
   tickets: '/dashboard/tickets',
+  agentes: '/dashboard/agentes',
 };
 
 export function pathnameToTab(pathname: string): DashboardTab {
   if (pathname.includes('/actividades')) return 'actividades';
   if (pathname.includes('/tickets')) return 'tickets';
+  if (pathname.includes('/agentes')) return 'agentes';
   return 'solicitudes';
 }
 
