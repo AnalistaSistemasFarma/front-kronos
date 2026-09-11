@@ -44,10 +44,16 @@ function getDatabaseConfigKey() {
   return `${connection.server}/${connection.database}/${connection.user}`;
 }
 
+function buildDatabaseUrl() {
+  const conn = resolveConnection();
+  return `sqlserver://${conn.server}:${conn.port};database=${conn.database};user=${conn.user};password=${conn.password};trustServerCertificate=true;encrypt=true`;
+}
+
 const sqlConfig = {
   ...connection,
   resolveConnection,
   buildMssqlConfig,
+  buildDatabaseUrl,
   getDatabaseConfigKey,
 };
 
@@ -55,4 +61,5 @@ module.exports = sqlConfig;
 module.exports.default = sqlConfig;
 module.exports.resolveConnection = resolveConnection;
 module.exports.buildMssqlConfig = buildMssqlConfig;
+module.exports.buildDatabaseUrl = buildDatabaseUrl;
 module.exports.getDatabaseConfigKey = getDatabaseConfigKey;

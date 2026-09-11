@@ -21,7 +21,7 @@ export async function GET(req) {
       FROM notes n
       INNER JOIN [user] u ON u.id = n.created_by
       WHERE n.id_process_category = @id_process_category
-      ORDER BY n.id_note DESC
+      ORDER BY n.creation_date ASC, n.id_note ASC
     `;
 
     const request = pool.request();

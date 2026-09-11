@@ -229,6 +229,116 @@ html[data-landing] body {
   overscroll-behavior-x: contain;
 }
 
+/* Orion / documentos */
+.doc-table .mantine-Table-thead th {
+  color: var(--app-text-muted, #6b7280);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.doc-table .mantine-Table-tbody tr {
+  transition: background-color 150ms ease;
+}
+
+.doc-table .mantine-Table-tbody tr:hover {
+  background: color-mix(in srgb, var(--app-surface-raised, #f4f6f8) 52%, transparent);
+}
+
+.doc-row--closed > td:first-child {
+  box-shadow: inset 3px 0 0 var(--mantine-color-teal-6);
+}
+
+.doc-cell--mono {
+  font-family: var(--font-mono);
+}
+
+.doc-dossier {
+  display: grid;
+  grid-template-columns: 3px 1fr;
+  gap: 10px;
+  min-width: 10.5rem;
+  max-width: 16rem;
+}
+
+.doc-dossier__rail {
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    var(--mantine-color-blue-5) 0%,
+    var(--mantine-color-cyan-5) 100%
+  );
+}
+
+.doc-dossier--closed .doc-dossier__rail {
+  background: linear-gradient(
+    180deg,
+    var(--mantine-color-teal-5) 0%,
+    var(--mantine-color-green-6) 100%
+  );
+}
+
+.doc-dossier__body {
+  min-width: 0;
+}
+
+.doc-dossier__seal {
+  margin-top: 2px;
+}
+
+.doc-cell--actions .mantine-UnstyledButton-root,
+.doc-cell--actions .mantine-Button-root {
+  transition:
+    color 150ms ease,
+    transform 150ms ease,
+    background-color 150ms ease,
+    opacity 150ms ease;
+}
+
+.doc-cell--actions .mantine-UnstyledButton-root:hover {
+  transform: translateX(1px);
+}
+
+@media (max-width: 767px) {
+  .doc-table .mantine-Table-thead {
+    display: none;
+  }
+
+  .doc-table .mantine-Table-tbody,
+  .doc-table .mantine-Table-tr,
+  .doc-table .mantine-Table-td {
+    display: block;
+    width: 100%;
+  }
+
+  .doc-table .mantine-Table-tr {
+    margin-bottom: 0.9rem;
+    border: 1px solid var(--app-border, var(--border-subtle));
+    border-radius: 14px;
+    background: var(--app-surface, #fff);
+    overflow: hidden;
+  }
+
+  .doc-table .mantine-Table-td {
+    border: 0;
+    padding: 0.7rem 0.9rem;
+  }
+
+  .doc-table .mantine-Table-td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.2rem;
+    color: var(--app-text-muted, #6b7280);
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .doc-cell--actions .doc-dossier {
+    max-width: none;
+  }
+}
+
 .chart-scroll-y {
   overflow-y: auto;
   overflow-x: hidden;
