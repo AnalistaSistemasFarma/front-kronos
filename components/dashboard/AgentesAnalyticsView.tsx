@@ -16,7 +16,14 @@ import {
   Title,
   Badge,
 } from '@mantine/core';
-import { IconAlertCircle, IconChartLine, IconMessage, IconRobot, IconUsers } from '@tabler/icons-react';
+import {
+  IconAlertCircle,
+  IconBuilding,
+  IconChartLine,
+  IconMessage,
+  IconRobot,
+  IconUsers,
+} from '@tabler/icons-react';
 import { buildAreaLineChart, buildHorizontalMultiColorBarChart } from '../../lib/charts/builders';
 import {
   getDashboardDateRange,
@@ -57,6 +64,14 @@ interface RankingAgente {
   turnos: number;
 }
 
+interface EmpresaUso {
+  idCompany: number | null;
+  nombre: string;
+  mensajes: number;
+  usuariosActivos: number;
+  conversaciones: number;
+}
+
 interface AgentesResponse {
   agentes: AgenteCatalogo[];
   resumen: {
@@ -68,9 +83,12 @@ interface AgentesResponse {
   rankingUsuarios: RankingUsuario[];
   rankingAgentes: RankingAgente[];
   tendencia: { fecha: string; mensajes: number }[];
+  porEmpresa: EmpresaUso[];
+  empresas: { idCompany: number; nombre: string }[];
 }
 
 const ALL_AGENTS_VALUE = '__todos__';
+const ALL_COMPANIES_VALUE = '__todas__';
 
 const formatNumber = (n: number) => new Intl.NumberFormat('es-CO').format(n);
 
@@ -84,6 +102,7 @@ export default function AgentesAnalyticsView() {
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   );
   const [agentFilter, setAgentFilter] = useState<string>(ALL_AGENTS_VALUE);
+  const [companyFilter, setCompanyFilter] = useState<string>(ALL_COMPANIES_VALUE);
 
   const [data, setData] = useState<AgentesResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,6 +125,9 @@ export default function AgentesAnalyticsView() {
       if (agentFilter !== ALL_AGENTS_VALUE) {
         params.set('agente', agentFilter);
       }
+      if (companyFilter !== ALL_COMPANIES_VALUE) {
+        params.set('empresa', companyFilter);
+      }
       const res = await fetch(`/api/dashboard/agentes?${params.toString()}`, { cache: 'no-store' });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
@@ -119,7 +141,7 @@ export default function AgentesAnalyticsView() {
     } finally {
       setLoading(false);
     }
-  }, [range, agentFilter]);
+  }, [range, agentFilter, companyFilter]);
 
   useEffect(() => {
     fetchData();
@@ -131,6 +153,28 @@ export default function AgentesAnalyticsView() {
       ...(data?.agentes.map((a) => ({ value: String(a.idAgent), label: a.displayName })) ?? []),
     ],
     [data?.agentes]
+  );
+
+  const companySelectData = useMemo(
+    () => [
+      { value: ALL_COMPANIES_VALUE, label: 'Todas las empresas' },
+      ...(data?.empresas.map((e) => ({ value: String(e.idCompany), label: e.nombre })) ?? []),
+    ],
+    [data?.empresas]
+  );
+
+  const porEmpresaChart = useMemo(
+    () =>
+      buildHorizontalMultiColorBarChart(
+        (data?.porEmpresa ?? []).map((e, index) => ({
+          label: e.nombre,
+          value: e.mensajes,
+          color: categoricalPalette[index % categoricalPalette.length],
+        })),
+        chartViewport.isMobile,
+        { valueLabel: 'mensajes', datasetLabel: 'Mensajes por empresa', truncateLabels: true }
+      ),
+    [data?.porEmpresa, categoricalPalette, chartViewport.isMobile]
   );
 
   const tendenciaChart = useMemo(
@@ -221,17 +265,30 @@ export default function AgentesAnalyticsView() {
       }
     >
       <Paper p={{ base: 'sm', sm: 'md' }} radius='md' withBorder>
-        <Select
-          label='Agente'
-          description='Filtrar la analítica a un solo agente'
-          leftSection={<IconRobot size={18} />}
-          data={agentSelectData}
-          value={agentFilter}
-          onChange={(v) => setAgentFilter(v ?? ALL_AGENTS_VALUE)}
-          allowDeselect={false}
-          searchable={(data?.agentes.length ?? 0) > 4}
-          nothingFoundMessage='Sin agentes'
-        />
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
+          <Select
+            label='Agente'
+            description='Filtrar la analítica a un solo agente'
+            leftSection={<IconRobot size={18} />}
+            data={agentSelectData}
+            value={agentFilter}
+            onChange={(v) => setAgentFilter(v ?? ALL_AGENTS_VALUE)}
+            allowDeselect={false}
+            searchable={(data?.agentes.length ?? 0) > 4}
+            nothingFoundMessage='Sin agentes'
+          />
+          <Select
+            label='Empresa'
+            description='Filtrar la analítica a una sola empresa'
+            leftSection={<IconBuilding size={18} />}
+            data={companySelectData}
+            value={companyFilter}
+            onChange={(v) => setCompanyFilter(v ?? ALL_COMPANIES_VALUE)}
+            allowDeselect={false}
+            searchable={(data?.empresas.length ?? 0) > 4}
+            nothingFoundMessage='Sin empresas con actividad'
+          />
+        </SimpleGrid>
       </Paper>
 
       {error && (
@@ -337,6 +394,28 @@ export default function AgentesAnalyticsView() {
           </Flex>
         )}
       </Card>
+
+      {(data?.porEmpresa.length ?? 0) > 1 && (
+        <Card shadow='sm' padding={getDashboardCardPadding()} radius='md' withBorder>
+          <Title order={4} mb='xs'>
+            Uso por empresa
+          </Title>
+          <Text size='xs' c='dimmed' mb='md'>
+            Comparativo entre empresas del grupo en el periodo (siempre sobre todas, aunque haya un
+            filtro de empresa activo arriba)
+          </Text>
+          {loading ? (
+            <Skeleton height={chartHeights.medium} />
+          ) : (
+            <ChartContainer
+              type='bar'
+              data={porEmpresaChart.data}
+              options={porEmpresaChart.options}
+              height={chartHeights.medium}
+            />
+          )}
+        </Card>
+      )}
 
       <Grid gutter='lg' align='stretch'>
         <Grid.Col span={{ base: 12, md: 6 }}>
