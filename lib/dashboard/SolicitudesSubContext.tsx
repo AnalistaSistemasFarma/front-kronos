@@ -11,15 +11,17 @@ import {
 } from 'react';
 import { usePathname } from 'next/navigation';
 
-export type SolicitudesSubView = 'solicitudes' | 'procesos';
+export type SolicitudesSubView = 'solicitudes' | 'procesos' | 'agentes';
 
 export const SOLICITUDES_SUB_URL: Record<SolicitudesSubView, string> = {
   solicitudes: '/dashboard/solicitudes',
   procesos: '/dashboard/solicitudes/procesos',
+  agentes: '/dashboard/solicitudes/agentes',
 };
 
 export function pathnameToSolicitudesSub(pathname: string): SolicitudesSubView {
   if (pathname.includes('/solicitudes/procesos')) return 'procesos';
+  if (pathname.includes('/solicitudes/agentes')) return 'agentes';
   return 'solicitudes';
 }
 
