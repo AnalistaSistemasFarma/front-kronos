@@ -534,9 +534,21 @@ export default function OrionSignaturePanel({
       setIdentityError(null);
       setError(null);
       try {
-        // Solo reenviar rúbrica si Orion aún no la tiene (evita payload grande).
-        const includeRubric =
-          !hasSignature && Boolean(signaturePreview?.startsWith('data:image/'));
+        // Siempre mandar la rúbrica local si la tenemos. Antes se omitía cuando
+        // hasSignature=true (payload más liviano), pero Orion a veces no la
+        // resuelve en accept-sign → 422 "No hay rúbrica guardada" justo después
+        // de un POST signature-embed 200.
+        const localRubric = signaturePreview?.startsWith('data:image/')
+          ? signaturePreview
+          : null;
+        if (!localRubric && !hasSignature) {
+          setIdentityModalOpen(false);
+          continueToSignAfterPadRef.current = true;
+          setSignatureModalOpen(true);
+          setIdentityError(null);
+          setError('Dibuje su firma antes de confirmar.');
+          return false;
+        }
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 90_000);
         let res: Response;
@@ -549,7 +561,7 @@ export default function OrionSignaturePanel({
             body: JSON.stringify({
               requestId,
               fileId: file.fileId,
-              ...(includeRubric ? { signatureDataUrl: signaturePreview } : {}),
+              ...(localRubric ? { signatureDataUrl: localRubric } : {}),
               ...(identity
                 ? {
                     fullName: identity.fullName,
@@ -578,6 +590,16 @@ export default function OrionSignaturePanel({
             setSignerModalIntent('view');
             void refreshState(file.fileId, { soft: true });
             return true;
+          }
+          // Sin rúbrica en Orion: reabrir el pad en vez de dejar al usuario atrapado.
+          if (/r[uú]brica|dibuje su firma|no hay.*firma/i.test(msg)) {
+            setIdentityModalOpen(false);
+            setHasSignature(false);
+            continueToSignAfterPadRef.current = true;
+            setSignatureModalOpen(true);
+            setIdentityError(null);
+            setError(msg);
+            return false;
           }
           setIdentityError(msg);
           setError(msg);
