@@ -70,8 +70,16 @@ export async function POST(request: NextRequest) {
       return jsonNoStore({ error: 'No tiene permiso para hablar con este agente.' }, { status: 403 });
     }
 
+    // ⚠️ SOLO HILOS DIRECTOS. Un GRUPO también guarda `id_user` (quien lo creó)
+    // e `id_agent` (el anfitrión, ver app/api/chat/groups/route.ts): sin este
+    // filtro, si Nicolás crea un grupo y elige a un agente X como anfitrión,
+    // esta consulta encuentra ESE grupo al abrir su chat directo con X —mismo
+    // id_user, mismo id_agent— y lo devuelve como si fuera el hilo privado. La
+    // interfaz termina mostrando y enviando al grupo en vez de al hilo 1:1.
+    // Bug reportado por Nicolás el 2026-09-12 (su chat con horus lo mandaba al
+    // grupo y no lo dejaba hablarle en privado).
     const existing = await prisma.chatConversation.findFirst({
-      where: { id_user: user.id, id_agent: idAgent, archived: false },
+      where: { kind: 'direct', id_user: user.id, id_agent: idAgent, archived: false },
       orderBy: { id: 'desc' },
       select: { id: true },
     });
@@ -83,6 +91,7 @@ export async function POST(request: NextRequest) {
 
     const created = await prisma.chatConversation.create({
       data: {
+        kind: 'direct',
         id_user: user.id,
         id_agent: idAgent,
         title: agentAccess.displayName,
