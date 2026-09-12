@@ -108,8 +108,13 @@ export async function POST(request: NextRequest) {
       try {
         const now = new Date();
 
+        // ⚠️ SOLO HILOS DIRECTOS — mismo motivo que en
+        // app/api/chat/conversations/route.ts: un GRUPO también guarda
+        // `id_user` (creador) e `id_agent` (anfitrión), así que sin este
+        // filtro el masivo podía terminar escribiendo dentro de un grupo en
+        // vez del hilo privado con ese agente.
         const existente = await prisma.chatConversation.findFirst({
-          where: { id_user: user.id, id_agent: agente.idAgent, archived: false },
+          where: { kind: 'direct', id_user: user.id, id_agent: agente.idAgent, archived: false },
           orderBy: { id: 'desc' },
           select: { id: true },
         });
@@ -118,7 +123,12 @@ export async function POST(request: NextRequest) {
           existente?.id ??
           (
             await prisma.chatConversation.create({
-              data: { id_user: user.id, id_agent: agente.idAgent, title: agente.displayName },
+              data: {
+                kind: 'direct',
+                id_user: user.id,
+                id_agent: agente.idAgent,
+                title: agente.displayName,
+              },
               select: { id: true },
             })
           ).id;
