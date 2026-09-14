@@ -23,7 +23,8 @@ export async function GET(req, { params }) {
             ta.type_asset as tipo_activo, a.id_user_asset as id_usuario, ua.username_asset as usuario, d.department as departamento,
             a.serial, a.label as etiqueta, a.processor as procesador, a.ram, a.storage as almacenamiento, a.id_status_asset as id_estado_activo,
             sta.status_asset as estado, a.active as activo, a.equipment_cost as costo_equipo, a.purchaseDate as created_at, a.so, a.site as sitio, a.sim,
-            a.invoice as factura, a.renovation as renovacion, a.date_renovation as renovacion_fecha, a.out_minute as acta_salida
+            a.invoice as factura, a.renovation as renovacion, a.date_renovation as renovacion_fecha, a.out_minute as acta_salida, a.id_company_asset,
+            c.company as empresa
         FROM
             assets a
         INNER JOIN subtype_asset sa ON sa.id = a.id_subtype_asset
@@ -31,6 +32,7 @@ export async function GET(req, { params }) {
         INNER JOIN user_asset ua ON ua.id = a.id_user_asset
         INNER JOIN department d ON d.id_department = ua.id_department
         INNER JOIN status_asset sta ON sta.id = a.id_status_asset
+        INNER JOIN company c ON c.id_company= a.id_company_asset
         WHERE a.id = @id
     `;
 

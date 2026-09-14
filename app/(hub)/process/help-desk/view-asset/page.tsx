@@ -279,17 +279,7 @@ const RENOVACION_OPTIONS = [
 
 const SEDES = toOptions(['Administrativa', 'Planta', 'Ryan']);
 
-const COMPANY_NAME = 'Farmalogica S.A.';
-
-const ACTA_LEGAL_TEXT =
-  'El colaborador ha sido informado y acepta que la titularidad de los equipos entregados y de la ' +
-  'información en ellos contenida o que se llegue a procesar por parte del Colaborador(a), son de ' +
-  `${COMPANY_NAME} por lo que se compromete a cumplir con las políticas establecidas por la empresa en ` +
-  'cuanto al hardware, software e información y a restituir los equipos en las condiciones originales ' +
-  'en que se recibe, en caso de que el equipo no sea devuelto en las mismas condiciones y el daño sea ' +
-  'ocasionado por el colaborador el costo de la reparación deberá ser asumido por él, la información y ' +
-  'demás elementos conexos deberán ser restituidos en las mismas condiciones recibidas, en caso de ' +
-  'terminación del contrato de trabajo, reemplazo del equipo, u otra situación que aboque a su retiro.';
+const COMPANY_NAME = '';
 
 const EMPTY_NEW_USER: NewUserAssetForm = {
   usuario: '',
@@ -1929,7 +1919,7 @@ function ViewAsset() {
                 </Group>
 
                 <Text size='sm'>
-                  {COMPANY_NAME} hace entrega oficial de los equipos detallados, sobre los cuales se
+                  {asset.empresa} hace entrega oficial de los equipos detallados, sobre los cuales se
                   capacitó para su uso al colaborador:
                 </Text>
 
@@ -2011,7 +2001,16 @@ function ViewAsset() {
                   </div>
                 </Card>
 
-                <Text size='sm'>{ACTA_LEGAL_TEXT}</Text>
+                <Text size='sm'>
+                    {'El colaborador ha sido informado y acepta que la titularidad de los equipos entregados y de la ' +
+                    'información en ellos contenida o que se llegue a procesar por parte del Colaborador(a), son de ' +
+                    `${asset.empresa} por lo que se compromete a cumplir con las políticas establecidas por la empresa en ` +
+                    'cuanto al hardware, software e información y a restituir los equipos en las condiciones originales ' +
+                    'en que se recibe, en caso de que el equipo no sea devuelto en las mismas condiciones y el daño sea ' +
+                    'ocasionado por el colaborador el costo de la reparación deberá ser asumido por él, la información y ' +
+                    'demás elementos conexos deberán ser restituidos en las mismas condiciones recibidas, en caso de ' +
+                    'terminación del contrato de trabajo, reemplazo del equipo, u otra situación que aboque a su retiro.'}
+                </Text>
 
                 <div>
                   <Text size='sm' fw={600} mb='xs'>
@@ -2099,7 +2098,7 @@ function ViewAsset() {
                   </Group>
 
                   <Text size='sm'>
-                    {COMPANY_NAME} hace entrega oficial de los equipos detallados, sobre los cuales se
+                    {asset.empresa} hace entrega oficial de los equipos detallados, sobre los cuales se
                     capacitó para su uso al colaborador:
                   </Text>
 
@@ -2156,7 +2155,16 @@ function ViewAsset() {
                     </div>
                   </Card>
 
-                  <Text size='sm'>{ACTA_LEGAL_TEXT}</Text>
+                    <Text size='sm'>
+                        {'El colaborador ha sido informado y acepta que la titularidad de los equipos entregados y de la ' +
+                        'información en ellos contenida o que se llegue a procesar por parte del Colaborador(a), son de ' +
+                        `${asset.empresa} por lo que se compromete a cumplir con las políticas establecidas por la empresa en ` +
+                        'cuanto al hardware, software e información y a restituir los equipos en las condiciones originales ' +
+                        'en que se recibe, en caso de que el equipo no sea devuelto en las mismas condiciones y el daño sea ' +
+                        'ocasionado por el colaborador el costo de la reparación deberá ser asumido por él, la información y ' +
+                        'demás elementos conexos deberán ser restituidos en las mismas condiciones recibidas, en caso de ' +
+                        'terminación del contrato de trabajo, reemplazo del equipo, u otra situación que aboque a su retiro.'}
+                    </Text>
 
                   <Grid gutter='lg'>
                     <Grid.Col span={{ base: 12, md: 6 }}>
