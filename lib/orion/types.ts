@@ -38,6 +38,13 @@ export type OrionDocumentVersion = {
 /** Intent de firma por adjunto: gestionar/firmar vs solo ver. */
 export type OrionSignatureIntent = 'sign' | 'view';
 
+/**
+ * Tipo de firma del documento en preparación:
+ * - electronic: rúbrica dibujada (flujo actual SynerLink ↔ Orion)
+ * - digital: certificado digital (opción abierta; operación pendiente en Orion)
+ */
+export type OrionDocumentSignatureKind = 'electronic' | 'digital';
+
 /** Estado Orion de un PDF concreto (por fileId de OneDrive). */
 export type OrionSignatureState = {
   orionDocumentId?: string | null;
@@ -51,6 +58,8 @@ export type OrionSignatureState = {
    * Ausente en bags viejos: se infiere (flujo Orion activo → sign).
    */
   signatureIntent?: OrionSignatureIntent | null;
+  /** Preferencia de tipo de firma en preparación (default operativo: electronic). */
+  signatureKind?: OrionDocumentSignatureKind | null;
   status?: OrionDocumentStatus;
   embedUrl?: string | null;
   signedFileUrl?: string | null;

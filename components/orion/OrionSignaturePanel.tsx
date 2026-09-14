@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Box,
   Button,
+  Card,
   Group,
   Loader,
   Modal,
@@ -187,6 +189,10 @@ export default function OrionSignaturePanel({
   const continueToSignAfterPadRef = useRef(false);
   /** Primer GET ensure-document terminó (canManage ya es fiable). */
   const [permissionsReady, setPermissionsReady] = useState(false);
+  /** Tras autorizar: overlay hasta abrir pad / modal de firma o fallar el deep-link. */
+  const [postAuthPreparing, setPostAuthPreparing] = useState(
+    () => Boolean(fromAuthorization && autoOpenAction === 'sign')
+  );
 
   const state = activeFile ? documents[activeFile.fileId] ?? {} : {};
 
@@ -1138,6 +1144,21 @@ export default function OrionSignaturePanel({
     }
   }, [state.embedUrl]);
 
+  useEffect(() => {
+    if (
+      postAuthPreparing &&
+      (signatureModalOpen || identityModalOpen || documentModalOpen || Boolean(error))
+    ) {
+      setPostAuthPreparing(false);
+    }
+  }, [
+    documentModalOpen,
+    error,
+    identityModalOpen,
+    postAuthPreparing,
+    signatureModalOpen,
+  ]);
+
   // Deep-link post-auth / desde tarea: solo si aún corresponde firmar/gestionar.
   useEffect(() => {
     if (autoOpenedRef.current) return;
@@ -1180,6 +1201,7 @@ export default function OrionSignaturePanel({
     if (autoOpenAction === 'manage') {
       if (!canManage) {
         autoOpenedRef.current = true;
+        setPostAuthPreparing(false);
         clearDeepLink();
         setError('Solo el creador de la solicitud puede configurar la firma del documento.');
         return;
@@ -1190,6 +1212,7 @@ export default function OrionSignaturePanel({
       // Ya firmó o el documento terminó: no reabrir el asistente al recargar.
       if (alreadyDone || docTerminal || (doc.signers?.length && !isMyTurnNow)) {
         autoOpenedRef.current = true;
+        setPostAuthPreparing(false);
         clearDeepLink();
         return;
       }
@@ -1203,11 +1226,20 @@ export default function OrionSignaturePanel({
     };
     const t = window.setTimeout(() => {
       if (autoOpenAction === 'manage') {
-        void openDocumentEditor(meta).finally(() => clearDeepLink());
+        void openDocumentEditor(meta)
+          .finally(() => {
+            setPostAuthPreparing(false);
+            clearDeepLink();
+          });
       } else if (autoOpenAction === 'sign') {
-        void handleAcceptSign(meta).finally(() => clearDeepLink());
+        void handleAcceptSign(meta)
+          .finally(() => {
+            setPostAuthPreparing(false);
+            clearDeepLink();
+          });
       } else {
         openSignerView(meta);
+        setPostAuthPreparing(false);
         clearDeepLink();
       }
     }, 0);
@@ -1382,6 +1414,35 @@ export default function OrionSignaturePanel({
 
   return (
     <>
+      {(postAuthPreparing || (fromAuthorization && acceptLoading && !identityModalOpen && !signatureModalOpen && !documentModalOpen)) && (
+        <Box
+          role='status'
+          aria-live='polite'
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 400,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'color-mix(in srgb, var(--mantine-color-body) 72%, transparent)',
+            backdropFilter: 'blur(3px)',
+            padding: 24,
+          }}
+        >
+          <Card shadow='md' radius='md' withBorder p='xl' style={{ maxWidth: 420, width: '100%' }}>
+            <Stack align='center' gap='md'>
+              <Loader size='lg' />
+              <Text fw={700} ta='center'>
+                Preparando la firma…
+              </Text>
+              <Text size='sm' c='dimmed' ta='center'>
+                Cargando el documento tras la autorización. Espere un momento.
+              </Text>
+            </Stack>
+          </Card>
+        </Box>
+      )}
       {signSuccessMessage && (
         <Alert
           color='green'

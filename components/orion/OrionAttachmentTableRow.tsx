@@ -1,7 +1,19 @@
 'use client';
 
-import { Badge, Button, SegmentedControl, Stack, Table, Text, UnstyledButton } from '@mantine/core';
 import {
+  ActionIcon,
+  Badge,
+  Button,
+  Group,
+  SegmentedControl,
+  Stack,
+  Table,
+  Text,
+  Tooltip,
+  UnstyledButton,
+} from '@mantine/core';
+import {
+  IconEye,
   IconFile,
   IconPencil,
   IconSignature,
@@ -21,6 +33,8 @@ type RowProps = OrionAttachmentSignActionsProps & {
   rowNumber?: number | string;
   fileSizeLabel?: string;
   openUrl?: string | null;
+  /** Visor en línea (SharePoint/OneDrive webUrl). No usar downloadUrl. */
+  previewUrl?: string | null;
   versionsSlot?: ReactNode;
 };
 
@@ -85,12 +99,15 @@ export default function OrionAttachmentTableRow({
   rowNumber,
   fileSizeLabel,
   openUrl,
+  previewUrl,
   versionsSlot,
   ...props
 }: RowProps) {
   const d = useOrionAttachmentDerived(props);
   const [extensionLoading, setExtensionLoading] = useState(false);
   const [renewLoading, setRenewLoading] = useState(false);
+  // Preferir webUrl (visor online); si no hay, caer a openUrl.
+  const viewOnlineHref = String(previewUrl || '').trim() || String(openUrl || '').trim() || null;
 
   const applyDocs = (documents: Record<string, OrionSignatureState>) => {
     props.onDocumentsUpdate?.(documents);
@@ -181,15 +198,36 @@ export default function OrionAttachmentTableRow({
         </Text>
       </Table.Td>
 
-      <Table.Td data-label='Documento' className='doc-cell' style={{ minWidth: 160, maxWidth: 260 }}>
-        <Text size='sm' fw={700} lineClamp={2}>
-          {props.fileName}
-        </Text>
-        {fileSizeLabel ? (
-          <Text size='xs' c='dimmed' mt={2}>
-            {fileSizeLabel}
-          </Text>
-        ) : null}
+      <Table.Td data-label='Documento' className='doc-cell' style={{ minWidth: 160, maxWidth: 280 }}>
+        <Group gap={6} wrap='nowrap' align='flex-start'>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <Text size='sm' fw={700} lineClamp={2}>
+              {props.fileName}
+            </Text>
+            {fileSizeLabel ? (
+              <Text size='xs' c='dimmed' mt={2}>
+                {fileSizeLabel}
+              </Text>
+            ) : null}
+          </div>
+          {viewOnlineHref ? (
+            <Tooltip label='Ver en línea (sin descargar)'>
+              <ActionIcon
+                variant='subtle'
+                color='blue'
+                size='sm'
+                component='a'
+                href={viewOnlineHref}
+                target='_blank'
+                rel='noopener noreferrer'
+                aria-label={`Ver en línea ${props.fileName}`}
+                style={{ flexShrink: 0, marginTop: 1 }}
+              >
+                <IconEye size={16} />
+              </ActionIcon>
+            </Tooltip>
+          ) : null}
+        </Group>
       </Table.Td>
 
       <Table.Td data-label='Departamento' className='doc-cell' style={{ minWidth: 140, maxWidth: 200 }}>
@@ -281,8 +319,14 @@ export default function OrionAttachmentTableRow({
                 Este documento no está marcado para firma.
               </Text>
               <ActionLink
+                icon={<IconEye size={15} stroke={1.6} />}
+                label='Ver en línea'
+                href={viewOnlineHref}
+                disabled={!viewOnlineHref}
+              />
+              <ActionLink
                 icon={<IconFile size={15} stroke={1.6} />}
-                label='Abrir / descargar'
+                label='Descargar'
                 href={openUrl || originalFileHref}
                 disabled={!openUrl && !originalFileHref}
               />
@@ -328,6 +372,14 @@ export default function OrionAttachmentTableRow({
             ) : null}
 
             <Stack gap={2} mt={2}>
+              {viewOnlineHref ? (
+                <ActionLink
+                  icon={<IconEye size={15} stroke={1.6} />}
+                  label='Ver en línea'
+                  href={viewOnlineHref}
+                />
+              ) : null}
+
               {canAccessOriginalFile ? (
                 <ActionLink
                   icon={<IconFile size={15} stroke={1.6} />}

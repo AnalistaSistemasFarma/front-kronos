@@ -37,7 +37,6 @@ import {
 import axios from 'axios';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../lib/orion/fieldType';
-import { parseOrionSignatureBagBag } from '../../../../lib/orion/formValue';
 
 // Item mínimo que llega desde el panel de autorización (subconjunto de AuthorizationRequest).
 interface RequestSummary {
@@ -166,19 +165,12 @@ function isOrionSignatureFormValue(fv: FormValue): boolean {
   }
 }
 
-function summarizeOrionSignature(fv: FormValue): string {
-  try {
-    const bag = parseOrionSignatureBagBag(fv.value_text);
-    const docs = Object.values(bag.documents || {});
-    if (docs.length === 0) return 'Documento de firma pendiente';
-    const statuses = docs.map((d) => String(d.status || 'SIN INICIAR').toUpperCase());
-    const signers = docs.reduce((n, d) => n + (d.signers?.length ?? 0), 0);
-    return `${docs.length} documento(s) · ${statuses.join(', ')}${
-      signers ? ` · ${signers} firmante(s)` : ''
-    }`;
-  } catch {
-    return 'Firma digital (GSS Firma)';
-  }
+/** Autorización de firma: no exponer PDFs, firmantes ni historial de progreso. */
+function isFirmaAuthorizationRequest(request: RequestSummary | null): boolean {
+  if (!request) return false;
+  return (
+    /firma/i.test(request.type_authorization || '') || /firma/i.test(request.subject || '')
+  );
 }
 
 export default function AuthorizationDetailModal({ opened, onClose, request }: Props) {
@@ -195,6 +187,9 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
   const [filesError, setFilesError] = useState<string | null>(null);
 
   const idReqGen = request?.id_request_general;
+  const isFirmaAuth = isFirmaAuthorizationRequest(request);
+  // En firma solo se muestra metadatos básicos: sin adjuntos, notas ni progreso Orion.
+  const hideSensitiveFirmaContext = isFirmaAuth;
 
   useEffect(() => {
     if (!opened || !idReqGen) return;
@@ -208,19 +203,26 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
     setFiles([]);
     setFilesError(null);
 
-    // Datos internos (SQL): detalle + valores del formulario + notas.
+    // Datos internos (SQL): detalle + valores del formulario (+ notas si no es firma).
     const loadData = async () => {
       setLoading(true);
       try {
-        const [detailRes, valuesRes, notesRes] = await Promise.all([
+        const fetches: Promise<Response>[] = [
           fetch(`/api/requests-general/view-request?id=${idReqGen}`),
           fetch(`/api/requests-general/request-form-values?id_request=${idReqGen}`),
-          fetch(`/api/requests-general/notes?id_request=${idReqGen}`),
-        ]);
+        ];
+        if (!hideSensitiveFirmaContext) {
+          fetches.push(fetch(`/api/requests-general/notes?id_request=${idReqGen}`));
+        }
+
+        const responses = await Promise.all(fetches);
+        const detailRes = responses[0];
+        const valuesRes = responses[1];
+        const notesRes = responses[2];
 
         const detailJson = await detailRes.json().catch(() => null);
         const valuesJson = await valuesRes.json().catch(() => []);
-        const notesJson = await notesRes.json().catch(() => []);
+        const notesJson = notesRes ? await notesRes.json().catch(() => []) : [];
         if (!active) return;
 
         if (!detailRes.ok) {
@@ -228,8 +230,10 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
         } else {
           setDetail(detailJson);
         }
-        setFormValues(Array.isArray(valuesJson) ? valuesJson : []);
-        setNotes(Array.isArray(notesJson) ? notesJson : []);
+        // Nunca volcar payloads Orion (firmantes / estado) en este modal.
+        const values = Array.isArray(valuesJson) ? valuesJson : [];
+        setFormValues(values.filter((fv: FormValue) => !isOrionSignatureFormValue(fv)));
+        setNotes(hideSensitiveFirmaContext ? [] : Array.isArray(notesJson) ? notesJson : []);
       } catch {
         if (active) setError('No se pudo cargar el detalle de la solicitud.');
       } finally {
@@ -237,8 +241,13 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
       }
     };
 
-    // Adjuntos (Microsoft Graph): independiente, no bloquea el resto.
+    // Adjuntos: no se cargan en autorizaciones de firma (privacidad).
     const loadFiles = async () => {
+      if (hideSensitiveFirmaContext) {
+        setFilesLoading(false);
+        setFiles([]);
+        return;
+      }
       setFilesLoading(true);
       try {
         const token = await getMicrosoftToken();
@@ -266,7 +275,7 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
     return () => {
       active = false;
     };
-  }, [opened, idReqGen]);
+  }, [opened, idReqGen, hideSensitiveFirmaContext]);
 
   const subject = detail?.subject_request || request?.subject || '';
 
@@ -364,137 +373,124 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
               </Card>
             )}
 
-            {/* Campos del formulario (sin volcar JSON Orion) */}
-            {(() => {
-              const paymentFields = formValues.filter((fv) => !isOrionSignatureFormValue(fv));
-              const orionFields = formValues.filter((fv) => isOrionSignatureFormValue(fv));
-              if (paymentFields.length === 0 && orionFields.length === 0) return null;
-              return (
-                <>
-                  {paymentFields.length > 0 && (
-                    <div>
-                      <Group gap={6} mb='xs'>
-                        <IconCashBanknote size={18} className='text-gray-500' />
-                        <Text fw={600}>Información adicional</Text>
-                      </Group>
-                      <Grid>
-                        {paymentFields.map((fv) => {
-                          const raw = fv.option_label || fv.value_text || '';
-                          const shown = raw ? formatFieldValue(fv.field_label, raw) : '—';
-                          return (
-                            <Grid.Col span={{ base: 12, sm: 6 }} key={fv.id}>
-                              <Card withBorder radius='md' p='sm'>
-                                <Text size='xs' c='dimmed' fw={500} tt='uppercase'>
-                                  {fv.field_label}
+            {/* Campos del formulario (sin payloads Orion / firmantes) */}
+            {formValues.length > 0 && (
+              <div>
+                <Group gap={6} mb='xs'>
+                  <IconCashBanknote size={18} className='text-gray-500' />
+                  <Text fw={600}>Información adicional</Text>
+                </Group>
+                <Grid>
+                  {formValues.map((fv) => {
+                    const raw = fv.option_label || fv.value_text || '';
+                    const shown = raw ? formatFieldValue(fv.field_label, raw) : '—';
+                    return (
+                      <Grid.Col span={{ base: 12, sm: 6 }} key={fv.id}>
+                        <Card withBorder radius='md' p='sm'>
+                          <Text size='xs' c='dimmed' fw={500} tt='uppercase'>
+                            {fv.field_label}
+                          </Text>
+                          <Text size='sm' fw={600} mt={2}>
+                            {shown}
+                          </Text>
+                        </Card>
+                      </Grid.Col>
+                    );
+                  })}
+                </Grid>
+              </div>
+            )}
+
+            {hideSensitiveFirmaContext ? (
+              <Alert color='blue' variant='light' icon={<IconAlertCircle size={16} />}>
+                Por privacidad, en esta autorización no se muestran adjuntos, firmantes ni el
+                avance del proceso de firma. Abre la solicitud para firmar tu parte.
+              </Alert>
+            ) : (
+              <>
+                {/* Adjuntos */}
+                <div>
+                  <Group gap={6} mb='xs'>
+                    <IconPaperclip size={18} className='text-gray-500' />
+                    <Text fw={600}>Adjuntos</Text>
+                    {filesLoading && <Loader size={14} />}
+                  </Group>
+                  {!filesLoading && files.length === 0 ? (
+                    <Text size='sm' c='dimmed'>{filesError || 'Sin adjuntos'}</Text>
+                  ) : (
+                    <Stack gap='xs'>
+                      {files.map((file) => (
+                        <Card key={file.id} withBorder radius='md' p='xs'>
+                          <Group justify='space-between' wrap='nowrap'>
+                            <Group gap='xs' wrap='nowrap' style={{ minWidth: 0 }}>
+                              <IconFile size={18} className='text-gray-400' />
+                              <div style={{ minWidth: 0 }}>
+                                <Text size='sm' fw={500} truncate>{file.name}</Text>
+                                <Text size='xs' c='dimmed'>
+                                  {formatFileSize(file.size)} · {formatDateCO(file.lastModifiedDateTime)}
                                 </Text>
-                                <Text size='sm' fw={600} mt={2}>
-                                  {shown}
-                                </Text>
-                              </Card>
-                            </Grid.Col>
-                          );
-                        })}
-                      </Grid>
-                    </div>
+                              </div>
+                            </Group>
+                            <Group gap={4} wrap='nowrap'>
+                              <Tooltip label='Ver'>
+                                <ActionIcon
+                                  variant='light'
+                                  color='blue'
+                                  component='a'
+                                  href={file.webUrl}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                >
+                                  <IconEye size={16} />
+                                </ActionIcon>
+                              </Tooltip>
+                              {file['@microsoft.graph.downloadUrl'] && (
+                                <Tooltip label='Descargar'>
+                                  <ActionIcon
+                                    variant='light'
+                                    color='gray'
+                                    component='a'
+                                    href={file['@microsoft.graph.downloadUrl']}
+                                    target='_blank'
+                                    rel='noopener noreferrer'
+                                  >
+                                    <IconDownload size={16} />
+                                  </ActionIcon>
+                                </Tooltip>
+                              )}
+                            </Group>
+                          </Group>
+                        </Card>
+                      ))}
+                    </Stack>
                   )}
-                  {orionFields.map((fv) => (
-                    <Card key={fv.id} withBorder radius='md' p='sm'>
-                      <Text size='xs' c='dimmed' fw={500} tt='uppercase'>
-                        {fv.field_label || 'Firma digital'}
-                      </Text>
-                      <Text size='sm' fw={600} mt={2}>
-                        {summarizeOrionSignature(fv)}
-                      </Text>
-                      <Text size='xs' c='dimmed' mt={4}>
-                        El detalle de firmantes y el PDF se gestionan en la solicitud / adjuntos.
-                      </Text>
-                    </Card>
-                  ))}
-                </>
-              );
-            })()}
+                </div>
 
-            {/* Adjuntos */}
-            <div>
-              <Group gap={6} mb='xs'>
-                <IconPaperclip size={18} className='text-gray-500' />
-                <Text fw={600}>Adjuntos</Text>
-                {filesLoading && <Loader size={14} />}
-              </Group>
-              {!filesLoading && files.length === 0 ? (
-                <Text size='sm' c='dimmed'>{filesError || 'Sin adjuntos'}</Text>
-              ) : (
-                <Stack gap='xs'>
-                  {files.map((file) => (
-                    <Card key={file.id} withBorder radius='md' p='xs'>
-                      <Group justify='space-between' wrap='nowrap'>
-                        <Group gap='xs' wrap='nowrap' style={{ minWidth: 0 }}>
-                          <IconFile size={18} className='text-gray-400' />
-                          <div style={{ minWidth: 0 }}>
-                            <Text size='sm' fw={500} truncate>{file.name}</Text>
-                            <Text size='xs' c='dimmed'>
-                              {formatFileSize(file.size)} · {formatDateCO(file.lastModifiedDateTime)}
-                            </Text>
-                          </div>
-                        </Group>
-                        <Group gap={4} wrap='nowrap'>
-                          <Tooltip label='Ver'>
-                            <ActionIcon
-                              variant='light'
-                              color='blue'
-                              component='a'
-                              href={file.webUrl}
-                              target='_blank'
-                              rel='noopener noreferrer'
-                            >
-                              <IconEye size={16} />
-                            </ActionIcon>
-                          </Tooltip>
-                          {file['@microsoft.graph.downloadUrl'] && (
-                            <Tooltip label='Descargar'>
-                              <ActionIcon
-                                variant='light'
-                                color='gray'
-                                component='a'
-                                href={file['@microsoft.graph.downloadUrl']}
-                                target='_blank'
-                                rel='noopener noreferrer'
-                              >
-                                <IconDownload size={16} />
-                              </ActionIcon>
-                            </Tooltip>
-                          )}
-                        </Group>
-                      </Group>
-                    </Card>
-                  ))}
-                </Stack>
-              )}
-            </div>
-
-            {/* Notas / historial */}
-            <div>
-              <Group gap={6} mb='xs'>
-                <IconNotes size={18} className='text-gray-500' />
-                <Text fw={600}>Historial de notas</Text>
-              </Group>
-              {notes.length === 0 ? (
-                <Text size='sm' c='dimmed'>Sin notas registradas</Text>
-              ) : (
-                <Stack gap='xs'>
-                  {notes.map((n) => (
-                    <Card key={n.id_note} withBorder radius='md' p='sm'>
-                      <Text size='sm' style={{ whiteSpace: 'pre-line' }}>{n.note}</Text>
-                      <Group gap={6} mt={4}>
-                        <Text size='xs' c='dimmed'>{n.createdBy || 'Sistema'}</Text>
-                        <Text size='xs' c='dimmed'>·</Text>
-                        <Text size='xs' c='dimmed'>{formatDateCO(n.creation_date)}</Text>
-                      </Group>
-                    </Card>
-                  ))}
-                </Stack>
-              )}
-            </div>
+                {/* Notas / historial */}
+                <div>
+                  <Group gap={6} mb='xs'>
+                    <IconNotes size={18} className='text-gray-500' />
+                    <Text fw={600}>Historial de notas</Text>
+                  </Group>
+                  {notes.length === 0 ? (
+                    <Text size='sm' c='dimmed'>Sin notas registradas</Text>
+                  ) : (
+                    <Stack gap='xs'>
+                      {notes.map((n) => (
+                        <Card key={n.id_note} withBorder radius='md' p='sm'>
+                          <Text size='sm' style={{ whiteSpace: 'pre-line' }}>{n.note}</Text>
+                          <Group gap={6} mt={4}>
+                            <Text size='xs' c='dimmed'>{n.createdBy || 'Sistema'}</Text>
+                            <Text size='xs' c='dimmed'>·</Text>
+                            <Text size='xs' c='dimmed'>{formatDateCO(n.creation_date)}</Text>
+                          </Group>
+                        </Card>
+                      ))}
+                    </Stack>
+                  )}
+                </div>
+              </>
+            )}
           </Stack>
         )}
       </Box>
