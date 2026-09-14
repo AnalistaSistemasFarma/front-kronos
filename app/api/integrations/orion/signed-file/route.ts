@@ -84,7 +84,7 @@ export async function GET(req: Request) {
 
     let targetUrl: string | null = null;
     let maxSignerOrder: number | null = null;
-    let selectedVersion = versionId
+    const selectedVersion = versionId
       ? orderedVersions.find((v) => v.id === versionId) ?? null
       : null;
 
