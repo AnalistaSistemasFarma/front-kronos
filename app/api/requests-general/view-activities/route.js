@@ -26,8 +26,8 @@ const TASK_SELECT = `
 `;
 
 /**
- * Resuelve la tarea de firma abierta del usuario para una solicitud (y PDF opcional).
- * Preferencia: tarea Orion pendiente de firma → cualquier tarea abierta asignada → auth recién cerrada.
+ * Resuelve una tarea del usuario para una solicitud (y PDF opcional).
+ * Preferencia: firma Orion abierta → cualquier abierta → cualquier tarea (también cerrada).
  */
 async function resolveTaskIdForRequest(pool, { requestId, fileId, userId }) {
   const fileMarker = fileId ? `[orionFile:${fileId}]` : null;
@@ -71,8 +71,48 @@ async function resolveTaskIdForRequest(pool, { requestId, fileId, userId }) {
     `);
   if (anyOpen.recordset[0]?.id) return anyOpen.recordset[0].id;
 
-  // No devolver auths/tareas ya cerradas: el firmante debe aterrizar en una tarea abierta.
-  return null;
+  // Incluye auth pendiente del usuario (flujo Autorizaciones → ver tarea).
+  const openAuth = await pool
+    .request()
+    .input('id_request', sql.Int, requestId)
+    .input('id_user', sql.NVarChar(255), userId)
+    .query(`
+      SELECT TOP 1 trg.id
+      FROM task_request_general trg
+      WHERE trg.id_request_general = @id_request
+        AND trg.id_assigned = @id_user
+        AND trg.id_status NOT IN (2, 3)
+      ORDER BY trg.id DESC
+    `);
+  if (openAuth.recordset[0]?.id) return openAuth.recordset[0].id;
+
+  // Última tarea del usuario en la solicitud (aunque ya esté cerrada).
+  const anyMine = await pool
+    .request()
+    .input('id_request', sql.Int, requestId)
+    .input('id_user', sql.NVarChar(255), userId)
+    .query(`
+      SELECT TOP 1 trg.id
+      FROM task_request_general trg
+      WHERE trg.id_request_general = @id_request
+        AND trg.id_assigned = @id_user
+      ORDER BY trg.id DESC
+    `);
+  if (anyMine.recordset[0]?.id) return anyMine.recordset[0].id;
+
+  // Si es solicitante o no hay asignación al usuario: cualquier tarea de la solicitud.
+  const anyOnRequest = await pool
+    .request()
+    .input('id_request', sql.Int, requestId)
+    .query(`
+      SELECT TOP 1 trg.id
+      FROM task_request_general trg
+      WHERE trg.id_request_general = @id_request
+      ORDER BY
+        CASE WHEN trg.id_status NOT IN (2, 3) THEN 0 ELSE 1 END,
+        trg.id DESC
+    `);
+  return anyOnRequest.recordset[0]?.id ?? null;
 }
 
 export async function GET(req) {
@@ -116,7 +156,26 @@ export async function GET(req) {
     const request = pool.request();
     request.input('id', sql.Int, taskId);
 
-    const result = await request.query(`${TASK_SELECT} WHERE trg.id = @id`);
+    let result = await request.query(`${TASK_SELECT} WHERE trg.id = @id`);
+
+    // Compat: a veces llega id_request_general en ?id= (notificaciones viejas).
+    if (result.recordset.length === 0 && Number.isInteger(taskId) && taskId > 0) {
+      const session = await getServerSession(authOptions);
+      const userId = session?.user?.id;
+      if (userId) {
+        const resolved = await resolveTaskIdForRequest(pool, {
+          requestId: taskId,
+          fileId,
+          userId: String(userId),
+        });
+        if (resolved) {
+          taskId = resolved;
+          const retry = pool.request();
+          retry.input('id', sql.Int, taskId);
+          result = await retry.query(`${TASK_SELECT} WHERE trg.id = @id`);
+        }
+      }
+    }
 
     if (result.recordset.length === 0) {
       return NextResponse.json({ error: 'Solicitud no encontrada' }, { status: 404 });
