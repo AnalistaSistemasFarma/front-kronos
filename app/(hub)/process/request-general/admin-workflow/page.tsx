@@ -30,6 +30,7 @@ import {
   NumberInput,
   ScrollArea,
   Tooltip,
+  Switch,
 } from '@mantine/core';
 import {
   IconUser,
@@ -50,9 +51,20 @@ import {
   IconTrash,
   IconList,
   IconListCheck,
+  IconClock,
+  IconPlayerPlay,
+  IconEdit,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
+import {
+  SCHEDULE_PRESETS,
+  PRESET_LABELS,
+  CUSTOM_CRON_KEY,
+  DAY_CLAMP_HINT,
+  buildCronFromPreset,
+  describeCron,
+} from '../../../../../lib/scheduler/presets';
 
 interface WorkFlow {
   id: number;
@@ -66,6 +78,42 @@ interface WorkFlow {
   assigned_process_category: string;
   company: string;
 }
+
+// Job del servicio central de tareas automáticas (scheduled_job) que esta página
+// administra con job_type = 'create_general_request' (mini-módulo Tareas Periódicas).
+interface ScheduledJob {
+  id: number;
+  name: string;
+  job_type: string;
+  payload: string | null;
+  cron_expression: string;
+  next_run_date: string;
+  last_run_date: string | null;
+  last_status: string | null;
+  active: boolean | number;
+  source_module: string | null;
+}
+
+interface PeriodicJobPayload {
+  company?: number;
+  process?: number;
+  subject?: string;
+  descripcion?: string;
+  preset?: string;
+}
+
+const EMPTY_JOB_FORM = {
+  company: '',
+  category: '',
+  process: '',
+  subject: '',
+  descripcion: '',
+  preset: 'daily',
+  customCron: '',
+  startDate: new Date().toISOString().slice(0, 10),
+  time: '06:00',
+  active: true,
+};
 
 function RequestBoard() {
   const { data: session, status } = useSession();
@@ -116,6 +164,219 @@ function RequestBoard() {
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // ── Tareas Periódicas (cliente del scheduler central) ─────────────────────
+  // Listas crudas de consult-request para el cascadeo Empresa → Categoría → Proceso
+  // del modal (hoy fetchCompanies descartaba processCategories).
+  const [crCategories, setCrCategories] = useState<
+    Array<{ id_company: number; id: number; company: string; category: string }>
+  >([]);
+  const [crProcessCategories, setCrProcessCategories] = useState<
+    Array<{ id_process: number; process: string; id_category_request: number }>
+  >([]);
+
+  const [periodicJobs, setPeriodicJobs] = useState<ScheduledJob[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobModalOpened, setJobModalOpened] = useState(false);
+  const [editingJobId, setEditingJobId] = useState<number | null>(null);
+  const [jobSaving, setJobSaving] = useState(false);
+  const [jobError, setJobError] = useState<string | null>(null);
+  const [runNowLoading, setRunNowLoading] = useState(false);
+  const [runSummary, setRunSummary] = useState<string | null>(null);
+  const [jobForm, setJobForm] = useState({ ...EMPTY_JOB_FORM });
+
+  const fetchJobs = async () => {
+    try {
+      setJobsLoading(true);
+      const res = await fetch('/api/scheduler/jobs?job_type=create_general_request');
+      if (!res.ok) throw new Error('Error consultando tareas periódicas');
+      const data = await res.json();
+      setPeriodicJobs(Array.isArray(data.jobs) ? data.jobs : []);
+    } catch (err) {
+      console.error('Error fetching scheduled jobs:', err);
+    } finally {
+      setJobsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchJobs();
+  }, []);
+
+  const parseJobPayload = (payload: string | null): PeriodicJobPayload => {
+    if (!payload) return {};
+    try {
+      return JSON.parse(payload) as PeriodicJobPayload;
+    } catch {
+      return {};
+    }
+  };
+
+  const jobCompanyLabel = (id?: number) =>
+    companies.find((c) => c.value === String(id))?.label || (id ? `#${id}` : '—');
+
+  const jobProcessLabel = (id?: number) => {
+    const p = crProcessCategories.find((x) => x.id_process === id);
+    return p ? p.process : id ? `#${id}` : '—';
+  };
+
+  const jobScheduleLabel = (job: ScheduledJob) => {
+    const preset = parseJobPayload(job.payload).preset;
+    if (preset && preset !== CUSTOM_CRON_KEY && PRESET_LABELS[preset]) {
+      return `${PRESET_LABELS[preset]} · ${describeCron(job.cron_expression)}`;
+    }
+    return describeCron(job.cron_expression);
+  };
+
+  const formatJobDate = (value: string | null) =>
+    value ? new Date(value).toLocaleString('es-CO', { hour12: true }) : '—';
+
+  const resetJobForm = () => {
+    setJobForm({ ...EMPTY_JOB_FORM, startDate: new Date().toISOString().slice(0, 10) });
+    setEditingJobId(null);
+    setJobError(null);
+  };
+
+  const openEditJob = (job: ScheduledJob) => {
+    const payload = parseJobPayload(job.payload);
+    const processEntry = crProcessCategories.find((p) => p.id_process === payload.process);
+    setJobForm({
+      company: payload.company ? String(payload.company) : '',
+      category: processEntry ? String(processEntry.id_category_request) : '',
+      process: payload.process ? String(payload.process) : '',
+      subject: payload.subject || job.name,
+      descripcion: payload.descripcion || '',
+      preset: payload.preset && PRESET_LABELS[payload.preset] ? payload.preset : CUSTOM_CRON_KEY,
+      customCron: job.cron_expression,
+      startDate: new Date().toISOString().slice(0, 10),
+      time: '06:00',
+      active: Boolean(job.active),
+    });
+    setEditingJobId(job.id);
+    setJobError(null);
+    setJobModalOpened(true);
+  };
+
+  const handleSaveJob = async () => {
+    setJobError(null);
+    if (
+      !jobForm.company ||
+      !jobForm.process ||
+      !jobForm.subject.trim() ||
+      !jobForm.descripcion.trim()
+    ) {
+      setJobError('Complete empresa, proceso, asunto y descripción.');
+      return;
+    }
+
+    let cron: string | null;
+    if (jobForm.preset === CUSTOM_CRON_KEY) {
+      cron = jobForm.customCron.trim();
+      if (!cron) {
+        setJobError('Ingrese la expresión cron personalizada.');
+        return;
+      }
+    } else {
+      cron = buildCronFromPreset(jobForm.preset, jobForm.startDate, jobForm.time);
+      if (!cron) {
+        setJobError('Fecha u hora de inicio inválida.');
+        return;
+      }
+    }
+
+    try {
+      setJobSaving(true);
+      const body = {
+        ...(editingJobId ? { id: editingJobId } : {}),
+        name: jobForm.subject.trim(),
+        job_type: 'create_general_request',
+        cron_expression: cron,
+        active: jobForm.active,
+        source_module: 'request-general',
+        payload: {
+          company: Number(jobForm.company),
+          process: Number(jobForm.process),
+          subject: jobForm.subject.trim(),
+          descripcion: jobForm.descripcion.trim(),
+          preset: jobForm.preset,
+        },
+      };
+      const res = await fetch('/api/scheduler/jobs', {
+        method: editingJobId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al guardar la tarea periódica');
+      setJobModalOpened(false);
+      resetJobForm();
+      fetchJobs();
+    } catch (err) {
+      setJobError(err instanceof Error ? err.message : 'Error al guardar la tarea periódica');
+    } finally {
+      setJobSaving(false);
+    }
+  };
+
+  const handleToggleJobActive = async (job: ScheduledJob, nextActive: boolean) => {
+    try {
+      const res = await fetch('/api/scheduler/jobs', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: job.id,
+          name: job.name,
+          job_type: job.job_type,
+          cron_expression: job.cron_expression,
+          active: nextActive,
+          source_module: job.source_module,
+          payload: parseJobPayload(job.payload),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Error al actualizar la tarea');
+      }
+      fetchJobs();
+    } catch (err) {
+      console.error('Error toggling job:', err);
+      setError(err instanceof Error ? err.message : 'Error al actualizar la tarea periódica');
+    }
+  };
+
+  const handleDeleteJob = async (job: ScheduledJob) => {
+    if (!window.confirm(`¿Eliminar la tarea periódica "${job.name}"?`)) return;
+    try {
+      const res = await fetch(`/api/scheduler/jobs?id=${job.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Error al eliminar la tarea');
+      }
+      fetchJobs();
+    } catch (err) {
+      console.error('Error deleting job:', err);
+      setError(err instanceof Error ? err.message : 'Error al eliminar la tarea periódica');
+    }
+  };
+
+  const handleRunSchedulerNow = async () => {
+    try {
+      setRunNowLoading(true);
+      setRunSummary(null);
+      const res = await fetch('/api/scheduler/run', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al ejecutar el scheduler');
+      setRunSummary(
+        `Vencidas: ${data.due} · Ejecutadas: ${data.ran?.length ?? 0} · Errores: ${data.errors ?? 0}`
+      );
+      fetchJobs();
+    } catch (err) {
+      setRunSummary(err instanceof Error ? err.message : 'Error al ejecutar el scheduler');
+    } finally {
+      setRunNowLoading(false);
+    }
+  };
+  // ── fin Tareas Periódicas ──────────────────────────────────────────────────
 
   const [tasks, setTasks] = useState<
     Array<{
@@ -497,6 +758,12 @@ function RequestBoard() {
       if (response.ok) {
         const data = await response.json();
 
+        // Listas crudas para el mini-módulo de Tareas Periódicas (cascadeo del modal).
+        setCrCategories(Array.isArray(data.categories) ? data.categories : []);
+        setCrProcessCategories(
+          Array.isArray(data.processCategories) ? data.processCategories : []
+        );
+
         if (data.companies && Array.isArray(data.companies)) {
           setCompany(
             data.companies.map((sub: { id_company: number; company: string }) => ({
@@ -789,6 +1056,19 @@ function RequestBoard() {
     const user = assignedUsers.find(u => u.value === id);
     return user ? user.label : id;
   };
+
+  // Opciones del cascadeo del modal de Tarea Periódica (dedupe de categorías por id).
+  const jobCategoryOptions = (() => {
+    const seen = new Set<number>();
+    return crCategories
+      .filter((c) => String(c.id_company) === jobForm.company)
+      .filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)))
+      .map((c) => ({ value: c.id.toString(), label: c.category }));
+  })();
+
+  const jobProcessOptions = crProcessCategories
+    .filter((p) => String(p.id_category_request) === jobForm.category)
+    .map((p) => ({ value: p.id_process.toString(), label: p.process }));
 
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
@@ -1128,6 +1408,317 @@ function RequestBoard() {
             </Table>
           </div>
         </Card>
+
+        {/* ── Tareas Periódicas: jobs del scheduler central que generan solicitudes ── */}
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='xl' className='overflow-hidden'>
+          <LoadingOverlay visible={jobsLoading} />
+
+          <Group justify='space-between' mb='md'>
+            <div>
+              <Title order={3} className='flex items-center gap-2'>
+                <IconClock size={20} />
+                Tareas Periódicas
+              </Title>
+              <Text size='sm' c='dimmed'>
+                Solicitudes generadas automáticamente según una frecuencia (servicio de
+                tareas automáticas).
+              </Text>
+            </div>
+            <Group gap='sm'>
+              <Button
+                variant='outline'
+                leftSection={<IconPlayerPlay size={16} />}
+                loading={runNowLoading}
+                onClick={handleRunSchedulerNow}
+              >
+                Ejecutar ahora
+              </Button>
+              <Button
+                leftSection={<IconPlus size={16} />}
+                className='bg-blue-600 hover:bg-blue-700'
+                onClick={() => {
+                  resetJobForm();
+                  setJobModalOpened(true);
+                }}
+              >
+                Crear Tarea Periódica
+              </Button>
+            </Group>
+          </Group>
+
+          {runSummary && (
+            <Alert color='blue' mb='md' icon={<IconAlertCircle size={18} />}>
+              {runSummary}
+            </Alert>
+          )}
+
+          <div className='overflow-x-auto'>
+            <Table striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Asunto</Table.Th>
+                  <Table.Th>Empresa</Table.Th>
+                  <Table.Th>Proceso</Table.Th>
+                  <Table.Th>Programación</Table.Th>
+                  <Table.Th>Próxima</Table.Th>
+                  <Table.Th>Última</Table.Th>
+                  <Table.Th>Activa</Table.Th>
+                  <Table.Th>Acciones</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {periodicJobs.length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={8} className='text-center py-8 text-[var(--mantine-color-dimmed)]'>
+                      <Text size='sm' c='dimmed'>
+                        No hay tareas periódicas configuradas
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : (
+                  periodicJobs.map((job) => {
+                    const payload = parseJobPayload(job.payload);
+                    return (
+                      <Table.Tr key={job.id}>
+                        <Table.Td>
+                          <Text size='sm' fw={500}>
+                            {job.name}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size='sm'>{jobCompanyLabel(payload.company)}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size='sm'>{jobProcessLabel(payload.process)}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size='sm'>{jobScheduleLabel(job)}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size='sm'>{formatJobDate(job.next_run_date)}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Group gap={6}>
+                            <Text size='sm'>{formatJobDate(job.last_run_date)}</Text>
+                            {job.last_status && (
+                              <Badge
+                                color={job.last_status === 'ok' ? 'green' : 'red'}
+                                variant='light'
+                                size='sm'
+                              >
+                                {job.last_status === 'ok' ? 'OK' : 'Error'}
+                              </Badge>
+                            )}
+                          </Group>
+                        </Table.Td>
+                        <Table.Td>
+                          <Switch
+                            checked={Boolean(job.active)}
+                            onChange={(e) => handleToggleJobActive(job, e.currentTarget.checked)}
+                            size='sm'
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          <Group gap={4}>
+                            <ActionIcon
+                              variant='subtle'
+                              color='blue'
+                              onClick={() => openEditJob(job)}
+                              title='Editar'
+                            >
+                              <IconEdit size={16} />
+                            </ActionIcon>
+                            <ActionIcon
+                              variant='subtle'
+                              color='red'
+                              onClick={() => handleDeleteJob(job)}
+                              title='Eliminar'
+                            >
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          </Group>
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })
+                )}
+              </Table.Tbody>
+            </Table>
+          </div>
+        </Card>
+
+        {/* Modal Crear / Editar Tarea Periódica */}
+        <Modal
+          opened={jobModalOpened}
+          onClose={() => {
+            setJobModalOpened(false);
+            resetJobForm();
+          }}
+          title={
+            <Group gap='sm'>
+              <div className='flex items-center justify-center w-10 h-10 rounded-lg bg-blue-100'>
+                <IconClock size={20} className='text-blue-600' />
+              </div>
+              <div>
+                <Text size='lg' fw={600}>
+                  {editingJobId ? 'Editar Tarea Periódica' : 'Crear Tarea Periódica'}
+                </Text>
+                <Text size='xs' c='dimmed'>
+                  La solicitud se generará automáticamente según la frecuencia
+                </Text>
+              </div>
+            </Group>
+          }
+          size='lg'
+          radius='lg'
+          centered
+        >
+          <Stack gap='md'>
+            {jobError && (
+              <Alert color='red' icon={<IconAlertCircle size={18} />}>
+                {jobError}
+              </Alert>
+            )}
+
+            <Grid>
+              <Grid.Col span={{ base: 12, md: 4 }}>
+                <Select
+                  label='Empresa'
+                  placeholder='Seleccione'
+                  data={companies}
+                  value={jobForm.company}
+                  onChange={(value) =>
+                    setJobForm({ ...jobForm, company: value || '', category: '', process: '' })
+                  }
+                  required
+                  searchable
+                  leftSection={<IconBuilding size={16} />}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, md: 4 }}>
+                <Select
+                  label='Categoría'
+                  placeholder={!jobForm.company ? 'Primero la empresa' : 'Seleccione'}
+                  data={jobCategoryOptions}
+                  value={jobForm.category}
+                  onChange={(value) =>
+                    setJobForm({ ...jobForm, category: value || '', process: '' })
+                  }
+                  required
+                  searchable
+                  disabled={!jobForm.company}
+                  leftSection={<IconTag size={16} />}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, md: 4 }}>
+                <Select
+                  label='Proceso'
+                  placeholder={!jobForm.category ? 'Primero la categoría' : 'Seleccione'}
+                  data={jobProcessOptions}
+                  value={jobForm.process}
+                  onChange={(value) => setJobForm({ ...jobForm, process: value || '' })}
+                  required
+                  searchable
+                  disabled={!jobForm.category}
+                  leftSection={<IconProgress size={16} />}
+                />
+              </Grid.Col>
+            </Grid>
+
+            <TextInput
+              label='Asunto de la solicitud'
+              placeholder='Ej: Conciliación mensual de pagos'
+              value={jobForm.subject}
+              onChange={(e) => setJobForm({ ...jobForm, subject: e.target.value })}
+              required
+            />
+
+            <Textarea
+              label='Descripción'
+              placeholder='Descripción de la solicitud generada'
+              value={jobForm.descripcion}
+              onChange={(e) => setJobForm({ ...jobForm, descripcion: e.target.value })}
+              minRows={3}
+              required
+            />
+
+            <Grid>
+              <Grid.Col span={{ base: 12, md: 4 }}>
+                <Select
+                  label='Frecuencia'
+                  data={SCHEDULE_PRESETS}
+                  value={jobForm.preset}
+                  onChange={(value) => setJobForm({ ...jobForm, preset: value || 'daily' })}
+                  required
+                  allowDeselect={false}
+                />
+              </Grid.Col>
+              {jobForm.preset === CUSTOM_CRON_KEY ? (
+                <Grid.Col span={{ base: 12, md: 8 }}>
+                  <TextInput
+                    label='Expresión cron'
+                    placeholder='min hora díaMes mes díaSemana (ej: 0 6 * * 1)'
+                    value={jobForm.customCron}
+                    onChange={(e) => setJobForm({ ...jobForm, customCron: e.target.value })}
+                    required
+                  />
+                </Grid.Col>
+              ) : (
+                <>
+                  <Grid.Col span={{ base: 6, md: 4 }}>
+                    <TextInput
+                      type='date'
+                      label='Fecha de inicio'
+                      value={jobForm.startDate}
+                      onChange={(e) => setJobForm({ ...jobForm, startDate: e.target.value })}
+                      required
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 6, md: 4 }}>
+                    <TextInput
+                      type='time'
+                      label='Hora'
+                      value={jobForm.time}
+                      onChange={(e) => setJobForm({ ...jobForm, time: e.target.value })}
+                      required
+                    />
+                  </Grid.Col>
+                </>
+              )}
+            </Grid>
+
+            {jobForm.preset !== CUSTOM_CRON_KEY && jobForm.preset !== 'daily' && (
+              <Text size='xs' c='dimmed'>
+                {DAY_CLAMP_HINT}
+              </Text>
+            )}
+
+            <Switch
+              label='Activa'
+              checked={jobForm.active}
+              onChange={(e) => setJobForm({ ...jobForm, active: e.currentTarget.checked })}
+            />
+
+            <Group justify='flex-end' gap='sm' mt='sm'>
+              <Button
+                variant='outline'
+                onClick={() => {
+                  setJobModalOpened(false);
+                  resetJobForm();
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleSaveJob}
+                loading={jobSaving}
+                className='bg-blue-600 hover:bg-blue-700'
+              >
+                {editingJobId ? 'Guardar Cambios' : 'Crear Tarea Periódica'}
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
 
         <Modal
           opened={modalOpened}
