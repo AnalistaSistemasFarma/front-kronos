@@ -22,6 +22,11 @@ const eslintConfig = [
       'app/generated/**',
       'mcp/**',
       'coverage/**',
+      // Assets estáticos servidos tal cual (Next.js los expone desde /public);
+      // incluye el worker minificado de pdf.js (public/pdf.worker.min.mjs,
+      // vendido por pdfjs-dist para el visor de PDF de Orion) — no es código
+      // fuente propio y su minificación dispara ruido de lint sin valor real.
+      'public/**',
     ],
   },
   // ---------------------------------------------------------------------------
@@ -95,7 +100,11 @@ const eslintConfig = [
     },
   },
   {
-    files: ['scripts/**/*.cjs'],
+    // Cualquier .cjs del repo (fuera de scripts/, que ya tiene su propio
+    // bloque) es CommonJS por definición — require() ahí no es deuda, es el
+    // formato del archivo. Caso actual: lib/db/ensureDatabaseHost.server.cjs
+    // (failover de red para SQL Server, agregado con la integración Orion).
+    files: ['**/*.cjs'],
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
     },

@@ -78,6 +78,34 @@ export function inferNotificationPath(
   if (fromUrl && !isExternalNotificationPath(fromUrl)) return fromUrl;
 
   const id = bodyId;
+
+  // GSS Firma / Orion: priorizar antes del genérico "solicitud"
+  // (si no, "Autorizar firma · Solicitud #X" caía en view-request).
+  if (
+    text.includes('autorizar firma') ||
+    text.includes('su turno de firma') ||
+    text.includes('autorice para') ||
+    (text.includes('autoriz') && text.includes('firmar'))
+  ) {
+    return '/process/authorization';
+  }
+
+  if (
+    text.includes('firma digital') ||
+    text.includes('documento enviado a firma') ||
+    text.includes('documento firmado') ||
+    text.includes('siguiente firmante') ||
+    text.includes('incluido como firmante') ||
+    text.includes('firma avanzada') ||
+    text.includes('documento rechazado') ||
+    text.includes('documento devuelto') ||
+    (text.includes('firma') && text.includes('synerlink'))
+  ) {
+    if (id) {
+      return `/process/request-general/view-request?id=${id}&from=general-requests`;
+    }
+  }
+
   if (!id) return null;
 
   if (text.includes('ticket') || text.includes('mesa de ayuda')) {
@@ -121,6 +149,16 @@ export function getNotificationActionLabel(path: string | null, title?: string |
 
   if (p.includes('view-ticket') || t.includes('ticket') || t.includes('mesa de ayuda')) {
     return 'Ver ticket';
+  }
+  if (p.includes('/process/authorization') || t.includes('autorizar firma') || t.includes('turno de firma')) {
+    return 'Ir a autorizaciones';
+  }
+  if (
+    t.includes('firma') ||
+    t.includes('firmante') ||
+    (p.includes('view-request') && t.includes('documento'))
+  ) {
+    return 'Ver documento';
   }
   if (p.includes('view-activities') || t.includes('actividad asignada')) {
     return 'Ver actividades';

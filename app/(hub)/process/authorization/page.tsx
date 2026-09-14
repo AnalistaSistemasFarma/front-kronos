@@ -30,6 +30,7 @@ import {
   Modal,
   Tooltip,
   ThemeIcon,
+  UnstyledButton,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -48,9 +49,15 @@ import {
   IconThumbDown,
   IconFileText,
   IconEye,
+  IconNotes,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import AuthorizationDetailModal from './AuthorizationDetailModal';
+
+function parseOrionFileIdFromAuthResolution(resolution?: string | null): string | null {
+  const match = /\[orionFile:([^\]]+)\]/i.exec(String(resolution || ''));
+  return match?.[1]?.trim() || null;
+}
 
 interface AuthorizationRequest {
   id: number;
@@ -62,6 +69,7 @@ interface AuthorizationRequest {
   requester: string;
   created_at: string;
   status: 'pendiente' | 'autorizado' | 'rechazado' | 'cancelado';
+  resolution?: string | null;
 }
 
 interface RawActivity {
@@ -79,6 +87,7 @@ interface RawActivity {
   created_at: string;
   id_creator_request: string;
   creator_request: string | null;
+  resolution?: string | null;
 }
 
 const STATUS_OPTIONS = [
@@ -150,6 +159,8 @@ function AuthorizationBoard() {
     const isMobile = useMediaQuery('(max-width: 768px)');
 
     const [loading, setLoading] = useState(false);
+    /** Overlay a pantalla completa tras autorizar firma (hasta navegar al documento). */
+    const [openingSignDocument, setOpeningSignDocument] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const userName = session?.user?.name || '';
     const [userIdInitialized, setUserIdInitialized] = useState(false);
@@ -305,6 +316,7 @@ function AuthorizationBoard() {
                 requester: a.creator_request || '—',
                 created_at: a.created_at,
                 status: mapStatus(a.id_status),
+                resolution: a.resolution ?? null,
             }));
 
             setRequests(mapped);
@@ -397,7 +409,7 @@ function AuthorizationBoard() {
         taskId: number,
         idStatus: number,
         resolution: string | null
-    ): Promise<boolean> => {
+    ): Promise<{ ok: boolean; error?: string }> => {
         try {
             const response = await fetch('/api/requests-general/update-activities', {
                 method: 'POST',
@@ -407,13 +419,67 @@ function AuthorizationBoard() {
                     id_status: idStatus,
                     id_assigned: userId,
                     resolution,
+                    skip_sequential_gate: true,
                 }),
             });
-            return response.ok;
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                return {
+                    ok: false,
+                    error: typeof data.error === 'string' ? data.error : `Error ${response.status}`,
+                };
+            }
+            return { ok: true };
         } catch (e) {
             console.error('Error updating activity', taskId, e);
-            return false;
+            return { ok: false, error: 'Error de red al autorizar' };
         }
+    };
+
+    const isFirmaAuthorizationRow = (row: AuthorizationRequest) =>
+        /firma/i.test(row.type_authorization || '') ||
+        /firma/i.test(row.subject || '') ||
+        /orionAuth/i.test(row.resolution || '') ||
+        /orionFile/i.test(row.resolution || '');
+
+    /** Ir a la solicitud (o deep-link de firma) desde la fila de autorización. */
+    const goToRelatedRequest = (req: AuthorizationRequest) => {
+        if (!req.id_request_general) return;
+        const fileId = parseOrionFileIdFromAuthResolution(req.resolution);
+        if (isFirmaAuthorizationRow(req)) {
+            const qs = new URLSearchParams({
+                id: String(req.id_request_general),
+                from: 'authorization',
+            });
+            if (fileId) qs.set('orionFileId', fileId);
+            // Pendiente: abrir flujo para firmar; ya autorizada: ver el documento.
+            qs.set('orionAction', req.status === 'pendiente' ? 'sign' : 'view');
+            router.push(`/process/request-general/view-request?${qs.toString()}`);
+            return;
+        }
+        router.push(
+            `/process/request-general/view-request?id=${req.id_request_general}&from=authorization`
+        );
+    };
+
+    const redirectToSignDocument = (params: {
+        requestId: number;
+        fileId?: string | null;
+        signTaskId?: number | null;
+    }) => {
+        setOpeningSignDocument(true);
+        const qs = new URLSearchParams({
+            from: 'authorization',
+            orionAction: 'sign',
+        });
+        if (params.fileId) qs.set('orionFileId', params.fileId);
+        if (params.signTaskId) {
+            qs.set('id', String(params.signTaskId));
+            router.push(`/process/request-general/view-activities?${qs.toString()}`);
+            return;
+        }
+        qs.set('id', String(params.requestId));
+        router.push(`/process/request-general/view-request?${qs.toString()}`);
     };
 
     const confirmAuthorize = async () => {
@@ -421,20 +487,99 @@ function AuthorizationBoard() {
         const ids = targetIds();
         if (ids.length === 0) return;
 
-        setLoading(true);
-        const results = await Promise.all(ids.map((id) => updateActivityStatus(id, 2, null)));
-        const ok = results.filter(Boolean).length;
-        const fail = results.length - ok;
+        const authorizedRows = requests.filter((r) => ids.includes(r.id));
 
+        setLoading(true);
         setAuthorizeModalOpened(false);
-        setSelectedIds(new Set());
-        if (ok > 0) {
-            toast.success(ok > 1 ? `${ok} solicitudes autorizadas` : 'Solicitud autorizada');
+        try {
+            const results = await Promise.all(
+                authorizedRows.map(async (row) => {
+                    if (isFirmaAuthorizationRow(row)) {
+                        try {
+                            const consumeRes = await fetch('/api/integrations/orion/consume-auth', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    taskId: row.id,
+                                    requestId: row.id_request_general,
+                                    fileId: parseOrionFileIdFromAuthResolution(row.resolution),
+                                }),
+                            });
+                            const consumeData = await consumeRes.json().catch(() => ({}));
+                            if (consumeRes.ok && (consumeData.closed > 0 || consumeData.success)) {
+                                return {
+                                    ok: true as const,
+                                    row,
+                                    fileId:
+                                        consumeData.fileId ||
+                                        parseOrionFileIdFromAuthResolution(row.resolution),
+                                    signTaskId: consumeData.signTaskId ?? null,
+                                };
+                            }
+                        } catch (e) {
+                            console.error('consume-auth falló, se intenta update-activities', e);
+                        }
+                    }
+
+                    const updated = await updateActivityStatus(row.id, 2, null);
+                    return {
+                        ok: updated.ok,
+                        error: updated.error,
+                        row,
+                        fileId: parseOrionFileIdFromAuthResolution(row.resolution),
+                        signTaskId: null as number | null,
+                    };
+                })
+            );
+
+            const okResults = results.filter((r) => r.ok);
+            const fail = results.length - okResults.length;
+            const failMessage = results.find((r) => !r.ok)?.error;
+
+            setSelectedIds(new Set());
+            if (fail > 0) {
+                toast.error(failMessage || `${fail} solicitud(es) no se pudieron autorizar`);
+            }
+
+            const singleOk = okResults.length === 1 ? okResults[0] : null;
+            const singleFirma =
+                Boolean(singleOk) &&
+                isFirmaAuthorizationRow(singleOk!.row) &&
+                Boolean(singleOk!.row.id_request_general);
+
+            if (singleFirma && singleOk) {
+                setOpeningSignDocument(true);
+                void fetchActivities(userId, filters);
+                redirectToSignDocument({
+                    requestId: singleOk.row.id_request_general!,
+                    fileId: singleOk.fileId,
+                    signTaskId: singleOk.signTaskId,
+                });
+                return;
+            }
+
+            if (singleOk?.row.id_request_general) {
+                setOpeningSignDocument(true);
+                void fetchActivities(userId, filters);
+                router.push(
+                    `/process/request-general/view-request?id=${singleOk.row.id_request_general}&from=authorization`
+                );
+                return;
+            }
+
+            if (okResults.length > 0) {
+                toast.success(
+                    okResults.length > 1
+                        ? `${okResults.length} solicitudes autorizadas`
+                        : 'Solicitud autorizada'
+                );
+            }
+            await fetchActivities(userId, filters);
+            setLoading(false);
+        } catch {
+            setLoading(false);
+            setOpeningSignDocument(false);
         }
-        if (fail > 0) {
-            toast.error(`${fail} solicitud(es) no se pudieron autorizar`);
-        }
-        await fetchActivities(userId, filters);
     };
 
     const confirmReject = async () => {
@@ -449,7 +594,7 @@ function AuthorizationBoard() {
         setLoading(true);
         const reason = rejectReason.trim();
         const results = await Promise.all(ids.map((id) => updateActivityStatus(id, 3, reason)));
-        const ok = results.filter(Boolean).length;
+        const ok = results.filter((r) => r.ok).length;
         const fail = results.length - ok;
 
         setRejectModalOpened(false);
@@ -510,9 +655,15 @@ function AuthorizationBoard() {
             />
             </Table.Td>
             <Table.Td>
-            <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
-                #{req.id_request_general}
-            </Text>
+            <UnstyledButton
+                onClick={() => goToRelatedRequest(req)}
+                style={{ display: 'block' }}
+                aria-label={`Abrir solicitud ${req.id_request_general}`}
+            >
+                <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
+                    #{req.id_request_general}
+                </Text>
+            </UnstyledButton>
             </Table.Td>
             <Table.Td style={{ minWidth: 220, maxWidth: 340 }}>
             <Text size='sm' fw={500} lineClamp={2}>
@@ -558,20 +709,35 @@ function AuthorizationBoard() {
             </Group>
             </Table.Td>
             <Table.Td style={{ whiteSpace: 'nowrap' }}>
-            <Badge variant='light' color={getStatusColor(req.status)} size='sm'>
-                {getStatusLabel(req.status)}
-            </Badge>
+            <UnstyledButton
+                onClick={() => goToRelatedRequest(req)}
+                aria-label={`Ir a solicitud ${req.id_request_general}`}
+            >
+                <Badge variant='light' color={getStatusColor(req.status)} size='sm'>
+                    {getStatusLabel(req.status)}
+                </Badge>
+            </UnstyledButton>
             </Table.Td>
             <Table.Td>
             <Group gap='xs' wrap='nowrap'>
-                <Tooltip label='Ver detalle'>
+                <Tooltip label='Ir a la solicitud'>
                 <ActionIcon
                     variant='light'
                     color='blue'
+                    onClick={() => goToRelatedRequest(req)}
+                    aria-label='Ir a la solicitud'
+                >
+                    <IconEye size={16} />
+                </ActionIcon>
+                </Tooltip>
+                <Tooltip label='Ver detalle'>
+                <ActionIcon
+                    variant='subtle'
+                    color='gray'
                     onClick={() => openDetailModal(req)}
                     aria-label='Ver detalle'
                 >
-                    <IconEye size={16} />
+                    <IconNotes size={16} />
                 </ActionIcon>
                 </Tooltip>
                 {isPending && (
@@ -625,18 +791,24 @@ function AuthorizationBoard() {
                     disabled={!isPending}
                     aria-label={`Seleccionar solicitud ${req.id_request_general}`}
                 />
+                <UnstyledButton onClick={() => goToRelatedRequest(req)}>
                 <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
                     #{req.id_request_general}
                 </Text>
+                </UnstyledButton>
                 </Group>
+                <UnstyledButton onClick={() => goToRelatedRequest(req)}>
                 <Badge variant='light' color={getStatusColor(req.status)} size='sm'>
                 {getStatusLabel(req.status)}
                 </Badge>
+                </UnstyledButton>
             </Group>
 
+            <UnstyledButton onClick={() => goToRelatedRequest(req)} style={{ textAlign: 'left' }}>
             <Text size='sm' fw={500} lineClamp={2}>
                 {req.subject}
             </Text>
+            </UnstyledButton>
 
             <Group gap={6} wrap='nowrap'>
                 <IconBuilding size={14} className='text-gray-400' />
@@ -665,6 +837,17 @@ function AuthorizationBoard() {
                 mt='xs'
                 fullWidth
                 leftSection={<IconEye size={14} />}
+                onClick={() => goToRelatedRequest(req)}
+            >
+                Ir a la solicitud
+            </Button>
+
+            <Button
+                size='xs'
+                variant='subtle'
+                color='gray'
+                fullWidth
+                leftSection={<IconNotes size={14} />}
                 onClick={() => openDetailModal(req)}
             >
                 Ver detalle
@@ -940,7 +1123,45 @@ function AuthorizationBoard() {
 
             {/* Contenido */}
             <Card shadow='sm' radius='md' withBorder className='overflow-hidden' pos='relative'>
-            <LoadingOverlay visible={loading} />
+            <LoadingOverlay
+                visible={loading && !openingSignDocument}
+                zIndex={20}
+                overlayProps={{ blur: 1 }}
+            />
+
+            {(loading || openingSignDocument) && (
+                <Box
+                    role='status'
+                    aria-live='polite'
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        zIndex: 400,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: 'color-mix(in srgb, var(--mantine-color-body) 72%, transparent)',
+                        backdropFilter: 'blur(3px)',
+                        padding: 24,
+                    }}
+                >
+                    <Card shadow='md' radius='md' withBorder p='xl' style={{ maxWidth: 420, width: '100%' }}>
+                        <Stack align='center' gap='md'>
+                            <Loader size='lg' />
+                            <Text fw={700} ta='center'>
+                                {openingSignDocument
+                                    ? 'Abriendo el documento para firmar…'
+                                    : 'Autorizando…'}
+                            </Text>
+                            <Text size='sm' c='dimmed' ta='center'>
+                                {openingSignDocument
+                                    ? 'Espere un momento. Se abrirá el asistente de firma.'
+                                    : 'Confirmando la autorización en SynerLink.'}
+                            </Text>
+                        </Stack>
+                    </Card>
+                </Box>
+            )}
 
             <Group justify='space-between' mb='md'>
                 <Title order={3} className='flex items-center gap-2'>
@@ -1031,10 +1252,19 @@ function AuthorizationBoard() {
                 </Text>
             </Group>
             <Group justify='flex-end'>
-                <Button variant='default' onClick={() => setAuthorizeModalOpened(false)}>
+                <Button
+                    variant='default'
+                    onClick={() => setAuthorizeModalOpened(false)}
+                    disabled={loading || openingSignDocument}
+                >
                 Cancelar
                 </Button>
-                <Button color='green' leftSection={<IconCheck size={16} />} onClick={confirmAuthorize}>
+                <Button
+                    color='green'
+                    leftSection={<IconCheck size={16} />}
+                    onClick={() => void confirmAuthorize()}
+                    loading={loading || openingSignDocument}
+                >
                 Autorizar
                 </Button>
             </Group>

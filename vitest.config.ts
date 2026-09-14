@@ -9,6 +9,8 @@ export default defineConfig({
     alias: {
       // Replica el path alias "@/*" del tsconfig para que los imports funcionen.
       '@': fileURLToPath(new URL('./', import.meta.url)),
+      // `server-only` lanza en runtime de cliente; en Vitest (Node) es un no-op.
+      'server-only': fileURLToPath(new URL('./vitest.server-only-stub.ts', import.meta.url)),
     },
   },
   test: {

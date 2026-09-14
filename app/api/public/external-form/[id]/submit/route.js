@@ -200,7 +200,7 @@ export async function POST(req, { params }) {
       );
     }
 
-    const { id_request: newRequestId, processEmail, taskEmails } = result;
+    const { id_request: newRequestId, processEmail, processEmails, taskEmails } = result;
 
     // Notifica al encargado del proceso (y responsables de tareas), igual que create-request.
     fireAndForgetNotification(
@@ -208,6 +208,7 @@ export async function POST(req, { params }) {
         requestId: newRequestId,
         subject,
         processEmail,
+        processEmails,
         taskEmails,
         requestUrl: null,
       })

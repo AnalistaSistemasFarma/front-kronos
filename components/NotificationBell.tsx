@@ -44,7 +44,7 @@ interface Notification {
   created_at: string;
 }
 
-const POLL_INTERVAL_MS = 30_000;
+const POLL_INTERVAL_MS = 90_000;
 
 function formatRelative(date: string) {
   const diff = Date.now() - new Date(date).getTime();
@@ -90,7 +90,7 @@ export default function NotificationBell() {
   const router = useRouter();
   const userEmail = session?.user?.email;
   const isAuthenticated = status === 'authenticated' && Boolean(userEmail);
-  const { isSupported, isSubscribed, permission, loading: pushLoading, subscribe, unsubscribe } =
+  const { isSupported, isAvailable, isSubscribed, permission, loading: pushLoading, lastError, subscribe, unsubscribe } =
     usePushNotifications(userEmail);
 
   const [opened, setOpened] = useState(false);
@@ -179,20 +179,28 @@ export default function NotificationBell() {
       void fetchNotifications();
     };
 
-    const initialTimer = window.setTimeout(run, 800);
-    const interval = window.setInterval(run, POLL_INTERVAL_MS);
+    const initialTimer = window.setTimeout(run, 4000);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      run();
+    }, POLL_INTERVAL_MS);
 
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
         void fetchNotifications();
       }
     };
+    const onRefresh = () => {
+      void fetchNotifications();
+    };
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('synerlink:notifications-refresh', onRefresh);
 
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('synerlink:notifications-refresh', onRefresh);
       abortRef.current?.abort();
     };
   }, [isAuthenticated, fetchNotifications]);
@@ -258,7 +266,19 @@ export default function NotificationBell() {
     [router]
   );
 
-  const handleClick = async (n: Notification) => {
+  const prefetchDetail = useCallback(
+    (path: string) => {
+      if (!path || isExternalNotificationPath(path)) return;
+      try {
+        router.prefetch(path);
+      } catch {
+        /* prefetch best-effort */
+      }
+    },
+    [router]
+  );
+
+  const handleClick = (n: Notification) => {
     const detailPath = inferNotificationPath(n);
 
     if (!detailPath) {
@@ -266,24 +286,22 @@ export default function NotificationBell() {
       return;
     }
 
+    // Navegar primero; marcar leída en segundo plano (no esperar red).
+    setOpened(false);
+    navigateToDetail(detailPath);
+
     if (!n.read_at) {
-      try {
-        await apiFetch('/api/notifications/read', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: n.id }),
-        });
-      } catch {
-        /* no bloquear navegación */
-      }
-      // Sale de la lista de no leídas; la de leídas se recargará al verla.
       setNotifications((prev) => prev.filter((x) => x.id !== n.id));
       setUnreadCount((c) => Math.max(0, c - 1));
       setReadLoaded(false);
+      void apiFetch('/api/notifications/read', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: n.id }),
+      }).catch(() => {
+        /* la UI ya avanzó; el próximo poll corrige el contador si falló */
+      });
     }
-
-    setOpened(false);
-    navigateToDetail(detailPath);
   };
 
   const markAllRead = async () => {
@@ -313,13 +331,16 @@ export default function NotificationBell() {
       return;
     }
     if (isSubscribed) {
-      await unsubscribe();
-      toast.success('Notificaciones push desactivadas');
+      const { ok, error } = await unsubscribe();
+      if (ok) toast.success('Notificaciones push desactivadas');
+      else toast.error(error || 'No se pudieron desactivar las notificaciones push');
     } else {
-      await subscribe();
-      if (Notification.permission === 'granted') {
-        toast.success('Notificaciones push activadas');
-      }
+      const { ok, error } = await subscribe();
+      if (ok) toast.success('Notificaciones push activadas');
+      else
+        toast.error(error || lastError || 'No se pudieron activar las notificaciones push', {
+          duration: 7000,
+        });
     }
   };
 
@@ -405,7 +426,12 @@ export default function NotificationBell() {
             ) : (
               <ul className='list-none m-0 p-0'>
                 {notifications.map((n) => (
-                  <NotificationRow key={n.id} notification={n} onOpen={handleClick} />
+                  <NotificationRow
+                    key={n.id}
+                    notification={n}
+                    onOpen={handleClick}
+                    onPrefetch={prefetchDetail}
+                  />
                 ))}
               </ul>
             )
@@ -420,13 +446,18 @@ export default function NotificationBell() {
           ) : (
             <ul className='list-none m-0 p-0'>
               {readNotifications.map((n) => (
-                <NotificationRow key={n.id} notification={n} onOpen={handleClick} />
+                <NotificationRow
+                  key={n.id}
+                  notification={n}
+                  onOpen={handleClick}
+                  onPrefetch={prefetchDetail}
+                />
               ))}
             </ul>
           )}
         </ScrollArea.Autosize>
 
-        {isSupported && (
+        {isSupported && isAvailable && (
           <Group
             justify='space-between'
             px='md'
@@ -452,9 +483,11 @@ export default function NotificationBell() {
 function NotificationRow({
   notification: n,
   onOpen,
+  onPrefetch,
 }: {
   notification: Notification;
   onOpen: (n: Notification) => void;
+  onPrefetch?: (path: string) => void;
 }) {
   const detailPath = inferNotificationPath(n);
   const actionLabel = getNotificationActionLabel(detailPath, n.title);
@@ -466,6 +499,12 @@ function NotificationRow({
     <li>
       <UnstyledButton
         onClick={() => onOpen(n)}
+        onMouseEnter={() => {
+          if (detailPath) onPrefetch?.(detailPath);
+        }}
+        onFocus={() => {
+          if (detailPath) onPrefetch?.(detailPath);
+        }}
         disabled={!hasLink}
         w='100%'
         aria-label={hasLink ? `${actionLabel}: ${n.title}` : n.title}
