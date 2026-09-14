@@ -47,13 +47,22 @@ export async function GET(req) {
         ORDER BY c.company
     `;
 
-    const [typeRes, subtypesRes, departmentsRes, usersRes, companiesRes] =
+    const queryStatusAsset = `
+        SELECT
+            sta.id, sta.status_asset as estado
+        FROM
+            status_asset sta
+        ORDER BY sta.status_asset
+    `;
+
+    const [typeRes, subtypesRes, departmentsRes, usersRes, companiesRes, statusesRes] =
       await Promise.all([
         pool.request().query(queryTypeAsset),
         pool.request().query(querySubTypeAsset),
         pool.request().query(queryDepartments),
         pool.request().query(queryUsers),
         pool.request().query(queryCompanies),
+        pool.request().query(queryStatusAsset),
       ]);
 
 
@@ -64,6 +73,7 @@ export async function GET(req) {
         departments: departmentsRes.recordset,
         users: usersRes.recordset,
         companies: companiesRes.recordset,
+        statuses: statusesRes.recordset,
       },
       { status: 200 }
     );
