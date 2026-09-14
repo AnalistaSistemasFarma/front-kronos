@@ -168,15 +168,33 @@ export default function OrionAttachmentTableRow({
     if (d.api?.enabled) d.api.actions.openDocumentEditor(d.meta, { initialStep });
   };
 
-  // Original vía proxy (versionId=original): solo creador del flujo / admin.
-  const originalFileHref =
+  // Vista vigente (última con firmas acumuladas). El original solo vía historial de versiones.
+  const isClosed =
+    String(d.state.status || '').toUpperCase() === 'FIRMADO' ||
+    (d.signers.length > 0 && d.completedCount === d.signers.length);
+
+  const latestFileHref =
     d.hasOrionDoc && props.requestId && props.fileId
+      ? buildOrionSignedFileProxyUrl({
+          requestId: props.requestId,
+          fileId: props.fileId,
+        })
+      : String(d.state.originalFileUrl || '').trim() || openUrl || null;
+
+  const originalFileHref =
+    d.hasOrionDoc && props.requestId && props.fileId && d.api?.canViewVersions
       ? buildOrionSignedFileProxyUrl({
           requestId: props.requestId,
           fileId: props.fileId,
           versionId: 'original',
         })
-      : String(d.state.originalFileUrl || '').trim() || openUrl || null;
+      : null;
+
+  const primaryOpenHref =
+    (d.hasOrionDoc && (d.completedCount > 0 || isClosed) ? latestFileHref : null) ||
+    openUrl ||
+    latestFileHref ||
+    originalFileHref;
 
   const statusColor =
     d.displayStatus.color === 'yellow'
@@ -184,9 +202,6 @@ export default function OrionAttachmentTableRow({
       : d.displayStatus.color === 'gray'
         ? 'gray'
         : d.displayStatus.color;
-  const isClosed =
-    String(d.state.status || '').toUpperCase() === 'FIRMADO' ||
-    (d.signers.length > 0 && d.completedCount === d.signers.length);
   // Misma regla que Versiones: no firmantes ni solo “Preparar firma”.
   const canAccessOriginalFile = Boolean(d.api?.canViewVersions);
 
@@ -299,9 +314,17 @@ export default function OrionAttachmentTableRow({
         }}
       >
         {!d.enabled && !d.canToggleIntent ? (
-          <Text size='sm' c='dimmed'>
-            —
-          </Text>
+          <div className='doc-dossier'>
+            <div className='doc-dossier__rail' />
+            <Stack gap={4} className='doc-dossier__body'>
+              <ActionLink
+                icon={<IconFile size={15} stroke={1.6} />}
+                label='Abrir / descargar'
+                href={primaryOpenHref}
+                disabled={!primaryOpenHref}
+              />
+            </Stack>
+          </div>
         ) : !d.forSigning ? (
           <div className='doc-dossier'>
             <div className='doc-dossier__rail' />
@@ -327,8 +350,8 @@ export default function OrionAttachmentTableRow({
               <ActionLink
                 icon={<IconFile size={15} stroke={1.6} />}
                 label='Descargar'
-                href={openUrl || originalFileHref}
-                disabled={!openUrl && !originalFileHref}
+                href={primaryOpenHref}
+                disabled={!primaryOpenHref}
               />
             </Stack>
           </div>
@@ -380,12 +403,22 @@ export default function OrionAttachmentTableRow({
                 />
               ) : null}
 
-              {canAccessOriginalFile ? (
+              {canAccessOriginalFile && (latestFileHref || originalFileHref) ? (
                 <ActionLink
                   icon={<IconFile size={15} stroke={1.6} />}
-                  label='Archivo'
-                  href={originalFileHref}
-                  disabled={!originalFileHref}
+                  label={d.completedCount > 0 || isClosed ? 'Ver documento' : 'Archivo'}
+                  href={
+                    d.completedCount > 0 || isClosed
+                      ? latestFileHref || primaryOpenHref
+                      : originalFileHref || primaryOpenHref
+                  }
+                  disabled={!(latestFileHref || originalFileHref || primaryOpenHref)}
+                />
+              ) : primaryOpenHref ? (
+                <ActionLink
+                  icon={<IconFile size={15} stroke={1.6} />}
+                  label='Ver documento'
+                  href={primaryOpenHref}
                 />
               ) : null}
 

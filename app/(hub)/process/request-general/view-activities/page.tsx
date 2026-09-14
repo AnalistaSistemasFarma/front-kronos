@@ -2083,7 +2083,15 @@ function ViewRequestPage() {
 
                     if (showOrionPanel && isPdf) {
                       const orionState = getOrionDocForFile(String(file.id), file.name);
+                      const orionLatest =
+                        orionState?.orionDocumentId && request.id_request_general
+                          ? resolveOrionPdfAccessUrl(orionState, null, {
+                              requestId: request.id_request_general,
+                              fileId: fileId || String(file.id),
+                            })
+                          : null;
                       const pdfUrl =
+                        orionLatest ||
                         getFolderFileUrl(file) ||
                         file.webUrl ||
                         resolveAttachmentDownloadUrl(file) ||
@@ -2097,7 +2105,7 @@ function ViewRequestPage() {
                           fileName={file.name}
                           pdfUrl={pdfUrl}
                           fileSizeLabel={sizeLabel}
-                          openUrl={openUrl}
+                          openUrl={orionLatest || openUrl}
                           previewUrl={file.webUrl ?? null}
                           processName={request?.process || request?.category || null}
                           requesterName={request?.name_requester || null}

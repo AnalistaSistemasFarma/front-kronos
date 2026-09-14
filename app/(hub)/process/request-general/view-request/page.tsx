@@ -2802,11 +2802,19 @@ function ViewRequestPage() {
                       .join(' · ');
 
                     if (showOrionPanel && /\.pdf$/i.test(file.name)) {
+                      const orionState = getOrionDocForFile(fileId, file.name);
+                      const orionLatest =
+                        orionState?.orionDocumentId
+                          ? resolveOrionPdfAccessUrl(orionState, null, {
+                              requestId: request.id,
+                              fileId,
+                            })
+                          : null;
                       const pdfUrl =
+                        orionLatest ||
                         getFolderPdfDownloadUrl(file) ||
                         resolveAttachmentDownloadUrl(file) ||
                         `/api/integrations/orion/signed-file?requestId=${request.id}&fileId=${encodeURIComponent(fileId)}`;
-                      const orionState = getOrionDocForFile(fileId, file.name);
                       return (
                         <OrionAttachmentTableRow
                           key={file.id}
@@ -2816,7 +2824,7 @@ function ViewRequestPage() {
                           fileName={file.name}
                           pdfUrl={pdfUrl}
                           fileSizeLabel={sizeLabel}
-                          openUrl={openUrl}
+                          openUrl={orionLatest || openUrl}
                           previewUrl={file.webUrl ?? null}
                           processName={request?.process || request?.category || null}
                           requesterName={request?.requester || null}

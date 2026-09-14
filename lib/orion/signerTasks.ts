@@ -1,6 +1,5 @@
 import 'server-only';
 import sql from 'mssql';
-import { notifyActivityAssigned } from '../notificationEvents.js';
 import type { OrionSignatureState, OrionSignerState } from './types';
 import {
   allSignersCompleted,
@@ -240,22 +239,9 @@ async function openSignerTask(
           WHERE id = @id AND id_status NOT IN (2, 3)
         `);
     }
-    // Reavisar al firmante en turno aunque la tarea ya existiera.
-    if (params.notifyExistingTurn) {
-      try {
-        await notifyActivityAssigned({
-          taskId: existing,
-          userId: params.userId,
-          requestId: params.requestId,
-          subject: params.subject ?? undefined,
-          taskName: params.fileName
-            ? `${params.template.task} (${params.fileName})`
-            : params.template.task,
-        });
-      } catch (err) {
-        console.warn('[orion/signerTasks] Re-notificación de tarea existente falló:', err);
-      }
-    }
+    // No re-notificar aquí: el aviso de turno lo envía createOrionSignerAuthorizations
+    // ("Autorizar firma" / "Su turno"). Evita duplicar con "Actividad asignada".
+    void params.notifyExistingTurn;
     return { taskId: existing, created: false };
   }
 
@@ -278,20 +264,7 @@ async function openSignerTask(
   const taskId = inserted.recordset[0]?.id as number | undefined;
   if (!taskId) return null;
 
-  try {
-    await notifyActivityAssigned({
-      taskId,
-      userId: params.userId,
-      requestId: params.requestId,
-      subject: params.subject ?? undefined,
-      taskName: params.fileName
-        ? `${params.template.task} (${params.fileName})`
-        : params.template.task,
-    });
-  } catch (err) {
-    console.warn('[orion/signerTasks] No se pudo notificar actividad asignada:', err);
-  }
-
+  // La notificación de turno la emite signerAuthorizations (una sola campana).
   return { taskId, created: true };
 }
 

@@ -757,16 +757,24 @@ export default function OrionSignaturePanel({
       }
 
       setDocumentModalOpen(true);
-      // Preferir OneDrive / original; signed-file solo si no hay URL directa.
-      const previewUrl =
-        (isLikelyPdfFetchUrl(file.pdfUrl) ? file.pdfUrl : null) ||
-        (fileState.originalFileUrl && isLikelyPdfFetchUrl(fileState.originalFileUrl)
-          ? fileState.originalFileUrl
-          : null) ||
-        (fileState.orionDocumentId
-          ? `/api/integrations/orion/signed-file?requestId=${requestId}&fileId=${encodeURIComponent(file.fileId)}&versionId=original`
-          : null) ||
-        file.pdfUrl;
+      // Borrador / sin firmas: original OneDrive. Con firmas: PDF vigente (sin versionId=original).
+      const hasSignedProgress = (fileState.signers ?? []).some((s) =>
+        isSignerCompleted(s.status)
+      );
+      const previewUrl = hasSignedProgress
+        ? resolveOrionPdfAccessUrl(fileState, file.pdfUrl ?? null, {
+            requestId,
+            fileId: file.fileId,
+          }) ||
+          file.pdfUrl
+        : (isLikelyPdfFetchUrl(file.pdfUrl) ? file.pdfUrl : null) ||
+          (fileState.originalFileUrl && isLikelyPdfFetchUrl(fileState.originalFileUrl)
+            ? fileState.originalFileUrl
+            : null) ||
+          (fileState.orionDocumentId
+            ? `/api/integrations/orion/signed-file?requestId=${requestId}&fileId=${encodeURIComponent(file.fileId)}&versionId=original`
+            : null) ||
+          file.pdfUrl;
 
       // Abrir modal ya; rúbrica en paralelo (no bloquear preview).
       const rubricPromise = loadUserSignature();
