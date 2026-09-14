@@ -1,7 +1,7 @@
 'use client';
 
 import { Group, Paper, Text, ThemeIcon, UnstyledButton } from '@mantine/core';
-import { IconClipboardList, IconChecklist, IconTicket } from '@tabler/icons-react';
+import { IconClipboardList, IconChecklist, IconTicket, IconRobot } from '@tabler/icons-react';
 import {
   useDashboardTab,
   type DashboardTab,
@@ -31,6 +31,12 @@ const navItems: {
     label: 'Tickets',
     description: 'Mesa de ayuda',
     icon: IconTicket,
+  },
+  {
+    tab: 'agentes',
+    label: 'Agentes',
+    description: 'Uso y tendencia',
+    icon: IconRobot,
   },
 ];
 

@@ -25,6 +25,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: projectRoot,
   },
+  serverExternalPackages: ['mssql', 'tedious', 'tarn'],
   typescript: {
     ignoreBuildErrors: true,
   },

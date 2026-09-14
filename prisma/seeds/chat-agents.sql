@@ -1,5 +1,5 @@
 /*
-  Seed del módulo "Asistentes IA" (chat de agentes en SynerLink).
+  Seed del módulo "Chat" (chat de agentes y grupos en SynerLink).
   Idempotente y APPEND-ONLY. SQL Server. NO contiene DROP/ALTER/TRUNCATE, y no
   toca ninguna tabla del módulo de Gestión Documental (SGD).
 
@@ -9,7 +9,7 @@
        6 y 7 son otras empresas. Sembrar por id dejaría el módulo colgado de
        la empresa equivocada en pruebas: por eso todo aquí se resuelve por
        nombre.
-    2. Crea el Process 'Asistentes IA' (contenedor propio del módulo, no se
+    2. Crea el Process 'Chat' (contenedor propio del módulo, no se
        cuelga de 'Procesos' como Organigrama/Métricas: es un módulo con
        identidad propia en el hub).
     3. Crea los dos subprocesos que SON el permiso:
@@ -34,7 +34,7 @@
 
 DECLARE @AdminEmail   NVARCHAR(255) = 'nicolas.rivera@gsslatam.com';
 DECLARE @CompanyName  NVARCHAR(255) = 'GSS';
-DECLARE @ProcessName  NVARCHAR(255) = 'Asistentes IA';
+DECLARE @ProcessName  NVARCHAR(255) = 'Chat';
 DECLARE @ModuleUrl    NVARCHAR(255) = '/process/chat';
 DECLARE @AgentCode    NVARCHAR(60)  = 'horus';
 DECLARE @AgentName    NVARCHAR(120) = 'Orus';
@@ -79,7 +79,7 @@ DECLARE @ModuleSubId INT = (
 IF @ModuleSubId IS NULL
 BEGIN
   INSERT INTO [dbo].[subprocess] (subprocess, id_process, subprocess_url)
-  VALUES (N'Asistentes IA', @ProcessId, @ModuleUrl);
+  VALUES (N'Chat', @ProcessId, @ModuleUrl);
   SET @ModuleSubId = SCOPE_IDENTITY();
 END
 

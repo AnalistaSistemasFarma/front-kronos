@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
-import axios from 'axios';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useGetMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
@@ -70,6 +69,10 @@ import {
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 import { sanitizeOneDriveName } from '../../../../../lib/onedriveName';
+import {
+  ensureOneDriveFolderPath,
+  uploadFileToOneDriveFolder,
+} from '../../../../../lib/onedrive/graphFolderUpload';
 import { isSapField } from '../../../../../lib/requests-general/sapSources';
 import { DOCUMENT_WORKFLOW_PROCESS_NAME } from '../../../../../lib/document-management/workflowStates';
 import {
@@ -81,6 +84,19 @@ import {
   type TableColumn,
   type TableRow,
 } from '../../../../../lib/requests-general/tableField';
+import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
+
+function readSelectedCompanyId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const stored = localStorage.getItem('selectedCompany');
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as { id?: number };
+    return parsed?.id != null ? String(parsed.id) : null;
+  } catch {
+    return null;
+  }
+}
 import SapOptionSelect from './SapOptionSelect';
 import TableFieldInput from './TableFieldInput';
 import toast from 'react-hot-toast';
@@ -126,6 +142,7 @@ interface CompanyData {
 interface CategoryData {
   id: number;
   category: string;
+  id_company?: number;
 }
 
 interface ProcessCategoryData {
@@ -156,7 +173,7 @@ interface FolderFile {
 function RequestBoard() {
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
-  const [userId, setUserId] = useState<number | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [userIdInitialized, setUserIdInitialized] = useState(false);
 
@@ -280,32 +297,44 @@ function RequestBoard() {
       router.push('/login');
       return;
     }
-    fetchFormData();
-  }, [session, status, router]);
 
-  useEffect(() => {
-    if (status === 'loading') return;
-    if (!session) {
-      router.push('/login');
-      return;
-    }
+    const controller = new AbortController();
+    let cancelled = false;
 
-    if (!userIdInitialized) {
-      if (userName && !userId) {
-        getUserIdByName(userName).then((id) => {
-          if (id) {
-            setUserId(id);
-            setUserIdInitialized(true);
-            fetchTicketsWithUserId(id);
-          } else {
-            setUserIdInitialized(true);
-          }
-        });
-      } else if (!userName) {
+    const loadInitialData = async () => {
+      await fetchFormData(controller.signal);
+      if (cancelled || userIdInitialized) return;
+
+      const sessionUserId = session.user?.id ? String(session.user.id) : null;
+      if (sessionUserId) {
+        setUserId(sessionUserId);
+        setUserIdInitialized(true);
+        await fetchTicketsWithUserId(sessionUserId);
+        return;
+      }
+
+      if (userName) {
+        const id = await getUserIdByName(userName, controller.signal);
+        if (cancelled) return;
+        if (id) {
+          setUserId(String(id));
+          setUserIdInitialized(true);
+          await fetchTicketsWithUserId(String(id));
+        } else {
+          setUserIdInitialized(true);
+        }
+      } else {
         setUserIdInitialized(true);
       }
-    }
-  }, [status, session, userName, userId, userIdInitialized, router]);
+    };
+
+    void loadInitialData();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [session, status, router]);
 
   useEffect(() => {
     const globalStore = localStorage.getItem('global-store');
@@ -547,7 +576,7 @@ function RequestBoard() {
   };
 
   const fetchTicketsWithUserId = async (
-    userIdToUse: number,
+    userIdToUse: string,
     filtersToUse: typeof filters = filters
   ) => {
     try {
@@ -618,14 +647,15 @@ function RequestBoard() {
     }
   };
 
-  const getUserIdByName = async (userName: string): Promise<number | null> => {
+  const getUserIdByName = async (
+    userName: string,
+    signal?: AbortSignal
+  ): Promise<string | null> => {
     if (!session || status !== 'authenticated') {
-      console.error('No hay sesión activa para realizar esta operación');
       return null;
     }
 
     if (!userName || userName.trim() === '') {
-      console.error('El nombre de usuario es requerido');
       return null;
     }
 
@@ -641,17 +671,20 @@ function RequestBoard() {
         headers: {
           'Content-Type': 'application/json',
         },
+        signal,
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        if (response.status === 499) return null;
+        const errorData = await response.json().catch(() => ({}));
         console.error('Error al obtener ID de usuario:', errorData.error);
         return null;
       }
 
       const data = await response.json();
-      return data.success ? data.userId : null;
+      return data.success ? String(data.userId) : null;
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return null;
       console.error('Error en la llamada al endpoint:', error);
       return null;
     } finally {
@@ -659,12 +692,12 @@ function RequestBoard() {
     }
   };
 
-  const fetchFormData = async () => {
+  const fetchFormData = async (signal?: AbortSignal) => {
     try {
       setFormDataLoading(true);
       setFormDataError(null);
 
-      const response = await fetch(`/api/requests-general/consult-request`);
+      const response = await fetch(`/api/requests-general/consult-request`, { signal });
 
       if (response.ok) {
         const data: ConsultResponse = await response.json();
@@ -672,13 +705,24 @@ function RequestBoard() {
           data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
         );
 
-        const defaultCompanyId = '3';
-        await fetchCategoriesByCompanyOnLoad(defaultCompanyId, data.processCategories);
+        const defaultCompanyId =
+          readSelectedCompanyId() ??
+          (data.companies.length === 1 ? String(data.companies[0].id_company) : '');
 
-        setFormData((prev) => ({
-          ...prev,
-          company: defaultCompanyId,
-        }));
+        if (defaultCompanyId) {
+          const companyIdNum = Number(defaultCompanyId);
+          setCategories(
+            data.categories
+              .filter((c: CategoryData) => c.id_company === companyIdNum)
+              .map((c: CategoryData) => ({ value: c.id.toString(), label: c.category }))
+          );
+          setFormData((prev) => ({
+            ...prev,
+            company: defaultCompanyId,
+          }));
+        } else {
+          setCategories([]);
+        }
 
         setProcessCategories(
           data.processCategories
@@ -695,11 +739,12 @@ function RequestBoard() {
         if (data.assignedUsers) {
           setAssignedUsers(data.assignedUsers.map((u) => ({ value: u.name, label: u.name })));
         }
-      } else {
+      } else if (response.status !== 499) {
         console.error('Frontend - fetchFormData failed with status:', response.status);
         setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       console.error('Error fetching form data:', err);
       setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
     } finally {
@@ -709,24 +754,25 @@ function RequestBoard() {
 
   const fetchCategoriesByCompanyOnLoad = async (
     companyId: string,
-    allProcessCategories: ProcessCategoryData[]
+    signal?: AbortSignal
   ) => {
     try {
       const url = `/api/requests-general/consult-request?companyId=${companyId}`;
-      const response = await fetch(url);
+      const response = await fetch(url, { signal });
 
       if (response.ok) {
         const data = await response.json();
         setCategories(
           data.categories.map((c: CategoryData) => ({ value: c.id.toString(), label: c.category }))
         );
-      } else {
+      } else if (response.status !== 499) {
         console.error(
           'Frontend - fetchCategoriesByCompanyOnLoad failed with status:',
           response.status
         );
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       console.error('Error fetching categories by company on load:', err);
     }
   };
@@ -782,6 +828,7 @@ function RequestBoard() {
   const collectVisibleFieldErrors = (): Record<string, string> => {
     const errors: Record<string, string> = {};
     for (const field of visibleFields) {
+      if (field.field_type === ORION_SIGNATURE_FIELD_TYPE) continue;
       const val = fieldValues[field.id];
       if (field.field_type === TABLE_FIELD_TYPE) {
         const columns = parseTableConfig(field.config_json).columns;
@@ -839,6 +886,22 @@ function RequestBoard() {
         if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
           errors[`file_${doc.id}`] = `Debe adjuntar el documento: ${doc.file_label}`;
         }
+      }
+    }
+
+    const hasOrionSignatureField = visibleFields.some(
+      (f) => f.field_type === ORION_SIGNATURE_FIELD_TYPE
+    );
+    // PDF obligatorio solo si el formulario del proceso aún trae campo orion_signature.
+    if (hasOrionSignatureField) {
+      const isPdf = (name: string) => /\.pdf$/i.test(name || '');
+      const pdfFromRequired = Object.values(filesByDoc)
+        .flat()
+        .some((f) => isPdf(f.file?.name || ''));
+      const pdfFromAttached = attachedFiles.some((f) => isPdf(f.file?.name || ''));
+      if (!pdfFromRequired && !pdfFromAttached) {
+        errors.orion_pdf =
+          'Debe adjuntar al menos un documento PDF para el flujo de firma digital.';
       }
     }
 
@@ -1001,6 +1064,10 @@ function RequestBoard() {
 
       const newTicket = await response.json();
       const requestId = Number(newTicket.id_request);
+      // Refrescar campana (encargado/asignado en la misma sesión la ve al instante).
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('synerlink:notifications-refresh'));
+      }
       const filesToUpload: { file: File; label?: string }[] = [
         ...visibleRequiredFiles.flatMap((doc) =>
           (filesByDoc[doc.id] || []).map((f) => ({ file: f.file, label: doc.file_label }))
@@ -1021,7 +1088,7 @@ function RequestBoard() {
 
           // SAPSEND: reenviar los adjuntos (si es solicitud de tesorería). No bloquea; el servidor
           // aplica el gate y lee los archivos desde OneDrive.
-          fetch('/api/requests-general/sapsend-files', {
+          void fetch('/api/requests-general/sapsend-files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: requestId }),
@@ -1031,24 +1098,43 @@ function RequestBoard() {
           console.error('Error al subir archivos:', uploadErr);
           toast.error(
             `Solicitud #${requestId} creada, pero NO se pudieron subir los archivos. ` +
-              `Ábrala desde la lista y cárguelos en la vista de la solicitud.`,
+              `Cárguelos en la vista de la solicitud.`,
             { duration: 10000 }
           );
         }
       }
 
-      try {
-        await sendRequestEmailNotification(
-          requestId,
-          formData.subject,
-          parseInt(formData.process)
-        );
-      } catch (notifyErr) {
+      // Notificación en segundo plano: no retrasa la llegada a la solicitud.
+      void sendRequestEmailNotification(
+        requestId,
+        formData.subject,
+        parseInt(formData.process)
+      ).catch((notifyErr) => {
         console.error('Error en notificación por correo:', notifyErr);
-      }
+      });
 
       if (uploadOk) {
         toast.success(`Solicitud #${requestId} creada correctamente.`);
+      }
+
+      // Ir de inmediato a la solicitud creada (creador marca PDFs / sigue el flujo).
+      if (Number.isInteger(requestId) && requestId > 0) {
+        try {
+          sessionStorage.setItem(
+            'selectedRequest',
+            JSON.stringify({
+              id: requestId,
+              subject: formData.subject,
+              description: formData.descripcion,
+            })
+          );
+        } catch {
+          sessionStorage.removeItem('selectedRequest');
+        }
+        router.replace(
+          `/process/request-general/view-request?id=${requestId}&from=create-request`
+        );
+        return;
       }
 
       setFormData({
@@ -1080,73 +1166,50 @@ function RequestBoard() {
     token: string
   ) {
     try {
-      const createResponse = await axios.post(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG:/children`,
-        {
-          name: folderName,
-          folder: {},
-          '@microsoft.graph.conflictBehavior': 'replace',
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const folderId = await ensureOneDriveFolderPath(token, [
+        'SAPSEND',
+        'TEC',
+        'SG',
+        folderName,
+      ]);
 
-      if (createResponse.status !== 201) {
-        throw new Error('Error al crear la carpeta.');
+      if (!files?.length) {
+        console.log('No hay archivos seleccionados para subir.');
+        return;
       }
 
-      const folderId = createResponse.data.id;
+      const uploadNames = files.map((file) =>
+        sanitizeOneDriveName(
+          file.label ? `${file.label} - ${file.file.name}` : file.file.name
+        )
+      );
 
-      if (files && files.length > 0) {
-        const uploadNames = files.map((file) =>
-          sanitizeOneDriveName(
-            file.label ? `${file.label} - ${file.file.name}` : file.file.name
-          )
-        );
-
-        const uploadPromises = files.map((file: { file: File; label?: string }, index) =>
-          axios.put(
-            `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${uploadNames[index]}:/content`,
+      const results = await Promise.allSettled(
+        files.map((file, index) =>
+          uploadFileToOneDriveFolder(
+            token,
+            folderId,
+            uploadNames[index],
             file.file,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': file.file.type,
-              },
-            }
+            file.file.type || 'application/octet-stream'
           )
-        );
+        )
+      );
 
-        const results = await Promise.allSettled(uploadPromises);
-
-        const failed: string[] = [];
-        results.forEach((result, index) => {
-          if (
-            result.status === 'fulfilled' &&
-            (result.value.status === 201 || result.value.status === 200)
-          ) {
-            console.log(`Archivo subido: ${uploadNames[index]}`, result.value.data);
-          } else {
-            const reason =
-              result.status === 'rejected'
-                ? result.reason
-                : `status ${result.value.status}`;
-            console.log(`Error al subir el archivo: ${uploadNames[index]}`, reason);
-            failed.push(uploadNames[index]);
-          }
-        });
-
-        if (failed.length > 0) {
-          throw new Error(
-            `No se pudieron subir ${failed.length} archivo(s): ${failed.join(', ')}`
-          );
+      const failed: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          console.log(`Archivo subido: ${uploadNames[index]}`, result.value);
+        } else {
+          console.log(`Error al subir el archivo: ${uploadNames[index]}`, result.reason);
+          failed.push(uploadNames[index]);
         }
-      } else {
-        console.log('No hay archivos seleccionados para subir.');
+      });
+
+      if (failed.length > 0) {
+        throw new Error(
+          `No se pudieron subir ${failed.length} archivo(s): ${failed.join(', ')}`
+        );
       }
     } catch (error) {
       console.error('Error en CheckOrCreateFolderAndUpload:', error);
@@ -2171,12 +2234,18 @@ function RequestBoard() {
                     // Muestra separador de miles (400.000) y guarda el número limpio (400000).
                     const isMoneyField = /valor a pagar|monto/i.test(field.field_label);
                     const isTableField = field.field_type === TABLE_FIELD_TYPE;
+                    const isOrionSignatureField = field.field_type === ORION_SIGNATURE_FIELD_TYPE;
                     return (
                       <Grid.Col
-                        span={{ base: 12, md: isTableField ? 12 : 6 }}
+                        span={{ base: 12, md: isTableField || isOrionSignatureField ? 12 : 6 }}
                         key={field.id}
                       >
-                        {isTableField ? (
+                        {isOrionSignatureField ? (
+                          <Alert color='blue' title={field.field_label} icon={<IconLink size={16} />}>
+                            Tras crear la solicitud podrá marcar PDFs para firmar o solo ver, y
+                            configurar firmantes. Adjunte al menos un PDF.
+                          </Alert>
+                        ) : isTableField ? (
                           <TableFieldInput
                             label={field.field_label}
                             required={field.required}
@@ -2364,6 +2433,11 @@ function RequestBoard() {
                   autoUpload={false}
                   disabled={formDataLoading}
                 />
+                {formErrors.orion_pdf && (
+                  <Text size='sm' c='red' mt='xs'>
+                    {formErrors.orion_pdf}
+                  </Text>
+                )}
               </div>
             )}
 

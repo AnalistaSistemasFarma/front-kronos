@@ -8,13 +8,22 @@ import {
   notifyChatRefresh,
   type ChatConversationDto,
   type ChatMessageDto,
+  type ChatAgentStatusDto,
   type ChatPollDto,
+  type ChatReplyToDto,
   type ChatStatusDto,
 } from '../../lib/chat/client';
 import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
 
 /**
- * El hilo abierto con UN agente: histórico, sondeo en vivo, envío y "leído".
+ * El hilo abierto —con UN agente o un GRUPO—: histórico, sondeo en vivo, envío
+ * y "leído".
+ *
+ * Las dos clases de hilo comparten TODO lo de abajo (sondeo adaptativo, envío
+ * optimista, carga de lo viejo, marca de leído) y solo se diferencian en cómo
+ * se abren: con un agente hay que pedirle al servidor el hilo (que lo crea si
+ * no existía) y un grupo ya existe, así que se abre por su id. De ahí el
+ * `ChatTarget`.
  *
  * -------------------------------------------------------------------------
  * EL SONDEO LO MANDA EL SERVIDOR
@@ -32,24 +41,50 @@ import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
 /** Respaldo si el servidor no mandara cadencia (no debería ocurrir). */
 const FALLBACK_POLL_MS = 5_000;
 
+/**
+ * Qué hilo abrir.
+ *   - `agent`: la conversación de esta persona con ese agente. Si no existe,
+ *     el servidor la crea (POST /api/chat/conversations es idempotente).
+ *   - `group`: un grupo que YA existe, identificado por su id de conversación.
+ */
+export type ChatTarget =
+  | { kind: 'agent'; idAgent: number }
+  | { kind: 'group'; idConversation: number };
+
 export interface ChatThreadState {
   conversation: ChatConversationDto | null;
   messages: ChatMessageDto[];
   status: ChatStatusDto | null;
+  /** Un estado por agente. En un grupo es lo que se pinta; en directo trae uno. */
+  statuses: ChatAgentStatusDto[];
   loading: boolean;
   sending: boolean;
   error: string | null;
   hasOlder: boolean;
   loadingOlder: boolean;
-  send: (body: string, files?: File[]) => Promise<boolean>;
+  /** `cita` = mensaje al que responde, o null. */
+  send: (body: string, files?: File[], cita?: ChatReplyToDto | null) => Promise<boolean>;
   loadOlder: () => Promise<void>;
   markRead: () => Promise<void>;
 }
 
-export function useChatConversation(idAgent: number | null, active: boolean): ChatThreadState {
+export function useChatConversation(
+  target: ChatTarget | null,
+  active: boolean
+): ChatThreadState {
   const [conversation, setConversation] = useState<ChatConversationDto | null>(null);
   const [messages, setMessages] = useState<ChatMessageDto[]>([]);
   const [status, setStatus] = useState<ChatStatusDto | null>(null);
+  const [statuses, setStatuses] = useState<ChatAgentStatusDto[]>([]);
+
+  // El objetivo se aplana a una cadena para poder usarlo como dependencia de
+  // los efectos: un objeto nuevo en cada render reabriría el hilo sin parar.
+  const targetKey =
+    target === null
+      ? null
+      : target.kind === 'agent'
+        ? `agent:${target.idAgent}`
+        : `group:${target.idConversation}`;
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,39 +140,64 @@ export function useChatConversation(idAgent: number | null, active: boolean): Ch
     setConversation(null);
     setMessages([]);
     setStatus(null);
+    setStatuses([]);
     setError(null);
     setHasOlder(false);
 
-    if (idAgent === null) return;
+    if (target === null) return;
 
     let cancelled = false;
     setLoading(true);
 
     void (async () => {
       try {
-        // Idempotente: si ya existe el hilo con este agente, lo devuelve.
-        const res = await chatFetch('/api/chat/conversations', {
-          method: 'POST',
-          body: JSON.stringify({ idAgent }),
-        });
+        let conversacion: ChatConversationDto | null = null;
 
-        if (!res.ok) {
-          if (cancelled) return;
-          setError(
-            res.status === 403
-              ? 'No tiene permiso para hablar con este asistente.'
-              : 'No se pudo abrir la conversación.'
-          );
-          setLoading(false);
-          return;
+        if (target.kind === 'agent') {
+          // Idempotente: si ya existe el hilo con este agente, lo devuelve.
+          const res = await chatFetch('/api/chat/conversations', {
+            method: 'POST',
+            body: JSON.stringify({ idAgent: target.idAgent }),
+          });
+
+          if (!res.ok) {
+            if (cancelled) return;
+            setError(
+              res.status === 403
+                ? 'No tiene permiso para hablar con este asistente.'
+                : 'No se pudo abrir la conversación.'
+            );
+            setLoading(false);
+            return;
+          }
+
+          const data = (await res.json()) as { conversation: ChatConversationDto };
+          conversacion = data.conversation ?? null;
+        } else {
+          // Un grupo ya existe: se lee su ficha. 404 = no es suyo o no está en
+          // él (el servidor no distingue las dos cosas a propósito).
+          const res = await chatFetch(`/api/chat/conversations/${target.idConversation}`);
+          if (!res.ok) {
+            if (cancelled) return;
+            setError(
+              res.status === 404
+                ? 'Este grupo no existe o usted no forma parte de él.'
+                : 'No se pudo abrir el grupo.'
+            );
+            setLoading(false);
+            return;
+          }
+          const data = (await res.json()) as { conversation: ChatConversationDto };
+          conversacion = data.conversation ?? null;
         }
 
-        const data = (await res.json()) as { conversation: ChatConversationDto };
-        if (cancelled || !data.conversation) return;
+        if (cancelled || !conversacion) return;
+        const data = { conversation: conversacion };
 
         conversationIdRef.current = data.conversation.id;
         setConversation(data.conversation);
         setStatus(data.conversation.agentStatus);
+        setStatuses(data.conversation.agentStatuses ?? []);
 
         const history = await chatGetJson<{
           messages: ChatMessageDto[];
@@ -168,7 +228,11 @@ export function useChatConversation(idAgent: number | null, active: boolean): Ch
       clearTimer();
       abortRef.current?.abort();
     };
-  }, [idAgent, clearTimer]);
+    // ⚠️ SOLO `targetKey`, NUNCA `target`: el objeto se construye nuevo en cada
+    // render, así que ponerlo aquí reabriría el hilo en cada render —
+    // recargando el histórico y perdiendo el desplazamiento— sin que nada haya
+    // cambiado. La cadena captura lo único que importa: cuál hilo es.
+  }, [targetKey, clearTimer]);
 
   /* ──────────────────────────── Sondeo en vivo ────────────────────────── */
 
@@ -212,6 +276,9 @@ export function useChatConversation(idAgent: number | null, active: boolean): Ch
         notifyChatRefresh();
       }
       setStatus(data.status);
+      // Un sondeo viejo (o un front por delante de la API) no trae el
+      // desglose: se deja lo que había en vez de vaciar el encabezado.
+      if (data.statuses) setStatuses(data.statuses);
 
       // ⬅️ La cadencia la ordena el servidor.
       scheduleNext(data.nextPollMs);
@@ -226,7 +293,7 @@ export function useChatConversation(idAgent: number | null, active: boolean): Ch
   }, [poll]);
 
   useEffect(() => {
-    if (idAgent === null || conversation === null) return;
+    if (targetKey === null || conversation === null) return;
 
     void poll();
 
@@ -241,12 +308,16 @@ export function useChatConversation(idAgent: number | null, active: boolean): Ch
       abortRef.current?.abort();
     };
     // `poll` es estable (useCallback con dependencias estables).
-  }, [idAgent, conversation, poll, clearTimer]);
+  }, [targetKey, conversation, poll, clearTimer]);
 
   /* ─────────────────────────────── Acciones ───────────────────────────── */
 
   const send = useCallback(
-    async (body: string, files: File[] = []): Promise<boolean> => {
+    async (
+      body: string,
+      files: File[] = [],
+      cita: ChatReplyToDto | null = null
+    ): Promise<boolean> => {
       const conversationId = conversationIdRef.current;
       const text = body.trim();
       // Con adjuntos el texto puede ir vacío; sin nada de nada, no se envía.
@@ -274,6 +345,9 @@ export function useChatConversation(idAgent: number | null, active: boolean): Ch
             sizeBytes: file.size,
             downloadUrl: '',
           })),
+          // La cita se pinta de una en el mensaje optimista: el usuario tiene
+          // que ver a qué respondió sin esperar la vuelta del servidor.
+          replyTo: cita,
           pending: true,
         },
       ]);
@@ -285,6 +359,7 @@ export function useChatConversation(idAgent: number | null, active: boolean): Ch
         if (files.length > 0) {
           const form = new FormData();
           form.append('body', text);
+          if (cita) form.append('replyTo', String(cita.idMessage));
           for (const file of files) form.append('files', file);
           // Sin `Content-Type` a mano: el navegador tiene que ponerlo con su
           // propio `boundary`, si no el servidor no puede leer el formulario.
@@ -298,7 +373,7 @@ export function useChatConversation(idAgent: number | null, active: boolean): Ch
         } else {
           res = await chatFetch(`/api/chat/conversations/${conversationId}/messages`, {
             method: 'POST',
-            body: JSON.stringify({ body: text }),
+            body: JSON.stringify({ body: text, ...(cita ? { replyTo: cita.idMessage } : {}) }),
           });
         }
 
@@ -396,6 +471,7 @@ export function useChatConversation(idAgent: number | null, active: boolean): Ch
     conversation,
     messages,
     status,
+    statuses,
     loading,
     sending,
     error,

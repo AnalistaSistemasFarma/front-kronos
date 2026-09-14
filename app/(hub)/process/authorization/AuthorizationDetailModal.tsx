@@ -41,6 +41,8 @@ import {
 } from '@tabler/icons-react';
 import axios from 'axios';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
+import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../lib/orion/fieldType';
+import { parseOrionSignatureBagBag } from '../../../../lib/orion/formValue';
 
 // Nombre EXACTO del tipo sembrado en `types_authorization` por
 // prisma/seeds/document-management-authorization-type.sql (Sprint 6) para la
@@ -76,6 +78,7 @@ interface DetailData {
 interface FormValue {
   id: number;
   field_label: string;
+  field_type?: string | null;
   option_label: string | null;
   value_text: string | null;
 }
@@ -177,6 +180,33 @@ const formatFieldValue = (label: string, value: string) => {
   }
   return value;
 };
+
+function isOrionSignatureFormValue(fv: FormValue): boolean {
+  if (fv.field_type === ORION_SIGNATURE_FIELD_TYPE) return true;
+  const raw = String(fv.value_text || '').trim();
+  if (!raw.startsWith('{')) return false;
+  try {
+    const parsed = JSON.parse(raw) as { documents?: unknown };
+    return Boolean(parsed && typeof parsed === 'object' && parsed.documents);
+  } catch {
+    return false;
+  }
+}
+
+function summarizeOrionSignature(fv: FormValue): string {
+  try {
+    const bag = parseOrionSignatureBagBag(fv.value_text);
+    const docs = Object.values(bag.documents || {});
+    if (docs.length === 0) return 'Documento de firma pendiente';
+    const statuses = docs.map((d) => String(d.status || 'SIN INICIAR').toUpperCase());
+    const signers = docs.reduce((n, d) => n + (d.signers?.length ?? 0), 0);
+    return `${docs.length} documento(s) · ${statuses.join(', ')}${
+      signers ? ` · ${signers} firmante(s)` : ''
+    }`;
+  } catch {
+    return 'Firma digital (GSS Firma)';
+  }
+}
 
 export default function AuthorizationDetailModal({ opened, onClose, request }: Props) {
   const isMobile = useMediaQuery('(max-width: 768px)');
@@ -450,29 +480,55 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
               </Card>
             )}
 
-            {/* Información de pago (campos del formulario) */}
-            {formValues.length > 0 && (
-              <div>
-                <Group gap={6} mb='xs'>
-                  <IconCashBanknote size={18} className='text-gray-500' />
-                  <Text fw={600}>Información de pago</Text>
-                </Group>
-                <Grid>
-                  {formValues.map((fv) => {
-                    const raw = fv.option_label || fv.value_text || '';
-                    const shown = raw ? formatFieldValue(fv.field_label, raw) : '—';
-                    return (
-                      <Grid.Col span={{ base: 12, sm: 6 }} key={fv.id}>
-                        <Card withBorder radius='md' p='sm'>
-                          <Text size='xs' c='dimmed' fw={500} tt='uppercase'>{fv.field_label}</Text>
-                          <Text size='sm' fw={600} mt={2}>{shown}</Text>
-                        </Card>
-                      </Grid.Col>
-                    );
-                  })}
-                </Grid>
-              </div>
-            )}
+            {/* Campos del formulario (sin volcar JSON Orion) */}
+            {(() => {
+              const paymentFields = formValues.filter((fv) => !isOrionSignatureFormValue(fv));
+              const orionFields = formValues.filter((fv) => isOrionSignatureFormValue(fv));
+              if (paymentFields.length === 0 && orionFields.length === 0) return null;
+              return (
+                <>
+                  {paymentFields.length > 0 && (
+                    <div>
+                      <Group gap={6} mb='xs'>
+                        <IconCashBanknote size={18} className='text-gray-500' />
+                        <Text fw={600}>Información adicional</Text>
+                      </Group>
+                      <Grid>
+                        {paymentFields.map((fv) => {
+                          const raw = fv.option_label || fv.value_text || '';
+                          const shown = raw ? formatFieldValue(fv.field_label, raw) : '—';
+                          return (
+                            <Grid.Col span={{ base: 12, sm: 6 }} key={fv.id}>
+                              <Card withBorder radius='md' p='sm'>
+                                <Text size='xs' c='dimmed' fw={500} tt='uppercase'>
+                                  {fv.field_label}
+                                </Text>
+                                <Text size='sm' fw={600} mt={2}>
+                                  {shown}
+                                </Text>
+                              </Card>
+                            </Grid.Col>
+                          );
+                        })}
+                      </Grid>
+                    </div>
+                  )}
+                  {orionFields.map((fv) => (
+                    <Card key={fv.id} withBorder radius='md' p='sm'>
+                      <Text size='xs' c='dimmed' fw={500} tt='uppercase'>
+                        {fv.field_label || 'Firma digital'}
+                      </Text>
+                      <Text size='sm' fw={600} mt={2}>
+                        {summarizeOrionSignature(fv)}
+                      </Text>
+                      <Text size='xs' c='dimmed' mt={4}>
+                        El detalle de firmantes y el PDF se gestionan en la solicitud / adjuntos.
+                      </Text>
+                    </Card>
+                  ))}
+                </>
+              );
+            })()}
 
             {/* Adjuntos */}
             <div>

@@ -69,10 +69,21 @@ export interface ChatAgentAccess {
   displayName: string;
   handle: string | null;
   avatarUrl: string | null;
+  /** Marca de tiempo de la foto subida, o null. NO viajan los bytes: el
+   *  avatar se pide aparte, por su endpoint, y así se cachea. */
+  avatarVersion: number | null;
   description: string | null;
   sortOrder: number;
   /** Empresas donde el usuario tiene permiso sobre ESTE agente. */
   companies: ChatAgentCompanyAccess[];
+  /**
+   * El agente está atendiendo un turno EN CUALQUIER CONVERSACIÓN.
+   *
+   * Distinto del indicador de estado, que es por hilo: ese solo lo ve quien
+   * está en esa conversación. Este es global —"está ocupado, aunque no sea con
+   * usted"— y es lo que pinta el aro alrededor del avatar.
+   */
+  busy: boolean;
 }
 
 /** Resultado completo de la resolución de permisos del módulo. */
@@ -174,17 +185,56 @@ export async function getChatAccess(userEmail: string): Promise<ChatAccess> {
       displayName: agent.display_name,
       handle: agent.handle,
       avatarUrl: agent.avatar_url,
+      avatarVersion: agent.avatar_updated_at ? agent.avatar_updated_at.getTime() : null,
       description: agent.description,
       sortOrder: agent.sort_order,
       companies,
+      // Se llena abajo, de una sola consulta para todos.
+      busy: false,
     });
   }
+
+  await marcarAgentesOcupados(visibleAgents);
 
   return {
     canUseChat: moduleCompanies.size > 0,
     companies: [...moduleCompanies.values()],
     agents: visibleAgents,
   };
+}
+
+/**
+ * Marca qué agentes están atendiendo un turno, MIRE QUIEN MIRE.
+ *
+ * El estado vive en chat_agent_status con clave (conversación, agente): es por
+ * hilo. Para el aro del avatar la pregunta es otra —"¿está ocupado con
+ * alguien?"— así que basta con que exista UNA fila suya que no esté en reposo.
+ *
+ * VENTANA DE FRESCURA: si un agente se cae a mitad de turno, su fila queda en
+ * 'thinking' para siempre y el aro se quedaría prendido sin que nadie esté
+ * trabajando. Por eso solo cuentan las filas tocadas en los últimos 15
+ * minutos, que es el mismo tope que tiene un turno en el puente.
+ *
+ * Una sola consulta agrupada para todos los agentes: esto se pide cada vez que
+ * la interfaz refresca su bandeja y no puede costar una consulta por agente.
+ */
+const FRESCURA_ESTADO_MS = 15 * 60 * 1000;
+
+async function marcarAgentesOcupados(agents: ChatAgentAccess[]): Promise<void> {
+  if (agents.length === 0) return;
+
+  const ocupados = await prisma.chatAgentStatus.findMany({
+    where: {
+      id_agent: { in: agents.map((a) => a.idAgent) },
+      state: { not: 'idle' },
+      updated_at: { gte: new Date(Date.now() - FRESCURA_ESTADO_MS) },
+    },
+    select: { id_agent: true },
+    distinct: ['id_agent'],
+  });
+
+  const set = new Set(ocupados.map((o) => o.id_agent));
+  for (const agent of agents) agent.busy = set.has(agent.idAgent);
 }
 
 /**
@@ -204,13 +254,20 @@ export async function getChatAgentAccess(
 }
 
 /**
- * Verificación de PROPIEDAD de una conversación (anti-IDOR). Nunca confíe en
- * un id_conversation que llegue del cliente sin pasar por aquí: valida a la
- * vez que el hilo es del usuario de la sesión Y que el usuario todavía tiene
- * permiso sobre el agente del hilo (un permiso revocado cierra el acceso a
- * las conversaciones viejas).
+ * Verificación de PROPIEDAD de una conversación DIRECTA (anti-IDOR). Nunca
+ * confíe en un id_conversation que llegue del cliente sin pasar por aquí:
+ * valida a la vez que el hilo es del usuario de la sesión Y que el usuario
+ * todavía tiene permiso sobre el agente del hilo (un permiso revocado cierra
+ * el acceso a las conversaciones viejas).
  *
- * Devuelve null si la conversación no existe, no es suya, o perdió el permiso.
+ * ⚠️ ANCLADA A `kind = 'direct'` A PROPÓSITO. En un GRUPO, `id_user` es solo
+ * "quien lo creó": si esta función no filtrara por `kind`, el creador de un
+ * grupo entraría por el camino del hilo directo y se saltaría la verificación
+ * de participantes. La puerta de los grupos es `assertGroupAccess`
+ * (lib/chat/groups.ts).
+ *
+ * Devuelve null si la conversación no existe, no es un hilo directo, no es
+ * suya, o perdió el permiso.
  */
 export async function assertConversationOwnership(
   userEmail: string,
@@ -221,6 +278,7 @@ export async function assertConversationOwnership(
   const conversation = await prisma.chatConversation.findFirst({
     where: {
       id: conversationId,
+      kind: 'direct',
       // El filtro por correo de la sesión es lo que ata el hilo al dueño.
       user: { email: userEmail },
     },

@@ -34,14 +34,26 @@ const MAX_BODY_CHARS = 140;
 
 export interface NotifyAgentReplyInput {
   idConversation: number;
-  /** Dueño del hilo (chat_conversation.id_user). */
-  idUser: string;
+  /**
+   * Dueño del hilo DIRECTO (chat_conversation.id_user). En un grupo va en
+   * null: allí los destinatarios son varios y llegan en `groupEmails`.
+   */
+  idUser: string | null;
   agentCode: string;
   agentName: string;
   agentAvatarUrl: string | null;
   /** Cuerpo en Markdown de la respuesta. Puede venir vacío si solo van archivos. */
   body: string;
   attachmentCount: number;
+  /**
+   * GRUPO: correos de las personas del grupo. Se avisa a todas porque en un
+   * grupo la respuesta es para el grupo, no para quien preguntó — y quien
+   * tenga el grupo abierto no verá la notificación de todas formas (lo filtra
+   * el service worker, ver la nota de arriba).
+   */
+  groupEmails?: string[];
+  /** GRUPO: el nombre del grupo, para que el aviso diga en cuál fue. */
+  groupTitle?: string | null;
 }
 
 /**
@@ -83,20 +95,33 @@ export function summarizeReply(body: string, attachmentCount: number): string {
 
 export async function notifyAgentReply(input: NotifyAgentReplyInput): Promise<void> {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: input.idUser },
-      select: { email: true },
-    });
-    const email = user?.email?.trim();
-    if (!email) {
+    const esGrupo = Array.isArray(input.groupEmails);
+
+    let destinatarios: string[] = [];
+    if (esGrupo) {
+      destinatarios = (input.groupEmails ?? [])
+        .map((e) => e.trim())
+        .filter((e) => e.length > 0);
+    } else if (input.idUser) {
+      const user = await prisma.user.findUnique({
+        where: { id: input.idUser },
+        select: { email: true },
+      });
+      const email = user?.email?.trim();
+      if (email) destinatarios = [email];
+    }
+
+    if (destinatarios.length === 0) {
       console.warn(
-        `[chat/notify] la conversación ${input.idConversation} no tiene un correo al que avisar.`
+        `[chat/notify] la conversación ${input.idConversation} no tiene a quién avisarle.`
       );
       return;
     }
 
-    await createAndSendNotifications([email], {
-      title: input.agentName,
+    await createAndSendNotifications(destinatarios, {
+      title: esGrupo
+        ? `${input.agentName} · ${input.groupTitle?.trim() || 'Grupo'}`
+        : input.agentName,
       body: summarizeReply(input.body, input.attachmentCount),
       // Enlace profundo al hilo. Se usa la RUTA DEDICADA del agente
       // (/process/chat/<code>) y no el parámetro ?agent=, porque esa página
@@ -104,7 +129,9 @@ export async function notifyAgentReply(input: NotifyAgentReplyInput): Promise<vo
       // (initialAgentCode). El parámetro depende de un efecto en el navegador
       // y, al abrir la aplicación desde cero por una notificación, se veía la
       // lista de agentes en vez de la conversación.
-      url: `/process/chat/${encodeURIComponent(input.agentCode)}`,
+      url: esGrupo
+        ? `/process/chat/grupo/${input.idConversation}`
+        : `/process/chat/${encodeURIComponent(input.agentCode)}`,
       // Un `tag` por conversación: si el agente manda varios mensajes, la
       // notificación se reemplaza en vez de apilarse.
       tag: `chat-agente-${input.idConversation}`,

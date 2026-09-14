@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { DASHBOARD_SOLICITADO_URL } from './dashboardAccess';
+import { DASHBOARD_SOLICITADO_URL } from './dashboardRoutes';
 
 export type SolicitadoTab = 'procesos' | 'actividades';
 

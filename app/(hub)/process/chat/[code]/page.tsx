@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
-import { Center, Loader } from '@mantine/core';
 import ChatWorkspace from '../../../../../components/chat/ChatWorkspace';
+import { EsqueletoPantallaChat } from '../../../../../components/chat/ChatSkeletons';
 
 /**
  * Chat directo con UN agente — /process/chat/orus.
@@ -27,11 +27,7 @@ export default async function AgentChatPage({
   return (
     <Suspense
       fallback={
-        <div className='app-page-shell app-page-shell--fill min-h-screen'>
-          <Center py='xl'>
-            <Loader size='sm' />
-          </Center>
-        </div>
+        <EsqueletoPantallaChat />
       }
     >
       <ChatWorkspace initialAgentCode={decodeURIComponent(code)} />

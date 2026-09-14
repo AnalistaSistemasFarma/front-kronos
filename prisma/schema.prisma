@@ -72,8 +72,11 @@ model User {
   sessions                Session[]
   auditLogs               UserAuditLog[]
   documentsOwned          Document[]               @relation("DocumentOwner")
-  // Modulo "Asistentes IA" (chat de agentes) — back-relation requerida por Prisma.
+  // Modulo "Asistentes IA" (chat de agentes) — back-relations requeridas por Prisma.
   chatConversations       ChatConversation[]       @relation("ChatConversationUser")
+  chatGroupsCreated       ChatConversation[]       @relation("ChatConversationCreator")
+  chatParticipations      ChatParticipant[]
+  chatMessagesAuthored    ChatMessage[]            @relation("ChatMessageUserAuthor")
 
   @@map("user")
 }
@@ -88,7 +91,7 @@ model VerificationToken {
 }
 
 model Company {
-  id_company      Int              @id @default(autoincrement())
+  id_company      Int                @id @default(autoincrement())
   company         String
   company_logo    String?
   companyUsers    CompanyUser[]
@@ -96,8 +99,9 @@ model Company {
   cargoAliases    CargoAlias[]
   cargoJerarquias CargoJerarquia[]
   documents       Document[]
-  // Modulo "Asistentes IA" (chat de agentes) — back-relation requerida por Prisma.
+  // Modulo "Asistentes IA" (chat de agentes) — back-relations requeridas por Prisma.
   agentCompanies  AgentCompany[]
+  chatGroups      ChatConversation[]
 
   @@map("company")
 }
@@ -786,17 +790,28 @@ model ServiceLayerDailyMetric {
 /// estable ('horus'); `display_name` es como se ve en la interfaz ('Orus');
 /// `handle` es el puente con Telegram ('@horus_gss_bot').
 model Agent {
-  id_agent     Int      @id @default(autoincrement())
-  code         String   @db.NVarChar(60)
-  display_name String   @db.NVarChar(120)
-  handle       String?  @db.NVarChar(60)
+  id_agent      Int      @id @default(autoincrement())
+  code          String   @db.NVarChar(60)
+  display_name  String   @db.NVarChar(120)
+  handle        String?  @db.NVarChar(60)
   /// Ruta relativa dentro de /public (p.ej. /agents/orus.png). NULL = la
   /// interfaz cae al avatar por inicial. A propósito no se guardan URLs
   /// externas: las fotos de usuario que hoy apuntan a postimg.cc son frágiles.
-  avatar_url   String?  @db.NVarChar(500)
-  description  String?  @db.NVarChar(500)
-  is_active    Boolean  @default(true)
-  sort_order   Int      @default(0)
+  avatar_url    String?  @db.NVarChar(500)
+  /// Avatar SUBIDO desde la interfaz, guardado aquí y no en /public: Next
+  /// resuelve esa carpeta con una lista de tiempo de compilación, así que un
+  /// archivo nuevo daría 404 hasta el siguiente despliegue. Lo sirve
+  /// GET /api/chat/agents/<code>/avatar. NULL = no le han subido ninguna y la
+  /// interfaz sigue con `avatar_url` o con la inicial.
+  avatar_blob       Bytes?    @db.VarBinary(Max)
+  avatar_mime       String?   @db.NVarChar(100)
+  /// Cuándo se subió. Sirve para saber si hay imagen sin traerse los bytes, y
+  /// como número de versión en la URL (?v=…) para poder cachearla fuerte y que
+  /// igual cambie al instante cuando la reemplacen.
+  avatar_updated_at DateTime?
+  description   String?  @db.NVarChar(500)
+  is_active     Boolean  @default(true)
+  sort_order    Int      @default(0)
   /// Subproceso que ES el permiso para hablar con este agente (fuente de
   /// verdad única del permiso; ver la nota de módulo arriba). NULL = agente
   /// del catálogo todavía sin subproceso creado, y por tanto invisible para
@@ -805,11 +820,16 @@ model Agent {
   /// @unique aquí porque SQL Server solo admite un NULL en un índice único
   /// no filtrado (mismo caso que User.nit).
   id_subprocess Int?
-  created_at   DateTime @default(now())
+  created_at    DateTime @default(now())
 
-  subprocess    Subprocess?        @relation(fields: [id_subprocess], references: [id_subprocess], onDelete: NoAction, onUpdate: NoAction)
-  companies     AgentCompany[]
-  conversations ChatConversation[]
+  subprocess       Subprocess?           @relation(fields: [id_subprocess], references: [id_subprocess], onDelete: NoAction, onUpdate: NoAction)
+  companies        AgentCompany[]
+  conversations    ChatConversation[]
+  participations   ChatParticipant[]
+  messagesAuthored ChatMessage[]         @relation("ChatMessageAgentAuthor")
+  deliveries       ChatMessageDelivery[]
+  statuses         ChatAgentStatus[]
+  turnUsage        ChatAgentTurnUsage[]
 
   @@unique([code])
   @@map("agent")
@@ -832,31 +852,145 @@ model AgentCompany {
   @@map("agent_company")
 }
 
-/// Hilo de conversación entre UN usuario y UN agente. La propiedad del hilo
-/// es `id_user`: todo endpoint debe verificar que el id_conversation que
-/// llega del cliente pertenece al usuario de la sesión (IDOR).
+/// Hilo de conversación. Hay DOS clases, distinguidas por `kind`:
+///
+///   'direct' — UNA persona con UN agente. Es el hilo original y el que usa
+///              toda la flota. La propiedad es `id_user`: todo endpoint debe
+///              verificar que el id_conversation que llega del cliente
+///              pertenece al usuario de la sesión (IDOR).
+///   'group'  — VARIAS personas y VARIOS agentes. La pertenencia NO se lee de
+///              `id_user`/`id_agent` sino de `ChatParticipant`.
+///
+/// ⚠️ EN UN GRUPO, `id_user` y `id_agent` SON METADATOS, NO PERMISO.
+/// Lo natural sería dejarlos en NULL, pero las dos columnas están dentro de
+/// índices y SQL Server rechaza un ALTER COLUMN sobre una columna indexada:
+/// volverlas nullables obligaba a tumbar índices y claves ajenas de una tabla
+/// viva. Se decidió no pagar ese riesgo (ver el encabezado de la migración
+/// 20260908180000_add_chat_groups). En un grupo:
+///   - `id_user`  = quien lo creó (además queda como participante 'owner').
+///   - `id_agent` = el agente ANFITRIÓN, la cara del grupo en la bandeja.
+/// Quien pregunte "¿este usuario puede entrar?" tiene que consultar
+/// ChatParticipant, nunca estas dos columnas.
 model ChatConversation {
   id              Int       @id @default(autoincrement())
   id_user         String    @db.NVarChar(1000)
   id_agent        Int
   title           String?   @db.NVarChar(300)
+  /// 'direct' | 'group'. Texto y no enum porque el provider sqlserver de
+  /// Prisma no soporta enums nativos. Hay un CHECK en la base que solo admite
+  /// esos dos valores.
+  kind            String    @default("direct") @db.NVarChar(20)
+  /// Empresa del grupo. NULL en los hilos directos: allí la empresa la define
+  /// el permiso sobre el agente, no el hilo.
+  id_company      Int?
+  /// Quién creó el grupo. Redundante con `id_user` hoy, pero explícito a
+  /// propósito: `id_user` se lee como "el dueño" y en un grupo eso no
+  /// significa lo mismo.
+  created_by      String?   @db.NVarChar(1000)
   created_at      DateTime  @default(now())
   updated_at      DateTime  @updatedAt
   /// Denormalizado para ordenar la bandeja sin agregar sobre chat_message.
   last_message_at DateTime?
   archived        Boolean   @default(false)
 
-  user     User              @relation("ChatConversationUser", fields: [id_user], references: [id], onDelete: Cascade)
-  agent    Agent             @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
-  messages ChatMessage[]
-  status   ChatAgentStatus?
+  user         User              @relation("ChatConversationUser", fields: [id_user], references: [id], onDelete: Cascade)
+  agent        Agent             @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+  company      Company?          @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  creator      User?             @relation("ChatConversationCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  messages     ChatMessage[]
+  participants ChatParticipant[]
+  /// Un indicador POR AGENTE: en un grupo hay varios trabajando a la vez.
+  statuses     ChatAgentStatus[]
+  turnUsage    ChatAgentTurnUsage[]
 
   @@index([id_user, archived, last_message_at(sort: Desc)])
   @@index([id_agent])
+  @@index([kind, archived, last_message_at(sort: Desc)])
   @@map("chat_conversation")
 }
 
+/// Integrante de un grupo: una PERSONA o un AGENTE, nunca los dos.
+/// Es la ÚNICA fuente de verdad de quién está en un grupo — un CHECK en la
+/// base garantiza que exactamente una de las dos columnas venga con valor,
+/// para que no dependa de que cada endpoint se acuerde de validarlo.
+model ChatParticipant {
+  id_participant       Int      @id @default(autoincrement())
+  id_conversation      Int
+  id_user              String?  @db.NVarChar(1000)
+  id_agent             Int?
+  /// 'owner' = puede agregar y quitar integrantes. 'member' = solo participa.
+  role                 String   @default("member") @db.NVarChar(20)
+  /// Id del último mensaje que esta persona ya vio. Es la marca de agua con la
+  /// que se cuentan sus no leídos: `chat_message.read_at` no sirve en un grupo
+  /// porque es una sola columna por mensaje y el primero que leyera lo daría
+  /// por leído para todos los demás. NULL = nunca ha abierto el grupo.
+  last_read_message_id Int?
+  added_at             DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+  user         User?            @relation(fields: [id_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  agent        Agent?           @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  /// Los dos únicos son ÍNDICES FILTRADOS en la base (WHERE ... IS NOT NULL),
+  /// porque la mitad de las filas tiene una de las dos columnas en NULL a
+  /// propósito y SQL Server solo admite un NULL en un único no filtrado. No
+  /// se declaran con @@unique aquí por el mismo motivo que User.nit.
+  @@index([id_user])
+  @@index([id_agent])
+  @@map("chat_participant")
+}
+
 /// Un mensaje del hilo.
+/// Anuncios del PORTAL DE TALENTO HUMANO, cargados desde el propio portal.
+///
+/// En la base y no en SharePoint: el conector que lee ese sitio es de SOLO
+/// LECTURA a propósito, y darle escritura significaría poder escribir en todo
+/// el tenant con una credencial que ya tiene de más. Para subir un anuncio no
+/// vale la pena abrir esa puerta.
+model PortalBanner {
+  id          Int      @id @default(autoincrement())
+  file_name   String   @db.NVarChar(255)
+  mime        String   @db.NVarChar(100)
+  contenido   Bytes    @db.VarBinary(Max)
+  /// Para ordenarlos a mano más adelante sin migrar otra vez.
+  orden       Int      @default(0)
+  /// Quién lo subió: si aparece un anuncio que nadie reconoce, hay que poder
+  /// saber de dónde salió.
+  uploaded_by String   @db.NVarChar(255)
+  created_at  DateTime @default(now())
+
+  @@index([orden, id(sort: Desc)])
+  @@map("portal_banner")
+}
+
+/// Códigos de un solo uso del PORTAL DE TALENTO HUMANO.
+///
+/// El portal no usa la sesión de SynerLink: entra cualquier colaborador con
+/// correo de una empresa del grupo (o de la lista de excepciones), y la
+/// identidad se comprueba con un código enviado a ese correo.
+///
+/// Vive en la base y no en memoria porque producción corre en clúster de dos
+/// instancias: un código emitido por una y verificado por la otra fallaría de
+/// forma intermitente.
+model PortalAccessCode {
+  id         Int       @id @default(autoincrement())
+  /// Siempre en minúsculas: es como se consulta.
+  email      String    @db.NVarChar(255)
+  /// SHA-256 del código. NUNCA el código en claro: quien lea la tabla —o un
+  /// respaldo— no puede entrar con lo que ve.
+  code_hash  String    @db.NVarChar(64)
+  created_at DateTime  @default(now())
+  expires_at DateTime
+  /// Marca de uso: un código sirve UNA vez.
+  used_at    DateTime?
+  /// Intentos fallidos. Seis dígitos sin tope se prueban en minutos.
+  attempts   Int       @default(0)
+
+  @@index([email, id(sort: Desc)])
+  @@index([expires_at])
+  @@map("portal_access_code")
+}
+
 model ChatMessage {
   id              Int    @id @default(autoincrement())
   id_conversation Int
@@ -870,17 +1004,89 @@ model ChatMessage {
   /// porque lo produce un editor propio y no un agente.)
   body            String @db.NVarChar(Max)
 
+  /// Autor PERSONA. En un hilo directo es siempre el dueño y se puede deducir
+  /// de la conversación; en un grupo es imprescindible saber cuál de las
+  /// personas escribió. NULL en los mensajes del agente y en los de sistema.
+  id_user_author  String? @db.NVarChar(1000)
+  /// Autor AGENTE. NULL en los mensajes de personas y en los de sistema.
+  id_agent_author Int?
+
+  /// El mensaje AL QUE RESPONDE, cuando se citó uno. NULL = mensaje normal,
+  /// que es la enorme mayoría. Normalizado y no con el texto copiado: el id
+  /// hace falta igual para poder SALTAR al original, y así una corrección del
+  /// original no deja la cita diciendo lo viejo.
+  id_reply_to  Int?
+
   created_at   DateTime  @default(now())
+
+  /// ORIGEN DE LA CONEXIÓN de quien escribió — auditoría (pedido de Nicolás
+  /// el 2026-09-10: "la ip de dónde enviaron el mensaje y la hora").
+  ///
+  /// Se llenan SOLO en los mensajes de personas: en los del agente no hay
+  /// navegador ni IP de cliente, el mensaje entra por la API con su llave.
+  ///
+  /// Sale de la petición HTTP, nunca del payload: `x-forwarded-for` que pone
+  /// el proxy de IIS (ARR) delante de la aplicación. Queda NULL cuando la
+  /// cabecera no llega, que es lo honesto — una IP inventada es peor que no
+  /// tener el dato. Ver lib/chat/client-origin.ts.
+  client_ip    String?   @db.NVarChar(64)
+  /// Navegador declarado por el cliente. Es un dato que el cliente controla y
+  /// puede mentir; sirve para distinguir un celular de un equipo de escritorio
+  /// en una revisión, no como prueba.
+  user_agent   String?   @db.NVarChar(400)
+
   /// Momento en que el agente confirmó la recepción (puente con Telegram).
+  /// SOLO SIRVE EN HILOS DIRECTOS, donde hay un único agente. En un grupo la
+  /// entrega se lleva en ChatMessageDelivery, una fila por agente: si se usara
+  /// esta columna, el primer agente que recogiera el mensaje lo marcaría
+  /// entregado y los demás no lo verían nunca.
   delivered_at DateTime?
   read_at      DateTime?
 
-  conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+  conversation ChatConversation      @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+  /// NO ACTION y no Cascade: es una FK a la MISMA tabla y ya existe un camino
+  /// de borrado en cascada (id_conversation), que SQL Server rechaza combinar.
+  /// Hoy nada borra mensajes; si algún día se agrega, esto falla ruidosamente
+  /// en vez de dejar citas apuntando al vacío.
+  replyTo      ChatMessage?          @relation("ChatMessageReplyTo", fields: [id_reply_to], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  replies      ChatMessage[]         @relation("ChatMessageReplyTo")
   attachments  ChatAttachment[]
+  userAuthor   User?                 @relation("ChatMessageUserAuthor", fields: [id_user_author], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  agentAuthor  Agent?                @relation("ChatMessageAgentAuthor", fields: [id_agent_author], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+  deliveries   ChatMessageDelivery[]
+  voiceEvent   ChatVoiceEvent?
 
   @@index([id_conversation, id(sort: Desc)])
   @@index([id_conversation, created_at])
+  @@index([id_agent_author])
+  @@index([id_reply_to])
   @@map("chat_message")
+}
+
+/// Entrega de UN mensaje de grupo a UN agente — y, a la vez, el registro de
+/// que ese agente fue MENCIONADO en ese mensaje.
+///
+/// Las dos cosas son el mismo hecho a propósito: **existe una fila solo si el
+/// agente fue mencionado**, y `delivered_at` dice si ya lo recogió. Así "a
+/// quién le toca" y "quién ya lo tiene" no pueden contradecirse, y la bandeja
+/// del agente es una lectura directa por índice
+/// (id_agent, delivered_at, id_message).
+///
+/// Lo que la interfaz resalta en el texto NO se lee de aquí: se resuelve
+/// leyendo el propio cuerpo del mensaje, para que el render nunca dependa del
+/// estado de entrega.
+model ChatMessageDelivery {
+  id_message   Int
+  id_agent     Int
+  /// NULL = pendiente, es lo que devuelve el long-poll de la bandeja.
+  delivered_at DateTime?
+
+  message ChatMessage @relation(fields: [id_message], references: [id], onDelete: Cascade)
+  agent   Agent       @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([id_message, id_agent])
+  @@index([id_agent, delivered_at, id_message])
+  @@map("chat_message_delivery")
 }
 
 /// Adjunto de un mensaje. El archivo vive en OneDrive (mismo criterio que
@@ -901,12 +1107,82 @@ model ChatAttachment {
   @@map("chat_attachment")
 }
 
+/// CONSUMO EN TOKENS de un turno de un agente — auditoría.
+///
+/// POR QUÉ EXISTE (pedido de Nicolás el 2026-09-10, auditoría de permisos):
+/// las conversaciones ya quedan registradas en `chat_message`, pero el COSTO de
+/// atenderlas no queda en ninguna parte. Sin esto no hay forma de revisar si un
+/// agente se está usando para algo desproporcionado.
+///
+/// POR QUÉ LO REPORTA EL CONECTOR Y NO LA APLICACIÓN: los tokens los informa la
+/// API del modelo al proceso del agente (Claude Code), que los escribe en la
+/// bitácora de su sesión. La aplicación NUNCA los ve. Por eso cada agente los
+/// manda por POST /api/chat/agent/usage al cerrar el turno, con su propia
+/// llave — y el `id_agent` sale de la llave, no del payload.
+///
+/// UNA FILA POR TURNO Y POR CONVERSACIÓN: si un turno atendió a dos
+/// conversaciones a la vez, el agente reporta el mismo consumo para cada una,
+/// porque no hay manera de partir el gasto de un turno compartido. Al sumar por
+/// conversación eso se debe tener presente; `session_id` + `turn_started_at`
+/// permiten reconocer las filas que son el mismo turno.
+model ChatAgentTurnUsage {
+  id              Int    @id @default(autoincrement())
+  id_conversation Int
+  id_agent        Int
+
+  /// Sesión del proceso del agente. Junto con turn_started_at identifica el
+  /// turno, y permite reconocer un mismo turno repartido en varias filas.
+  session_id      String? @db.NVarChar(120)
+  /// Modelos que atendieron el turno, separados por coma (p. ej. 'claude-opus-5').
+  models          String? @db.NVarChar(300)
+  /// Llamados a la API que hizo el turno (no mensajes del chat: un turno
+  /// publica una respuesta pero puede hacer decenas de llamados).
+  api_messages    Int     @default(0)
+  /// De esos llamados, los que hicieron los sub-agentes.
+  api_messages_subagents Int @default(0)
+
+  /// Renglones del consumo. Se guardan separados y no solo el total porque no
+  /// cuestan lo mismo: la lectura de caché es una fracción del precio de la
+  /// entrada normal, y un total único no permite revisar nada.
+  input_tokens           Int @default(0)
+  cache_creation_tokens  Int @default(0)
+  cache_read_tokens      Int @default(0)
+  output_tokens          Int @default(0)
+  /// Parte de la salida que fue razonamiento. YA ESTÁ DENTRO de output_tokens;
+  /// se guarda aparte para poder mirarlo, no para sumarlo otra vez.
+  thinking_tokens        Int @default(0)
+  /// entrada + creación de caché + lectura de caché + salida. Redundante a
+  /// propósito: es la cifra por la que se ordena y se filtra el tablero, y
+  /// calcularla en cada consulta obliga a leer toda la tabla.
+  total_tokens           Int @default(0)
+
+  /// Ventana del turno según la bitácora del agente. NULL si no se pudo
+  /// determinar.
+  turn_started_at DateTime?
+  turn_ended_at   DateTime?
+  /// Momento en que se recibió el reporte.
+  created_at      DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+  agent        Agent            @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_conversation, created_at])
+  @@index([id_agent, created_at])
+  @@index([created_at])
+  @@map("chat_agent_turn_usage")
+}
+
 /// Estado en vivo del agente dentro de una conversación — alimenta el
 /// indicador de "qué está haciendo" (pensando / usando una herramienta).
-/// Una sola fila por conversación (la PK es id_conversation): es un estado
-/// puntual que se sobrescribe, no un histórico.
+/// Una sola fila por conversación Y AGENTE (la PK es (id_conversation,
+/// id_agent)): es un estado puntual que se sobrescribe, no un histórico.
 model ChatAgentStatus {
-  id_conversation Int      @id
+  id_conversation Int
+  /// El agente al que corresponde este indicador. En un hilo directo es el
+  /// agente del hilo; en un grupo, cada agente tiene el suyo. Forma parte de
+  /// la clave primaria: antes la clave era solo `id_conversation` y en un
+  /// grupo no cabía más que un indicador.
+  id_agent        Int
   /// 'idle' | 'thinking' | 'tool'.
   state           String   @default("idle") @db.NVarChar(20)
   /// Texto libre que se muestra al usuario ("Consultando SAP…").
@@ -921,6 +1197,33 @@ model ChatAgentStatus {
   updated_at      DateTime @updatedAt
 
   conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+  agent        Agent            @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
 
+  @@id([id_conversation, id_agent])
   @@map("chat_agent_status")
+}
+
+/// Server-owned identity of a voice call; retained for delayed audit retries.
+model ChatVoiceCall {
+  id              String   @id @db.VarChar(36)
+  id_conversation Int
+  id_agent        Int
+  id_user         String   @db.NVarChar(1000)
+  client_ip       String?  @db.NVarChar(64)
+  user_agent      String?  @db.NVarChar(400)
+  created_at      DateTime @default(now())
+  expires_at      DateTime
+  events          ChatVoiceEvent[]
+  @@index([id_conversation])
+  @@map("chat_voice_call")
+}
+
+/// Durable receipt: retries of one Gateway event cannot create extra messages.
+model ChatVoiceEvent {
+  event_key    String @id @db.VarChar(64)
+  call_id      String @db.VarChar(36)
+  id_message   Int @unique
+  call         ChatVoiceCall @relation(fields: [call_id], references: [id], onDelete: Cascade)
+  message      ChatMessage @relation(fields: [id_message], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  @@map("chat_voice_event")
 }

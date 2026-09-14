@@ -1,16 +1,16 @@
 'use client';
 
-import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useId, useImperativeHandle, useRef, useState } from 'react';
+import { useMediaQuery } from '@mantine/hooks';
 import {
   ActionIcon,
   Box,
   Group,
   Menu,
-  Popover,
-  ScrollArea,
   Text,
   Textarea,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import {
   IconBold,
@@ -19,11 +19,11 @@ import {
   IconEyeOff,
   IconItalic,
   IconList,
-  IconMoodSmile,
   IconPaperclip,
   IconSend,
   IconX,
 } from '@tabler/icons-react';
+import AgentAvatar from './AgentAvatar';
 import ChatMarkdown from './ChatMarkdown';
 import { MAX_USER_MESSAGE_CHARS } from '../../lib/chat/constants';
 import {
@@ -31,11 +31,14 @@ import {
   formatBytes,
   getChatAttachmentError,
 } from '../../lib/chat/attachments';
+import type { ChatReplyToDto } from '../../lib/chat/client';
 
 /**
  * Entrada de texto del chat — v1: Markdown CRUDO con ayudas.
  *
- * DISPOSICIÓN: una sola fila, como WhatsApp — emoji · caja · clip · ⋯ · enviar.
+ * DISPOSICIÓN: una sola fila, como WhatsApp — caja (con el clip adentro) y el
+ * botón de enviar al lado. El panel de emojis se quitó el 2026-09-09: el
+ * teclado del sistema ya trae los suyos y ese botón solo robaba ancho.
  * Antes eran tres filas apiladas (barra de siete botones, caja de dos renglones
  * mínimos y el renglón del recordatorio con el botón de enviar): unos 155 px que
  * le quitaba a la conversación. Ahora son ~55 px, unos tres renglones más de
@@ -54,31 +57,11 @@ import {
  * validación que manda es la de la API, que vuelve a correr exactamente esa
  * misma comprobación.
  *
- * El selector de emojis es una rejilla propia con una selección curada: las
- * librerías de emojis pesan cientos de kilobytes (traen catálogo completo,
- * índice de búsqueda y a veces sprites remotos) para un botón secundario.
- * Además, el sistema operativo ya trae su propio selector.
+ * YA NO HAY SELECTOR DE EMOJIS. Tenía una rejilla propia con una selección
+ * curada —las librerías pesan cientos de kilobytes para un botón secundario—,
+ * pero se quitó el 2026-09-09: el teclado del sistema ya trae los suyos, y en
+ * el celular ese botón se comía ancho que le hacía falta a la caja de texto.
  */
-
-/** Emojis frecuentes en conversación de trabajo, agrupados por intención. */
-const EMOJI_GROUPS: { label: string; emojis: string[] }[] = [
-  {
-    label: 'Frecuentes',
-    emojis: ['👍', '🙏', '✅', '❌', '⚠️', '📌', '🔧', '📊', '🚀', '🔥', '⏰', '📎'],
-  },
-  {
-    label: 'Caras',
-    emojis: ['🙂', '😀', '😅', '😉', '😍', '🤔', '😐', '😴', '😬', '😊', '🥳', '😎'],
-  },
-  {
-    label: 'Trabajo',
-    emojis: ['📁', '📄', '📥', '📤', '💡', '🧾', '🗓️', '🔍', '🖥️', '🛠️', '📈', '📉'],
-  },
-  {
-    label: 'Señales',
-    emojis: ['🟢', '🟡', '🔴', '⭐', '❗', '❓', '➡️', '⬅️', '🔁', '🔒', '🔓', '💬'],
-  },
-];
 
 type WrapKind = 'bold' | 'italic' | 'code' | 'list';
 
@@ -110,7 +93,19 @@ function conNombreUtil(file: File, index: number): File {
 export type ChatComposerHandle = {
   /** Agrega archivos a la bandeja del mensaje, con la misma validación del clip. */
   addFiles: (incoming: FileList | File[] | null) => void;
+  /** Pone el cursor en la caja. Lo usa el hilo al citar un mensaje: citar y
+   *  tener que tocar la caja aparte sobraría. */
+  focus: () => void;
 };
+
+/** Un candidato del autocompletado del `@` (los asistentes de un grupo). */
+export interface MencionCandidato {
+  /** Lo que se inserta después de la arroba. */
+  valor: string;
+  /** Cómo se muestra en la lista. */
+  nombre: string;
+  avatarUrl: string | null;
+}
 
 const ChatComposer = forwardRef<ChatComposerHandle, {
   /** Devuelve lo que quiera (p. ej. si el envío tuvo éxito); aquí solo se espera. */
@@ -119,6 +114,18 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   sending?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
+  /**
+   * A quién se puede mencionar con `@`. Vacío (lo normal en un hilo directo)
+   * apaga el autocompletado por completo.
+   */
+  menciones?: MencionCandidato[];
+  /**
+   * Mensaje que se está CITANDO. Se pinta como una tarjeta encima de la caja,
+   * con el autor y un extracto, igual que en WhatsApp y Telegram. Quién la
+   * manda es el hilo: el compositor solo la muestra y ofrece quitarla.
+   */
+  cita?: ChatReplyToDto | null;
+  onQuitarCita?: () => void;
 }>(function ChatComposer(
   {
     onSend,
@@ -126,16 +133,115 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     sending = false,
     placeholder = 'Escriba su mensaje… (Markdown: **negrita**, _cursiva_, - viñetas)',
     autoFocus = false,
+    menciones = [],
+    cita = null,
+    onQuitarCita,
   },
   ref
 ) {
   const [value, setValue] = useState('');
   const [preview, setPreview] = useState(false);
-  const [emojiOpen, setEmojiOpen] = useState(false);
+  // Con teclado TÁCTIL el Enter hace salto de línea y para enviar está el
+  // botón. Se detecta por `pointer: coarse` y no por ancho de pantalla a
+  // propósito: lo que manda no es que la pantalla sea angosta sino que el
+  // teclado sea de vidrio — un portátil con la ventana chica sigue teniendo
+  // Enter físico y ahí Enter debe seguir enviando. Pedido de Nicolás
+  // (2026-09-08): en el celular no hay un Shift+Enter cómodo.
+  const tecladoTactil = useMediaQuery('(pointer: coarse)');
+  // El id amarra la opción "Adjuntar archivos" (una <label>) con el input de
+  // archivos. Va con useId y no con una constante porque puede haber más de un
+  // compositor montado (el panel flotante y la página) y dos labels apuntando
+  // al mismo id abrirían siempre el input equivocado.
+  const fileInputId = useId();
+  // El menú del clip se maneja controlado: la opción de adjuntar NO puede
+  // cerrarlo al tocarla (ver el comentario de esa opción), así que hay que
+  // cerrarlo a mano cuando ya se escogió el archivo.
+  const [menuAbierto, setMenuAbierto] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /* ─────────────────── Autocompletado de menciones (@) ────────────────── */
+  /**
+   * Solo se activa cuando hay a quién mencionar (grupos). En un hilo directo
+   * `menciones` viene vacío y todo esto queda inerte: escribir una arroba no
+   * abre nada.
+   *
+   * El disparador es la arroba MÁS CERCANA hacia atrás desde el cursor, y solo
+   * cuenta si viene tras un inicio o un espacio — la misma condición que usa
+   * el servidor para no confundir un correo con una mención
+   * (lib/chat/groups.ts). Si aquí fuera distinto, la interfaz sugeriría
+   * menciones que el servidor después no reconoce.
+   */
+  const [mencionAbierta, setMencionAbierta] = useState(false);
+  const [mencionFiltro, setMencionFiltro] = useState('');
+  const [mencionIndice, setMencionIndice] = useState(0);
+  const mencionInicioRef = useRef(0);
+
+  const candidatos = menciones.filter((m) => {
+    if (mencionFiltro === '') return true;
+    const f = mencionFiltro.toLowerCase();
+    return m.valor.toLowerCase().includes(f) || m.nombre.toLowerCase().includes(f);
+  });
+  const mencionVisible = mencionAbierta && menciones.length > 0 && candidatos.length > 0;
+
+  /** Revisa, tras cada cambio, si el cursor está justo detrás de una arroba. */
+  const revisarMencion = useCallback(
+    (texto: string, cursor: number) => {
+      if (menciones.length === 0) return;
+
+      const antes = texto.slice(0, cursor);
+      const arroba = antes.lastIndexOf('@');
+      if (arroba < 0) {
+        setMencionAbierta(false);
+        return;
+      }
+
+      // Lo escrito entre la arroba y el cursor. Un espacio o un salto de línea
+      // cierran la mención: ya se pasó a escribir otra cosa.
+      const parcial = antes.slice(arroba + 1);
+      if (/[\s]/.test(parcial)) {
+        setMencionAbierta(false);
+        return;
+      }
+
+      // La arroba debe estar al inicio o tras un separador (si va pegada a
+      // texto, es un correo).
+      const anterior = arroba === 0 ? '' : antes[arroba - 1];
+      if (anterior !== '' && /[\w@.]/.test(anterior)) {
+        setMencionAbierta(false);
+        return;
+      }
+
+      mencionInicioRef.current = arroba;
+      setMencionFiltro(parcial);
+      setMencionIndice(0);
+      setMencionAbierta(true);
+    },
+    [menciones.length]
+  );
+
+  /** Reemplaza lo escrito tras la arroba por el nombre elegido. */
+  const insertarMencion = useCallback(
+    (candidato: MencionCandidato) => {
+      const area = textareaRef.current;
+      const inicio = mencionInicioRef.current;
+      const cursor = area?.selectionStart ?? value.length;
+
+      const texto = `${value.slice(0, inicio)}@${candidato.valor} ${value.slice(cursor)}`;
+      setValue(texto);
+      setMencionAbierta(false);
+
+      // El cursor queda después del espacio que se acaba de insertar.
+      const posicion = inicio + candidato.valor.length + 2;
+      requestAnimationFrame(() => {
+        area?.focus();
+        area?.setSelectionRange(posicion, posicion);
+      });
+    },
+    [value]
+  );
 
   const tooLong = value.length > MAX_USER_MESSAGE_CHARS;
   // Con adjuntos el texto puede ir vacío (mandar solo un archivo es válido);
@@ -191,7 +297,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   // El arrastrar-y-soltar vive en el hilo (para poder soltar sobre toda la
   // conversación, no solo sobre la caja de texto), pero los archivos y su
   // validación viven aquí. Esta es la única puerta entre los dos.
-  useImperativeHandle(ref, () => ({ addFiles }), [addFiles]);
+  useImperativeHandle(
+    ref,
+    () => ({ addFiles, focus: () => textareaRef.current?.focus() }),
+    [addFiles]
+  );
 
   /**
    * Pegar una imagen del portapapeles (Ctrl+V / Cmd+V) — el caso de todos los
@@ -255,20 +365,6 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     });
   }, [value]);
 
-  const insertEmoji = useCallback((emoji: string) => {
-    const el = textareaRef.current;
-    const start = el?.selectionStart ?? value.length;
-    const end = el?.selectionEnd ?? value.length;
-    const next = value.slice(0, start) + emoji + value.slice(end);
-    setValue(next);
-    setEmojiOpen(false);
-    requestAnimationFrame(() => {
-      el?.focus();
-      const pos = start + emoji.length;
-      el?.setSelectionRange(pos, pos);
-    });
-  }, [value]);
-
   const submit = useCallback(async () => {
     if (!canSend) return;
     const body = value.trim();
@@ -289,8 +385,39 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // ⚠️ La lista de menciones se atiende ANTES que todo lo demás: con la
+      // lista abierta, Enter escoge el nombre resaltado en vez de enviar el
+      // mensaje. Si se atendiera después, escribir "@pl" + Enter mandaría el
+      // mensaje a medio escribir, que es el error clásico de estos menús.
+      if (mencionVisible) {
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          setMencionIndice((i) => (i + 1) % candidatos.length);
+          return;
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          setMencionIndice((i) => (i - 1 + candidatos.length) % candidatos.length);
+          return;
+        }
+        if (event.key === 'Enter' || event.key === 'Tab') {
+          event.preventDefault();
+          insertarMencion(candidatos[Math.min(mencionIndice, candidatos.length - 1)]);
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          setMencionAbierta(false);
+          return;
+        }
+      }
+
       // Enter envía; Shift+Enter hace salto de línea (convención universal).
+      // Con teclado táctil se invierte: Enter salta de línea y se envía con el
+      // botón. No se llama a preventDefault, así que el salto lo hace el
+      // navegador solo.
       if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+        if (tecladoTactil) return;
         event.preventDefault();
         void submit();
         return;
@@ -306,11 +433,162 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         }
       }
     },
-    [applyFormat, submit]
+    [applyFormat, candidatos, insertarMencion, mencionIndice, mencionVisible, submit, tecladoTactil]
+  );
+
+  /*
+   * El clip vive DENTRO de la caja de escribir (`rightSection`), no al lado.
+   * Pedido de Nicolás (2026-09-09): "quita el panel de emojis y deja solo el
+   * clip dentro del input, muy similar a como lo hace WhatsApp".
+   *
+   * Se guarda en una variable porque se usa en los DOS caminos —la caja de
+   * escribir y la vista previa—: si viviera solo dentro del Textarea, al
+   * activar la vista previa se perdería la forma de adjuntar.
+   */
+  // UN SOLO botón secundario, y va DENTRO de la caja, como WhatsApp. Antes
+  // eran dos (clip y ⋯) y Nicolás lo pidió explícito: "solo hay un botón de
+  // clip y ese sí muestra todo". Adjuntar queda de primero porque es lo que la
+  // gente viene a buscar cuando toca un clip.
+  const menuClip = (
+    <Menu
+      opened={menuAbierto}
+      onChange={setMenuAbierto}
+      position='top-end'
+      withArrow
+      shadow='md'
+      width={225}
+      trapFocus={!tecladoTactil}
+      returnFocus={!tecladoTactil}
+      menuItemTabIndex={0}
+    >
+      <Menu.Target>
+        <ActionIcon
+          variant='subtle'
+          color='gray'
+          size={34}
+          radius='xl'
+          disabled={disabled}
+          aria-label='Adjuntar y más opciones'
+          title='Adjuntar y más opciones'
+          onMouseDown={(event) => {
+            if (document.activeElement === textareaRef.current) event.preventDefault();
+          }}
+        >
+          <IconPaperclip size={19} />
+        </ActionIcon>
+      </Menu.Target>
+      <Menu.Dropdown className='chat-surface'>
+        {/* ETIQUETA, no botón con `.click()` por programa.
+            Abrir el selector desde JavaScript es frágil en el celular: se
+            pierde el gesto del usuario, el teclado se cierra y no pasa
+            nada más (Nicolás en iPhone, 2026-09-08 — el primer intento,
+            que solo dejó de esconder el input, no bastó). Con una <label>
+            amarrada por `htmlFor`, quien abre el selector es el navegador
+            de forma nativa: no hay gesto que perder.
+            `closeMenuOnClick={false}` es indispensable: si el menú se
+            desmonta con el mismo toque, la etiqueta desaparece antes de
+            que el navegador alcance a activar el input. El menú se cierra
+            en el `onChange` del input, cuando ya escogieron el archivo. */}
+        <Menu.Item
+          component='label'
+          htmlFor={fileInputId}
+          closeMenuOnClick={false}
+          leftSection={<IconPaperclip size={14} />}
+          disabled={files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
+          style={{ cursor: 'pointer' }}
+        >
+          Adjuntar archivos
+        </Menu.Item>
+        <Menu.Divider />
+        <Menu.Label>Formato</Menu.Label>
+        <Menu.Item
+          leftSection={<IconBold size={14} />}
+          rightSection={
+            <Text size='xs' c='dimmed'>
+              Ctrl+B
+            </Text>
+          }
+          onClick={() => applyFormat('bold')}
+        >
+          Negrita
+        </Menu.Item>
+        <Menu.Item
+          leftSection={<IconItalic size={14} />}
+          rightSection={
+            <Text size='xs' c='dimmed'>
+              Ctrl+I
+            </Text>
+          }
+          onClick={() => applyFormat('italic')}
+        >
+          Cursiva
+        </Menu.Item>
+        <Menu.Item leftSection={<IconList size={14} />} onClick={() => applyFormat('list')}>
+          Lista
+        </Menu.Item>
+        <Menu.Item leftSection={<IconCode size={14} />} onClick={() => applyFormat('code')}>
+          Código
+        </Menu.Item>
+        <Menu.Divider />
+        <Menu.Item
+          leftSection={preview ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+          onClick={() => setPreview((p) => !p)}
+          disabled={value.trim().length === 0}
+        >
+          {preview ? 'Volver a editar' : 'Vista previa'}
+        </Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
   );
 
   return (
     <Box className='chat-composer'>
+      {/* Lista de menciones. Va como primer hijo del compositor, así que se
+          dibuja ARRIBA de la caja de escribir: en el celular, un menú que
+          apareciera debajo quedaría tapado por el teclado. */}
+      {mencionVisible && (
+        <Box className='chat-menciones' role='listbox' aria-label='Asistentes del grupo'>
+          {candidatos.map((c, i) => (
+            <UnstyledButton
+              key={c.valor}
+              role='option'
+              aria-selected={i === mencionIndice}
+              className={[
+                'chat-menciones__item',
+                i === mencionIndice ? 'chat-menciones__item--activo' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              // `onMouseDown` y no `onClick`: el clic llega después del blur
+              // del textarea, que cierra la lista, y el `onClick` nunca se
+              // dispararía.
+              onMouseDown={(event) => {
+                event.preventDefault();
+                insertarMencion(c);
+              }}
+              onMouseEnter={() => setMencionIndice(i)}
+            >
+              <Group gap={8} wrap='nowrap'>
+                <AgentAvatar
+                  code={c.valor}
+                  displayName={c.nombre}
+                  avatarUrl={c.avatarUrl}
+                  size={22}
+                  showStatus={false}
+                  withTooltip={false}
+                />
+                <Text size='sm' fw={600} lineClamp={1}>
+                  {c.nombre}
+                </Text>
+                <Text size='xs' className='chat-text-muted' lineClamp={1}>
+                  @{c.valor}
+                </Text>
+              </Group>
+            </UnstyledButton>
+          ))}
+        </Box>
+      )}
+
       {files.length > 0 && (
         <Group gap={6} mb={6} wrap='wrap'>
           {files.map((file, index) => (
@@ -345,6 +623,32 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         </Text>
       )}
 
+      {/* La cita, encima de la caja y cancelable. Va ARRIBA y no dentro de la
+          caja para no robarle renglones al texto: el compositor arranca en una
+          sola fila y así se queda. */}
+      {cita && (
+        <Group gap={6} wrap='nowrap' mb={6} className='chat-cita chat-cita--compositor'>
+          <Box className='chat-cita__barra' aria-hidden />
+          <Box style={{ flex: 1, minWidth: 0 }}>
+            <Text size='xs' fw={600} lineClamp={1}>
+              Respondiendo a {cita.author}
+            </Text>
+            <Text size='xs' className='chat-text-muted' lineClamp={1}>
+              {cita.preview}
+            </Text>
+          </Box>
+          <ActionIcon
+            size='sm'
+            variant='subtle'
+            color='gray'
+            onClick={() => onQuitarCita?.()}
+            aria-label='Quitar la cita'
+          >
+            <IconX size={14} />
+          </ActionIcon>
+        </Group>
+      )}
+
       {/* El contador solo aparece cerca del tope; el resto del tiempo no ocupa
           renglón, que es justamente lo que se buscaba. */}
       {value.length > MAX_USER_MESSAGE_CHARS * 0.8 && (
@@ -353,50 +657,15 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         </Text>
       )}
 
-      <Group gap={2} align='flex-end' wrap='nowrap'>
-        <Popover opened={emojiOpen} onChange={setEmojiOpen} position='top-start' withArrow shadow='md' width={260}>
-          <Popover.Target>
-            <Tooltip label='Emojis' withArrow>
-              <ActionIcon
-                variant='subtle'
-                color='gray'
-                size={34}
-                radius='xl'
-                disabled={disabled}
-                onClick={() => setEmojiOpen((o) => !o)}
-                aria-label='Insertar emoji'
-              >
-                <IconMoodSmile size={18} />
-              </ActionIcon>
-            </Tooltip>
-          </Popover.Target>
-          <Popover.Dropdown p='xs' className='chat-surface'>
-            <ScrollArea.Autosize mah={220}>
-              {EMOJI_GROUPS.map((group) => (
-                <Box key={group.label} mb={6}>
-                  <Text size='xs' c='dimmed' mb={2}>
-                    {group.label}
-                  </Text>
-                  <Group gap={2}>
-                    {group.emojis.map((emoji) => (
-                      <ActionIcon
-                        key={emoji}
-                        variant='subtle'
-                        color='gray'
-                        size='md'
-                        onClick={() => insertEmoji(emoji)}
-                        aria-label={`Insertar ${emoji}`}
-                      >
-                        <span style={{ fontSize: 16, lineHeight: 1 }}>{emoji}</span>
-                      </ActionIcon>
-                    ))}
-                  </Group>
-                </Box>
-              ))}
-            </ScrollArea.Autosize>
-          </Popover.Dropdown>
-        </Popover>
-
+      {/* `align='center'` y no `flex-end`: la caja (min-height 42 px) y el
+          botón de enviar (46 px) tienen alturas DISTINTAS a propósito (ver el
+          comentario del radio en `.chat-composer__input`), pero alineándolos
+          por abajo esos pocos píxeles de diferencia quedan todos arriba de la
+          caja y se ve corrida hacia abajo respecto al botón. Centrados, la
+          diferencia se reparte mitad arriba y mitad abajo y no se nota.
+          El `gap` sube de 2 a 8 px por lo mismo que reportó Nicolás
+          (2026-09-10): pegados así la fila se ve amontonada, no espaciada. */}
+      <Group gap={8} align='center' wrap='nowrap' className='chat-composer__row'>
         {preview ? (
           <Box
             className='chat-composer__preview'
@@ -405,15 +674,36 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           >
             <ChatMarkdown content={value} />
           </Box>
-        ) : (
+        ) : null}
+        {preview && menuClip}
+        {!preview && (
           <Textarea
             ref={textareaRef}
             value={value}
-            onChange={(event) => setValue(event.currentTarget.value)}
+            onChange={(event) => {
+              setValue(event.currentTarget.value);
+              revisarMencion(event.currentTarget.value, event.currentTarget.selectionStart ?? 0);
+            }}
+            onKeyUp={(event) => {
+              // Mover el cursor con las flechas también cambia si estamos o no
+              // dentro de una mención.
+              if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
+                revisarMencion(event.currentTarget.value, event.currentTarget.selectionStart ?? 0);
+              }
+            }}
+            onBlur={() => setMencionAbierta(false)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             placeholder={placeholder}
+            /* Sin corrector del navegador: nada de subrayado rojo ni
+               autocorrección/mayúsculas automáticas en la caja del chat
+               (Nicolás, 2026-09-09). spellCheck apaga el subrayado; autoCorrect
+               y autoCapitalize evitan que el móvil "arregle" lo que se escribe. */
+            spellCheck={false}
+            autoCorrect='off'
+            autoCapitalize='off'
             autosize
+            radius={23}
             /* Arranca en UN renglón, como WhatsApp, y crece al escribir. */
             minRows={1}
             maxRows={6}
@@ -421,84 +711,33 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             autoFocus={autoFocus}
             error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
             style={{ flex: 1, minWidth: 0 }}
-            classNames={{ input: 'chat-composer__input' }}
+            classNames={{ root: 'chat-composer__field', input: 'chat-composer__input' }}
+            /* El clip va DENTRO de la caja. `rightSectionPointerEvents='all'`
+               no es opcional: por defecto Mantine le pone `pointer-events:
+               none` a esa zona —está pensada para iconos decorativos— y el
+               botón quedaría pintado pero muerto al tacto. */
+            rightSection={menuClip}
+            rightSectionWidth={42}
+            rightSectionPointerEvents='all'
           />
         )}
 
-        {/* UN SOLO botón secundario, como WhatsApp: el clip abre todo.
-            Antes eran dos (clip y ⋯) y Nicolás lo pidió explícito: "solo hay
-            un botón de clip y ese sí muestra todo". Adjuntar queda de primero
-            porque es lo que la gente viene a buscar cuando toca un clip. */}
-        <Menu position='top-end' withArrow shadow='md' width={225}>
-          <Menu.Target>
-            <ActionIcon
-              variant='subtle'
-              color='gray'
-              size={34}
-              radius='xl'
-              disabled={disabled}
-              aria-label='Adjuntar y más opciones'
-              title='Adjuntar y más opciones'
-            >
-              <IconPaperclip size={19} />
-            </ActionIcon>
-          </Menu.Target>
-          <Menu.Dropdown className='chat-surface'>
-            <Menu.Item
-              leftSection={<IconPaperclip size={14} />}
-              onClick={() => fileInputRef.current?.click()}
-              disabled={files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
-            >
-              Adjuntar archivos
-            </Menu.Item>
-            <Menu.Divider />
-            <Menu.Label>Formato</Menu.Label>
-            <Menu.Item
-              leftSection={<IconBold size={14} />}
-              rightSection={
-                <Text size='xs' c='dimmed'>
-                  Ctrl+B
-                </Text>
-              }
-              onClick={() => applyFormat('bold')}
-            >
-              Negrita
-            </Menu.Item>
-            <Menu.Item
-              leftSection={<IconItalic size={14} />}
-              rightSection={
-                <Text size='xs' c='dimmed'>
-                  Ctrl+I
-                </Text>
-              }
-              onClick={() => applyFormat('italic')}
-            >
-              Cursiva
-            </Menu.Item>
-            <Menu.Item leftSection={<IconList size={14} />} onClick={() => applyFormat('list')}>
-              Lista
-            </Menu.Item>
-            <Menu.Item leftSection={<IconCode size={14} />} onClick={() => applyFormat('code')}>
-              Código
-            </Menu.Item>
-            <Menu.Divider />
-            <Menu.Item
-              leftSection={preview ? <IconEyeOff size={14} /> : <IconEye size={14} />}
-              onClick={() => setPreview((p) => !p)}
-              disabled={value.trim().length === 0}
-            >
-              {preview ? 'Volver a editar' : 'Vista previa'}
-            </Menu.Item>
-          </Menu.Dropdown>
-        </Menu>
 
         {/* El recordatorio de Enter / Shift+Enter era un renglón entero; ahora
             vive en el globo de este botón. */}
         {/* Grande a propósito (46 px contra los 34 de los secundarios): es la
             acción principal y en el celular se toca con el pulgar. Es el
             círculo verde de WhatsApp. */}
-        <Tooltip label='Enviar · Enter envía, Shift+Enter salta de línea' withArrow>
+        <Tooltip
+          label={
+            tecladoTactil
+              ? 'Enviar · con teclado táctil, Enter salta de línea'
+              : 'Enviar · Enter envía, Shift+Enter salta de línea'
+          }
+          withArrow
+        >
           <ActionIcon
+            className='chat-composer__send'
             size={46}
             radius='xl'
             variant='filled'
@@ -517,16 +756,41 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         </Tooltip>
       </Group>
 
+      {/* NO va con `hidden`. Con `hidden` (o sea `display:none`) el input no se
+          renderiza, y varios navegadores móviles se niegan a abrir el selector
+          de archivos cuando se le hace `.click()` por programa a un input que
+          no está en el layout. En escritorio funcionaba y en el celular no
+          pasaba nada al tocar "Adjuntar archivos" (Nicolás, 2026-09-08).
+          Queda renderizado pero sin ocupar espacio: bloque de 0×0 y
+          transparente. Va como `block` a propósito — en línea generaría una
+          caja de renglón y le sumaría alto al compositor. El `.click()` por
+          programa sí lo alcanza. */}
       <input
         ref={fileInputRef}
+        id={fileInputId}
         type='file'
         multiple
-        hidden
+        tabIndex={-1}
+        aria-hidden='true'
+        style={{
+          display: 'block',
+          width: 0,
+          height: 0,
+          padding: 0,
+          border: 0,
+          opacity: 0,
+          overflow: 'hidden',
+          pointerEvents: 'none',
+        }}
         onChange={(event) => {
+          // El menú quedó abierto a propósito mientras se escogía el archivo;
+          // ya con el archivo en mano se cierra.
+          setMenuAbierto(false);
           addFiles(event.currentTarget.files);
           // Se limpia para que escoger DOS VECES el mismo archivo vuelva a
           // disparar el onChange.
           event.currentTarget.value = '';
+          textareaRef.current?.focus({ preventScroll: true });
         }}
       />
     </Box>

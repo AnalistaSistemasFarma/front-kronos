@@ -18,6 +18,7 @@ import {
 } from '@mantine/core';
 import { IconAlertCircle, IconArrowLeft, IconHierarchy2, IconLock } from '@tabler/icons-react';
 import AgentAvatar from '../../../../../components/chat/AgentAvatar';
+import { EsqueletoListaAgentes } from '../../../../../components/chat/ChatSkeletons';
 
 /**
  * ORGANIGRAMA DE LA FLOTA, dentro de SynerLink.
@@ -161,7 +162,7 @@ export default function OrganigramaAgentesPage() {
           <Link href='/process/chat' className='chat-text-muted' style={{ fontSize: 13 }}>
             <Group gap={4} wrap='nowrap'>
               <IconArrowLeft size={14} />
-              <span>Volver a Asistentes IA</span>
+              <span>Volver a Chat</span>
             </Group>
           </Link>
         </Group>
@@ -183,11 +184,7 @@ export default function OrganigramaAgentesPage() {
           </Alert>
         )}
 
-        {!agentes && !error && (
-          <Center py='xl'>
-            <Loader size='sm' />
-          </Center>
-        )}
+        {!agentes && !error && <EsqueletoListaAgentes filas={6} />}
 
         {agentes && (
           <Stack gap='xl'>

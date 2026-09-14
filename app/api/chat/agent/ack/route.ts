@@ -22,9 +22,17 @@ export const dynamic = 'force-dynamic';
  * el agente confirmó la recepción". Es idempotente — confirmar dos veces no
  * mueve la marca original (el WHERE exige delivered_at IS NULL).
  *
- * Seguridad: el agente sale de la llave y el WHERE está anclado a sus propias
- * conversaciones. Mandar el id de un mensaje de otro agente no marca nada: la
- * respuesta dirá `updated: 0`.
+ * Dos destinos según de dónde venga el mensaje, y la diferencia importa:
+ *   - HILO DIRECTO: se marca `chat_message.delivered_at`. Hay un solo agente,
+ *     así que la columna del mensaje alcanza.
+ *   - GRUPO: se marca la fila de ESTE agente en `chat_message_delivery`. Tocar
+ *     la columna del mensaje se lo escondería a los otros agentes mencionados,
+ *     que es justo el error que esa tabla existe para evitar.
+ * El bot manda los mismos ids en los dos casos; el servidor sabe cuál es cuál.
+ *
+ * Seguridad: el agente sale de la llave y los dos WHERE están anclados a lo
+ * suyo. Mandar el id de un mensaje de otro agente no marca nada: la respuesta
+ * dirá `updated: 0`.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -51,18 +59,35 @@ export async function POST(request: NextRequest) {
       ids.push(n);
     }
 
-    const result = await prisma.chatMessage.updateMany({
-      where: {
-        id: { in: ids },
-        delivered_at: null,
-        role: 'user',
-        // ANCLA DE SEGURIDAD: solo mensajes de hilos de ESTE agente.
-        conversation: { id_agent: agent.idAgent },
-      },
-      data: { delivered_at: new Date() },
-    });
+    const ahora = new Date();
 
-    return jsonNoStore({ updated: result.count });
+    const [directos, grupos] = await Promise.all([
+      prisma.chatMessage.updateMany({
+        where: {
+          id: { in: ids },
+          delivered_at: null,
+          role: 'user',
+          // ANCLA DE SEGURIDAD: solo mensajes de hilos DIRECTOS de ESTE agente.
+          conversation: { kind: 'direct', id_agent: agent.idAgent },
+        },
+        data: { delivered_at: ahora },
+      }),
+      prisma.chatMessageDelivery.updateMany({
+        where: {
+          id_message: { in: ids },
+          // ANCLA DE SEGURIDAD: solo las entregas de ESTE agente.
+          id_agent: agent.idAgent,
+          delivered_at: null,
+        },
+        data: { delivered_at: ahora },
+      }),
+    ]);
+
+    return jsonNoStore({
+      updated: directos.count + grupos.count,
+      direct: directos.count,
+      group: grupos.count,
+    });
   } catch (error) {
     return serverError('POST /api/chat/agent/ack', error);
   }

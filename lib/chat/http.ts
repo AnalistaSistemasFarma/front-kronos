@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 import { authOptions } from '../../app/api/auth/[...nextauth]/route';
 import { prisma } from '../prisma';
 import { assertConversationOwnership } from './access';
+import { assertGroupAccess, type AgenteMencionable, type ParticipantRole } from './groups';
 
 /** El chat nunca se cachea: es una bandeja en vivo. */
 export const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' } as const;
@@ -65,12 +66,21 @@ export async function resolveSessionUser(): Promise<ChatSessionUser | null> {
 }
 
 /**
- * Resuelve sesión + PROPIEDAD de la conversación de una sola vez.
+ * Resuelve sesión + ACCESO a la conversación de una sola vez, sirva para un
+ * hilo directo o para un grupo.
  *
- * Es el guardia anti-IDOR de todos los endpoints con `[id]`: el id que llega
- * del cliente solo sirve si la conversación es del usuario de la sesión Y el
- * usuario todavía tiene permiso sobre el agente de ese hilo
- * (assertConversationOwnership, lib/chat/access.ts).
+ * Es el guardia anti-IDOR de todos los endpoints con `[id]`. El id que llega
+ * del cliente solo sirve si:
+ *
+ *   - hilo DIRECTO: la conversación es del usuario de la sesión Y el usuario
+ *     todavía tiene permiso sobre el agente de ese hilo
+ *     (assertConversationOwnership, lib/chat/access.ts);
+ *   - GRUPO: el usuario es participante Y sigue teniendo el módulo habilitado
+ *     en la empresa del grupo (assertGroupAccess, lib/chat/groups.ts).
+ *
+ * Se prueban en ese orden y las dos puertas están ancladas a su `kind`, así
+ * que ninguna acepta una conversación de la otra clase. El resultado dice cuál
+ * fue (`kind`) para que la ruta pueda ramificar sin volver a consultar.
  *
  * Devuelve un `NextResponse` ya listo cuando algo falla, para que la ruta solo
  * tenga que hacer `if ('response' in guard) return guard.response;`.
@@ -81,7 +91,22 @@ export async function resolveSessionUser(): Promise<ChatSessionUser | null> {
  */
 export type ConversationGuard =
   | { response: NextResponse }
-  | { user: ChatSessionUser; conversationId: number; idAgent: number };
+  | {
+      user: ChatSessionUser;
+      conversationId: number;
+      kind: 'direct';
+      /** El agente del hilo directo. */
+      idAgent: number;
+    }
+  | {
+      user: ChatSessionUser;
+      conversationId: number;
+      kind: 'group';
+      /** Papel del usuario dentro del grupo ('owner' puede administrar). */
+      groupRole: ParticipantRole;
+      /** Agentes que están en el grupo (para resolver menciones). */
+      groupAgents: AgenteMencionable[];
+    };
 
 export async function guardConversation(rawId: string): Promise<ConversationGuard> {
   const user = await resolveSessionUser();
@@ -93,16 +118,27 @@ export async function guardConversation(rawId: string): Promise<ConversationGuar
   }
 
   const owned = await assertConversationOwnership(user.email, conversationId);
-  if (!owned) {
+  if (owned) {
+    return { user, conversationId: owned.id, kind: 'direct', idAgent: owned.idAgent };
+  }
+
+  const grupo = await assertGroupAccess(user.email, user.id, conversationId);
+  if (grupo) {
     return {
-      response: NextResponse.json(
-        { error: 'Conversación no encontrada.' },
-        { status: 404, headers: NO_STORE }
-      ),
+      user,
+      conversationId: grupo.id,
+      kind: 'group',
+      groupRole: grupo.role,
+      groupAgents: grupo.agentes,
     };
   }
 
-  return { user, conversationId: owned.id, idAgent: owned.idAgent };
+  return {
+    response: NextResponse.json(
+      { error: 'Conversación no encontrada.' },
+      { status: 404, headers: NO_STORE }
+    ),
+  };
 }
 
 /** Lee el cuerpo JSON de una petición sin reventar si viene vacío o corrupto. */

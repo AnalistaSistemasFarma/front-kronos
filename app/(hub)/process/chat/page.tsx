@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
-import { Center, Loader } from '@mantine/core';
 import ChatWorkspace from '../../../../components/chat/ChatWorkspace';
+import { EsqueletoPantallaChat } from '../../../../components/chat/ChatSkeletons';
 
 /**
  * Módulo "Asistentes IA" — página de chats.
@@ -20,11 +20,7 @@ export default function ChatPage() {
   return (
     <Suspense
       fallback={
-        <div className='app-page-shell app-page-shell--fill min-h-screen'>
-          <Center py='xl'>
-            <Loader size='sm' />
-          </Center>
-        </div>
+        <EsqueletoPantallaChat />
       }
     >
       <ChatWorkspace />

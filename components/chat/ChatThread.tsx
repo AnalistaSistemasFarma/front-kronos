@@ -8,15 +8,14 @@ import {
   Button,
   Center,
   Group,
-  Loader,
   ScrollArea,
   Stack,
   Text,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import {
   IconAlertCircle,
-  IconArrowDown,
   IconDownload,
   IconMessage2,
   IconUpload,
@@ -24,17 +23,22 @@ import {
 import AgentAvatar from './AgentAvatar';
 import AgentTaskTable from './AgentTaskTable';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
+import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
-import { useChatConversation } from './useChatConversation';
+import ChatVoice from './ChatVoice';
+import { useChatConversation, type ChatTarget } from './useChatConversation';
 import { useAltoVisible } from './useAltoVisible';
 import {
   describeAgentStatus,
   formatChatTime,
   SIN_RESPUESTA_MS,
   type ChatAgentDto,
+  type ChatAgentStatusDto,
   type ChatMessageDto,
+  type ChatParticipantDto,
 } from '../../lib/chat/client';
 import { formatBytes } from '../../lib/chat/attachments';
+import type { ChatReplyToDto } from '../../lib/chat/client';
 
 /**
  * El hilo de conversación: burbujas con Markdown real, indicador de qué está
@@ -106,20 +110,97 @@ function MessageAttachments({ message }: { message: ChatMessageDto }) {
 function MessageBubble({
   message,
   agent,
+  currentUserId,
+  enGrupo = false,
   nueva = false,
+  onCitar,
+  onIrAlCitado,
 }: {
   message: ChatMessageDto;
-  agent: ChatAgentDto;
+  /** El agente del hilo directo. En un grupo no hay "uno". */
+  agent?: ChatAgentDto;
+  /** Quién soy: en un grupo es lo que distingue mis mensajes de los ajenos. */
+  currentUserId?: string;
+  enGrupo?: boolean;
   /** Llegó DESPUÉS de abrir el hilo: solo esas se animan (ver ChatThread). */
   nueva?: boolean;
+  /** Citar ESTE mensaje. Sin esto, los gestos quedan inertes. */
+  onCitar?: (message: ChatMessageDto) => void;
+  /** Saltar al mensaje que este cita. */
+  onIrAlCitado?: (idMessage: number) => void;
 }) {
-  const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+
+  /*
+   * CÓMO SE CITA, según el aparato.
+   *
+   * Es lo que hacen los grandes, y por buenas razones:
+   *   - En el CELULAR, deslizar el mensaje a la derecha (WhatsApp, Telegram,
+   *     Signal). No hay clic derecho y una presión larga pelea con la
+   *     selección de texto del sistema.
+   *   - En ESCRITORIO, clic derecho (Telegram) — en Slack es una barra al
+   *     pasar el mouse, pero eso pide rediseñar la burbuja; el menú del clic
+   *     derecho da lo mismo sin tocar el diseño.
+   *
+   * El umbral son 55 px para que un desplazamiento vertical de la
+   * conversación no dispare la cita por accidente, y solo cuenta si el gesto
+   * fue MÁS horizontal que vertical.
+   */
+  const gesto = useRef<{ x: number; y: number } | null>(null);
+  const [arrastre, setArrastre] = useState(0);
+  const UMBRAL = 55;
+
+  const puedeCitar = Boolean(onCitar) && !message.pending && !message.failed && message.id > 0;
+
+  const alTocar = (event: React.TouchEvent) => {
+    if (!puedeCitar) return;
+    const toque = event.touches[0];
+    gesto.current = { x: toque.clientX, y: toque.clientY };
+  };
+
+  const alMover = (event: React.TouchEvent) => {
+    if (!gesto.current || !puedeCitar) return;
+    const toque = event.touches[0];
+    const dx = toque.clientX - gesto.current.x;
+    const dy = toque.clientY - gesto.current.y;
+    // Solo a la derecha, y solo si el gesto es horizontal: si no, es la
+    // conversación desplazándose y hay que dejarla en paz.
+    if (dx <= 0 || Math.abs(dy) > Math.abs(dx)) {
+      setArrastre(0);
+      return;
+    }
+    setArrastre(Math.min(dx, UMBRAL + 15));
+  };
+
+  const alSoltar = () => {
+    if (arrastre >= UMBRAL && puedeCitar) onCitar?.(message);
+    gesto.current = null;
+    setArrastre(0);
+  };
+
+  // ⚠️ EN UN GRUPO, "mío" NO es lo mismo que role='user'. Con el criterio del
+  // hilo directo, los mensajes de las OTRAS personas del grupo se pintarían
+  // alineados a la derecha como si los hubiera escrito uno: el grupo quedaría
+  // ilegible. Aquí lo mío es lo que escribí yo, y eso solo lo dice el autor.
+  const isUser = enGrupo
+    ? message.author?.kind === 'user' &&
+      currentUserId !== undefined &&
+      String(message.author.id) === currentUserId
+    : message.role === 'user';
+
+  // Nombre de quien escribió, para la etiqueta de la burbuja. En el hilo
+  // directo es siempre el agente; en un grupo, quien sea (persona o agente).
+  const nombreAutor = message.author?.name ?? agent?.displayName ?? 'Asistente';
+  const avatarAutor = message.author?.avatarUrl ?? agent?.avatarUrl ?? null;
+  const codigoAutor = message.author?.kind === 'agent' ? String(message.author.id) : agent?.code ?? '';
 
   if (isSystem) {
     return (
       <Center>
-        <Box className={`chat-bubble chat-bubble--system${nueva ? ' chat-bubble--nueva' : ''}`}>
+        <Box
+          id={`msg-${message.id}`}
+          className={`chat-bubble chat-bubble--system${nueva ? ' chat-bubble--nueva' : ''}`}
+        >
           <ChatMarkdown content={message.body} />
           <MessageAttachments message={message} />
         </Box>
@@ -137,9 +218,9 @@ function MessageBubble({
       {!isUser && (
         <Box style={{ flexShrink: 0 }}>
           <AgentAvatar
-            code={agent.code}
-            displayName={agent.displayName}
-            avatarUrl={agent.avatarUrl}
+            code={codigoAutor}
+            displayName={nombreAutor}
+            avatarUrl={avatarAutor}
             size={28}
             showStatus={false}
             withTooltip={false}
@@ -148,6 +229,8 @@ function MessageBubble({
       )}
 
       <Box
+        // El ancla con la que se salta a este mensaje desde una cita.
+        id={`msg-${message.id}`}
         className={[
           'chat-bubble',
           isUser ? 'chat-bubble--user' : 'chat-bubble--agent',
@@ -157,11 +240,43 @@ function MessageBubble({
         ]
           .filter(Boolean)
           .join(' ')}
+        style={arrastre > 0 ? { transform: `translateX(${arrastre}px)` } : undefined}
+        onTouchStart={alTocar}
+        onTouchMove={alMover}
+        onTouchEnd={alSoltar}
+        onContextMenu={(event) => {
+          if (!puedeCitar) return;
+          // Se reemplaza el menú del navegador: ofrecer "inspeccionar" sobre
+          // un mensaje no le sirve a nadie, y responder sí.
+          event.preventDefault();
+          onCitar?.(message);
+        }}
       >
         {!isUser && (
           <Text size='xs' fw={600} className='chat-bubble__author'>
-            {agent.displayName}
+            {nombreAutor}
           </Text>
+        )}
+
+        {/* El mensaje CITADO, dentro de la burbuja y encima del texto. Al
+            tocarlo salta al original, que es la otra mitad de la función:
+            citar sin poder volver al contexto sirve a medias. */}
+        {message.replyTo && (
+          <UnstyledButton
+            className='chat-cita chat-cita--burbuja'
+            onClick={() => onIrAlCitado?.(message.replyTo!.idMessage)}
+            aria-label={`Ir al mensaje de ${message.replyTo.author}`}
+          >
+            <Box className='chat-cita__barra' aria-hidden />
+            <Box style={{ minWidth: 0 }}>
+              <Text size='xs' fw={600} lineClamp={1}>
+                {message.replyTo.author}
+              </Text>
+              <Text size='xs' className='chat-text-muted' lineClamp={2}>
+                {message.replyTo.preview}
+              </Text>
+            </Box>
+          </UnstyledButton>
         )}
 
         {message.body.trim().length > 0 && <ChatMarkdown content={message.body} />}
@@ -254,6 +369,50 @@ function SinRespuesta({
   );
 }
 
+/**
+ * Indicador de varios agentes a la vez, para los GRUPOS.
+ *
+ * En un grupo el indicador no puede ser uno solo: si tres agentes están
+ * trabajando y se muestra "Pensando…" sin decir quién, el usuario no sabe si
+ * le contesta el que le importa. Se pinta una línea por agente ocupado, y
+ * ninguna cuando están todos quietos.
+ */
+function GroupActivity({ statuses }: { statuses: ChatAgentStatusDto[] }) {
+  const ocupados = statuses.filter((s) => describeAgentStatus(s).busy);
+  if (ocupados.length === 0) return null;
+
+  return (
+    <Stack gap={4} role='status' aria-live='polite'>
+      {ocupados.map((s) => {
+        const view = describeAgentStatus(s);
+        return (
+          <Box key={s.idAgent}>
+            <Group gap='xs' align='center' className='chat-activity'>
+              <AgentAvatar
+                code={String(s.idAgent)}
+                displayName={s.agentName ?? 'Asistente'}
+                avatarUrl={s.agentAvatarUrl ?? null}
+                size={24}
+                showStatus={false}
+                withTooltip={false}
+              />
+              <span className='chat-typing' aria-hidden>
+                <i />
+                <i />
+                <i />
+              </span>
+              <Text size='xs' className='chat-activity__label'>
+                <b>{s.agentName ?? 'Asistente'}</b> · {view.label}
+              </Text>
+            </Group>
+            <AgentTaskTable tasks={s.tasks} />
+          </Box>
+        );
+      })}
+    </Stack>
+  );
+}
+
 /** Indicador de "qué está haciendo el agente" — lo que evita el efecto congelado. */
 function AgentActivity({
   agent,
@@ -294,16 +453,92 @@ function AgentActivity({
 
 export default function ChatThread({
   agent,
+  group,
+  currentUserId,
   active = true,
   height,
 }: {
-  agent: ChatAgentDto;
+  /** Hilo DIRECTO: el agente con el que se habla. */
+  agent?: ChatAgentDto;
+  /**
+   * GRUPO: el hilo ya existe y se abre por su id. `agentes` son los asistentes
+   * del grupo, para el autocompletado del `@`.
+   */
+  group?: {
+    idConversation: number;
+    title: string;
+    participants?: ChatParticipantDto[] | null;
+  };
+  /** Quién soy. En un grupo es lo que distingue mis mensajes de los ajenos. */
+  currentUserId?: string;
   /** El hilo está a la vista (marca leído y arranca el sondeo). */
   active?: boolean;
   /** Alto del área de mensajes. Sin valor, ocupa el espacio disponible. */
   height?: string | number;
 }) {
-  const thread = useChatConversation(agent.idAgent, active);
+  const enGrupo = Boolean(group);
+
+  const target: ChatTarget | null = group
+    ? { kind: 'group', idConversation: group.idConversation }
+    : agent
+      ? { kind: 'agent', idAgent: agent.idAgent }
+      : null;
+
+  const thread = useChatConversation(target, active);
+
+  /* ─────────────────────────── Citar y responder ───────────────────────── */
+
+  const [cita, setCita] = useState<ChatReplyToDto | null>(null);
+
+  /**
+   * Pone un mensaje como cita y deja el cursor listo para escribir.
+   *
+   * El extracto se arma AQUÍ y no se pide al servidor: el mensaje ya está en
+   * pantalla, así que pedirlo otra vez sería un viaje para nada. El servidor
+   * vuelve a resolverlo cuando devuelve el mensaje creado, y esa es la versión
+   * que queda.
+   */
+  const citar = useCallback((message: ChatMessageDto) => {
+    const autor =
+      message.author?.name ??
+      (message.role === 'agent' ? (agent?.displayName ?? 'Asistente') : 'Usted');
+    const plano = message.body.replace(/\s+/g, ' ').trim();
+    setCita({
+      idMessage: message.id,
+      author: autor,
+      preview: plano.length > 140 ? `${plano.slice(0, 139)}…` : plano || '(adjunto)',
+    });
+    composerRef.current?.focus();
+  }, [agent]);
+
+  /**
+   * Salta al mensaje citado y lo resalta un momento.
+   *
+   * Si no está montado —quedó en una página anterior del historial— no se
+   * hace nada: traerlo pediría cargar hacia atrás hasta encontrarlo, y eso es
+   * una función aparte que vale la pena hacer bien y no de paso.
+   */
+  const irAlMensaje = useCallback((idMessage: number) => {
+    const nodo = document.getElementById(`msg-${idMessage}`);
+    if (!nodo) return;
+    nodo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    nodo.classList.add('chat-bubble--resaltada');
+    window.setTimeout(() => nodo.classList.remove('chat-bubble--resaltada'), 1600);
+  }, []);
+
+  // Asistentes del grupo, para el autocompletado del `@`. Se toman de la
+  // ficha que devuelve el servidor cuando está disponible: si se tomaran solo
+  // de las props, agregar un asistente al grupo no se reflejaría hasta
+  // recargar la página.
+  // Clave del hilo abierto: cambia al pasar de un agente a otro o de un grupo
+  // a otro, y es lo que reinicia los efectos de desplazamiento.
+  const claveHilo = group ? `grupo:${group.idConversation}` : `agente:${agent?.idAgent ?? 0}`;
+
+  const agentesMencionables = (
+    thread.conversation?.participants ??
+    group?.participants ??
+    []
+  ).filter((p) => p.kind === 'agent');
 
   // Mantiene `--alto-visible` al día: es lo que permite que el compositor no
   // quede debajo del teclado en el celular (ver el propio hook).
@@ -318,10 +553,10 @@ export default function ChatThread({
       const viewport = viewportRef.current;
       if (!viewport || !stickToBottomRef.current) return;
       // En el mismo cuadro el navegador todavía no reacomodó el layout con el
-      // alto nuevo; se espera al siguiente. Y se baja con `smooth` para que la
-      // conversación acompañe al teclado en vez de saltar de golpe.
+      // alto nuevo; se espera al siguiente. No encadenar animaciones smooth
+      // mientras el teclado cambia el viewport en cada cuadro.
       requestAnimationFrame(() => {
-        viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
+        viewport.scrollTop = viewport.scrollHeight;
       });
     }, [])
   );
@@ -358,7 +593,7 @@ export default function ChatThread({
     const viewport = viewportRef.current;
     if (!viewport || thread.loading) return;
     viewport.scrollTop = viewport.scrollHeight;
-  }, [thread.loading, agent.idAgent]);
+  }, [thread.loading, claveHilo]);
 
   /**
    * PEGADO AL FONDO de verdad, mientras el usuario esté abajo.
@@ -394,7 +629,7 @@ export default function ChatThread({
     });
     observador.observe(contenido);
     return () => observador.disconnect();
-  }, [agent.idAgent]);
+  }, [claveHilo]);
 
   // ── Arrastrar y soltar archivos sobre la conversación ────────────────────
   // El área de soltar es TODO el hilo (mensajes + compositor), no solo la caja
@@ -479,26 +714,6 @@ export default function ChatThread({
     setStickToBottom(distanceToBottom < 80);
   };
 
-  /**
-   * Bajar del todo, a mano.
-   *
-   * Pedido de Nicolás (2026-09-08): "a veces se sube pero toca bajar de nuevo
-   * al mensaje más reciente". Subir a leer algo viejo desactiva el
-   * autodesplazamiento a propósito —para no arrancarle la lectura—, y entonces
-   * volver abajo era trabajo manual: en una conversación larga, mucho trabajo.
-   *
-   * El botón solo aparece cuando uno NO está abajo, que es cuando sirve. Al
-   * pulsarlo, además de bajar, se vuelve a activar el pegado al fondo: quien
-   * baja a propósito quiere seguir la conversación en vivo.
-   */
-  const bajarDelTodo = useCallback(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    setStickToBottom(true);
-    stickToBottomRef.current = true;
-    viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
-  }, []);
-
   return (
     <Box
       className={`chat-thread${dragging ? ' chat-thread--dragging' : ''}`}
@@ -509,6 +724,7 @@ export default function ChatThread({
       onDrop={onDrop}
       onPaste={onPaste}
     >
+      {agent?.code === 'duo' && thread.conversation && <ChatVoice key={thread.conversation.id} conversationId={thread.conversation.id} />}
       {dragging && (
         <Box className='chat-thread__dropzone' aria-hidden>
           <Stack align='center' gap={4}>
@@ -542,11 +758,7 @@ export default function ChatThread({
             </Center>
           )}
 
-          {thread.loading && thread.messages.length === 0 && (
-            <Center py='xl'>
-              <Loader size='sm' />
-            </Center>
-          )}
+          {thread.loading && thread.messages.length === 0 && <EsqueletoHilo />}
 
           {!thread.loading && thread.messages.length === 0 && !thread.error && (
             <Center py='xl'>
@@ -556,8 +768,10 @@ export default function ChatThread({
                   Todavía no han hablado
                 </Text>
                 <Text size='xs' ta='center' className='chat-text-muted' maw={320}>
-                  {agent.description ||
-                    `Escríbale a ${agent.displayName} para empezar la conversación.`}
+                  {enGrupo
+                    ? 'Escriba para empezar. Los asistentes de este grupo responden solo cuando se los menciona con @.'
+                    : agent?.description ||
+                      `Escríbale a ${agent?.displayName ?? 'el asistente'} para empezar la conversación.`}
                 </Text>
               </Stack>
             </Center>
@@ -568,17 +782,30 @@ export default function ChatThread({
               key={message.id}
               message={message}
               agent={agent}
+              currentUserId={currentUserId}
+              enGrupo={enGrupo}
               nueva={yaEstaban.current ? !yaEstaban.current.has(message.id) : false}
+              onCitar={citar}
+              onIrAlCitado={irAlMensaje}
             />
           ))}
 
-          <AgentActivity agent={agent} status={thread.status} />
+          {enGrupo ? (
+            <GroupActivity statuses={thread.statuses} />
+          ) : (
+            agent && <AgentActivity agent={agent} status={thread.status} />
+          )}
 
-          <SinRespuesta
-            agent={agent}
-            ultimoMensaje={thread.messages[thread.messages.length - 1]}
-            status={thread.status}
-          />
+          {/* El aviso de "nadie ha contestado" NO va en los grupos: allí un
+              mensaje sin menciones no espera respuesta de nadie, así que el
+              aviso sería una falsa alarma en el caso más común. */}
+          {!enGrupo && agent && (
+            <SinRespuesta
+              agent={agent}
+              ultimoMensaje={thread.messages[thread.messages.length - 1]}
+              status={thread.status}
+            />
+          )}
         </Stack>
       </ScrollArea>
 
@@ -595,31 +822,31 @@ export default function ChatThread({
         </Alert>
       )}
 
-      {/* Flotante sobre la conversación, no en la fila del compositor: ahí
-          taparía la caja de escribir. Se esconde solo cuando ya está abajo. */}
-      {!stickToBottom && (
-        <Tooltip label='Bajar al mensaje más reciente' withArrow position='left'>
-          <ActionIcon
-            className='chat-thread__bajar'
-            variant='filled'
-            color='blue'
-            radius='xl'
-            size={38}
-            onClick={bajarDelTodo}
-            aria-label='Bajar al mensaje más reciente'
-          >
-            <IconArrowDown size={20} />
-          </ActionIcon>
-        </Tooltip>
-      )}
-
       <Box className='chat-thread__composer'>
         <ChatComposer
           ref={composerRef}
-          onSend={(body, files) => thread.send(body, files)}
+          onSend={async (body, files) => {
+            const enviado = await thread.send(body, files, cita);
+            // La cita se limpia solo si el mensaje SALIÓ: si falló, el usuario
+            // reintenta y la cita tiene que seguir puesta.
+            if (enviado) setCita(null);
+          }}
+          cita={cita}
+          onQuitarCita={() => setCita(null)}
           sending={thread.sending}
           disabled={composerDisabled}
-          placeholder={`Escríbale a ${agent.displayName}…`}
+          placeholder={
+            enGrupo
+              ? `Escriba en ${group?.title ?? 'el grupo'}…  (mencione con @)`
+              : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
+          }
+          menciones={agentesMencionables.map((p) => ({
+            // Se sugiere el handle sin arroba cuando existe (es el nombre que
+            // el servidor reconoce sin ambigüedad) y el nombre visible si no.
+            valor: (p.handle ?? p.name).replace(/^@/, ''),
+            nombre: p.name,
+            avatarUrl: p.avatarUrl,
+          }))}
         />
       </Box>
     </Box>

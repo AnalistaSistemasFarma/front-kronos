@@ -1,0 +1,157 @@
+import { getOrionConfig } from './config';
+import { resolveOrionPdfUrl } from './documentVersions';
+import { isSignerCompleted } from './signerStatus';
+import type { OrionSignatureState } from './types';
+
+/** URLs de PDF firmado en Orion exigen Bearer; no abrir en el navegador sin proxy. */
+export function isOrionProtectedFileUrl(url: string | null | undefined): boolean {
+  const value = String(url || '').trim();
+  if (!value) return false;
+
+  const { apiBaseUrl } = getOrionConfig();
+  if (apiBaseUrl && value.startsWith(apiBaseUrl)) return true;
+
+  return /\/api\/integrations\/synerlink\/documents\/[^/]+\/signed-file/i.test(value);
+}
+
+/**
+ * ¿Se puede pedir al servidor que descargue esta URL?
+ * Evita SSRF: solo Orion protegido, OneDrive/SharePoint/Graph, o http(s) público
+ * que no apunte a loopback / link-local / metadata.
+ */
+export function isAllowedServerPdfFetchUrl(url: string | null | undefined): boolean {
+  const value = String(url || '').trim();
+  if (!value) return false;
+  if (isOrionProtectedFileUrl(value)) return true;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+
+  const host = parsed.hostname.toLowerCase();
+  if (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '0.0.0.0' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    host === 'metadata.google.internal'
+  ) {
+    return false;
+  }
+
+  // Orígenes habituales de adjuntos SynerLink / Graph.
+  if (
+    host.endsWith('sharepoint.com') ||
+    host.endsWith('sharepointonline.com') ||
+    host.endsWith('1drv.ms') ||
+    host.endsWith('onedrive.live.com') ||
+    host.endsWith('microsoft.com') ||
+    host.endsWith('microsoftonline.com') ||
+    host.endsWith('graph.microsoft.com') ||
+    host.endsWith('blob.core.windows.net')
+  ) {
+    return true;
+  }
+
+  // Relativo same-app no se fetcha como URL externa aquí.
+  return false;
+}
+
+export function buildOrionSignedFileProxyUrl(params: {
+  requestId: number;
+  fileId: string;
+  versionId?: string | null;
+  download?: boolean;
+}): string {
+  const qs = new URLSearchParams({
+    requestId: String(params.requestId),
+    fileId: params.fileId,
+  });
+  if (params.versionId) qs.set('versionId', params.versionId);
+  if (params.download) qs.set('download', '1');
+  return `/api/integrations/orion/signed-file?${qs.toString()}`;
+}
+
+/**
+ * URL para ver/descargar en el cliente:
+ * - OneDrive original → directo
+ * - PDF firmado Orion → proxy SynerLink (Bearer server-side)
+ *
+ * Vista "vigente": sin versionId, para que Orion regenere el PDF con todas las firmas.
+ * (Si se fija la 1.ª versión parcial por URL duplicada, se puede ver solo la 1.ª firma.)
+ */
+export function resolveOrionPdfAccessUrl(
+  state: OrionSignatureState | undefined | null,
+  originalUrl: string | null | undefined,
+  ctx: { requestId: number; fileId: string } | null
+): string | null {
+  // Con firmas acumuladas: siempre proxy Orion (PDF vigente con todas las firmas),
+  // aunque falte signedFileUrl en el form value o aún apunte al original.
+  if (ctx && state?.orionDocumentId) {
+    const hasCompletedSigner = (state.signers ?? []).some((s) =>
+      isSignerCompleted(s.status)
+    );
+    const status = String(state.status || '').toUpperCase();
+    const signedReady =
+      hasCompletedSigner ||
+      status === 'FIRMADO' ||
+      status === 'SIGNED' ||
+      status === 'COMPLETED';
+    if (signedReady) {
+      return buildOrionSignedFileProxyUrl({
+        requestId: ctx.requestId,
+        fileId: ctx.fileId,
+      });
+    }
+  }
+
+  const raw = resolveOrionPdfUrl(state, originalUrl);
+  if (!raw) return null;
+  if (!ctx) return raw;
+
+  const original = String(originalUrl || state?.originalFileUrl || '').trim();
+  const matchedVersion = (state?.versions ?? []).find((v) => v.url === raw);
+
+  const usesSignedCopy =
+    isOrionProtectedFileUrl(raw) ||
+    Boolean(matchedVersion && matchedVersion.kind !== 'original') ||
+    Boolean(state?.signedFileUrl && raw === state.signedFileUrl) ||
+    Boolean(original && raw !== original);
+
+  if (!usesSignedCopy) return raw;
+
+  return buildOrionSignedFileProxyUrl({
+    requestId: ctx.requestId,
+    fileId: ctx.fileId,
+  });
+}
+
+export function resolveOrionVersionAccessUrl(params: {
+  requestId: number;
+  fileId: string;
+  versionId: string;
+  url: string;
+  kind: string;
+}): string {
+  // Original público (p. ej. OneDrive) → enlace directo.
+  if (params.kind === 'original' && !isOrionProtectedFileUrl(params.url)) {
+    return params.url;
+  }
+  // Parcial/final (y original en Orion) → proxy SynerLink con Bearer server-side.
+  return buildOrionSignedFileProxyUrl({
+    requestId: params.requestId,
+    fileId: params.fileId,
+    versionId: params.versionId,
+    download: true,
+  });
+}

@@ -4,6 +4,7 @@ import { getChatAccess } from '../../../../lib/chat/access';
 import { checkAdminPrivileges } from '../../../../lib/access-control';
 import { serializeMessage } from '../../../../lib/chat/conversations';
 import { MAX_USER_MESSAGE_CHARS, normalizeMessageBody } from '../../../../lib/chat/constants';
+import { readClientOrigin } from '../../../../lib/chat/client-origin';
 import {
   badRequest,
   jsonNoStore,
@@ -65,9 +66,12 @@ export async function POST(request: NextRequest) {
     if (!normalized.ok) return badRequest(normalized.error);
     const body = normalized.body;
 
+    // Origen de la conexión, para la auditoría (ver lib/chat/client-origin.ts).
+    const { clientIp, userAgent } = readClientOrigin(request);
+
     const access = await getChatAccess(user.email);
     if (!access.canUseChat || access.agents.length === 0) {
-      return jsonNoStore({ error: 'No tiene habilitado el módulo de Asistentes IA.' }, { status: 403 });
+      return jsonNoStore({ error: 'No tiene habilitado el módulo de Chat.' }, { status: 403 });
     }
 
     // Selección opcional. Se valida contra lo que el usuario YA podía usar.
@@ -104,8 +108,13 @@ export async function POST(request: NextRequest) {
       try {
         const now = new Date();
 
+        // ⚠️ SOLO HILOS DIRECTOS — mismo motivo que en
+        // app/api/chat/conversations/route.ts: un GRUPO también guarda
+        // `id_user` (creador) e `id_agent` (anfitrión), así que sin este
+        // filtro el masivo podía terminar escribiendo dentro de un grupo en
+        // vez del hilo privado con ese agente.
         const existente = await prisma.chatConversation.findFirst({
-          where: { id_user: user.id, id_agent: agente.idAgent, archived: false },
+          where: { kind: 'direct', id_user: user.id, id_agent: agente.idAgent, archived: false },
           orderBy: { id: 'desc' },
           select: { id: true },
         });
@@ -114,14 +123,28 @@ export async function POST(request: NextRequest) {
           existente?.id ??
           (
             await prisma.chatConversation.create({
-              data: { id_user: user.id, id_agent: agente.idAgent, title: agente.displayName },
+              data: {
+                kind: 'direct',
+                id_user: user.id,
+                id_agent: agente.idAgent,
+                title: agente.displayName,
+              },
               select: { id: true },
             })
           ).id;
 
         const mensaje = await prisma.$transaction(async (tx) => {
           const creado = await tx.chatMessage.create({
-            data: { id_conversation: idConversation, role: 'user', body, created_at: now },
+            data: {
+              id_conversation: idConversation,
+              role: 'user',
+              body,
+              created_at: now,
+              // Mismo origen para todos los destinatarios del masivo: es una
+              // sola petición de una sola persona.
+              client_ip: clientIp,
+              user_agent: userAgent,
+            },
             include: { attachments: true },
           });
           await tx.chatConversation.update({

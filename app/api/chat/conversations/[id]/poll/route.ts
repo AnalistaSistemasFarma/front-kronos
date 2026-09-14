@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { parseAgentTasks } from '../../../../../../lib/chat/status-tasks';
-import { serializeMessage } from '../../../../../../lib/chat/conversations';
+import { messageInclude, serializeMessage } from '../../../../../../lib/chat/conversations';
 import {
   POLL_PAGE_MAX,
   parseNonNegativeInt,
@@ -55,14 +55,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const limit = parsePositiveInt(sp.get('limit'), POLL_PAGE_MAX, POLL_PAGE_MAX);
     const hidden = sp.get('hidden') === '1';
 
-    const [rows, status, conversation, lastMessage] = await Promise.all([
+    const [rows, estados, conversation, lastMessage] = await Promise.all([
       prisma.chatMessage.findMany({
         where: { id_conversation: guard.conversationId, id: { gt: after } },
         orderBy: { id: 'asc' },
         take: limit + 1,
-        include: { attachments: true },
+        include: messageInclude,
       }),
-      prisma.chatAgentStatus.findUnique({ where: { id_conversation: guard.conversationId } }),
+      // En un grupo hay un estado POR AGENTE, así que ya no es una sola fila.
+      prisma.chatAgentStatus.findMany({
+        where: { id_conversation: guard.conversationId },
+        include: { agent: { select: { display_name: true, avatar_url: true } } },
+      }),
       prisma.chatConversation.findUnique({
         where: { id: guard.conversationId },
         select: { last_message_at: true, updated_at: true },
@@ -80,6 +84,24 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
 
+    const statuses = estados.map((f) => ({
+      idAgent: f.id_agent,
+      agentName: f.agent.display_name,
+      agentAvatarUrl: f.agent.avatar_url,
+      state: f.state,
+      label: f.label,
+      tasks: parseAgentTasks(f.tasks),
+      updatedAt: f.updated_at.toISOString(),
+    }));
+
+    // El estado que gobierna la cadencia del sondeo. En el hilo directo es el
+    // del agente del hilo; en un grupo, el "más ocupado" de todos: si alguno
+    // está trabajando, al usuario le tiene que llegar rápido lo que publique.
+    const status =
+      guard.kind === 'direct'
+        ? statuses.find((s) => s.idAgent === guard.idAgent) ?? null
+        : statuses.find((s) => s.state !== 'idle') ?? null;
+
     const lastActivity =
       conversation?.last_message_at ?? conversation?.updated_at ?? null;
     const msSinceLastActivity = lastActivity
@@ -90,7 +112,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // en vivo aunque el estado siga en 'idle', que es lo que pasa entre que se
     // envía el mensaje y el bot publica su primer "Pensando…".
     const lastRole = page.length > 0 ? page[page.length - 1].role : lastMessage?.role ?? null;
-    const awaitingAgent = lastRole === 'user';
+    // En un grupo, que el último mensaje sea de una persona NO significa que
+    // haya un agente por contestar: si no mencionó a nadie, nadie va a
+    // responder y sondear en vivo sería quemar consultas para siempre. Ahí el
+    // criterio es que quede alguna mención sin recoger.
+    const awaitingAgent =
+      guard.kind === 'direct'
+        ? lastRole === 'user'
+        : (await prisma.chatMessageDelivery.count({
+            where: { delivered_at: null, message: { id_conversation: guard.conversationId } },
+          })) > 0;
 
     const nextPollMs = computeNextPollMs({
       hasNewMessages: page.length > 0,
@@ -109,10 +140,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         ? {
             state: status.state,
             label: status.label,
-            tasks: parseAgentTasks(status.tasks),
-            updatedAt: status.updated_at.toISOString(),
+            tasks: status.tasks,
+            updatedAt: status.updatedAt,
           }
         : null,
+      // Desglose por agente: lo que pinta el encabezado de un grupo.
+      statuses,
       nextPollMs,
       serverTime: new Date().toISOString(),
     });
