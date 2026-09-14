@@ -83,6 +83,7 @@ import {
   resolveOrionPdfUrl,
 } from '../../../../../lib/orion/documentVersions';
 import { resolveOrionPdfAccessUrl } from '../../../../../lib/orion/signedFileAccess';
+import { mergeOneDriveWithOrionDocuments } from '../../../../../lib/orion/attachmentList';
 import type { OrionSignatureState } from '../../../../../lib/orion/types';
 import { buildOrionParticipants } from '../../../../../lib/orion/participants';
 import {
@@ -562,12 +563,12 @@ function ViewRequestPage() {
 
   const downloadAllFilesAsZip = async () => {
     setLoadingOptions(true);
-    if (!folderContents.length) return;
+    if (!attachmentRows.length) return;
 
     try {
       const zip = new JSZip();
 
-      for (const file of folderContents) {
+      for (const file of attachmentRows) {
         const url = resolveAttachmentDownloadUrl(file);
 
         if (!url) continue;
@@ -661,6 +662,15 @@ function ViewRequestPage() {
   const orionInitialDocuments = useMemo(
     () => parseOrionSignatureBagBag(orionValueText).documents,
     [orionValueText]
+  );
+
+  const attachmentRows = useMemo(
+    () =>
+      mergeOneDriveWithOrionDocuments(folderContents, {
+        ...orionInitialDocuments,
+        ...orionDocuments,
+      }),
+    [folderContents, orionInitialDocuments, orionDocuments]
   );
 
   useEffect(() => {
@@ -1293,7 +1303,7 @@ function ViewRequestPage() {
   const hasOrionDocuments = Object.keys(orionInitialDocuments).length > 0;
   const taskOrionFileId = parseOrionFileIdFromResolution(request?.resolution);
   const taskPendingOrionAuth = isOrionSignerAuthResolution(request?.resolution);
-  const hasPdfAttachments = folderContents.some((f) => /\.pdf$/i.test(f.name));
+  const hasPdfAttachments = attachmentRows.some((f) => /\.pdf$/i.test(f.name));
   const showOrionPanel =
     hasPdfAttachments ||
     hasOrionSignatureField ||
@@ -1333,7 +1343,7 @@ function ViewRequestPage() {
     });
   const signedOrionDocs = listSignedOrionDocuments({ documents: orionInitialDocuments });
   const autoOpenFile = orionFileIdParam
-    ? folderContents.find(
+    ? attachmentRows.find(
         (f) => String(f.id) === String(orionFileIdParam) && /\.pdf$/i.test(f.name)
       )
     : undefined;
@@ -1341,7 +1351,7 @@ function ViewRequestPage() {
   // Si viene from=authorization sin fileId, abrir el primer PDF pendiente de firma del usuario
   const fallbackSignFile =
     !autoOpenFile && from === 'authorization'
-      ? folderContents.find((f) => /\.pdf$/i.test(f.name))
+      ? attachmentRows.find((f) => /\.pdf$/i.test(f.name))
       : undefined;
   const deepLinkFileId = autoOpenFile
     ? String(autoOpenFile.id)
@@ -1383,7 +1393,7 @@ function ViewRequestPage() {
   })();
 
   const chatDocumentItems = [
-    ...folderContents
+    ...attachmentRows
       .filter((f) => /\.pdf$/i.test(f.name))
       .map((f) => {
         const url = resolveOrionPdfAccessUrl(
@@ -2013,13 +2023,13 @@ function ViewRequestPage() {
             <Title order={3} className='flex items-center gap-2'>
               <IconEye size={20} />
               Archivos adjuntos
-              {folderContents.length > 0 ? (
+              {attachmentRows.length > 0 ? (
                 <Text span size='sm' c='dimmed' fw={400}>
-                  ({folderContents.length})
+                  ({attachmentRows.length})
                 </Text>
               ) : null}
             </Title>
-            {folderContents.length > 0 && (
+            {attachmentRows.length > 0 && (
               <Button
                 size='xs'
                 variant='light'
@@ -2032,7 +2042,7 @@ function ViewRequestPage() {
             )}
           </Group>
 
-          {folderContents.length > 0 && (
+          {attachmentRows.length > 0 && (
             <ScrollArea.Autosize mah={420} offsetScrollbars type='auto' mb='md'>
               <Table
                 className='doc-table'
@@ -2063,7 +2073,7 @@ function ViewRequestPage() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {folderContents.map((file: FolderFile, fileIndex: number) => {
+                  {attachmentRows.map((file: FolderFile, fileIndex: number) => {
                     const fileId = String(file.id || taskOrionFileId || '');
                     const openUrl =
                       resolveAttachmentDownloadUrl(file) ?? file.webUrl ?? '#';
