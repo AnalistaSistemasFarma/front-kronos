@@ -106,8 +106,6 @@ export default function OrionAttachmentTableRow({
   const d = useOrionAttachmentDerived(props);
   const [extensionLoading, setExtensionLoading] = useState(false);
   const [renewLoading, setRenewLoading] = useState(false);
-  // Preferir webUrl (visor online); si no hay, caer a openUrl.
-  const viewOnlineHref = String(previewUrl || '').trim() || String(openUrl || '').trim() || null;
 
   const applyDocs = (documents: Record<string, OrionSignatureState>) => {
     props.onDocumentsUpdate?.(documents);
@@ -196,13 +194,26 @@ export default function OrionAttachmentTableRow({
     latestFileHref ||
     originalFileHref;
 
+  /**
+   * Acceso para quien ve la solicitud (incl. “Solo ver” y firmantes):
+   * 1) PDF vigente Orion (sesión SynerLink)
+   * 2) downloadUrl de Graph (no exige permiso SharePoint del usuario)
+   * 3) webUrl SharePoint (solo si el usuario tiene acceso al drive)
+   */
+  const viewOnlineHref =
+    (d.hasOrionDoc && (d.completedCount > 0 || isClosed) ? latestFileHref : null) ||
+    String(openUrl || '').trim() ||
+    String(previewUrl || '').trim() ||
+    primaryOpenHref ||
+    null;
+
   const statusColor =
     d.displayStatus.color === 'yellow'
       ? 'blue'
       : d.displayStatus.color === 'gray'
         ? 'gray'
         : d.displayStatus.color;
-  // Misma regla que Versiones: no firmantes ni solo “Preparar firma”.
+  // Historial/original: solo creador del flujo / admin.
   const canAccessOriginalFile = Boolean(d.api?.canViewVersions);
 
   return (
@@ -317,6 +328,13 @@ export default function OrionAttachmentTableRow({
           <div className='doc-dossier'>
             <div className='doc-dossier__rail' />
             <Stack gap={4} className='doc-dossier__body'>
+              {viewOnlineHref ? (
+                <ActionLink
+                  icon={<IconEye size={15} stroke={1.6} />}
+                  label='Ver en línea'
+                  href={viewOnlineHref}
+                />
+              ) : null}
               <ActionLink
                 icon={<IconFile size={15} stroke={1.6} />}
                 label='Abrir / descargar'
@@ -341,12 +359,13 @@ export default function OrionAttachmentTableRow({
               <Text size='xs' c='dimmed'>
                 Este documento no está marcado para firma.
               </Text>
-              <ActionLink
-                icon={<IconEye size={15} stroke={1.6} />}
-                label='Ver en línea'
-                href={viewOnlineHref}
-                disabled={!viewOnlineHref}
-              />
+              {viewOnlineHref ? (
+                <ActionLink
+                  icon={<IconEye size={15} stroke={1.6} />}
+                  label='Ver en línea'
+                  href={viewOnlineHref}
+                />
+              ) : null}
               <ActionLink
                 icon={<IconFile size={15} stroke={1.6} />}
                 label='Descargar'
@@ -403,22 +422,24 @@ export default function OrionAttachmentTableRow({
                 />
               ) : null}
 
-              {canAccessOriginalFile && (latestFileHref || originalFileHref) ? (
+              {/* Cualquiera que vea la solicitud puede abrir el PDF vigente; el original queda en Versiones. */}
+              {latestFileHref || primaryOpenHref ? (
                 <ActionLink
                   icon={<IconFile size={15} stroke={1.6} />}
-                  label={d.completedCount > 0 || isClosed ? 'Ver documento' : 'Archivo'}
+                  label={d.completedCount > 0 || isClosed ? 'Ver documento' : 'Descargar'}
                   href={
                     d.completedCount > 0 || isClosed
                       ? latestFileHref || primaryOpenHref
-                      : originalFileHref || primaryOpenHref
+                      : primaryOpenHref || latestFileHref
                   }
-                  disabled={!(latestFileHref || originalFileHref || primaryOpenHref)}
                 />
-              ) : primaryOpenHref ? (
+              ) : null}
+
+              {canAccessOriginalFile && originalFileHref ? (
                 <ActionLink
                   icon={<IconFile size={15} stroke={1.6} />}
-                  label='Ver documento'
-                  href={primaryOpenHref}
+                  label='Original'
+                  href={originalFileHref}
                 />
               ) : null}
 
