@@ -889,22 +889,6 @@ function RequestBoard() {
       }
     }
 
-    const hasOrionSignatureField = visibleFields.some(
-      (f) => f.field_type === ORION_SIGNATURE_FIELD_TYPE
-    );
-    // PDF obligatorio solo si el formulario del proceso aún trae campo orion_signature.
-    if (hasOrionSignatureField) {
-      const isPdf = (name: string) => /\.pdf$/i.test(name || '');
-      const pdfFromRequired = Object.values(filesByDoc)
-        .flat()
-        .some((f) => isPdf(f.file?.name || ''));
-      const pdfFromAttached = attachedFiles.some((f) => isPdf(f.file?.name || ''));
-      if (!pdfFromRequired && !pdfFromAttached) {
-        errors.orion_pdf =
-          'Debe adjuntar al menos un documento PDF para el flujo de firma digital.';
-      }
-    }
-
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -2242,8 +2226,9 @@ function RequestBoard() {
                       >
                         {isOrionSignatureField ? (
                           <Alert color='blue' title={field.field_label} icon={<IconLink size={16} />}>
-                            Tras crear la solicitud podrá marcar PDFs para firmar o solo ver, y
-                            configurar firmantes. Adjunte al menos un PDF.
+                            Puede adjuntar archivos como de costumbre. Si tiene permiso “Preparar
+                            firma”, después de crear la solicitud podrá marcar PDFs para firmar o
+                            solo ver y configurar firmantes.
                           </Alert>
                         ) : isTableField ? (
                           <TableFieldInput
@@ -2433,11 +2418,6 @@ function RequestBoard() {
                   autoUpload={false}
                   disabled={formDataLoading}
                 />
-                {formErrors.orion_pdf && (
-                  <Text size='sm' c='red' mt='xs'>
-                    {formErrors.orion_pdf}
-                  </Text>
-                )}
               </div>
             )}
 

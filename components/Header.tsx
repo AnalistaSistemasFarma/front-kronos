@@ -32,7 +32,7 @@ import {
 } from '../lib/navigation/AppSectionContext';
 import { useDashboardAdminOptional } from '../lib/dashboard/DashboardAdminContext';
 import { useRequestRoleNavOptional } from '../lib/request-general/SolicitadoNavContext';
-import { buildLogoutCallbackUrl } from '../lib/auth/logout';
+import { buildLogoutCallbackUrl, clearClientSessionArtifacts } from '../lib/auth/logout';
 
 function useAppSectionOptional(): AppSectionContextValue | null {
   return useContext(AppSectionContext);
@@ -73,9 +73,9 @@ export default function Header() {
         : PROCESS_HUB_URL;
 
   const handleSignOut = () => {
-    const search = typeof window !== 'undefined' ? window.location.search : '';
+    clearClientSessionArtifacts();
     void signOut({
-      callbackUrl: buildLogoutCallbackUrl(pathname, search),
+      callbackUrl: buildLogoutCallbackUrl(),
     });
   };
 
