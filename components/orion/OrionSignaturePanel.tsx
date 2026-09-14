@@ -866,6 +866,7 @@ export default function OrionSignaturePanel({
         const qs = new URLSearchParams({
           requestId: String(requestId),
           fileId: file.fileId,
+          // Solo BD + auth pendiente (sin Orion GET): el PDF ya está en el adjunto.
           soft: '1',
         });
         const [hasRubric, ensureRes] = await Promise.all([
