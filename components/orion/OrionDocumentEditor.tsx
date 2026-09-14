@@ -12,8 +12,15 @@ import {
   SimpleGrid,
   Stack,
   Text,
+  UnstyledButton,
 } from '@mantine/core';
-import { IconCertificate, IconDeviceFloppy, IconFileText, IconPaperclip, IconSend } from '@tabler/icons-react';
+import {
+  IconCertificate,
+  IconDeviceFloppy,
+  IconPaperclip,
+  IconSend,
+  IconWriting,
+} from '@tabler/icons-react';
 import {
   emptySignerSlot,
   mergeParticipantSources,
@@ -22,7 +29,7 @@ import {
   type OrionUserOption,
 } from '../../lib/orion/participants';
 import type { SignatureFieldPlacement } from '../../lib/orion/signatureFields';
-import type { OrionSignatureState } from '../../lib/orion/types';
+import type { OrionDocumentSignatureKind, OrionSignatureState } from '../../lib/orion/types';
 import OrionEditorSteps, { editorStepSubtitle } from './OrionEditorSteps';
 import OrionSignerAssignment from './OrionSignerAssignment';
 import OrionSignersList from './OrionSignersList';
@@ -134,6 +141,26 @@ export default function OrionDocumentEditor({
   const [fields, setFields] = useState<SignatureFieldPlacement[]>(initialFields);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [signatureKind, setSignatureKind] = useState<OrionDocumentSignatureKind>(
+    () => state.signatureKind || 'electronic'
+  );
+
+  useEffect(() => {
+    setSignatureKind(state.signatureKind || 'electronic');
+  }, [state.signatureKind, documentId, fileId, openNonce]);
+
+  const selectSignatureKind = useCallback(
+    (kind: OrionDocumentSignatureKind) => {
+      setSignatureKind(kind);
+      onStateUpdate({
+        ...state,
+        signatureKind: kind,
+        fileId,
+        fileName: state.fileName || fileName || null,
+      });
+    },
+    [fileId, fileName, onStateUpdate, state]
+  );
 
   useEffect(() => {
     setFields(initialFields);
@@ -444,44 +471,92 @@ export default function OrionDocumentEditor({
                   Tipo de firma del documento
                 </Text>
                 <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
-                  <Paper
-                    withBorder
-                    p='sm'
-                    radius='md'
-                    style={{
-                      background: 'color-mix(in srgb, var(--app-accent) 10%, var(--app-surface))',
-                      borderColor: 'color-mix(in srgb, var(--app-accent) 45%, var(--app-border))',
-                    }}
+                  <UnstyledButton
+                    onClick={() => selectSignatureKind('electronic')}
+                    style={{ textAlign: 'left', width: '100%' }}
+                    aria-pressed={signatureKind === 'electronic'}
                   >
-                    <Group gap='xs' mb={4}>
-                      <IconFileText size={16} />
-                      <Text size='sm' fw={700}>
-                        Firma digital activa
+                    <Paper
+                      withBorder
+                      p='sm'
+                      radius='md'
+                      style={{
+                        background:
+                          signatureKind === 'electronic'
+                            ? 'color-mix(in srgb, var(--app-accent) 10%, var(--app-surface))'
+                            : 'var(--app-surface)',
+                        borderColor:
+                          signatureKind === 'electronic'
+                            ? 'color-mix(in srgb, var(--app-accent) 45%, var(--app-border))'
+                            : undefined,
+                        borderWidth: signatureKind === 'electronic' ? 2 : 1,
+                      }}
+                    >
+                      <Group gap='xs' mb={4} justify='space-between' wrap='nowrap'>
+                        <Group gap='xs' wrap='nowrap'>
+                          <IconWriting size={16} />
+                          <Text size='sm' fw={700}>
+                            Firma electrónica
+                          </Text>
+                        </Group>
+                        {signatureKind === 'electronic' ? (
+                          <Text size='10px' fw={700} c='blue' tt='uppercase'>
+                            Principal
+                          </Text>
+                        ) : null}
+                      </Group>
+                      <Text size='xs' c='dimmed'>
+                        Rúbrica dibujada + identidad en GSS Firma. Es el flujo activo hoy (plazo
+                        24 h por turno).
                       </Text>
-                    </Group>
-                    <Text size='xs' c='dimmed'>
-                      Rúbrica + identidad en GSS Firma (Orion). Plazo de 24 h por turno.
-                    </Text>
-                  </Paper>
-                  <Paper
-                    withBorder
-                    p='sm'
-                    radius='md'
-                    style={{
-                      background: 'var(--app-surface)',
-                    }}
+                    </Paper>
+                  </UnstyledButton>
+
+                  <UnstyledButton
+                    onClick={() => selectSignatureKind('digital')}
+                    style={{ textAlign: 'left', width: '100%' }}
+                    aria-pressed={signatureKind === 'digital'}
                   >
-                    <Group gap='xs' mb={4}>
-                      <IconCertificate size={16} />
-                      <Text size='sm' fw={700}>
-                        Procedencia SynerLink
+                    <Paper
+                      withBorder
+                      p='sm'
+                      radius='md'
+                      style={{
+                        background:
+                          signatureKind === 'digital'
+                            ? 'color-mix(in srgb, var(--app-accent) 10%, var(--app-surface))'
+                            : 'var(--app-surface)',
+                        borderColor:
+                          signatureKind === 'digital'
+                            ? 'color-mix(in srgb, var(--app-accent) 45%, var(--app-border))'
+                            : undefined,
+                        borderWidth: signatureKind === 'digital' ? 2 : 1,
+                      }}
+                    >
+                      <Group gap='xs' mb={4} wrap='nowrap'>
+                        <IconCertificate size={16} />
+                        <Text size='sm' fw={700}>
+                          Firma digital
+                        </Text>
+                      </Group>
+                      <Text size='xs' c='dimmed'>
+                        Certificado digital. Opción disponible para preparar; la firma con
+                        certificado se habilitará en Orion.
                       </Text>
-                    </Group>
-                    <Text size='xs' c='dimmed'>
-                      El documento queda trazado en Orion con empresa y origen SynerLink.
-                    </Text>
-                  </Paper>
+                    </Paper>
+                  </UnstyledButton>
                 </SimpleGrid>
+                {signatureKind === 'digital' ? (
+                  <Alert color='yellow' variant='light' mt='sm'>
+                    Por ahora el firmante sigue usando rúbrica electrónica al confirmar. La firma
+                    digital con certificado quedará operativa cuando Orion la active.
+                  </Alert>
+                ) : (
+                  <Text size='xs' c='dimmed' mt='sm'>
+                    Procedencia SynerLink: el documento queda trazado en Orion con empresa y origen
+                    SynerLink.
+                  </Text>
+                )}
               </Box>
 
               <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>

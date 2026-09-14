@@ -115,6 +115,7 @@ export async function POST(req: Request) {
           subject: ctx?.subject_request ?? null,
           signerEmails,
           currentSignerEmail: pending?.email ?? null,
+          fileId,
         })
       );
       fireAndForgetNotification(
@@ -122,6 +123,7 @@ export async function POST(req: Request) {
           requestId,
           subject: ctx?.subject_request ?? null,
           fileName: nextState.fileName ?? current.fileName ?? null,
+          fileId,
           event: 'sent',
           excludeEmail: String(session.user.email || '').trim() || null,
         })

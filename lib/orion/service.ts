@@ -748,6 +748,7 @@ export async function applyOrionWebhookToRequest(
             requestId: params.requestId,
             subject: ctx?.subject_request ?? null,
             fileName: state.fileName || null,
+            fileId: state.fileId || fileId || null,
             event: 'signer_completed',
             signerLabel: signer.name || signer.email || null,
             positionLabel,
@@ -761,6 +762,7 @@ export async function applyOrionWebhookToRequest(
             requestId: params.requestId,
             subject: ctx?.subject_request ?? null,
             fileName: state.fileName || null,
+            fileId: state.fileId || fileId || null,
             event: 'all_signed',
           })
         );
@@ -770,6 +772,7 @@ export async function applyOrionWebhookToRequest(
             requestId: params.requestId,
             subject: ctx?.subject_request ?? null,
             fileName: state.fileName || null,
+            fileId: state.fileId || fileId || null,
             event: 'turn',
             nextSignerEmail: syncResult.currentSignerEmail,
             excludeEmail: syncResult.currentSignerEmail,
@@ -788,6 +791,7 @@ export async function applyOrionWebhookToRequest(
           requestId: params.requestId,
           subject: ctx?.subject_request ?? null,
           fileName: state.fileName || null,
+          fileId: state.fileId || fileId || null,
           event: 'all_signed',
         })
       );
@@ -803,6 +807,7 @@ export async function applyOrionWebhookToRequest(
           requestId: params.requestId,
           subject: ctx?.subject_request ?? null,
           fileName: state.fileName || null,
+          fileId: state.fileId || fileId || null,
           event: 'rejected',
         })
       );
@@ -818,6 +823,7 @@ export async function applyOrionWebhookToRequest(
           requestId: params.requestId,
           subject: ctx?.subject_request ?? null,
           fileName: state.fileName || null,
+          fileId: state.fileId || fileId || null,
           event: 'returned',
         })
       );
@@ -833,6 +839,7 @@ export async function applyOrionWebhookToRequest(
           requestId: params.requestId,
           subject: ctx?.subject_request ?? null,
           fileName: state.fileName || null,
+          fileId: state.fileId || fileId || null,
           event: 'turn',
           nextSignerEmail: syncResult.currentSignerEmail,
           excludeEmail: syncResult.currentSignerEmail,
@@ -861,6 +868,7 @@ export async function applyOrionWebhookToRequest(
             requestId: params.requestId,
             subject: ctx?.subject_request ?? null,
             fileName: state.fileName || null,
+            fileId: state.fileId || fileId || null,
             event: 'signer_completed',
             signerLabel: signer.name || signer.email || null,
             positionLabel,
@@ -874,6 +882,7 @@ export async function applyOrionWebhookToRequest(
             requestId: params.requestId,
             subject: ctx?.subject_request ?? null,
             fileName: state.fileName || null,
+            fileId: state.fileId || fileId || null,
             event: 'all_signed',
           })
         );
@@ -883,6 +892,7 @@ export async function applyOrionWebhookToRequest(
             requestId: params.requestId,
             subject: ctx?.subject_request ?? null,
             fileName: state.fileName || null,
+            fileId: state.fileId || fileId || null,
             event: 'turn',
             nextSignerEmail: syncResult.currentSignerEmail,
             excludeEmail: syncResult.currentSignerEmail,
@@ -895,6 +905,7 @@ export async function applyOrionWebhookToRequest(
           requestId: params.requestId,
           subject: ctx?.subject_request ?? null,
           fileName: state.fileName || null,
+          fileId: state.fileId || fileId || null,
           event: 'all_signed',
         })
       );
@@ -904,6 +915,7 @@ export async function applyOrionWebhookToRequest(
           requestId: params.requestId,
           subject: ctx?.subject_request ?? null,
           fileName: state.fileName || null,
+          fileId: state.fileId || fileId || null,
           event: 'rejected',
         })
       );
@@ -913,6 +925,7 @@ export async function applyOrionWebhookToRequest(
           requestId: params.requestId,
           subject: ctx?.subject_request ?? null,
           fileName: state.fileName || null,
+          fileId: state.fileId || fileId || null,
           event: 'returned',
         })
       );

@@ -41,6 +41,7 @@ import {
   ThemeIcon,
   Table,
   UnstyledButton,
+  Tooltip,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -2816,6 +2817,7 @@ function ViewRequestPage() {
                           pdfUrl={pdfUrl}
                           fileSizeLabel={sizeLabel}
                           openUrl={openUrl}
+                          previewUrl={file.webUrl ?? null}
                           processName={request?.process || request?.category || null}
                           requesterName={request?.requester || null}
                           currentUserEmail={session?.user?.email}
@@ -2917,19 +2919,37 @@ function ViewRequestPage() {
                                 borderLeft: '2px solid var(--mantine-color-blue-5)',
                               }}
                             >
-                              <UnstyledButton
-                                component='a'
-                                href={openUrl}
-                                target='_blank'
-                                rel='noopener noreferrer'
-                                style={{
-                                  fontSize: 13,
-                                  color: 'var(--mantine-color-blue-6)',
-                                  fontWeight: 600,
-                                }}
-                              >
-                                Abrir
-                              </UnstyledButton>
+                              <Group gap={6} wrap='nowrap'>
+                                {file.webUrl ? (
+                                  <Tooltip label='Ver en línea (sin descargar)'>
+                                    <ActionIcon
+                                      variant='subtle'
+                                      color='blue'
+                                      size='sm'
+                                      component='a'
+                                      href={file.webUrl}
+                                      target='_blank'
+                                      rel='noopener noreferrer'
+                                      aria-label={`Ver en línea ${file.name}`}
+                                    >
+                                      <IconEye size={16} />
+                                    </ActionIcon>
+                                  </Tooltip>
+                                ) : null}
+                                <UnstyledButton
+                                  component='a'
+                                  href={openUrl}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  style={{
+                                    fontSize: 13,
+                                    color: 'var(--mantine-color-blue-6)',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  Abrir
+                                </UnstyledButton>
+                              </Group>
                             </Table.Td>
                           </>
                         ) : (
