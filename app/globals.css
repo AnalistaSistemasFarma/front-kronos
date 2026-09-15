@@ -2840,6 +2840,61 @@ body.chat-inmersivo .chat-page-thread--completa {
   transform: translateY(-1px);
 }
 
+/* La caja de Contactos crece solo cuando se muestra la tabla de correos: el
+   tamaño chico de siempre (los dos botones) sirve para el resto de los casos,
+   y una tabla de cientos de filas no entra ahí. */
+.portal-th__visor-caja--contactos-tabla {
+  width: min(760px, 94vw);
+  height: min(80vh, 100%);
+}
+.portal-th__visor-caja--contactos-tabla .portal-th__contactos {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.portal-th__correos {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 4px;
+}
+
+.portal-th__correos-grupo {
+  border-top: 1px solid var(--pth-linea);
+  padding-top: 12px;
+}
+
+.portal-th__correos-empresa {
+  margin: 0 0 8px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--pth-azul);
+}
+
+.portal-th__correos-dominio {
+  font-weight: 400;
+  color: var(--pth-tinta-3);
+}
+
+.portal-th__correos-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.portal-th__correos-tabla th,
+.portal-th__correos-tabla td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--pth-linea);
+}
+
+.portal-th__correos-tabla th {
+  color: var(--pth-tinta-3);
+  font-weight: 600;
+}
+
 /* Un anuncio se ve entero y centrado, sin recortarse ni estirarse. El fondo
    oscuro es a propósito: una imagen con fondo blanco sobre blanco no deja ver
    dónde termina. */
