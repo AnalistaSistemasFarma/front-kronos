@@ -2507,8 +2507,12 @@ body.chat-inmersivo .chat-page-thread--completa {
 
 .portal-th__carrusel-marco {
   position: relative;
-  width: 100%;
-  aspect-ratio: 21 / 9;
+  /* Medida ESTÁNDAR FIJA pedida por Cristian (2026-09-15): 1420x720px, sin
+     ajustarse a otro tamaño según el viewport. Las imágenes se recortan
+     dentro de este recuadro fijo (ver .portal-th__carrusel-imagen), pero el
+     recuadro en sí no cambia de tamaño. */
+  width: 1420px;
+  height: 720px;
   border-radius: 14px;
   overflow: hidden;
   border: 1px solid var(--pth-linea);
