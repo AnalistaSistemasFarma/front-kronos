@@ -15,7 +15,7 @@ import {
   loadOrionFormBag,
   resolveOriginalPdfBase64,
 } from '@/lib/orion/service';
-import { isOrionProtectedFileUrl, isAllowedServerPdfFetchUrl } from '@/lib/orion/signedFileAccess';
+import { isOrionProtectedFileUrl, isAllowedServerPdfFetchUrl, orionDocumentHasSignedCopy } from '@/lib/orion/signedFileAccess';
 
 function normalizeEmail(email?: string | null): string {
   return String(email || '')
@@ -75,11 +75,51 @@ export async function GET(req: Request) {
       return { state, canViewVersions };
     });
 
+    const servePdfFromOneDrive = async (
+      stateLike: {
+        fileName?: string | null;
+        originalFileUrl?: string | null;
+        versions?: import('@/lib/orion/types').OrionSignatureState['versions'];
+      } | null
+    ) => {
+      const resolved = await resolveOriginalPdfBase64({
+        fileId,
+        originalFileUrl: stateLike?.originalFileUrl ?? null,
+        versions: stateLike?.versions,
+      });
+      if (!resolved.base64) return null;
+      const fileName = stateLike?.fileName || 'documento.pdf';
+      const disposition = forceDownload ? 'attachment' : 'inline';
+      return new NextResponse(Buffer.from(resolved.base64, 'base64'), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `${disposition}; filename="${fileName}"`,
+          'Cache-Control': 'private, no-store',
+        },
+      });
+    };
+
+    const redirectToSynerLinkAttachment = () => {
+      const dest = new URL('/api/requests-general/attachment-file', req.url);
+      dest.searchParams.set('requestId', String(requestId));
+      dest.searchParams.set('fileId', fileId);
+      if (forceDownload) dest.searchParams.set('download', '1');
+      return NextResponse.redirect(dest, 307);
+    };
+
     if (!auth) {
-      return NextResponse.json({ error: 'Documento no encontrado' }, { status: 404 });
+      // Sin bag Orion: el adjunto vive en OneDrive SynerLink, no en este proxy.
+      return redirectToSynerLinkAttachment();
     }
 
     const { state, canViewVersions } = auth;
+
+    // Borrador / sin firmas: no usar este endpoint (es de Orion).
+    if (!versionId && !orionDocumentHasSignedCopy(state)) {
+      return redirectToSynerLinkAttachment();
+    }
+
     const orderedVersions = listOrionDocumentVersions(state);
 
     let targetUrl: string | null = null;
@@ -131,8 +171,14 @@ export async function GET(req: Request) {
       // Vista vigente: PDF acumulado — firmantes pueden ver al firmar (sin versionId)
     }
 
+    // Sin URL Orion (p. ej. Solo ver / aún sin firmas): PDF original desde OneDrive.
     if (!targetUrl) {
-      return NextResponse.json({ error: 'No hay PDF firmado para este archivo' }, { status: 404 });
+      const fromDrive = await servePdfFromOneDrive(state);
+      if (fromDrive) return fromDrive;
+      return NextResponse.json(
+        { error: 'No hay PDF disponible para este archivo' },
+        { status: 404 }
+      );
     }
 
     const fileName = state.fileName || 'documento.pdf';
@@ -193,37 +239,38 @@ export async function GET(req: Request) {
         );
       }
       const publicRes = await fetch(targetUrl, { cache: 'no-store', redirect: 'manual' });
-      if (!publicRes.ok) {
-        if (versionId === 'original') {
-          const resolved = await resolveOriginalPdfBase64({
-            fileId,
-            originalFileUrl: state.originalFileUrl ?? null,
-            versions: state.versions,
-          });
-          if (resolved.base64) {
-            return serveBuffer(Buffer.from(resolved.base64, 'base64'), 'application/pdf');
+      if (publicRes.status >= 300 && publicRes.status < 400) {
+        const loc = publicRes.headers.get('location');
+        if (loc && (isAllowedServerPdfFetchUrl(loc) || loc === targetUrl || trustedInBag)) {
+          const follow = await fetch(loc, { cache: 'no-store', redirect: 'error' });
+          if (follow.ok) {
+            return serveBuffer(await follow.arrayBuffer(), follow.headers.get('content-type'));
           }
         }
+      } else if (publicRes.ok) {
+        return serveBuffer(await publicRes.arrayBuffer(), publicRes.headers.get('content-type'));
+      }
+
+      // URL pública caída (p. ej. OneDrive liberado tras prepare antiguo).
+      if (versionId === 'original') {
+        const resolved = await resolveOriginalPdfBase64({
+          fileId,
+          originalFileUrl: state.originalFileUrl ?? null,
+          versions: state.versions,
+        });
+        if (resolved.base64) {
+          return serveBuffer(Buffer.from(resolved.base64, 'base64'), 'application/pdf');
+        }
+      }
+      const fromDrive = await servePdfFromOneDrive(state);
+      if (fromDrive) return fromDrive;
+      if (!state.orionDocumentId) {
         return NextResponse.json(
           { error: 'No se pudo obtener el archivo' },
           { status: publicRes.status >= 400 ? publicRes.status : 502 }
         );
       }
-      if (publicRes.status >= 300 && publicRes.status < 400) {
-        const loc = publicRes.headers.get('location');
-        if (!loc || (!isAllowedServerPdfFetchUrl(loc) && loc !== targetUrl)) {
-          return NextResponse.json({ error: 'Redirect no permitido' }, { status: 400 });
-        }
-        const follow = await fetch(loc, { cache: 'no-store', redirect: 'error' });
-        if (!follow.ok) {
-          return NextResponse.json(
-            { error: 'No se pudo obtener el archivo' },
-            { status: follow.status }
-          );
-        }
-        return serveBuffer(await follow.arrayBuffer(), follow.headers.get('content-type'));
-      }
-      return serveBuffer(await publicRes.arrayBuffer(), publicRes.headers.get('content-type'));
+      // Hay doc Orion: intentar signed-file / PDF acumulado más abajo.
     }
 
     const upstream = await fetchOrionSignedFileContent({
@@ -236,6 +283,8 @@ export async function GET(req: Request) {
       if (upstream.status === 409) {
         const fallback = await tryServePublicUrl(state.originalFileUrl);
         if (fallback) return fallback;
+        const fromDrive = await servePdfFromOneDrive(state);
+        if (fromDrive) return fromDrive;
         return NextResponse.json(
           {
             error:

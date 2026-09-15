@@ -133,7 +133,7 @@ export default function OrionSignerAssignment({
 
             return (
               <Paper
-                key={`slot-${person.order}`}
+                key={`slot-${idx}-${person.order ?? 'x'}-${person.email || 'empty'}`}
                 withBorder
                 radius='md'
                 p='sm'
