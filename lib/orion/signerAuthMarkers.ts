@@ -38,3 +38,30 @@ export function isOrionWorkflowResolution(resolution?: string | null): boolean {
   const value = String(resolution || '');
   return value.includes(ORION_AUTH_MARKER) || /\[orionFile:/i.test(value);
 }
+
+/**
+ * Clasifica autorización de FIRMA digital (Orion) vs autorización NORMAL (p. ej. TESORERIA).
+ * Prioriza marcadores en resolution; luego tipo/tarea de plantilla.
+ * NO usa el asunto de la solicitud (evita falsos positivos).
+ * TESORERIA / tipos sin "firma" → false (tras autorizar no se redirige a la solicitud).
+ */
+export function isFirmaAuthorizationItem(params: {
+  resolution?: string | null;
+  typeAuthorization?: string | null;
+  taskName?: string | null;
+}): boolean {
+  if (isOrionSignerAuthResolution(params.resolution)) return true;
+  if (parseOrionFileIdFromResolution(params.resolution)) return true;
+
+  const type = String(params.typeAuthorization || '').trim();
+  // Excluir tipos de negocio que no son flujo Orion (aunque el nombre contenga otra cosa).
+  if (type && /^tesorer/i.test(type)) return false;
+  if (type && /firma/i.test(type)) return true;
+
+  const task = String(params.taskName || '').trim();
+  if (task && (/autorizar\s+firma/i.test(task) || /firma\s+digital/i.test(task))) {
+    return true;
+  }
+
+  return false;
+}

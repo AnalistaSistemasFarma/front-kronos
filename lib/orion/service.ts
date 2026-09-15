@@ -10,6 +10,7 @@ import {
   getOrionDocumentFromBag,
   mergeOrionSignatureState,
   parseOrionSignatureBagBag,
+  resolveOrionSignatureIntent,
   serializeOrionSignatureBagBag,
   setOrionDocumentInBag,
 } from './formValue';
@@ -18,10 +19,12 @@ import {
   ORION_LEGACY_FILE_ID,
   buildOrionExternalRef,
   getOrionDefaultCreatedByEmail,
+  getOrionTenantFallback,
   parseFileIdFromExternalRef,
   resolveOrionTenantId,
 } from './config';
 import { acceptOrionSignerTurn, buildOrionSignedFileApiUrl, createOrionDocument, getOrionDocument, getOrionDocumentByRef, rebuildOrionSignedPdf, returnOrionDocument, saveOrionSignatureFields } from './client';
+import { deleteOneDriveItem } from '../onedrive/graphFolderUpload';
 import { mapOrionFieldsToPlacements, normalizeFieldsForStorage, parseEmbedTokenFromUrl, toOrionSignatureFields, type SignatureFieldPlacement } from './signatureFields';
 import { advanceSequentialTask } from '../workflow/advanceSequentialTask.js';
 import {
@@ -126,6 +129,27 @@ export async function resolveOriginalPdfBase64(params: {
   }
 
   return { base64: null, sourceUrl: null };
+}
+
+/**
+ * Cuando el PDF ya está firmado por completo, Orion es canónico y se libera
+ * la copia OneDrive SynerLink. Se conserva durante Preparar / envío / firmas
+ * parciales: Orion signed-file responde 409 hasta la 1.ª firma y el preview
+ * de ubicaciones necesita el adjunto SynerLink.
+ */
+export async function releaseSynerlinkOneDriveCopyAfterOrionPrepare(
+  fileId: string
+): Promise<void> {
+  const id = String(fileId || '').trim();
+  if (!id || id === ORION_LEGACY_FILE_ID) return;
+  try {
+    const token = await getMicrosoftToken();
+    if (!token) return;
+    await deleteOneDriveItem(token, id);
+    console.log(`[orion] Copia OneDrive SynerLink liberada tras firma completa fileId=${id}`);
+  } catch (err) {
+    console.warn('[orion] No se pudo liberar OneDrive tras firma completa:', err);
+  }
 }
 
 export type RequestOrionContext = {
@@ -394,6 +418,16 @@ export async function ensureOrionDocumentForRequest(
   }
 
   const current = getOrionDocumentFromBag(bag, fileId);
+  // Solo ver = solo OneDrive SynerLink. Orion únicamente con “Para firmar”.
+  if (!current.orionDocumentId && resolveOrionSignatureIntent(current) !== 'sign') {
+    throw Object.assign(
+      new Error(
+        'Este PDF está en “Solo ver”. Márquelo como “Para firmar” en Archivos adjuntos y luego use Preparar documento.'
+      ),
+      { status: 422 }
+    );
+  }
+
   const externalRef =
     current.externalRef ||
     buildOrionExternalRef(
@@ -432,7 +466,7 @@ export async function ensureOrionDocumentForRequest(
     if (!tenantId) {
       throw Object.assign(
         new Error(
-          `Empresa SynerLink id_company=${ctx.id_company} (${ctx.company_name || 'sin nombre'}) no está mapeada a un tenant Orion. Configure ORION_TENANT_MAP (p. ej. {"1":"farmalogica"}).`
+          `Empresa SynerLink id_company=${ctx.id_company} (${ctx.company_name || 'sin nombre'}) no está mapeada a un tenant Orion. Configure ORION_TENANT_MAP (p. ej. {"1":"gss"}).`
         ),
         { status: 422 }
       );
@@ -465,11 +499,10 @@ export async function ensureOrionDocumentForRequest(
       }
     }
 
-    const createRes = await createOrionDocument({
+    const createPayloadBase = {
       externalRef,
       synerlinkRequestId: params.requestId,
       synerlinkCompanyId: ctx.id_company,
-      tenantId,
       title:
         params.title ||
         params.fileName ||
@@ -478,7 +511,7 @@ export async function ensureOrionDocumentForRequest(
       createdByEmail,
       pdfBase64,
       metadata: {
-        source: 'synerlink',
+        source: 'synerlink' as const,
         synerlinkRequestId: params.requestId,
         synerlinkCompanyId: ctx.id_company,
         companyName: ctx.company_name ?? undefined,
@@ -488,27 +521,57 @@ export async function ensureOrionDocumentForRequest(
         fileName: params.fileName ?? undefined,
         createdByEmail,
       },
+    };
+
+    let createRes = await createOrionDocument({
+      ...createPayloadBase,
+      tenantId,
     });
 
-    if (!createRes.ok || !createRes.data) {
-      throw Object.assign(new Error(createRes.error || 'No se pudo crear el documento en Orion'), {
-        status: createRes.status >= 500 ? 503 : 502,
+    // Si el slug del mapa no existe en la BD de Orion (p.ej. farmalogica), reintentar hub gss.
+    const tenantMissing =
+      !createRes.ok &&
+      /tenant no existe|SYNERLINK_TENANT_MAP apunta/i.test(String(createRes.error || ''));
+    const fallbackTenant = getOrionTenantFallback();
+    if (tenantMissing && fallbackTenant && fallbackTenant !== tenantId) {
+      console.warn(
+        `[orion] tenant "${tenantId}" no existe en Orion; reintento con fallback "${fallbackTenant}" (id_company=${ctx.id_company})`
+      );
+      createRes = await createOrionDocument({
+        ...createPayloadBase,
+        tenantId: fallbackTenant,
       });
+    }
+
+    if (!createRes.ok || !createRes.data) {
+      const hint = tenantMissing
+        ? ` El tenant "${tenantId}" no existe en Orion. Ajuste ORION_TENANT_MAP / SYNERLINK_TENANT_MAP al slug real (p.ej. gss) o créelo en Orion.`
+        : '';
+      throw Object.assign(
+        new Error((createRes.error || 'No se pudo crear el documento en Orion') + hint),
+        { status: createRes.status >= 500 ? 503 : 502 }
+      );
     }
     doc = createRes.data;
     created = createRes.status === 201;
+
+    // El PDF canónico de firma vive en Orion; la copia SynerLink se mantiene hasta
+    // "Enviar a firma" para que Preparar (ubicaciones) pueda previsualizar el adjunto.
+    const orionOriginalUrl =
+      resolvedOriginalUrl ||
+      buildOrionSignedFileApiUrl(String(doc.orionDocumentId));
 
     const state = applyOrionVersionHistory({
       previous: current,
       next: mergeOrionSignatureState(current, {
         ...mapOrionResponseToState(externalRef, doc, fileId, params.fileName ?? current.fileName),
-        originalFileUrl: resolvedOriginalUrl,
+        originalFileUrl: orionOriginalUrl,
         signatureIntent: 'sign',
       }),
       previousSigners: current.signers,
-      originalUrl: resolvedOriginalUrl,
+      originalUrl: orionOriginalUrl,
     });
-    bag = setOrionDocumentInBag(bag, fileId, ensureOriginalOrionVersion(state, resolvedOriginalUrl));
+    bag = setOrionDocumentInBag(bag, fileId, ensureOriginalOrionVersion(state, orionOriginalUrl));
     await upsertOrionFormBag(pool, params.requestId, field.id_form_field, bag);
 
     return { state, bag, formFieldId: field.id_form_field, created, fileId };
@@ -680,24 +743,12 @@ export async function applyOrionWebhookToRequest(
   const allSigned = allOrionDocumentsFullySigned(bag) && allSignersCompleted(state.signers);
 
   if (allRejected || (statusUpper === 'RECHAZADO' && Object.keys(bag.documents).length <= 1)) {
+    // Rechazo: cierra turnos de firma de ese flujo; NO finaliza la solicitud.
     tasksUpdated += await cancelOpenSignerTasks(
       pool,
       params.requestId,
       'Documento rechazado en GSS Firma (Orion).'
     );
-
-    await pool
-      .request()
-      .input('id', sql.Int, params.requestId)
-      .input('resolution', sql.NVarChar(sql.MAX), resolution)
-      .query(`
-        UPDATE requests_general
-        SET status_req = 3,
-            resolution = @resolution,
-            date_resolution = GETDATE()
-        WHERE id = @id AND status_req NOT IN (2, 3)
-      `);
-    requestClosed = true;
   } else if (statusUpper === 'DEVUELTO') {
     // Devolución: cancela turnos de firma, NO cierra la solicitud (coordinador corrige y reenvía).
     tasksUpdated += await cancelOpenSignerTasks(
@@ -708,7 +759,7 @@ export async function applyOrionWebhookToRequest(
     );
   } else if (statusUpper === 'FIRMADO' && allSigned) {
     // Firmas completas: avanza el workflow secuencial de firma, pero NO cierra la
-    // solicitud. Pueden quedar otras tareas (p. ej. Validación Planeación).
+    // solicitud. Pueden quedar otras tareas o más PDFs por adjuntar/firmar.
     const template = await findOrionSignatureTaskTemplate(pool, params.requestId);
     if (template) {
       await advanceSequentialTask(pool, {
@@ -737,12 +788,7 @@ export async function applyOrionWebhookToRequest(
               ) + 1;
         const positionLabel =
           totalSigners > 0 && position > 0 ? `firmante ${position}/${totalSigners}` : 'firmante';
-        await insertRequestNote(
-          pool,
-          params.requestId,
-          `GSS Firma (${state.fileName || fileId}): ${positionLabel} — ${signer.name || signer.email} completó su firma.`,
-          params.noteAuthorUserId
-        );
+        // Progreso de firma: campana/push; no ensuciar historial de interacciones.
         fireAndForgetNotification(
           notifyOrionSignatureProgress({
             requestId: params.requestId,
@@ -780,12 +826,6 @@ export async function applyOrionWebhookToRequest(
         );
       }
     } else if (statusUpper === 'FIRMADO' && allSigned) {
-      await insertRequestNote(
-        pool,
-        params.requestId,
-        `GSS Firma: todos los documentos firmados. ${resolution}`,
-        params.noteAuthorUserId
-      );
       fireAndForgetNotification(
         notifyOrionSignatureProgress({
           requestId: params.requestId,
@@ -796,12 +836,6 @@ export async function applyOrionWebhookToRequest(
         })
       );
     } else if (statusUpper === 'RECHAZADO') {
-      await insertRequestNote(
-        pool,
-        params.requestId,
-        `GSS Firma: documento rechazado. ${resolution}`,
-        params.noteAuthorUserId
-      );
       fireAndForgetNotification(
         notifyOrionSignatureProgress({
           requestId: params.requestId,
@@ -812,12 +846,6 @@ export async function applyOrionWebhookToRequest(
         })
       );
     } else if (statusUpper === 'DEVUELTO') {
-      await insertRequestNote(
-        pool,
-        params.requestId,
-        `GSS Firma: documento devuelto para corrección. ${resolution}`,
-        params.noteAuthorUserId
-      );
       fireAndForgetNotification(
         notifyOrionSignatureProgress({
           requestId: params.requestId,
@@ -828,12 +856,6 @@ export async function applyOrionWebhookToRequest(
         })
       );
     } else if (statusUpper === 'EN_PROCESO' && syncResult.tasksOpened > 0) {
-      await insertRequestNote(
-        pool,
-        params.requestId,
-        `GSS Firma (${state.fileName || fileId}): turno de firma para ${syncResult.currentSignerEmail}.`,
-        params.noteAuthorUserId
-      );
       fireAndForgetNotification(
         notifyOrionSignatureProgress({
           requestId: params.requestId,
@@ -1892,6 +1914,10 @@ export async function finalizeSignerTurn(
   });
 
   const completed = newlyCompletedSigners(previousSigners, outcome.state.signers);
+  // PDF canónico en Orion: liberar copia SynerLink solo al cerrar el documento.
+  if (allSignersCompleted(outcome.state.signers)) {
+    await releaseSynerlinkOneDriveCopyAfterOrionPrepare(fileId);
+  }
   const turnOrder = Number(turnSigner.order);
   const justCompletedThisTurn = completed.some((s) => {
     if (Number.isFinite(turnOrder) && turnOrder > 0) {

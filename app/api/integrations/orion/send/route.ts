@@ -108,7 +108,15 @@ export async function POST(req: Request) {
       const signerEmails = (nextState.signers ?? [])
         .map((s) => String(s.email || '').trim())
         .filter(Boolean);
+      const pendingEmail = String(pending?.email || '')
+        .trim()
+        .toLowerCase();
+      const preparerEmail = String(session.user.email || '')
+        .trim()
+        .toLowerCase();
 
+      // Firmantes: 1 aviso de turno (Autorizar firma). Resto: "Incluido como firmante".
+      // "Documento enviado" solo a stakeholders (no al firmante en turno ni al preparador).
       fireAndForgetNotification(
         notifyOrionSignerInvited({
           requestId,
@@ -125,7 +133,11 @@ export async function POST(req: Request) {
           fileName: nextState.fileName ?? current.fileName ?? null,
           fileId,
           event: 'sent',
-          excludeEmail: String(session.user.email || '').trim() || null,
+          excludeEmail: pendingEmail || preparerEmail || null,
+          excludeEmails: [
+            ...signerEmails,
+            preparerEmail,
+          ].filter(Boolean),
         })
       );
 
