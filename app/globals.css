@@ -2959,6 +2959,38 @@ body.chat-inmersivo .chat-page-thread--completa {
   background-color: var(--pth-azul-50);
 }
 
+/* ── VENTANA DE CONTACTOS ────────────────────────────────────────────────── */
+.portal-th__visor-caja--contactos {
+  width: min(420px, 92vw);
+  height: auto;
+}
+
+.portal-th__contactos {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+}
+
+.portal-th__contactos-boton {
+  padding: 14px 16px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 10px;
+  background-color: var(--pth-azul-50);
+  color: var(--pth-azul);
+  font-weight: 600;
+  font-size: 0.92rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 140ms ease, transform 140ms ease;
+}
+
+.portal-th__contactos-boton:hover {
+  background-color: #fff;
+  border-color: var(--pth-azul);
+  transform: translateY(-1px);
+}
+
 /* Un anuncio se ve entero y centrado, sin recortarse ni estirarse. El fondo
    oscuro es a propósito: una imagen con fondo blanco sobre blanco no deja ver
    dónde termina. */
