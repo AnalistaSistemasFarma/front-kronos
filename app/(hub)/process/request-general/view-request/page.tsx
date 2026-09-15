@@ -96,6 +96,7 @@ import {
   resolveOrionPdfUrl,
 } from '../../../../../lib/orion/documentVersions';
 import { resolveOrionPdfAccessUrl } from '../../../../../lib/orion/signedFileAccess';
+import { mergeOneDriveWithOrionDocuments } from '../../../../../lib/orion/attachmentList';
 import type { OrionSignatureState } from '../../../../../lib/orion/types';
 import { buildOrionParticipants } from '../../../../../lib/orion/participants';
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
@@ -531,6 +532,15 @@ function ViewRequestPage() {
 
   const lastOrionFormFetchKeyRef = useRef('');
   const [orionDocuments, setOrionDocuments] = useState<Record<string, OrionSignatureState>>({});
+
+  const attachmentRows = useMemo(
+    () =>
+      mergeOneDriveWithOrionDocuments(folderContents, {
+        ...orionInitialDocuments,
+        ...orionDocuments,
+      }),
+    [folderContents, orionInitialDocuments, orionDocuments]
+  );
 
   useEffect(() => {
     setOrionDocuments(orionInitialDocuments);
@@ -994,12 +1004,12 @@ function ViewRequestPage() {
 
   const downloadAllFilesAsZip = async () => {
     setLoadingDownload(true);
-    if (!folderContents.length) return;
+    if (!attachmentRows.length) return;
 
     try {
       const zip = new JSZip();
 
-      for (const file of folderContents) {
+      for (const file of attachmentRows) {
         const url = resolveAttachmentDownloadUrl(file);
 
         if (!url) continue;
@@ -1950,7 +1960,7 @@ function ViewRequestPage() {
     (fv) => fv.field_type === ORION_SIGNATURE_FIELD_TYPE
   );
   const hasOrionDocuments = Object.keys(orionInitialDocuments).length > 0;
-  const hasPdfAttachments = folderContents.some((f) => /\.pdf$/i.test(f.name));
+  const hasPdfAttachments = attachmentRows.some((f) => /\.pdf$/i.test(f.name));
   // Firma en solicitud normal: basta con PDFs adjuntos (o bag Orion).
   const showOrionPanel =
     hasPdfAttachments || hasOrionSignatureField || hasOrionDocuments;
@@ -1978,7 +1988,7 @@ function ViewRequestPage() {
   const orionWorkflowLocked = isRequestResolved();
   const signedOrionDocs = listSignedOrionDocuments({ documents: orionInitialDocuments });
   const autoOpenFile = orionFileIdParam
-    ? folderContents.find(
+    ? attachmentRows.find(
         (f) => String(f.id) === String(orionFileIdParam) && /\.pdf$/i.test(f.name)
       )
     : undefined;
@@ -1987,7 +1997,7 @@ function ViewRequestPage() {
     (from === 'authorization' ||
       orionActionParam === 'sign' ||
       orionActionParam === 'manage')
-      ? folderContents.find((f) => /\.pdf$/i.test(f.name))
+      ? attachmentRows.find((f) => /\.pdf$/i.test(f.name))
       : undefined;
   const deepLinkFileId = autoOpenFile
     ? String(autoOpenFile.id)
@@ -2023,7 +2033,7 @@ function ViewRequestPage() {
   })();
 
   const chatDocumentItems = [
-    ...folderContents
+    ...attachmentRows
       .filter((f) => /\.pdf$/i.test(f.name))
       .map((f) => {
         const url = getFolderFileUrl(f);
@@ -2737,13 +2747,13 @@ function ViewRequestPage() {
             <Title order={3} className='flex items-center gap-2'>
               <IconEye size={20} />
               Archivos adjuntos
-              {folderContents.length > 0 ? (
+              {attachmentRows.length > 0 ? (
                 <Text span size='sm' c='dimmed' fw={400}>
-                  ({folderContents.length})
+                  ({attachmentRows.length})
                 </Text>
               ) : null}
             </Title>
-            {folderContents.length > 0 && (
+            {attachmentRows.length > 0 && (
               <Button
                 size='xs'
                 variant='light'
@@ -2756,7 +2766,7 @@ function ViewRequestPage() {
             )}
           </Group>
 
-          {folderContents.length > 0 && (
+          {attachmentRows.length > 0 && (
             <ScrollArea.Autosize mah={480} offsetScrollbars type='auto' mb='md'>
               <Table
                 className='doc-table'
@@ -2788,7 +2798,7 @@ function ViewRequestPage() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {folderContents.map((file: FolderFile, fileIndex: number) => {
+                  {attachmentRows.map((file: FolderFile, fileIndex: number) => {
                     const fileId = String(file.id);
                     const openUrl =
                       resolveAttachmentDownloadUrl(file) ?? file.webUrl ?? '#';
@@ -2802,11 +2812,19 @@ function ViewRequestPage() {
                       .join(' · ');
 
                     if (showOrionPanel && /\.pdf$/i.test(file.name)) {
+                      const orionState = getOrionDocForFile(fileId, file.name);
+                      const orionLatest =
+                        orionState?.orionDocumentId
+                          ? resolveOrionPdfAccessUrl(orionState, null, {
+                              requestId: request.id,
+                              fileId,
+                            })
+                          : null;
                       const pdfUrl =
+                        orionLatest ||
                         getFolderPdfDownloadUrl(file) ||
                         resolveAttachmentDownloadUrl(file) ||
                         `/api/integrations/orion/signed-file?requestId=${request.id}&fileId=${encodeURIComponent(fileId)}`;
-                      const orionState = getOrionDocForFile(fileId, file.name);
                       return (
                         <OrionAttachmentTableRow
                           key={file.id}
@@ -2816,7 +2834,7 @@ function ViewRequestPage() {
                           fileName={file.name}
                           pdfUrl={pdfUrl}
                           fileSizeLabel={sizeLabel}
-                          openUrl={openUrl}
+                          openUrl={orionLatest || openUrl}
                           previewUrl={file.webUrl ?? null}
                           processName={request?.process || request?.category || null}
                           requesterName={request?.requester || null}

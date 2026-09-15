@@ -9,6 +9,9 @@ const ROTACION_CARRUSEL_MS = 6000;
 /** ids estables de sección, para el panel de navegación y el scroll-spy. */
 const ID_SECCION_ANUNCIOS = 'portal-th-anuncios';
 const ID_SECCION_POLITICAS = 'portal-th-politicas';
+/** No es una sección con scroll: es un botón del panel que abre su propia
+ *  ventana de vista previa (ver `irASeccion`), igual que un documento. */
+const ID_SECCION_CONTACTOS = 'portal-th-contactos';
 
 /**
  * EL CONTENIDO DEL PORTAL DE TALENTO HUMANO — anuncios y documentos.
@@ -246,6 +249,19 @@ export default function PortalContenido({
    */
   const [abierto, setAbierto] = useState<Vista | null>(null);
 
+  /**
+   * Ventana de "Contactos". Pedido de Cristian (2026-09-14): un botón propio
+   * en el panel que abre una vista previa con dos botones adentro —"Correos
+   * Corporativos" y "Extensiones Corporativas"— sin contenido todavía; avisó
+   * que luego cuenta de dónde sale la información de cada uno.
+   */
+  const [contactosAbierto, setContactosAbierto] = useState(false);
+  const [contactoSeleccionado, setContactoSeleccionado] = useState<'correos' | 'extensiones' | null>(null);
+  const cerrarContactos = () => {
+    setContactosAbierto(false);
+    setContactoSeleccionado(null);
+  };
+
   // Cerrar con Escape: en una ventana que tapa la pantalla, buscar la ✕ con el
   // mouse cuando uno solo quería salir es incómodo.
   useEffect(() => {
@@ -264,6 +280,22 @@ export default function PortalContenido({
     };
   }, [abierto]);
 
+  // Mismo tratamiento de Escape y bloqueo de scroll que la vista previa de
+  // documentos, para la ventana de Contactos.
+  useEffect(() => {
+    if (!contactosAbierto) return;
+    const alTeclear = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cerrarContactos();
+    };
+    window.addEventListener('keydown', alTeclear);
+    const overflowPrevio = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', alTeclear);
+      document.body.style.overflow = overflowPrevio;
+    };
+  }, [contactosAbierto]);
+
   // ── Panel de navegación ─────────────────────────────────────────────────
   // Misma condición que ya decide si se pinta la sección de Anuncios: si no
   // hay ninguno y esta persona no administra, ese botón tampoco tiene sentido.
@@ -271,13 +303,21 @@ export default function PortalContenido({
   const secciones: SeccionNav[] = [
     ...(mostrarAnuncios ? [{ id: ID_SECCION_ANUNCIOS, etiqueta: 'Anuncios' }] : []),
     { id: ID_SECCION_POLITICAS, etiqueta: 'Políticas y reglamentos' },
+    { id: ID_SECCION_CONTACTOS, etiqueta: 'Contactos' },
     // Cuando el portal tenga más secciones, se agregan acá — el panel de
     // navegación no necesita ningún otro cambio.
   ];
+  // Contactos no tiene sección propia en la página (no hay `getElementById`
+  // que la encuentre), así que nunca queda "activa" por scroll — eso está
+  // bien: no navega, abre su ventana.
   const idsSecciones = secciones.map((s) => s.id);
   const activa = useSeccionActiva(idsSecciones);
 
   const irASeccion = (id: string) => {
+    if (id === ID_SECCION_CONTACTOS) {
+      setContactosAbierto(true);
+      return;
+    }
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
@@ -451,6 +491,55 @@ export default function PortalContenido({
             ) : (
               <iframe src={abierto.url} title={abierto.titulo} />
             )}
+          </div>
+        </div>
+      )}
+
+      {/* VENTANA DE CONTACTOS — mismo marco que la vista previa de documentos,
+          pero con dos botones adentro en vez de un PDF. Sin contenido todavía:
+          Cristian confirma después de dónde sale cada uno (SharePoint o
+          directorio de Microsoft 365). */}
+      {contactosAbierto && (
+        <div
+          className='portal-th__visor'
+          role='dialog'
+          aria-modal='true'
+          aria-label='Contactos'
+          onClick={(e) => {
+            if (e.target === e.currentTarget) cerrarContactos();
+          }}
+        >
+          <div className='portal-th__visor-caja portal-th__visor-caja--contactos'>
+            <header className='portal-th__visor-barra'>
+              <strong>Contactos</strong>
+              <div className='portal-th__visor-acciones'>
+                <button type='button' onClick={cerrarContactos} aria-label='Cerrar'>
+                  ✕
+                </button>
+              </div>
+            </header>
+            <div className='portal-th__contactos'>
+              <button
+                type='button'
+                className='portal-th__contactos-boton'
+                onClick={() => setContactoSeleccionado('correos')}
+              >
+                Correos Corporativos
+              </button>
+              <button
+                type='button'
+                className='portal-th__contactos-boton'
+                onClick={() => setContactoSeleccionado('extensiones')}
+              >
+                Extensiones Corporativas
+              </button>
+              {contactoSeleccionado && (
+                <p className='portal-th__estado'>
+                  Todavía no hay contenido cargado para{' '}
+                  {contactoSeleccionado === 'correos' ? 'Correos Corporativos' : 'Extensiones Corporativas'}.
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}

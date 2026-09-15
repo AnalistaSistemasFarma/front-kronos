@@ -84,6 +84,7 @@ import {
   resolveOrionPdfUrl,
 } from '../../../../../lib/orion/documentVersions';
 import { resolveOrionPdfAccessUrl } from '../../../../../lib/orion/signedFileAccess';
+import { mergeOneDriveWithOrionDocuments } from '../../../../../lib/orion/attachmentList';
 import type { OrionSignatureState } from '../../../../../lib/orion/types';
 import { buildOrionParticipants } from '../../../../../lib/orion/participants';
 import {
@@ -210,6 +211,7 @@ function ViewRequestPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const id = searchParams.get('id');
+  const requestIdParam = searchParams.get('requestId');
   const from = searchParams.get('from') || searchParams.get('mode') || 'assigned-activities';
   const orionFileIdParam = searchParams.get('orionFileId');
   const orionActionParam = searchParams.get('orionAction') as 'sign' | 'manage' | 'view' | null;
@@ -275,30 +277,64 @@ function ViewRequestPage() {
   const [orionDocuments, setOrionDocuments] = useState<Record<string, OrionSignatureState>>({});
 
   useEffect(() => {
-    const storedRequest = sessionStorage.getItem('selectedRequest');
-    if (storedRequest) {
-      try {
+    // No usar selectedRequest de otra pantalla: suele ser solicitud (sin id_request_general)
+    // y pinta "Tarea #2147" vacío mientras el fetch falla.
+    try {
+      const storedRequest = sessionStorage.getItem('selectedRequest');
+      if (storedRequest) {
         const requestData = JSON.parse(storedRequest);
-        setRequest(requestData);
-        setOriginalRequest(requestData);
-        setLoading(false);
+        const looksLikeTask =
+          requestData &&
+          typeof requestData === 'object' &&
+          requestData.id_request_general != null &&
+          (id == null || String(requestData.id) === String(id));
+        if (looksLikeTask) {
+          setRequest(requestData);
+          setOriginalRequest(requestData);
+          setLoading(false);
+        } else {
+          sessionStorage.removeItem('selectedRequest');
+        }
+      }
+    } catch {
+      try {
+        sessionStorage.removeItem('selectedRequest');
       } catch {
-        /* ignore invalid cache */
+        /* ignore */
       }
     }
 
-    if (!id) return;
+    if (!id && !requestIdParam) return;
 
     const loadTask = async () => {
       try {
-        let res = await fetch(`/api/requests-general/view-activities?id=${id}`);
-        // Deep-link legacy / error: a veces llega id_request_general en lugar del id de tarea
-        if (!res.ok && from === 'authorization') {
-          const qs = new URLSearchParams({ requestId: String(id) });
+        let res: Response;
+        if (id) {
+          res = await fetch(`/api/requests-general/view-activities?id=${id}`);
+          // Deep-link legacy / notificaciones: a veces llega id_request_general en lugar del id de tarea
+          if (!res.ok) {
+            const qs = new URLSearchParams({ requestId: String(id) });
+            if (orionFileIdParam) qs.set('fileId', orionFileIdParam);
+            res = await fetch(`/api/requests-general/view-activities?${qs.toString()}`);
+          }
+        } else {
+          const qs = new URLSearchParams({ requestId: String(requestIdParam) });
           if (orionFileIdParam) qs.set('fileId', orionFileIdParam);
           res = await fetch(`/api/requests-general/view-activities?${qs.toString()}`);
         }
-        if (!res.ok) throw new Error('Error al cargar la tarea');
+
+        if (!res.ok) {
+          // Si venía el id de solicitud, ir al detalle de solicitud (no a una tarea fantasma).
+          const maybeRequestId = Number(id || requestIdParam);
+          if (Number.isInteger(maybeRequestId) && maybeRequestId > 0) {
+            router.replace(
+              `/process/request-general/view-request?id=${maybeRequestId}&from=${encodeURIComponent(from)}`
+            );
+            return;
+          }
+          throw new Error('Error al cargar la tarea');
+        }
+
         const data = await res.json();
         const mappedData = {
           ...data,
@@ -307,18 +343,22 @@ function ViewRequestPage() {
         };
         setRequest(mappedData);
         setOriginalRequest(mappedData);
+        setError(null);
         setLoading(false);
+        try {
+          sessionStorage.setItem('selectedRequest', JSON.stringify(mappedData));
+        } catch {
+          /* ignore */
+        }
       } catch (err) {
         console.error('Error fetching request:', err);
-        if (!storedRequest) {
-          setError('No se pudo cargar la tarea. Por favor intente nuevamente.');
-        }
+        setError('No se pudo cargar la tarea. Por favor intente nuevamente.');
         setLoading(false);
       }
     };
 
     void loadTask();
-  }, [id, from, orionFileIdParam]);
+  }, [id, requestIdParam, from, orionFileIdParam, router]);
 
   useEffect(() => {
     if (request) {
@@ -526,12 +566,12 @@ function ViewRequestPage() {
 
   const downloadAllFilesAsZip = async () => {
     setLoadingOptions(true);
-    if (!folderContents.length) return;
+    if (!attachmentRows.length) return;
 
     try {
       const zip = new JSZip();
 
-      for (const file of folderContents) {
+      for (const file of attachmentRows) {
         const url = resolveAttachmentDownloadUrl(file);
 
         if (!url) continue;
@@ -625,6 +665,15 @@ function ViewRequestPage() {
   const orionInitialDocuments = useMemo(
     () => parseOrionSignatureBagBag(orionValueText).documents,
     [orionValueText]
+  );
+
+  const attachmentRows = useMemo(
+    () =>
+      mergeOneDriveWithOrionDocuments(folderContents, {
+        ...orionInitialDocuments,
+        ...orionDocuments,
+      }),
+    [folderContents, orionInitialDocuments, orionDocuments]
   );
 
   useEffect(() => {
@@ -1280,7 +1329,7 @@ function ViewRequestPage() {
   const hasOrionDocuments = Object.keys(orionInitialDocuments).length > 0;
   const taskOrionFileId = parseOrionFileIdFromResolution(request?.resolution);
   const taskPendingOrionAuth = isOrionSignerAuthResolution(request?.resolution);
-  const hasPdfAttachments = folderContents.some((f) => /\.pdf$/i.test(f.name));
+  const hasPdfAttachments = attachmentRows.some((f) => /\.pdf$/i.test(f.name));
   const showOrionPanel =
     hasPdfAttachments ||
     hasOrionSignatureField ||
@@ -1320,7 +1369,7 @@ function ViewRequestPage() {
     });
   const signedOrionDocs = listSignedOrionDocuments({ documents: orionInitialDocuments });
   const autoOpenFile = orionFileIdParam
-    ? folderContents.find(
+    ? attachmentRows.find(
         (f) => String(f.id) === String(orionFileIdParam) && /\.pdf$/i.test(f.name)
       )
     : undefined;
@@ -1328,7 +1377,7 @@ function ViewRequestPage() {
   // Si viene from=authorization sin fileId, abrir el primer PDF pendiente de firma del usuario
   const fallbackSignFile =
     !autoOpenFile && from === 'authorization'
-      ? folderContents.find((f) => /\.pdf$/i.test(f.name))
+      ? attachmentRows.find((f) => /\.pdf$/i.test(f.name))
       : undefined;
   const deepLinkFileId = autoOpenFile
     ? String(autoOpenFile.id)
@@ -1370,7 +1419,7 @@ function ViewRequestPage() {
   })();
 
   const chatDocumentItems = [
-    ...folderContents
+    ...attachmentRows
       .filter((f) => /\.pdf$/i.test(f.name))
       .map((f) => {
         const url = resolveOrionPdfAccessUrl(
@@ -2017,13 +2066,13 @@ function ViewRequestPage() {
             <Title order={3} className='flex items-center gap-2'>
               <IconEye size={20} />
               Archivos adjuntos
-              {folderContents.length > 0 ? (
+              {attachmentRows.length > 0 ? (
                 <Text span size='sm' c='dimmed' fw={400}>
-                  ({folderContents.length})
+                  ({attachmentRows.length})
                 </Text>
               ) : null}
             </Title>
-            {folderContents.length > 0 && (
+            {attachmentRows.length > 0 && (
               <Button
                 size='xs'
                 variant='light'
@@ -2036,7 +2085,7 @@ function ViewRequestPage() {
             )}
           </Group>
 
-          {folderContents.length > 0 && (
+          {attachmentRows.length > 0 && (
             <ScrollArea.Autosize mah={420} offsetScrollbars type='auto' mb='md'>
               <Table
                 className='doc-table'
@@ -2067,7 +2116,7 @@ function ViewRequestPage() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {folderContents.map((file: FolderFile, fileIndex: number) => {
+                  {attachmentRows.map((file: FolderFile, fileIndex: number) => {
                     const fileId = String(file.id || taskOrionFileId || '');
                     const openUrl =
                       resolveAttachmentDownloadUrl(file) ?? file.webUrl ?? '#';
@@ -2083,7 +2132,15 @@ function ViewRequestPage() {
 
                     if (showOrionPanel && isPdf) {
                       const orionState = getOrionDocForFile(String(file.id), file.name);
+                      const orionLatest =
+                        orionState?.orionDocumentId && request.id_request_general
+                          ? resolveOrionPdfAccessUrl(orionState, null, {
+                              requestId: request.id_request_general,
+                              fileId: fileId || String(file.id),
+                            })
+                          : null;
                       const pdfUrl =
+                        orionLatest ||
                         getFolderFileUrl(file) ||
                         file.webUrl ||
                         resolveAttachmentDownloadUrl(file) ||
@@ -2097,7 +2154,7 @@ function ViewRequestPage() {
                           fileName={file.name}
                           pdfUrl={pdfUrl}
                           fileSizeLabel={sizeLabel}
-                          openUrl={openUrl}
+                          openUrl={orionLatest || openUrl}
                           previewUrl={file.webUrl ?? null}
                           processName={request?.process || request?.category || null}
                           requesterName={request?.name_requester || null}
