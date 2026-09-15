@@ -630,7 +630,7 @@ export async function applyOrionWebhookToRequest(
 
   const statusUpper = String(params.status).toUpperCase();
   let tasksUpdated = 0;
-  let requestClosed = false;
+  const requestClosed = false;
 
   const syncResult = await syncOrionSignerTasks(pool, {
     requestId: params.requestId,
