@@ -1,4 +1,9 @@
 import type { OrionSignatureState } from './types';
+import {
+  isOrionProtectedFileUrl,
+  isOrionSignedFileProxyUrl,
+  orionDocumentHasSignedCopy,
+} from './signedFileAccess';
 
 export type AttachmentListItem = {
   id: string;
@@ -10,6 +15,34 @@ export type AttachmentListItem = {
   /** true si no está en OneDrive y se reconstruyó desde el bag Orion */
   fromOrionBag?: boolean;
 };
+
+function hasSignedProgress(doc: OrionSignatureState): boolean {
+  return orionDocumentHasSignedCopy(doc);
+}
+
+function pickGhostAttachmentUrl(doc: OrionSignatureState): string | undefined {
+  const original = String(doc.originalFileUrl || '').trim();
+  const originalVersion = String(
+    doc.versions?.find((v) => v.kind === 'original')?.url || ''
+  ).trim();
+  const signed = String(doc.signedFileUrl || '').trim();
+
+  // Borrador / sin firmas: NUNCA signedFileUrl (Orion responde 409).
+  if (!hasSignedProgress(doc)) {
+    for (const candidate of [original, originalVersion]) {
+      if (!candidate) continue;
+      if (isOrionProtectedFileUrl(candidate)) continue;
+      if (isOrionSignedFileProxyUrl(candidate)) continue;
+      return candidate;
+    }
+    return undefined;
+  }
+
+  for (const candidate of [signed, original, originalVersion]) {
+    if (candidate) return candidate;
+  }
+  return undefined;
+}
 
 /**
  * La tabla de adjuntos lista OneDrive; si la carpeta/archivo ya no existe (404)
@@ -32,12 +65,7 @@ export function mergeOneDriveWithOrionDocuments(
     if (!id || byId.has(id)) continue;
 
     const name = String(doc.fileName || '').trim() || `documento-${id}.pdf`;
-    const url =
-      String(doc.signedFileUrl || '').trim() ||
-      String(doc.originalFileUrl || '').trim() ||
-      String(doc.versions?.find((v) => v.kind !== 'original')?.url || '').trim() ||
-      String(doc.versions?.[0]?.url || '').trim() ||
-      undefined;
+    const url = pickGhostAttachmentUrl(doc);
 
     byId.set(id, {
       id,

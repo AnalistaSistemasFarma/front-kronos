@@ -3,6 +3,7 @@
 import { Button, Stack, Text, UnstyledButton } from '@mantine/core';
 import { IconSignature } from '@tabler/icons-react';
 import { useCallback, useMemo, useState } from 'react';
+import toast from 'react-hot-toast';
 import {
   isOrionSignDocument,
   resolveOrionDocumentForAttachment,
@@ -241,7 +242,10 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
           onDocumentsUpdate?.(data.documents as Record<string, OrionSignatureState>);
         }
         return true;
-      } catch {
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : 'No se pudo actualizar Para firmar / Solo ver';
+        toast.error(msg);
         return false;
       } finally {
         setIntentLoading(false);

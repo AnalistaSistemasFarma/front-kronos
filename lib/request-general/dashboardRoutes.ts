@@ -2,6 +2,7 @@ import {
   isOrionFirmaPrepareSubprocess,
   isOrionFirmaSignSubprocess,
 } from '../orion/access';
+import { isDeleteAttachmentsSubprocess } from '../attachments/access';
 
 export const DASHBOARD_SOLICITANTE_URL = '/process/request-general/dashboard-solicitante';
 export const DASHBOARD_SOLICITADO_URL = '/process/request-general/dashboard-solicitado';
@@ -14,7 +15,11 @@ export function isHubHiddenRequestDashboardSubprocess(subprocess: {
   subprocess?: string | null;
   subprocess_url?: string | null;
 }): boolean {
-  if (isOrionFirmaPrepareSubprocess(subprocess) || isOrionFirmaSignSubprocess(subprocess)) {
+  if (
+    isOrionFirmaPrepareSubprocess(subprocess) ||
+    isOrionFirmaSignSubprocess(subprocess) ||
+    isDeleteAttachmentsSubprocess(subprocess)
+  ) {
     return true;
   }
 

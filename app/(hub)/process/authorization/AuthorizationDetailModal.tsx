@@ -37,6 +37,7 @@ import {
 import axios from 'axios';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../lib/orion/fieldType';
+import { isFirmaAuthorizationItem } from '../../../../lib/orion/signerAuthMarkers';
 
 // Item mínimo que llega desde el panel de autorización (subconjunto de AuthorizationRequest).
 interface RequestSummary {
@@ -44,9 +45,11 @@ interface RequestSummary {
   subject: string;
   company: string;
   type_authorization: string;
+  task?: string | null;
   requester: string;
   created_at: string;
   status: string;
+  resolution?: string | null;
 }
 
 interface DetailData {
@@ -168,9 +171,11 @@ function isOrionSignatureFormValue(fv: FormValue): boolean {
 /** Autorización de firma: no exponer PDFs, firmantes ni historial de progreso. */
 function isFirmaAuthorizationRequest(request: RequestSummary | null): boolean {
   if (!request) return false;
-  return (
-    /firma/i.test(request.type_authorization || '') || /firma/i.test(request.subject || '')
-  );
+  return isFirmaAuthorizationItem({
+    resolution: request.resolution,
+    typeAuthorization: request.type_authorization,
+    taskName: request.task,
+  });
 }
 
 export default function AuthorizationDetailModal({ opened, onClose, request }: Props) {
@@ -381,11 +386,14 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                   <Text fw={600}>Información adicional</Text>
                 </Group>
                 <Grid>
-                  {formValues.map((fv) => {
+                  {formValues.map((fv, index) => {
                     const raw = fv.option_label || fv.value_text || '';
                     const shown = raw ? formatFieldValue(fv.field_label, raw) : '—';
                     return (
-                      <Grid.Col span={{ base: 12, sm: 6 }} key={fv.id}>
+                      <Grid.Col
+                        span={{ base: 12, sm: 6 }}
+                        key={`auth-fv-${fv.id ?? 'x'}-${fv.field_label ?? index}-${index}`}
+                      >
                         <Card withBorder radius='md' p='sm'>
                           <Text size='xs' c='dimmed' fw={500} tt='uppercase'>
                             {fv.field_label}
@@ -419,8 +427,13 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                     <Text size='sm' c='dimmed'>{filesError || 'Sin adjuntos'}</Text>
                   ) : (
                     <Stack gap='xs'>
-                      {files.map((file) => (
-                        <Card key={file.id} withBorder radius='md' p='xs'>
+                      {files.map((file, index) => (
+                        <Card
+                          key={`auth-file-${file.id ?? 'x'}-${index}`}
+                          withBorder
+                          radius='md'
+                          p='xs'
+                        >
                           <Group justify='space-between' wrap='nowrap'>
                             <Group gap='xs' wrap='nowrap' style={{ minWidth: 0 }}>
                               <IconFile size={18} className='text-gray-400' />
@@ -476,8 +489,13 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                     <Text size='sm' c='dimmed'>Sin notas registradas</Text>
                   ) : (
                     <Stack gap='xs'>
-                      {notes.map((n) => (
-                        <Card key={n.id_note} withBorder radius='md' p='sm'>
+                      {notes.map((n, index) => (
+                        <Card
+                          key={`auth-note-${n.id_note ?? 'x'}-${index}`}
+                          withBorder
+                          radius='md'
+                          p='sm'
+                        >
                           <Text size='sm' style={{ whiteSpace: 'pre-line' }}>{n.note}</Text>
                           <Group gap={6} mt={4}>
                             <Text size='xs' c='dimmed'>{n.createdBy || 'Sistema'}</Text>

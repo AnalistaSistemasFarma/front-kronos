@@ -20,7 +20,6 @@ export async function POST(req) {
       start_date,
       end_date,
       resolution,
-      skip_sequential_gate,
     } = body;
 
     console.log(`${TAG} ▶ POST recibido. body =`, {
@@ -68,22 +67,19 @@ export async function POST(req) {
       const resolutionText = String(prevRow?.resolution || '');
       const typeAuth = String(prevRow?.type_authorization || '').toLowerCase();
       const taskName = String(prevRow?.task || '').toLowerCase();
-      const processName = String(prevRow?.process || '').toLowerCase();
-      const categoryName = String(prevRow?.category || '').toLowerCase();
       const isAuthorizationTask =
         Number(prevRow?.is_authorization) === 1 || prevRow?.is_authorization === true;
       const isSequentialTask =
         Number(prevRow?.is_sequential) === 1 || prevRow?.is_sequential === true;
       const isOrionSignerAuth =
         resolutionText.includes('[orionAuth]') || resolutionText.includes('[orionFile:');
-      const isFirmaProcess =
-        typeAuth.includes('firma') ||
-        taskName.includes('firma') ||
-        taskName.includes('previa') ||
-        processName.includes('firma') ||
-        categoryName.includes('firma');
+      // Alineado con isFirmaAuthorizationItem (UI): no usar process/categoría/"previa"
+      // para no saltar el avance secuencial de autorizaciones normales.
       const isFirmaAuthorization =
-        isOrionSignerAuth || isFirmaProcess || (isAuthorizationTask && Boolean(skip_sequential_gate));
+        isOrionSignerAuth ||
+        typeAuth.includes('firma') ||
+        /\bautorizar firma\b/i.test(taskName) ||
+        /\bfirma digital\b/i.test(taskName);
 
       console.log(`${TAG} 1) Tarea actual (prevRow) =`, {
         id_task: prevRow?.id_task,
