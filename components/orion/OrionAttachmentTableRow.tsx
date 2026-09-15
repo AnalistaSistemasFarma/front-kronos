@@ -18,6 +18,7 @@ import {
   IconPencil,
   IconSignature,
   IconSparkles,
+  IconTrash,
   IconUsers,
 } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
@@ -27,7 +28,11 @@ import {
   type OrionAttachmentSignActionsProps,
   useOrionAttachmentDerived,
 } from './OrionAttachmentSignActions';
-import { buildOrionSignedFileProxyUrl } from '../../lib/orion/signedFileAccess';
+import { resolveRequestPdfAccessUrl } from '../../lib/attachments/fileUrl';
+import {
+  buildOrionSignedFileProxyUrl,
+  orionDocumentHasSignedCopy,
+} from '../../lib/orion/signedFileAccess';
 
 type RowProps = OrionAttachmentSignActionsProps & {
   rowNumber?: number | string;
@@ -36,6 +41,8 @@ type RowProps = OrionAttachmentSignActionsProps & {
   /** Visor en línea (SharePoint/OneDrive webUrl). No usar downloadUrl. */
   previewUrl?: string | null;
   versionsSlot?: ReactNode;
+  canDeleteAttachment?: boolean;
+  onDeleteAttachment?: (fileId: string) => void | Promise<void>;
 };
 
 function ActionLink({
@@ -101,11 +108,15 @@ export default function OrionAttachmentTableRow({
   openUrl,
   previewUrl,
   versionsSlot,
+  canDeleteAttachment = false,
+  onDeleteAttachment,
   ...props
 }: RowProps) {
+  void previewUrl; // OneDrive webUrl no se usa: Ver en línea va por proxy SynerLink.
   const d = useOrionAttachmentDerived(props);
   const [extensionLoading, setExtensionLoading] = useState(false);
   const [renewLoading, setRenewLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const applyDocs = (documents: Record<string, OrionSignatureState>) => {
     props.onDocumentsUpdate?.(documents);
@@ -170,42 +181,42 @@ export default function OrionAttachmentTableRow({
   const isClosed =
     String(d.state.status || '').toUpperCase() === 'FIRMADO' ||
     (d.signers.length > 0 && d.completedCount === d.signers.length);
-
-  const latestFileHref =
-    d.hasOrionDoc && props.requestId && props.fileId
-      ? buildOrionSignedFileProxyUrl({
-          requestId: props.requestId,
-          fileId: props.fileId,
-        })
-      : String(d.state.originalFileUrl || '').trim() || openUrl || null;
+  const hasSignedCopy = orionDocumentHasSignedCopy(d.state);
 
   const originalFileHref =
-    d.hasOrionDoc && props.requestId && props.fileId && d.api?.canViewVersions
+    hasSignedCopy && d.hasOrionDoc && props.requestId && props.fileId && d.api?.canViewVersions
       ? buildOrionSignedFileProxyUrl({
           requestId: props.requestId,
           fileId: props.fileId,
           versionId: 'original',
+          download: true,
         })
       : null;
 
-  const primaryOpenHref =
-    (d.hasOrionDoc && (d.completedCount > 0 || isClosed) ? latestFileHref : null) ||
-    openUrl ||
-    latestFileHref ||
-    originalFileHref;
+  /** Descarga: SynerLink OneDrive si no hay firmas; Orion si ya hay copia firmada. */
+  const downloadHref =
+    props.requestId && props.fileId
+      ? resolveRequestPdfAccessUrl({
+          requestId: props.requestId,
+          fileId: props.fileId,
+          state: d.state,
+          download: true,
+        })
+      : String(openUrl || '').trim() || originalFileHref || null;
 
   /**
-   * Acceso para quien ve la solicitud (incl. “Solo ver” y firmantes):
-   * 1) PDF vigente Orion (sesión SynerLink)
-   * 2) downloadUrl de Graph (no exige permiso SharePoint del usuario)
-   * 3) webUrl SharePoint (solo si el usuario tiene acceso al drive)
+   * Ver en línea:
+   * - sin firmas → `/api/requests-general/attachment-file` (OneDrive SynerLink)
+   * - con firmas → `/api/integrations/orion/signed-file` (OneDrive Orion)
    */
   const viewOnlineHref =
-    (d.hasOrionDoc && (d.completedCount > 0 || isClosed) ? latestFileHref : null) ||
-    String(openUrl || '').trim() ||
-    String(previewUrl || '').trim() ||
-    primaryOpenHref ||
-    null;
+    props.requestId && props.fileId
+      ? resolveRequestPdfAccessUrl({
+          requestId: props.requestId,
+          fileId: props.fileId,
+          state: d.state,
+        })
+      : String(props.pdfUrl || openUrl || '').trim() || null;
 
   const statusColor =
     d.displayStatus.color === 'yellow'
@@ -216,15 +227,39 @@ export default function OrionAttachmentTableRow({
   // Historial/original: solo creador del flujo / admin.
   const canAccessOriginalFile = Boolean(d.api?.canViewVersions);
 
+  const deleteAction =
+    canDeleteAttachment && onDeleteAttachment ? (
+      <ActionLink
+        icon={<IconTrash size={15} stroke={1.6} />}
+        label={deleteLoading ? 'Eliminando…' : 'Eliminar'}
+        danger
+        disabled={deleteLoading || isClosed}
+        onClick={() => {
+          if (deleteLoading || isClosed) return;
+          if (
+            !window.confirm(
+              `¿Eliminar “${props.fileName}” de la solicitud? Esta acción no se puede deshacer.`
+            )
+          ) {
+            return;
+          }
+          setDeleteLoading(true);
+          void Promise.resolve(onDeleteAttachment(props.fileId)).finally(() => {
+            setDeleteLoading(false);
+          });
+        }}
+      />
+    ) : null;
+
   return (
     <Table.Tr className={isClosed ? 'doc-row doc-row--closed' : 'doc-row'}>
-      <Table.Td data-label='N.º' className='doc-cell doc-cell--mono' style={{ width: 72, whiteSpace: 'nowrap' }}>
+      <Table.Td data-label='N.º' className='doc-cell doc-cell--mono doc-col--secondary' style={{ width: 56, whiteSpace: 'nowrap' }}>
         <Text size='sm' c='dimmed'>
           {rowNumber ?? '—'}
         </Text>
       </Table.Td>
 
-      <Table.Td data-label='Documento' className='doc-cell' style={{ minWidth: 160, maxWidth: 280 }}>
+      <Table.Td data-label='Documento' className='doc-cell doc-cell--file' style={{ minWidth: 140, maxWidth: 280 }}>
         <Group gap={6} wrap='nowrap' align='flex-start'>
           <div style={{ minWidth: 0, flex: 1 }}>
             <Text size='sm' fw={700} lineClamp={2}>
@@ -241,13 +276,13 @@ export default function OrionAttachmentTableRow({
               <ActionIcon
                 variant='subtle'
                 color='blue'
-                size='sm'
+                size='md'
                 component='a'
                 href={viewOnlineHref}
                 target='_blank'
                 rel='noopener noreferrer'
                 aria-label={`Ver en línea ${props.fileName}`}
-                style={{ flexShrink: 0, marginTop: 1 }}
+                style={{ flexShrink: 0, marginTop: 1, minWidth: 36, minHeight: 36 }}
               >
                 <IconEye size={16} />
               </ActionIcon>
@@ -256,14 +291,14 @@ export default function OrionAttachmentTableRow({
         </Group>
       </Table.Td>
 
-      <Table.Td data-label='Departamento' className='doc-cell' style={{ minWidth: 140, maxWidth: 200 }}>
+      <Table.Td data-label='Departamento' className='doc-cell doc-col--secondary' style={{ minWidth: 120, maxWidth: 180 }}>
         <Text size='sm' c='dimmed' lineClamp={2}>
           {props.processName || '—'}
         </Text>
       </Table.Td>
 
       <Table.Td data-label='Estado' className='doc-cell'>
-        <Stack gap={6}>
+        <Stack gap={6} className='doc-intent-control'>
           {d.permissionsPending ? (
             <Text size='xs' c='dimmed'>
               Cargando permisos…
@@ -271,6 +306,7 @@ export default function OrionAttachmentTableRow({
           ) : d.canToggleIntent ? (
             <SegmentedControl
               size='xs'
+              fullWidth
               value={d.signatureIntent}
               disabled={d.intentLoading}
               onChange={(value) => {
@@ -281,8 +317,7 @@ export default function OrionAttachmentTableRow({
                 { label: 'Solo ver', value: 'view' },
               ]}
             />
-          ) : null}
-          {d.enabled || d.forSigning ? (
+          ) : d.forSigning ? (
             <Badge
               variant='outline'
               color={statusColor}
@@ -292,6 +327,16 @@ export default function OrionAttachmentTableRow({
             >
               {d.displayStatus.label}
             </Badge>
+          ) : d.enabled ? (
+            <Badge
+              variant='outline'
+              color='gray'
+              size='sm'
+              radius='xl'
+              styles={{ label: { textTransform: 'none', fontWeight: 600 } }}
+            >
+              Solo ver
+            </Badge>
           ) : (
             <Text size='sm' c='dimmed'>
               —
@@ -300,7 +345,7 @@ export default function OrionAttachmentTableRow({
         </Stack>
       </Table.Td>
 
-      <Table.Td data-label='Firmantes' className='doc-cell'>
+      <Table.Td data-label='Firmantes' className='doc-cell doc-col--secondary'>
         <Text size='sm' c='dimmed'>
           {d.enabled && d.signers.length > 0
             ? `${d.completedCount}/${d.signers.length}`
@@ -308,7 +353,7 @@ export default function OrionAttachmentTableRow({
         </Text>
       </Table.Td>
 
-      <Table.Td data-label='Responsable' className='doc-cell' style={{ maxWidth: 160 }}>
+      <Table.Td data-label='Responsable' className='doc-cell doc-col--secondary' style={{ maxWidth: 160 }}>
         <Text size='sm' c='dimmed' lineClamp={1}>
           {d.enabled && d.signers.length > 0
             ? d.turnName
@@ -320,7 +365,7 @@ export default function OrionAttachmentTableRow({
         data-label='Acciones'
         className={isClosed ? 'doc-cell doc-cell--actions doc-cell--actions-closed' : 'doc-cell doc-cell--actions'}
         style={{
-          minWidth: 200,
+          minWidth: 160,
           verticalAlign: 'top',
         }}
       >
@@ -338,9 +383,10 @@ export default function OrionAttachmentTableRow({
               <ActionLink
                 icon={<IconFile size={15} stroke={1.6} />}
                 label='Abrir / descargar'
-                href={primaryOpenHref}
-                disabled={!primaryOpenHref}
+                href={downloadHref}
+                disabled={!downloadHref}
               />
+              {deleteAction}
             </Stack>
           </div>
         ) : !d.forSigning ? (
@@ -354,10 +400,7 @@ export default function OrionAttachmentTableRow({
                 fw={700}
                 style={{ letterSpacing: 0.6 }}
               >
-                Consulta
-              </Text>
-              <Text size='xs' c='dimmed'>
-                Este documento no está marcado para firma.
+                Solo ver
               </Text>
               {viewOnlineHref ? (
                 <ActionLink
@@ -369,9 +412,10 @@ export default function OrionAttachmentTableRow({
               <ActionLink
                 icon={<IconFile size={15} stroke={1.6} />}
                 label='Descargar'
-                href={primaryOpenHref}
-                disabled={!primaryOpenHref}
+                href={downloadHref}
+                disabled={!downloadHref}
               />
+              {deleteAction}
             </Stack>
           </div>
         ) : (
@@ -385,8 +429,13 @@ export default function OrionAttachmentTableRow({
               fw={700}
               style={{ letterSpacing: 0.6 }}
             >
-              Seguimiento
+              Para firmar · Orion
             </Text>
+            {!d.hasOrionDoc ? (
+              <Text size='xs' c='dimmed' className='doc-dossier__hint'>
+                Pulse “Preparar documento”. La copia SynerLink se conserva hasta firma completa.
+              </Text>
+            ) : null}
 
             {d.hasOrionDoc && d.signers.length > 0 ? (
               <OrionSignatureFlow
@@ -422,18 +471,16 @@ export default function OrionAttachmentTableRow({
                 />
               ) : null}
 
-              {/* Cualquiera que vea la solicitud puede abrir el PDF vigente; el original queda en Versiones. */}
-              {latestFileHref || primaryOpenHref ? (
+              {/* Descargar = binario; Ver en línea = visor (arriba). */}
+              {downloadHref ? (
                 <ActionLink
                   icon={<IconFile size={15} stroke={1.6} />}
-                  label={d.completedCount > 0 || isClosed ? 'Ver documento' : 'Descargar'}
-                  href={
-                    d.completedCount > 0 || isClosed
-                      ? latestFileHref || primaryOpenHref
-                      : primaryOpenHref || latestFileHref
-                  }
+                  label='Descargar'
+                  href={downloadHref}
                 />
               ) : null}
+
+              {deleteAction}
 
               {canAccessOriginalFile && originalFileHref ? (
                 <ActionLink

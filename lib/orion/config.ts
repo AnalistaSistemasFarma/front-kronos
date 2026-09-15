@@ -63,6 +63,15 @@ export function resolveOrionTenantId(synerlinkCompanyId: number): string | null 
   return tenantMap[synerlinkCompanyId] ?? null;
 }
 
+/**
+ * Tenant hub de respaldo si el slug del mapa no existe en la BD de Orion
+ * (p.ej. mapa dice "farmalogica" pero en ORIONDB solo está "gss").
+ */
+export function getOrionTenantFallback(): string | null {
+  const raw = process.env.ORION_TENANT_FALLBACK?.trim();
+  return raw || 'gss';
+}
+
 /** Clave interna para JSON legacy (1 doc por solicitud sin fileId). */
 export const ORION_LEGACY_FILE_ID = '_legacy';
 

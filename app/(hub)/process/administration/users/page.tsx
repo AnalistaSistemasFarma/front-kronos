@@ -46,6 +46,7 @@ import {
   isOrionFirmaPrepareSubprocess,
   isOrionFirmaSignSubprocess,
 } from '@/lib/orion/access';
+import { isDeleteAttachmentsSubprocess } from '@/lib/attachments/access';
 
 interface User {
   id: string;
@@ -1226,7 +1227,9 @@ function UserManagement() {
                                       ? 'Permiso: preparar PDF, firmantes y enviar a firma'
                                       : isOrionFirmaSignSubprocess(subprocess)
                                         ? 'Permiso obligatorio para firmar (aunque esté como firmante)'
-                                        : subprocess.subprocess_url === DASHBOARD_SOLICITADO_URL ||
+                                        : isDeleteAttachmentsSubprocess(subprocess)
+                                          ? 'Permiso: eliminar archivos adjuntos de solicitudes'
+                                          : subprocess.subprocess_url === DASHBOARD_SOLICITADO_URL ||
                                             (subprocess.subprocess_url ?? '').includes(
                                               'dashboard-solicitado'
                                             )
