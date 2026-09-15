@@ -3,6 +3,11 @@ import { resolveOrionPdfUrl } from './documentVersions';
 import { isSignerCompleted } from './signerStatus';
 import type { OrionSignatureState } from './types';
 
+/** URL del proxy SynerLink de PDF Orion (no es el adjunto OneDrive). */
+export function isOrionSignedFileProxyUrl(url: string | null | undefined): boolean {
+  return /\/api\/integrations\/orion\/signed-file/i.test(String(url || '').trim());
+}
+
 /** URLs de PDF firmado en Orion exigen Bearer; no abrir en el navegador sin proxy. */
 export function isOrionProtectedFileUrl(url: string | null | undefined): boolean {
   const value = String(url || '').trim();
@@ -82,6 +87,27 @@ export function buildOrionSignedFileProxyUrl(params: {
   return `/api/integrations/orion/signed-file?${qs.toString()}`;
 }
 
+/** True si ya hay PDF acumulado en Orion (no el original SynerLink). */
+export function orionDocumentHasSignedCopy(
+  state: OrionSignatureState | undefined | null
+): boolean {
+  if (!state) return false;
+  const hasCompletedSigner = (state.signers ?? []).some((s) =>
+    isSignerCompleted(s.status)
+  );
+  const hasSignedVersion = (state.versions ?? []).some(
+    (v) => v.kind === 'partial' || v.kind === 'final'
+  );
+  const status = String(state.status || '').toUpperCase();
+  return (
+    hasCompletedSigner ||
+    hasSignedVersion ||
+    status === 'FIRMADO' ||
+    status === 'SIGNED' ||
+    status === 'COMPLETED'
+  );
+}
+
 /**
  * URL para ver/descargar en el cliente:
  * - OneDrive original → directo
@@ -95,24 +121,16 @@ export function resolveOrionPdfAccessUrl(
   originalUrl: string | null | undefined,
   ctx: { requestId: number; fileId: string } | null
 ): string | null {
-  // Con firmas acumuladas: siempre proxy Orion (PDF vigente con todas las firmas),
-  // aunque falte signedFileUrl en el form value o aún apunte al original.
+  // Con firmas acumuladas: siempre proxy Orion (PDF vigente con todas las firmas).
+  // Sin firmas: null → el caller usa OneDrive SynerLink (no /orion/signed-file).
   if (ctx && state?.orionDocumentId) {
-    const hasCompletedSigner = (state.signers ?? []).some((s) =>
-      isSignerCompleted(s.status)
-    );
-    const status = String(state.status || '').toUpperCase();
-    const signedReady =
-      hasCompletedSigner ||
-      status === 'FIRMADO' ||
-      status === 'SIGNED' ||
-      status === 'COMPLETED';
-    if (signedReady) {
+    if (orionDocumentHasSignedCopy(state)) {
       return buildOrionSignedFileProxyUrl({
         requestId: ctx.requestId,
         fileId: ctx.fileId,
       });
     }
+    return null;
   }
 
   const raw = resolveOrionPdfUrl(state, originalUrl);

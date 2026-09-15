@@ -84,5 +84,14 @@ export function isHubHiddenSubprocess(params: {
   name?: string | null;
 }): boolean {
   const sub = { subprocess: params.name, subprocess_url: params.url };
-  return isOrionFirmaPrepareSubprocess(sub) || isOrionFirmaSignSubprocess(sub);
+  if (isOrionFirmaPrepareSubprocess(sub) || isOrionFirmaSignSubprocess(sub)) return true;
+  // Evitar import circular: detectar por URL/nombre aquí también.
+  const url = normalizeSubUrl(params.url);
+  const name = normalizeSubName(params.name);
+  return (
+    url === '/process/request-general/delete-attachments' ||
+    url.includes('/delete-attachments') ||
+    name === 'eliminar adjuntos' ||
+    name.includes('eliminar adjuntos')
+  );
 }
