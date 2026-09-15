@@ -1547,14 +1547,16 @@ function ViewRequestPage() {
     if (statusId === RETURNED_STATUS_ID || statusText.includes('devuel')) {
       return false;
     }
-    const closedByStatus =
+    // Solo el ESTADO de la solicitud cierra edición/adjuntos.
+    // Un PDF firmado en Orion cierra su flujo de archivo, NO la solicitud:
+    // no usar request.resolution (notas GSS Firma / texto residual) como candado.
+    return (
       statusId === 2 ||
       statusId === 3 ||
       statusText.includes('resuelt') ||
       statusText.includes('cancel') ||
-      statusText.includes('completad');
-
-    return closedByStatus || Boolean(request?.resolution && request.resolution.trim() !== '');
+      statusText.includes('completad')
+    );
   };
 
   const handleAddNote = async () => {

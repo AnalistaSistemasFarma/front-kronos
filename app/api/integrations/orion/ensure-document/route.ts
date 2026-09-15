@@ -36,7 +36,7 @@ function readFileId(source: { get?: (k: string) => string | null } | Record<stri
  *
  * Query flags:
  * - lite=1  → solo BD + canManage (rápido; bootstrap UI)
- * - soft=1  → sync Orion GET sin rebuild de PDF ni tareas (polling)
+ * - soft=1  → solo BD + pending auth (sin Orion GET ni rebuild; firmante / polling)
  * - rebuild=1 → sync completo con rebuild de PDF firmado
  */
 export async function GET(req: Request) {
@@ -111,8 +111,8 @@ export async function GET(req: Request) {
       .trim()
       .toLowerCase();
 
-    // soft sin fileId = bootstrap liviano (solo BD). Orion GET solo con fileId o rebuild.
-    const softBagOnly = soft && !fileId && !rebuildSigned;
+    // soft = solo BD (con o sin fileId). Orion GET solo sin soft / con rebuild.
+    const softBagOnly = soft && !rebuildSigned;
 
     const result = await withMssqlPool(async (pool) => {
       const actorId = await resolveOrionActorUserId(pool, {

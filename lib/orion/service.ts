@@ -630,7 +630,7 @@ export async function applyOrionWebhookToRequest(
 
   const statusUpper = String(params.status).toUpperCase();
   let tasksUpdated = 0;
-  let requestClosed = false;
+  const requestClosed = false;
 
   const syncResult = await syncOrionSignerTasks(pool, {
     requestId: params.requestId,
@@ -680,24 +680,12 @@ export async function applyOrionWebhookToRequest(
   const allSigned = allOrionDocumentsFullySigned(bag) && allSignersCompleted(state.signers);
 
   if (allRejected || (statusUpper === 'RECHAZADO' && Object.keys(bag.documents).length <= 1)) {
+    // Rechazo: cierra turnos de firma de ese flujo; NO finaliza la solicitud.
     tasksUpdated += await cancelOpenSignerTasks(
       pool,
       params.requestId,
       'Documento rechazado en GSS Firma (Orion).'
     );
-
-    await pool
-      .request()
-      .input('id', sql.Int, params.requestId)
-      .input('resolution', sql.NVarChar(sql.MAX), resolution)
-      .query(`
-        UPDATE requests_general
-        SET status_req = 3,
-            resolution = @resolution,
-            date_resolution = GETDATE()
-        WHERE id = @id AND status_req NOT IN (2, 3)
-      `);
-    requestClosed = true;
   } else if (statusUpper === 'DEVUELTO') {
     // Devolución: cancela turnos de firma, NO cierra la solicitud (coordinador corrige y reenvía).
     tasksUpdated += await cancelOpenSignerTasks(
@@ -708,7 +696,7 @@ export async function applyOrionWebhookToRequest(
     );
   } else if (statusUpper === 'FIRMADO' && allSigned) {
     // Firmas completas: avanza el workflow secuencial de firma, pero NO cierra la
-    // solicitud. Pueden quedar otras tareas (p. ej. Validación Planeación).
+    // solicitud. Pueden quedar otras tareas o más PDFs por adjuntar/firmar.
     const template = await findOrionSignatureTaskTemplate(pool, params.requestId);
     if (template) {
       await advanceSequentialTask(pool, {
