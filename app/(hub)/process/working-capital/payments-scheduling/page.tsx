@@ -52,72 +52,83 @@ import {
   IconNotes,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
-import AuthorizationDetailModal from './AuthorizationDetailModal';
 
 function parseOrionFileIdFromAuthResolution(resolution?: string | null): string | null {
   const match = /\[orionFile:([^\]]+)\]/i.exec(String(resolution || ''));
   return match?.[1]?.trim() || null;
 }
 
-interface AuthorizationRequest {
-  id: number;
-  id_request_general: number;
-  subject: string;
-  company: string;
-  id_company: number;
-  type_authorization: string;
-  requester: string;
-  created_at: string;
-  status: 'pendiente' | 'autorizado' | 'rechazado' | 'cancelado';
-  resolution?: string | null;
+interface PaymentSchedulingTask {
+  id_tarea: number;
+  tarea: string;
+  id_solicitud: number;
+  id_estado_solicitud: number;
+  estado_tarea: string;
+  id_asignado_tarea: number;
+  usuario_asignado: string;
+  fecha_inicio_tarea?: string | null;
+  fecha_fin_tarea?: string | null;
+  activo?: number | null;
+  resolución_tarea?: string | null;
+  fecha_resolucion_tarea?: string | null;
+  proceso_solicitud?: string | null;
+  asunto_solicitud?: string | null;
+  creador_solicitud?: string | null;
+  descripción_solicitud?: string | null;
+  id_empresa?: number | null;
+  empresa?: string | null;
+  fecha_creación_solicitud: string;
+  id_creador_solicitud?: string | null;
+  tipo_solicitud?: string | null;
+  subtipo_solicitud?: string | null;
+  valor_pagar?: number | null;
+  fecha_solicitada_pago: string;
+  acreedor?: string | null;
 }
 
-interface RawActivity {
-  id_task_request: number;
-  id_request_general: number;
-  id_status: number;
-  task: string;
-  status_task: string;
-  assigned_task: string | null;
-  type_authorization: string;
-  subject_request: string;
-  description: string | null;
-  id_company: number;
-  company: string;
-  created_at: string;
-  id_creator_request: string;
-  creator_request: string | null;
-  resolution?: string | null;
+interface CompanyRow {
+  id: number;
+  empresa: string;
+}
+
+interface ConsultsResponse {
+  companies: CompanyRow[];
 }
 
 const STATUS_OPTIONS = [
   { value: '0', label: 'Todos' },
   { value: '4', label: 'Pendiente' },
-  { value: '2', label: 'Autorizado' },
+  { value: '2', label: 'Programado' },
   { value: '3', label: 'Rechazado' },
 ];
 
-const mapStatus = (idStatus: number): AuthorizationRequest['status'] => {
-  switch (idStatus) {
-    case 2:
-      return 'autorizado';
-    case 3:
-      return 'rechazado';
-    case 1:
-    case 4:
-      return 'pendiente';
-    default:
-      return 'pendiente';
-  }
-};
+const TYPE_REQUEST_OPTIONS = [
+  { value: '0', label: 'Todos' },
+  { value: 'Giro Anticipos a Terceros', label: 'Giro Anticipos a Terceros' },
+  { value: 'Giro a Proveedores', label: 'Giro a Proveedores' },
+  { value: 'Giro a Empleado', label: 'Giro a Empleado' },
+];
+
+const SUBTYPE_REQUEST_OPTIONS = [
+  { value: '0', label: 'Todos' },
+  { value: 'AFC', label: 'AFC' },
+  { value: 'Impuestos Distritales o Nacionales', label: 'Impuestos Distritales o Nacionales' },
+  { value: 'Invima', label: 'Invima' },
+  { value: 'Legalización - Reembolso', label: 'Legalización - Reembolso' },
+  { value: 'Legalización Tarjeta de Credito', label: 'Legalización Tarjeta de Credito' },
+  { value: 'Libranzas (Portal Bancario)', label: 'Libranzas (Portal Bancario)' },
+  { value: 'Pago Nomina', label: 'Pago Nomina' },
+  { value: 'Pago Prima', label: 'Pago Prima' },
+  { value: 'Pila Seguridad Social', label: 'Pila Seguridad Social' },
+];
 
 const getStatusColor = (status: string) => {
   switch (status) {
-    case 'pendiente':
+    case 'Sin Empezar':
       return 'yellow';
-    case 'autorizado':
+    case 'Resuelto':
       return 'green';
-    case 'rechazado':
+    case 'Cancelado':
       return 'red';
     default:
       return 'gray';
@@ -126,53 +137,73 @@ const getStatusColor = (status: string) => {
 
 const getStatusLabel = (status: string) => {
   switch (status) {
-    case 'pendiente':
+    case 'Sin Empezar':
       return 'Pendiente';
-    case 'autorizado':
-      return 'Autorizado';
-    case 'rechazado':
+    case 'Resuelto':
+      return 'Programado';
+    case 'Devuelta':
       return 'Rechazado';
-    case 'cancelado':
+    case 'Cancelado':
       return 'Cancelado';
     default:
       return status;
   }
 };
 
-const formatDate = (value: string) => {
+const formatShortDate = (value?: string | null) => {
+  if (!value) return '—';
   try {
     return new Intl.DateTimeFormat('es-CO', {
-      day: '2-digit',
-      month: 'short',
+      day: 'numeric',
+      month: 'long',
       year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(new Date(value));
+    }).format(new Date(new Date(value).getTime() + 5 * 60 * 60 * 1000));
   } catch {
-    return value;
+    return String(value);
   }
 };
 
-function AuthorizationBoard() {
+const formatCurrency = (value?: number | string | null) => {
+  if (value === null || value === undefined || value === '') return '—';
+  const n = Number(String(value).replace(/[^\d.-]/g, ''));
+  if (!Number.isFinite(n)) return String(value);
+  return n.toLocaleString('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  });
+};
+
+const splitAcreedor = (value?: string | null): { doc: string; name: string } => {
+  const raw = String(value || '').trim();
+  if (!raw) return { doc: '', name: '' };
+  const idx = raw.indexOf(' - ');
+  if (idx === -1) return { doc: '', name: raw };
+  return { doc: raw.slice(0, idx).trim(), name: raw.slice(idx + 3).trim() };
+};
+
+function PaymentSchedulingBoard() {
     const { data: session, status } = useSession();
     const router = useRouter();
     const isMobile = useMediaQuery('(max-width: 768px)');
 
     const [loading, setLoading] = useState(false);
-    /** Overlay a pantalla completa tras autorizar firma (hasta navegar al documento). */
-    const [openingSignDocument, setOpeningSignDocument] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const userName = session?.user?.name || '';
     const [userIdInitialized, setUserIdInitialized] = useState(false);
     const [userId, setUserId] = useState<string | null>(null);
 
-    const [requests, setRequests] = useState<AuthorizationRequest[]>([]);
-    const [companyOptions, setCompanyOptions] = useState<{ value: string; label: string }[]>([]);
+    const [payments, setPayments] = useState<PaymentSchedulingTask[]>([]);
+    const [listsLoading, setListsLoading] = useState(false);
+    const [companyOptions, setCompanyOptions] = useState<CompanyRow[]>([]);
 
     const [filters, setFilters] = useState({
-        id: '',
+        id_tarea: '',
+        id_solicitud: '',
+        tipo_solicitud: '0',
+        subtipo_solicitud: '0',
         status: '0',
-        company: '',
+        company: '0',
         date_from: '',
         date_to: '',
     });
@@ -187,8 +218,8 @@ function AuthorizationBoard() {
     const [actionTarget, setActionTarget] = useState<number | null>(null);
 
     const [detailModalOpened, setDetailModalOpened] = useState(false);
-    const [detailRequest, setDetailRequest] = useState<AuthorizationRequest | null>(null);
-    const openDetailModal = (req: AuthorizationRequest) => {
+    const [detailRequest, setDetailRequest] = useState<PaymentSchedulingTask | null>(null);
+    const openDetailModal = (req: PaymentSchedulingTask) => {
         setDetailRequest(req);
         setDetailModalOpened(true);
     };
@@ -214,7 +245,8 @@ function AuthorizationBoard() {
                 setUserId(id);
                 setUserIdInitialized(true);
                 fetchDepartments(id);
-                fetchActivities(id, filters);
+                fetchPayments(id, filters);
+                fetchLists();
               } else {
                 setUserIdInitialized(true);
               }
@@ -225,26 +257,26 @@ function AuthorizationBoard() {
         }
     }, [status, session, userName, userId, userIdInitialized, router]);
 
-    const filteredRequests = requests;
+    const filteredRequests = payments;
 
     const selectableRequests = useMemo(
-        () => filteredRequests.filter((r) => r.status === 'pendiente'),
+        () => filteredRequests.filter((r) => r.estado_tarea === 'Sin Empezar'),
         [filteredRequests]
     );
 
     const stats = useMemo(
         () => ({
-        total: requests.length,
-        pendientes: requests.filter((r) => r.status === 'pendiente').length,
-        autorizadas: requests.filter((r) => r.status === 'autorizado').length,
-        rechazadas: requests.filter((r) => r.status === 'rechazado').length,
+        total: payments.length,
+        pendientes: payments.filter((r) => r.estado_tarea === 'Sin Empezar').length,
+        autorizadas: payments.filter((r) => r.estado_tarea === 'Resuelto').length,
+        rechazadas: payments.filter((r) => r.estado_tarea === 'Cancelado').length,
         }),
-        [requests]
+        [payments]
     );
 
     const allSelectableSelected =
-        selectableRequests.length > 0 && selectableRequests.every((r) => selectedIds.has(r.id));
-    const someSelectableSelected = selectableRequests.some((r) => selectedIds.has(r.id));
+        selectableRequests.length > 0 && selectableRequests.every((r) => selectedIds.has(r.id_tarea));
+    const someSelectableSelected = selectableRequests.some((r) => selectedIds.has(r.id_tarea));
 
     const getUserIdByName = async (userName: string): Promise<string | null> => {
         if (!session || status !== 'authenticated') {
@@ -284,58 +316,56 @@ function AuthorizationBoard() {
         }
     };
 
-    const fetchActivities = async (id: string, f = filters) => {
+    const fetchLists = async () => {
+        try {
+        setListsLoading(true);
+        const response = await fetch('/api/assets/consults-assets');
+        if (!response.ok) throw new Error('Failed to fetch asset lists');
+
+        const data: ConsultsResponse = await response.json();
+
+        setCompanyOptions(Array.isArray(data.companies) ? data.companies : []);
+
+        } catch (err) {
+        console.error('Error fetching companies lists:', err);
+        toast.error('No se pudieron cargar las listas de empresas.');
+        } finally {
+        setListsLoading(false);
+        }
+    };
+
+    const fetchPayments = async (id: string, f = filters) => {
         setLoading(true);
         setError(null);
         try {
             const params = new URLSearchParams({ idUser: id });
+            params.set('id_tarea', f.id_tarea || '');
+            params.set('id_solicitud', f.id_solicitud || '');
+            params.set('tipo_solicitud', f.tipo_solicitud || '0');
+            params.set('subtipo_solicitud', f.subtipo_solicitud || '0');
             params.set('status', f.status || '0');
-            if (f.id) params.set('id', f.id);
-            if (f.company) params.set('company', f.company);
-            if (f.date_from) params.set('date_from', f.date_from);
-            if (f.date_to) params.set('date_to', f.date_to);
+            params.set('company', f.company || '0');
+            params.set('date_from', f.date_from || '');
+            params.set('date_to', f.date_to || '');
 
             const response = await fetch(
-                `/api/authorization/authorization-activities?${params.toString()}`,
+                `/api/payment-scheduling?${params.toString()}`,
                 { cache: 'no-store' }
             );
 
             if (!response.ok) {
                 const err = await response.json().catch(() => null);
-                throw new Error(err?.error || 'No se pudieron cargar las solicitudes');
+                throw new Error(err?.error || 'No se pudieron cargar los pagos');
             }
 
-            const data: RawActivity[] = await response.json();
-            const mapped: AuthorizationRequest[] = data.map((a) => ({
-                id: a.id_task_request,
-                id_request_general: a.id_request_general,
-                subject: a.subject_request,
-                company: a.company,
-                id_company: a.id_company,
-                type_authorization: a.type_authorization,
-                requester: a.creator_request || '—',
-                created_at: a.created_at,
-                status: mapStatus(a.id_status),
-                resolution: a.resolution ?? null,
-            }));
+            const data: PaymentSchedulingTask[] = await response.json();
 
-            setRequests(mapped);
+            setPayments(data);
 
-            if (!f.company) {
-                const seen = new Map<number, string>();
-                mapped.forEach((m) => {
-                    if (m.id_company != null && !seen.has(m.id_company)) {
-                        seen.set(m.id_company, m.company);
-                    }
-                });
-                setCompanyOptions(
-                    Array.from(seen, ([value, label]) => ({ value: value.toString(), label }))
-                );
-            }
         } catch (e) {
-            console.error('Error fetching authorization activities:', e);
-            setError(e instanceof Error ? e.message : 'Error al cargar solicitudes');
-            setRequests([]);
+            console.error('Error fetching payment scheduling tasks:', e);
+            setError(e instanceof Error ? e.message : 'Error al cargar pagos');
+            setPayments([]);
         } finally {
             setLoading(false);
         }
@@ -362,14 +392,14 @@ function AuthorizationBoard() {
 
     const applyFilters = () => {
         setSelectedIds(new Set());
-        if (userId) fetchActivities(userId, filters);
+        if (userId) fetchPayments(userId, filters);
     };
 
     const clearFilters = () => {
-        const empty = { id: '', status: '0', company: '', date_from: '', date_to: '' };
+        const empty = { id_tarea: '', id_solicitud: '', status: '0', company: '0', date_from: '', date_to: '', tipo_solicitud: '0', subtipo_solicitud: '0' };
         setFilters(empty);
         setSelectedIds(new Set());
-        if (userId) fetchActivities(userId, empty);
+        if (userId) fetchPayments(userId, empty);
     };
 
     const toggleSelect = (id: number) => {
@@ -383,10 +413,10 @@ function AuthorizationBoard() {
 
     const toggleSelectAll = () => {
         setSelectedIds((prev) => {
-        if (selectableRequests.length > 0 && selectableRequests.every((r) => prev.has(r.id))) {
+        if (selectableRequests.length > 0 && selectableRequests.every((r) => prev.has(r.id_tarea))) {
             return new Set();
         }
-        return new Set(selectableRequests.map((r) => r.id));
+        return new Set(selectableRequests.map((r) => r.id_tarea));
         });
     };
 
@@ -435,50 +465,12 @@ function AuthorizationBoard() {
         }
     };
 
-    const isFirmaAuthorizationRow = (row: AuthorizationRequest) =>
-        /firma/i.test(row.type_authorization || '') ||
-        /firma/i.test(row.subject || '') ||
-        /orionAuth/i.test(row.resolution || '') ||
-        /orionFile/i.test(row.resolution || '');
-
-    /** Ir a la solicitud (o deep-link de firma) desde la fila de autorización. */
-    const goToRelatedRequest = (req: AuthorizationRequest) => {
-        if (!req.id_request_general) return;
-        const fileId = parseOrionFileIdFromAuthResolution(req.resolution);
-        if (isFirmaAuthorizationRow(req)) {
-            const qs = new URLSearchParams({
-                id: String(req.id_request_general),
-                from: 'authorization',
-            });
-            if (fileId) qs.set('orionFileId', fileId);
-            // Pendiente: abrir flujo para firmar; ya autorizada: ver el documento.
-            qs.set('orionAction', req.status === 'pendiente' ? 'sign' : 'view');
-            router.push(`/process/request-general/view-request?${qs.toString()}`);
-            return;
-        }
+    const goToRelatedRequest = (req: PaymentSchedulingTask) => {
+        if (!req.id_solicitud) return;
+        const fileId = parseOrionFileIdFromAuthResolution(req.resolución_tarea);
         router.push(
-            `/process/request-general/view-request?id=${req.id_request_general}&from=authorization`
+            `/process/request-general/view-activities?id=${req.id_tarea}&from=payments-scheduling`
         );
-    };
-
-    const redirectToSignDocument = (params: {
-        requestId: number;
-        fileId?: string | null;
-        signTaskId?: number | null;
-    }) => {
-        setOpeningSignDocument(true);
-        const qs = new URLSearchParams({
-            from: 'authorization',
-            orionAction: 'sign',
-        });
-        if (params.fileId) qs.set('orionFileId', params.fileId);
-        if (params.signTaskId) {
-            qs.set('id', String(params.signTaskId));
-            router.push(`/process/request-general/view-activities?${qs.toString()}`);
-            return;
-        }
-        qs.set('id', String(params.requestId));
-        router.push(`/process/request-general/view-request?${qs.toString()}`);
     };
 
     const confirmAuthorize = async () => {
@@ -486,46 +478,20 @@ function AuthorizationBoard() {
         const ids = targetIds();
         if (ids.length === 0) return;
 
-        const authorizedRows = requests.filter((r) => ids.includes(r.id));
+        const authorizedRows = payments.filter((r) => ids.includes(r.id_tarea));
 
         setLoading(true);
         setAuthorizeModalOpened(false);
         try {
             const results = await Promise.all(
                 authorizedRows.map(async (row) => {
-                    if (isFirmaAuthorizationRow(row)) {
-                        try {
-                            const consumeRes = await fetch('/api/integrations/orion/consume-auth', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    taskId: row.id,
-                                    requestId: row.id_request_general,
-                                    fileId: parseOrionFileIdFromAuthResolution(row.resolution),
-                                }),
-                            });
-                            const consumeData = await consumeRes.json().catch(() => ({}));
-                            if (consumeRes.ok && (consumeData.closed > 0 || consumeData.success)) {
-                                return {
-                                    ok: true as const,
-                                    row,
-                                    fileId:
-                                        consumeData.fileId ||
-                                        parseOrionFileIdFromAuthResolution(row.resolution),
-                                    signTaskId: consumeData.signTaskId ?? null,
-                                };
-                            }
-                        } catch (e) {
-                            console.error('consume-auth falló, se intenta update-activities', e);
-                        }
-                    }
 
-                    const updated = await updateActivityStatus(row.id, 2, null);
+                    const updated = await updateActivityStatus(row.id_tarea, 2, 'Solicitud Autorizada Correctamente');
                     return {
                         ok: updated.ok,
                         error: updated.error,
                         row,
-                        fileId: parseOrionFileIdFromAuthResolution(row.resolution),
+                        fileId: parseOrionFileIdFromAuthResolution(row.resolución_tarea),
                         signTaskId: null as number | null,
                     };
                 })
@@ -540,32 +506,6 @@ function AuthorizationBoard() {
                 toast.error(failMessage || `${fail} solicitud(es) no se pudieron autorizar`);
             }
 
-            const singleOk = okResults.length === 1 ? okResults[0] : null;
-            const singleFirma =
-                Boolean(singleOk) &&
-                isFirmaAuthorizationRow(singleOk!.row) &&
-                Boolean(singleOk!.row.id_request_general);
-
-            if (singleFirma && singleOk) {
-                setOpeningSignDocument(true);
-                void fetchActivities(userId, filters);
-                redirectToSignDocument({
-                    requestId: singleOk.row.id_request_general!,
-                    fileId: singleOk.fileId,
-                    signTaskId: singleOk.signTaskId,
-                });
-                return;
-            }
-
-            if (singleOk?.row.id_request_general) {
-                setOpeningSignDocument(true);
-                void fetchActivities(userId, filters);
-                router.push(
-                    `/process/request-general/view-request?id=${singleOk.row.id_request_general}&from=authorization`
-                );
-                return;
-            }
-
             if (okResults.length > 0) {
                 toast.success(
                     okResults.length > 1
@@ -573,11 +513,10 @@ function AuthorizationBoard() {
                         : 'Solicitud autorizada'
                 );
             }
-            await fetchActivities(userId, filters);
+            await fetchPayments(userId, filters);
             setLoading(false);
         } catch {
             setLoading(false);
-            setOpeningSignDocument(false);
         }
     };
 
@@ -604,14 +543,19 @@ function AuthorizationBoard() {
         if (fail > 0) {
             toast.error(`${fail} solicitud(es) no se pudieron rechazar`);
         }
-        await fetchActivities(userId, filters);
+        await fetchPayments(userId, filters);
     };
+
+    const companySelectData = companyOptions.map((c) => ({
+        value: String(c.id),
+        label: c.empresa,
+    }));
 
     const actionCount = actionTarget !== null ? 1 : selectedIds.size;
 
     const breadcrumbItems = [
         { title: 'Procesos', href: '/process' },
-        { title: 'Autorización', href: '#' },
+        { title: 'Programador de Pagos', href: '#' },
     ].map((item, index) =>
         item.href !== '#' ? (
         <Link key={index} href={item.href} passHref>
@@ -638,87 +582,96 @@ function AuthorizationBoard() {
         );
     }
 
-    const renderRow = (req: AuthorizationRequest) => {
-        const isPending = req.status === 'pendiente';
+    const renderRow = (req: PaymentSchedulingTask) => {
+        const isPending = req.estado_tarea === 'Sin Empezar';
+        const acreedor = splitAcreedor(req.acreedor);
         return (
         <Table.Tr
-            key={req.id}
-            bg={selectedIds.has(req.id) ? 'var(--mantine-color-blue-light)' : undefined}
+            key={req.id_tarea}
+            bg={selectedIds.has(req.id_tarea) ? 'var(--mantine-color-blue-light)' : undefined}
         >
             <Table.Td>
             <Checkbox
-                checked={selectedIds.has(req.id)}
-                onChange={() => toggleSelect(req.id)}
+                checked={selectedIds.has(req.id_tarea)}
+                onChange={() => toggleSelect(req.id_tarea)}
                 disabled={!isPending}
-                aria-label={`Seleccionar solicitud ${req.id_request_general}`}
+                aria-label={`Seleccionar solicitud ${req.id_tarea}`}
             />
             </Table.Td>
             <Table.Td>
             <UnstyledButton
                 onClick={() => goToRelatedRequest(req)}
                 style={{ display: 'block' }}
-                aria-label={`Abrir solicitud ${req.id_request_general}`}
+                aria-label={`Abrir Tarea ${req.id_tarea}`}
             >
                 <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
-                    #{req.id_request_general}
+                    #{req.id_tarea}
                 </Text>
             </UnstyledButton>
             </Table.Td>
-            <Table.Td style={{ minWidth: 220, maxWidth: 340 }}>
+            <Table.Td style={{ minWidth: 150, maxWidth: 220 }}>
             <Text size='sm' fw={500} lineClamp={2}>
-                {req.subject}
+                {req.tipo_solicitud || '—'}
             </Text>
-            </Table.Td>
-            <Table.Td>
-            <Group gap={4} wrap='nowrap'>
-                <IconBuilding size={14} className='text-gray-400' />
-                <Text size='sm' className='truncate'>
-                {req.company}
+            {req.subtipo_solicitud && (
+                <Text size='xs' c='dimmed' lineClamp={2}>
+                    {req.subtipo_solicitud}
                 </Text>
+            )}
+            </Table.Td>
+            <Table.Td style={{ minWidth: 150, maxWidth: 220 }}>
+            <Group gap={6} wrap='nowrap'>
+                <IconBuilding size={16} className='text-gray-400' style={{ flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                    <Text size='sm' fw={500} truncate>
+                        {req.usuario_asignado}
+                    </Text>
+                    <Text size='xs' c='dimmed' truncate>
+                        {req.empresa}
+                    </Text>
+                </div>
             </Group>
             </Table.Td>
-            <Table.Td>
-            <Badge variant='light' color='indigo' size='sm'>
-                {req.type_authorization}
-            </Badge>
+            <Table.Td style={{ minWidth: 160, maxWidth: 240 }}>
+                <Group gap={6} wrap='nowrap'>
+                    <IconUser size={16} className='text-gray-400' style={{ flexShrink: 0 }} />
+                    <div style={{ minWidth: 0 }}>
+                        <Text size='sm' fw={500} lineClamp={2}>
+                            {acreedor.name || '—'}
+                        </Text>
+                        {acreedor.doc && (
+                            <Text size='xs' c='dimmed' truncate>
+                                {acreedor.doc}
+                            </Text>
+                        )}
+                    </div>
+                </Group>
             </Table.Td>
             <Table.Td>
-            <Group gap={4} wrap='nowrap'>
-                <IconUser size={14} className='text-gray-400' />
-                <Text size='sm'>{req.requester}</Text>
-            </Group>
+                <Group gap={6} wrap='nowrap'>
+                    <IconCalendarEvent size={16} className='text-gray-400' style={{ flexShrink: 0 }} />
+                    <Text size='sm' c='dimmed' style={{ whiteSpace: 'nowrap' }}>
+                    {formatShortDate(req.fecha_solicitada_pago)}
+                    </Text>
+                </Group>
             </Table.Td>
-            <Table.Td>
-            <Group gap={4} wrap='nowrap'>
-                <IconCalendarEvent size={14} className='text-gray-400' />
-                <Text size='sm' c='dimmed'>
-                {new Intl.DateTimeFormat('es-CO', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: true,
-                  }).format(
-                    new Date(
-                      new Date(req.created_at).getTime() + 5 * 60 * 60 * 1000 
-                    )
-                  )}
+            <Table.Td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                <Text size='sm' fw={600} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {formatCurrency(req.valor_pagar)}
                 </Text>
-            </Group>
             </Table.Td>
-            <Table.Td style={{ whiteSpace: 'nowrap' }}>
+            <Table.Td style={{ whiteSpace: 'nowrap', minWidth: 120 }}>
             <UnstyledButton
                 onClick={() => goToRelatedRequest(req)}
-                aria-label={`Ir a solicitud ${req.id_request_general}`}
+                aria-label={`Ir a solicitud ${req.id_solicitud}`}
             >
-                <Badge variant='light' color={getStatusColor(req.status)} size='sm'>
-                    {getStatusLabel(req.status)}
+                <Badge variant='light' color={getStatusColor(req.estado_tarea)} size='sm'>
+                    {getStatusLabel(req.estado_tarea)}
                 </Badge>
             </UnstyledButton>
             </Table.Td>
-            <Table.Td>
-            <Group gap='xs' wrap='nowrap'>
+            <Table.Td style={{ whiteSpace: 'nowrap' }}>
+            <Group gap='xs' wrap='nowrap' justify='center'>
                 <Tooltip label='Ir a la solicitud'>
                 <ActionIcon
                     variant='light'
@@ -739,93 +692,99 @@ function AuthorizationBoard() {
                     <IconNotes size={16} />
                 </ActionIcon>
                 </Tooltip>
-                {isPending && (
-                <>
-                    <Tooltip label='Autorizar'>
-                    <ActionIcon
-                        variant='light'
-                        color='green'
-                        onClick={() => openAuthorizeModal(req.id)}
-                        aria-label='Autorizar'
-                    >
-                        <IconThumbUp size={16} />
-                    </ActionIcon>
-                    </Tooltip>
-                    <Tooltip label='Rechazar'>
-                    <ActionIcon
-                        variant='light'
-                        color='red'
-                        onClick={() => openRejectModal(req.id)}
-                        aria-label='Rechazar'
-                    >
-                        <IconThumbDown size={16} />
-                    </ActionIcon>
-                    </Tooltip>
-                </>
-                )}
             </Group>
             </Table.Td>
         </Table.Tr>
         );
     };
 
-    const renderCard = (req: AuthorizationRequest) => {
-        const isPending = req.status === 'pendiente';
+    const renderCard = (req: PaymentSchedulingTask) => {
+        const isPending = req.estado_tarea === 'Sin Empezar';
+        const acreedorCard = splitAcreedor(req.acreedor);
         return (
         <Card
-            key={req.id}
+            key={req.id_tarea}
             withBorder
             radius='md'
             p='md'
             style={{
-            backgroundColor: selectedIds.has(req.id) ? 'var(--mantine-color-blue-light)' : undefined,
+            backgroundColor: selectedIds.has(req.id_tarea) ? 'var(--mantine-color-blue-light)' : undefined,
             }}
         >
             <Stack gap='xs'>
             <Group justify='space-between' wrap='nowrap'>
                 <Group gap='xs' wrap='nowrap'>
                 <Checkbox
-                    checked={selectedIds.has(req.id)}
-                    onChange={() => toggleSelect(req.id)}
+                    checked={selectedIds.has(req.id_tarea)}
+                    onChange={() => toggleSelect(req.id_tarea)}
                     disabled={!isPending}
-                    aria-label={`Seleccionar solicitud ${req.id_request_general}`}
+                    aria-label={`Seleccionar solicitud ${req.id_solicitud}`}
                 />
                 <UnstyledButton onClick={() => goToRelatedRequest(req)}>
                 <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
-                    #{req.id_request_general}
+                    #{req.id_tarea}
                 </Text>
                 </UnstyledButton>
                 </Group>
                 <UnstyledButton onClick={() => goToRelatedRequest(req)}>
-                <Badge variant='light' color={getStatusColor(req.status)} size='sm'>
-                {getStatusLabel(req.status)}
+                <Badge variant='light' color={getStatusColor(req.estado_tarea)} size='sm'>
+                {getStatusLabel(req.estado_tarea)}
                 </Badge>
                 </UnstyledButton>
             </Group>
 
             <UnstyledButton onClick={() => goToRelatedRequest(req)} style={{ textAlign: 'left' }}>
             <Text size='sm' fw={500} lineClamp={2}>
-                {req.subject}
+                {req.tipo_solicitud || '—'}
             </Text>
+            {req.subtipo_solicitud && (
+                <Text size='xs' c='dimmed' lineClamp={2}>
+                    {req.subtipo_solicitud}
+                </Text>
+            )}
             </UnstyledButton>
 
             <Group gap={6} wrap='nowrap'>
-                <IconBuilding size={14} className='text-gray-400' />
-                <Text size='sm'>{req.company}</Text>
-                <Badge variant='light' color='indigo' size='xs' ml='auto'>
-                {req.type_authorization}
+                <IconBuilding size={14} className='text-gray-400' style={{ flexShrink: 0 }} />
+                <Text size='sm' truncate>{req.empresa}</Text>
+                <Badge variant='light' color='indigo' size='xs' ml='auto' style={{ flexShrink: 0 }}>
+                {req.usuario_asignado}
                 </Badge>
             </Group>
 
-            <Group gap={6} wrap='nowrap'>
-                <IconUser size={14} className='text-gray-400' />
-                <Text size='sm'>{req.requester}</Text>
+            <Group gap={6} wrap='nowrap' align='flex-start'>
+                <IconUser size={14} className='text-gray-400' style={{ flexShrink: 0, marginTop: 2 }} />
+                <div style={{ minWidth: 0 }}>
+                    <Text size='sm'>{acreedorCard.name || '—'}</Text>
+                    {acreedorCard.doc && (
+                        <Text size='xs' c='dimmed'>{acreedorCard.doc}</Text>
+                    )}
+                </div>
             </Group>
 
             <Group gap={6} wrap='nowrap'>
                 <IconCalendarEvent size={14} className='text-gray-400' />
                 <Text size='xs' c='dimmed'>
-                {formatDate(req.created_at)}
+                {formatShortDate(req.fecha_solicitada_pago)}
+                </Text>
+            </Group>
+
+            <Group
+                justify='space-between'
+                wrap='nowrap'
+                mt={4}
+                px='sm'
+                py={6}
+                style={{
+                    backgroundColor: 'var(--mantine-color-gray-0)',
+                    borderRadius: 'var(--mantine-radius-sm)',
+                }}
+            >
+                <Text size='xs' c='dimmed' fw={600} tt='uppercase'>
+                    Valor a pagar
+                </Text>
+                <Text size='sm' fw={700} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {formatCurrency(req.valor_pagar)}
                 </Text>
             </Group>
 
@@ -852,28 +811,6 @@ function AuthorizationBoard() {
                 Ver detalle
             </Button>
 
-            {isPending && (
-                <Group grow mt='xs'>
-                <Button
-                    size='xs'
-                    color='green'
-                    variant='light'
-                    leftSection={<IconThumbUp size={14} />}
-                    onClick={() => openAuthorizeModal(req.id)}
-                >
-                    Autorizar
-                </Button>
-                <Button
-                    size='xs'
-                    color='red'
-                    variant='light'
-                    leftSection={<IconThumbDown size={14} />}
-                    onClick={() => openRejectModal(req.id)}
-                >
-                    Rechazar
-                </Button>
-                </Group>
-            )}
             </Stack>
         </Card>
         );
@@ -882,105 +819,56 @@ function AuthorizationBoard() {
     return (
         <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
         <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-            {/* Header */}
-            <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
+            <Card shadow='sm' p='xl' radius='md' withBorder mb='lg'>
             <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
                 {breadcrumbItems}
             </Breadcrumbs>
 
-            <Flex justify='space-between' align='center' mb='4'>
+            <Flex justify='space-between' align='center' mb='lg'>
                 <div>
                 <Title order={1} className='text-3xl font-bold mb-2 flex items-center gap-3'>
                     <IconShieldCheck size={32} className='text-blue-600' />
-                    Autorizaciones
+                    Programador de Pagos
                 </Title>
                 <Text size='lg' c='dimmed'>
-                    Autoriza o rechaza solicitudes de forma individual o masiva
+                    Tablero para realizar flujo de caja
                 </Text>
                 </div>
             </Flex>
 
-            <Grid>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                <Card
-                    p='md'
-                    radius='md'
-                    withBorder
-                    style={{ backgroundColor: 'var(--mantine-color-blue-light)' }}
-                >
-                    <Group>
-                    <IconFileText size={24} color='var(--mantine-color-blue-light-color)' />
-                    <div>
-                        <Text size='xs' c='var(--mantine-color-blue-light-color)'>
-                        Total
-                        </Text>
-                        <Text size='lg' fw={600}>
-                        {stats.total}
-                        </Text>
-                    </div>
-                    </Group>
-                </Card>
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                <Card
-                    p='md'
-                    radius='md'
-                    withBorder
-                    style={{ backgroundColor: 'var(--mantine-color-yellow-light)' }}
-                >
-                    <Group>
-                    <IconClock size={24} color='var(--mantine-color-yellow-light-color)' />
-                    <div>
-                        <Text size='xs' c='var(--mantine-color-yellow-light-color)'>
-                        Pendientes
-                        </Text>
-                        <Text size='lg' fw={600}>
-                        {stats.pendientes}
-                        </Text>
-                    </div>
-                    </Group>
-                </Card>
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                <Card
-                    p='md'
-                    radius='md'
-                    withBorder
-                    style={{ backgroundColor: 'var(--mantine-color-green-light)' }}
-                >
-                    <Group>
-                    <IconCheck size={24} color='var(--mantine-color-green-light-color)' />
-                    <div>
-                        <Text size='xs' c='var(--mantine-color-green-light-color)'>
-                        Autorizadas
-                        </Text>
-                        <Text size='lg' fw={600}>
-                        {stats.autorizadas}
-                        </Text>
-                    </div>
-                    </Group>
-                </Card>
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                <Card
-                    p='md'
-                    radius='md'
-                    withBorder
-                    style={{ backgroundColor: 'var(--mantine-color-red-light)' }}
-                >
-                    <Group>
-                    <IconX size={24} color='var(--mantine-color-red-light-color)' />
-                    <div>
-                        <Text size='xs' c='var(--mantine-color-red-light-color)'>
-                        Rechazadas
-                        </Text>
-                        <Text size='lg' fw={600}>
-                        {stats.rechazadas}
-                        </Text>
-                    </div>
-                    </Group>
-                </Card>
-                </Grid.Col>
+            <Grid gutter='md'>
+                {[
+                { label: 'Total', value: stats.total, color: 'blue', icon: IconFileText },
+                { label: 'Pendientes', value: stats.pendientes, color: 'yellow', icon: IconClock },
+                { label: 'Autorizadas', value: stats.autorizadas, color: 'green', icon: IconCheck },
+                { label: 'Rechazadas', value: stats.rechazadas, color: 'red', icon: IconX },
+                ].map((s) => {
+                const StatIcon = s.icon;
+                return (
+                    <Grid.Col span={{ base: 6, md: 3 }} key={s.label}>
+                    <Card
+                        p='md'
+                        radius='md'
+                        withBorder
+                        style={{ borderLeft: `4px solid var(--mantine-color-${s.color}-6)`, height: '100%' }}
+                    >
+                        <Group justify='space-between' align='flex-start' wrap='nowrap'>
+                        <div>
+                            <Text size='xs' c='dimmed' fw={600} tt='uppercase'>
+                            {s.label}
+                            </Text>
+                            <Text fw={700} style={{ fontSize: '1.75rem', lineHeight: 1.15 }}>
+                            {s.value}
+                            </Text>
+                        </div>
+                        <ThemeIcon variant='light' color={s.color} size={40} radius='md'>
+                            <StatIcon size={22} />
+                        </ThemeIcon>
+                        </Group>
+                    </Card>
+                    </Grid.Col>
+                );
+                })}
             </Grid>
             </Card>
 
@@ -996,8 +884,7 @@ function AuthorizationBoard() {
             </Alert>
             )}
 
-            {/* Filtros */}
-            <Card shadow='sm' p='lg' radius='md' withBorder mb='6'>
+            <Card shadow='sm' p='lg' radius='md' withBorder mb='lg'>
             <Group justify='space-between' mb='md'>
                 <Title order={3} className='flex items-center gap-2'>
                 <IconFilter size={20} />
@@ -1017,11 +904,40 @@ function AuthorizationBoard() {
                 <Grid>
                     <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                     <TextInput
-                        label='ID Solicitud'
+                        label='ID de Tarea'
                         type='text'
-                        value={filters.id}
-                        onChange={(e) => handleFilterChange('id', e.target.value)}
+                        value={filters.id_tarea}
+                        onChange={(e) => handleFilterChange('id_tarea', e.target.value)}
                         leftSection={<IconFilter size={16} />}
+                    />
+                    </Grid.Col>
+                    <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                    <TextInput
+                        label='ID de Solicitud'
+                        type='text'
+                        value={filters.id_solicitud}
+                        onChange={(e) => handleFilterChange('id_solicitud', e.target.value)}
+                        leftSection={<IconFilter size={16} />}
+                    />
+                    </Grid.Col>
+                    <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                    <Select
+                        label='Tipo de Solicitud'
+                        placeholder='Todos los tipos'
+                        clearable
+                        data={TYPE_REQUEST_OPTIONS}
+                        value={filters.tipo_solicitud || null}
+                        onChange={(value) => handleFilterChange('tipo_solicitud', value || '')}
+                    />
+                    </Grid.Col>
+                    <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                    <Select
+                        label='Subtipo de Solicitud'
+                        placeholder='Todos los tipos'
+                        clearable
+                        data={SUBTYPE_REQUEST_OPTIONS}
+                        value={filters.subtipo_solicitud || null}
+                        onChange={(value) => handleFilterChange('subtipo_solicitud', value || '')}
                     />
                     </Grid.Col>
                     <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
@@ -1040,7 +956,7 @@ function AuthorizationBoard() {
                         placeholder='Todas las empresas'
                         clearable
                         searchable
-                        data={companyOptions}
+                        data={companySelectData}
                         value={filters.company || null}
                         onChange={(value) => handleFilterChange('company', value || '')}
                         leftSection={<IconBuilding size={16} />}
@@ -1078,14 +994,13 @@ function AuthorizationBoard() {
             </Collapse>
             </Card>
 
-            {/* Barra de acciones masivas */}
             {selectedIds.size > 0 && (
             <Card
                 shadow='sm'
                 p='md'
                 radius='md'
                 withBorder
-                mb='6'
+                mb='lg'
                 style={{ backgroundColor: 'var(--mantine-color-blue-light)' }}
             >
                 <Flex
@@ -1106,7 +1021,7 @@ function AuthorizationBoard() {
                     leftSection={<IconCheck size={16} />}
                     onClick={() => openAuthorizeModal(null)}
                     >
-                    Autorizar seleccionadas
+                    Programar seleccionadas
                     </Button>
                     <Button
                     color='red'
@@ -1120,47 +1035,12 @@ function AuthorizationBoard() {
             </Card>
             )}
 
-            {/* Contenido */}
             <Card shadow='sm' radius='md' withBorder className='overflow-hidden' pos='relative'>
             <LoadingOverlay
-                visible={loading && !openingSignDocument}
+                visible={loading}
                 zIndex={20}
                 overlayProps={{ blur: 1 }}
             />
-
-            {(loading || openingSignDocument) && (
-                <Box
-                    role='status'
-                    aria-live='polite'
-                    style={{
-                        position: 'fixed',
-                        inset: 0,
-                        zIndex: 400,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        background: 'color-mix(in srgb, var(--mantine-color-body) 72%, transparent)',
-                        backdropFilter: 'blur(3px)',
-                        padding: 24,
-                    }}
-                >
-                    <Card shadow='md' radius='md' withBorder p='xl' style={{ maxWidth: 420, width: '100%' }}>
-                        <Stack align='center' gap='md'>
-                            <Loader size='lg' />
-                            <Text fw={700} ta='center'>
-                                {openingSignDocument
-                                    ? 'Abriendo el documento para firmar…'
-                                    : 'Autorizando…'}
-                            </Text>
-                            <Text size='sm' c='dimmed' ta='center'>
-                                {openingSignDocument
-                                    ? 'Espere un momento. Se abrirá el asistente de firma.'
-                                    : 'Confirmando la autorización en SynerLink.'}
-                            </Text>
-                        </Stack>
-                    </Card>
-                </Box>
-            )}
 
             <Group justify='space-between' mb='md'>
                 <Title order={3} className='flex items-center gap-2'>
@@ -1201,8 +1081,8 @@ function AuthorizationBoard() {
                 </Stack>
             ) : (
                 <div className='overflow-x-auto'>
-                <Table striped highlightOnHover verticalSpacing='sm'>
-                    <Table.Thead>
+                <Table striped highlightOnHover verticalSpacing='sm' horizontalSpacing='md'>
+                    <Table.Thead style={{ backgroundColor: 'var(--mantine-color-gray-0)' }}>
                     <Table.Tr>
                         <Table.Th w={40}>
                         <Checkbox
@@ -1214,13 +1094,13 @@ function AuthorizationBoard() {
                         />
                         </Table.Th>
                         <Table.Th>ID</Table.Th>
-                        <Table.Th>Asunto</Table.Th>
-                        <Table.Th>Empresa</Table.Th>
-                        <Table.Th>Tipo de autorización</Table.Th>
+                        <Table.Th>Tipo</Table.Th>
                         <Table.Th>Solicitante</Table.Th>
-                        <Table.Th>Fecha</Table.Th>
+                        <Table.Th>Acreedor</Table.Th>
+                        <Table.Th>Fecha de pago</Table.Th>
+                        <Table.Th ta='right'>Valor</Table.Th>
                         <Table.Th>Estado</Table.Th>
-                        <Table.Th>Acciones</Table.Th>
+                        <Table.Th ta='center'>Acciones</Table.Th>
                     </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>{filteredRequests.map(renderRow)}</Table.Tbody>
@@ -1230,7 +1110,6 @@ function AuthorizationBoard() {
             </Card>
         </div>
 
-        {/* Modal de autorización (confirmación simple) */}
         <Modal
             opened={authorizeModalOpened}
             onClose={() => setAuthorizeModalOpened(false)}
@@ -1254,7 +1133,7 @@ function AuthorizationBoard() {
                 <Button
                     variant='default'
                     onClick={() => setAuthorizeModalOpened(false)}
-                    disabled={loading || openingSignDocument}
+                    disabled={loading}
                 >
                 Cancelar
                 </Button>
@@ -1262,7 +1141,7 @@ function AuthorizationBoard() {
                     color='green'
                     leftSection={<IconCheck size={16} />}
                     onClick={() => void confirmAuthorize()}
-                    loading={loading || openingSignDocument}
+                    loading={loading}
                 >
                 Autorizar
                 </Button>
@@ -1270,7 +1149,6 @@ function AuthorizationBoard() {
             </Stack>
         </Modal>
 
-        {/* Modal de rechazo (con motivo obligatorio) */}
         <Modal
             opened={rejectModalOpened}
             onClose={() => setRejectModalOpened(false)}
@@ -1305,17 +1183,11 @@ function AuthorizationBoard() {
             </Stack>
         </Modal>
 
-        {/* Modal de detalle (solo lectura) */}
-        <AuthorizationDetailModal
-            opened={detailModalOpened}
-            onClose={() => setDetailModalOpened(false)}
-            request={detailRequest}
-        />
         </div>
     );
     }
 
-    export default function AuthorizationPage() {
+    export default function PaymentSchedulingPage() {
     return (
         <Suspense
         fallback={
@@ -1324,7 +1196,7 @@ function AuthorizationBoard() {
             </div>
         }
         >
-        <AuthorizationBoard />
+        <PaymentSchedulingBoard />
         </Suspense>
     );
 }
