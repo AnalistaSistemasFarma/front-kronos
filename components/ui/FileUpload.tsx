@@ -35,16 +35,32 @@ export interface UploadedFile {
   progress: number;
   error?: string;
   url?: string;
+  /** Item OneDrive devuelto por el API de subida (si aplica). */
+  graphItem?: {
+    id: string;
+    name: string;
+    size?: number;
+    webUrl?: string;
+    lastModifiedDateTime?: string;
+    '@microsoft.graph.downloadUrl'?: string;
+  };
 }
 
 interface FileUploadProps {
   ticketId: number;
   onFilesChange?: (files: UploadedFile[]) => void;
+  /** Se llama tras cada archivo subido con éxito (para refrescar la tabla de adjuntos). */
+  onUploadComplete?: (file: UploadedFile) => void;
   maxFiles?: number;
   disabled?: boolean;
   storagePath?: string;
   entityType?: string;
   autoUpload?: boolean;
+  /**
+   * Si true (default), sube vía API servidor → OneDrive (más fiable).
+   * Si false, usa Graph directo desde el navegador (legado).
+   */
+  useServerUpload?: boolean;
 }
 
 const ALLOWED_TYPES = [
@@ -63,21 +79,28 @@ const MAX_FILE_SIZE = Number.MAX_SAFE_INTEGER; // Sin límite de tamaño
 const FileUpload: React.FC<FileUploadProps> = ({
   ticketId,
   onFilesChange,
+  onUploadComplete,
   maxFiles = Number.MAX_SAFE_INTEGER, // Sin límite de archivos
   disabled = false,
   storagePath = 'MA',
   entityType = 'Ticket',
   autoUpload = true,
+  useServerUpload = true,
 }) => {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const onFilesChangeRef = useRef(onFilesChange);
+  const onUploadCompleteRef = useRef(onUploadComplete);
 
   useEffect(() => {
     onFilesChangeRef.current = onFilesChange;
   }, [onFilesChange]);
+
+  useEffect(() => {
+    onUploadCompleteRef.current = onUploadComplete;
+  }, [onUploadComplete]);
 
   useEffect(() => {
     onFilesChangeRef.current?.(files);
@@ -109,43 +132,75 @@ const FileUpload: React.FC<FileUploadProps> = ({
   };
 
   const uploadFile = async (file: File, fileId: string) => {
+    const progressInterval = setInterval(() => {
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === fileId && f.status === 'uploading'
+            ? { ...f, progress: Math.min(f.progress + 10, 90) }
+            : f
+        )
+      );
+    }, 200);
+
     try {
-      const token = await getMicrosoftToken();
-      if (!token) {
-        throw new Error('No se pudo obtener el token de acceso');
-      }
-
-      // Crear carpeta única con el ID de la entidad
-      const folderName = `${entityType}-${ticketId}`;
-
-      // Preparar archivo para subida
-      const filesToUpload = [{ file }];
-
-      // Actualizar estado a uploading
       setFiles((prev) =>
         prev.map((f) => (f.id === fileId ? { ...f, status: 'uploading', progress: 0 } : f))
       );
 
-      // Simular progreso durante la carga
-      const progressInterval = setInterval(() => {
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileId && f.status === 'uploading'
-              ? { ...f, progress: Math.min(f.progress + 10, 90) }
-              : f
-          )
-        );
-      }, 200);
+      let graphItem: UploadedFile['graphItem'];
 
-      // Usar la nueva función CheckOrCreateFolderAndUpload
-      await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token, storagePath);
+      if (useServerUpload) {
+        const form = new FormData();
+        form.append('requestId', String(ticketId));
+        form.append('storagePath', storagePath);
+        form.append('entityType', entityType);
+        form.append('files', file, file.name);
 
-      clearInterval(progressInterval);
+        const res = await fetch('/api/requests-general/upload-attachments', {
+          method: 'POST',
+          body: form,
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          uploaded?: UploadedFile['graphItem'][];
+        };
+        if (!res.ok) {
+          throw new Error(data.error || `Error al subir el archivo (HTTP ${res.status})`);
+        }
+        graphItem = data.uploaded?.[0];
+        if (!graphItem?.id) {
+          throw new Error(data.error || 'El servidor no confirmó el archivo en OneDrive');
+        }
+      } else {
+        const token = await getMicrosoftToken();
+        if (!token) {
+          throw new Error('No se pudo obtener el token de acceso');
+        }
+        const folderName = `${entityType}-${ticketId}`;
+        await CheckOrCreateFolderAndUpload(folderName, [{ file }], token, storagePath);
+      }
 
-      // Actualizar estado a success
       setFiles((prev) =>
-        prev.map((f) => (f.id === fileId ? { ...f, status: 'success', progress: 100 } : f))
+        prev.map((f) =>
+          f.id === fileId
+            ? { ...f, status: 'success' as const, progress: 100, graphItem }
+            : f
+        )
       );
+      const completed: UploadedFile = {
+        id: fileId,
+        file,
+        status: 'success',
+        progress: 100,
+        graphItem,
+      };
+      queueMicrotask(() => {
+        onUploadCompleteRef.current?.(completed);
+        // Limpiar de la cola de subida tras éxito: la tabla de adjuntos es la fuente de verdad.
+        window.setTimeout(() => {
+          setFiles((prev) => prev.filter((f) => f.id !== fileId || f.status !== 'success'));
+        }, 1200);
+      });
     } catch (error) {
       console.error('Error uploading file:', error);
       setFiles((prev) =>
@@ -160,6 +215,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
             : f
         )
       );
+    } finally {
+      clearInterval(progressInterval);
     }
   };
 
@@ -377,7 +434,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
       {files.length > 0 && (
         <Stack gap='sm'>
           <Text size='sm' fw={500}>
-            Archivos adjuntos ({files.length}/{maxFiles})
+            Archivos en cola ({files.length}
+            {Number.isFinite(maxFiles) ? `/${maxFiles}` : ''})
           </Text>
 
           {files.map((uploadedFile) => (

@@ -68,6 +68,7 @@ import {
   IconFileSpreadsheet,
   IconPhoto,
   IconEye,
+  IconTrash,
   IconLock,
   IconArrowBackUp,
   IconPencil,
@@ -75,6 +76,12 @@ import {
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import {
+  hydrateAttachments,
+  mergeListedWithPending,
+  rememberPendingAttachment,
+  removeFromAttachmentCache,
+} from '../../../../../lib/attachments/pendingOptimistic';
 import AiSummarizeButton from './AiSummarizeButton';
 import {
   TABLE_FIELD_TYPE,
@@ -86,7 +93,6 @@ import {
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
 import { allSlotsCompletedForEmail, getCurrentPendingSigner, isSignerCompleted } from '../../../../../lib/orion/signerStatus';
 import {
-  listSignedOrionDocuments,
   parseOrionSignatureBagBag,
   resolveOrionDocumentForAttachment,
 } from '../../../../../lib/orion/formValue';
@@ -96,15 +102,16 @@ import {
   resolveOrionPdfUrl,
 } from '../../../../../lib/orion/documentVersions';
 import { resolveOrionPdfAccessUrl } from '../../../../../lib/orion/signedFileAccess';
+import { resolveRequestPdfAccessUrl } from '../../../../../lib/attachments/fileUrl';
 import { mergeOneDriveWithOrionDocuments } from '../../../../../lib/orion/attachmentList';
 import type { OrionSignatureState } from '../../../../../lib/orion/types';
 import { buildOrionParticipants } from '../../../../../lib/orion/participants';
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
-import ChatDocumentChip from '../../../../../components/orion/ChatDocumentChip';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import TableFieldInput from '../create-request/TableFieldInput';
+import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
 
 interface Request {
   id: number;
@@ -301,8 +308,8 @@ function ViewRequestPage() {
     text: string;
   } | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
-  const hasNotedUpload = useRef(false);
   const [folderContents, setFolderContents] = useState<FolderFile[]>([]);
+  const [canDeleteAttachments, setCanDeleteAttachments] = useState(false);
   const [showResolution, setShowResolution] = useState(false);
   const [resolutionData, setResolutionData] = useState({
     estado: '',
@@ -378,8 +385,10 @@ function ViewRequestPage() {
     }
 
     // Al cambiar de solicitud, limpiar estado que no debe cruzarse.
+    // NO vaciar adjuntos a []: hidratar desde caché para que un refresh no
+    // “borre” la tabla mientras llega el listado de OneDrive.
     setNotes([]);
-    setFolderContents([]);
+    setFolderContents(hydrateAttachments(urlId) as FolderFile[]);
     setTaskRQ([]);
     setRequestFormValues([]);
 
@@ -481,6 +490,12 @@ function ViewRequestPage() {
 
     void fetchFolderContents();
     void loadRelatedData();
+    void fetch('/api/requests-general/attachment-permissions')
+      .then((r) => r.json())
+      .then((data) => {
+        setCanDeleteAttachments(Boolean(data?.canDeleteAttachments));
+      })
+      .catch(() => setCanDeleteAttachments(false));
 
     // Tras crear con PDF el listado de OneDrive a veces aún no refleja el archivo.
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -560,17 +575,24 @@ function ViewRequestPage() {
   const resolveAttachmentDownloadUrl = useCallback(
     (file: FolderFile): string | null => {
       const original = getFolderFileUrl(file);
-      if (!/\.pdf$/i.test(file.name)) return original;
-      const orionDoc = getOrionDocForFile(String(file.id), file.name);
       if (!request?.id) {
-        return resolveOrionPdfUrl(orionDoc, original) ?? original;
+        if (!/\.pdf$/i.test(file.name)) return original;
+        return resolveOrionPdfUrl(getOrionDocForFile(String(file.id), file.name), original) ?? original;
       }
-      return (
-        resolveOrionPdfAccessUrl(orionDoc, original, {
-          requestId: request.id,
-          fileId: String(file.id),
-        }) ?? original
-      );
+      if (!/\.pdf$/i.test(file.name)) {
+        return (
+          resolveRequestPdfAccessUrl({
+            requestId: request.id,
+            fileId: String(file.id),
+            download: true,
+          }) || original
+        );
+      }
+      return resolveRequestPdfAccessUrl({
+        requestId: request.id,
+        fileId: String(file.id),
+        state: getOrionDocForFile(String(file.id), file.name),
+      });
     },
     [getOrionDocForFile, request?.id]
   );
@@ -588,7 +610,38 @@ function ViewRequestPage() {
 
   const handleOrionDocumentsChange = useCallback(
     (documents: Record<string, OrionSignatureState>) => {
-      setOrionDocuments(documents);
+      setOrionDocuments((prev) => {
+        const movedIds = Object.entries(documents)
+          .filter(
+            ([id, doc]) =>
+              Boolean(doc?.orionDocumentId) && !prev[id]?.orionDocumentId
+          )
+          .map(([id]) => id);
+
+        if (movedIds.length > 0 && request?.id) {
+          const reqId = request.id;
+          queueMicrotask(() => {
+            setFolderContents((files) =>
+              files.filter((f) => !movedIds.includes(String(f.id)))
+            );
+            for (const id of movedIds) removeFromAttachmentCache(reqId, id);
+            window.setTimeout(() => {
+              void fetch(
+                `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(reqId))}&storagePath=SG&entityType=Request`
+              )
+                .then((r) => r.json())
+                .then((data) => {
+                  if (!Array.isArray(data.files)) return;
+                  setFolderContents((prevFiles) =>
+                    mergeListedWithPending(reqId, data.files, prevFiles)
+                  );
+                })
+                .catch(() => undefined);
+            }, 400);
+          });
+        }
+        return documents;
+      });
       if (!request?.id) return;
       const fetchKey = JSON.stringify(
         Object.entries(documents).map(([id, doc]) => [
@@ -598,7 +651,6 @@ function ViewRequestPage() {
         ])
       );
       if (fetchKey === lastOrionFormFetchKeyRef.current) return;
-      // Solo re-fetch form values en cambios relevantes (firmado / nuevo PDF / cierre).
       const shouldRefresh = Object.values(documents).some((doc) => {
         const status = String(doc.status || '').toUpperCase();
         return (
@@ -934,7 +986,8 @@ function ViewRequestPage() {
             if (da !== db) return da - db;
             return Number(a.id_note || 0) - Number(b.id_note || 0);
           });
-          setNotes(list);
+          // Historial de interacciones: sin chips ni notas de documentos/firma.
+          setNotes(list.filter((n) => !isOrionDocumentInteractionNote(n.note)));
         }
       } else if (!signal?.aborted) {
         console.error('Error al cargar notas');
@@ -972,34 +1025,73 @@ function ViewRequestPage() {
   const fetchFolderContents = async () => {
     if (!request?.id) return;
 
-    const folderName = `Request-${request.id}`;
     try {
-      const token = await getMicrosoftToken();
-      if (!token) {
-        throw new Error('No se pudo obtener el token de acceso.');
+      const response = await fetch(
+        `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(request.id))}&storagePath=SG&entityType=Request`
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        files?: FolderFile[];
+      };
+      if (!response.ok) {
+        throw new Error(data.error || `Error listando adjuntos (HTTP ${response.status})`);
       }
 
-      const response = await axios.get(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG/${folderName}:/children`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      const files = response.data.value.filter(
-        (item: Record<string, unknown>) => 'file' in item && !!item.file
-      );
-      setFolderContents(files);
+      const files = Array.isArray(data.files) ? data.files : [];
+      setFolderContents((prev) => mergeListedWithPending(request.id, files, prev));
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        setFolderContents([]);
-        return;
-      }
       console.error('Error al listar los archivos de la carpeta:', error);
-      setFolderContents([]);
+      // null = fallo de red: conservar caché / optimistas
+      setFolderContents((prev) => mergeListedWithPending(request.id, null, prev));
     }
+  };
+
+  const refreshAttachmentsAfterUpload = useCallback(() => {
+    // Dar tiempo a Graph a indexar; no pisar al instante el merge optimista.
+    window.setTimeout(() => {
+      void fetchFolderContents();
+    }, 600);
+    window.setTimeout(() => {
+      void fetchFolderContents();
+    }, 2000);
+    window.setTimeout(() => {
+      void fetchFolderContents();
+    }, 5000);
+  }, [request?.id]);
+
+  const handleDeleteAttachment = useCallback(
+    async (fileId: string) => {
+      if (!request?.id || !fileId) return;
+      try {
+        const res = await fetch('/api/requests-general/delete-attachment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId: request.id, fileId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(typeof data.error === 'string' ? data.error : 'No se pudo eliminar');
+          return;
+        }
+        setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
+        removeFromAttachmentCache(request.id, fileId);
+        setOrionDocuments((prev) => {
+          if (!prev[fileId]) return prev;
+          const next = { ...prev };
+          delete next[fileId];
+          return next;
+        });
+        toast.success('Archivo eliminado');
+        refreshAttachmentsAfterUpload();
+      } catch {
+        toast.error('Error de red al eliminar el archivo');
+      }
+    },
+    [request?.id, refreshAttachmentsAfterUpload]
+  );
+
+  const handleFilesChange = (files: UploadedFile[]) => {
+    setAttachedFiles(files);
   };
 
   const downloadAllFilesAsZip = async () => {
@@ -1596,20 +1688,6 @@ function ViewRequestPage() {
     }
   };
 
-  const handleFilesChange = (files: UploadedFile[]) => {
-    setAttachedFiles(files);
-  };
-
-  useEffect(() => {
-    if (!hasNotedUpload.current && attachedFiles.some((f) => f.status === 'success')) {
-      hasNotedUpload.current = true;
-      void addSystemNote('Se cargaron archivos a la solicitud.');
-      void fetchFolderContents();
-      // SAPSEND: reenviar los adjuntos recién subidos (silencioso; el servidor aplica el gate).
-      void triggerSapsendFiles(false);
-    }
-  }, [attachedFiles]);
-
   // Reenvía a SAPSEND los adjuntos de la solicitud (los lee desde OneDrive el servidor).
   const triggerSapsendFiles = async (showToast: boolean) => {
     if (!request?.id) return;
@@ -1986,17 +2064,15 @@ function ViewRequestPage() {
     )
   );
   const orionWorkflowLocked = isRequestResolved();
-  const signedOrionDocs = listSignedOrionDocuments({ documents: orionInitialDocuments });
   const autoOpenFile = orionFileIdParam
     ? attachmentRows.find(
         (f) => String(f.id) === String(orionFileIdParam) && /\.pdf$/i.test(f.name)
       )
     : undefined;
+  // Solo abrir firma si vino explícitamente a firmar/gestionar (no por from=authorization solo).
   const fallbackManageOrSignFile =
     !autoOpenFile &&
-    (from === 'authorization' ||
-      orionActionParam === 'sign' ||
-      orionActionParam === 'manage')
+    (orionActionParam === 'sign' || orionActionParam === 'manage')
       ? attachmentRows.find((f) => /\.pdf$/i.test(f.name))
       : undefined;
   const deepLinkFileId = autoOpenFile
@@ -2005,13 +2081,17 @@ function ViewRequestPage() {
       ? String(fallbackManageOrSignFile.id)
       : null;
   const deepLinkPdfUrl = deepLinkFileId
-    ? getFolderPdfDownloadUrl((autoOpenFile || fallbackManageOrSignFile) as FolderFile)
+    ? resolveRequestPdfAccessUrl({
+        requestId: request.id,
+        fileId: deepLinkFileId,
+        state: getOrionDocForFile(deepLinkFileId),
+      })
     : null;
   const deepLinkAction: 'sign' | 'manage' | 'view' | null = (() => {
     const raw: 'sign' | 'manage' | 'view' | null =
       orionActionParam === 'sign' || orionActionParam === 'manage' || orionActionParam === 'view'
         ? orionActionParam
-        : from === 'authorization' || orionFileIdParam
+        : orionFileIdParam
           ? 'sign'
           : null;
     if (raw !== 'sign' || !deepLinkFileId || !currentUserEmailNorm) return raw;
@@ -2031,28 +2111,6 @@ function ViewRequestPage() {
     if (st === 'FIRMADO' || st === 'RECHAZADO') return null;
     return raw;
   })();
-
-  const chatDocumentItems = [
-    ...attachmentRows
-      .filter((f) => /\.pdf$/i.test(f.name))
-      .map((f) => {
-        const url = getFolderFileUrl(f);
-        if (!url) return null;
-        return {
-          id: f.id,
-          name: f.name,
-          url,
-          variant: 'attachment' as const,
-        };
-      })
-      .filter((item): item is NonNullable<typeof item> => item !== null),
-    ...signedOrionDocs.map((doc) => ({
-      id: `orion-signed-${doc.fileId}`,
-      name: doc.fileName,
-      url: doc.url,
-      variant: 'signed' as const,
-    })),
-  ];
 
   return (
     <OrionSignatureProvider>
@@ -2119,36 +2177,6 @@ function ViewRequestPage() {
                 }}
               >
                 <Stack gap='sm' py={4}>
-                  {chatDocumentItems.map((doc) => (
-                    <Box key={doc.id} style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                      <Box
-                        maw={240}
-                        px='sm'
-                        py='xs'
-                        style={{
-                          borderRadius: 14,
-                          borderBottomRightRadius: 4,
-                          background:
-                            'color-mix(in srgb, var(--app-accent) 14%, var(--app-surface))',
-                          border: '1px solid color-mix(in srgb, var(--app-accent) 28%, var(--app-border))',
-                        }}
-                      >
-                        <Text size='xs' c='dimmed' fw={500} mb={6}>
-                          {request?.requester || 'Solicitud'}
-                        </Text>
-                        <ChatDocumentChip
-                          name={doc.name}
-                          url={doc.url}
-                          variant={doc.variant}
-                          tone='chat'
-                        />
-                        <Text size='10px' c='dimmed' ta='right' mt={6}>
-                          Documento adjunto
-                        </Text>
-                      </Box>
-                    </Box>
-                  ))}
-
                   {notes.length > 0 ? (
                     notes.map((note) => {
                       const isCurrentUser = note.createdBy === userName;
@@ -2194,7 +2222,7 @@ function ViewRequestPage() {
                         </Box>
                       );
                     })
-                  ) : chatDocumentItems.length === 0 ? (
+                  ) : (
                     <Stack align='center' py='xl' gap={4}>
                       <Text size='sm' c='dimmed'>
                         No hay interacciones registradas
@@ -2203,7 +2231,7 @@ function ViewRequestPage() {
                         Sé el primero en añadir un comentario
                       </Text>
                     </Stack>
-                  ) : null}
+                  )}
                   <div ref={chatEndRef} />
                 </Stack>
               </ScrollArea>
@@ -2595,7 +2623,7 @@ function ViewRequestPage() {
             <Grid>
               {requestFormValues
                 .filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE)
-                .map((fv) => {
+                .map((fv, fvIndex) => {
                 const canEditField = Boolean(fv.editable) && !isRequestResolved();
                 const isEditingThis = editingFieldId === fv.id_form_field;
                 const editButton = canEditField && !isEditingThis && (
@@ -2639,7 +2667,10 @@ function ViewRequestPage() {
                     return String(value);
                   };
                   return (
-                    <Grid.Col span={12} key={fv.id || fv.id_form_field}>
+                    <Grid.Col
+                      span={12}
+                      key={`rfv-${fvIndex}-${fv.id ?? 'x'}-${fv.id_form_field ?? 'y'}`}
+                    >
                       <Card withBorder radius='md' p='md'>
                         <Group justify='space-between' mb='xs'>
                           <Text size='xs' c='dimmed' fw={500} className='uppercase'>
@@ -2692,7 +2723,10 @@ function ViewRequestPage() {
                   );
                 }
                 return (
-                  <Grid.Col span={{ base: 12, md: 6 }} key={fv.id || fv.id_form_field}>
+                  <Grid.Col
+                    span={{ base: 12, md: 6 }}
+                    key={`rfv-sm-${fvIndex}-${fv.id ?? 'x'}-${fv.id_form_field ?? 'y'}`}
+                  >
                     <Card withBorder radius='md' p='md'>
                       <Group justify='space-between'>
                         <Text size='xs' c='dimmed' fw={500} className='uppercase'>
@@ -2767,26 +2801,32 @@ function ViewRequestPage() {
           </Group>
 
           {attachmentRows.length > 0 && (
-            <ScrollArea.Autosize mah={480} offsetScrollbars type='auto' mb='md'>
+            <ScrollArea.Autosize
+              mah={{ base: 'none', sm: 560 }}
+              offsetScrollbars
+              type='auto'
+              mb='md'
+              className='doc-attachments-scroll'
+            >
               <Table
-                className='doc-table'
+                className={showOrionPanel ? 'doc-table doc-table--orion' : 'doc-table'}
                 horizontalSpacing='md'
                 verticalSpacing='sm'
                 highlightOnHover
                 withTableBorder
                 withColumnBorders={false}
-                style={{ minWidth: showOrionPanel ? 980 : 420 }}
+                style={{ width: '100%' }}
               >
                 <Table.Thead>
                   <Table.Tr>
                     {showOrionPanel ? (
                       <>
-                        <Table.Th>N.º</Table.Th>
+                        <Table.Th className='doc-col--secondary'>N.º</Table.Th>
                         <Table.Th>Documento</Table.Th>
-                        <Table.Th>Departamento</Table.Th>
+                        <Table.Th className='doc-col--secondary'>Departamento</Table.Th>
                         <Table.Th>Estado</Table.Th>
-                        <Table.Th>Firmantes</Table.Th>
-                        <Table.Th>Responsable</Table.Th>
+                        <Table.Th className='doc-col--secondary'>Firmantes</Table.Th>
+                        <Table.Th className='doc-col--secondary'>Responsable</Table.Th>
                         <Table.Th>Acciones</Table.Th>
                       </>
                     ) : (
@@ -2813,18 +2853,15 @@ function ViewRequestPage() {
 
                     if (showOrionPanel && /\.pdf$/i.test(file.name)) {
                       const orionState = getOrionDocForFile(fileId, file.name);
-                      const orionLatest =
-                        orionState?.orionDocumentId
-                          ? resolveOrionPdfAccessUrl(orionState, null, {
-                              requestId: request.id,
-                              fileId,
-                            })
-                          : null;
-                      const pdfUrl =
-                        orionLatest ||
-                        getFolderPdfDownloadUrl(file) ||
-                        resolveAttachmentDownloadUrl(file) ||
-                        `/api/integrations/orion/signed-file?requestId=${request.id}&fileId=${encodeURIComponent(fileId)}`;
+                      const pdfUrl = resolveRequestPdfAccessUrl({
+                        requestId: request.id,
+                        fileId,
+                        state: orionState,
+                      });
+                      const orionLatest = resolveOrionPdfAccessUrl(orionState, null, {
+                        requestId: request.id,
+                        fileId,
+                      });
                       return (
                         <OrionAttachmentTableRow
                           key={file.id}
@@ -2855,6 +2892,8 @@ function ViewRequestPage() {
                           }}
                           workflowLocked={orionWorkflowLocked}
                           onDocumentsUpdate={handleOrionDocumentsChange}
+                          canDeleteAttachment={canDeleteAttachments && !isRequestResolved()}
+                          onDeleteAttachment={handleDeleteAttachment}
                           forceSignerUi={(() => {
                             const me = currentUserEmailNorm;
                             if (!me) return false;
@@ -2967,6 +3006,19 @@ function ViewRequestPage() {
                                 >
                                   Abrir
                                 </UnstyledButton>
+                                {canDeleteAttachments && !isRequestResolved() ? (
+                                  <Tooltip label='Eliminar adjunto'>
+                                    <ActionIcon
+                                      variant='subtle'
+                                      color='red'
+                                      size='sm'
+                                      aria-label={`Eliminar ${file.name}`}
+                                      onClick={() => void handleDeleteAttachment(fileId)}
+                                    >
+                                      <IconTrash size={16} />
+                                    </ActionIcon>
+                                  </Tooltip>
+                                ) : null}
                               </Group>
                             </Table.Td>
                           </>
@@ -2983,6 +3035,7 @@ function ViewRequestPage() {
                               ) : null}
                             </Table.Td>
                             <Table.Td data-label='Abrir'>
+                              <Group gap={6} wrap='nowrap'>
                               <ActionIcon
                                 variant='subtle'
                                 color='blue'
@@ -2995,6 +3048,18 @@ function ViewRequestPage() {
                               >
                                 <IconEye size={16} />
                               </ActionIcon>
+                              {canDeleteAttachments && !isRequestResolved() ? (
+                                <ActionIcon
+                                  variant='subtle'
+                                  color='red'
+                                  size='sm'
+                                  aria-label={`Eliminar ${file.name}`}
+                                  onClick={() => void handleDeleteAttachment(fileId)}
+                                >
+                                  <IconTrash size={16} />
+                                </ActionIcon>
+                              ) : null}
+                              </Group>
                             </Table.Td>
                           </>
                         )}
@@ -3009,6 +3074,31 @@ function ViewRequestPage() {
           <FileUpload
             ticketId={request.id}
             onFilesChange={handleFilesChange}
+            onUploadComplete={(uploaded) => {
+              if (uploaded.graphItem?.id) {
+                const optimistic: FolderFile = {
+                  id: uploaded.graphItem.id,
+                  name: uploaded.graphItem.name || uploaded.file.name,
+                  size: uploaded.graphItem.size ?? uploaded.file.size,
+                  lastModifiedDateTime:
+                    uploaded.graphItem.lastModifiedDateTime || new Date().toISOString(),
+                  webUrl: uploaded.graphItem.webUrl || '',
+                  ...(uploaded.graphItem['@microsoft.graph.downloadUrl']
+                    ? {
+                        '@microsoft.graph.downloadUrl':
+                          uploaded.graphItem['@microsoft.graph.downloadUrl'],
+                      }
+                    : {}),
+                };
+                rememberPendingAttachment(request.id, optimistic);
+                setFolderContents((prev) => {
+                  if (prev.some((f) => String(f.id) === String(optimistic.id))) return prev;
+                  return [...prev, optimistic];
+                });
+              }
+              refreshAttachmentsAfterUpload();
+              void triggerSapsendFiles(false);
+            }}
             disabled={isRequestResolved()}
             storagePath='SG'
             entityType='Request'

@@ -18,7 +18,14 @@ import { IconArrowBackUp, IconCheck, IconFileText } from '@tabler/icons-react';
 import type { OrionPostMessage, OrionSignatureState } from '../../lib/orion/types';
 import type { OrionParticipant, OrionUserOption } from '../../lib/orion/participants';
 import type { SignatureFieldPlacement } from '../../lib/orion/signatureFields';
-import { resolveOrionPdfAccessUrl } from '../../lib/orion/signedFileAccess';
+import {
+  isOrionProtectedFileUrl,
+  isOrionSignedFileProxyUrl,
+  orionDocumentHasSignedCopy,
+  resolveOrionPdfAccessUrl,
+} from '../../lib/orion/signedFileAccess';
+import { resolveRequestPdfAccessUrl } from '../../lib/attachments/fileUrl';
+import { resolveOrionSignatureIntent } from '../../lib/orion/formValue';
 import { allSlotsCompletedForEmail, getCurrentPendingSigner, isSignerCompleted } from '../../lib/orion/signerStatus';
 import { canViewOrionDocumentVersions, isOrionDocumentSigner } from '../../lib/orion/documentVersions';
 import { resolveOrionPermissions } from '../../lib/orion/permissions';
@@ -79,6 +86,8 @@ function isLikelyPdfFetchUrl(url: string): boolean {
   const value = String(url || '').trim();
   if (!value) return false;
   if (value.startsWith('data:application/pdf') || value.startsWith('blob:')) return true;
+  // Proxy Orion signed-file: en borrador responde 409 — no es el adjunto SynerLink.
+  if (isOrionSignedFileProxyUrl(value) || isOrionProtectedFileUrl(value)) return false;
   if (value.startsWith('/')) return true;
   if (!/^https?:\/\//i.test(value)) return false;
   // webUrl de SharePoint/OneDrive (visor), no el binario del PDF.
@@ -728,7 +737,6 @@ export default function OrionSignaturePanel({
   const openDocumentEditor = useCallback(
     async (file: OrionFileMeta, options?: { initialStep?: 0 | 1 | 2 }) => {
       setError(null);
-      setActiveFile(file);
       setSignerModalIntent('manage');
       stableEmbedSrcRef.current = null;
       const step = options?.initialStep;
@@ -756,66 +764,113 @@ export default function OrionSignaturePanel({
         return false;
       }
 
-      setDocumentModalOpen(true);
-      // Borrador / sin firmas: original OneDrive. Con firmas: PDF vigente (sin versionId=original).
-      const hasSignedProgress = (fileState.signers ?? []).some((s) =>
-        isSignerCompleted(s.status)
-      );
-      const previewUrl = hasSignedProgress
-        ? resolveOrionPdfAccessUrl(fileState, file.pdfUrl ?? null, {
-            requestId,
-            fileId: file.fileId,
-          }) ||
-          file.pdfUrl
-        : (isLikelyPdfFetchUrl(file.pdfUrl) ? file.pdfUrl : null) ||
-          (fileState.originalFileUrl && isLikelyPdfFetchUrl(fileState.originalFileUrl)
-            ? fileState.originalFileUrl
-            : null) ||
-          (fileState.orionDocumentId
-            ? `/api/integrations/orion/signed-file?requestId=${requestId}&fileId=${encodeURIComponent(file.fileId)}&versionId=original`
-            : null) ||
-          file.pdfUrl;
-
-      // Abrir modal ya; rúbrica en paralelo (no bloquear preview).
-      const rubricPromise = loadUserSignature();
-
-      if (fileState.orionDocumentId && fileState.embedUrl) {
-        setActiveFile({ ...file, pdfUrl: previewUrl || file.pdfUrl });
-        const hasRubric = await rubricPromise;
-        if (!hasRubric && filePerms.canDrawSignature) {
-          setSignatureModalOpen(true);
+      // Preparar documento ⇒ Orion. Si aún estaba en Solo ver, marcar Para firmar primero.
+      if (resolveOrionSignatureIntent(fileState) !== 'sign') {
+        try {
+          const intentRes = await fetch('/api/integrations/orion/signature-intent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              requestId,
+              fileId: file.fileId,
+              fileName: file.fileName,
+              intent: 'sign',
+              originalFileUrl: file.pdfUrl || null,
+            }),
+          });
+          const intentData = await intentRes.json().catch(() => ({}));
+          if (intentRes.ok && intentData.documents) {
+            notifyDocuments(intentData.documents as Record<string, OrionSignatureState>);
+          } else if (!intentRes.ok) {
+            setError(
+              typeof intentData.error === 'string'
+                ? intentData.error
+                : 'Marque el PDF como “Para firmar” antes de prepararlo.'
+            );
+            return false;
+          }
+        } catch {
+          setError('No se pudo marcar el documento para firma.');
           return false;
         }
-        return true;
       }
+
+      const hasSignedProgress = orionDocumentHasSignedCopy(fileState);
+      const resolvedPdfUrl = resolveRequestPdfAccessUrl({
+        requestId,
+        fileId: file.fileId,
+        state: fileState,
+      });
+      const liveOdUrl =
+        (isLikelyPdfFetchUrl(file.pdfUrl) ? file.pdfUrl : null) ||
+        (fileState.originalFileUrl && isLikelyPdfFetchUrl(fileState.originalFileUrl)
+          ? fileState.originalFileUrl
+          : null) ||
+        (!hasSignedProgress ? resolvedPdfUrl : null);
+
+      // No abrir el canvas con signed-file (409 en borrador) ni URL muerta del bag.
+      setDocumentModalOpen(true);
       setUploading(true);
+      const rubricPromise = loadUserSignature();
+
       try {
-        if (isLikelyPdfFetchUrl(file.pdfUrl)) {
-          void fetchUrlAsBase64(file.pdfUrl)
-            .then((pdfBase64) => {
-              setActiveFile((prev) =>
-                prev?.fileId === file.fileId
-                  ? { ...prev, pdfUrl: `data:application/pdf;base64,${pdfBase64}` }
-                  : prev
-              );
-            })
-            .catch(() => {
-              /* preview opcional */
-            });
+        let editorSrc: string | null = null;
+        let pdfBase64: string | undefined;
+
+        if (hasSignedProgress) {
+          editorSrc =
+            resolveOrionPdfAccessUrl(fileState, file.pdfUrl ?? null, {
+              requestId,
+              fileId: file.fileId,
+            }) || resolvedPdfUrl;
+        } else if (liveOdUrl) {
+          try {
+            pdfBase64 = await fetchUrlAsBase64(liveOdUrl);
+            editorSrc = `data:application/pdf;base64,${pdfBase64}`;
+          } catch {
+            setError(
+              'No se pudo leer el PDF en SynerLink. Vuelva a subir el archivo e intente Preparar de nuevo.'
+            );
+            setActiveFile({ ...file, pdfUrl: '' });
+            await rubricPromise;
+            return false;
+          }
+        } else {
+          setError(
+            'Este PDF ya no está en SynerLink (solo queda el registro de firma). Elimínelo de la lista, súbalo otra vez y vuelva a Preparar.'
+          );
+          setActiveFile({ ...file, pdfUrl: '' });
+          await rubricPromise;
+          return false;
         }
+
+        setActiveFile({ ...file, pdfUrl: editorSrc || file.pdfUrl });
+
+        if (fileState.orionDocumentId && fileState.embedUrl) {
+          const hasRubric = await rubricPromise;
+          if (!hasRubric && filePerms.canDrawSignature) {
+            setSignatureModalOpen(true);
+            return false;
+          }
+          return true;
+        }
+
         const [hasRubric, ok] = await Promise.all([
           rubricPromise,
-          ensureDocument({
-            ...file,
-            pdfUrl: file.pdfUrl,
-          }),
+          ensureDocument(
+            {
+              ...file,
+              pdfUrl: liveOdUrl || file.pdfUrl,
+            },
+            pdfBase64
+          ),
         ]);
         if (!hasRubric && filePerms.canDrawSignature) {
           setSignatureModalOpen(true);
         }
-        if (previewUrl) {
+        if (editorSrc?.startsWith('data:')) {
           setActiveFile((prev) =>
-            prev?.fileId === file.fileId ? { ...prev, pdfUrl: previewUrl } : prev
+            prev?.fileId === file.fileId ? { ...prev, pdfUrl: editorSrc! } : prev
           );
         }
         return ok;
@@ -836,6 +891,7 @@ export default function OrionSignaturePanel({
       hasSignature,
       isAdmin,
       loadUserSignature,
+      notifyDocuments,
       requestId,
       requesterId,
       workflowLocked,
@@ -895,8 +951,8 @@ export default function OrionSignaturePanel({
             }));
           }
 
-          // Si hay auth FIRMA pendiente y es su turno: cerrarla aquí y seguir a firmar
-          // (no mandar al coordinador/firmante a /process/authorization "a sí mismo").
+          // Auth FIRMA pendiente: intentar cerrarla aquí y seguir a firmar en la misma
+          // solicitud. Si no se puede, ir a Autorizaciones (primer paso).
           if (data.pendingAuthorization) {
             try {
               const consumeRes = await fetch('/api/integrations/orion/consume-auth', {
@@ -908,13 +964,22 @@ export default function OrionSignaturePanel({
                 }),
               });
               if (consumeRes.ok) {
-                setPendingAuthorizationByFile((prev) => ({
-                  ...prev,
-                  [file.fileId]: false,
-                }));
+                const consumeData = await consumeRes.json().catch(() => ({}));
+                if (Number(consumeData.closed) > 0) {
+                  setPendingAuthorizationByFile((prev) => ({
+                    ...prev,
+                    [file.fileId]: false,
+                  }));
+                } else if (!skipAuthRedirect) {
+                  setError(
+                    'Primero debe autorizar la firma. Después volverá a la solicitud para firmar.'
+                  );
+                  window.location.href = '/process/authorization';
+                  return;
+                }
               } else if (!skipAuthRedirect) {
                 setError(
-                  'Debe autorizar la firma en Autorizaciones antes de ver y firmar el documento.'
+                  'Primero debe autorizar la firma. Después volverá a la solicitud para firmar.'
                 );
                 window.location.href = '/process/authorization';
                 return;

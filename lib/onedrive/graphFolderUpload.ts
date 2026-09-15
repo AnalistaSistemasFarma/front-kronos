@@ -143,6 +143,206 @@ export async function uploadFileToOneDriveFolder(
   return (await response.json()) as GraphItemResponse;
 }
 
+export type OneDriveItemMeta = {
+  id: string;
+  name: string;
+  parentName?: string;
+  parentPath?: string;
+  mimeType?: string;
+  downloadUrl?: string;
+};
+
+/** Metadatos de un driveItem (nombre, padre, downloadUrl). */
+export async function getOneDriveItemMeta(
+  token: string,
+  itemId: string
+): Promise<OneDriveItemMeta | null> {
+  const graph = graphBase();
+  const id = String(itemId || '').trim();
+  if (!id) return null;
+
+  const response = await fetch(`${graph}items/${encodeURIComponent(id)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (!response.ok) return null;
+
+  const data = (await response.json()) as {
+    id?: string;
+    name?: string;
+    file?: { mimeType?: string };
+    parentReference?: { name?: string; path?: string };
+    '@microsoft.graph.downloadUrl'?: string;
+  };
+  const resolvedId = String(data.id || id).trim();
+  const name = String(data.name || '').trim();
+  if (!resolvedId || !name) return null;
+
+  return {
+    id: resolvedId,
+    name,
+    parentName: typeof data.parentReference?.name === 'string' ? data.parentReference.name : undefined,
+    parentPath: typeof data.parentReference?.path === 'string' ? data.parentReference.path : undefined,
+    mimeType: typeof data.file?.mimeType === 'string' ? data.file.mimeType : undefined,
+    downloadUrl:
+      typeof data['@microsoft.graph.downloadUrl'] === 'string'
+        ? data['@microsoft.graph.downloadUrl']
+        : undefined,
+  };
+}
+
+/** El item vive en la carpeta descrita por `segments` (p. ej. SAPSEND/TEC/SG/Request-2092). */
+export function isOneDriveItemInFolder(meta: OneDriveItemMeta, segments: string[]): boolean {
+  const expectedFolder = String(segments[segments.length - 1] || '').trim();
+  if (!expectedFolder) return false;
+  if (String(meta.parentName || '').trim() === expectedFolder) return true;
+  const needle = `/${segments.join('/')}`;
+  return String(meta.parentPath || '').includes(needle);
+}
+
+export async function downloadOneDriveItemContent(
+  token: string,
+  itemId: string,
+  metaHint?: OneDriveItemMeta | null
+): Promise<{ buffer: Buffer; contentType: string; fileName: string } | null> {
+  const meta = metaHint ?? (await getOneDriveItemMeta(token, itemId));
+  if (!meta) return null;
+
+  const contentType =
+    String(meta.mimeType || '').trim() ||
+    (/\.pdf$/i.test(meta.name) ? 'application/pdf' : 'application/octet-stream');
+
+  const tryBuffer = async (url: string, auth?: boolean) => {
+    const res = await fetch(url, {
+      headers: auth ? { Authorization: `Bearer ${token}` } : undefined,
+      cache: 'no-store',
+      redirect: 'follow',
+    });
+    if (!res.ok) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.byteLength === 0) return null;
+    return {
+      buffer,
+      contentType: res.headers.get('content-type') || contentType,
+      fileName: meta.name,
+    };
+  };
+
+  if (meta.downloadUrl) {
+    const fromShare = await tryBuffer(meta.downloadUrl);
+    if (fromShare) return fromShare;
+  }
+
+  const graph = graphBase();
+  return tryBuffer(`${graph}items/${encodeURIComponent(meta.id)}/content`, true);
+}
+
+/** Elimina un driveItem de OneDrive/Graph por id. */
+export async function deleteOneDriveItem(token: string, itemId: string): Promise<void> {
+  const graph = graphBase();
+  const id = String(itemId || '').trim();
+  if (!id) throw new Error('itemId es obligatorio');
+
+  const response = await fetch(`${graph}items/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  // 404: ya no existe → idempotente.
+  if (response.ok || response.status === 204 || response.status === 404) {
+    return;
+  }
+
+  throw new Error(`Error al eliminar el archivo en OneDrive (HTTP ${response.status})`);
+}
+
+export type OneDriveListedFile = {
+  id: string;
+  name: string;
+  size?: number;
+  webUrl?: string;
+  lastModifiedDateTime?: string;
+  '@microsoft.graph.downloadUrl'?: string;
+};
+
+/**
+ * Lista archivos (no carpetas) en una ruta relativa al drive.
+ * Devuelve [] si la carpeta no existe (404).
+ */
+export async function listOneDriveFolderFiles(
+  token: string,
+  segments: string[]
+): Promise<OneDriveListedFile[]> {
+  const graph = graphBase();
+  const path = segments
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .join('/');
+  if (!path) return [];
+
+  // Sin $select agresivo: algunos tenants omiten el facet `file` y el filtro
+  // vaciaba la tabla aunque OneDrive sí tuviera el documento.
+  const response = await fetch(`${graph}root:/${path}:/children?$top=200`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+
+  if (response.status === 404) return [];
+
+  if (!response.ok) {
+    throw new Error(`Error listando OneDrive "${path}" (HTTP ${response.status})`);
+  }
+
+  const data = (await response.json()) as {
+    value?: Array<Record<string, unknown>>;
+  };
+
+  const out: OneDriveListedFile[] = [];
+  for (const item of data.value || []) {
+    if (!item || typeof item !== 'object') continue;
+    // Carpetas fuera; todo lo demás (archivo / item sin facet) cuenta.
+    if (item.folder) continue;
+    const id = String(item.id || '').trim();
+    const name = String(item.name || '').trim();
+    if (!id || !name) continue;
+    out.push({
+      id,
+      name,
+      size: typeof item.size === 'number' ? item.size : undefined,
+      webUrl: typeof item.webUrl === 'string' ? item.webUrl : undefined,
+      lastModifiedDateTime:
+        typeof item.lastModifiedDateTime === 'string' ? item.lastModifiedDateTime : undefined,
+      ...(typeof item['@microsoft.graph.downloadUrl'] === 'string'
+        ? { '@microsoft.graph.downloadUrl': item['@microsoft.graph.downloadUrl'] }
+        : {}),
+    });
+  }
+  return out;
+}
+
+/** Nombres de archivo ya presentes en la carpeta (para evitar sobrescritura silenciosa). */
+export async function listOneDriveFolderFileNames(
+  token: string,
+  segments: string[]
+): Promise<Set<string>> {
+  const files = await listOneDriveFolderFiles(token, segments);
+  return new Set(files.map((f) => f.name.toLowerCase()));
+}
+
+/** Si `baseName` existe, genera `name (2).ext`, `name (3).ext`, ... */
+export function uniqueOneDriveFileName(baseName: string, existingLower: Set<string>): string {
+  const raw = String(baseName || 'archivo.bin').trim() || 'archivo.bin';
+  if (!existingLower.has(raw.toLowerCase())) return raw;
+  const dot = raw.lastIndexOf('.');
+  const stem = dot > 0 ? raw.slice(0, dot) : raw;
+  const ext = dot > 0 ? raw.slice(dot) : '';
+  for (let n = 2; n < 1000; n += 1) {
+    const candidate = `${stem} (${n})${ext}`;
+    if (!existingLower.has(candidate.toLowerCase())) return candidate;
+  }
+  return `${stem}-${Date.now()}${ext}`;
+}
+
 /**
  * Azúcar sintáctico: asegura la carpeta de `segments` y sube el archivo ahí.
  * Devuelve el item de Graph creado (id, webUrl, ...).
