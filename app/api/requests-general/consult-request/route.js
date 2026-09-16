@@ -103,7 +103,8 @@ export async function GET(req) {
       ]);
     });
 
-    // La firma va en solicitudes normales: no ofrecer categoría/proceso FIRMA.
+    // Ocultar solo el leftover técnico Orion (categoría/proceso llamado exactamente
+    // FIRMA o Firma digital). El workflow de negocio «Solicitud de firma» sí se ofrece.
     const categories = categoriesRes.recordset.filter(
       (c) => !isFirmaRequestCategoryOrProcess(c.category, null)
     );
