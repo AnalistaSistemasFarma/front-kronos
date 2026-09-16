@@ -7,6 +7,7 @@ import {
   buildOrionSignedFileProxyUrl,
   isAllowedServerPdfFetchUrl,
   isOrionProtectedFileUrl,
+  orionDocumentHasSignedCopy,
   resolveOrionPdfAccessUrl,
   resolveOrionVersionAccessUrl,
 } from '../signedFileAccess';
@@ -129,12 +130,29 @@ describe('signedFileAccess', () => {
     ).toBe('/api/integrations/orion/signed-file?requestId=1&fileId=file-1');
   });
 
-  it('keeps OneDrive URL when no Orion signed file', () => {
+  it('detects signed copy only after a signer completed', () => {
+    expect(orionDocumentHasSignedCopy({ orionDocumentId: 'doc-1' })).toBe(false);
+    expect(
+      orionDocumentHasSignedCopy({
+        orionDocumentId: 'doc-1',
+        status: 'BORRADOR',
+        signers: [{ email: 'a@test.com', status: 'PENDIENTE' }],
+      })
+    ).toBe(false);
+    expect(
+      orionDocumentHasSignedCopy({
+        orionDocumentId: 'doc-1',
+        signers: [{ email: 'a@test.com', status: 'FIRMADO' }],
+      })
+    ).toBe(true);
+  });
+
+  it('returns null for draft so callers prefer live OneDrive', () => {
     const doc: OrionSignatureState = { orionDocumentId: 'doc-1' };
     const original = 'https://onedrive.example.com/original.pdf';
     expect(
       resolveOrionPdfAccessUrl(doc, original, { requestId: 1, fileId: 'file-1' })
-    ).toBe(original);
+    ).toBeNull();
   });
 
   it('does not proxy Orion signed-file while document is still BORRADOR', () => {
@@ -148,7 +166,7 @@ describe('signedFileAccess', () => {
     const original = 'https://onedrive.example.com/original.pdf';
     expect(
       resolveOrionPdfAccessUrl(doc, original, { requestId: 1, fileId: 'file-1' })
-    ).toBe(original);
+    ).toBeNull();
   });
 
   it('builds version proxy URL for partial versions', () => {

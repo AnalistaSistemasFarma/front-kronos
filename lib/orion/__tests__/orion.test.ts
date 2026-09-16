@@ -32,6 +32,7 @@ import {
   ORION_FIRMA_PREPARE_URL,
   ORION_FIRMA_SIGN_URL,
 } from '../access';
+import { isFirmaAuthorizationItem } from '../signerAuthMarkers';
 
 describe('orion access subprocesses', () => {
   it('detecta Preparar (prepare y legacy manage)', () => {
@@ -699,5 +700,43 @@ describe('documentVersions', () => {
       String(rebuilt.versions?.find((v) => v.kind === 'original')?.createdAt)
     );
     expect(rebuiltOriginalAt).toBeLessThan(Date.parse('2026-09-10T14:28:22.000Z'));
+  });
+});
+
+describe('isFirmaAuthorizationItem', () => {
+  it('detecta firma por marcadores Orion (no por asunto)', () => {
+    expect(
+      isFirmaAuthorizationItem({
+        resolution: '[orionFile:abc][orionAuth] Autorizar firma',
+        typeAuthorization: 'Cualquier tipo',
+      })
+    ).toBe(true);
+    expect(
+      isFirmaAuthorizationItem({
+        resolution: null,
+        typeAuthorization: 'Firma — Empleado',
+      })
+    ).toBe(true);
+    expect(
+      isFirmaAuthorizationItem({
+        resolution: null,
+        typeAuthorization: 'Autorización gerencial',
+        taskName: 'Autorizar solicitud',
+      })
+    ).toBe(false);
+    // Asunto no se usa: una solicitud con "firma" en el título no es auth de firma
+    expect(
+      isFirmaAuthorizationItem({
+        resolution: null,
+        typeAuthorization: 'Aprobación',
+      })
+    ).toBe(false);
+    expect(
+      isFirmaAuthorizationItem({
+        resolution: null,
+        typeAuthorization: 'TESORERIA',
+        taskName: 'Autorizar pago',
+      })
+    ).toBe(false);
   });
 });
