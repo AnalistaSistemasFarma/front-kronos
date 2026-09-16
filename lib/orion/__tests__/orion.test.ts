@@ -25,6 +25,7 @@ import {
 } from '../signerStatus';
 import { resolveOrionPermissions } from '../permissions';
 import {
+  isFirmaRequestCategoryOrProcess,
   isHubHiddenSubprocess,
   isOrionFirmaPrepareSubprocess,
   isOrionFirmaSignSubprocess,
@@ -82,6 +83,19 @@ describe('orion access subprocesses', () => {
       true
     );
     expect(isHubHiddenSubprocess({ url: '/process/other', name: 'Otro' })).toBe(false);
+  });
+
+  it('no oculta el proceso de negocio Solicitud de firma al crear solicitudes', () => {
+    expect(isFirmaRequestCategoryOrProcess('Jurídico', 'Solicitud de firma')).toBe(false);
+    expect(isFirmaRequestCategoryOrProcess(null, 'Solicitud de firma')).toBe(false);
+    expect(isFirmaRequestCategoryOrProcess('Jurídico', null)).toBe(false);
+  });
+
+  it('sí oculta el leftover técnico Orion FIRMA / Firma digital', () => {
+    expect(isFirmaRequestCategoryOrProcess('FIRMA', null)).toBe(true);
+    expect(isFirmaRequestCategoryOrProcess(null, 'FIRMA')).toBe(true);
+    expect(isFirmaRequestCategoryOrProcess(null, 'Firma digital')).toBe(true);
+    expect(isFirmaRequestCategoryOrProcess('  firma  ', 'Otro')).toBe(true);
   });
 });
 

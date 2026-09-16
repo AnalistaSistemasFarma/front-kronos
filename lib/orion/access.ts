@@ -17,12 +17,22 @@ export const ORION_FIRMA_PREPARE_NAME = 'Preparar firma';
 export const ORION_FIRMA_SIGN_URL = '/process/firma/sign';
 export const ORION_FIRMA_SIGN_NAME = 'Firmar documento';
 
-/** Categoría o proceso legacy de firma (ocultar en UI de creación). */
+/**
+ * Categoría o proceso técnico legado de Orion (nombre exacto FIRMA / Firma digital).
+ * No oculta el workflow de negocio «Solicitud de firma» (Jurídico).
+ */
 export function isFirmaRequestCategoryOrProcess(
   category?: string | null,
   process?: string | null
 ): boolean {
-  return /FIRMA/i.test(String(category || '')) || /FIRMA/i.test(String(process || ''));
+  return isLegacyOrionFirmaLabel(category) || isLegacyOrionFirmaLabel(process);
+}
+
+function isLegacyOrionFirmaLabel(value?: string | null): boolean {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
+  return normalized === 'firma' || normalized === 'firma digital';
 }
 
 function normalizeSubUrl(url?: string | null): string {
