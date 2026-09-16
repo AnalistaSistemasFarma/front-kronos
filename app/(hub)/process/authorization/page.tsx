@@ -53,11 +53,10 @@ import {
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import AuthorizationDetailModal from './AuthorizationDetailModal';
-
-function parseOrionFileIdFromAuthResolution(resolution?: string | null): string | null {
-  const match = /\[orionFile:([^\]]+)\]/i.exec(String(resolution || ''));
-  return match?.[1]?.trim() || null;
-}
+import {
+  isFirmaAuthorizationItem,
+  parseOrionFileIdFromAuthResolution,
+} from '../../../../lib/orion/signerAuthMarkers';
 
 interface AuthorizationRequest {
   id: number;
@@ -66,6 +65,7 @@ interface AuthorizationRequest {
   company: string;
   id_company: number;
   type_authorization: string;
+  task?: string | null;
   requester: string;
   created_at: string;
   status: 'pendiente' | 'autorizado' | 'rechazado' | 'cancelado';
@@ -313,6 +313,7 @@ function AuthorizationBoard() {
                 company: a.company,
                 id_company: a.id_company,
                 type_authorization: a.type_authorization,
+                task: a.task ?? null,
                 requester: a.creator_request || '—',
                 created_at: a.created_at,
                 status: mapStatus(a.id_status),
@@ -436,48 +437,52 @@ function AuthorizationBoard() {
     };
 
     const isFirmaAuthorizationRow = (row: AuthorizationRequest) =>
-        /firma/i.test(row.type_authorization || '') ||
-        /firma/i.test(row.subject || '') ||
-        /orionAuth/i.test(row.resolution || '') ||
-        /orionFile/i.test(row.resolution || '');
+        isFirmaAuthorizationItem({
+            resolution: row.resolution,
+            typeAuthorization: row.type_authorization,
+            taskName: row.task,
+        });
 
-    /** Ir a la solicitud (o deep-link de firma) desde la fila de autorización. */
+    /**
+     * Solo autorizaciones de FIRMA navegan a la solicitud (ojito / deep-link).
+     * TESORERIA y el resto se gestionan solo en este listado (autorizar / detalle).
+     */
     const goToRelatedRequest = (req: AuthorizationRequest) => {
         if (!req.id_request_general) return;
-        const fileId = parseOrionFileIdFromAuthResolution(req.resolution);
-        if (isFirmaAuthorizationRow(req)) {
-            const qs = new URLSearchParams({
-                id: String(req.id_request_general),
-                from: 'authorization',
-            });
-            if (fileId) qs.set('orionFileId', fileId);
-            // Pendiente: abrir flujo para firmar; ya autorizada: ver el documento.
-            qs.set('orionAction', req.status === 'pendiente' ? 'sign' : 'view');
-            router.push(`/process/request-general/view-request?${qs.toString()}`);
+        if (!isFirmaAuthorizationRow(req)) return;
+
+        // Pendiente: el usuario debe Autorizar aquí; no abrir el asistente de firma aún.
+        if (req.status === 'pendiente') {
+            router.push(
+                `/process/request-general/view-request?id=${req.id_request_general}&from=authorization`
+            );
             return;
         }
-        router.push(
-            `/process/request-general/view-request?id=${req.id_request_general}&from=authorization`
-        );
+        const fileId = parseOrionFileIdFromAuthResolution(req.resolution);
+        const qs = new URLSearchParams({
+            id: String(req.id_request_general),
+            from: 'authorization',
+            orionAction: 'view',
+        });
+        if (fileId) qs.set('orionFileId', fileId);
+        router.push(`/process/request-general/view-request?${qs.toString()}`);
     };
 
+    /**
+     * Tras autorizar una auth de FIRMA: ir a la misma solicitud para firmar.
+     * (El creador-firmante se queda en la solicitud; no se manda a otra pantalla de tarea.)
+     */
     const redirectToSignDocument = (params: {
         requestId: number;
         fileId?: string | null;
-        signTaskId?: number | null;
     }) => {
         setOpeningSignDocument(true);
         const qs = new URLSearchParams({
+            id: String(params.requestId),
             from: 'authorization',
             orionAction: 'sign',
         });
         if (params.fileId) qs.set('orionFileId', params.fileId);
-        if (params.signTaskId) {
-            qs.set('id', String(params.signTaskId));
-            router.push(`/process/request-general/view-activities?${qs.toString()}`);
-            return;
-        }
-        qs.set('id', String(params.requestId));
         router.push(`/process/request-general/view-request?${qs.toString()}`);
     };
 
@@ -505,14 +510,15 @@ function AuthorizationBoard() {
                                 }),
                             });
                             const consumeData = await consumeRes.json().catch(() => ({}));
-                            if (consumeRes.ok && (consumeData.closed > 0 || consumeData.success)) {
+                            // Solo éxito real de cierre (no basta success:true con closed:0).
+                            if (consumeRes.ok && Number(consumeData.closed) > 0) {
                                 return {
                                     ok: true as const,
                                     row,
+                                    isFirma: true as const,
                                     fileId:
                                         consumeData.fileId ||
                                         parseOrionFileIdFromAuthResolution(row.resolution),
-                                    signTaskId: consumeData.signTaskId ?? null,
                                 };
                             }
                         } catch (e) {
@@ -525,8 +531,8 @@ function AuthorizationBoard() {
                         ok: updated.ok,
                         error: updated.error,
                         row,
+                        isFirma: isFirmaAuthorizationRow(row),
                         fileId: parseOrionFileIdFromAuthResolution(row.resolution),
-                        signTaskId: null as number | null,
                     };
                 })
             );
@@ -541,31 +547,25 @@ function AuthorizationBoard() {
             }
 
             const singleOk = okResults.length === 1 ? okResults[0] : null;
-            const singleFirma =
-                Boolean(singleOk) &&
-                isFirmaAuthorizationRow(singleOk!.row) &&
-                Boolean(singleOk!.row.id_request_general);
+            // Solo FIRMA (Orion) navega a la solicitud para firmar.
+            // TESORERIA y el resto de autorizaciones normales se quedan en este listado.
+            const shouldOpenSignFlow =
+                Boolean(singleOk?.ok) &&
+                Boolean(singleOk?.isFirma) &&
+                Boolean(singleOk?.row.id_request_general) &&
+                isFirmaAuthorizationRow(singleOk!.row);
 
-            if (singleFirma && singleOk) {
-                setOpeningSignDocument(true);
+            if (shouldOpenSignFlow && singleOk) {
+                toast.success('Autorizado. Puede firmar el documento en la solicitud.');
                 void fetchActivities(userId, filters);
                 redirectToSignDocument({
                     requestId: singleOk.row.id_request_general!,
                     fileId: singleOk.fileId,
-                    signTaskId: singleOk.signTaskId,
                 });
                 return;
             }
 
-            if (singleOk?.row.id_request_general) {
-                setOpeningSignDocument(true);
-                void fetchActivities(userId, filters);
-                router.push(
-                    `/process/request-general/view-request?id=${singleOk.row.id_request_general}&from=authorization`
-                );
-                return;
-            }
-
+            // TESORERIA / normal (1 o N): autorizar y permanecer en /process/authorization.
             if (okResults.length > 0) {
                 toast.success(
                     okResults.length > 1
@@ -575,6 +575,7 @@ function AuthorizationBoard() {
             }
             await fetchActivities(userId, filters);
             setLoading(false);
+            setOpeningSignDocument(false);
         } catch {
             setLoading(false);
             setOpeningSignDocument(false);
@@ -614,11 +615,11 @@ function AuthorizationBoard() {
         { title: 'Autorización', href: '#' },
     ].map((item, index) =>
         item.href !== '#' ? (
-        <Link key={index} href={item.href} passHref>
+        <Link key={`auth-bc-${item.title}-${index}`} href={item.href} passHref>
             <Anchor component='span'>{item.title}</Anchor>
         </Link>
         ) : (
-        <span key={index} className='text-gray-500'>
+        <span key={`auth-bc-${item.title}-${index}`} className='text-gray-500'>
             {item.title}
         </span>
         )
@@ -638,11 +639,12 @@ function AuthorizationBoard() {
         );
     }
 
-    const renderRow = (req: AuthorizationRequest) => {
+    const renderRow = (req: AuthorizationRequest, index: number) => {
         const isPending = req.status === 'pendiente';
+        const isFirma = isFirmaAuthorizationRow(req);
         return (
         <Table.Tr
-            key={req.id}
+            key={`auth-row-${req.id}-${req.id_request_general}-${index}`}
             bg={selectedIds.has(req.id) ? 'var(--mantine-color-blue-light)' : undefined}
         >
             <Table.Td>
@@ -654,15 +656,21 @@ function AuthorizationBoard() {
             />
             </Table.Td>
             <Table.Td>
-            <UnstyledButton
-                onClick={() => goToRelatedRequest(req)}
-                style={{ display: 'block' }}
-                aria-label={`Abrir solicitud ${req.id_request_general}`}
-            >
-                <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
+            {isFirma ? (
+                <UnstyledButton
+                    onClick={() => goToRelatedRequest(req)}
+                    style={{ display: 'block' }}
+                    aria-label={`Abrir solicitud ${req.id_request_general}`}
+                >
+                    <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
+                        #{req.id_request_general}
+                    </Text>
+                </UnstyledButton>
+            ) : (
+                <Text size='sm' fw={700}>
                     #{req.id_request_general}
                 </Text>
-            </UnstyledButton>
+            )}
             </Table.Td>
             <Table.Td style={{ minWidth: 220, maxWidth: 340 }}>
             <Text size='sm' fw={500} lineClamp={2}>
@@ -678,9 +686,16 @@ function AuthorizationBoard() {
             </Group>
             </Table.Td>
             <Table.Td>
-            <Badge variant='light' color='indigo' size='sm'>
-                {req.type_authorization}
-            </Badge>
+            <Group gap={6} wrap='wrap'>
+                <Badge variant='light' color={isFirma ? 'violet' : 'indigo'} size='sm'>
+                    {req.type_authorization}
+                </Badge>
+                {isFirma ? (
+                    <Badge variant='outline' color='violet' size='xs'>
+                        Firma
+                    </Badge>
+                ) : null}
+            </Group>
             </Table.Td>
             <Table.Td>
             <Group gap={4} wrap='nowrap'>
@@ -708,17 +723,13 @@ function AuthorizationBoard() {
             </Group>
             </Table.Td>
             <Table.Td style={{ whiteSpace: 'nowrap' }}>
-            <UnstyledButton
-                onClick={() => goToRelatedRequest(req)}
-                aria-label={`Ir a solicitud ${req.id_request_general}`}
-            >
                 <Badge variant='light' color={getStatusColor(req.status)} size='sm'>
                     {getStatusLabel(req.status)}
                 </Badge>
-            </UnstyledButton>
             </Table.Td>
             <Table.Td>
             <Group gap='xs' wrap='nowrap'>
+                {isFirma ? (
                 <Tooltip label='Ir a la solicitud'>
                 <ActionIcon
                     variant='light'
@@ -729,6 +740,7 @@ function AuthorizationBoard() {
                     <IconEye size={16} />
                 </ActionIcon>
                 </Tooltip>
+                ) : null}
                 <Tooltip label='Ver detalle'>
                 <ActionIcon
                     variant='subtle'
@@ -769,11 +781,12 @@ function AuthorizationBoard() {
         );
     };
 
-    const renderCard = (req: AuthorizationRequest) => {
+    const renderCard = (req: AuthorizationRequest, index: number) => {
         const isPending = req.status === 'pendiente';
+        const isFirma = isFirmaAuthorizationRow(req);
         return (
         <Card
-            key={req.id}
+            key={`auth-card-${req.id}-${req.id_request_general}-${index}`}
             withBorder
             radius='md'
             p='md'
@@ -790,29 +803,36 @@ function AuthorizationBoard() {
                     disabled={!isPending}
                     aria-label={`Seleccionar solicitud ${req.id_request_general}`}
                 />
+                {isFirma ? (
                 <UnstyledButton onClick={() => goToRelatedRequest(req)}>
                 <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
                     #{req.id_request_general}
                 </Text>
                 </UnstyledButton>
+                ) : (
+                <Text size='sm' fw={700}>
+                    #{req.id_request_general}
+                </Text>
+                )}
                 </Group>
-                <UnstyledButton onClick={() => goToRelatedRequest(req)}>
                 <Badge variant='light' color={getStatusColor(req.status)} size='sm'>
                 {getStatusLabel(req.status)}
                 </Badge>
-                </UnstyledButton>
             </Group>
 
-            <UnstyledButton onClick={() => goToRelatedRequest(req)} style={{ textAlign: 'left' }}>
             <Text size='sm' fw={500} lineClamp={2}>
                 {req.subject}
             </Text>
-            </UnstyledButton>
 
             <Group gap={6} wrap='nowrap'>
                 <IconBuilding size={14} className='text-gray-400' />
                 <Text size='sm'>{req.company}</Text>
-                <Badge variant='light' color='indigo' size='xs' ml='auto'>
+                <Badge
+                    variant='light'
+                    color={isFirma ? 'violet' : 'indigo'}
+                    size='xs'
+                    ml='auto'
+                >
                 {req.type_authorization}
                 </Badge>
             </Group>
@@ -829,6 +849,7 @@ function AuthorizationBoard() {
                 </Text>
             </Group>
 
+            {isFirma ? (
             <Button
                 size='xs'
                 variant='light'
@@ -840,6 +861,7 @@ function AuthorizationBoard() {
             >
                 Ir a la solicitud
             </Button>
+            ) : null}
 
             <Button
                 size='xs'
@@ -1197,7 +1219,7 @@ function AuthorizationBoard() {
                     onChange={toggleSelectAll}
                     />
                 )}
-                {filteredRequests.map(renderCard)}
+                {filteredRequests.map((req, index) => renderCard(req, index))}
                 </Stack>
             ) : (
                 <div className='overflow-x-auto'>
@@ -1223,7 +1245,9 @@ function AuthorizationBoard() {
                         <Table.Th>Acciones</Table.Th>
                     </Table.Tr>
                     </Table.Thead>
-                    <Table.Tbody>{filteredRequests.map(renderRow)}</Table.Tbody>
+                    <Table.Tbody>
+                      {filteredRequests.map((req, index) => renderRow(req, index))}
+                    </Table.Tbody>
                 </Table>
                 </div>
             )}

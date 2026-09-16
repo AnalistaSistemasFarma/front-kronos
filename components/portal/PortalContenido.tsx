@@ -40,6 +40,14 @@ interface Banner {
   /** Los anuncios se sirven desde la base, no desde SharePoint. */
   url: string;
 }
+/** Un correo con licencia activa de M365, agrupado por empresa. */
+interface GrupoCorreo {
+  empresa: string;
+  dominio: string;
+  /** 'sin_acceso' = todavía no hay conector configurado para ese tenant. */
+  estado: 'ok' | 'sin_acceso';
+  usuarios: { nombre: string; correo: string }[];
+}
 
 /**
  * Lee la respuesta como JSON SIN reventar cuando no lo es.
@@ -261,6 +269,35 @@ export default function PortalContenido({
     setContactosAbierto(false);
     setContactoSeleccionado(null);
   };
+
+  // ── "Correos Corporativos" dentro de Contactos ──────────────────────────
+  // Se pide la primera vez que se abre esa opción, no al abrir la ventana de
+  // Contactos entera (nadie pide "Extensiones" el 100% de las veces).
+  const [correosGrupos, setCorreosGrupos] = useState<GrupoCorreo[] | null>(null);
+  const [correosCargando, setCorreosCargando] = useState(false);
+  const [correosError, setCorreosError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (contactoSeleccionado !== 'correos' || correosGrupos !== null || correosCargando) return;
+    let cancelado = false;
+    setCorreosCargando(true);
+    setCorreosError(null);
+    (async () => {
+      try {
+        const res = await fetch('/api/portal/contactos/correos', { cache: 'no-store' });
+        const data = await leerJson(res);
+        if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo cargar la lista.'));
+        if (!cancelado) setCorreosGrupos(Array.isArray(data.grupos) ? (data.grupos as GrupoCorreo[]) : []);
+      } catch (e) {
+        if (!cancelado) setCorreosError((e as Error).message);
+      } finally {
+        if (!cancelado) setCorreosCargando(false);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [contactoSeleccionado, correosGrupos, correosCargando]);
 
   // Cerrar con Escape: en una ventana que tapa la pantalla, buscar la ✕ con el
   // mouse cuando uno solo quería salir es incómodo.
@@ -509,7 +546,13 @@ export default function PortalContenido({
             if (e.target === e.currentTarget) cerrarContactos();
           }}
         >
-          <div className='portal-th__visor-caja portal-th__visor-caja--contactos'>
+          <div
+            className={
+              contactoSeleccionado === 'correos'
+                ? 'portal-th__visor-caja portal-th__visor-caja--contactos portal-th__visor-caja--contactos-tabla'
+                : 'portal-th__visor-caja portal-th__visor-caja--contactos'
+            }
+          >
             <header className='portal-th__visor-barra'>
               <strong>Contactos</strong>
               <div className='portal-th__visor-acciones'>
@@ -533,11 +576,47 @@ export default function PortalContenido({
               >
                 Extensiones Corporativas
               </button>
-              {contactoSeleccionado && (
-                <p className='portal-th__estado'>
-                  Todavía no hay contenido cargado para{' '}
-                  {contactoSeleccionado === 'correos' ? 'Correos Corporativos' : 'Extensiones Corporativas'}.
-                </p>
+
+              {contactoSeleccionado === 'extensiones' && (
+                <p className='portal-th__estado'>Todavía no hay contenido cargado para Extensiones Corporativas.</p>
+              )}
+
+              {contactoSeleccionado === 'correos' && (
+                <div className='portal-th__correos'>
+                  {correosCargando && <p className='portal-th__estado'>Cargando correos corporativos…</p>}
+                  {correosError && <p className='portal-th__error'>{correosError}</p>}
+                  {correosGrupos &&
+                    correosGrupos.map((grupo) => (
+                      <section key={grupo.dominio} className='portal-th__correos-grupo'>
+                        <h4 className='portal-th__correos-empresa'>
+                          {grupo.empresa}
+                          <span className='portal-th__correos-dominio'> · {grupo.dominio}</span>
+                        </h4>
+                        {grupo.estado === 'sin_acceso' ? (
+                          <p className='portal-th__estado'>Sin acceso configurado para este tenant.</p>
+                        ) : grupo.usuarios.length === 0 ? (
+                          <p className='portal-th__estado'>Sin usuarios con licencia activa.</p>
+                        ) : (
+                          <table className='portal-th__correos-tabla'>
+                            <thead>
+                              <tr>
+                                <th>Nombre</th>
+                                <th>Correo</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {grupo.usuarios.map((u) => (
+                                <tr key={u.correo}>
+                                  <td>{u.nombre}</td>
+                                  <td>{u.correo}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </section>
+                    ))}
+                </div>
               )}
             </div>
           </div>
