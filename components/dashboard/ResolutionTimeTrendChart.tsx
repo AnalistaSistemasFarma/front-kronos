@@ -32,7 +32,7 @@ import {
   type TaskForResolutionTime,
 } from '../../lib/dashboard/resolutionTimeSeries';
 import { buildTrendTimeChart } from '../../lib/charts/builders';
-import { trendDownColor, trendUpColor, trendFlatColor } from '../../lib/charts/defaults';
+import { colorForTimeTrend, rgbaForTimeTrend, timeFasterColor, timeSlowerColor, trendFlatColor } from '../../lib/charts/defaults';
 import { useDashboardChartPalette } from './useDashboardChartPalette';
 
 function TrendBadge({
@@ -55,7 +55,7 @@ function TrendBadge({
     );
   }
 
-  const color = trend === 'up' ? trendUpColor : trend === 'down' ? trendDownColor : trendFlatColor;
+  const color = colorForTimeTrend(trend);
   const Icon = trend === 'up' ? IconTrendingUp : trend === 'down' ? IconTrendingDown : IconMinus;
 
   return (
@@ -213,11 +213,9 @@ function TrendChartBody({
           withBorder
           style={{
             borderColor:
-              summary.latestTrend === 'up'
-                ? 'rgba(22, 163, 74, 0.35)'
-                : summary.latestTrend === 'down'
-                  ? 'rgba(220, 38, 38, 0.35)'
-                  : palette.blue100,
+              summary.latestTrend === 'up' || summary.latestTrend === 'down'
+                ? rgbaForTimeTrend(summary.latestTrend, 0.35)
+                : palette.blue100,
             background: palette.chartPanelBg,
           }}
         >
@@ -317,11 +315,9 @@ function TrendChartBody({
                 style={{
                   flexShrink: 0,
                   borderColor:
-                    point.trend === 'up'
-                      ? 'rgba(22, 163, 74, 0.25)'
-                      : point.trend === 'down'
-                        ? 'rgba(220, 38, 38, 0.25)'
-                        : palette.chartPanelBorder,
+                    point.trend === 'up' || point.trend === 'down'
+                      ? rgbaForTimeTrend(point.trend, 0.25)
+                      : palette.chartPanelBorder,
                   background: palette.chartPanelBg,
                 }}
               >
@@ -345,14 +341,14 @@ function TrendChartBody({
 
       <Text size='xs' ta='center' mt='sm' c='dimmed'>
         Cada punto muestra el <strong>tiempo promedio</strong> de cierre en ese periodo.{' '}
-        <Text span fw={700} style={{ color: trendUpColor }}>
-          Verde
-        </Text>{' '}
-        = tardó más ·{' '}
-        <Text span fw={700} style={{ color: trendDownColor }}>
+        <Text span fw={700} style={{ color: timeSlowerColor }}>
           Rojo
         </Text>{' '}
-        = fue más rápido
+        = más lento ·{' '}
+        <Text span fw={700} style={{ color: timeFasterColor }}>
+          Verde
+        </Text>{' '}
+        = más rápido
       </Text>
     </>
   );

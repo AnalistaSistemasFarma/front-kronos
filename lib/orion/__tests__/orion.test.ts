@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   adoptLegacyOrionDocument,
+  hasOrionActiveSignFlow,
   isOrionSignDocument,
   mergeOrionSignatureState,
   parseOrionSignatureBagBag,
@@ -365,6 +366,19 @@ describe('orion signatureIntent', () => {
     expect(
       isOrionSignDocument({ signatureIntent: 'view', status: 'EN_PROCESO' })
     ).toBe(true);
+  });
+
+  it('marca flujo activo solo cuando ya hay Orion/firmantes/estado', () => {
+    expect(hasOrionActiveSignFlow({})).toBe(false);
+    expect(hasOrionActiveSignFlow({ signatureIntent: 'sign' })).toBe(false);
+    expect(hasOrionActiveSignFlow({ status: 'BORRADOR' })).toBe(false);
+    expect(hasOrionActiveSignFlow({ orionDocumentId: 'doc-1' })).toBe(true);
+    expect(
+      hasOrionActiveSignFlow({
+        signers: [{ email: 'a@test.com', order: 1, status: 'PENDIENTE' }],
+      })
+    ).toBe(true);
+    expect(hasOrionActiveSignFlow({ status: 'EN_PROCESO' })).toBe(true);
   });
 });
 
