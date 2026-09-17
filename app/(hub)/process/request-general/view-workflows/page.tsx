@@ -144,12 +144,16 @@ const FIELD_TYPE_LABELS: Record<string, string> = {
   select: 'Lista',
   text: 'Texto',
   number: 'Número',
+  money: 'Moneda (COP)',
   date: 'Fecha',
+  yesno: 'Sí / No',
+  url: 'URL',
   [TABLE_FIELD_TYPE]: 'Tabla',
   ...Object.fromEntries(Object.entries(SAP_SOURCES).map(([key, s]) => [key, s.label])),
 };
 
 // Datos agrupados para el Select "Tipo": básicos + fuentes SAP curadas.
+// Mismos tipos que las columnas de tabla (TABLE_COLUMN_TYPES) + Tabla.
 const FIELD_TYPE_SELECT_DATA = [
   {
     group: 'Básico',
@@ -157,7 +161,10 @@ const FIELD_TYPE_SELECT_DATA = [
       { value: 'select', label: 'Lista (opciones)' },
       { value: 'text', label: 'Texto' },
       { value: 'number', label: 'Número' },
+      { value: 'money', label: 'Moneda (COP)' },
       { value: 'date', label: 'Fecha' },
+      { value: 'yesno', label: 'Sí / No' },
+      { value: 'url', label: 'URL' },
       { value: TABLE_FIELD_TYPE, label: 'Tabla' },
     ],
   },

@@ -31,6 +31,7 @@ import {
   Tooltip,
   ThemeIcon,
   UnstyledButton,
+  useComputedColorScheme,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -52,6 +53,13 @@ import {
   IconNotes,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
+import PaymentDetailModal from './PaymentDetailModal';
+import axios from 'axios';
+import { saveAs } from 'file-saver';
+import { PDFDocument } from 'pdf-lib';
+import ExcelJS from 'exceljs';
+import { addDataSheet, downloadWorkbook } from '../../../../../lib/dashboard/excel/excelHelpers';
+import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 
 function parseOrionFileIdFromAuthResolution(resolution?: string | null): string | null {
   const match = /\[orionFile:([^\]]+)\]/i.exec(String(resolution || ''));
@@ -104,22 +112,40 @@ const STATUS_OPTIONS = [
 
 const TYPE_REQUEST_OPTIONS = [
   { value: '0', label: 'Todos' },
-  { value: 'Giro Anticipos a Terceros', label: 'Giro Anticipos a Terceros' },
-  { value: 'Giro a Proveedores', label: 'Giro a Proveedores' },
-  { value: 'Giro a Empleado', label: 'Giro a Empleado' },
+  { value: 'Giro a Empleados', label: 'Giro a Empleados' },
+  { value: 'Anticipo a Terceros', label: 'Anticipo a Terceros' },
+  { value: 'Pagos Exterior', label: 'Pagos Exterior' },
+  { value: 'Pagos PSE', label: 'Pagos PSE' },
+  { value: 'Pagos (Nomina)', label: 'Pagos (Nomina)' },
 ];
 
 const SUBTYPE_REQUEST_OPTIONS = [
   { value: '0', label: 'Todos' },
   { value: 'AFC', label: 'AFC' },
+  { value: 'Anticipo', label: 'Anticipo' },
+  { value: 'Anticipos Viajes', label: 'Anticipos Viajes' },
+  { value: 'Apostilla', label: 'Apostilla' },
+  { value: 'Cámara y Comercio', label: 'Cámara y Comercio' },
+  { value: 'Cesantias', label: 'Cesantias' },
+  { value: 'Comercio', label: 'Comercio' },
+  { value: 'Cuota-Sena', label: 'Cuota-Sena' },
+  { value: 'Estampillas', label: 'Estampillas' },
+  { value: 'Factura', label: 'Factura' },
   { value: 'Impuestos Distritales o Nacionales', label: 'Impuestos Distritales o Nacionales' },
   { value: 'Invima', label: 'Invima' },
-  { value: 'Legalización - Reembolso', label: 'Legalización - Reembolso' },
-  { value: 'Legalización Tarjeta de Credito', label: 'Legalización Tarjeta de Credito' },
-  { value: 'Libranzas (Portal Bancario)', label: 'Libranzas (Portal Bancario)' },
+  { value: 'Legalización - Reembolsos', label: 'Legalización - Reembolsos' },
+  { value: 'Legalización de Tarjeta de Crédito', label: 'Legalización de Tarjeta de Crédito' },
+  { value: 'Libranzas', label: 'Libranzas' },
+  { value: 'Liquidación', label: 'Liquidación' },
   { value: 'Pago Nomina', label: 'Pago Nomina' },
   { value: 'Pago Prima', label: 'Pago Prima' },
-  { value: 'Pila Seguridad Social', label: 'Pila Seguridad Social' },
+  { value: 'Pagos Proveedores', label: 'Pagos Proveedores' },
+  { value: 'Pila - Seguridad Social', label: 'Pila - Seguridad Social' },
+  { value: 'Prestamos', label: 'Prestamos' },
+  { value: 'Reembolsos Caja Menor', label: 'Reembolsos Caja Menor' },
+  { value: 'Solicitud Caja Menor', label: 'Solicitud Caja Menor' },
+  { value: 'Tributos Aduaneros', label: 'Tributos Aduaneros' },
+  { value: 'Vacaciones', label: 'Vacaciones' },
 ];
 
 const getStatusColor = (status: string) => {
@@ -186,6 +212,8 @@ function PaymentSchedulingBoard() {
     const { data: session, status } = useSession();
     const router = useRouter();
     const isMobile = useMediaQuery('(max-width: 768px)');
+    const computedColorScheme = useComputedColorScheme('light', { getInitialValueInEffect: true });
+    const dateInputStyles = { input: { colorScheme: computedColorScheme } };
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -396,7 +424,7 @@ function PaymentSchedulingBoard() {
     };
 
     const clearFilters = () => {
-        const empty = { id_tarea: '', id_solicitud: '', status: '0', company: '0', date_from: '', date_to: '', tipo_solicitud: '0', subtipo_solicitud: '0' };
+        const empty = { id_tarea: '', id_solicitud: '', status: '0', company: '', date_from: '', date_to: '', tipo_solicitud: '0', subtipo_solicitud: '0' };
         setFilters(empty);
         setSelectedIds(new Set());
         if (userId) fetchPayments(userId, empty);
@@ -473,6 +501,105 @@ function PaymentSchedulingBoard() {
         );
     };
 
+    const downloadPaymentPlano = async (rows: PaymentSchedulingTask[]) => {
+        const columns = [
+            { header: 'ID Solicitud', key: 'id', width: 12 },
+            { header: 'Empresa', key: 'empresa', width: 26 },
+            { header: 'Tipo', key: 'tipo', width: 22 },
+            { header: 'Subtipo', key: 'subtipo', width: 24 },
+            { header: 'Documento', key: 'documento', width: 16 },
+            { header: 'Acreedor', key: 'acreedor', width: 30 },
+            { header: 'Valor a Pagar', key: 'valor', width: 16 },
+            { header: 'Fecha Solicitada de Pago', key: 'fecha', width: 20 },
+            { header: 'Solicitante', key: 'solicitante', width: 24 },
+            { header: 'Estado', key: 'estado', width: 14 },
+        ];
+        const data = rows.map((r) => {
+            const a = splitAcreedor(r.acreedor);
+            const valor = Number(String(r.valor_pagar ?? '').replace(/[^\d.-]/g, ''));
+            return {
+                id: r.id_solicitud,
+                empresa: r.empresa ?? '',
+                tipo: r.tipo_solicitud ?? '',
+                subtipo: r.subtipo_solicitud ?? '',
+                documento: a.doc,
+                acreedor: a.name,
+                valor: Number.isFinite(valor) ? valor : '',
+                fecha: formatShortDate(r.fecha_solicitada_pago),
+                solicitante: r.creador_solicitud ?? r.usuario_asignado ?? '',
+                estado: 'Programado',
+            };
+        });
+
+        const wb = new ExcelJS.Workbook();
+        const ws = addDataSheet(wb, 'Pagos programados', columns, data);
+        ws.getColumn(columns.findIndex((c) => c.key === 'valor') + 1).numFmt = '#,##0';
+
+        const stamp = new Date().toISOString().slice(0, 10);
+        await downloadWorkbook(wb, `plano-pagos-${stamp}.xlsx`);
+    };
+
+    const downloadConsolidatedPdf = async (rows: PaymentSchedulingTask[]): Promise<number> => {
+        const token = await getMicrosoftToken();
+        if (!token) throw new Error('No se pudo obtener el token de acceso a OneDrive.');
+
+        const base = process.env.MICROSOFTGRAPHUSERROUTE;
+        const merged = await PDFDocument.create();
+        let mergedCount = 0;
+
+        for (const r of rows) {
+            const folder = `Request-${r.id_solicitud}`;
+            let children: Array<{
+                id: string;
+                name?: string;
+                file?: unknown;
+                '@microsoft.graph.downloadUrl'?: string;
+            }> = [];
+            try {
+                const res = await axios.get(
+                    `${base}root:/SAPSEND/TEC/SG/${folder}:/children`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                children = res.data?.value ?? [];
+            } catch (err) {
+                if (axios.isAxiosError(err) && err.response?.status === 404) continue;
+                throw err;
+            }
+
+            const pdfs = children.filter(
+                (it) => it.file && /\.pdf$/i.test(String(it.name || ''))
+            );
+
+            for (const pdf of pdfs) {
+                const downloadUrl = pdf['@microsoft.graph.downloadUrl'];
+                const bytesRes = downloadUrl
+                    ? await axios.get(downloadUrl, { responseType: 'arraybuffer' })
+                    : await axios.get(`${base}items/${pdf.id}/content`, {
+                          responseType: 'arraybuffer',
+                          headers: { Authorization: `Bearer ${token}` },
+                      });
+                try {
+                    const src = await PDFDocument.load(bytesRes.data, { ignoreEncryption: true });
+                    const pages = await merged.copyPages(src, src.getPageIndices());
+                    pages.forEach((p) => merged.addPage(p));
+                    mergedCount += 1;
+                } catch (loadErr) {
+                    console.error(`No se pudo agregar el PDF "${pdf.name}":`, loadErr);
+                }
+            }
+        }
+
+        if (mergedCount === 0) return 0;
+
+        const bytes = await merged.save();
+        const stamp = new Date().toISOString().slice(0, 10);
+        saveAs(
+            new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' }),
+            `consolidado-pagos-${stamp}.pdf`
+        );
+        return mergedCount;
+    };
+
     const confirmAuthorize = async () => {
         if (!userId) return;
         const ids = targetIds();
@@ -512,6 +639,24 @@ function PaymentSchedulingBoard() {
                         ? `${okResults.length} solicitudes autorizadas`
                         : 'Solicitud autorizada'
                 );
+
+                const executedRows = okResults.map((r) => r.row);
+                try {
+                    await downloadPaymentPlano(executedRows);
+                } catch (e) {
+                    console.error('Error generando el plano Excel:', e);
+                    toast.error('Los pagos se ejecutaron, pero no se pudo generar el plano Excel.');
+                }
+
+                try {
+                    const merged = await downloadConsolidatedPdf(executedRows);
+                    if (merged === 0) {
+                        toast('No se encontraron PDF adjuntos para el consolidado.', { icon: 'ℹ️' });
+                    }
+                } catch (e) {
+                    console.error('Error generando el PDF consolidado:', e);
+                    toast.error('Los pagos se ejecutaron, pero no se pudo generar el PDF consolidado.');
+                }
             }
             await fetchPayments(userId, filters);
             setLoading(false);
@@ -969,6 +1114,7 @@ function PaymentSchedulingBoard() {
                         value={filters.date_from}
                         onChange={(e) => handleFilterChange('date_from', e.target.value)}
                         leftSection={<IconCalendarEvent size={16} />}
+                        styles={dateInputStyles}
                     />
                     </Grid.Col>
                     <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
@@ -978,6 +1124,7 @@ function PaymentSchedulingBoard() {
                         value={filters.date_to}
                         onChange={(e) => handleFilterChange('date_to', e.target.value)}
                         leftSection={<IconCalendarEvent size={16} />}
+                        styles={dateInputStyles}
                     />
                     </Grid.Col>
                 </Grid>
@@ -1082,7 +1229,12 @@ function PaymentSchedulingBoard() {
             ) : (
                 <div className='overflow-x-auto'>
                 <Table striped highlightOnHover verticalSpacing='sm' horizontalSpacing='md'>
-                    <Table.Thead style={{ backgroundColor: 'var(--mantine-color-gray-0)' }}>
+                    <Table.Thead
+                        style={{
+                            backgroundColor:
+                                'light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))',
+                        }}
+                    >
                     <Table.Tr>
                         <Table.Th w={40}>
                         <Checkbox
@@ -1182,6 +1334,12 @@ function PaymentSchedulingBoard() {
             </Group>
             </Stack>
         </Modal>
+
+        <PaymentDetailModal
+            opened={detailModalOpened}
+            onClose={() => setDetailModalOpened(false)}
+            request={detailRequest}
+        />
 
         </div>
     );
