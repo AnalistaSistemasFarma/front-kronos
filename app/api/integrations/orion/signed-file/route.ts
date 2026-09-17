@@ -208,20 +208,15 @@ export async function GET(req: Request) {
     const tryServePublicUrl = async (url: string | null | undefined) => {
       const value = String(url || '').trim();
       if (!value || isOrionProtectedFileUrl(value)) return null;
-      // SSRF: solo OneDrive/SharePoint/Graph allowlisted, o URL ya confiable en el bag.
-      const trustedInBag =
-        value === String(state.originalFileUrl || '').trim() ||
-        (state.versions ?? []).some((v) => String(v.url || '').trim() === value);
-      if (!isAllowedServerPdfFetchUrl(value) && !trustedInBag) {
-        return null;
-      }
+      if (!isAllowedServerPdfFetchUrl(value)) return null;
       const publicRes = await fetch(value, { cache: 'no-store', redirect: 'manual' });
-      if (!publicRes.ok) return null;
-      // No seguir redirects a hosts internos.
+      if (!publicRes.ok && !(publicRes.status >= 300 && publicRes.status < 400)) return null;
       if (publicRes.status >= 300 && publicRes.status < 400) {
         const loc = publicRes.headers.get('location');
-        if (!loc || (!isAllowedServerPdfFetchUrl(loc) && !trustedInBag)) return null;
-        const follow = await fetch(loc, { cache: 'no-store', redirect: 'error' });
+        if (!loc) return null;
+        const next = new URL(loc, value).toString();
+        if (!isAllowedServerPdfFetchUrl(next)) return null;
+        const follow = await fetch(next, { cache: 'no-store', redirect: 'error' });
         if (!follow.ok) return null;
         return serveBuffer(await follow.arrayBuffer(), follow.headers.get('content-type'));
       }
@@ -229,10 +224,7 @@ export async function GET(req: Request) {
     };
 
     if (!isOrionProtectedFileUrl(targetUrl)) {
-      const trustedInBag =
-        targetUrl === String(state.originalFileUrl || '').trim() ||
-        (state.versions ?? []).some((v) => String(v.url || '').trim() === targetUrl);
-      if (!isAllowedServerPdfFetchUrl(targetUrl) && !trustedInBag) {
+      if (!isAllowedServerPdfFetchUrl(targetUrl)) {
         return NextResponse.json(
           { error: 'URL de archivo no permitida' },
           { status: 400 }
@@ -241,10 +233,13 @@ export async function GET(req: Request) {
       const publicRes = await fetch(targetUrl, { cache: 'no-store', redirect: 'manual' });
       if (publicRes.status >= 300 && publicRes.status < 400) {
         const loc = publicRes.headers.get('location');
-        if (loc && (isAllowedServerPdfFetchUrl(loc) || loc === targetUrl || trustedInBag)) {
-          const follow = await fetch(loc, { cache: 'no-store', redirect: 'error' });
-          if (follow.ok) {
-            return serveBuffer(await follow.arrayBuffer(), follow.headers.get('content-type'));
+        if (loc) {
+          const next = new URL(loc, targetUrl).toString();
+          if (isAllowedServerPdfFetchUrl(next)) {
+            const follow = await fetch(next, { cache: 'no-store', redirect: 'error' });
+            if (follow.ok) {
+              return serveBuffer(await follow.arrayBuffer(), follow.headers.get('content-type'));
+            }
           }
         }
       } else if (publicRes.ok) {

@@ -50,6 +50,7 @@ import { openNextOrionSignerAuthorization } from './signerAuthorizations';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken.jsx';
 import type { SignerAcceptIdentity } from './signerIdentity';
 import { normalizeSignerIdentity } from './signerIdentity';
+import { isAllowedServerPdfFetchUrl } from './signedFileAccess';
 import {
   fireAndForgetNotification,
   notifyOrionSignatureProgress,
@@ -69,10 +70,22 @@ export async function resolveOriginalPdfBase64(params: {
   versions?: OrionSignatureState['versions'];
 }): Promise<{ base64: string | null; sourceUrl: string | null }> {
   const tryUrl = async (url: string): Promise<string | null> => {
+    if (!isAllowedServerPdfFetchUrl(url)) return null;
     try {
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) return null;
-      const buf = Buffer.from(await res.arrayBuffer());
+      const res = await fetch(url, { cache: 'no-store', redirect: 'manual' });
+      const follow = async (response: Response): Promise<Response | null> => {
+        if (response.status >= 300 && response.status < 400) {
+          const loc = response.headers.get('location');
+          if (!loc) return null;
+          const next = new URL(loc, url).toString();
+          if (!isAllowedServerPdfFetchUrl(next)) return null;
+          return fetch(next, { cache: 'no-store', redirect: 'error' });
+        }
+        return response.ok ? response : null;
+      };
+      const finalRes = await follow(res);
+      if (!finalRes?.ok) return null;
+      const buf = Buffer.from(await finalRes.arrayBuffer());
       return buf.byteLength > 0 ? buf.toString('base64') : null;
     } catch {
       return null;
@@ -1579,11 +1592,20 @@ export async function setOrionDocumentSignatureIntent(
     );
   }
 
+  const incomingOriginal = String(params.originalFileUrl || '').trim() || null;
+  if (
+    incomingOriginal &&
+    /^https?:\/\//i.test(incomingOriginal) &&
+    !isAllowedServerPdfFetchUrl(incomingOriginal)
+  ) {
+    throw Object.assign(new Error('URL de archivo original no permitida'), { status: 400 });
+  }
+
   const next: OrionSignatureState = {
     ...current,
     fileId,
     fileName: params.fileName ?? current.fileName ?? null,
-    originalFileUrl: params.originalFileUrl ?? current.originalFileUrl ?? null,
+    originalFileUrl: incomingOriginal ?? current.originalFileUrl ?? null,
     signatureIntent: params.intent,
   };
 

@@ -5,12 +5,28 @@ import type {
   OrionDocumentResponse,
 } from './types';
 
+/** True si la URL absoluta es el mismo origen que ORION_API_BASE_URL. */
+export function isOrionIntegrationOrigin(url: string | null | undefined): boolean {
+  const value = String(url || '').trim();
+  const { apiBaseUrl } = getOrionConfig();
+  if (!value || !apiBaseUrl) return false;
+  try {
+    const target = new URL(value);
+    const base = new URL(apiBaseUrl);
+    return target.protocol === base.protocol && target.host === base.host;
+  } catch {
+    return false;
+  }
+}
+
 /** Convierte rutas relativas de Orion en URL absoluta usando ORION_API_BASE_URL. */
 export function resolveOrionAbsoluteUrl(urlOrPath: string | null | undefined): string | null {
   const value = String(urlOrPath || '').trim();
   if (!value) return null;
-  if (/^https?:\/\//i.test(value)) return value;
   const { apiBaseUrl } = getOrionConfig();
+  if (/^https?:\/\//i.test(value)) {
+    return isOrionIntegrationOrigin(value) ? value : null;
+  }
   if (!apiBaseUrl) return null;
   return `${apiBaseUrl}${value.startsWith('/') ? value : `/${value}`}`;
 }
@@ -325,13 +341,13 @@ export async function fetchOrionProtectedFile(url: string): Promise<{
   }
 
   const absoluteUrl = resolveOrionAbsoluteUrl(url);
-  if (!absoluteUrl) {
+  if (!absoluteUrl || !isOrionIntegrationOrigin(absoluteUrl)) {
     return {
       ok: false,
-      status: 503,
+      status: 400,
       buffer: null,
       contentType: null,
-      error: 'ORION_API_BASE_URL no configurado',
+      error: 'URL de Orion no permitida',
     };
   }
 
@@ -339,7 +355,17 @@ export async function fetchOrionProtectedFile(url: string): Promise<{
     const res = await fetch(absoluteUrl, {
       headers: { Authorization: `Bearer ${cfg.integrationApiKey}` },
       cache: 'no-store',
+      redirect: 'manual',
     });
+    if (res.status >= 300 && res.status < 400) {
+      return {
+        ok: false,
+        status: 502,
+        buffer: null,
+        contentType: null,
+        error: 'Redirect de Orion no permitido',
+      };
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       return {

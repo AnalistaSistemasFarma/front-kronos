@@ -9,7 +9,7 @@
 
 DECLARE @ProcessId INT = 84;
 DECLARE @TypeAbogado INT = (SELECT id FROM types_authorization WHERE type_authorization = N'Firma — Abogado');
-DECLARE @TypeDueno INT = (SELECT id FROM types_authorization WHERE type_authorization = N'Firma — Dueño');
+ DECLARE @TypeDueno INT = (SELECT id FROM types_authorization WHERE type_authorization = N'Firma — Dueño');
 DECLARE @TypeGerente INT = (SELECT id FROM types_authorization WHERE type_authorization = N'Firma — Gerente');
 DECLARE @TypeEmpleado INT = (SELECT id FROM types_authorization WHERE type_authorization = N'Firma — Empleado');
 

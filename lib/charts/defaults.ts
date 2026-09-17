@@ -19,6 +19,25 @@ export const trendUpColor = '#16a34a';
 export const trendDownColor = '#dc2626';
 export const trendFlatColor = '#64748b';
 
+/** En gráficas de tiempo: tardar más es peor (rojo) y resolver más rápido es mejor (verde). */
+export const timeSlowerColor = trendDownColor;
+export const timeFasterColor = trendUpColor;
+
+type TimeTrend = 'up' | 'down' | 'flat' | null | undefined;
+
+export function colorForTimeTrend(trend: TimeTrend): string {
+  if (trend === 'up') return timeSlowerColor;
+  if (trend === 'down') return timeFasterColor;
+  return trendFlatColor;
+}
+
+export function rgbaForTimeTrend(trend: TimeTrend, alpha: number): string {
+  const hex = colorForTimeTrend(trend).replace('#', '');
+  const n = Number.parseInt(hex, 16);
+  if (Number.isNaN(n) || hex.length !== 6) return `rgba(100, 116, 139, ${alpha})`;
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
 export function chartAxisFont(compact = false) {
   return {
     family: chartFontFamily,

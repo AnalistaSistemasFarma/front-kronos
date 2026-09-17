@@ -8,26 +8,76 @@ export function isOrionSignedFileProxyUrl(url: string | null | undefined): boole
   return /\/api\/integrations\/orion\/signed-file/i.test(String(url || '').trim());
 }
 
+/** host === domain o subdominio (evita evilmicrosoft.com). */
+export function isHostOrSubdomain(host: string, domain: string): boolean {
+  const h = String(host || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\./, '');
+  const d = String(domain || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\./, '');
+  if (!h || !d) return false;
+  return h === d || h.endsWith(`.${d}`);
+}
+
+function sameOrigin(left: string, right: string): boolean {
+  try {
+    const a = new URL(left);
+    const b = new URL(right);
+    return a.protocol === b.protocol && a.host === b.host;
+  } catch {
+    return false;
+  }
+}
+
 /** URLs de PDF firmado en Orion exigen Bearer; no abrir en el navegador sin proxy. */
 export function isOrionProtectedFileUrl(url: string | null | undefined): boolean {
   const value = String(url || '').trim();
   if (!value) return false;
 
-  const { apiBaseUrl } = getOrionConfig();
-  if (apiBaseUrl && value.startsWith(apiBaseUrl)) return true;
+  const synerlinkSignedFile =
+    /\/api\/integrations\/synerlink\/documents\/[^/]+\/signed-file/i.test(value);
 
-  return /\/api\/integrations\/synerlink\/documents\/[^/]+\/signed-file/i.test(value);
+  if (/^https?:\/\//i.test(value)) {
+    const { apiBaseUrl } = getOrionConfig();
+    if (apiBaseUrl) {
+      return Boolean(sameOrigin(value, apiBaseUrl) && synerlinkSignedFile);
+    }
+    return synerlinkSignedFile;
+  }
+
+  return synerlinkSignedFile;
 }
+
+const PRIVATE_OR_METADATA_HOSTS = new Set([
+  'localhost',
+  '127.0.0.1',
+  '::1',
+  '0.0.0.0',
+  'metadata.google.internal',
+]);
+
+const PDF_FETCH_ALLOWLIST_DOMAINS = [
+  'sharepoint.com',
+  'sharepointonline.com',
+  '1drv.ms',
+  'onedrive.live.com',
+  'microsoft.com',
+  'microsoftonline.com',
+  'graph.microsoft.com',
+  'blob.core.windows.net',
+] as const;
 
 /**
  * ¿Se puede pedir al servidor que descargue esta URL?
- * Evita SSRF: solo Orion protegido, OneDrive/SharePoint/Graph, o http(s) público
- * que no apunte a loopback / link-local / metadata.
+ * Evita SSRF: origen de Orion configurado, o Graph/OneDrive/SharePoint.
+ * No usa suffix suelto (evilmicrosoft.com no entra) ni URLs relativas.
  */
 export function isAllowedServerPdfFetchUrl(url: string | null | undefined): boolean {
   const value = String(url || '').trim();
   if (!value) return false;
-  if (isOrionProtectedFileUrl(value)) return true;
 
   let parsed: URL;
   try {
@@ -37,39 +87,29 @@ export function isAllowedServerPdfFetchUrl(url: string | null | undefined): bool
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
 
-  const host = parsed.hostname.toLowerCase();
+  const { apiBaseUrl } = getOrionConfig();
   if (
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
-    host === '::1' ||
-    host === '0.0.0.0' ||
+    apiBaseUrl &&
+    sameOrigin(value, apiBaseUrl) &&
+    /\/api\/integrations\/synerlink\/documents\/[^/]+\/signed-file/i.test(value)
+  ) {
+    return true;
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  if (PRIVATE_OR_METADATA_HOSTS.has(host)) return false;
+  if (
     host.endsWith('.local') ||
     host.endsWith('.internal') ||
     /^10\./.test(host) ||
     /^192\.168\./.test(host) ||
     /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
-    /^169\.254\./.test(host) ||
-    host === 'metadata.google.internal'
+    /^169\.254\./.test(host)
   ) {
     return false;
   }
 
-  // Orígenes habituales de adjuntos SynerLink / Graph.
-  if (
-    host.endsWith('sharepoint.com') ||
-    host.endsWith('sharepointonline.com') ||
-    host.endsWith('1drv.ms') ||
-    host.endsWith('onedrive.live.com') ||
-    host.endsWith('microsoft.com') ||
-    host.endsWith('microsoftonline.com') ||
-    host.endsWith('graph.microsoft.com') ||
-    host.endsWith('blob.core.windows.net')
-  ) {
-    return true;
-  }
-
-  // Relativo same-app no se fetcha como URL externa aquí.
-  return false;
+  return PDF_FETCH_ALLOWLIST_DOMAINS.some((domain) => isHostOrSubdomain(host, domain));
 }
 
 export function buildOrionSignedFileProxyUrl(params: {

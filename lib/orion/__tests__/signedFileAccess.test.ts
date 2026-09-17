@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildOrionSignedFileApiUrl,
+  isOrionIntegrationOrigin,
   resolveOrionAbsoluteUrl,
 } from '../client';
 import {
   buildOrionSignedFileProxyUrl,
   isAllowedServerPdfFetchUrl,
+  isHostOrSubdomain,
   isOrionProtectedFileUrl,
   orionDocumentHasSignedCopy,
   resolveOrionPdfAccessUrl,
@@ -13,52 +15,98 @@ import {
 } from '../signedFileAccess';
 import type { OrionSignatureState } from '../types';
 
-describe('orion client url helpers', () => {
-  it('resolves relative Orion paths with api base from env', () => {
-    const prev = process.env.ORION_API_BASE_URL;
-    process.env.ORION_API_BASE_URL = 'http://localhost:3000';
-    expect(
-      resolveOrionAbsoluteUrl('/api/integrations/synerlink/documents/abc/signed-file')
-    ).toBe('http://localhost:3000/api/integrations/synerlink/documents/abc/signed-file');
+function withOrionBase<T>(base: string, fn: () => T): T {
+  const prev = process.env.ORION_API_BASE_URL;
+  process.env.ORION_API_BASE_URL = base;
+  try {
+    return fn();
+  } finally {
     if (prev === undefined) delete process.env.ORION_API_BASE_URL;
     else process.env.ORION_API_BASE_URL = prev;
+  }
+}
+
+describe('orion client url helpers', () => {
+  it('resolves relative Orion paths with api base from env', () => {
+    withOrionBase('http://localhost:3000', () => {
+      expect(
+        resolveOrionAbsoluteUrl('/api/integrations/synerlink/documents/abc/signed-file')
+      ).toBe('http://localhost:3000/api/integrations/synerlink/documents/abc/signed-file');
+    });
+  });
+
+  it('does not resolve absolute URLs outside ORION_API_BASE_URL', () => {
+    withOrionBase('http://localhost:3000', () => {
+      expect(resolveOrionAbsoluteUrl('https://evilmicrosoft.com/steal')).toBeNull();
+      expect(
+        resolveOrionAbsoluteUrl(
+          'http://localhost:3000.attacker.com/api/integrations/synerlink/documents/abc/signed-file'
+        )
+      ).toBeNull();
+      expect(
+        isOrionIntegrationOrigin(
+          'http://localhost:3000/api/integrations/synerlink/documents/abc/signed-file'
+        )
+      ).toBe(true);
+      expect(isOrionIntegrationOrigin('https://webhook.site/abc')).toBe(false);
+    });
   });
 
   it('builds canonical signed-file API url', () => {
-    const prev = process.env.ORION_API_BASE_URL;
-    process.env.ORION_API_BASE_URL = 'http://localhost:3000';
-    expect(buildOrionSignedFileApiUrl('doc-1')).toBe(
-      'http://localhost:3000/api/integrations/synerlink/documents/doc-1/signed-file'
-    );
-    if (prev === undefined) delete process.env.ORION_API_BASE_URL;
-    else process.env.ORION_API_BASE_URL = prev;
+    withOrionBase('http://localhost:3000', () => {
+      expect(buildOrionSignedFileApiUrl('doc-1')).toBe(
+        'http://localhost:3000/api/integrations/synerlink/documents/doc-1/signed-file'
+      );
+    });
   });
 });
 
 describe('signedFileAccess', () => {
   it('detects Orion protected file URLs', () => {
-    expect(
-      isOrionProtectedFileUrl(
-        'http://localhost:3000/api/integrations/synerlink/documents/abc/signed-file'
-      )
-    ).toBe(true);
-    expect(isOrionProtectedFileUrl('https://onedrive.example.com/file.pdf')).toBe(false);
+    withOrionBase('http://localhost:3000', () => {
+      expect(
+        isOrionProtectedFileUrl(
+          'http://localhost:3000/api/integrations/synerlink/documents/abc/signed-file'
+        )
+      ).toBe(true);
+      expect(
+        isOrionProtectedFileUrl(
+          'https://evil.com/api/integrations/synerlink/documents/abc/signed-file'
+        )
+      ).toBe(false);
+      expect(isOrionProtectedFileUrl('https://onedrive.example.com/file.pdf')).toBe(false);
+    });
   });
 
-  it('rejects loopback and private hosts for server PDF fetch', () => {
+  it('rejects suffix-bypass hosts and metadata for server PDF fetch', () => {
+    expect(isHostOrSubdomain('evilmicrosoft.com', 'microsoft.com')).toBe(false);
+    expect(isHostOrSubdomain('graph.microsoft.com', 'microsoft.com')).toBe(true);
     expect(isAllowedServerPdfFetchUrl('http://127.0.0.1/secret.pdf')).toBe(false);
     expect(isAllowedServerPdfFetchUrl('http://169.254.169.254/latest/meta-data')).toBe(false);
     expect(isAllowedServerPdfFetchUrl('http://192.168.1.10/file.pdf')).toBe(false);
+    expect(isAllowedServerPdfFetchUrl('https://evilmicrosoft.com/file.pdf')).toBe(false);
+    expect(isAllowedServerPdfFetchUrl('https://attacker-sharepoint.com/file.pdf')).toBe(false);
+    expect(isAllowedServerPdfFetchUrl('https://webhook.site/abc')).toBe(false);
+    expect(
+      isAllowedServerPdfFetchUrl(
+        'https://evil.com/api/integrations/synerlink/documents/abc/signed-file'
+      )
+    ).toBe(false);
     expect(
       isAllowedServerPdfFetchUrl(
         'https://contoso.sharepoint.com/sites/x/_layouts/15/download.aspx?UniqueId=abc'
       )
     ).toBe(true);
-    expect(
-      isAllowedServerPdfFetchUrl(
-        'http://localhost:3000/api/integrations/synerlink/documents/abc/signed-file'
-      )
-    ).toBe(true);
+    expect(isAllowedServerPdfFetchUrl('https://graph.microsoft.com/v1.0/me/drive/items/x')).toBe(
+      true
+    );
+    withOrionBase('http://localhost:3000', () => {
+      expect(
+        isAllowedServerPdfFetchUrl(
+          'http://localhost:3000/api/integrations/synerlink/documents/abc/signed-file'
+        )
+      ).toBe(true);
+    });
   });
 
   it('builds proxy URL with requestId and fileId', () => {
