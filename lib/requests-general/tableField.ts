@@ -28,6 +28,7 @@ export type TableColumnType =
   | 'date'
   | 'select'
   | 'yesno'
+  | 'url'
   | 'sap_items'
   | 'sap_business_partners';
 
@@ -39,6 +40,7 @@ export const TABLE_COLUMN_TYPES: { value: TableColumnType; label: string }[] = [
   { value: 'date', label: 'Fecha' },
   { value: 'select', label: 'Lista (opciones)' },
   { value: 'yesno', label: 'Sí / No' },
+  { value: 'url', label: 'URL' },
   { value: 'sap_items', label: 'Artículo (SAP)' },
   { value: 'sap_business_partners', label: 'Socio de negocio (SAP)' },
 ];

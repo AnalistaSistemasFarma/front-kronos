@@ -115,12 +115,30 @@ export async function GET(req) {
     }
 
     if (tipo_solicitud && tipo_solicitud !== '0') {
-      query += ` AND rfv.value_text LIKE '%' + @tipo_solicitud + '%'`;
+      query += `
+        AND EXISTS (
+          SELECT 1
+          FROM request_form_value rfv_t
+          INNER JOIN process_form_field f_t ON f_t.id = rfv_t.id_form_field
+          LEFT JOIN process_form_field_option o_t ON o_t.id = rfv_t.id_option
+          WHERE rfv_t.id_request_general = trg.id_request_general
+            AND f_t.field_label = 'Tipo de Solicitud'
+            AND COALESCE(rfv_t.value_text, o_t.option_label) LIKE '%' + @tipo_solicitud + '%'
+        )`;
       console.log('API assets: Agregando filtro por tipo_solicitud:', tipo_solicitud);
     }
 
     if (subtipo_solicitud  && subtipo_solicitud !== '0') {
-      query += ` AND rfv.value_text LIKE '%' +  @subtipo_solicitud + '%'`;
+      query += `
+        AND EXISTS (
+          SELECT 1
+          FROM request_form_value rfv_s
+          INNER JOIN process_form_field f_s ON f_s.id = rfv_s.id_form_field
+          LEFT JOIN process_form_field_option o_s ON o_s.id = rfv_s.id_option
+          WHERE rfv_s.id_request_general = trg.id_request_general
+            AND f_s.field_label LIKE 'Subtipo de Solicitud%'
+            AND COALESCE(rfv_s.value_text, o_s.option_label) LIKE '%' + @subtipo_solicitud + '%'
+        )`;
       console.log('API assets: Agregando filtro por subtipo_solicitud:', subtipo_solicitud);
     }
 
@@ -180,11 +198,11 @@ export async function GET(req) {
       request.input('id_solicitud', sql.Int, parseInt(id_solicitud));
     }
 
-    if (tipo_solicitud) {
+    if (tipo_solicitud && tipo_solicitud !== '0') {
       request.input('tipo_solicitud', sql.NVarChar, tipo_solicitud);
     }
 
-    if (subtipo_solicitud) {
+    if (subtipo_solicitud && subtipo_solicitud !== '0') {
       request.input('subtipo_solicitud', sql.NVarChar, subtipo_solicitud);
     }
 
