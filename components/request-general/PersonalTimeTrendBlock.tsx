@@ -12,7 +12,7 @@ import { ChartContainer } from '../dashboard/ChartContainer';
 import { useChartViewport } from '../dashboard/useChartViewport';
 import { useDashboardChartPalette } from '../dashboard/useDashboardChartPalette';
 import { buildTrendTimeChart } from '../../lib/charts/builders';
-import { trendDownColor, trendFlatColor, trendUpColor } from '../../lib/charts/defaults';
+import { colorForTimeTrend, rgbaForTimeTrend, timeFasterColor, timeSlowerColor, trendFlatColor } from '../../lib/charts/defaults';
 import {
   formatResolutionDuration,
   type TimeTrendSummary,
@@ -44,8 +44,7 @@ function TrendChip({
     );
   }
 
-  const color =
-    trend === 'up' ? trendUpColor : trend === 'down' ? trendDownColor : trendFlatColor;
+  const color = colorForTimeTrend(trend);
   const Icon = trend === 'up' ? IconTrendingUp : trend === 'down' ? IconTrendingDown : IconMinus;
 
   return (
@@ -129,11 +128,9 @@ export function PersonalTimeTrendBlock({
             withBorder
             style={{
               borderColor:
-                lastTrend === 'up'
-                  ? 'rgba(22, 163, 74, 0.4)'
-                  : lastTrend === 'down'
-                    ? 'rgba(220, 38, 38, 0.4)'
-                    : palette.blue100,
+                lastTrend === 'up' || lastTrend === 'down'
+                  ? rgbaForTimeTrend(lastTrend, 0.4)
+                  : palette.blue100,
               background: palette.chartPanelBg,
             }}
           >
@@ -183,11 +180,9 @@ export function PersonalTimeTrendBlock({
                   style={{
                     flexShrink: 0,
                     borderColor:
-                      trend === 'up'
-                        ? 'rgba(22, 163, 74, 0.35)'
-                        : trend === 'down'
-                          ? 'rgba(220, 38, 38, 0.35)'
-                          : palette.chartPanelBorder,
+                      trend === 'up' || trend === 'down'
+                        ? rgbaForTimeTrend(trend, 0.35)
+                        : palette.chartPanelBorder,
                     background: palette.chartPanelBg,
                   }}
                 >
@@ -212,14 +207,14 @@ export function PersonalTimeTrendBlock({
 
       <Text size='xs' ta='center' mt='sm' c='dimmed'>
         Cada punto es tu tiempo promedio de ese periodo ·{' '}
-        <Text span fw={700} style={{ color: trendUpColor }}>
-          ↑ Verde
+        <Text span fw={700} style={{ color: timeSlowerColor }}>
+          ↑ Rojo
         </Text>{' '}
-        = tardaste más ·{' '}
-        <Text span fw={700} style={{ color: trendDownColor }}>
-          ↓ Rojo
+        = más lento ·{' '}
+        <Text span fw={700} style={{ color: timeFasterColor }}>
+          ↓ Verde
         </Text>{' '}
-        = fuiste más rápido
+        = más rápido
       </Text>
     </Paper>
   );

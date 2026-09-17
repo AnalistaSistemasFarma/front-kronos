@@ -8,6 +8,7 @@ import {
   findOrionDocumentByExternalRef,
   findOrionDocumentByOrionId,
   getOrionDocumentFromBag,
+  hasOrionActiveSignFlow,
   mergeOrionSignatureState,
   parseOrionSignatureBagBag,
   resolveOrionSignatureIntent,
@@ -1572,11 +1573,24 @@ export async function setOrionDocumentSignatureIntent(
   const { field, bag: loadedBag } = await loadOrionFormBagEnsured(pool, params.requestId);
   const current = getOrionDocumentFromBag(loadedBag, fileId);
 
-  if (params.intent === 'view' && hasAnyCompletedSignatureLocal(current)) {
-    throw Object.assign(
-      new Error('No se puede quitar de firma un documento que ya tiene firmas'),
-      { status: 422 }
-    );
+  if (params.intent === 'view') {
+    if (hasAnyCompletedSignatureLocal(current)) {
+      throw Object.assign(
+        new Error(
+          'No se puede pasar a “Solo ver”: el documento ya tiene firmas. Debe permanecer en Orion.'
+        ),
+        { status: 422 }
+      );
+    }
+    // Documento ya en Orion / con firmantes: el destino quedó fijado; Solo ver = solo OneDrive.
+    if (hasOrionActiveSignFlow(current)) {
+      throw Object.assign(
+        new Error(
+          'No se puede pasar a “Solo ver”: el PDF ya está en Orion (preparado o con firmantes). Solo ver aplica mientras el archivo viva solo en OneDrive SynerLink.'
+        ),
+        { status: 422 }
+      );
+    }
   }
 
   const next: OrionSignatureState = {
