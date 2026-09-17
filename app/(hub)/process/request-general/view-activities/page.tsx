@@ -1585,8 +1585,11 @@ function ViewRequestPage() {
                                   hour: '2-digit',
                                   minute: '2-digit',
                                   hour12: true,
-                                  timeZone: 'America/Bogota',
-                                }).format(new Date(note.creation_date))}
+                                }).format(
+                                  new Date(
+                                    new Date(note.creation_date).getTime() + 5 * 60 * 60 * 1000
+                                  )
+                                )}
                               </Text>
                             )}
                           </div>
