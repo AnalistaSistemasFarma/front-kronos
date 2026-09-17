@@ -843,6 +843,14 @@ function RequestBoard() {
           field.field_type === 'select'
             ? `Debe seleccionar: ${field.field_label}`
             : `Debe completar: ${field.field_label}`;
+      } else if (
+        field.field_type === 'url' &&
+        !empty &&
+        typeof val === 'string' &&
+        !/^https?:\/\/\S+$/i.test(val.trim())
+      ) {
+        errors[`field_${field.id}`] =
+          `${field.field_label}: ingrese una URL válida que empiece por http:// o https://`;
       }
     }
     return errors;
@@ -2214,9 +2222,12 @@ function RequestBoard() {
                       });
                       clearFieldError();
                     };
-                    // "Valor a Pagar"/monto: no hay field_type de moneda, se detecta por label.
-                    // Muestra separador de miles (400.000) y guarda el número limpio (400000).
-                    const isMoneyField = /valor a pagar|monto/i.test(field.field_label);
+                    // Moneda: por field_type ('money') o, para campos viejos sin tipo de
+                    // moneda, detectada por label ("Valor a Pagar"/monto). Muestra separador
+                    // de miles (400.000) y guarda el número limpio (400000).
+                    const isMoneyField =
+                      field.field_type === 'money' ||
+                      /valor a pagar|monto/i.test(field.field_label);
                     const isTableField = field.field_type === TABLE_FIELD_TYPE;
                     const isOrionSignatureField = field.field_type === ORION_SIGNATURE_FIELD_TYPE;
                     return (
@@ -2340,6 +2351,32 @@ function RequestBoard() {
                             onChange={(e) => setTextValue(e.currentTarget.value)}
                             error={formErrors[`field_${field.id}`]}
                             leftSection={<IconTag size={16} />}
+                          />
+                        ) : field.field_type === 'yesno' ? (
+                          <Select
+                            label={field.field_label}
+                            placeholder='Seleccione Sí o No'
+                            required={field.required}
+                            data={[
+                              { value: 'Sí', label: 'Sí' },
+                              { value: 'No', label: 'No' },
+                            ]}
+                            value={typeof rawValue === 'string' ? rawValue : null}
+                            onChange={(value) => setTextValue(value || '')}
+                            error={formErrors[`field_${field.id}`]}
+                            clearable
+                            leftSection={<IconTag size={16} />}
+                          />
+                        ) : field.field_type === 'url' ? (
+                          <TextInput
+                            type='url'
+                            label={field.field_label}
+                            placeholder='https://…'
+                            required={field.required}
+                            value={typeof rawValue === 'string' ? rawValue : ''}
+                            onChange={(e) => setTextValue(e.currentTarget.value)}
+                            error={formErrors[`field_${field.id}`]}
+                            leftSection={<IconLink size={16} />}
                           />
                         ) : (
                           <TextInput

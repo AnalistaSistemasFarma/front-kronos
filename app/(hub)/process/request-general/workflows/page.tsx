@@ -175,7 +175,10 @@ function RequestBoard() {
     select: 'Lista',
     text: 'Texto',
     number: 'Número',
+    money: 'Moneda (COP)',
     date: 'Fecha',
+    yesno: 'Sí / No',
+    url: 'URL',
     [TABLE_FIELD_TYPE]: 'Tabla',
     [ORION_SIGNATURE_FIELD_TYPE]: 'Firma digital (Orion)',
     ...Object.fromEntries(
@@ -183,6 +186,7 @@ function RequestBoard() {
     ),
   };
 
+  // Mismos tipos básicos que las columnas de tabla (TABLE_COLUMN_TYPES) + Tabla/Firma.
   const fieldTypeSelectData = [
     {
       group: 'Básico',
@@ -190,7 +194,10 @@ function RequestBoard() {
         { value: 'select', label: 'Lista (opciones)' },
         { value: 'text', label: 'Texto' },
         { value: 'number', label: 'Número' },
+        { value: 'money', label: 'Moneda (COP)' },
         { value: 'date', label: 'Fecha' },
+        { value: 'yesno', label: 'Sí / No' },
+        { value: 'url', label: 'URL' },
         { value: TABLE_FIELD_TYPE, label: 'Tabla' },
         { value: ORION_SIGNATURE_FIELD_TYPE, label: 'Firma digital (Orion)' },
       ],
