@@ -318,25 +318,40 @@ export default function OrionAttachmentTableRow({
               ]}
             />
           ) : d.forSigning ? (
-            <Badge
-              variant='outline'
-              color={statusColor}
-              size='sm'
-              radius='xl'
-              styles={{ label: { textTransform: 'none', fontWeight: 600 } }}
+            <Tooltip
+              label={
+                d.intentLockedReason ||
+                'Para firmar · Orion. No se puede pasar a Solo ver si el documento ya está en Orion o tiene firmas.'
+              }
+              multiline
+              maw={280}
+              withArrow
             >
-              {d.displayStatus.label}
-            </Badge>
+              <Badge
+                variant='outline'
+                color={statusColor}
+                size='sm'
+                radius='xl'
+                styles={{ label: { textTransform: 'none', fontWeight: 600 } }}
+              >
+                {d.displayStatus.label}
+              </Badge>
+            </Tooltip>
           ) : d.enabled ? (
-            <Badge
-              variant='outline'
-              color='gray'
-              size='sm'
-              radius='xl'
-              styles={{ label: { textTransform: 'none', fontWeight: 600 } }}
+            <Tooltip
+              label='Solo ver · OneDrive SynerLink'
+              withArrow
             >
-              Solo ver
-            </Badge>
+              <Badge
+                variant='outline'
+                color='gray'
+                size='sm'
+                radius='xl'
+                styles={{ label: { textTransform: 'none', fontWeight: 600 } }}
+              >
+                Solo ver
+              </Badge>
+            </Tooltip>
           ) : (
             <Text size='sm' c='dimmed'>
               —
@@ -433,7 +448,9 @@ export default function OrionAttachmentTableRow({
             </Text>
             {!d.hasOrionDoc ? (
               <Text size='xs' c='dimmed' className='doc-dossier__hint'>
-                Pulse “Preparar documento”. La copia SynerLink se conserva hasta firma completa.
+                Pulse “Preparar documento” para enviarlo a Orion. Mientras no se prepare, puede
+                volver a Solo ver (OneDrive SynerLink). Tras preparar o firmar, el destino queda
+                fijado en Orion.
               </Text>
             ) : null}
 
