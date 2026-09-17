@@ -14,6 +14,66 @@ import * as https from 'https';
 
 const sapAgent = new https.Agent({ rejectUnauthorized: false });
 
+interface SapFetchInit {
+  method: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+interface SapFetchResponse {
+  ok: boolean;
+  status: number;
+  text: () => Promise<string>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- espeja la firma de Response.json() del fetch nativo
+  json: () => Promise<any>;
+}
+
+/**
+ * Reemplazo de `fetch()` para el Service Layer, via `https.request`.
+ *
+ * El `fetch` nativo de Node (undici) NO soporta la opcion `agent` de
+ * `https.Agent` (esa opcion es de `http.request`/`https.request`; undici usa
+ * `dispatcher`, que no esta disponible sin instalar el paquete `undici`
+ * aparte). Pasarle `agent` a `fetch` queda ignorado en silencio: la
+ * verificacion TLS por defecto sigue activa y falla con
+ * ERR_TLS_CERT_ALTNAME_INVALID al conectar por IP contra un certificado
+ * emitido para el nombre de dominio (ver incidente "Articulos OLP: fetch
+ * failed", 2026-09-17). `https.request` si respeta `agent`, por eso este
+ * wrapper delega en el modulo `https` en vez de `fetch`.
+ */
+function sapFetch(url: string, init: SapFetchInit): Promise<SapFetchResponse> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request(
+      {
+        hostname: u.hostname,
+        port: u.port || 443,
+        path: `${u.pathname}${u.search}`,
+        method: init.method,
+        headers: init.headers,
+        agent: sapAgent,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          const bodyText = Buffer.concat(chunks).toString('utf8');
+          const status = res.statusCode ?? 0;
+          resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            text: async () => bodyText,
+            json: async () => JSON.parse(bodyText),
+          });
+        });
+      }
+    );
+    req.on('error', reject);
+    if (init.body) req.write(init.body);
+    req.end();
+  });
+}
+
 export class SapError extends Error {
   status: number;
   detail: string;
@@ -87,7 +147,7 @@ function normalizeBase(baseUrl: string): string {
 export async function sapLogin(creds: SapCredentials): Promise<SapSession> {
   const baseUrl = normalizeBase(creds.baseUrl);
 
-  const response = await fetch(`${baseUrl}/b1s/v1/Login`, {
+  const response = await sapFetch(`${baseUrl}/b1s/v1/Login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -95,8 +155,6 @@ export async function sapLogin(creds: SapCredentials): Promise<SapSession> {
       Password: creds.password,
       CompanyDB: creds.companyDB,
     }),
-    // @ts-expect-error - Node.js fetch admite un agent para los certificados autofirmados
-    agent: sapAgent,
   });
 
   if (!response.ok) {
@@ -130,15 +188,13 @@ export async function sapGet<T = unknown>(
 ): Promise<T> {
   const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
 
-  const response = await fetch(url, {
+  const response = await sapFetch(url, {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
       Cookie: `B1SESSION=${session.sessionId}`,
       ...extraHeaders,
     },
-    // @ts-expect-error - Node.js fetch admite un agent
-    agent: sapAgent,
   });
 
   if (response.status === 401) {
@@ -193,15 +249,13 @@ export async function sapPost<T = unknown>(
 ): Promise<T> {
   const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
 
-  const response = await fetch(url, {
+  const response = await sapFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Cookie: `B1SESSION=${session.sessionId}`,
     },
     body: JSON.stringify(body),
-    // @ts-expect-error - Node.js fetch admite un agent
-    agent: sapAgent,
   });
 
   if (response.status === 401) {
@@ -237,12 +291,10 @@ export async function sapPatch(
   };
   if (replaceCollections) headers['B1S-ReplaceCollectionsOnPatch'] = 'true';
 
-  const response = await fetch(url, {
+  const response = await sapFetch(url, {
     method: 'PATCH',
     headers,
     body: JSON.stringify(body),
-    // @ts-expect-error - Node.js fetch admite un agent
-    agent: sapAgent,
   });
 
   if (response.status === 401) {
@@ -258,11 +310,9 @@ export async function sapPatch(
 export async function sapDelete(session: SapSession, path: string): Promise<void> {
   const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
 
-  const response = await fetch(url, {
+  const response = await sapFetch(url, {
     method: 'DELETE',
     headers: { Cookie: `B1SESSION=${session.sessionId}` },
-    // @ts-expect-error - Node.js fetch admite un agent
-    agent: sapAgent,
   });
 
   if (response.status === 401) {
@@ -277,11 +327,9 @@ export async function sapDelete(session: SapSession, path: string): Promise<void
 /** Cierra la sesion del Service Layer. Best-effort: no lanza si falla. */
 export async function sapLogout(session: SapSession): Promise<void> {
   try {
-    await fetch(`${session.baseUrl}/b1s/v1/Logout`, {
+    await sapFetch(`${session.baseUrl}/b1s/v1/Logout`, {
       method: 'POST',
       headers: { Cookie: `B1SESSION=${session.sessionId}` },
-      // @ts-expect-error - Node.js fetch admite un agent
-      agent: sapAgent,
     });
   } catch {
     // El cierre de sesion no es critico para la respuesta al usuario.
