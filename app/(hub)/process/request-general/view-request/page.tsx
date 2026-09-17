@@ -240,7 +240,12 @@ function getFolderPdfDownloadUrl(file: FolderFile): string | null {
   return null;
 }
 
-/** Fecha en zona Colombia. Evita RangeError si el valor no es parseable. */
+/**
+ * Fecha/hora de SQL Server (datetime local CO) para UI.
+ * El driver mssql serializa esos valores como UTC; se suma +5 h (UTC−5)
+ * igual que en el resto del módulo de solicitudes. Sin timeZone en Intl
+ * para no restar otras 5 h.
+ */
 function formatDateCO(
   value?: string | null,
   options?: { month?: 'long' | 'short'; fallback?: string }
@@ -257,8 +262,7 @@ function formatDateCO(
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
-      timeZone: 'America/Bogota',
-    }).format(parsed);
+    }).format(new Date(parsed.getTime() + 5 * 60 * 60 * 1000));
   } catch {
     return fallback;
   }
