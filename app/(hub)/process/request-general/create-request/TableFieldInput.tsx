@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
   Table,
   TextInput,
@@ -11,9 +12,21 @@ import {
   Text,
   ScrollArea,
   Group,
+  FileButton,
+  Alert,
 } from '@mantine/core';
-import { IconPlus, IconTrash } from '@tabler/icons-react';
+import {
+  IconPlus,
+  IconTrash,
+  IconDownload,
+  IconUpload,
+  IconAlertCircle,
+} from '@tabler/icons-react';
 import { isSapColumn, type TableColumn, type TableRow } from '../../../../../lib/requests-general/tableField';
+import {
+  downloadTableTemplate,
+  parseTableExcelFile,
+} from '../../../../../lib/requests-general/tableExcel';
 import SapOptionSelect from './SapOptionSelect';
 
 interface TableFieldInputProps {
@@ -40,6 +53,47 @@ export default function TableFieldInput({
   companyId,
   error,
 }: TableFieldInputProps) {
+  // Cargue masivo por Excel: resultado del último archivo procesado.
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [importSummary, setImportSummary] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleDownloadTemplate = async () => {
+    try {
+      await downloadTableTemplate(label, columns);
+    } catch (err) {
+      console.error('Error generando la plantilla Excel:', err);
+      setImportErrors(['No se pudo generar la plantilla Excel.']);
+    }
+  };
+
+  const handleExcelFile = async (file: File | null) => {
+    if (!file) return;
+    setImporting(true);
+    setImportErrors([]);
+    setImportSummary(null);
+    try {
+      const { rows: parsedRows, errors } = await parseTableExcelFile(file, columns);
+      if (parsedRows.length > 0) {
+        onChange([...rows, ...parsedRows]);
+      }
+      setImportErrors(errors);
+      setImportSummary(
+        parsedRows.length > 0
+          ? `${parsedRows.length} fila(s) cargada(s) desde ${file.name}` +
+              (errors.length > 0 ? ` (${errors.length} con errores, no cargadas)` : '')
+          : errors.length === 0
+            ? 'El archivo no tiene filas diligenciadas.'
+            : null
+      );
+    } catch (err) {
+      console.error('Error cargando el Excel:', err);
+      setImportErrors(['No se pudo procesar el archivo.']);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const updateCell = (rowIndex: number, colKey: string, value: unknown) => {
     const next = rows.map((r, i) =>
       i === rowIndex ? { ...r, [colKey]: value } : r
@@ -132,6 +186,16 @@ export default function TableFieldInput({
             label={raw === true ? 'Sí' : 'No'}
           />
         );
+      case 'url':
+        return (
+          <TextInput
+            size={commonSize}
+            type='url'
+            placeholder='https://…'
+            value={typeof raw === 'string' ? raw : ''}
+            onChange={(e) => updateCell(rowIndex, col.key, e.currentTarget.value)}
+          />
+        );
       case 'sap_items':
       case 'sap_business_partners':
         return isSapColumn(col.type) ? (
@@ -219,15 +283,67 @@ export default function TableFieldInput({
         </Table>
       </ScrollArea>
 
-      <Button
-        mt='xs'
-        size='xs'
-        variant='light'
-        leftSection={<IconPlus size={16} />}
-        onClick={addRow}
-      >
-        Agregar fila
-      </Button>
+      <Group mt='xs' gap='xs'>
+        <Button
+          size='xs'
+          variant='light'
+          leftSection={<IconPlus size={16} />}
+          onClick={addRow}
+        >
+          Agregar fila
+        </Button>
+        <Button
+          size='xs'
+          variant='subtle'
+          leftSection={<IconDownload size={16} />}
+          onClick={handleDownloadTemplate}
+        >
+          Descargar plantilla
+        </Button>
+        <FileButton
+          onChange={handleExcelFile}
+          accept='.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        >
+          {(props) => (
+            <Button
+              {...props}
+              size='xs'
+              variant='subtle'
+              loading={importing}
+              leftSection={<IconUpload size={16} />}
+            >
+              Cargar Excel
+            </Button>
+          )}
+        </FileButton>
+      </Group>
+
+      {importSummary && (
+        <Text size='xs' c={importErrors.length > 0 ? 'orange' : 'teal'} mt={6}>
+          {importSummary}
+        </Text>
+      )}
+
+      {importErrors.length > 0 && (
+        <Alert
+          color='red'
+          mt={6}
+          p='xs'
+          icon={<IconAlertCircle size={16} />}
+          title='Errores en el archivo'
+        >
+          {importErrors.slice(0, 8).map((e, i) => (
+            <Text size='xs' key={i}>
+              {e}
+            </Text>
+          ))}
+          {importErrors.length > 8 && (
+            <Text size='xs' c='dimmed'>
+              …y {importErrors.length - 8} error(es) más
+            </Text>
+          )}
+        </Alert>
+      )}
 
       {error && (
         <Text size='sm' c='red' mt={6}>
