@@ -1,7 +1,17 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Group, Select, Stack, Text, TextInput } from '@mantine/core';
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Collapse,
+  Group,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+} from '@mantine/core';
 import {
   SIGNER_ID_DOCUMENT_OPTIONS,
   formatSignerIdLabel,
@@ -18,8 +28,8 @@ type Props = {
   defaultName?: string | null;
   currentUserEmail?: string | null;
   confirming?: boolean;
-  /** Error del API / padre (visible dentro del modal). */
   externalError?: string | null;
+  onClearExternalError?: () => void;
   onCancel: () => void;
   onConfirm: (identity: SignerAcceptIdentity) => void | Promise<void>;
 };
@@ -29,6 +39,7 @@ export default function SignerIdentityForm({
   currentUserEmail,
   confirming = false,
   externalError = null,
+  onClearExternalError,
   onCancel,
   onConfirm,
 }: Props) {
@@ -46,6 +57,8 @@ export default function SignerIdentityForm({
   const [idNumber, setIdNumber] = useState(() => stored?.idNumber || '');
   const [companyName, setCompanyName] = useState(() => stored?.companyName || '');
   const [jobTitle, setJobTitle] = useState(() => stored?.jobTitle || '');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -57,10 +70,14 @@ export default function SignerIdentityForm({
   }, [externalError]);
 
   const isNitEmpresa = isCompanyNitDocumentType(idDocumentType);
-
   const previewLabel = formatSignerIdLabel(idDocumentType, idNumber);
 
   const handleSubmit = async () => {
+    if (!acceptedTerms) {
+      setFormError('Debe leer y aceptar las condiciones de firma para continuar.');
+      return;
+    }
+
     const draft = normalizeSignerIdentity(
       {
         fullName,
@@ -69,6 +86,7 @@ export default function SignerIdentityForm({
         companyName,
         companySlug: companyName,
         jobTitle,
+        acceptedTerms: true,
       },
       defaultName
     );
@@ -77,9 +95,16 @@ export default function SignerIdentityForm({
       setFormError(error);
       return;
     }
+
     setFormError(null);
+    onClearExternalError?.();
     storeSignerIdentity(currentUserEmail, draft);
-    await onConfirm(draft);
+
+    try {
+      await onConfirm({ ...draft, acceptedTerms: true });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'No se pudo confirmar la firma.');
+    }
   };
 
   return (
@@ -173,6 +198,38 @@ export default function SignerIdentityForm({
         </Text>
       )}
 
+      <Stack gap={4}>
+        <Checkbox
+          checked={acceptedTerms}
+          disabled={confirming}
+          label='He leído y acepto las condiciones de firma'
+          onChange={(e) => {
+            const checked = e.currentTarget.checked;
+            setAcceptedTerms(checked);
+            setFormError(null);
+            if (checked) onClearExternalError?.();
+          }}
+        />
+        <Text
+          size='xs'
+          c='blue'
+          style={{ cursor: 'pointer', textDecoration: 'underline', width: 'fit-content' }}
+          onClick={() => setTermsOpen((o) => !o)}
+        >
+          {termsOpen ? 'Ocultar condiciones' : 'Ver condiciones de firma'}
+        </Text>
+        <Collapse in={termsOpen}>
+          <Alert color='gray' variant='light'>
+            <Text size='xs'>
+              Al firmar, declara que actúa de forma voluntaria, que los datos indicados son
+              veraces y que autoriza el registro de su rúbrica (y huella, si aplica) sobre este
+              documento en GSS Firma / SynerLink, con efectos jurídicos conforme a la normativa
+              aplicable sobre firma electrónica.
+            </Text>
+          </Alert>
+        </Collapse>
+      </Stack>
+
       {(formError || externalError) && (
         <Alert color='red' variant='light'>
           {formError || externalError}
@@ -183,7 +240,12 @@ export default function SignerIdentityForm({
         <Button variant='default' disabled={confirming} onClick={onCancel}>
           Volver
         </Button>
-        <Button color='green' loading={confirming} onClick={() => void handleSubmit()}>
+        <Button
+          color='green'
+          loading={confirming}
+          disabled={!acceptedTerms || confirming}
+          onClick={() => void handleSubmit()}
+        >
           Confirmar y firmar
         </Button>
       </Group>

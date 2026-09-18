@@ -5,10 +5,12 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Group,
   Loader,
   Paper,
   ScrollArea,
+  SegmentedControl,
   SimpleGrid,
   Stack,
   Text,
@@ -21,15 +23,17 @@ import {
   IconSend,
   IconWriting,
 } from '@tabler/icons-react';
+import type { SignatureFieldPlacement, SignatureFieldKind } from '../../lib/orion/signatureFields';
+import { normalizeFieldKind } from '../../lib/orion/signatureFields';
+import type { OrionDocumentSignatureKind, OrionSignatureState } from '../../lib/orion/types';
 import {
   emptySignerSlot,
   mergeParticipantSources,
   resizeParticipantSlots,
   type OrionParticipant,
+  type OrionParticipantType,
   type OrionUserOption,
 } from '../../lib/orion/participants';
-import type { SignatureFieldPlacement } from '../../lib/orion/signatureFields';
-import type { OrionDocumentSignatureKind, OrionSignatureState } from '../../lib/orion/types';
 import OrionEditorSteps, { editorStepSubtitle } from './OrionEditorSteps';
 import OrionSignerAssignment from './OrionSignerAssignment';
 import OrionSignersList from './OrionSignersList';
@@ -50,6 +54,8 @@ type Props = {
   availableUsers?: OrionUserOption[];
   currentUserEmail?: string;
   currentUserName?: string;
+  /** Empresa de la solicitud (búsqueda de socios externos). */
+  companyId?: number | null;
   /** Departamento del coordinador (solo visual, v1) */
   departmentLabel?: string | null;
   initialFields?: SignatureFieldPlacement[];
@@ -106,6 +112,7 @@ export default function OrionDocumentEditor({
   availableUsers = [],
   currentUserEmail,
   currentUserName,
+  companyId = null,
   departmentLabel = null,
   initialFields = [],
   state,
@@ -138,6 +145,10 @@ export default function OrionDocumentEditor({
   });
   const [sequential, setSequential] = useState(true);
   const [activeOrder, setActiveOrder] = useState(1);
+  const [activeFieldKind, setActiveFieldKind] = useState<SignatureFieldKind>('signature');
+  const [requireFingerprint, setRequireFingerprint] = useState(() =>
+    Boolean(state.requireFingerprint)
+  );
   const [fields, setFields] = useState<SignatureFieldPlacement[]>(initialFields);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -192,7 +203,16 @@ export default function OrionDocumentEditor({
 
   const allPlaced =
     assignedParticipants.length > 0 &&
-    assignedParticipants.every((p) => fields.some((f) => f.signerOrder === p.order));
+    assignedParticipants.every((p) => {
+      const hasSig = fields.some(
+        (f) => f.signerOrder === p.order && normalizeFieldKind(f.kind) === 'signature'
+      );
+      if (!hasSig) return false;
+      if (!requireFingerprint) return true;
+      return fields.some(
+        (f) => f.signerOrder === p.order && normalizeFieldKind(f.kind) === 'fingerprint'
+      );
+    });
 
   const handleSignerCountChange = useCallback((count: number) => {
     setSignerCount(count);
@@ -200,15 +220,30 @@ export default function OrionDocumentEditor({
     setFields((prev) => prev.filter((f) => f.signerOrder <= count));
   }, []);
 
-  const handleAssignSigner = useCallback((order: number, email: string, name: string) => {
-    setOrderedParticipants((prev) =>
-      prev.map((p) =>
-        p.order === order
-          ? { ...p, email: normalizeEmail(email), name: name.trim() || email, role: 'Firmante' }
-          : p
-      )
-    );
-  }, []);
+  const handleAssignSigner = useCallback(
+    (
+      order: number,
+      email: string,
+      name: string,
+      meta?: { type?: OrionParticipantType; cardCode?: string | null }
+    ) => {
+      setOrderedParticipants((prev) =>
+        prev.map((p) =>
+          p.order === order
+            ? {
+                ...p,
+                email: normalizeEmail(email),
+                name: name.trim() || email,
+                role: 'Firmante',
+                type: meta?.type || 'internal',
+                cardCode: meta?.cardCode ?? null,
+              }
+            : p
+        )
+      );
+    },
+    []
+  );
 
   const handleClearSigner = useCallback((order: number) => {
     setOrderedParticipants((prev) =>
@@ -303,22 +338,69 @@ export default function OrionDocumentEditor({
             email: p.email,
             name: p.name,
             order: p.order,
-            type: 'internal',
+            type: p.type === 'external' ? 'external' : 'internal',
+            ...(p.cardCode ? { cardCode: p.cardCode } : {}),
           })),
       }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'No se pudieron asignar los firmantes');
-    if (data.state) onStateUpdate(data.state as OrionSignatureState);
-  }, [fileId, onStateUpdate, orderedParticipants, requestId, sequential, validateAssignments]);
+    if (data.state) {
+      const next = data.state as OrionSignatureState;
+      // Preserva type/cardCode locales si Orion no los devuelve.
+      const byEmail = new Map(
+        orderedParticipants.map((p) => [normalizeEmail(p.email), p] as const)
+      );
+      const signers = (next.signers ?? []).map((s) => {
+        const local = byEmail.get(normalizeEmail(s.email));
+        if (!local) return s;
+        return {
+          ...s,
+          type: local.type || s.type || 'internal',
+          cardCode: local.cardCode ?? s.cardCode ?? null,
+        };
+      });
+      onStateUpdate({ ...next, signers, requireFingerprint });
+    }
+  }, [fileId, onStateUpdate, orderedParticipants, requestId, requireFingerprint, sequential, validateAssignments]);
 
   const persistFields = useCallback(async () => {
-    const res = await fetch('/api/integrations/orion/signature-fields', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId, fileId, signatureFields: fields }),
-    });
-    const data = await res.json().catch(() => ({}));
+    const postFields = () =>
+      fetch('/api/integrations/orion/signature-fields', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, fileId, signatureFields: fields }),
+      });
+
+    let res = await postFields();
+    let data = await res.json().catch(() => ({}));
+
+    const tokenStale =
+      !res.ok &&
+      (res.status === 401 ||
+        res.status === 403 ||
+        /embed|token|expir|inv[aá]lid/i.test(String(data.error || '')));
+
+    if (tokenStale) {
+      // Renueva embedUrl en Orion/bag y reintenta guardar ubicaciones.
+      const refreshRes = await fetch('/api/integrations/orion/ensure-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId,
+          fileId,
+          fileName: fileName ?? undefined,
+          refresh: true,
+        }),
+      });
+      const refreshData = await refreshRes.json().catch(() => ({}));
+      if (refreshRes.ok && refreshData.state) {
+        onStateUpdate(refreshData.state as OrionSignatureState);
+      }
+      res = await postFields();
+      data = await res.json().catch(() => ({}));
+    }
+
     if (!res.ok) {
       throw new Error(data.error || 'No se guardaron las ubicaciones en Orion');
     }
@@ -327,7 +409,7 @@ export default function OrionDocumentEditor({
     } else {
       onStateUpdate({ ...state, signatureFields: fields });
     }
-  }, [fields, fileId, onStateUpdate, requestId, state]);
+  }, [fields, fileId, fileName, onStateUpdate, requestId, state]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -610,6 +692,7 @@ export default function OrionDocumentEditor({
               availableUsers={availableUsers}
               currentUserEmail={currentUserEmail}
               currentUserName={currentUserName}
+              companyId={companyId}
               signerStatuses={signerStatuses}
               readOnly={!assignmentsEditable}
               onSignerCountChange={handleSignerCountChange}
@@ -619,6 +702,15 @@ export default function OrionDocumentEditor({
               onClear={handleClearSigner}
               onReorder={signerCount > 1 && assignmentsEditable ? reorderParticipant : undefined}
             />
+            {assignmentsEditable ? (
+              <Checkbox
+                mt='md'
+                label='Requiere huella dactilar'
+                description='Además de la rúbrica, coloque una caja de huella por firmante.'
+                checked={requireFingerprint}
+                onChange={(e) => setRequireFingerprint(e.currentTarget.checked)}
+              />
+            ) : null}
           </ScrollArea>
         )}
 
@@ -658,8 +750,20 @@ export default function OrionDocumentEditor({
                   Orden de firma
                 </Text>
                 <Text size='xs' c='dimmed'>
-                  Seleccione un firmante y ubique su firma en el documento.
+                  Seleccione un firmante y el tipo de caja; luego ubíquela en el PDF.
                 </Text>
+                <SegmentedControl
+                  mt='sm'
+                  size='xs'
+                  fullWidth
+                  value={activeFieldKind}
+                  onChange={(v) => setActiveFieldKind(v as SignatureFieldKind)}
+                  data={[
+                    { label: 'Firma', value: 'signature' },
+                    { label: 'Huella', value: 'fingerprint' },
+                    { label: 'Validación', value: 'validation' },
+                  ]}
+                />
               </Box>
               <ScrollArea style={{ flex: 1 }} offsetScrollbars type='scroll' scrollbarSize={8}>
                 <Box p='md'>
@@ -694,6 +798,7 @@ export default function OrionDocumentEditor({
                 documentId={documentId}
                 participants={assignedParticipants}
                 activeOrder={activeOrder}
+                activeKind={activeFieldKind}
                 fields={fields}
                 onChange={setFields}
               />

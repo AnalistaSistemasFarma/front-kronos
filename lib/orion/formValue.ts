@@ -293,6 +293,22 @@ function mergeOrionVersions(
   return [...byId.values()];
 }
 
+function mergeOrionSignerInvites(
+  current?: OrionSignatureState['signerInvites'],
+  patch?: OrionSignatureState['signerInvites']
+): OrionSignatureState['signerInvites'] {
+  if (patch == null) return current;
+  if (current == null || current.length === 0) return patch;
+  const byEmail = new Map<string, NonNullable<OrionSignatureState['signerInvites']>[number]>();
+  for (const i of current) {
+    byEmail.set(String(i.email || '').trim().toLowerCase(), i);
+  }
+  for (const i of patch) {
+    byEmail.set(String(i.email || '').trim().toLowerCase(), i);
+  }
+  return [...byEmail.values()];
+}
+
 export function mergeOrionSignatureState(
   current: OrionSignatureState,
   patch: Partial<OrionSignatureState>
@@ -303,6 +319,7 @@ export function mergeOrionSignatureState(
     signers: mergeOrionSigners(current.signers, patch.signers),
     signatureFields: patch.signatureFields ?? current.signatureFields,
     versions: mergeOrionVersions(current.versions, patch.versions),
+    signerInvites: mergeOrionSignerInvites(current.signerInvites, patch.signerInvites),
     // No degradar URL firmada si el patch no trae una nueva
     signedFileUrl:
       patch.signedFileUrl !== undefined && patch.signedFileUrl !== null && patch.signedFileUrl !== ''

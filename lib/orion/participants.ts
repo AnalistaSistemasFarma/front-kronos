@@ -1,15 +1,23 @@
 export type OrionParticipantRole = 'Solicitante' | 'Asignado' | 'Firmante';
 
+export type OrionParticipantType = 'internal' | 'external';
+
 export type OrionParticipant = {
   order: number;
   email: string;
   name: string;
   role: OrionParticipantRole;
   signatureDataUrl?: string | null;
+  /** internal = usuario SynerLink; external = socio de negocio. */
+  type?: OrionParticipantType;
+  /** CardCode SAP cuando type = external. */
+  cardCode?: string | null;
 };
 
 function normalizeEmail(email?: string | null): string {
-  return String(email || '').trim().toLowerCase();
+  return String(email || '')
+    .trim()
+    .toLowerCase();
 }
 
 function parseUserLabelName(label: string): string {
@@ -28,10 +36,6 @@ export function buildOrionParticipants(_input?: {
   users?: Array<{ value: string; label: string }>;
   tasks?: Array<{ name?: string; id_assigned?: number }>;
 }): OrionParticipant[] {
-  // Firmantes Orion = elección explícita en el editor (orden y personas).
-  // No prellenar con solicitante / encargado / responsables de tareas del flujo:
-  // en FIRMA la 1.ª tarea "Preparar documento…" estaba asignada a Juan Fonseca
-  // y terminaba como firmante 1 en modo secuencial (los demás quedaban en espera).
   void _input;
   return [];
 }
@@ -44,7 +48,13 @@ export function parseUserOptionLabel(label: string): string {
 
 export function mergeParticipantSources(
   suggested: OrionParticipant[],
-  signers?: Array<{ email?: string; name?: string; order?: number }> | null
+  signers?: Array<{
+    email?: string;
+    name?: string;
+    order?: number;
+    type?: string;
+    cardCode?: string | null;
+  }> | null
 ): OrionParticipant[] {
   if (signers?.length) {
     return signers
@@ -55,13 +65,15 @@ export function mergeParticipantSources(
         email: normalizeEmail(s.email),
         name: s.name?.trim() || s.email || `Firmante ${i + 1}`,
         role: 'Firmante' as OrionParticipantRole,
+        type: String(s.type || '').toLowerCase() === 'external' ? 'external' : 'internal',
+        cardCode: s.cardCode ?? null,
       }));
   }
   return suggested.map((p, i) => ({ ...p, order: i + 1 }));
 }
 
 export function emptySignerSlot(order: number): OrionParticipant {
-  return { order, email: '', name: '', role: 'Firmante' };
+  return { order, email: '', name: '', role: 'Firmante', type: 'internal', cardCode: null };
 }
 
 export function resizeParticipantSlots(

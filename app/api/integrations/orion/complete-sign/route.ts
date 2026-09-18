@@ -33,6 +33,8 @@ export async function POST(req: Request) {
     const fileId = body.fileId ? String(body.fileId).trim() : null;
     const signatureDataUrl =
       typeof body.signatureDataUrl === 'string' ? body.signatureDataUrl.trim() : null;
+    const fingerprintDataUrl =
+      typeof body.fingerprintDataUrl === 'string' ? body.fingerprintDataUrl.trim() : null;
     if (!Number.isInteger(requestId) || requestId <= 0) {
       return NextResponse.json({ error: 'requestId inválido' }, { status: 400 });
     }
@@ -57,6 +59,7 @@ export async function POST(req: Request) {
         userEmail: email,
         fileId,
         signatureDataUrl,
+        fingerprintDataUrl,
         identity,
       })
     );

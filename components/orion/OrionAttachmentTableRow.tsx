@@ -33,6 +33,7 @@ import {
   buildOrionSignedFileProxyUrl,
   orionDocumentHasSignedCopy,
 } from '../../lib/orion/signedFileAccess';
+import OrionFirmantesInviteModal from './OrionFirmantesInviteModal';
 
 type RowProps = OrionAttachmentSignActionsProps & {
   rowNumber?: number | string;
@@ -117,6 +118,7 @@ export default function OrionAttachmentTableRow({
   const [extensionLoading, setExtensionLoading] = useState(false);
   const [renewLoading, setRenewLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [firmantesOpen, setFirmantesOpen] = useState(false);
 
   const applyDocs = (documents: Record<string, OrionSignatureState>) => {
     props.onDocumentsUpdate?.(documents);
@@ -252,6 +254,7 @@ export default function OrionAttachmentTableRow({
     ) : null;
 
   return (
+    <>
     <Table.Tr className={isClosed ? 'doc-row doc-row--closed' : 'doc-row'}>
       <Table.Td data-label='N.º' className='doc-cell doc-cell--mono doc-col--secondary' style={{ width: 56, whiteSpace: 'nowrap' }}>
         <Text size='sm' c='dimmed'>
@@ -388,13 +391,6 @@ export default function OrionAttachmentTableRow({
           <div className='doc-dossier'>
             <div className='doc-dossier__rail' />
             <Stack gap={4} className='doc-dossier__body'>
-              {viewOnlineHref ? (
-                <ActionLink
-                  icon={<IconEye size={15} stroke={1.6} />}
-                  label='Ver en línea'
-                  href={viewOnlineHref}
-                />
-              ) : null}
               <ActionLink
                 icon={<IconFile size={15} stroke={1.6} />}
                 label='Abrir / descargar'
@@ -417,13 +413,6 @@ export default function OrionAttachmentTableRow({
               >
                 Solo ver
               </Text>
-              {viewOnlineHref ? (
-                <ActionLink
-                  icon={<IconEye size={15} stroke={1.6} />}
-                  label='Ver en línea'
-                  href={viewOnlineHref}
-                />
-              ) : null}
               <ActionLink
                 icon={<IconFile size={15} stroke={1.6} />}
                 label='Descargar'
@@ -480,15 +469,7 @@ export default function OrionAttachmentTableRow({
             ) : null}
 
             <Stack gap={2} mt={2}>
-              {viewOnlineHref ? (
-                <ActionLink
-                  icon={<IconEye size={15} stroke={1.6} />}
-                  label='Ver en línea'
-                  href={viewOnlineHref}
-                />
-              ) : null}
-
-              {/* Descargar = binario; Ver en línea = visor (arriba). */}
+              {/* Descargar = binario; ojito en nombre = visor en línea. */}
               {downloadHref ? (
                 <ActionLink
                   icon={<IconFile size={15} stroke={1.6} />}
@@ -507,13 +488,16 @@ export default function OrionAttachmentTableRow({
                 />
               ) : null}
 
+              {d.hasOrionDoc && d.signers.length > 0 ? (
+                <ActionLink
+                  icon={<IconUsers size={15} stroke={1.6} />}
+                  label='Firmantes'
+                  onClick={() => setFirmantesOpen(true)}
+                />
+              ) : null}
+
               {!isClosed && d.canEditDocument && d.api ? (
                 <>
-                  <ActionLink
-                    icon={<IconUsers size={15} stroke={1.6} />}
-                    label='Firmantes'
-                    onClick={() => openEditor(1)}
-                  />
                   <ActionLink
                     icon={<IconPencil size={15} stroke={1.6} />}
                     label='Colocar firmas'
@@ -577,5 +561,15 @@ export default function OrionAttachmentTableRow({
         )}
       </Table.Td>
     </Table.Tr>
+    {props.requestId && props.fileId ? (
+      <OrionFirmantesInviteModal
+        opened={firmantesOpen}
+        onClose={() => setFirmantesOpen(false)}
+        requestId={props.requestId}
+        fileId={props.fileId}
+        fileName={props.fileName}
+      />
+    ) : null}
+    </>
   );
 }

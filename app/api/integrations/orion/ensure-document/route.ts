@@ -18,7 +18,7 @@ import { syncOrionSignerTasks } from '@/lib/orion/signerTasks';
 import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
 import type { OrionSignatureState } from '@/lib/orion/types';
 import { resolveOrionPermissions } from '@/lib/orion/permissions';
-import { userHasPendingOrionSignerAuthBatch } from '@/lib/orion/signerAuthorizations';
+import { reconcileDuplicateOrionSignerAuths, userHasPendingOrionSignerAuthBatch } from '@/lib/orion/signerAuthorizations';
 import { getCurrentPendingSigner } from '@/lib/orion/signerStatus';
 
 function readFileId(source: { get?: (k: string) => string | null } | Record<string, unknown>): string | null {
@@ -146,6 +146,11 @@ export async function GET(req: Request) {
             );
           });
           if (myTurnFiles.length > 0) {
+            await reconcileDuplicateOrionSignerAuths(pool, {
+              requestId,
+              userId: String(actorId),
+              fileIds: myTurnFiles,
+            });
             const pendingMap = await userHasPendingOrionSignerAuthBatch(pool, {
               requestId,
               userId: String(actorId),
@@ -231,6 +236,11 @@ export async function GET(req: Request) {
           );
         });
         if (myTurnFiles.length > 0) {
+          await reconcileDuplicateOrionSignerAuths(pool, {
+            requestId,
+            userId: String(actorId),
+            fileIds: myTurnFiles,
+          });
           const pendingMap = await userHasPendingOrionSignerAuthBatch(pool, {
             requestId,
             userId: String(actorId),

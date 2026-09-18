@@ -53,6 +53,8 @@ type Props = {
   participants?: OrionParticipant[];
   availableUsers?: OrionUserOption[];
   currentUserName?: string;
+  /** Empresa de la solicitud (socios externos). */
+  companyId?: number | null;
   onDocumentsChange?: (documents: Record<string, OrionSignatureState>) => void;
   workflowLocked?: boolean;
   /** Deep-link: abrir modal al montar */
@@ -142,6 +144,7 @@ export default function OrionSignaturePanel({
   participants = [],
   availableUsers = [],
   currentUserName,
+  companyId = null,
   onDocumentsChange,
   workflowLocked = false,
   autoOpenFileId = null,
@@ -543,6 +546,12 @@ export default function OrionSignaturePanel({
         setIdentityError(
           'No hay documento activo para firmar. Cierre el modal e intente de nuevo desde Firmar.'
         );
+        return false;
+      }
+      // Sin identidad del modal: abrir formulario (checkbox + datos). No bloquear por terms en API.
+      if (!identity) {
+        setIdentityError(null);
+        setIdentityModalOpen(true);
         return false;
       }
       setAcceptLoading(true);
@@ -952,9 +961,18 @@ export default function OrionSignaturePanel({
             }));
           }
 
-          // Auth FIRMA pendiente: intentar cerrarla aquí y seguir a firmar en la misma
-          // solicitud. Si no se puede, ir a Autorizaciones (primer paso).
-          if (data.pendingAuthorization) {
+          // Auth FIRMA pendiente de ESTE PDF: consumir y seguir a firmar.
+          // Si closed=0 (ya no había abierta), continuar — no redirigir a Autorizaciones
+          // (evita el bucle cuando la auth ya estaba AUTORIZADA).
+          const pendingForFile =
+            data.pendingAuthorizationByFile &&
+            typeof data.pendingAuthorizationByFile === 'object'
+              ? Boolean(
+                  (data.pendingAuthorizationByFile as Record<string, boolean>)[file.fileId]
+                )
+              : Boolean(data.pendingAuthorization);
+
+          if (pendingForFile) {
             try {
               const consumeRes = await fetch('/api/integrations/orion/consume-auth', {
                 method: 'POST',
@@ -965,19 +983,11 @@ export default function OrionSignaturePanel({
                 }),
               });
               if (consumeRes.ok) {
-                const consumeData = await consumeRes.json().catch(() => ({}));
-                if (Number(consumeData.closed) > 0) {
-                  setPendingAuthorizationByFile((prev) => ({
-                    ...prev,
-                    [file.fileId]: false,
-                  }));
-                } else if (!skipAuthRedirect) {
-                  setError(
-                    'Primero debe autorizar la firma. Después volverá a la solicitud para firmar.'
-                  );
-                  window.location.href = '/process/authorization';
-                  return;
-                }
+                setPendingAuthorizationByFile((prev) => ({
+                  ...prev,
+                  [file.fileId]: false,
+                }));
+                // closed > 0 o 0: en ambos casos ya no hay pendiente usable → firmar.
               } else if (!skipAuthRedirect) {
                 setError(
                   'Primero debe autorizar la firma. Después volverá a la solicitud para firmar.'
@@ -1571,6 +1581,7 @@ export default function OrionSignaturePanel({
           currentUserEmail={currentUserEmail}
           confirming={acceptLoading}
           externalError={identityError}
+          onClearExternalError={() => setIdentityError(null)}
           onCancel={() => {
             if (!acceptLoading) {
               setIdentityModalOpen(false);
@@ -1782,6 +1793,7 @@ export default function OrionSignaturePanel({
             availableUsers={availableUsers}
             currentUserEmail={currentUserEmail}
             currentUserName={currentUserName}
+            companyId={companyId}
             participants={participants.map((p) => ({
               ...p,
               signatureDataUrl:

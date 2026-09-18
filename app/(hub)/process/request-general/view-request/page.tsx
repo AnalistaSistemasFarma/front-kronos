@@ -2340,6 +2340,7 @@ function ViewRequestPage() {
                 currentUserName={session?.user?.name ?? undefined}
                 onDocumentsChange={handleOrionDocumentsChange}
                 workflowLocked={orionWorkflowLocked}
+                companyId={request?.id_company}
                 autoOpenFileId={deepLinkFileId}
                 autoOpenAction={deepLinkAction}
                 autoOpenFileName={autoOpenFile?.name || fallbackManageOrSignFile?.name || null}

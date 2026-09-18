@@ -138,12 +138,16 @@ export async function sendOrionDocument(
   );
 }
 
+/** Consentimiento legal que exige Orion accept-sign (UI vive en SynerLink). */
+export const ORION_SIGNING_LEGAL_CONSENT_VERSION = 'co-ley527-d2364-v1';
+
 /** Firmante interno acepta y aplica su rúbrica guardada (sin embed de gestión). */
 export async function acceptOrionSignerTurn(
   orionDocumentId: string,
   email: string,
   options?: {
     signatureDataUrl?: string | null;
+    fingerprintDataUrl?: string | null;
     originalPdfBase64?: string | null;
     fullName?: string | null;
     idDocumentType?: string | null;
@@ -152,14 +156,21 @@ export async function acceptOrionSignerTurn(
     companyName?: string | null;
     companyNit?: string | null;
     jobTitle?: string | null;
+    /** Si false, no se envía consentimiento (Orion rechazará). Default: true. */
+    legalConsentAccepted?: boolean | null;
+    legalConsentKind?: 'ELECTRONIC' | 'DIGITAL' | null;
   }
 ): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
-  const payload: Record<string, string> = {
+  const payload: Record<string, string | boolean> = {
     email: email.trim().toLowerCase(),
   };
   const dataUrl = String(options?.signatureDataUrl || '').trim();
   if (dataUrl.startsWith('data:image/')) {
     payload.signatureDataUrl = dataUrl;
+  }
+  const fingerprintDataUrl = String(options?.fingerprintDataUrl || '').trim();
+  if (fingerprintDataUrl.startsWith('data:image/')) {
+    payload.fingerprintDataUrl = fingerprintDataUrl;
   }
   const originalPdfBase64 = String(options?.originalPdfBase64 || '')
     .trim()
@@ -181,6 +192,15 @@ export async function acceptOrionSignerTurn(
   if (companyNit) payload.companyNit = companyNit;
   const jobTitle = String(options?.jobTitle || '').trim();
   if (jobTitle) payload.jobTitle = jobTitle;
+
+  // Orion exige legalConsent* (no acceptedTerms). SynerLink ya validó el checkbox.
+  if (options?.legalConsentAccepted !== false) {
+    payload.legalConsentAccepted = true;
+    payload.legalConsentKind =
+      options?.legalConsentKind === 'DIGITAL' ? 'DIGITAL' : 'ELECTRONIC';
+    payload.legalConsentVersion = ORION_SIGNING_LEGAL_CONSENT_VERSION;
+    payload.legalConsentAcceptedAt = new Date().toISOString();
+  }
 
   return orionFetch<OrionDocumentResponse>(
     `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/accept-sign`,
@@ -283,17 +303,36 @@ type OrionSignatureFieldInput = {
   width: number;
   height: number;
   label?: string;
+  kind?: 'signature' | 'fingerprint' | 'validation';
 };
 
-/** Persiste recuadros de firma en Orion (embed API + token). */
+/**
+ * Persiste recuadros de firma en Orion.
+ * Preferido: POST /documents/{id}/signature-fields con Bearer de integración.
+ * Fallback: embed API + token (bags viejos / Orion sin la ruta nueva).
+ */
 export async function saveOrionSignatureFields(params: {
   orionDocumentId: string;
-  embedToken: string;
+  embedToken?: string | null;
   signatureFields: OrionSignatureFieldInput[];
 }): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+  const id = encodeURIComponent(params.orionDocumentId);
+  const viaKey = await orionFetch<OrionDocumentResponse>(
+    `/api/integrations/synerlink/documents/${id}/signature-fields`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ signatureFields: params.signatureFields }),
+    }
+  );
+  if (viaKey.ok) return viaKey;
+
+  // 404/405: Orion aún no expone la ruta → fallback embed.
+  const embedToken = String(params.embedToken || '').trim();
+  if (!embedToken) return viaKey;
+
   const qs = new URLSearchParams({
     docId: params.orionDocumentId,
-    token: params.embedToken,
+    token: embedToken,
     action: 'signatureFields',
   });
   return orionFetch<OrionDocumentResponse>(

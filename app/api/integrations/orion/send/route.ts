@@ -24,6 +24,8 @@ import {
   notifyOrionSignerInvited,
 } from '@/lib/notificationEvents.js';
 import { getCurrentPendingSigner } from '@/lib/orion/signerStatus';
+import { ensureExternalSignerInvites, markInviteSent } from '@/lib/orion/signerInvites';
+import { sendExternalSignerInviteEmail } from '@/lib/orion/inviteEmail';
 
 /** POST /api/integrations/orion/send — enviar documento a firma en Orion */
 export async function POST(req: Request) {
@@ -81,10 +83,51 @@ export async function POST(req: Request) {
         ...nextState,
         signers: applyPendingSignerTurnDeadline(nextState.signers),
       };
-      const bag = setOrionDocumentInBag(synced?.bag ?? loaded.bag, fileId, nextState);
+
+      // Invites SynerLink para firmantes external (URL pública).
+      const origin =
+        req.headers.get('origin') ||
+        process.env.NEXTAUTH_URL ||
+        process.env.APP_URL ||
+        null;
+      const ensured = ensureExternalSignerInvites({
+        state: nextState,
+        requestId,
+        fileId,
+        origin,
+      });
+      nextState = ensured.state;
+
+      let bag = setOrionDocumentInBag(synced?.bag ?? loaded.bag, fileId, nextState);
       await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
 
       const ctx = await getRequestOrionContext(pool, requestId);
+
+      // Correo automático a socios externos con URL SynerLink (logo GSS).
+      for (const created of ensured.created) {
+        try {
+          await sendExternalSignerInviteEmail({
+            to: created.email,
+            signerName:
+              nextState.signers?.find(
+                (s) =>
+                  String(s.email || '')
+                    .trim()
+                    .toLowerCase() === created.email
+              )?.name || null,
+            documentTitle: nextState.fileName,
+            requestSubject: ctx?.subject_request ?? null,
+            inviteUrl: created.absoluteUrl,
+          });
+          nextState = markInviteSent(nextState, created.email);
+        } catch (err) {
+          console.warn('[orion/send] Correo invite externo:', created.email, err);
+        }
+      }
+      if (ensured.created.length > 0) {
+        bag = setOrionDocumentInBag(bag, fileId, nextState);
+        await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
+      }
 
       const authResult = await createOrionSignerAuthorizations(pool, {
         requestId,

@@ -36,6 +36,8 @@ export type SignerAcceptIdentity = {
   companyName?: string | null;
   companyNit?: string | null;
   jobTitle?: string | null;
+  /** Aceptación de condiciones en SynerLink (no se envía a Orion). */
+  acceptedTerms?: boolean;
 };
 
 export function formatSignerIdLabel(
@@ -116,6 +118,7 @@ export function normalizeSignerIdentity(
     companyName: isNit ? companyName : null,
     companyNit: isNit && idNumber ? idNumber : null,
     jobTitle: isNit ? jobTitle : null,
+    acceptedTerms: identity.acceptedTerms === true ? true : undefined,
   };
 }
 

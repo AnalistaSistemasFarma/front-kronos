@@ -70,6 +70,9 @@ export function resolveOrionPdfUrl(
   const ordered = listOrionDocumentVersions(state);
   const signedVersions = ordered.filter((v) => v.kind !== 'original');
   if (signedVersions.length > 0) {
+    // Preferir validated (DOCUMENTO VALIDADO) como vigente.
+    const validated = [...signedVersions].reverse().find((v) => v.kind === 'validated');
+    if (validated) return validated.url;
     return signedVersions[signedVersions.length - 1]!.url;
   }
 
@@ -253,7 +256,7 @@ export function applyOrionVersionHistory(params: {
   if (
     workingUrl &&
     String(merged.status || '').toUpperCase() === 'FIRMADO' &&
-    !versions.some((v) => v.kind === 'final')
+    !versions.some((v) => v.kind === 'final' || v.kind === 'validated')
   ) {
     versions.push({
       id: `final-${merged.signedAt ?? Date.now()}`,
