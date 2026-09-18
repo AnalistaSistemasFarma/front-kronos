@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import PortalFormacion from './PortalFormacion';
 import PortalNavegacion, { useSeccionActiva, type SeccionNav } from './PortalNavegacion';
 
 /** Cada cuánto rota sola la imagen principal del carrusel de anuncios. */
@@ -9,6 +10,9 @@ const ROTACION_CARRUSEL_MS = 6000;
 /** ids estables de sección, para el panel de navegación y el scroll-spy. */
 const ID_SECCION_ANUNCIOS = 'portal-th-anuncios';
 const ID_SECCION_POLITICAS = 'portal-th-politicas';
+/** Sección nueva "tipo Moodle" — cursos, materiales, progreso y certificado.
+ *  Pedido de Cristian (2026-09-18). Va al final, después de Políticas. */
+const ID_SECCION_FORMACION = 'portal-th-formacion';
 /** No es una sección con scroll: es un botón del panel que abre su propia
  *  ventana de vista previa (ver `irASeccion`), igual que un documento. */
 const ID_SECCION_CONTACTOS = 'portal-th-contactos';
@@ -340,6 +344,7 @@ export default function PortalContenido({
   const secciones: SeccionNav[] = [
     ...(mostrarAnuncios ? [{ id: ID_SECCION_ANUNCIOS, etiqueta: 'Anuncios' }] : []),
     { id: ID_SECCION_POLITICAS, etiqueta: 'Políticas y reglamentos' },
+    { id: ID_SECCION_FORMACION, etiqueta: 'Formación' },
     { id: ID_SECCION_CONTACTOS, etiqueta: 'Contactos' },
     // Cuando el portal tenga más secciones, se agregan acá — el panel de
     // navegación no necesita ningún otro cambio.
@@ -487,6 +492,15 @@ export default function PortalContenido({
                 ))}
               </div>
             )}
+          </section>
+
+          {/* FORMACIÓN — sección nueva "tipo Moodle" al final de la página
+              (pedido de Cristian, 2026-09-18): cursos, materiales, progreso y
+              certificado. Vive en su propio componente porque hace sus
+              propios fetch — ver `PortalFormacion.tsx`. */}
+          <section id={ID_SECCION_FORMACION} className='portal-th__seccion'>
+            <h2>Formación</h2>
+            <PortalFormacion />
           </section>
         </div>
       </div>

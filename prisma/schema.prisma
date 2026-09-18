@@ -991,6 +991,123 @@ model PortalAccessCode {
   @@map("portal_access_code")
 }
 
+/// ══════════════════ PORTAL DE TALENTO HUMANO — FORMACIÓN ═══════════════════
+/// Pedido de Cristian Baldión (2026-09-18): una sección "tipo Moodle" al
+/// final del portal — cursos con materiales (documento o enlace), una barra
+/// de progreso que ve el formador Y el estudiante, y un certificado al llegar
+/// al 100%.
+///
+/// La identidad sigue siendo un CORREO, nunca un FK a `User`: el portal lo
+/// usa gente sin usuario en SynerLink (ver `lib/portal/acceso.ts`). Por eso
+/// tanto el formador (`created_by`) como el estudiante (`student_email`) se
+/// guardan como texto, igual que `uploaded_by` en `portal_banner`.
+///
+/// Un curso "publicado" (`active = true`) es visible para cualquier persona
+/// identificada en el portal, que se autoinscribe al abrirlo — no hay
+/// aprobación de un formador para entrar, a propósito: es lo más simple que
+/// no bloquea a nadie. Si más adelante Talento Humano pide inscripción con
+/// aprobación, es un campo de estado nuevo en `PortalCourseEnrollment`, no un
+/// cambio de estas tablas.
+
+/// Un curso.
+model PortalCourse {
+  id          Int      @id @default(autoincrement())
+  title       String   @db.NVarChar(255)
+  description String?  @db.NVarChar(Max)
+  active      Boolean  @default(true)
+  /// Correo de quien lo creó (el formador).
+  created_by  String   @db.NVarChar(255)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  materials    PortalCourseMaterial[]
+  enrollments  PortalCourseEnrollment[]
+  certificates PortalCertificate[]
+
+  @@index([active, id(sort: Desc)])
+  @@map("portal_course")
+}
+
+/// Un material del curso: un documento cargado (bytes en la base, igual que
+/// `portal_banner.contenido` — se reutiliza el mismo mecanismo en vez de
+/// inventar uno nuevo, ver `app/api/portal/courses/[id]/materials/route.ts`)
+/// o un enlace externo (cuestionario de Google/Microsoft Forms, video,
+/// cualquier URL).
+model PortalCourseMaterial {
+  id        Int          @id @default(autoincrement())
+  course_id Int
+  course    PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  /// 'DOCUMENT' | 'LINK'. Texto y no enum: el provider sqlserver no los
+  /// soporta (mismo criterio que el resto de este esquema).
+  type      String       @db.NVarChar(20)
+  title     String       @db.NVarChar(255)
+  /// Para mostrar los materiales en el orden que definió el formador.
+  orden     Int          @default(0)
+  /// Solo si type = 'LINK'.
+  url       String?      @db.NVarChar(1000)
+  /// Solo si type = 'DOCUMENT' — mismos tres campos que `portal_banner`.
+  file_name String?      @db.NVarChar(255)
+  mime      String?      @db.NVarChar(100)
+  contenido Bytes?       @db.VarBinary(Max)
+  /// Si hace falta marcarlo como completado para que el curso llegue a 100%.
+  required  Boolean      @default(true)
+  created_at DateTime    @default(now())
+
+  progress PortalMaterialProgress[]
+
+  @@index([course_id, orden])
+  @@map("portal_course_material")
+}
+
+/// Quién está inscrito en qué curso. Autoinscripción al abrir un curso
+/// publicado — ver nota arriba.
+model PortalCourseEnrollment {
+  id             Int          @id @default(autoincrement())
+  course_id      Int
+  course         PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  student_email  String       @db.NVarChar(255)
+  enrolled_at    DateTime     @default(now())
+
+  @@unique([course_id, student_email])
+  @@map("portal_course_enrollment")
+}
+
+/// Progreso de UN estudiante en UN material. El % del curso se calcula
+/// contando filas de esta tabla contra el total de materiales — no se guarda
+/// un porcentaje aparte para no tener dos fuentes de verdad que se puedan
+/// desincronizar.
+model PortalMaterialProgress {
+  id             Int                  @id @default(autoincrement())
+  material_id    Int
+  material       PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  student_email  String               @db.NVarChar(255)
+  completed_at   DateTime             @default(now())
+
+  @@unique([material_id, student_email])
+  @@index([student_email])
+  @@map("portal_material_progress")
+}
+
+/// Certificado emitido al llegar al 100% de un curso. `course_title` y
+/// `student_name` quedan CONGELADOS al momento de emitir: si el curso cambia
+/// de nombre después, el certificado ya entregado no debe cambiar con él.
+/// `code` es lo que valida `GET /api/portal/certificates/[code]` — sirve para
+/// reimprimir el mismo PDF sin regenerarlo con datos distintos.
+model PortalCertificate {
+  id            Int          @id @default(autoincrement())
+  code          String       @unique @db.NVarChar(40)
+  course_id     Int
+  course        PortalCourse @relation(fields: [course_id], references: [id])
+  student_email String       @db.NVarChar(255)
+  student_name  String       @db.NVarChar(255)
+  course_title  String       @db.NVarChar(255)
+  issued_at     DateTime     @default(now())
+
+  @@unique([course_id, student_email])
+  @@index([student_email])
+  @@map("portal_certificate")
+}
+
 model ChatMessage {
   id              Int    @id @default(autoincrement())
   id_conversation Int
