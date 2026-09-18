@@ -5,6 +5,7 @@ import { IconSignature } from '@tabler/icons-react';
 import { useCallback, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
+  hasOrionActiveSignFlow,
   isOrionSignDocument,
   resolveOrionDocumentForAttachment,
   resolveOrionSignatureIntent,
@@ -213,12 +214,22 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     !isMyTurn;
 
   const hasCompletedSignatures = (state.signers ?? []).some((s) => isSignerCompleted(s.status));
+  const activeSignFlow = hasOrionActiveSignFlow(state);
+  /** Solo se puede cambiar Estado mientras el PDF vive solo en SynerLink (aún no Orion). */
   const canToggleIntent =
     Boolean(api?.canManage) &&
     !workflowLocked &&
     !isTerminal &&
-    !(signatureIntent === 'sign' && hasCompletedSignatures);
+    !activeSignFlow &&
+    !hasCompletedSignatures;
   const permissionsPending = Boolean(api) && api?.permissionsReady === false;
+  const intentLockedReason = activeSignFlow
+    ? hasCompletedSignatures
+      ? 'Ya hay firmas: el documento queda en Orion y no puede pasar a Solo ver.'
+      : 'El PDF ya está en Orion (preparado o con firmantes). Solo ver solo aplica mientras esté en OneDrive SynerLink.'
+    : hasCompletedSignatures
+      ? 'Ya hay firmas: no se puede cambiar a Solo ver.'
+      : null;
 
   const setSignatureIntent = useCallback(
     async (intent: OrionSignatureIntent) => {
@@ -303,6 +314,7 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     signatureIntent,
     forSigning,
     canToggleIntent,
+    intentLockedReason,
     permissionsPending,
     intentLoading,
     setSignatureIntent,
