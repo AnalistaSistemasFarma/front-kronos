@@ -18,6 +18,8 @@ import {
   LoadingOverlay,
   Box,
   Button,
+  Table,
+  ScrollArea,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -40,6 +42,12 @@ import {
 } from '@tabler/icons-react';
 import axios from 'axios';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
+import {
+  TABLE_FIELD_TYPE,
+  parseTableConfig,
+  parseTableValue,
+} from '../../../../../lib/requests-general/tableField';
+import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
 
 interface RequestSummary {
   id_tarea: number;
@@ -84,6 +92,7 @@ interface FormValue {
   id: number;
   field_label: string;
   field_type?: string | null;
+  config_json?: string | null;
   option_label: string | null;
   value_text: string | null;
 }
@@ -244,7 +253,13 @@ export default function PaymentDetailModal({ opened, onClose, request }: Props) 
         }
         // Nunca volcar payloads Orion (firmantes / estado) en este modal.
         const values = Array.isArray(valuesJson) ? valuesJson : [];
-        setFormValues(values.filter((fv: FormValue) => !!fv.value_text));
+        setFormValues(
+          values.filter(
+            (fv: FormValue) =>
+              fv.field_type !== ORION_SIGNATURE_FIELD_TYPE &&
+              (!!fv.value_text || !!fv.option_label)
+          )
+        );
         setNotes(Array.isArray(notesJson) ? notesJson : []);
       } catch {
         if (active) setError('No se pudo cargar el detalle de la solicitud.');
@@ -468,6 +483,54 @@ export default function PaymentDetailModal({ opened, onClose, request }: Props) 
                 </Group>
                 <Grid>
                   {formValues.map((fv, index) => {
+                    // Campo tipo tabla: renderizar como tabla, no como JSON crudo.
+                    if (fv.field_type === TABLE_FIELD_TYPE) {
+                      const columns = parseTableConfig(fv.config_json).columns;
+                      const rows = parseTableValue(fv.value_text).rows;
+                      const renderCell = (value: unknown) => {
+                        if (value === true) return 'Sí';
+                        if (value === false) return 'No';
+                        if (value === undefined || value === null || value === '') return '—';
+                        return String(value);
+                      };
+                      return (
+                        <Grid.Col
+                          span={12}
+                          key={`auth-fv-${fv.id ?? 'x'}-${fv.field_label ?? index}-${index}`}
+                        >
+                          <Card withBorder radius='md' p='sm'>
+                            <Text size='xs' c='dimmed' fw={500} tt='uppercase' mb='xs'>
+                              {fv.field_label}
+                            </Text>
+                            {columns.length === 0 || rows.length === 0 ? (
+                              <Text size='sm' c='dimmed'>Sin datos.</Text>
+                            ) : (
+                              <ScrollArea>
+                                <Table withTableBorder withColumnBorders striped>
+                                  <Table.Thead>
+                                    <Table.Tr>
+                                      {columns.map((col) => (
+                                        <Table.Th key={col.key}>{col.label}</Table.Th>
+                                      ))}
+                                    </Table.Tr>
+                                  </Table.Thead>
+                                  <Table.Tbody>
+                                    {rows.map((row, ri) => (
+                                      <Table.Tr key={ri}>
+                                        {columns.map((col) => (
+                                          <Table.Td key={col.key}>{renderCell(row[col.key])}</Table.Td>
+                                        ))}
+                                      </Table.Tr>
+                                    ))}
+                                  </Table.Tbody>
+                                </Table>
+                              </ScrollArea>
+                            )}
+                          </Card>
+                        </Grid.Col>
+                      );
+                    }
+
                     const raw = fv.option_label || fv.value_text || '';
                     const shown = raw ? formatFieldValue(fv.field_label, raw) : '—';
                     return (
