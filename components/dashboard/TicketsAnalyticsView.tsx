@@ -39,7 +39,7 @@ import {
   buildVerticalBarChart,
   ticketStatusChartColors,
 } from '../../lib/charts/builders';
-import { trendDownColor, trendUpColor } from '../../lib/charts/defaults';
+import { colorForTimeTrend, timeFasterColor, timeSlowerColor } from '../../lib/charts/defaults';
 import { getFilterLabel } from '../../lib/dashboard/dateRange';
 import {
   ALL_TECHNICIANS_VALUE,
@@ -666,12 +666,7 @@ export default function TicketsAnalyticsView() {
                       size='xs'
                       fw={700}
                       style={{
-                        color:
-                          resolutionSeries.latestTrend === 'up'
-                            ? trendUpColor
-                            : resolutionSeries.latestTrend === 'down'
-                              ? trendDownColor
-                              : undefined,
+                        color: colorForTimeTrend(resolutionSeries.latestTrend),
                       }}
                     >
                       {resolutionSeries.latestChangeLabel}
@@ -706,12 +701,7 @@ export default function TicketsAnalyticsView() {
                               size='xs'
                               fw={700}
                               style={{
-                                color:
-                                  point.trend === 'up'
-                                    ? trendUpColor
-                                    : point.trend === 'down'
-                                      ? trendDownColor
-                                      : undefined,
+                                color: colorForTimeTrend(point.trend),
                               }}
                             >
                               {point.changeLabel}
@@ -724,14 +714,14 @@ export default function TicketsAnalyticsView() {
                 </Box>
               )}
               <Text size='xs' c='dimmed' ta='center'>
-                <Text span fw={700} style={{ color: trendUpColor }}>
-                  Verde
-                </Text>{' '}
-                = tardó más ·{' '}
-                <Text span fw={700} style={{ color: trendDownColor }}>
+                <Text span fw={700} style={{ color: timeSlowerColor }}>
                   Rojo
                 </Text>{' '}
-                = fue más rápido vs. periodo anterior
+                = más lento ·{' '}
+                <Text span fw={700} style={{ color: timeFasterColor }}>
+                  Verde
+                </Text>{' '}
+                = más rápido vs. periodo anterior
               </Text>
             </Stack>
           ) : (
