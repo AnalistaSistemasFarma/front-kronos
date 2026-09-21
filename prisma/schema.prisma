@@ -1047,6 +1047,10 @@ model ChatVoiceCall {
   user_agent      String?  @db.NVarChar(400)
   created_at      DateTime @default(now())
   expires_at      DateTime
+  offer_sdp       String   @db.NVarChar(Max)
+  answer_sdp      String?  @db.NVarChar(Max)
+  error           String?  @db.NVarChar(400)
+  claimed         Boolean  @default(false)
   events          ChatVoiceEvent[]
   @@index([id_conversation])
   @@map("chat_voice_call")
