@@ -16,13 +16,13 @@ import {
 import { IconAlertTriangle, IconPlayerPlay } from '@tabler/icons-react';
 
 /**
- * Balances — Sprint 1.
+ * Balances — Sprint 2.
  *
  * Un botón por empresa (Farmalogica, OLP, GSS — las únicas que hoy tiene el
  * job compartido de SQL Agent en el 10.7, ver lib/balances/companies.ts).
- * Cada botón dispara /api/balances/submit-run y espera el resultado; NO hay
- * estado en tiempo real todavía (eso es Sprint 2) — el request queda
- * "cargando" hasta que el balance + acumulado terminan.
+ * Cada botón dispara /api/balances/submit-run y la corrida continúa en
+ * background. El historial se consulta cada 2 segundos mientras hay una
+ * corrida activa, para reflejar running/success/failed sin bloquear el request.
  *
  * El acceso por empresa lo resuelve el servidor (subprocess_user_company);
  * si el usuario no tiene ninguna empresa habilitada, la lista sale vacía.
@@ -80,6 +80,12 @@ export default function BalancesPage() {
     fetchRuns();
   }, [fetchRuns]);
 
+  useEffect(() => {
+    if (!globallyRunning) return;
+    const timer = window.setInterval(fetchRuns, 2000);
+    return () => window.clearInterval(timer);
+  }, [fetchRuns, globallyRunning]);
+
   async function handleRun(idCompany: number) {
     setRunningCompany(idCompany);
     setLastError(null);
@@ -93,7 +99,7 @@ export default function BalancesPage() {
       setLastError(err instanceof Error ? err.message : String(err));
     } finally {
       setRunningCompany(null);
-      fetchRuns();
+      await fetchRuns();
     }
   }
 

@@ -1,4 +1,4 @@
-# Módulo de Balances (Sprint 1)
+# Módulo de Balances (Sprint 2)
 
 Migra el botón "Ejecutar balances" de SAPSEND-GSS a SynerLink. Contexto completo
 en la memoria del proyecto (bitácora de Nicolás vía SynerLink, 2026-09-21).
@@ -9,7 +9,9 @@ en la memoria del proyecto (bitácora de Nicolás vía SynerLink, 2026-09-21).
   compartido de SQL Agent `Balance_Empresas` / `Balance_Acumulado_Empresas` en
   serfarma07 (192.168.10.7). Ryan/Abamia/Kelab/Meditrack quedan para Sprint 3
   (ese job no tiene SQL para esas empresas todavía).
-- Ejecución SÍNCRONA, sin estado en tiempo real (Sprint 2).
+- Ejecución asíncrona: el endpoint registra la corrida, devuelve `202` y la
+  ejecuta en background. La interfaz consulta `balance_run` cada 2 segundos
+  mientras hay una corrida activa.
 - El SQL de cada paso (`lib/balances/sql/*.sql`) se extrajo **verbatim** del
   job compartido (`sp_help_jobstep` en el 10.7, 2026-09-21) y se ejecuta
   directo contra `FARMA_IND_PROD`, **sin pasar por `sp_start_job`** — así se
@@ -75,12 +77,10 @@ en la memoria del proyecto (bitácora de Nicolás vía SynerLink, 2026-09-21).
    Sin estas filas el módulo queda invisible (no roto) para todos los
    usuarios — es intencional (fail-closed).
 
-## Qué falta para Sprint 2
+## Qué falta después de Sprint 2
 
-- Endpoint de estado en tiempo real (polling de `balance_run` cada pocos
-  segundos, o llevar la ejecución a background + `run-status` al estilo
-  `payment-assistant`).
-- Deshabilitar el botón mientras hay una corrida en curso (hoy ya se
-  deshabilita del lado del cliente, pero no hay bloqueo del lado servidor si
-  llegan dos clics casi simultáneos — agregar un check de "ya hay una
-  corrida `running` para esta empresa" antes de insertar una nueva fila).
+- Recuperación de corridas huérfanas: agregar lease/heartbeat y una rutina que
+  marque como `failed` las corridas `running` cuyo proceso murió.
+- Evaluar una cola durable si el volumen deja de ser compatible con el
+  proceso web. Por ahora el candado global mantiene una sola corrida contra
+  el 10.7 y la ejecución background es adecuada para el timeout actual.
