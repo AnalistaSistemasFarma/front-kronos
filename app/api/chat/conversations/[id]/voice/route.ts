@@ -43,5 +43,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (body.action === 'close') { await closeVoiceCall(body.callId, guard.user.id, guard.conversationId); return jsonNoStore({ ok: true }); }
   if (body.action !== 'poll') return jsonNoStore({ error: 'Acción inválida.' }, { status: 400 });
   const call = await touchVoiceCall(body.callId, guard.user.id, guard.conversationId);
-  return call ? jsonNoStore({ sdp: call.answer, error: call.error }) : jsonNoStore({ error: 'La llamada expiró.' }, { status: 410 });
+  return call ? jsonNoStore({ sdp: call.answer_sdp, error: call.error }) : jsonNoStore({ error: 'La llamada expiró.' }, { status: 410 });
 }
