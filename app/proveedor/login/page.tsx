@@ -59,6 +59,7 @@ function SupplierLoginForm() {
 
   return (
     <div
+      className='login-page'
       style={{
         minHeight: '100vh',
         display: 'flex',
@@ -108,6 +109,7 @@ function SupplierLoginForm() {
         <form onSubmit={handleSubmit}>
           <Stack gap='md'>
             <TextInput
+              size='md'
               label='NIT'
               placeholder='Ej: 900123456'
               required
@@ -119,6 +121,7 @@ function SupplierLoginForm() {
               inputMode='numeric'
             />
             <TextInput
+              size='md'
               label='Contraseña'
               placeholder='Su contraseña'
               type={visible ? 'text' : 'password'}
