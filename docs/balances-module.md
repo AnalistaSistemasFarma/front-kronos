@@ -15,6 +15,16 @@ en la memoria del proyecto (bitácora de Nicolás vía SynerLink, 2026-09-21).
   directo contra `FARMA_IND_PROD`, **sin pasar por `sp_start_job`** — así se
   aísla por empresa sin tocar el job compartido (que corre las 3 empresas en
   cadena y no se puede parar a mitad limpiamente).
+- **Candado GLOBAL, no por empresa** (pedido explícito de Nicolás, 2026-09-21:
+  "quiero ejecutarlos independientemente a voluntad, la meta es que no
+  colguemos 3 bases al mismo tiempo"): los 3 botones son independientes —
+  cualquiera se puede disparar en cualquier momento — pero solo UNA corrida
+  puede estar `running` a la vez en TODA la tabla `balance_run`, sin importar
+  la empresa. Si se intenta una segunda mientras hay otra en curso, el
+  servidor responde `409` (no la encola, la rechaza) y el front lo muestra
+  como aviso. El candado es atómico en SQL (`INSERT ... WHERE NOT EXISTS`
+  con `TABLOCKX`/`HOLDLOCK`), así que dos clics casi simultáneos no se cuelan
+  los dos.
 
 ## Pendiente ANTES de desplegar (no lo hace este cambio de código)
 

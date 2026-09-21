@@ -57,12 +57,18 @@ export default function BalancesPage() {
   const [lastError, setLastError] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(true);
+  // Candado GLOBAL: si CUALQUIER empresa tiene una corrida 'running' (la
+  // disparó otra persona/pestaña), se deshabilitan los 3 botones — el
+  // servidor igual lo rechaza (409) si se cuela un clic, esto es solo UX.
+  const [globallyRunning, setGloballyRunning] = useState<RunRow | null>(null);
 
   const fetchRuns = useCallback(async () => {
     try {
       const res = await fetch('/api/balances/runs?limit=15');
       const data = await res.json();
-      setRuns(Array.isArray(data.runs) ? data.runs : []);
+      const list: RunRow[] = Array.isArray(data.runs) ? data.runs : [];
+      setRuns(list);
+      setGloballyRunning(list.find((r) => r.status === 'running') ?? null);
     } catch {
       // silencioso: el historial es informativo, no bloquea el botón
     } finally {
@@ -107,23 +113,35 @@ export default function BalancesPage() {
         </Alert>
       )}
 
+      {globallyRunning && runningCompany === null && (
+        <Alert color="yellow" icon={<IconAlertTriangle size={18} />} title="Hay un balance en curso">
+          {COMPANIES.find((c) => c.idCompany === globallyRunning.id_company)?.displayName ??
+            globallyRunning.id_company}{' '}
+          está corriendo ahora mismo (disparado por {globallyRunning.triggered_by}). Solo se permite una
+          corrida a la vez entre las 3 empresas, para no sobrecargar el 10.7 — espere a que termine.
+        </Alert>
+      )}
+
       <SimpleGrid cols={{ base: 1, sm: 3 }}>
-        {COMPANIES.map((c) => (
-          <Card key={c.idCompany} withBorder padding="lg">
-            <Stack gap="xs" align="center">
-              <Text fw={600}>{c.displayName}</Text>
-              <Button
-                leftSection={<IconPlayerPlay size={16} />}
-                loading={runningCompany === c.idCompany}
-                disabled={runningCompany !== null && runningCompany !== c.idCompany}
-                onClick={() => handleRun(c.idCompany)}
-                fullWidth
-              >
-                Ejecutar balances
-              </Button>
-            </Stack>
-          </Card>
-        ))}
+        {COMPANIES.map((c) => {
+          const blockedByOther = globallyRunning !== null && globallyRunning.id_company !== c.idCompany;
+          return (
+            <Card key={c.idCompany} withBorder padding="lg">
+              <Stack gap="xs" align="center">
+                <Text fw={600}>{c.displayName}</Text>
+                <Button
+                  leftSection={<IconPlayerPlay size={16} />}
+                  loading={runningCompany === c.idCompany}
+                  disabled={(runningCompany !== null && runningCompany !== c.idCompany) || blockedByOther}
+                  onClick={() => handleRun(c.idCompany)}
+                  fullWidth
+                >
+                  Ejecutar balances
+                </Button>
+              </Stack>
+            </Card>
+          );
+        })}
       </SimpleGrid>
 
       <div>

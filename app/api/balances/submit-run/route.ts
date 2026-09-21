@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { userCanAccessCompany } from '../../../../lib/balances/access';
 import { getBalanceCompany } from '../../../../lib/balances/companies';
-import { runCompanyBalance } from '../../../../lib/balances/runBalance';
+import { runCompanyBalance, BalanceRunLockedError } from '../../../../lib/balances/runBalance';
 
 /**
  * Dispara el balance (normal + acumulado) de UNA empresa.
@@ -51,6 +51,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ run: result }, { status: result.ok ? 200 : 502 });
   } catch (error) {
+    if (error instanceof BalanceRunLockedError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: message }, { status: 500 });
   }

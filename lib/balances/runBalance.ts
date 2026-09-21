@@ -4,6 +4,16 @@ import { getBalanceCompany, readBalanceSql, type BalanceCompanyConfig } from './
 
 export type BalanceKind = 'balance' | 'acumulado';
 
+/** Ya hay una corrida en curso (de cualquier empresa) — candado global, ver runCompanyBalance. */
+export class BalanceRunLockedError extends Error {
+  constructor() {
+    super(
+      'Ya hay un balance en curso (de cualquiera de las 3 empresas). Espere a que termine antes de disparar otro — evita sobrecargar el 10.7.'
+    );
+    this.name = 'BalanceRunLockedError';
+  }
+}
+
 export interface BalanceRunResult {
   idCompany: number;
   ok: boolean;
@@ -18,6 +28,13 @@ export interface BalanceRunResult {
  * correspondiente del job compartido, directo contra FARMA_IND_PROD en el
  * 10.7, SIN pasar por SQL Agent — así queda aislado por empresa sin tocar el
  * job compartido (ver hallazgo de Sprint 0, 2026-09-21).
+ *
+ * CANDADO GLOBAL (pedido explícito de Nicolás, 2026-09-21): los 3 botones se
+ * disparan de forma independiente, PERO nunca deben correr dos empresas a la
+ * vez contra el 10.7 ("no colguemos 3 bases al mismo tiempo") — es un candado
+ * de UNA sola corrida activa en TODO el módulo, no por empresa. El check +
+ * insert va en un único INSERT ... WHERE NOT EXISTS con TABLOCKX/HOLDLOCK
+ * para que sea atómico (dos clics casi simultáneos no pueden colarse los dos).
  *
  * Registra el resultado en la tabla `balance_run` (ver
  * docs/balances-module.md para el DDL — tabla NUEVA, pendiente de crear en
@@ -36,15 +53,10 @@ export async function runCompanyBalance(
     acumulado: { ok: false, durationMs: 0 },
   };
 
-  const alreadyRunning = await pool
-    .request()
-    .input('idCompany', sql.Int, company.idCompany)
-    .query(`SELECT TOP 1 id FROM [dbo].[balance_run] WHERE id_company = @idCompany AND status = 'running'`);
-  if (alreadyRunning.recordset.length > 0) {
-    throw new Error('Ya hay una corrida en curso para esta empresa. Espere a que termine.');
+  const runId = await acquireGlobalRunLock(pool, company.idCompany, triggeredByEmail);
+  if (runId == null) {
+    throw new BalanceRunLockedError();
   }
-
-  const runId = await insertRunRow(pool, company.idCompany, triggeredByEmail, 'running');
 
   for (const kind of ['balance', 'acumulado'] as const) {
     const fileName = kind === 'balance' ? company.balanceSqlFile : company.acumuladoSqlFile;
@@ -68,22 +80,30 @@ export async function runCompanyBalance(
   return result;
 }
 
-async function insertRunRow(
+/**
+ * Inserta la fila `running` SOLO si no hay ninguna otra fila `running` en
+ * TODA la tabla (cualquier empresa) — atómico vía TABLOCKX/HOLDLOCK dentro
+ * del mismo INSERT, para que dos clics casi simultáneos no se cuelen los dos.
+ * Devuelve el id insertado, o `null` si ya había una corrida en curso.
+ */
+async function acquireGlobalRunLock(
   pool: Awaited<ReturnType<typeof getBalancesPool>>,
   idCompany: number,
-  triggeredByEmail: string,
-  status: string
-): Promise<number> {
+  triggeredByEmail: string
+): Promise<number | null> {
   const r = await pool
     .request()
     .input('idCompany', sql.Int, idCompany)
     .input('triggeredBy', sql.NVarChar, triggeredByEmail)
-    .input('status', sql.NVarChar, status)
     .query(`
       INSERT INTO [dbo].[balance_run] (id_company, triggered_by, status, started_at)
       OUTPUT INSERTED.id
-      VALUES (@idCompany, @triggeredBy, @status, GETDATE())
+      SELECT @idCompany, @triggeredBy, 'running', GETDATE()
+      WHERE NOT EXISTS (
+        SELECT 1 FROM [dbo].[balance_run] WITH (TABLOCKX, HOLDLOCK) WHERE status = 'running'
+      )
     `);
+  if (r.recordset.length === 0) return null;
   return r.recordset[0].id as number;
 }
 
