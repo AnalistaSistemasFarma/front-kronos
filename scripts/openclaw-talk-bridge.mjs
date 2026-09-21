@@ -78,8 +78,9 @@ while (!quitting) {
     for (const id of sessions.keys()) if (!result.active.includes(id)) await close(id);
     for (const offer of result.offers) if (!sessions.has(offer.id)) void open(offer);
   } catch {
+    // A transient SynerLink poll failure must not drop healthy calls: only the
+    // try branch closes sessions SynerLink itself reported inactive.
     console.error('SynerLink voice poll unavailable');
-    for (const id of sessions.keys()) await close(id);
     await delay(4000);
   }
   await delay(1000);

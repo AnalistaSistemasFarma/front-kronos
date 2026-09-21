@@ -26,23 +26,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return jsonNoStore({ error: 'JSON inválido.' }, { status: 400 }); }
   if (!body || typeof body !== 'object') return jsonNoStore({ error: 'Solicitud inválida.' }, { status: 400 });
   if (body.action === 'offer' && typeof body.sdp === 'string' && body.sdp.startsWith('v=0')) {
-    const callId = createVoiceCall(guard.idAgent, guard.conversationId, guard.user.id, body.sdp);
+    const callId = await createVoiceCall(guard.idAgent, guard.conversationId, guard.user.id, body.sdp);
     if (callId) {
       const origin = readClientOrigin(request);
       try {
-        await prisma.chatVoiceCall.create({ data: { id: callId, id_conversation: guard.conversationId,
-          id_agent: guard.idAgent, id_user: guard.user.id, client_ip: origin.clientIp,
+        await prisma.chatVoiceCall.update({ where: { id: callId }, data: { client_ip: origin.clientIp,
           user_agent: origin.userAgent, expires_at: new Date(Date.now() + 11 * 60_000) } });
       } catch {
-        closeVoiceCall(callId, guard.user.id, guard.conversationId);
+        await closeVoiceCall(callId, guard.user.id, guard.conversationId);
         return jsonNoStore({ error: 'No se pudo iniciar la auditoría de voz.' }, { status: 503 });
       }
     }
     return callId ? jsonNoStore({ callId }) : jsonNoStore({ error: 'Ya tiene una llamada activa o no hay capacidad.' }, { status: 429 });
   }
   if (typeof body.callId !== 'string') return jsonNoStore({ error: 'Falta llamada.' }, { status: 400 });
-  if (body.action === 'close') { closeVoiceCall(body.callId, guard.user.id, guard.conversationId); return jsonNoStore({ ok: true }); }
+  if (body.action === 'close') { await closeVoiceCall(body.callId, guard.user.id, guard.conversationId); return jsonNoStore({ ok: true }); }
   if (body.action !== 'poll') return jsonNoStore({ error: 'Acción inválida.' }, { status: 400 });
-  const call = touchVoiceCall(body.callId, guard.user.id, guard.conversationId);
+  const call = await touchVoiceCall(body.callId, guard.user.id, guard.conversationId);
   return call ? jsonNoStore({ sdp: call.answer, error: call.error }) : jsonNoStore({ error: 'La llamada expiró.' }, { status: 410 });
 }
