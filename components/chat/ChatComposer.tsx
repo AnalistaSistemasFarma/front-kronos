@@ -705,6 +705,15 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             autoCorrect='off'
             autoCapitalize='off'
             autosize
+            /* size='md': Mantine no expone `size`, así que caía en su default
+               ("sm") y ponía `--input-fz: 0.875rem` (14px) en el wrapper. Esa
+               variable la hereda el `<textarea>` real y gana el empate de
+               especificidad contra `.chat-composer__input` en globals.css
+               (mismo peso, una sola clase, y `@mantine/core/styles.css` carga
+               DESPUÉS en app/layout.tsx) — por eso el input seguía quedando
+               en 14px pese al `font-size: 16px` del CSS, y Safari le seguía
+               haciendo zoom al enfocarlo. */
+            size='md'
             radius={23}
             /* Arranca en UN renglón, como WhatsApp, y crece al escribir. */
             minRows={1}
