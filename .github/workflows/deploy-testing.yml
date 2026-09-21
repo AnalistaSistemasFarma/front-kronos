@@ -91,7 +91,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           Set-Location $env:PROJECT_DIR
-          npx prisma db execute --file prisma/migrations/20260921193000_chat_voice_shared_state/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260921193000_chat_voice_shared_state/migration.sql
           if ($LASTEXITCODE -ne 0) { throw "migración de voz fallo" }
 
       - name: Build front (Next.js)
