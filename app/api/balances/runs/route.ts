@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getUserAccessibleCompanies } from '../../../../lib/balances/access';
-import { getBalancesPool, sql } from '../../../../lib/balances/adminPool';
+import { prisma } from '../../../../lib/prisma';
 
 /**
  * Últimas corridas de balances (historial corto), para las empresas a las
@@ -27,24 +27,24 @@ export async function GET(request: NextRequest) {
     const limitRaw = Number(request.nextUrl.searchParams.get('limit') ?? '10');
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 10;
 
-    const pool = await getBalancesPool();
-    const req = pool.request().input('limit', sql.Int, limit);
-    // `companies` sale de getUserAccessibleCompanies(), siempre un subconjunto
-    // de BALANCE_COMPANIES (enteros fijos del código, no input del usuario) —
-    // igual se parametriza cada valor para no armar la lista por concatenación.
-    const placeholders = companies.map((id, i) => {
-      req.input(`c${i}`, sql.Int, id);
-      return `@c${i}`;
+    const runs = await prisma.balanceRun.findMany({
+      where: { id_company: { in: companies } },
+      orderBy: { id: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        id_company: true,
+        triggered_by: true,
+        status: true,
+        started_at: true,
+        finished_at: true,
+        balance_duration_ms: true,
+        acumulado_duration_ms: true,
+        error_message: true,
+      },
     });
-    const result = await req.query(`
-      SELECT TOP (@limit) id, id_company, triggered_by, status,
-             started_at, finished_at, balance_duration_ms, acumulado_duration_ms, error_message
-      FROM [dbo].[balance_run]
-      WHERE id_company IN (${placeholders.join(',')})
-      ORDER BY id DESC
-    `);
 
-    return NextResponse.json({ runs: result.recordset });
+    return NextResponse.json({ runs });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: message }, { status: 500 });

@@ -1,6 +1,7 @@
 import 'server-only';
 import { getBalancesPool, sql } from './adminPool';
 import { getBalanceCompany, readBalanceSql, type BalanceCompanyConfig } from './companies';
+import { prisma } from '../prisma';
 
 export type BalanceKind = 'balance' | 'acumulado';
 
@@ -53,7 +54,7 @@ export async function runCompanyBalance(
     acumulado: { ok: false, durationMs: 0 },
   };
 
-  const runId = await acquireGlobalRunLock(pool, company.idCompany, triggeredByEmail);
+  const runId = await acquireGlobalRunLock(company.idCompany, triggeredByEmail);
   if (runId == null) {
     throw new BalanceRunLockedError();
   }
@@ -75,7 +76,7 @@ export async function runCompanyBalance(
 
   result.ok = result.balance.ok && result.acumulado.ok;
 
-  await finishRunRow(pool, runId, result);
+  await finishRunRow(runId, result);
 
   return result;
 }
@@ -87,49 +88,36 @@ export async function runCompanyBalance(
  * Devuelve el id insertado, o `null` si ya había una corrida en curso.
  */
 async function acquireGlobalRunLock(
-  pool: Awaited<ReturnType<typeof getBalancesPool>>,
   idCompany: number,
   triggeredByEmail: string
 ): Promise<number | null> {
-  const r = await pool
-    .request()
-    .input('idCompany', sql.Int, idCompany)
-    .input('triggeredBy', sql.NVarChar, triggeredByEmail)
-    .query(`
+  const rows = await prisma.$queryRaw<Array<{ id: number }>>`
       INSERT INTO [dbo].[balance_run] (id_company, triggered_by, status, started_at)
       OUTPUT INSERTED.id
-      SELECT @idCompany, @triggeredBy, 'running', GETDATE()
+      SELECT ${idCompany}, ${triggeredByEmail}, 'running', GETDATE()
       WHERE NOT EXISTS (
         SELECT 1 FROM [dbo].[balance_run] WITH (TABLOCKX, HOLDLOCK) WHERE status = 'running'
       )
-    `);
-  if (r.recordset.length === 0) return null;
-  return r.recordset[0].id as number;
+  `;
+  return rows[0]?.id ?? null;
 }
 
 async function finishRunRow(
-  pool: Awaited<ReturnType<typeof getBalancesPool>>,
   runId: number,
   result: BalanceRunResult
 ): Promise<void> {
   const status = result.ok ? 'success' : 'failed';
   const errorMessage = [result.balance.error, result.acumulado.error].filter(Boolean).join(' | ') || null;
-  await pool
-    .request()
-    .input('id', sql.Int, runId)
-    .input('status', sql.NVarChar, status)
-    .input('balanceMs', sql.Int, result.balance.durationMs)
-    .input('acumuladoMs', sql.Int, result.acumulado.durationMs)
-    .input('errorMessage', sql.NVarChar, errorMessage)
-    .query(`
-      UPDATE [dbo].[balance_run]
-      SET status = @status,
-          finished_at = GETDATE(),
-          balance_duration_ms = @balanceMs,
-          acumulado_duration_ms = @acumuladoMs,
-          error_message = @errorMessage
-      WHERE id = @id
-    `);
+  await prisma.balanceRun.update({
+    where: { id: runId },
+    data: {
+      status,
+      finished_at: new Date(),
+      balance_duration_ms: result.balance.durationMs,
+      acumulado_duration_ms: result.acumulado.durationMs,
+      error_message: errorMessage,
+    },
+  });
 }
 
 export { getBalanceCompany };

@@ -28,8 +28,11 @@ en la memoria del proyecto (bitácora de Nicolás vía SynerLink, 2026-09-21).
 
 ## Pendiente ANTES de desplegar (no lo hace este cambio de código)
 
-1. **Tabla nueva `balance_run` en KRONOSDB** (mismo patrón que `payment_run`:
-   fuera de Prisma, tabla de solo SQL — ver `lib/balances/runBalance.ts`):
+1. **Tabla nueva `balance_run` en KRONOSDB**. La tabla se crea mediante la
+   migración Prisma de este PR en KRONOSDB_PRUEBAS (y se promueve de forma
+   separada a KRONOSDB). El historial y el candado viven en SynerLink; solo
+   los SQL operativos se ejecutan contra FARMA_IND_PROD mediante el pool
+   administrativo.
 
    ```sql
    CREATE TABLE [dbo].[balance_run] (
