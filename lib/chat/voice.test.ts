@@ -3,7 +3,12 @@ const rows = vi.hoisted(() => new Map<string, any>());
 vi.mock('../prisma', () => ({ prisma: { chatVoiceCall: {
   count: vi.fn(async ({ where }: any) => [...rows.values()].filter((r: any) => r.expires_at > new Date() && (!where.id_user || r.id_user === where.id_user)).length),
   create: vi.fn(async ({ data }: any) => { rows.set(data.id, { ...data, claimed: false, answer_sdp: null, error: null }); return data; }),
-  findFirst: vi.fn(async ({ where }: any) => [...rows.values()].find((r: any) => r.id === where.id && r.id_user === where.id_user && r.id_conversation === where.id_conversation && r.expires_at > new Date()) ?? null),
+  findFirst: vi.fn(async ({ where }: any) => [...rows.values()].find((r: any) => r.id === where.id &&
+    (where.id_user === undefined || r.id_user === where.id_user) &&
+    (where.id_conversation === undefined || r.id_conversation === where.id_conversation) &&
+    (where.id_agent === undefined || r.id_agent === where.id_agent) &&
+    (where.claimed === undefined || r.claimed === where.claimed) &&
+    r.expires_at > new Date()) ?? null),
   findMany: vi.fn(async ({ where }: any) => [...rows.values()].filter((r: any) => r.id_agent === where.id_agent && r.expires_at > new Date())),
   update: vi.fn(async ({ where, data }: any) => { const row = rows.get(where.id); Object.assign(row, data); return row; }),
   updateMany: vi.fn(async ({ where, data }: any) => { for (const row of rows.values()) if (where.id.in.includes(row.id) && row.claimed === false) Object.assign(row, data); return { count: 1 }; }),
