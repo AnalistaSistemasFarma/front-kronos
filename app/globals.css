@@ -2400,3 +2400,14 @@ body.chat-inmersivo .chat-page-thread--completa {
     opacity: 1;
   }
 }
+
+/* ── iOS: mismo zoom automático del composer del chat, ahora en el login ──
+   Los TextInput de Mantine en /login y /proveedor/login no tenían `size`,
+   así que tomaban el "sm" por defecto (14px) y Safari hacía zoom al
+   enfocarlos. El fix real es el prop `size='md'` en cada TextInput; este
+   !important queda de respaldo por la misma razón que en
+   `.chat-composer__input` (2026-09-21): si algún día cambia el size o el
+   orden de imports de Mantine, no debe reabrirse el bug en silencio. */
+.login-page input {
+  font-size: 16px !important;
+}
