@@ -555,8 +555,19 @@ export default function ChatThread({
       // En el mismo cuadro el navegador todavía no reacomodó el layout con el
       // alto nuevo; se espera al siguiente. No encadenar animaciones smooth
       // mientras el teclado cambia el viewport en cada cuadro.
+      //
+      // DOBLE rAF (2026-09-21): un solo cuadro no siempre basta en iOS. La
+      // animación nativa de cierre/apertura del teclado sigue moviendo el
+      // `visualViewport` (y por tanto `--alto-visible`) un cuadro más después
+      // de este evento; si se lee `scrollHeight` en el primer rAF, a veces
+      // todavía refleja el alto viejo y el scroll queda "subido" respecto al
+      // fondo real. Esperar un segundo cuadro le da tiempo al reflow de
+      // asentarse antes de fijar la posición. Nicolás lo reportó como "la
+      // conversación se sube más de lo que debía".
       requestAnimationFrame(() => {
-        viewport.scrollTop = viewport.scrollHeight;
+        requestAnimationFrame(() => {
+          viewport.scrollTop = viewport.scrollHeight;
+        });
       });
     }, [])
   );
@@ -625,7 +636,14 @@ export default function ChatThread({
 
     const observador = new ResizeObserver(() => {
       if (!stickToBottomRef.current) return;
-      viewport.scrollTop = viewport.scrollHeight;
+      // Mismo motivo del doble rAF de arriba: si el contenido crece justo
+      // mientras el teclado todavía está animando el viewport, un solo
+      // cuadro puede leer un `scrollHeight` que no es el final.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          viewport.scrollTop = viewport.scrollHeight;
+        });
+      });
     });
     observador.observe(contenido);
     return () => observador.disconnect();

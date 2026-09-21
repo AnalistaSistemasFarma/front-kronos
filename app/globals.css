@@ -1756,8 +1756,17 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
      parche que solo subía a 16 por debajo de 768 px; el parche no bastó y
      además se leía chiquito en el computador. Ahora son 16 px SIEMPRE, que es
      lo que Nicolás pidió y de paso mata el zoom en todos los anchos
-     (2026-09-08). No la baje de 16. */
-  font-size: 16px;
+     (2026-09-08). No la baje de 16.
+     !important a propósito (2026-09-21): esta regla y la base de Mantine
+     (`font-size: var(--_input-fz, var(--input-fz, ...))`) tienen la MISMA
+     especificidad (una clase), y Mantine ganaba el empate porque
+     `@mantine/core/styles.css` carga después de este archivo en
+     app/layout.tsx — el Textarea heredaba `--input-fz` en 14px (su size
+     "sm" por defecto) y el zoom volvía pese a este 16px. El fix real es
+     pasarle `size='md'` al Textarea en ChatComposer.tsx; este !important
+     se deja de respaldo para que un cambio futuro de size/orden de imports
+     no reabra el mismo bug en silencio. */
+  font-size: 16px !important;
   /* Cápsula, como la caja de WhatsApp. Con un renglón queda redonda y al crecer
      se ve como una caja de bordes suaves.
      21 px = la MITAD del `min-height` de 42 px, o sea el radio máximo que
