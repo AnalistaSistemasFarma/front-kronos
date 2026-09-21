@@ -37,16 +37,31 @@ export interface BalanceRunResult {
  * insert va en un único INSERT ... WHERE NOT EXISTS con TABLOCKX/HOLDLOCK
  * para que sea atómico (dos clics casi simultáneos no pueden colarse los dos).
  *
- * Registra el resultado en la tabla `balance_run` (ver
- * docs/balances-module.md para el DDL — tabla NUEVA, pendiente de crear en
- * KRONOSDB antes de desplegar).
+ * Registra el resultado en la tabla `balance_run`.
  */
 export async function runCompanyBalance(
   company: BalanceCompanyConfig,
   triggeredByEmail: string
 ): Promise<BalanceRunResult> {
-  const pool = await getBalancesPool();
+  const runId = await startCompanyBalance(company, triggeredByEmail);
+  return executeCompanyBalance(company, runId);
+}
 
+/** Crea la corrida en estado `running` y devuelve su id sin ejecutar SQL operativo. */
+export async function startCompanyBalance(
+  company: BalanceCompanyConfig,
+  triggeredByEmail: string
+): Promise<number> {
+  const runId = await acquireGlobalRunLock(company.idCompany, triggeredByEmail);
+  if (runId == null) throw new BalanceRunLockedError();
+  return runId;
+}
+
+/** Ejecuta la corrida ya registrada; está diseñada para ejecutarse en background. */
+export async function executeCompanyBalance(
+  company: BalanceCompanyConfig,
+  runId: number
+): Promise<BalanceRunResult> {
   const result: BalanceRunResult = {
     idCompany: company.idCompany,
     ok: false,
@@ -54,24 +69,24 @@ export async function runCompanyBalance(
     acumulado: { ok: false, durationMs: 0 },
   };
 
-  const runId = await acquireGlobalRunLock(company.idCompany, triggeredByEmail);
-  if (runId == null) {
-    throw new BalanceRunLockedError();
-  }
-
-  for (const kind of ['balance', 'acumulado'] as const) {
-    const fileName = kind === 'balance' ? company.balanceSqlFile : company.acumuladoSqlFile;
-    const started = Date.now();
-    try {
-      const text = readBalanceSql(fileName);
-      await pool.request().query(text);
-      result[kind] = { ok: true, durationMs: Date.now() - started };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      result[kind] = { ok: false, durationMs: Date.now() - started, error: message };
-      // Si falla el balance normal, no tiene sentido correr el acumulado detrás.
-      break;
+  try {
+    const pool = await getBalancesPool();
+    for (const kind of ['balance', 'acumulado'] as const) {
+      const fileName = kind === 'balance' ? company.balanceSqlFile : company.acumuladoSqlFile;
+      const started = Date.now();
+      try {
+        const text = readBalanceSql(fileName);
+        await pool.request().query(text);
+        result[kind] = { ok: true, durationMs: Date.now() - started };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        result[kind] = { ok: false, durationMs: Date.now() - started, error: message };
+        // Si falla el balance normal, no tiene sentido correr el acumulado detrás.
+        break;
+      }
     }
+  } catch (err) {
+    result.balance.error = err instanceof Error ? err.message : String(err);
   }
 
   result.ok = result.balance.ok && result.acumulado.ok;
