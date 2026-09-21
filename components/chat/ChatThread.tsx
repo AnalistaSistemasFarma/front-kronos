@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActionIcon,
   Alert,
@@ -106,7 +106,14 @@ function MessageAttachments({ message }: { message: ChatMessageDto }) {
   );
 }
 
-function MessageBubble({
+/**
+ * Envuelto en `memo`: en un hilo activo, `poll()` reprograma cada 1-30 s y
+ * actualiza `status` aunque no haya mensajes nuevos. Sin esto, cada burbuja
+ * de la conversación entera se re-renderizaba en cada vuelta del sondeo
+ * (perceptible como lentitud en celulares con hilos largos), aun cuando el
+ * `message` de cada una seguía siendo el mismo objeto.
+ */
+const MessageBubble = memo(function MessageBubble({
   message,
   agent,
   currentUserId,
@@ -291,7 +298,8 @@ function MessageBubble({
       </Box>
     </Group>
   );
-}
+});
+MessageBubble.displayName = 'MessageBubble';
 
 /**
  * Aviso de "su mensaje llegó pero nadie ha contestado".
