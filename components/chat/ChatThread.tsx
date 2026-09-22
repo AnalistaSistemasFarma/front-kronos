@@ -606,8 +606,10 @@ export default function ChatThread({
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
   }, [thread.messages, stickToBottom]);
 
-  // Al abrir el hilo, al fondo sin animación.
-  useEffect(() => {
+  // Al abrir el hilo, al fondo sin animación. useLayoutEffect (no useEffect):
+  // fija el scroll ANTES de que el navegador pinte, para no dejar ver el
+  // salto de "arriba" a "abajo" (más notorio en mobile).
+  useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport || thread.loading) return;
     viewport.scrollTop = viewport.scrollHeight;
