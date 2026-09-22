@@ -3081,3 +3081,281 @@ body.chat-inmersivo .chat-page-thread--completa {
   text-align: left;
   cursor: pointer;
 }
+
+/* ══════════════════ FORMACIÓN ("tipo Moodle") ══════════════════════════
+   Pedido de Cristian Baldión (2026-09-18). Reutiliza las variables --pth-*
+   declaradas en `.portal-th` arriba — nada de colores nuevos. */
+
+.portal-th__formacion-barra {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.portal-th__formacion-toggle {
+  display: inline-flex;
+  border: 1px solid var(--pth-linea);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.portal-th__formacion-toggle button {
+  padding: 8px 14px;
+  border: none;
+  background: #fff;
+  color: var(--pth-tinta-2);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.portal-th__formacion-toggle button + button {
+  border-left: 1px solid var(--pth-linea);
+}
+
+.portal-th__formacion-toggle-activo {
+  background-color: var(--pth-azul) !important;
+  color: #fff !important;
+}
+
+.portal-th__curso-grilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.portal-th__curso-tarjeta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 12px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.portal-th__curso-tarjeta:hover {
+  border-color: var(--pth-azul);
+}
+
+.portal-th__curso-tarjeta strong {
+  color: var(--pth-azul-700);
+}
+
+.portal-th__curso-tarjeta p {
+  margin: 0;
+  color: var(--pth-tinta-2);
+  font-size: 0.9rem;
+}
+
+.portal-th__curso-borrador {
+  color: var(--pth-tinta-3);
+  font-weight: 400;
+  font-size: 0.85em;
+}
+
+.portal-th__curso-meta {
+  font-size: 0.8rem;
+  color: var(--pth-tinta-3);
+}
+
+.portal-th__curso-certificado-chip {
+  font-size: 0.85rem;
+  color: #1a7d3c;
+}
+
+.portal-th__curso-progreso {
+  position: relative;
+  height: 18px;
+  border-radius: 999px;
+  background-color: var(--pth-azul-50);
+  border: 1px solid var(--pth-linea);
+  overflow: hidden;
+}
+
+.portal-th__curso-progreso-barra {
+  height: 100%;
+  background-color: var(--pth-azul);
+  transition: width 0.25s ease;
+}
+
+.portal-th__curso-progreso span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--pth-tinta);
+  mix-blend-mode: difference;
+  filter: invert(1) grayscale(1) contrast(9);
+}
+
+.portal-th__curso-detalle h3,
+.portal-th__curso-detalle h4 {
+  color: var(--pth-azul-700);
+  margin: 20px 0 10px;
+}
+
+.portal-th__curso-detalle h3 {
+  margin-top: 0;
+}
+
+.portal-th__curso-descripcion {
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__volver {
+  border: none;
+  background: none;
+  color: var(--pth-azul);
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 12px;
+  font: inherit;
+}
+
+.portal-th__formacion-gestion-barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.portal-th__formacion-gestion-barra button {
+  border: 1px solid var(--pth-azul);
+  background: #fff;
+  color: var(--pth-azul);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.portal-th__material-lista {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.portal-th__material-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.portal-th__material-check {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 2px solid var(--pth-linea);
+  background: #fff;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.portal-th__material-check--hecho {
+  background-color: #1a7d3c;
+  border-color: #1a7d3c;
+}
+
+.portal-th__material-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.portal-th__material-info a {
+  color: var(--pth-tinta);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.portal-th__material-info a:hover {
+  text-decoration: underline;
+}
+
+.portal-th__material-tipo {
+  font-size: 0.78rem;
+  color: var(--pth-tinta-3);
+}
+
+.portal-th__certificado-boton {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background-color: var(--pth-azul);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.portal-th__certificado-boton:hover {
+  background-color: var(--pth-azul-700);
+}
+
+.portal-th__formacion-crear {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 20px;
+  padding: 14px;
+  border: 1px dashed var(--pth-linea);
+  border-radius: 12px;
+}
+
+.portal-th__formacion-crear input[type='text'],
+.portal-th__formacion-crear input:not([type]),
+.portal-th__formacion-crear input[type='file'] {
+  padding: 8px 10px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.portal-th__formacion-crear button {
+  padding: 9px 16px;
+  border: none;
+  border-radius: 8px;
+  background-color: var(--pth-azul);
+  color: #fff;
+  cursor: pointer;
+}
+
+.portal-th__formacion-crear button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.portal-th__formacion-obligatorio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__roster-tabla td {
+  vertical-align: middle;
+}
+
+.portal-th__roster-tabla .portal-th__curso-progreso {
+  min-width: 140px;
+}

@@ -121,6 +121,45 @@ export const BANNER_ANCHO = 1600;
 /** Formatos que se aceptan. */
 export const BANNER_MIMES_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp'];
 
+/* ───────────────────── Formación (sección "tipo Moodle") ───────────────────
+ * Pedido de Cristian Baldión (2026-09-18): cursos con materiales, progreso y
+ * certificado al final del portal.
+ */
+
+/**
+ * Quién puede CREAR y ADMINISTRAR cursos (el "formador").
+ *
+ * Va aparte de `editoresDeBanners()` a propósito, aunque hoy arranca con la
+ * misma gente por defecto: mañana Talento Humano puede querer que alguien
+ * dicte un curso sin darle permiso de tocar la cartelera de anuncios, y viene
+ * siendo un cambio de variable de entorno, no de código. Se sobrescribe con
+ * `PORTAL_TH_FORMADORES` (separados por coma).
+ */
+export function formadoresDePortal(): string[] {
+  const crudo = (process.env.PORTAL_TH_FORMADORES ?? '').trim();
+  const lista = crudo
+    ? crudo.split(',').map((c) => c.trim().toLowerCase()).filter(Boolean)
+    : editoresDeBanners();
+  return [...new Set(lista)];
+}
+
+/** Tope de un material de curso (documento). PDFs y Office pesan más que un anuncio. */
+export const MAX_MATERIAL_BYTES = 25 * 1024 * 1024;
+/** Formatos que se aceptan como documento de un material. */
+export const MATERIAL_MIMES_PERMITIDOS = [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'video/mp4',
+];
+
 /** Cuánto vive un código. Corto: es un dato que viaja por correo. */
 export const CODIGO_VIGENCIA_MINUTOS = 10;
 /** Intentos antes de invalidar el código. */
