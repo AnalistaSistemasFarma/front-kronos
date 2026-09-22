@@ -25,6 +25,7 @@ import {
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import ChatMarkdown from './ChatMarkdown';
+import ComposerLetterFx from './ComposerLetterFx';
 import { MAX_USER_MESSAGE_CHARS } from '../../lib/chat/constants';
 import {
   MAX_CHAT_ATTACHMENTS_PER_MESSAGE,
@@ -33,6 +34,14 @@ import {
 } from '../../lib/chat/attachments';
 import ChatVoice from './ChatVoice';
 import type { ChatReplyToDto } from '../../lib/chat/client';
+
+/**
+ * Tope de caracteres para la animación de letras (ComposerLetterFx). Mensajes
+ * más largos que esto se ven y se comportan como siempre, sin la capa
+ * decorativa — no vale la pena mantener cientos de `<span>` animados para un
+ * mensaje largo que casi siempre es un pegado, no algo tecleado letra a letra.
+ */
+const LETTERFX_MAX_CHARS = 600;
 
 /**
  * Entrada de texto del chat — v1: Markdown CRUDO con ayudas.
@@ -151,6 +160,10 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   // Enter físico y ahí Enter debe seguir enviando. Pedido de Nicolás
   // (2026-09-08): en el celular no hay un Shift+Enter cómodo.
   const tecladoTactil = useMediaQuery('(pointer: coarse)');
+  // Apaga la animación de letras (ComposerLetterFx) para quien pide menos
+  // movimiento en el sistema — la misma señal que ya se respeta en el resto
+  // del chat.
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   // El id amarra la opción "Adjuntar archivos" (una <label>) con el input de
   // archivos. Va con useId y no con una constante porque puede haber más de un
   // compositor montado (el panel flotante y la página) y dos labels apuntando
@@ -247,6 +260,13 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   );
 
   const tooLong = value.length > MAX_USER_MESSAGE_CHARS;
+  // Solo se activa la capa decorativa de letras cuando es seguro: sin
+  // menciones abiertas (esa lista depende de leer el texto real a tiempo),
+  // sin vista previa de Markdown, mensaje corto, y sin
+  // `prefers-reduced-motion`. Fuera de estas condiciones el campo se ve y se
+  // comporta exactamente como siempre — nunca a medias.
+  const letterFxActive =
+    !preview && !mencionVisible && !disabled && !reducedMotion && value.length <= LETTERFX_MAX_CHARS;
   // Con adjuntos el texto puede ir vacío (mandar solo un archivo es válido);
   // lo que no se puede enviar es un mensaje sin texto Y sin archivos.
   const canSend = (value.trim().length > 0 || files.length > 0) && !disabled && !sending && !tooLong;
@@ -545,7 +565,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   );
 
   return (
-    <Box className='chat-composer'>
+    <Box className={`chat-composer${letterFxActive ? ' chat-composer--letterfx-active' : ''}`}>
       {/* Lista de menciones. Va como primer hijo del compositor, así que se
           dibuja ARRIBA de la caja de escribir: en el celular, un menú que
           apareciera debajo quedaría tapado por el teclado. */}
@@ -679,6 +699,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           </Box>
         ) : null}
         {!preview && (
+          <Box pos='relative' style={{ display: 'flex', flex: 1, minWidth: 0 }}>
           <Textarea
             ref={textareaRef}
             value={value}
@@ -721,7 +742,6 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             disabled={disabled}
             autoFocus={autoFocus}
             error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
-            style={{ flex: 1, minWidth: 0 }}
             classNames={{ root: 'chat-composer__field', input: 'chat-composer__input' }}
             /* El clip (y, si la conversación admite voz, el ícono de llamada)
                va DENTRO de la caja. `rightSectionPointerEvents='all'` no es
@@ -742,6 +762,8 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             rightSectionPointerEvents='all'
             styles={{ input: { paddingRight: voiceConversationId ? 84 : 42 } }}
           />
+          {letterFxActive && <ComposerLetterFx textareaRef={textareaRef} value={value} />}
+          </Box>
         )}
 
         {/* El recordatorio de Enter / Shift+Enter era un renglón entero; ahora
