@@ -1856,12 +1856,40 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--app-text, var(--foreground));
+  /* El preflight de Tailwind pone `border: 0 solid` en TODO elemento (color
+     implícito `currentColor`, ancho 0). El efecto de espejo de
+     ComposerLetterFx.tsx copia el ancho de borde REAL del textarea (para que
+     la caja de contenido coincida en tamaño), pero nunca su color — así que
+     ese borde, antes invisible por ancho 0, pasaba a dibujarse con
+     `currentColor` (el texto del tema, casi blanco en oscuro) y sin
+     `border-radius` (que tampoco se espeja), como un rectángulo blanco de
+     esquinas cuadradas encima de la cápsula redondeada del input (reportado
+     por Nicolás, 2026-09-22). El ancho SÍ debe seguir copiándose para que el
+     texto quede alineado con el real; lo único que sobra es el color. */
+  border-color: transparent;
+  background-color: transparent;
 }
 
 .chat-composer__letterfx-char {
   display: inline-block;
   white-space: pre-wrap;
   animation: chat-letterfx-in 200ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* Agrupa las letras de una misma "palabra" para que la línea solo pueda
+   partirse en los espacios, igual que el textarea real — no entre cualquier
+   par de letras. Cada carácter sigue siendo su propio <span> animable
+   (chat-composer__letterfx-char) para la entrada/salida; lo que cambia es que
+   viven dentro de un contenedor `nowrap`, así que el navegador los trata como
+   un solo bloque indivisible al decidir dónde envolver el renglón. Sin esto,
+   cada letra es una caja `inline-block` independiente y el navegador puede
+   partir CUALQUIER letra al llegar al borde — el mensaje quedaba partido a
+   mitad de palabra ("se separa m" / "ucho del texto") con puntos de quiebre
+   distintos a los del textarea real, y el cursor nativo (que sí sigue el
+   renglonado real) terminaba lejos del último carácter dibujado (reportado
+   por Nicolás, 2026-09-22). */
+.chat-composer__letterfx-word {
+  white-space: nowrap;
 }
 
 .chat-composer__letterfx-char.is-leaving {
