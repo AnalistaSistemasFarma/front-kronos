@@ -1,0 +1,41 @@
+import { describe, expect, it } from 'vitest';
+import {
+  BALANCE_COMPANIES,
+  getBalanceCompany,
+  getEnabledBalanceCompanies,
+} from '../companies';
+import { getBalancesConfigurationError } from '../adminPool';
+
+describe('configuración de Balances', () => {
+  it('habilita exclusivamente Farmalogica para la salida inicial', () => {
+    expect(getEnabledBalanceCompanies().map((company) => company.idCompany)).toEqual([1]);
+    expect(getBalanceCompany(1)?.enabled).toBe(true);
+  });
+
+  it('mantiene OLP y GSS configuradas pero bloqueadas', () => {
+    expect(getBalanceCompany(3)).toMatchObject({ enabled: false, slug: 'olp' });
+    expect(getBalanceCompany(8)).toMatchObject({ enabled: false, slug: 'gss' });
+    expect(BALANCE_COMPANIES).toHaveLength(3);
+  });
+
+  it('no tiene configuración para compañías fuera del alcance', () => {
+    expect(getBalanceCompany(2)).toBeUndefined();
+  });
+
+  it('detecta la configuración de entorno incompleta sin abrir conexión SQL', () => {
+    expect(getBalancesConfigurationError({ BALANCES_SQL_SERVER: '192.168.10.7' })).toBe(
+      'Faltan variables de entorno: BALANCES_SQL_DB, BALANCES_SQL_USER, BALANCES_SQL_PASS'
+    );
+  });
+
+  it('acepta cuando están presentes todas las variables requeridas', () => {
+    expect(
+      getBalancesConfigurationError({
+        BALANCES_SQL_SERVER: '192.168.10.7',
+        BALANCES_SQL_DB: 'FARMA_IND_PROD',
+        BALANCES_SQL_USER: 'balance_test',
+        BALANCES_SQL_PASS: 'not-a-real-secret',
+      })
+    ).toBeNull();
+  });
+});

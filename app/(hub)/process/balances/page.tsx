@@ -16,23 +16,16 @@ import {
 import { IconAlertTriangle, IconPlayerPlay } from '@tabler/icons-react';
 
 /**
- * Balances — Sprint 1.
+ * Balances — Sprint 2.
  *
- * Un botón por empresa (Farmalogica, OLP, GSS — las únicas que hoy tiene el
- * job compartido de SQL Agent en el 10.7, ver lib/balances/companies.ts).
- * Cada botón dispara /api/balances/submit-run y espera el resultado; NO hay
- * estado en tiempo real todavía (eso es Sprint 2) — el request queda
- * "cargando" hasta que el balance + acumulado terminan.
- *
- * El acceso por empresa lo resuelve el servidor (subprocess_user_company);
- * si el usuario no tiene ninguna empresa habilitada, la lista sale vacía.
+ * Solo Farmalogica está habilitada para la salida inicial. OLP y GSS se
+ * conservan bloqueadas en el servidor hasta completar su activación propia.
+ * Cada botón dispara /api/balances/submit-run y la corrida continúa en
+ * background. El historial se consulta cada 2 segundos mientras hay una
+ * corrida activa, para reflejar running/success/failed sin bloquear el request.
  */
 
-const COMPANIES = [
-  { idCompany: 1, displayName: 'Farmalogica' },
-  { idCompany: 3, displayName: 'One Latam Pharma' },
-  { idCompany: 8, displayName: 'GSS' },
-] as const;
+const COMPANIES = [{ idCompany: 1, displayName: 'Farmalogica' }] as const;
 
 interface RunRow {
   id: number;
@@ -58,8 +51,8 @@ export default function BalancesPage() {
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(true);
   // Candado GLOBAL: si CUALQUIER empresa tiene una corrida 'running' (la
-  // disparó otra persona/pestaña), se deshabilitan los 3 botones — el
-  // servidor igual lo rechaza (409) si se cuela un clic, esto es solo UX.
+  // disparó otra persona/pestaña), se deshabilitan los botones — el servidor
+  // igual lo rechaza (409) si se cuela un clic; esto es solo UX.
   const [globallyRunning, setGloballyRunning] = useState<RunRow | null>(null);
 
   const fetchRuns = useCallback(async () => {
@@ -80,6 +73,12 @@ export default function BalancesPage() {
     fetchRuns();
   }, [fetchRuns]);
 
+  useEffect(() => {
+    if (!globallyRunning) return;
+    const timer = window.setInterval(fetchRuns, 2000);
+    return () => window.clearInterval(timer);
+  }, [fetchRuns, globallyRunning]);
+
   async function handleRun(idCompany: number) {
     setRunningCompany(idCompany);
     setLastError(null);
@@ -93,7 +92,7 @@ export default function BalancesPage() {
       setLastError(err instanceof Error ? err.message : String(err));
     } finally {
       setRunningCompany(null);
-      fetchRuns();
+      await fetchRuns();
     }
   }
 
@@ -102,8 +101,8 @@ export default function BalancesPage() {
       <div>
         <Title order={2}>Balances</Title>
         <Text c="dimmed" size="sm">
-          Ejecuta el balance y el balance acumulado de una empresa. Alcance actual: Farmalogica,
-          One Latam Pharma y GSS.
+          Ejecuta el balance y el balance acumulado de Farmalogica. Las demás empresas permanecen
+          bloqueadas hasta completar su activación operativa.
         </Text>
       </div>
 
@@ -118,7 +117,7 @@ export default function BalancesPage() {
           {COMPANIES.find((c) => c.idCompany === globallyRunning.id_company)?.displayName ??
             globallyRunning.id_company}{' '}
           está corriendo ahora mismo (disparado por {globallyRunning.triggered_by}). Solo se permite una
-          corrida a la vez entre las 3 empresas, para no sobrecargar el 10.7 — espere a que termine.
+          corrida a la vez para no sobrecargar el 10.7 — espere a que termine.
         </Alert>
       )}
 

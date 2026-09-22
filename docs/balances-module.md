@@ -1,86 +1,95 @@
-# Módulo de Balances (Sprint 1)
+# Módulo de Balances
 
-Migra el botón "Ejecutar balances" de SAPSEND-GSS a SynerLink. Contexto completo
-en la memoria del proyecto (bitácora de Nicolás vía SynerLink, 2026-09-21).
+Migra el botón "Ejecutar balances" de SAPSEND-GSS a SynerLink. Contexto
+completo en la bitácora del proyecto del 2026-09-21.
 
-## Alcance de este sprint
+## Alcance habilitado actualmente
 
-- Botón manual por empresa (Farmalogica, OLP, GSS) — las 3 que hoy cubre el job
-  compartido de SQL Agent `Balance_Empresas` / `Balance_Acumulado_Empresas` en
-  serfarma07 (192.168.10.7). Ryan/Abamia/Kelab/Meditrack quedan para Sprint 3
-  (ese job no tiene SQL para esas empresas todavía).
-- Ejecución SÍNCRONA, sin estado en tiempo real (Sprint 2).
-- El SQL de cada paso (`lib/balances/sql/*.sql`) se extrajo **verbatim** del
-  job compartido (`sp_help_jobstep` en el 10.7, 2026-09-21) y se ejecuta
-  directo contra `FARMA_IND_PROD`, **sin pasar por `sp_start_job`** — así se
-  aísla por empresa sin tocar el job compartido (que corre las 3 empresas en
-  cadena y no se puede parar a mitad limpiamente).
-- **Candado GLOBAL, no por empresa** (pedido explícito de Nicolás, 2026-09-21:
-  "quiero ejecutarlos independientemente a voluntad, la meta es que no
-  colguemos 3 bases al mismo tiempo"): los 3 botones son independientes —
-  cualquiera se puede disparar en cualquier momento — pero solo UNA corrida
-  puede estar `running` a la vez en TODA la tabla `balance_run`, sin importar
-  la empresa. Si se intenta una segunda mientras hay otra en curso, el
-  servidor responde `409` (no la encola, la rechaza) y el front lo muestra
-  como aviso. El candado es atómico en SQL (`INSERT ... WHERE NOT EXISTS`
-  con `TABLOCKX`/`HOLDLOCK`), así que dos clics casi simultáneos no se cuelan
-  los dos.
+- **Farmalogica únicamente** (`id_company = 1`). El botón ejecuta el balance y
+  el balance acumulado de Farmalogica de forma asíncrona.
+- **OLP** (`id_company = 3`) y **GSS** (`id_company = 8`) conservan su SQL
+  histórico versionado, pero están bloqueadas explícitamente en
+  `lib/balances/companies.ts`. Una fila anticipada de permisos en KRONOSDB no
+  puede activarlas por accidente.
+- Ryan, Abamia, Kelab y Meditrack siguen fuera del módulo: el job original no
+  contiene SQL de balance validado para esas compañías. Elaborar y validar ese
+  SQL es un sprint operativo independiente, no un cambio de configuración.
 
-## Pendiente ANTES de desplegar (no lo hace este cambio de código)
+La activación de Farmalogica tiene tres capas acumulativas:
 
-1. **Tabla nueva `balance_run` en KRONOSDB**. La tabla se crea mediante la
-   migración Prisma de este PR en KRONOSDB_PRUEBAS (y se promueve de forma
-   separada a KRONOSDB). El historial y el candado viven en SynerLink; solo
-   los SQL operativos se ejecutan contra FARMA_IND_PROD mediante el pool
-   administrativo.
+1. `enabled: true` en la configuración versionada.
+2. Permiso del usuario en `subprocess_user_company` para `/process/balances` y
+   `id_company = 1`.
+3. Variables `BALANCES_SQL_*` presentes en el `.env` de PRUEBAS. El endpoint
+   las verifica **antes** de crear una fila `running`, así evita una corrida
+   huérfana que falle por configuración incompleta.
 
-   ```sql
-   CREATE TABLE [dbo].[balance_run] (
-     id                     INT IDENTITY(1,1) PRIMARY KEY,
-     id_company             INT NOT NULL,
-     triggered_by           NVARCHAR(255) NOT NULL,
-     status                 NVARCHAR(20) NOT NULL, -- running | success | failed
-     started_at             DATETIME NOT NULL,
-     finished_at            DATETIME NULL,
-     balance_duration_ms    INT NULL,
-     acumulado_duration_ms  INT NULL,
-     error_message          NVARCHAR(MAX) NULL
-   );
-   ```
+## Ejecución y seguridad
 
-2. **Variables de entorno nuevas** (front-kronos `.env`, por ambiente):
+- El endpoint registra la corrida, responde `202` y ejecuta el SQL en segundo
+  plano. La interfaz consulta `balance_run` cada 2 segundos mientras ve una
+  corrida activa.
+- El candado es **global**, no por compañía: existe como máximo una fila
+  `running` en toda la tabla. El `INSERT ... WHERE NOT EXISTS` usa
+  `TABLOCKX`/`HOLDLOCK`, de modo que dos clics simultáneos no pueden iniciar
+  dos SQL pesados contra el 10.7.
+- Los SQL (`lib/balances/sql/*.sql`) se extrajeron del job compartido
+  `Balance_Empresas` / `Balance_Acumulado_Empresas` en serfarma07
+  (192.168.10.7) el 2026-09-21. Se ejecutan directo contra `FARMA_IND_PROD`,
+  sin `sp_start_job`; el job compartido no se modifica.
+- El SQL lee las tablas SAP Business One de `FARMALOGICA_PROD`, pero no las
+  modifica. Su escritura queda limitada a las tablas históricas
+  `Farma_Balance_2026` y `Farma_Balance_Acumulado_2026` en `FARMA_IND_PROD`,
+  y solo ocurre cuando un usuario autorizado pulsa el botón.
 
-   ```
+## Requisitos para activar Farmalogica en PRUEBAS
+
+Los siguientes pasos son operativos y **no los ejecuta el código ni este
+cambio**:
+
+1. Aplicar una vez la migración ya versionada
+   `prisma/migrations/20260921210500_add_balance_run/migration.sql` sobre
+   **KRONOSDB_PRUEBAS**. No aplicar nada en producción.
+2. En el `.env` no versionado del runner `.230`
+   (`C:\Users\nicolas.rivera\projects\front-kronos-test\.env`), configurar:
+
+   ```dotenv
    BALANCES_SQL_SERVER=192.168.10.7
    BALANCES_SQL_DB=FARMA_IND_PROD
-   BALANCES_SQL_USER=adminDesarrollo   # reutiliza el login ya creado para SAPSEND-GSS
-   BALANCES_SQL_PASS=<misma clave que SQLADMIN_PASS de sapsend-gss/.env>
+   BALANCES_SQL_USER=<login autorizado de PRUEBAS>
+   BALANCES_SQL_PASS=<secreto del login>
    ```
 
-   Decisión pendiente de Nicolás: reutilizar `adminDesarrollo` tal cual, o
-   crear un login dedicado a SynerLink (más aislado, un cambio de clave no
-   afecta a SAPSEND-GSS).
+   No reutilizar ni copiar secretos a Git. El login debe recibir únicamente los
+   permisos SQL que exigen las dos sentencias de Farmalogica.
+3. En **KRONOSDB_PRUEBAS**, crear o reutilizar el subproceso
+   `/process/balances` y asignarlo solo al usuario autorizado para
+   Farmalogica (`id_company = 1`). No conceder OLP ni GSS en esta salida.
+4. Fusionar el código aprobado a `testing`. El flujo `Deploy a PRUEBAS (.230)`
+   hace `fetch/reset` de `origin/testing`, conserva `.env`, ejecuta
+   `npm ci`, `prisma generate`, build y reinicia exclusivamente
+   `GSS-Front-TEST` y `kronos-mcp-test`.
+5. Iniciar sesión con el usuario autorizado, abrir `/process/balances` y
+   comprobar que solo aparece Farmalogica. La primera ejecución real requiere
+   autorización operativa explícita porque ejecuta las sentencias pesadas
+   contra el 10.7.
 
-3. **Alta del subproceso en KRONOSDB** para que el control de acceso
-   (`lib/balances/access.ts`) deje de estar fail-closed para todos:
+## Trabajo pendiente por sprint
 
-   ```sql
-   INSERT INTO [dbo].[subprocess] (subprocess, id_process, subprocess_url)
-   VALUES ('Balances', <id_process>, '/process/balances');
-   -- luego, por cada (usuario, empresa) que deba ver el botón:
-   INSERT INTO [dbo].[subprocess_user_company] (id_subprocess, id_company_user)
-   VALUES (<id_subprocess nuevo>, <id_company_user de Nicolás x Farmalogica/OLP/GSS>);
-   ```
+### Recuperación segura de corridas huérfanas
 
-   Sin estas filas el módulo queda invisible (no roto) para todos los
-   usuarios — es intencional (fail-closed).
+Una caída o reinicio del proceso web después de crear una fila `running` puede
+mantener el candado global. No se debe resolver con un vencimiento arbitrario:
+una consulta acumulada legítima podría durar más que el plazo elegido y abrir
+la puerta a una segunda ejecución concurrente.
 
-## Qué falta para Sprint 2
+Antes de automatizar la recuperación se requiere un diseño aprobado de
+lease/heartbeat, su DDL y una rutina de reconciliación. Hasta entonces, un
+operador debe revisar cualquier fila `running` persistente y decidir la
+recuperación de forma controlada.
 
-- Endpoint de estado en tiempo real (polling de `balance_run` cada pocos
-  segundos, o llevar la ejecución a background + `run-status` al estilo
-  `payment-assistant`).
-- Deshabilitar el botón mientras hay una corrida en curso (hoy ya se
-  deshabilita del lado del cliente, pero no hay bloqueo del lado servidor si
-  llegan dos clics casi simultáneos — agregar un check de "ya hay una
-  corrida `running` para esta empresa" antes de insertar una nueva fila).
+### Otras compañías
+
+OLP y GSS requieren activar su configuración, permisos y validación operativa
+por separado antes de cambiar su interruptor `enabled`. Ryan, Abamia, Kelab y
+Meditrack requieren primero SQL de balance validado y pruebas aisladas.

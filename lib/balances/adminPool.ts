@@ -24,23 +24,46 @@ declare global {
   var __balancesMssqlPoolPromise: Promise<sql.ConnectionPool> | undefined;
 }
 
+const REQUIRED_ENV = [
+  'BALANCES_SQL_SERVER',
+  'BALANCES_SQL_DB',
+  'BALANCES_SQL_USER',
+  'BALANCES_SQL_PASS',
+] as const;
+
+/**
+ * Verifica únicamente la presencia de configuración; no abre conexión ni
+ * ejecuta SQL. Se usa antes de registrar una corrida para no dejar una fila
+ * `running` que inevitablemente fallará por una activación incompleta.
+ */
+type BalancesEnvironment = Partial<Record<(typeof REQUIRED_ENV)[number], string | undefined>>;
+const runtimeEnvironment = process.env as unknown as BalancesEnvironment;
+
+export function getBalancesConfigurationError(
+  environment: BalancesEnvironment = runtimeEnvironment
+): string | null {
+  const missing = REQUIRED_ENV.filter((name) => !environment[name]);
+  return missing.length > 0
+    ? `Faltan variables de entorno: ${missing.join(', ')}`
+    : null;
+}
+
 function buildConfig(): sql.config {
   const server = process.env.BALANCES_SQL_SERVER;
   const database = process.env.BALANCES_SQL_DB;
   const user = process.env.BALANCES_SQL_USER;
   const password = process.env.BALANCES_SQL_PASS;
 
-  if (!server || !database || !user || !password) {
-    throw new Error(
-      'Faltan variables de entorno BALANCES_SQL_SERVER/BALANCES_SQL_DB/BALANCES_SQL_USER/BALANCES_SQL_PASS'
-    );
+  const configurationError = getBalancesConfigurationError();
+  if (configurationError) {
+    throw new Error(configurationError);
   }
 
   return {
-    server,
-    database,
-    user,
-    password,
+    server: server!,
+    database: database!,
+    user: user!,
+    password: password!,
     options: { encrypt: false, trustServerCertificate: true },
     requestTimeout: 120_000, // los balances acumulados son consultas pesadas
     pool: { max: 3, min: 0, idleTimeoutMillis: 30_000 },

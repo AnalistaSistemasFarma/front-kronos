@@ -3,22 +3,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { userCanAccessCompany } from '../../../../lib/balances/access';
 import { getBalanceCompany } from '../../../../lib/balances/companies';
-import { runCompanyBalance, BalanceRunLockedError } from '../../../../lib/balances/runBalance';
+import { getBalancesConfigurationError } from '../../../../lib/balances/adminPool';
+import {
+  executeCompanyBalance,
+  startCompanyBalance,
+  BalanceRunLockedError,
+} from '../../../../lib/balances/runBalance';
 
 /**
  * Dispara el balance (normal + acumulado) de UNA empresa.
  *
- * POST /api/balances/submit-run?companyId=<1|3|8>
+ * POST /api/balances/submit-run?companyId=<1>
  *
- * Sprint 1: ejecución SÍNCRONA (el request espera a que termine). El balance
- * normal es rápido; el acumulado puede tardar más — el timeout del pool está
- * en 120s (ver adminPool.ts). Sprint 2 lo vuelve asíncrono con estado en vivo
- * (polling de la tabla `balance_run`), pero hoy es deliberadamente simple:
- * "clic → espera → resultado", igual que el botón viejo de SAPSEND.
+ * Sprint 2: registra la corrida y devuelve 202 inmediatamente. La ejecución
+ * continúa en background; la interfaz consulta la tabla `balance_run`.
  *
- * ALCANCE: solo Farmalogica/OLP/GSS (ver lib/balances/companies.ts). Ejecuta
- * el SQL EXACTO extraído del job compartido de SQL Agent en el 10.7, SIN
- * pasar por sp_start_job — no toca el job compartido.
+ * ALCANCE HABILITADO: solo Farmalogica. OLP/GSS siguen presentes como
+ * configuraciones deshabilitadas y el servidor los rechaza hasta que exista
+ * una activación operativa independiente. Ejecuta el SQL extraído del job
+ * compartido en el 10.7, sin pasar por sp_start_job.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -36,9 +39,12 @@ export async function POST(request: NextRequest) {
 
     const company = getBalanceCompany(companyId);
     if (!company) {
+      return NextResponse.json({ error: 'Empresa no soportada por el módulo de Balances.' }, { status: 400 });
+    }
+    if (!company.enabled) {
       return NextResponse.json(
-        { error: 'Empresa no soportada por el módulo de Balances (Sprint 1: solo Farmalogica/OLP/GSS).' },
-        { status: 400 }
+        { error: `La ejecución de balances para ${company.displayName} no está habilitada actualmente.` },
+        { status: 403 }
       );
     }
 
@@ -47,9 +53,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No tiene acceso a esta empresa.' }, { status: 403 });
     }
 
-    const result = await runCompanyBalance(company, userEmail);
+    const configurationError = getBalancesConfigurationError();
+    if (configurationError) {
+      return NextResponse.json(
+        { error: `Balances no está configurado para PRUEBAS: ${configurationError}` },
+        { status: 503 }
+      );
+    }
 
-    return NextResponse.json({ run: result }, { status: result.ok ? 200 : 502 });
+    const runId = await startCompanyBalance(company, userEmail);
+    void executeCompanyBalance(company, runId).catch((error) => {
+      // La ejecución registra el fallo cuando puede; esto evita una rejection
+      // no manejada si el proceso pierde conexión durante la finalización.
+      console.error('Balance background run failed', error);
+    });
+
+    return NextResponse.json(
+      { run: { id: runId, id_company: company.idCompany, status: 'running' } },
+      { status: 202 }
+    );
   } catch (error) {
     if (error instanceof BalanceRunLockedError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
