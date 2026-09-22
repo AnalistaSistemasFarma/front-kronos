@@ -1671,7 +1671,7 @@ export async function finalizeSignerTurn(
     throw Object.assign(new Error('Campo orion_signature no encontrado'), { status: 404 });
   }
 
-  let { bag } = loaded;
+  const { bag } = loaded;
   const me = normalizeSignerEmail(params.userEmail);
 
   let fileId = String(params.fileId || '').trim();
