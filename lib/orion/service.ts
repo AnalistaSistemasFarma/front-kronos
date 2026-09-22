@@ -983,7 +983,7 @@ export async function syncOrionDocumentState(
   const loaded = await loadOrionFormBag(pool, requestId);
   if (!loaded) return null;
 
-  const { bag } = loaded;
+  let { bag } = loaded;
   const bagBefore = serializeOrionSignatureBagBag(bag);
   const requested = String(fileId || '').trim();
 
