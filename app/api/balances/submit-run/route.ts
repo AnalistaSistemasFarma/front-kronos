@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { userCanAccessCompany } from '../../../../lib/balances/access';
 import { getBalanceCompany } from '../../../../lib/balances/companies';
+import { getBalancesConfigurationError } from '../../../../lib/balances/adminPool';
 import {
   executeCompanyBalance,
   startCompanyBalance,
@@ -12,14 +13,15 @@ import {
 /**
  * Dispara el balance (normal + acumulado) de UNA empresa.
  *
- * POST /api/balances/submit-run?companyId=<1|3|8>
+ * POST /api/balances/submit-run?companyId=<1>
  *
  * Sprint 2: registra la corrida y devuelve 202 inmediatamente. La ejecución
  * continúa en background; la interfaz consulta la tabla `balance_run`.
  *
- * ALCANCE: solo Farmalogica/OLP/GSS (ver lib/balances/companies.ts). Ejecuta
- * el SQL EXACTO extraído del job compartido de SQL Agent en el 10.7, SIN
- * pasar por sp_start_job — no toca el job compartido.
+ * ALCANCE HABILITADO: solo Farmalogica. OLP/GSS siguen presentes como
+ * configuraciones deshabilitadas y el servidor los rechaza hasta que exista
+ * una activación operativa independiente. Ejecuta el SQL extraído del job
+ * compartido en el 10.7, sin pasar por sp_start_job.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -37,15 +39,26 @@ export async function POST(request: NextRequest) {
 
     const company = getBalanceCompany(companyId);
     if (!company) {
+      return NextResponse.json({ error: 'Empresa no soportada por el módulo de Balances.' }, { status: 400 });
+    }
+    if (!company.enabled) {
       return NextResponse.json(
-        { error: 'Empresa no soportada por el módulo de Balances (Sprint 1: solo Farmalogica/OLP/GSS).' },
-        { status: 400 }
+        { error: `La ejecución de balances para ${company.displayName} no está habilitada actualmente.` },
+        { status: 403 }
       );
     }
 
     const canRun = await userCanAccessCompany(userEmail, companyId);
     if (!canRun) {
       return NextResponse.json({ error: 'No tiene acceso a esta empresa.' }, { status: 403 });
+    }
+
+    const configurationError = getBalancesConfigurationError();
+    if (configurationError) {
+      return NextResponse.json(
+        { error: `Balances no está configurado para PRUEBAS: ${configurationError}` },
+        { status: 503 }
+      );
     }
 
     const runId = await startCompanyBalance(company, userEmail);
