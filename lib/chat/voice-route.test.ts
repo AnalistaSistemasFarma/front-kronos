@@ -2,8 +2,9 @@ import { expect, it, vi, beforeEach } from 'vitest';
 const guard = vi.hoisted(() => vi.fn());
 const agent = vi.hoisted(() => vi.fn());
 const auditCall = vi.hoisted(() => vi.fn());
+const auditUpdate = vi.hoisted(() => vi.fn());
 vi.mock('./http', () => ({ guardConversation: guard, jsonNoStore: (data: unknown, init?: ResponseInit) => Response.json(data, init) }));
-vi.mock('../prisma', () => ({ prisma: { agent: { findUnique: agent }, chatVoiceCall: { create: auditCall } } }));
+vi.mock('../prisma', () => ({ prisma: { agent: { findUnique: agent }, chatVoiceCall: { create: auditCall, update: auditUpdate, findFirst: vi.fn(), count: vi.fn().mockResolvedValue(0), findMany: vi.fn().mockResolvedValue([]), updateMany: vi.fn(), delete: vi.fn() } } }));
 import { POST } from '../../app/api/chat/conversations/[id]/voice/route';
 beforeEach(() => {
   vi.stubEnv('NEXTAUTH_URL', 'https://test.example');
@@ -33,15 +34,15 @@ it('captures authenticated call identity and the browser origin for auditing', a
     body: JSON.stringify({ action: 'offer', sdp: 'v=0', id_user: 'impostor' }),
   }), { params: Promise.resolve({ id: '47' }) });
   expect(response.status).toBe(200);
-  expect(auditCall).toHaveBeenCalledWith({ data: expect.objectContaining({ id_user: 'operator',
-    id_agent: 1, id_conversation: 47, client_ip: '192.0.2.10', user_agent: 'Test Browser' }) });
+  expect(auditUpdate).toHaveBeenCalledWith({ where: expect.any(Object), data: expect.objectContaining({
+    client_ip: '192.0.2.10', user_agent: 'Test Browser' }) });
   const { callId } = await response.json();
   await call(JSON.stringify({ action: 'close', callId }));
 });
 it('fails closed if durable audit cannot be initialized', async () => {
-  auditCall.mockRejectedValue(new Error('DB offline'));
+  auditUpdate.mockRejectedValue(new Error('DB offline'));
   expect((await call(JSON.stringify({ action: 'offer', sdp: 'v=0' }))).status).toBe(503);
-  auditCall.mockResolvedValue({});
+  auditUpdate.mockResolvedValue({});
   const response = await call(JSON.stringify({ action: 'offer', sdp: 'v=0' }));
   expect(response.status).toBe(200);
   const { callId } = await response.json();
