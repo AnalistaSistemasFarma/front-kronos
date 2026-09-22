@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActionIcon,
   Alert,
@@ -25,7 +25,6 @@ import AgentTaskTable from './AgentTaskTable';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
-import ChatVoice from './ChatVoice';
 import { useChatConversation, type ChatTarget } from './useChatConversation';
 import { useAltoVisible } from './useAltoVisible';
 import {
@@ -107,7 +106,14 @@ function MessageAttachments({ message }: { message: ChatMessageDto }) {
   );
 }
 
-function MessageBubble({
+/**
+ * Envuelto en `memo`: en un hilo activo, `poll()` reprograma cada 1-30 s y
+ * actualiza `status` aunque no haya mensajes nuevos. Sin esto, cada burbuja
+ * de la conversación entera se re-renderizaba en cada vuelta del sondeo
+ * (perceptible como lentitud en celulares con hilos largos), aun cuando el
+ * `message` de cada una seguía siendo el mismo objeto.
+ */
+const MessageBubble = memo(function MessageBubble({
   message,
   agent,
   currentUserId,
@@ -292,7 +298,8 @@ function MessageBubble({
       </Box>
     </Group>
   );
-}
+});
+MessageBubble.displayName = 'MessageBubble';
 
 /**
  * Aviso de "su mensaje llegó pero nadie ha contestado".
@@ -555,8 +562,19 @@ export default function ChatThread({
       // En el mismo cuadro el navegador todavía no reacomodó el layout con el
       // alto nuevo; se espera al siguiente. No encadenar animaciones smooth
       // mientras el teclado cambia el viewport en cada cuadro.
+      //
+      // DOBLE rAF (2026-09-21): un solo cuadro no siempre basta en iOS. La
+      // animación nativa de cierre/apertura del teclado sigue moviendo el
+      // `visualViewport` (y por tanto `--alto-visible`) un cuadro más después
+      // de este evento; si se lee `scrollHeight` en el primer rAF, a veces
+      // todavía refleja el alto viejo y el scroll queda "subido" respecto al
+      // fondo real. Esperar un segundo cuadro le da tiempo al reflow de
+      // asentarse antes de fijar la posición. Nicolás lo reportó como "la
+      // conversación se sube más de lo que debía".
       requestAnimationFrame(() => {
-        viewport.scrollTop = viewport.scrollHeight;
+        requestAnimationFrame(() => {
+          viewport.scrollTop = viewport.scrollHeight;
+        });
       });
     }, [])
   );
@@ -588,8 +606,10 @@ export default function ChatThread({
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
   }, [thread.messages, stickToBottom]);
 
-  // Al abrir el hilo, al fondo sin animación.
-  useEffect(() => {
+  // Al abrir el hilo, al fondo sin animación. useLayoutEffect (no useEffect):
+  // fija el scroll ANTES de que el navegador pinte, para no dejar ver el
+  // salto de "arriba" a "abajo" (más notorio en mobile).
+  useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport || thread.loading) return;
     viewport.scrollTop = viewport.scrollHeight;
@@ -625,7 +645,14 @@ export default function ChatThread({
 
     const observador = new ResizeObserver(() => {
       if (!stickToBottomRef.current) return;
-      viewport.scrollTop = viewport.scrollHeight;
+      // Mismo motivo del doble rAF de arriba: si el contenido crece justo
+      // mientras el teclado todavía está animando el viewport, un solo
+      // cuadro puede leer un `scrollHeight` que no es el final.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          viewport.scrollTop = viewport.scrollHeight;
+        });
+      });
     });
     observador.observe(contenido);
     return () => observador.disconnect();
@@ -724,7 +751,6 @@ export default function ChatThread({
       onDrop={onDrop}
       onPaste={onPaste}
     >
-      {agent?.code === 'duo' && thread.conversation && <ChatVoice key={thread.conversation.id} conversationId={thread.conversation.id} />}
       {dragging && (
         <Box className='chat-thread__dropzone' aria-hidden>
           <Stack align='center' gap={4}>
@@ -824,6 +850,7 @@ export default function ChatThread({
 
       <Box className='chat-thread__composer'>
         <ChatComposer
+          voiceConversationId={agent?.code === 'duo' ? thread.conversation?.id : undefined}
           ref={composerRef}
           onSend={async (body, files) => {
             const enviado = await thread.send(body, files, cita);
