@@ -29,6 +29,46 @@ function splitToChars(text: string): string[] {
   return Array.from(text);
 }
 
+function isBreakable(char: string): boolean {
+  return char === ' ' || char === '\n' || char === '\t';
+}
+
+type RenderGroup = { kind: 'space'; ghost: Ghost } | { kind: 'word'; ghosts: Ghost[] };
+
+/**
+ * Agrupa las letras en "palabras" (tramos sin espacio) para que el renglón
+ * solo pueda partirse donde el textarea real lo haría — en un espacio/salto de
+ * línea — y no entre dos letras cualesquiera. Cada carácter en `ghosts` es su
+ * propia caja `inline-block` (para poder animarla), y una caja `inline-block`
+ * es un punto de quiebre válido por sí sola: sin esta agrupación, el
+ * navegador podía partir CUALQUIER palabra a mitad de camino con un patrón de
+ * renglones distinto al del `<textarea>` real, dejando el cursor nativo (que
+ * sí sigue el renglonado real) lejos del último carácter dibujado — reportado
+ * por Nicolás, 2026-09-22. El CSS envuelve cada grupo `word` en
+ * `white-space: nowrap` (`.chat-composer__letterfx-word`) para que sus letras
+ * viajen juntas a la siguiente línea si no caben enteras.
+ */
+function groupForWrap(ghosts: Ghost[]): RenderGroup[] {
+  const groups: RenderGroup[] = [];
+  let current: Ghost[] = [];
+  const flushWord = () => {
+    if (current.length > 0) {
+      groups.push({ kind: 'word', ghosts: current });
+      current = [];
+    }
+  };
+  for (const g of ghosts) {
+    if (isBreakable(g.char)) {
+      flushWord();
+      groups.push({ kind: 'space', ghost: g });
+    } else {
+      current.push(g);
+    }
+  }
+  flushWord();
+  return groups;
+}
+
 /**
  * Capa puramente decorativa sobre el `<textarea>` real del compositor: anima
  * la entrada/salida de cada carácter que se escribe o se borra AL FINAL del
@@ -120,19 +160,29 @@ export default function ComposerLetterFx({
     setGhosts(chars.map((char, i) => ({ id: i, char, leaving: false })));
   }, [value]);
 
+  const renderChar = (g: Ghost) => (
+    <span
+      key={g.id}
+      className={`chat-composer__letterfx-char${g.leaving ? ' is-leaving' : ''}`}
+      onAnimationEnd={() => {
+        if (g.leaving) setGhosts((cur) => cur.filter((x) => x.id !== g.id));
+      }}
+    >
+      {g.char}
+    </span>
+  );
+
   return (
     <div ref={overlayRef} className='chat-composer__letterfx' aria-hidden='true'>
-      {ghosts.map((g) => (
-        <span
-          key={g.id}
-          className={`chat-composer__letterfx-char${g.leaving ? ' is-leaving' : ''}`}
-          onAnimationEnd={() => {
-            if (g.leaving) setGhosts((cur) => cur.filter((x) => x.id !== g.id));
-          }}
-        >
-          {g.char}
-        </span>
-      ))}
+      {groupForWrap(ghosts).map((group) =>
+        group.kind === 'space' ? (
+          renderChar(group.ghost)
+        ) : (
+          <span key={`word-${group.ghosts[0].id}`} className='chat-composer__letterfx-word'>
+            {group.ghosts.map(renderChar)}
+          </span>
+        )
+      )}
     </div>
   );
 }
