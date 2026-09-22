@@ -493,6 +493,60 @@ function PaymentSchedulingBoard() {
         }
     };
 
+    const closeRequest = async (
+        idSolicitud: number
+    ): Promise<{ ok: boolean; error?: string }> => {
+        try {
+            const response = await fetch('/api/requests-general/update-request', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: idSolicitud,
+                    status: 2,
+                    id_technical: userId,
+                    resolucion: 'Pago Programado Correctamente',
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                return {
+                    ok: false,
+                    error: typeof data.error === 'string' ? data.error : `Error ${response.status}`,
+                };
+            }
+            return { ok: true };
+        } catch (e) {
+            console.error('Error cerrando la solicitud', idSolicitud, e);
+            return { ok: false, error: 'Error de red al cerrar la solicitud' };
+        }
+    };
+
+    const addSystemNote = async (text: string, idSol: number) => {
+        if (!idSol || !userId) return;
+
+        try {
+        const response = await fetch('/api/requests-general/notes', {
+            method: 'POST',
+            headers: {
+            'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+            id_request: idSol,
+            note: text,
+            created_by: userId,
+            }),
+        });
+
+        if (response.ok) {
+        } else {
+            const errorData = await response.json();
+            console.error('Error al agregar nota:', errorData.error);
+        }
+        } catch (error) {
+        console.error('Error adding note:', error);
+        }
+    };
+
     const goToRelatedRequest = (req: PaymentSchedulingTask) => {
         if (!req.id_solicitud) return;
         const fileId = parseOrionFileIdFromAuthResolution(req.resolución_tarea);
@@ -641,6 +695,22 @@ function PaymentSchedulingBoard() {
                 );
 
                 const executedRows = okResults.map((r) => r.row);
+
+                const uniqueRequestIds = Array.from(
+                    new Set(executedRows.map((r) => r.id_solicitud))
+                );
+                const closeResults = await Promise.all(
+                    uniqueRequestIds.map((idSol) => closeRequest(idSol))
+                );
+                const notesResults = await Promise.all(
+                    uniqueRequestIds.map((idSol) => addSystemNote('Programación Realizada', idSol))
+                );
+                const closeFail = closeResults.filter((r) => !r.ok).length;
+                if (closeFail > 0) {
+                    toast.error(
+                        `El pago se programó, pero ${closeFail} solicitud(es) no se pudieron cerrar.`
+                    );
+                }
                 try {
                     await downloadPaymentPlano(executedRows);
                 } catch (e) {
