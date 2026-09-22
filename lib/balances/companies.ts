@@ -3,20 +3,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * Empresas habilitadas para el módulo de Balances — Sprint 1.
+ * Empresas configuradas para el módulo de Balances.
  *
- * Alcance DELIBERADO: solo las 3 empresas que hoy tiene el job compartido de
- * SQL Agent `Balance_Empresas` / `Balance_Acumulado_Empresas` en el 10.7
- * (Farmalogica, OLP, GSS). Ryan/Abamia/Kelab/Meditrack NO están wireados en
- * ese job (verificado 2026-09-21) — agregarlas es trabajo de Sprint 3, no solo
- * de código: hay que escribir el SQL de balance para cada una desde cero.
+ * Solo Farmalogica está habilitada en este momento. Aunque el SQL histórico de
+ * OLP y GSS permanece versionado, esas empresas quedan bloqueadas desde el
+ * servidor hasta que se complete y valide su configuración operativa propia.
+ * Ryan/Abamia/Kelab/Meditrack siguen fuera del módulo porque todavía no existe
+ * SQL de balance validado para ellas.
  *
- * `idCompany` coincide con `company.id_company` en KRONOSDB (1=Farmalogica,
- * 3=OneLatamPharma/OLP, 8=GSS).
- *
- * El SQL de cada paso se extrajo VERBATIM del job compartido en el 10.7
- * (sp_help_jobstep, 2026-09-21) — se ejecuta tal cual, sin reescribir, para no
- * introducir un bug nuevo respecto al job original.
+ * `idCompany` coincide con `company.id_company` en KRONOSDB
+ * (1=Farmalogica, 3=OneLatamPharma/OLP, 8=GSS).
  */
 
 export interface BalanceCompanyConfig {
@@ -25,15 +21,20 @@ export interface BalanceCompanyConfig {
   displayName: string;
   balanceSqlFile: string;
   acumuladoSqlFile: string;
+  /** Interruptor de activación deliberado: nunca se habilita solo por permisos en KRONOSDB. */
+  enabled: boolean;
+  /** Contexto visible para mantenimiento; no contiene secretos. */
+  disabledReason?: string;
 }
 
-export const BALANCE_COMPANIES: BalanceCompanyConfig[] = [
+export const BALANCE_COMPANIES: readonly BalanceCompanyConfig[] = [
   {
     idCompany: 1,
     slug: 'farmalogica',
     displayName: 'Farmalogica',
     balanceSqlFile: 'farmalogica-balance.sql',
     acumuladoSqlFile: 'farmalogica-acumulado.sql',
+    enabled: true,
   },
   {
     idCompany: 3,
@@ -41,6 +42,8 @@ export const BALANCE_COMPANIES: BalanceCompanyConfig[] = [
     displayName: 'One Latam Pharma',
     balanceSqlFile: 'olp-balance.sql',
     acumuladoSqlFile: 'olp-acumulado.sql',
+    enabled: false,
+    disabledReason: 'Pendiente de configuración y validación operativa exclusiva para OLP.',
   },
   {
     idCompany: 8,
@@ -48,11 +51,19 @@ export const BALANCE_COMPANIES: BalanceCompanyConfig[] = [
     displayName: 'GSS',
     balanceSqlFile: 'gss-balance.sql',
     acumuladoSqlFile: 'gss-acumulado.sql',
+    enabled: false,
+    disabledReason: 'Pendiente de configuración y validación operativa exclusiva para GSS.',
   },
 ];
 
+/** Configuraciones existentes, incluidas las empresas deshabilitadas. */
 export function getBalanceCompany(idCompany: number): BalanceCompanyConfig | undefined {
   return BALANCE_COMPANIES.find((c) => c.idCompany === idCompany);
+}
+
+/** Única fuente de verdad para las empresas que se pueden ejecutar hoy. */
+export function getEnabledBalanceCompanies(): readonly BalanceCompanyConfig[] {
+  return BALANCE_COMPANIES.filter((company) => company.enabled);
 }
 
 const SQL_DIR = path.join(process.cwd(), 'lib', 'balances', 'sql');
