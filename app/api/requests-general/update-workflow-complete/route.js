@@ -1,5 +1,15 @@
 import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig.js';
+import { DOCUMENT_WORKFLOW_STATES } from '../../../../lib/document-management/workflowStates';
+
+// Candado de Gestión Documental: estas 14 tareas (task_process_category.task) del
+// proceso id_process_category=86 están hardcodeadas por nombre en
+// lib/document-management/workflowStates.ts y en el grafo WORKFLOW_ACTIONS que las
+// consume. Si se renombran o borran desde esta pantalla genérica de administración
+// de procesos, el flujo documental se rompe en silencio. Por eso este endpoint
+// rechaza renombrar/borrar ESAS filas puntuales; todo lo demás (costo, centro de
+// costo, orden, activo/inactivo, y cualquier otro proceso) sigue funcionando igual.
+const DOCUMENT_MANAGEMENT_PROCESS_CATEGORY_ID = 86;
 
 export async function POST(req) {
   try {
@@ -49,6 +59,46 @@ export async function POST(req) {
     }
 
     const pool = await sql.connect(sqlConfig);
+
+    // Validar el candado de Gestión Documental ANTES de abrir la transacción: si el
+    // lote incluye un rename/delete sobre una de las 14 tareas protegidas, se rechaza
+    // toda la solicitud sin tocar la base de datos.
+    if (shouldUpdateTasks) {
+      const idsToCheck = tasks
+        .filter((t) => (t.action === 'update' || t.action === 'delete') && t.id)
+        .map((t) => Number(t.id))
+        .filter((id) => Number.isInteger(id));
+
+      if (idsToCheck.length > 0) {
+        const checkRequest = pool.request();
+        const paramNames = idsToCheck.map((val, idx) => {
+          const paramName = `lockCheckId${idx}`;
+          checkRequest.input(paramName, sql.Int, val);
+          return `@${paramName}`;
+        });
+
+        const checkResult = await checkRequest.query(
+          `SELECT id, task, id_process_category FROM task_process_category WHERE id IN (${paramNames.join(', ')})`
+        );
+
+        const lockedTask = checkResult.recordset.find(
+          (row) =>
+            row.id_process_category === DOCUMENT_MANAGEMENT_PROCESS_CATEGORY_ID &&
+            DOCUMENT_WORKFLOW_STATES.includes(row.task)
+        );
+
+        if (lockedTask) {
+          return new Response(
+            JSON.stringify({
+              error:
+                'Esta tarea es parte del flujo de Gestión Documental y no se puede renombrar/eliminar desde aquí. Contacte al equipo técnico si necesita cambiarla.',
+            }),
+            { status: 400 }
+          );
+        }
+      }
+    }
+
     const transaction = new sql.Transaction(pool);
 
     try {

@@ -81,8 +81,8 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           Set-Location $env:PROJECT_DIR
-          npm ci
-          if ($LASTEXITCODE -ne 0) { throw "npm ci (front) fallo" }
+          npm install --prefer-offline --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw "npm install (front) fallo" }
           npx prisma generate
           if ($LASTEXITCODE -ne 0) { throw "prisma generate fallo" }
 
@@ -107,8 +107,8 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           Set-Location (Join-Path $env:PROJECT_DIR "mcp")
-          npm ci
-          if ($LASTEXITCODE -ne 0) { throw "npm ci (mcp) fallo" }
+          npm install --prefer-offline --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw "npm install (mcp) fallo" }
           npm run build
           if ($LASTEXITCODE -ne 0) { throw "npm run build (mcp) fallo" }
 

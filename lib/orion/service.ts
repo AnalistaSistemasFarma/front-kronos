@@ -694,7 +694,7 @@ export async function applyOrionWebhookToRequest(
 
   const statusUpper = String(params.status).toUpperCase();
   let tasksUpdated = 0;
-  const requestClosed = false;
+  let requestClosed = false;
 
   const syncResult = await syncOrionSignerTasks(pool, {
     requestId: params.requestId,
@@ -1671,7 +1671,7 @@ export async function finalizeSignerTurn(
     throw Object.assign(new Error('Campo orion_signature no encontrado'), { status: 404 });
   }
 
-  const { bag } = loaded;
+  let { bag } = loaded;
   const me = normalizeSignerEmail(params.userEmail);
 
   let fileId = String(params.fileId || '').trim();

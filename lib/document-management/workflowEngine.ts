@@ -50,6 +50,24 @@ const sendToEmails = createAndSendNotifications as (
  * de workflowStates.ts es solo METADATA para decidir a quién se le asigna la
  * siguiente tarea (al dueño, o abierta a cualquiera con escritura) y para
  * rotular los botones en la UI — no es un gate de permisos adicional.
+ *
+ * Sprint 5 (2026-09-02): la creación INICIAL de un documento nuevo (primer
+ * DocumentType + primera versión) dejó de ser exclusiva de quien tiene
+ * permiso de escritura del módulo. Ahora hay dos caminos que terminan en la
+ * MISMA estructura de datos:
+ *   1. Camino estándar: cualquier usuario autenticado, desde el flujo normal
+ *      de "crear solicitud" de SynerLink (create-request/page.tsx),
+ *      seleccionando la categoría/proceso "Gestión Documental" — ver
+ *      app/api/document-management/create-request/route.ts.
+ *   2. Atajo de Asuntos Regulatorios: el botón "Cargar documento" (gateado
+ *      por el permiso NUEVO `/process/document-management/manage/regulatory`,
+ *      ver access.ts) — ver app/api/document-management/documents/route.ts.
+ * Ambos llaman a lib/document-management/documents.ts::createDocumentWithFirstVersion,
+ * que a su vez llama a createDocumentAndStartWorkflow (abajo) — la versión
+ * generalizada de createDocumentVersionAndStartWorkflow para cuando el
+ * Document todavía no existe. Ninguno de los dos caminos crea el documento
+ * directo en "Vigente": ambos arrancan en INITIAL_STATE y quedan sujetos al
+ * mismo flujo de 14 estados.
  */
 
 export class WorkflowNotSeededError extends Error {
@@ -76,8 +94,14 @@ interface WorkflowCatalog {
 
 let cachedCatalog: WorkflowCatalog | null = null;
 
-/** Resuelve (y cachea en memoria del proceso) el process_category + las 14 tareas sembradas. */
-async function resolveWorkflowCatalog(pool: Awaited<ReturnType<typeof getPool>>): Promise<WorkflowCatalog> {
+/**
+ * Resuelve (y cachea en memoria del proceso) el process_category + las 14 tareas
+ * sembradas. Exportada (además de usarse internamente para transicionar) para que
+ * app/api/document-management/workflow-tasks/route.ts —usada por el componente de
+ * diagrama en la página de detalle del documento— reutilice la misma resolución por
+ * NOMBRE en vez de duplicar la consulta.
+ */
+export async function resolveWorkflowCatalog(pool: Awaited<ReturnType<typeof getPool>>): Promise<WorkflowCatalog> {
   if (cachedCatalog) return cachedCatalog;
 
   const pcResult = await pool
@@ -156,62 +180,169 @@ async function insertNote(
   }
 }
 
-export interface StartWorkflowParams {
+/**
+ * Inserta requests_general + process_category_request_general + la PRIMERA
+ * tarea (INITIAL_STATE, asignada al dueño) del flujo documental. Extraído
+ * (Sprint 5) para que sea EXACTAMENTE lo mismo que corre tanto al arrancar
+ * el flujo de una versión nueva de un documento YA EXISTENTE
+ * (createDocumentVersionAndStartWorkflow) como al crear un documento NUEVO
+ * (createDocumentAndStartWorkflow) — los dos caminos de creación del
+ * sprint (solicitud estándar y atajo de Asuntos Regulatorios) deben producir
+ * la misma "solicitud interna", sin dos copias de esta lógica que puedan
+ * divergir.
+ */
+async function insertRequestAndFirstTask(
+  transaction: InstanceType<typeof sql.Transaction>,
+  {
+    processId,
+    taskIdByState,
+    idCompany,
+    ownerUserId,
+    subject,
+  }: {
+    processId: number;
+    taskIdByState: Record<string, number>;
+    idCompany: number;
+    ownerUserId: string;
+    subject: string;
+  }
+): Promise<number> {
+  const reqInsert = await new sql.Request(transaction)
+    .input('descripcion', sql.NVarChar(1000), subject)
+    .input('subject', sql.NVarChar(255), subject)
+    .input('company', sql.Int, idCompany)
+    .input('requester', sql.NVarChar(1000), ownerUserId)
+    .input('process', sql.Int, processId)
+    .query(`
+      INSERT INTO requests_general
+        (description, subject_request, id_company, id_requester, id_process_category, status_req)
+      OUTPUT INSERTED.id
+      VALUES (@descripcion, @subject, @company, @requester, @process, 1);
+    `);
+  const idRequestGeneral: number = reqInsert.recordset[0].id;
+
+  await new sql.Request(transaction)
+    .input('id_request', sql.Int, idRequestGeneral)
+    .input('process', sql.Int, processId)
+    .query(`
+      INSERT INTO process_category_request_general (id_request_general, id_process_category)
+      VALUES (@id_request, @process);
+    `);
+
+  await new sql.Request(transaction)
+    .input('id_request', sql.Int, idRequestGeneral)
+    .input('id_task', sql.Int, taskIdByState[INITIAL_STATE])
+    .input('id_user', sql.NVarChar(1000), ownerUserId)
+    .query(`
+      INSERT INTO task_request_general (id_request_general, id_task, id_status, id_assigned)
+      VALUES (@id_request, @id_task, 4, @id_user);
+    `);
+
+  return idRequestGeneral;
+}
+
+export interface CreateVersionAndStartWorkflowParams {
   idDocument: number;
-  idDocumentVersion: number;
+  versionNumber: number;
+  onedriveItemId: string | null;
+  onedrivePath: string;
+  createdBy: string;
+  comments: string | null;
   idCompany: number;
   ownerUserId: string;
   subject: string;
+  /**
+   * Sprint 8 (2026-09-03) — HTML editado desde el editor de documentos
+   * (lib/document-management/editor.ts), cuando esta versión nueva se crea
+   * a partir de "Guardar" en el editor sobre un documento CON proceso
+   * (id_process no nulo, Caso B de la decisión de Nicolás del 2026-09-03).
+   * Null/undefined para el camino de carga de archivo (newVersion.ts /
+   * documents.ts), que no tiene HTML editable que persistir.
+   */
+  contentHtml?: string | null;
+}
+
+export interface CreateVersionAndStartWorkflowResult {
+  idDocumentVersion: number;
+  createdAt: Date;
+  idRequestGeneral: number;
 }
 
 /**
- * Arranca el flujo de aprobación para una DocumentVersion recién creada
- * (status ya debe estar en 'En creación'): crea la solicitud
- * (`requests_general`) que representa esta instancia del flujo, su primera
- * tarea (`task_request_general`, estado "En creación", asignada al dueño) y
- * liga todo de vuelta a la versión (`document_version.id_request_general`) y,
- * si aún no estaba, al documento (`document.id_process`).
+ * Crea la fila de `document_version` Y arranca su flujo de aprobación
+ * (`requests_general` + primera `task_request_general` en estado "En
+ * creación", asignada al dueño) EN UNA SOLA transacción `sql.Transaction`.
+ *
+ * Por qué esto NO es un `prisma.$transaction` (fix del 2026-09-01, bug
+ * reportado por Nicolás): `document_version` sí es un modelo Prisma, pero
+ * `requests_general` / `task_request_general` / `process_category_request_general`
+ * NUNCA lo fueron (motor de "solicitudes generales" en SQL crudo, ver nota de
+ * módulo arriba) — viven detrás de un `mssql.ConnectionPool` totalmente
+ * aparte del pool interno de Prisma (`lib/mssqlPool.ts` vs `lib/prisma.ts`).
+ * Prisma y `mssql` no comparten conexión, así que un `prisma.$transaction`
+ * jamás habría podido abarcar los INSERT de `requests_general`/
+ * `task_request_general`: solo hubiera protegido la mitad del problema.
+ *
+ * Antes de este fix, `lib/document-management/newVersion.ts` hacía
+ * `prisma.documentVersion.create(...)` (se confirmaba solo, en su propia
+ * conexión) y LUEGO, en una llamada aparte, arrancaba este flujo. Si el
+ * arranque fallaba (típicamente `WorkflowNotSeededError` cuando
+ * `KRONOSDB_PRUEBAS` se refresca y pierde el seed de
+ * `prisma/seeds/document-management-workflow.sql`), la `DocumentVersion` ya
+ * había quedado comprometida en la base — huérfana, en "En creación", con el
+ * archivo ya subido a OneDrive pero sin ninguna tarea de flujo asociada.
+ *
+ * La solución real es que AMBAS escrituras corran dentro de la MISMA
+ * transacción de base de datos — por eso el INSERT de `document_version` se
+ * movió aquí, a SQL crudo sobre esta misma `sql.Transaction`, en vez de vivir
+ * como un `prisma.documentVersion.create` separado. Así, si cualquier paso
+ * falla (seed faltante, catálogo incompleto, error de red a mitad de
+ * transacción), el `ROLLBACK` deshace TODO, incluida la versión — nunca más
+ * queda un registro a medio crear. La subida a OneDrive sigue ocurriendo
+ * ANTES de llamar a esta función (ver newVersion.ts): una llamada HTTP
+ * externa no puede ni debe vivir dentro de una transacción de base de datos.
+ *
+ * Para documentos NUEVOS (primera versión) ver createDocumentAndStartWorkflow
+ * más abajo — comparte la inserción de requests_general/task_request_general
+ * vía insertRequestAndFirstTask, pero además crea la fila `document`.
  */
-export async function startDocumentVersionWorkflow(params: StartWorkflowParams): Promise<{ idRequestGeneral: number }> {
+export async function createDocumentVersionAndStartWorkflow(
+  params: CreateVersionAndStartWorkflowParams
+): Promise<CreateVersionAndStartWorkflowResult> {
   const pool = await getPool();
   const { processId, taskIdByState } = await resolveWorkflowCatalog(pool);
 
   const transaction = new sql.Transaction(pool);
   await transaction.begin();
   try {
-    const reqInsert = await new sql.Request(transaction)
-      .input('descripcion', sql.NVarChar(1000), params.subject)
-      .input('subject', sql.NVarChar(255), params.subject)
-      .input('company', sql.Int, params.idCompany)
-      .input('requester', sql.NVarChar(1000), params.ownerUserId)
-      .input('process', sql.Int, processId)
+    const versionInsert = await new sql.Request(transaction)
+      .input('id_document', sql.Int, params.idDocument)
+      .input('version_number', sql.Int, params.versionNumber)
+      .input('status', sql.NVarChar(30), INITIAL_STATE)
+      .input('onedrive_item_id', sql.NVarChar(300), params.onedriveItemId)
+      .input('onedrive_path', sql.NVarChar(1000), params.onedrivePath)
+      .input('created_by', sql.NVarChar(1000), params.createdBy)
+      .input('comments', sql.NVarChar(1000), params.comments)
+      .input('content_html', sql.NVarChar(sql.MAX), params.contentHtml ?? null)
       .query(`
-        INSERT INTO requests_general
-          (description, subject_request, id_company, id_requester, id_process_category, status_req)
-        OUTPUT INSERTED.id
-        VALUES (@descripcion, @subject, @company, @requester, @process, 1);
+        INSERT INTO document_version
+          (id_document, version_number, status, onedrive_item_id, onedrive_path, created_by, comments, content_html)
+        OUTPUT INSERTED.id_document_version, INSERTED.created_at
+        VALUES (@id_document, @version_number, @status, @onedrive_item_id, @onedrive_path, @created_by, @comments, @content_html);
       `);
-    const idRequestGeneral: number = reqInsert.recordset[0].id;
+    const idDocumentVersion: number = versionInsert.recordset[0].id_document_version;
+    const createdAt: Date = versionInsert.recordset[0].created_at;
+
+    const idRequestGeneral = await insertRequestAndFirstTask(transaction, {
+      processId,
+      taskIdByState,
+      idCompany: params.idCompany,
+      ownerUserId: params.ownerUserId,
+      subject: params.subject,
+    });
 
     await new sql.Request(transaction)
-      .input('id_request', sql.Int, idRequestGeneral)
-      .input('process', sql.Int, processId)
-      .query(`
-        INSERT INTO process_category_request_general (id_request_general, id_process_category)
-        VALUES (@id_request, @process);
-      `);
-
-    await new sql.Request(transaction)
-      .input('id_request', sql.Int, idRequestGeneral)
-      .input('id_task', sql.Int, taskIdByState[INITIAL_STATE])
-      .input('id_user', sql.NVarChar(1000), params.ownerUserId)
-      .query(`
-        INSERT INTO task_request_general (id_request_general, id_task, id_status, id_assigned)
-        VALUES (@id_request, @id_task, 4, @id_user);
-      `);
-
-    await new sql.Request(transaction)
-      .input('id_version', sql.Int, params.idDocumentVersion)
+      .input('id_version', sql.Int, idDocumentVersion)
       .input('id_request', sql.Int, idRequestGeneral)
       .query(`UPDATE document_version SET id_request_general = @id_request WHERE id_document_version = @id_version`);
 
@@ -221,7 +352,151 @@ export async function startDocumentVersionWorkflow(params: StartWorkflowParams):
       .query(`UPDATE document SET id_process = @id_process WHERE id_document = @id_document AND id_process IS NULL`);
 
     await transaction.commit();
-    return { idRequestGeneral };
+    return { idDocumentVersion, createdAt, idRequestGeneral };
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
+}
+
+export interface CreateDocumentAndStartWorkflowParams {
+  companyId: number;
+  documentTypeId: number;
+  code: string;
+  title: string;
+  dueReviewDate: Date | null;
+  isRestricted: boolean;
+  comments: string | null;
+  onedriveItemId: string | null;
+  onedrivePath: string;
+  ownerUserId: string;
+  /**
+   * Parametrización (post-Sprint 5): valores del mecanismo genérico de campos de proceso
+   * (process_form_field, sembrado para id_process_category=86 por
+   * prisma/seeds/document-management-generic-fields.sql) tal cual los envió el usuario
+   * -- ver lib/document-management/genericFields.ts. Se persisten en request_form_value
+   * DENTRO de esta misma transacción, atados al idRequestGeneral recién creado, para que
+   * la solicitud se vea igual que cualquier otra en
+   * /api/requests-general/request-form-values. Opcional: el atajo de Asuntos
+   * Regulatorios no lo envía (sigue sin usar el mecanismo genérico).
+   */
+  formValues?: import('./genericFields').SubmittedFormValue[];
+}
+
+export interface CreateDocumentAndStartWorkflowResult {
+  idDocument: number;
+  idDocumentVersion: number;
+  idRequestGeneral: number;
+  createdAt: Date;
+}
+
+/**
+ * Crea un documento NUEVO (`document` + su primera `document_version`) Y
+ * arranca su flujo de aprobación, todo en UNA sola transacción — la
+ * generalización (Sprint 5) de createDocumentVersionAndStartWorkflow para el
+ * caso en que el `Document` todavía no existe. Antes de este sprint, la
+ * carga inicial de un documento (lib/document-management/documents.ts)
+ * saltaba el flujo por completo y quedaba directo en "Vigente"; ahora
+ * arranca en INITIAL_STATE igual que cualquier otra versión, sin importar
+ * por cuál de los dos caminos del sprint haya entrado (solicitud estándar de
+ * SynerLink o atajo de Asuntos Regulatorios) — ver el comentario de módulo
+ * arriba.
+ *
+ * El archivo YA debe estar subido a OneDrive antes de llamar a esta función
+ * (mismo criterio que createDocumentVersionAndStartWorkflow: una llamada
+ * HTTP externa no puede vivir dentro de una transacción de base de datos).
+ * La validación de negocio (empresa/tipo de documento existen, código no
+ * duplicado) vive en el llamador
+ * (lib/document-management/documents.ts::createDocumentWithFirstVersion).
+ */
+export async function createDocumentAndStartWorkflow(
+  params: CreateDocumentAndStartWorkflowParams
+): Promise<CreateDocumentAndStartWorkflowResult> {
+  const pool = await getPool();
+  const { processId, taskIdByState } = await resolveWorkflowCatalog(pool);
+
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
+  try {
+    const docInsert = await new sql.Request(transaction)
+      .input('code', sql.NVarChar(50), params.code)
+      .input('title', sql.NVarChar(300), params.title)
+      .input('id_document_type', sql.Int, params.documentTypeId)
+      .input('id_company', sql.Int, params.companyId)
+      .input('owner_user_id', sql.NVarChar(1000), params.ownerUserId)
+      .input('due_review_date', sql.DateTime2, params.dueReviewDate)
+      .input('is_restricted', sql.Bit, params.isRestricted)
+      .input('current_status', sql.NVarChar(30), INITIAL_STATE)
+      .input('id_process', sql.Int, processId)
+      .query(`
+        INSERT INTO document
+          (code, title, id_document_type, id_company, owner_user_id, due_review_date, is_restricted, current_status, id_process, created_at, updated_at)
+        OUTPUT INSERTED.id_document
+        VALUES
+          (@code, @title, @id_document_type, @id_company, @owner_user_id, @due_review_date, @is_restricted, @current_status, @id_process, GETDATE(), GETDATE());
+      `);
+    const idDocument: number = docInsert.recordset[0].id_document;
+
+    const versionInsert = await new sql.Request(transaction)
+      .input('id_document', sql.Int, idDocument)
+      .input('version_number', sql.Int, 1)
+      .input('status', sql.NVarChar(30), INITIAL_STATE)
+      .input('onedrive_item_id', sql.NVarChar(300), params.onedriveItemId)
+      .input('onedrive_path', sql.NVarChar(1000), params.onedrivePath)
+      .input('created_by', sql.NVarChar(1000), params.ownerUserId)
+      .input('comments', sql.NVarChar(1000), params.comments)
+      .query(`
+        INSERT INTO document_version
+          (id_document, version_number, status, onedrive_item_id, onedrive_path, created_by, comments)
+        OUTPUT INSERTED.id_document_version, INSERTED.created_at
+        VALUES (@id_document, @version_number, @status, @onedrive_item_id, @onedrive_path, @created_by, @comments);
+      `);
+    const idDocumentVersion: number = versionInsert.recordset[0].id_document_version;
+    const createdAt: Date = versionInsert.recordset[0].created_at;
+
+    const idRequestGeneral = await insertRequestAndFirstTask(transaction, {
+      processId,
+      taskIdByState,
+      idCompany: params.companyId,
+      ownerUserId: params.ownerUserId,
+      subject: `${params.code} — ${params.title}`,
+    });
+
+    await new sql.Request(transaction)
+      .input('id_version', sql.Int, idDocumentVersion)
+      .input('id_request', sql.Int, idRequestGeneral)
+      .query(`UPDATE document_version SET id_request_general = @id_request WHERE id_document_version = @id_version`);
+
+    // A diferencia de una versión nueva de un documento EXISTENTE (que no toca
+    // current_version_id hasta publicarse — ver transitionDocumentVersion), un
+    // documento NUEVO no tiene ninguna versión "vigente" previa: current_version_id
+    // debe apuntar a esta primera versión desde ya, para que transitionDocumentVersion
+    // seguirla vía la comparación `current_version_id === version.id_document_version`.
+    await new sql.Request(transaction)
+      .input('id_document', sql.Int, idDocument)
+      .input('id_version', sql.Int, idDocumentVersion)
+      .query(`UPDATE document SET current_version_id = @id_version WHERE id_document = @id_document`);
+
+    // Parametrización: guarda las respuestas del mecanismo genérico de campos de proceso
+    // (si las hay -- solo el camino estándar las envía) en request_form_value, MISMA
+    // tabla/forma que usa createGeneralRequest.js para cualquier otro proceso.
+    if (params.formValues && params.formValues.length > 0) {
+      for (const fv of params.formValues) {
+        if (!fv || fv.id_field == null) continue;
+        await new sql.Request(transaction)
+          .input('id_request', sql.Int, idRequestGeneral)
+          .input('id_field', sql.Int, fv.id_field)
+          .input('id_option', sql.Int, fv.id_option ?? null)
+          .input('value_text', sql.NVarChar(sql.MAX), fv.value_text ?? null)
+          .query(`
+            INSERT INTO request_form_value (id_request_general, id_form_field, id_option, value_text)
+            VALUES (@id_request, @id_field, @id_option, @value_text)
+          `);
+      }
+    }
+
+    await transaction.commit();
+    return { idDocument, idDocumentVersion, idRequestGeneral, createdAt };
   } catch (err) {
     await transaction.rollback();
     throw err;
@@ -291,6 +566,20 @@ async function moveTask(
 function isOwnerAssignedState(state: string): boolean {
   return state === 'En elaboración' || state === 'Reelaboración';
 }
+
+/**
+ * Default temporal (bug reportado por Nicolás el 2026-09-02, ver decisión #8 del
+ * 2026-08-21 en proyectos/sgd-migracion-synerlink.md del vault): las tareas del flujo
+ * SIN dueño fijo (revisión, aprobación, visto bueno calidad, divulgación, reasignación,
+ * y los estados terminales) quedan ABIERTAS por diseño — cualquiera con permiso de
+ * escritura del módulo en esa empresa las puede resolver, eso NO cambia acá. Pero
+ * mientras no exista parametrización real de quién debe tomarlas, Nicolás pidió que
+ * queden asignadas a él por defecto (en vez de NULL/"Sin asignar") para que se vea un
+ * responsable en el timeline; se puede reasignar después con normalidad (acción
+ * `reasignar` / endpoint update-task-assigned). Antes de este fix quedaban con
+ * id_assigned NULL y Nicolás las parcheaba manualmente por SQL.
+ */
+const DEFAULT_UNOWNED_TASK_ASSIGNEE_ID = 'cmgicd6470000ekpi1a33o581'; // Nicolás Rivera
 
 /**
  * Ejecuta una transición de estado sobre una versión. Valida el grafo
@@ -365,7 +654,9 @@ export async function transitionDocumentVersion(params: TransitionParams): Promi
     throw new Error(`Estado sin tarea sembrada: ${!fromTaskId ? currentState : toState}`);
   }
 
-  const assignToUserId = isOwnerAssignedState(toState) ? version.document.owner_user_id : null;
+  const assignToUserId = isOwnerAssignedState(toState)
+    ? version.document.owner_user_id
+    : DEFAULT_UNOWNED_TASK_ASSIGNEE_ID;
 
   const transaction = new sql.Transaction(pool);
   await transaction.begin();
@@ -569,6 +860,7 @@ export async function getPendingDocumentTasksForUser(
     .request()
     .input('id_process', sql.Int, processId)
     .input('id_user', sql.NVarChar(1000), userId)
+    .input('default_assignee', sql.NVarChar(1000), DEFAULT_UNOWNED_TASK_ASSIGNEE_ID)
     .query(`
       SELECT
         d.id_document, d.code, d.title, d.id_company,
@@ -580,7 +872,8 @@ export async function getPendingDocumentTasksForUser(
       INNER JOIN document_version dv ON dv.id_request_general = trg.id_request_general AND dv.status = tpc.task
       INNER JOIN document d ON d.id_document = dv.id_document
       INNER JOIN company c ON c.id_company = d.id_company
-      WHERE trg.id_status = 4 AND (trg.id_assigned IS NULL OR trg.id_assigned = @id_user)
+      WHERE trg.id_status = 4
+        AND (trg.id_assigned IS NULL OR trg.id_assigned = @id_user OR trg.id_assigned = @default_assignee)
     `);
 
   const rows = result.recordset as Array<{

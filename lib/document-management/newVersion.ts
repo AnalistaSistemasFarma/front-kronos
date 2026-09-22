@@ -3,7 +3,7 @@ import { sanitizeOneDriveName } from '../onedriveName';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken';
 import { ensureFolderAndUploadFile } from '../onedrive/graphFolderUpload';
 import { buildDocumentVersionFolderSegments } from './storagePath';
-import { startDocumentVersionWorkflow } from './workflowEngine';
+import { createDocumentVersionAndStartWorkflow } from './workflowEngine';
 import { INITIAL_STATE } from './workflowStates';
 
 /**
@@ -12,8 +12,12 @@ import { INITIAL_STATE } from './workflowStates';
  * primera versión directo en "Vigente" para la migración histórica), esta
  * versión arranca en "En creación" y queda sujeta al flujo de aprobación de
  * 14 estados (ver workflowEngine.ts). Mismo orden de operaciones que Fase 1:
- * primero se sube el archivo a OneDrive y solo si eso tiene éxito se escribe
- * en la base (DocumentVersion + arranque del flujo).
+ * primero se sube el archivo a OneDrive (operación externa, no
+ * transaccional) y SOLO si eso tiene éxito se escribe en la base — y esa
+ * escritura (DocumentVersion + arranque del flujo) es una única transacción
+ * atómica (ver createDocumentVersionAndStartWorkflow en workflowEngine.ts:
+ * antes de este fix quedaban versiones huérfanas si el arranque del flujo
+ * fallaba después de que la versión ya se hubiera confirmado por su cuenta).
  */
 
 export interface CreateNewVersionInput {
@@ -66,25 +70,30 @@ export async function createNewDocumentVersion(input: CreateNewVersionInput) {
     input.fileType
   );
 
-  const version = await prisma.documentVersion.create({
-    data: {
-      id_document: input.idDocument,
-      version_number: versionNumber,
-      status: INITIAL_STATE,
-      onedrive_item_id: uploaded.id,
-      onedrive_path: fullPath,
-      created_by: input.actorUserId,
-      comments: input.comments || null,
-    },
-  });
-
-  const { idRequestGeneral } = await startDocumentVersionWorkflow({
-    idDocument: document.id_document,
-    idDocumentVersion: version.id_document_version,
+  const { idDocumentVersion, createdAt, idRequestGeneral } = await createDocumentVersionAndStartWorkflow({
+    idDocument: input.idDocument,
+    versionNumber,
+    onedriveItemId: uploaded.id,
+    onedrivePath: fullPath,
+    createdBy: input.actorUserId,
+    comments: input.comments || null,
     idCompany: document.id_company,
     ownerUserId: document.owner_user_id,
     subject: `${document.code} v${versionNumber} — ${document.title}`,
   });
 
-  return { document, version: { ...version, id_request_general: idRequestGeneral } };
+  const version = {
+    id_document_version: idDocumentVersion,
+    id_document: input.idDocument,
+    version_number: versionNumber,
+    status: INITIAL_STATE,
+    onedrive_item_id: uploaded.id,
+    onedrive_path: fullPath,
+    created_by: input.actorUserId,
+    created_at: createdAt,
+    comments: input.comments || null,
+    id_request_general: idRequestGeneral,
+  };
+
+  return { document, version };
 }
