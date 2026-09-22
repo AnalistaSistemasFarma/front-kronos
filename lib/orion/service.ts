@@ -694,7 +694,7 @@ export async function applyOrionWebhookToRequest(
 
   const statusUpper = String(params.status).toUpperCase();
   let tasksUpdated = 0;
-  let requestClosed = false;
+  const requestClosed = false;
 
   const syncResult = await syncOrionSignerTasks(pool, {
     requestId: params.requestId,
@@ -983,7 +983,7 @@ export async function syncOrionDocumentState(
   const loaded = await loadOrionFormBag(pool, requestId);
   if (!loaded) return null;
 
-  let { bag } = loaded;
+  const { bag } = loaded;
   const bagBefore = serializeOrionSignatureBagBag(bag);
   const requested = String(fileId || '').trim();
 
