@@ -38,10 +38,24 @@ export function buildExternalSignPath(token: string): string {
 
 export function buildExternalSignAbsoluteUrl(token: string, origin?: string | null): string {
   const path = buildExternalSignPath(token);
-  const base =
-    String(origin || '').trim().replace(/\/$/, '') ||
-    String(process.env.NEXTAUTH_URL || process.env.APP_URL || '').trim().replace(/\/$/, '') ||
-    '';
+  const candidates = [
+    String(origin || '').trim().replace(/\/$/, ''),
+    String(process.env.NEXTAUTH_URL || '').trim().replace(/\/$/, ''),
+    String(process.env.APP_URL || '').trim().replace(/\/$/, ''),
+    String(process.env.NEXT_PUBLIC_APP_URL || '').trim().replace(/\/$/, ''),
+  ].filter(Boolean);
+
+  const isLoopback = (base: string) => {
+    try {
+      const h = new URL(base).hostname.toLowerCase();
+      return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+    } catch {
+      return /localhost|127\.0\.0\.1/i.test(base);
+    }
+  };
+
+  const publicBase = candidates.find((b) => /^https?:\/\//i.test(b) && !isLoopback(b));
+  const base = publicBase || candidates.find((b) => /^https?:\/\//i.test(b)) || '';
   return base ? `${base}${path}` : path;
 }
 
@@ -201,10 +215,11 @@ export function markInviteUsed(
 }
 
 /**
- * Asegura invites para firmantes external. Regenera token si no hay o expiró.
- * Devuelve plainTokens solo para los recién creados (para mostrar/enviar una vez).
+ * Asegura invites SynerLink para TODOS los firmantes con email
+ * (internos y externos). Regenera token si no hay o expiró.
+ * Devuelve plainTokens solo para los recién creados (mostrar/enviar una vez).
  */
-export function ensureExternalSignerInvites(params: {
+export function ensureSignerInvites(params: {
   state: OrionSignatureState;
   requestId: number;
   fileId: string;
@@ -218,14 +233,12 @@ export function ensureExternalSignerInvites(params: {
   const now = Date.now();
 
   for (const signer of state.signers ?? []) {
-    if (String(signer.type || '').toLowerCase() !== 'external') continue;
     const email = normalizeEmail(signer.email);
     if (!email) continue;
 
     const existing = findInviteByEmail(state, email);
     const expired = existing?.expiresAt ? Date.parse(existing.expiresAt) < now : false;
     if (existing && !expired) {
-      // Refresca signUrl / nombre desde firmante Orion si llegó.
       if (signer.signUrl && signer.signUrl !== existing.signUrl) {
         state = upsertSignerInvite(state, {
           ...existing,
@@ -240,6 +253,7 @@ export function ensureExternalSignerInvites(params: {
       email,
       name: signer.name,
       signUrl: signer.signUrl,
+      cardCode: signer.cardCode,
       requestId: params.requestId,
       fileId: params.fileId,
       origin: params.origin,
@@ -249,4 +263,14 @@ export function ensureExternalSignerInvites(params: {
   }
 
   return { state, created };
+}
+
+/** @deprecated Alias: ahora incluye internos y externos. */
+export function ensureExternalSignerInvites(params: {
+  state: OrionSignatureState;
+  requestId: number;
+  fileId: string;
+  origin?: string | null;
+}) {
+  return ensureSignerInvites(params);
 }

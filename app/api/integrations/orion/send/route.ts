@@ -1,7 +1,7 @@
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../../auth/[...nextauth]/route';
-import { sendOrionDocument } from '@/lib/orion/client';
+import { resolveOrionAbsoluteUrl, sendOrionDocument, resolvePublicAppOrigin } from '@/lib/orion/client';
 import { getOrionConfig } from '@/lib/orion/config';
 import {
   getOrionDocumentFromBag,
@@ -24,8 +24,7 @@ import {
   notifyOrionSignerInvited,
 } from '@/lib/notificationEvents.js';
 import { getCurrentPendingSigner } from '@/lib/orion/signerStatus';
-import { ensureExternalSignerInvites, markInviteSent } from '@/lib/orion/signerInvites';
-import { sendExternalSignerInviteEmail } from '@/lib/orion/inviteEmail';
+import { ensureExternalSignerInvites } from '@/lib/orion/signerInvites';
 
 /** POST /api/integrations/orion/send — enviar documento a firma en Orion */
 export async function POST(req: Request) {
@@ -77,19 +76,29 @@ export async function POST(req: Request) {
         });
       }
 
+      // Sync post-send: Orion ya generó /sign/{token} por firmante pendiente.
       const synced = await syncOrionDocumentState(pool, requestId, fileId);
       let nextState = synced?.state ?? current;
+      if (res.data?.signers?.length) {
+        nextState = {
+          ...nextState,
+          signers: res.data.signers.map((s) => ({
+            ...s,
+            signUrl:
+              resolveOrionAbsoluteUrl(s.signUrl) ||
+              String(s.signUrl || '').trim() ||
+              null,
+          })),
+        };
+      }
       nextState = {
         ...nextState,
         signers: applyPendingSignerTurnDeadline(nextState.signers),
       };
 
-      // Invites SynerLink para firmantes external (URL pública).
-      const origin =
-        req.headers.get('origin') ||
-        process.env.NEXTAUTH_URL ||
-        process.env.APP_URL ||
-        null;
+      const origin = resolvePublicAppOrigin(req.headers.get('origin'));
+      // Genera/renueva invites locales (URLs para copiar). El correo lo manda Orion
+      // solo a firmantes con invitedAt (notifyByEmail marcado en preparación).
       const ensured = ensureExternalSignerInvites({
         state: nextState,
         requestId,
@@ -102,32 +111,6 @@ export async function POST(req: Request) {
       await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
 
       const ctx = await getRequestOrionContext(pool, requestId);
-
-      // Correo automático a socios externos con URL SynerLink (logo GSS).
-      for (const created of ensured.created) {
-        try {
-          await sendExternalSignerInviteEmail({
-            to: created.email,
-            signerName:
-              nextState.signers?.find(
-                (s) =>
-                  String(s.email || '')
-                    .trim()
-                    .toLowerCase() === created.email
-              )?.name || null,
-            documentTitle: nextState.fileName,
-            requestSubject: ctx?.subject_request ?? null,
-            inviteUrl: created.absoluteUrl,
-          });
-          nextState = markInviteSent(nextState, created.email);
-        } catch (err) {
-          console.warn('[orion/send] Correo invite externo:', created.email, err);
-        }
-      }
-      if (ensured.created.length > 0) {
-        bag = setOrionDocumentInBag(bag, fileId, nextState);
-        await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
-      }
 
       const authResult = await createOrionSignerAuthorizations(pool, {
         requestId,

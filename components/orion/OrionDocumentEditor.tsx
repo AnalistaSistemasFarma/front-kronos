@@ -5,7 +5,6 @@ import {
   Alert,
   Box,
   Button,
-  Checkbox,
   Group,
   Loader,
   Paper,
@@ -63,6 +62,8 @@ type Props = {
   onStateUpdate: (state: OrionSignatureState) => void;
   onClose?: () => void;
   assignmentsEditable?: boolean;
+  /** Permiso “Registrar huella”: exige/coloca cajas de huella. */
+  canUseFingerprint?: boolean;
   /** 0 = documento, 1 = firmantes, 2 = ubicar firmas */
   initialStep?: EditorStep;
   /** Cambia al reabrir el editor para resetear el paso aunque sea el mismo. */
@@ -119,6 +120,7 @@ export default function OrionDocumentEditor({
   onStateUpdate,
   onClose,
   assignmentsEditable = true,
+  canUseFingerprint = false,
   initialStep = 0,
   openNonce = 0,
 }: Props) {
@@ -146,9 +148,6 @@ export default function OrionDocumentEditor({
   const [sequential, setSequential] = useState(true);
   const [activeOrder, setActiveOrder] = useState(1);
   const [activeFieldKind, setActiveFieldKind] = useState<SignatureFieldKind>('signature');
-  const [requireFingerprint, setRequireFingerprint] = useState(() =>
-    Boolean(state.requireFingerprint)
-  );
   const [fields, setFields] = useState<SignatureFieldPlacement[]>(initialFields);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -201,6 +200,11 @@ export default function OrionDocumentEditor({
     [orderedParticipants]
   );
 
+  const anySignerNeedsFingerprint = assignedParticipants.some((p) =>
+    Boolean(p.requireFingerprint)
+  );
+  const effectiveRequireFingerprint = canUseFingerprint && anySignerNeedsFingerprint;
+
   const allPlaced =
     assignedParticipants.length > 0 &&
     assignedParticipants.every((p) => {
@@ -208,11 +212,17 @@ export default function OrionDocumentEditor({
         (f) => f.signerOrder === p.order && normalizeFieldKind(f.kind) === 'signature'
       );
       if (!hasSig) return false;
-      if (!requireFingerprint) return true;
+      if (!(canUseFingerprint && p.requireFingerprint)) return true;
       return fields.some(
         (f) => f.signerOrder === p.order && normalizeFieldKind(f.kind) === 'fingerprint'
       );
     });
+
+  useEffect(() => {
+    if (!canUseFingerprint && activeFieldKind === 'fingerprint') {
+      setActiveFieldKind('signature');
+    }
+  }, [activeFieldKind, canUseFingerprint]);
 
   const handleSignerCountChange = useCallback((count: number) => {
     setSignerCount(count);
@@ -227,6 +237,7 @@ export default function OrionDocumentEditor({
       name: string,
       meta?: { type?: OrionParticipantType; cardCode?: string | null }
     ) => {
+      const type = meta?.type || 'internal';
       setOrderedParticipants((prev) =>
         prev.map((p) =>
           p.order === order
@@ -235,8 +246,11 @@ export default function OrionDocumentEditor({
                 email: normalizeEmail(email),
                 name: name.trim() || email,
                 role: 'Firmante',
-                type: meta?.type || 'internal',
+                type,
                 cardCode: meta?.cardCode ?? null,
+                // Externos: correo con link por defecto. Internos: solo tarea.
+                notifyByEmail: type === 'external',
+                requireFingerprint: Boolean(p.requireFingerprint),
               }
             : p
         )
@@ -244,6 +258,26 @@ export default function OrionDocumentEditor({
     },
     []
   );
+
+  const handleToggleNotifyByEmail = useCallback((order: number, value: boolean) => {
+    setOrderedParticipants((prev) =>
+      prev.map((p) => (p.order === order ? { ...p, notifyByEmail: value } : p))
+    );
+  }, []);
+
+  const handleToggleRequireFingerprint = useCallback((order: number, value: boolean) => {
+    setOrderedParticipants((prev) =>
+      prev.map((p) => (p.order === order ? { ...p, requireFingerprint: value } : p))
+    );
+    if (!value) {
+      setFields((prev) =>
+        prev.filter(
+          (f) =>
+            !(f.signerOrder === order && normalizeFieldKind(f.kind) === 'fingerprint')
+        )
+      );
+    }
+  }, []);
 
   const handleClearSigner = useCallback((order: number) => {
     setOrderedParticipants((prev) =>
@@ -270,6 +304,10 @@ export default function OrionDocumentEditor({
             email: me,
             name: currentUserName?.trim() || me,
             role: 'Firmante' as const,
+            type: 'internal' as const,
+            cardCode: null,
+            notifyByEmail: false,
+            requireFingerprint: Boolean(slot1.requireFingerprint),
           };
           const without1 = next.filter((p) => p.order !== 1);
           return reindexParticipants(
@@ -340,6 +378,8 @@ export default function OrionDocumentEditor({
             order: p.order,
             type: p.type === 'external' ? 'external' : 'internal',
             ...(p.cardCode ? { cardCode: p.cardCode } : {}),
+            notifyByEmail: Boolean(p.notifyByEmail),
+            requireFingerprint: Boolean(p.requireFingerprint),
           })),
       }),
     });
@@ -347,22 +387,41 @@ export default function OrionDocumentEditor({
     if (!res.ok) throw new Error(data.error || 'No se pudieron asignar los firmantes');
     if (data.state) {
       const next = data.state as OrionSignatureState;
-      // Preserva type/cardCode locales si Orion no los devuelve.
+      // Preserva type/cardCode/flags locales (mismo email puede repetirse → clave por orden).
+      const byOrder = new Map(
+        orderedParticipants.map((p) => [Number(p.order), p] as const)
+      );
       const byEmail = new Map(
         orderedParticipants.map((p) => [normalizeEmail(p.email), p] as const)
       );
       const signers = (next.signers ?? []).map((s) => {
-        const local = byEmail.get(normalizeEmail(s.email));
+        const local =
+          byOrder.get(Number(s.order)) ?? byEmail.get(normalizeEmail(s.email));
         if (!local) return s;
         return {
           ...s,
           type: local.type || s.type || 'internal',
           cardCode: local.cardCode ?? s.cardCode ?? null,
+          notifyByEmail: Boolean(local.notifyByEmail),
+          requireFingerprint: Boolean(local.requireFingerprint),
         };
       });
-      onStateUpdate({ ...next, signers, requireFingerprint });
+      onStateUpdate({
+        ...next,
+        signers,
+        requireFingerprint: effectiveRequireFingerprint,
+        fingerprintPolicy: 'per-signer',
+      });
     }
-  }, [fileId, onStateUpdate, orderedParticipants, requestId, requireFingerprint, sequential, validateAssignments]);
+  }, [
+    effectiveRequireFingerprint,
+    fileId,
+    onStateUpdate,
+    orderedParticipants,
+    requestId,
+    sequential,
+    validateAssignments,
+  ]);
 
   const persistFields = useCallback(async () => {
     const postFields = () =>
@@ -677,8 +736,9 @@ export default function OrionDocumentEditor({
 
         {editorStep === 1 && assignmentsEditable && (
           <Alert color='blue' variant='light' mb='md'>
-            Cada firmante tendrá 24 horas para firmar cuando sea su turno. Si vence, podrá solicitar
-            renovación al líder del proceso.
+            Cada firmante tendrá 24 horas para firmar cuando sea su turno. Elija por persona si
+            recibe correo con el link y si requiere huella. Al enviar a firma se crean las tareas;
+            el correo solo llega a quienes usted marque.
           </Alert>
         )}
 
@@ -694,6 +754,7 @@ export default function OrionDocumentEditor({
               currentUserName={currentUserName}
               companyId={companyId}
               signerStatuses={signerStatuses}
+              canUseFingerprint={canUseFingerprint}
               readOnly={!assignmentsEditable}
               onSignerCountChange={handleSignerCountChange}
               onSequentialChange={setSequential}
@@ -701,15 +762,20 @@ export default function OrionDocumentEditor({
               onAssign={handleAssignSigner}
               onClear={handleClearSigner}
               onReorder={signerCount > 1 && assignmentsEditable ? reorderParticipant : undefined}
+              onToggleNotifyByEmail={
+                assignmentsEditable ? handleToggleNotifyByEmail : undefined
+              }
+              onToggleRequireFingerprint={
+                assignmentsEditable && canUseFingerprint
+                  ? handleToggleRequireFingerprint
+                  : undefined
+              }
             />
-            {assignmentsEditable ? (
-              <Checkbox
-                mt='md'
-                label='Requiere huella dactilar'
-                description='Además de la rúbrica, coloque una caja de huella por firmante.'
-                checked={requireFingerprint}
-                onChange={(e) => setRequireFingerprint(e.currentTarget.checked)}
-              />
+            {assignmentsEditable && !canUseFingerprint ? (
+              <Alert mt='md' color='gray' variant='light'>
+                Para exigir o colocar huella necesita el permiso “Registrar huella” (Administración →
+                Usuarios).
+              </Alert>
             ) : null}
           </ScrollArea>
         )}
@@ -760,7 +826,12 @@ export default function OrionDocumentEditor({
                   onChange={(v) => setActiveFieldKind(v as SignatureFieldKind)}
                   data={[
                     { label: 'Firma', value: 'signature' },
-                    { label: 'Huella', value: 'fingerprint' },
+                    ...(canUseFingerprint &&
+                    assignedParticipants.some(
+                      (p) => p.order === activeOrder && p.requireFingerprint
+                    )
+                      ? [{ label: 'Huella', value: 'fingerprint' as const }]
+                      : []),
                     { label: 'Validación', value: 'validation' },
                   ]}
                 />

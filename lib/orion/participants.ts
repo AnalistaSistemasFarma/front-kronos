@@ -12,6 +12,10 @@ export type OrionParticipant = {
   type?: OrionParticipantType;
   /** CardCode SAP cuando type = external. */
   cardCode?: string | null;
+  /** Enviar correo con link al enviar a firma. */
+  notifyByEmail?: boolean;
+  /** Exige huella dactilar para este firmante. */
+  requireFingerprint?: boolean;
 };
 
 function normalizeEmail(email?: string | null): string {
@@ -54,26 +58,44 @@ export function mergeParticipantSources(
     order?: number;
     type?: string;
     cardCode?: string | null;
+    notifyByEmail?: boolean | null;
+    requireFingerprint?: boolean | null;
   }> | null
 ): OrionParticipant[] {
   if (signers?.length) {
     return signers
       .slice()
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-      .map((s, i) => ({
-        order: s.order ?? i + 1,
-        email: normalizeEmail(s.email),
-        name: s.name?.trim() || s.email || `Firmante ${i + 1}`,
-        role: 'Firmante' as OrionParticipantRole,
-        type: String(s.type || '').toLowerCase() === 'external' ? 'external' : 'internal',
-        cardCode: s.cardCode ?? null,
-      }));
+      .map((s, i) => {
+        const type: OrionParticipantType =
+          String(s.type || '').toLowerCase() === 'external' ? 'external' : 'internal';
+        return {
+          order: s.order ?? i + 1,
+          email: normalizeEmail(s.email),
+          name: s.name?.trim() || s.email || `Firmante ${i + 1}`,
+          role: 'Firmante' as OrionParticipantRole,
+          type,
+          cardCode: s.cardCode ?? null,
+          notifyByEmail:
+            s.notifyByEmail == null ? type === 'external' : Boolean(s.notifyByEmail),
+          requireFingerprint: Boolean(s.requireFingerprint),
+        };
+      });
   }
   return suggested.map((p, i) => ({ ...p, order: i + 1 }));
 }
 
 export function emptySignerSlot(order: number): OrionParticipant {
-  return { order, email: '', name: '', role: 'Firmante', type: 'internal', cardCode: null };
+  return {
+    order,
+    email: '',
+    name: '',
+    role: 'Firmante',
+    type: 'internal',
+    cardCode: null,
+    notifyByEmail: false,
+    requireFingerprint: false,
+  };
 }
 
 export function resizeParticipantSlots(

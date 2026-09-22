@@ -1,5 +1,8 @@
 /**
  * Identidad del firmante al confirmar (alineado con Orion signer-identity).
+ *
+ * Privacidad (Ley 1581): NO persistir cédula/NIT/cargo/empresa en localStorage.
+ * Esos datos solo viven en memoria del formulario y en el POST a complete-sign → Orion.
  */
 
 export type SignerIdDocumentType =
@@ -36,8 +39,10 @@ export type SignerAcceptIdentity = {
   companyName?: string | null;
   companyNit?: string | null;
   jobTitle?: string | null;
-  /** Aceptación de condiciones en SynerLink (no se envía a Orion). */
+  /** Aceptación de condiciones de firma electrónica (SynerLink UI). */
   acceptedTerms?: boolean;
+  /** Consentimiento biométrico (huella) cuando el documento la exige. */
+  acceptedBiometric?: boolean;
 };
 
 export function formatSignerIdLabel(
@@ -119,51 +124,42 @@ export function normalizeSignerIdentity(
     companyNit: isNit && idNumber ? idNumber : null,
     jobTitle: isNit ? jobTitle : null,
     acceptedTerms: identity.acceptedTerms === true ? true : undefined,
+    acceptedBiometric: identity.acceptedBiometric === true ? true : undefined,
   };
 }
 
-const IDENTITY_STORAGE_KEY = 'kronos.orion.signerIdentity';
+/** Clave legada — se borra al cargar el formulario (ya no se escribe). */
+const LEGACY_IDENTITY_STORAGE_KEY = 'kronos.orion.signerIdentity';
 
+/**
+ * @deprecated No se persiste identidad. Solo limpia residuos de versiones anteriores.
+ */
 export function loadStoredSignerIdentity(
-  email?: string | null
+  _email?: string | null
 ): Partial<SignerAcceptIdentity> | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(IDENTITY_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as {
-      email?: string;
-      identity?: Partial<SignerAcceptIdentity>;
-    };
-    if (email && parsed.email && parsed.email.toLowerCase() !== email.toLowerCase()) {
-      return null;
-    }
-    return parsed.identity ?? null;
-  } catch {
-    return null;
-  }
+  void _email;
+  clearStoredSignerIdentity();
+  return null;
 }
 
+/**
+ * @deprecated No-op: no persistir datos personales del firmante en el navegador.
+ */
 export function storeSignerIdentity(
-  email: string | null | undefined,
-  identity: SignerAcceptIdentity
+  _email: string | null | undefined,
+  _identity: SignerAcceptIdentity
 ): void {
+  void _email;
+  void _identity;
+  clearStoredSignerIdentity();
+}
+
+/** Elimina cualquier rastro previo de identidad en localStorage. */
+export function clearStoredSignerIdentity(): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(
-      IDENTITY_STORAGE_KEY,
-      JSON.stringify({
-        email: String(email || '').toLowerCase(),
-        identity: {
-          fullName: identity.fullName,
-          idDocumentType: identity.idDocumentType,
-          idNumber: identity.idNumber,
-          companyName: identity.companyName,
-          jobTitle: identity.jobTitle,
-        },
-      })
-    );
+    window.localStorage.removeItem(LEGACY_IDENTITY_STORAGE_KEY);
   } catch {
-    /* ignore quota */
+    /* ignore */
   }
 }

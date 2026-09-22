@@ -31,6 +31,7 @@ type Props = {
   currentUserName?: string;
   signerStatuses?: Record<string, string>;
   companyId?: number | null;
+  canUseFingerprint?: boolean;
   onSignerCountChange: (count: number) => void;
   onSequentialChange: (value: boolean) => void;
   onIncludeSelfChange: (value: boolean) => void;
@@ -42,6 +43,8 @@ type Props = {
   ) => void;
   onClear: (order: number) => void;
   onReorder?: (order: number, direction: 'up' | 'down') => void;
+  onToggleNotifyByEmail?: (order: number, value: boolean) => void;
+  onToggleRequireFingerprint?: (order: number, value: boolean) => void;
   readOnly?: boolean;
 };
 
@@ -141,12 +144,15 @@ export default function OrionSignerAssignment({
   currentUserName,
   signerStatuses = {},
   companyId,
+  canUseFingerprint = false,
   onSignerCountChange,
   onSequentialChange,
   onIncludeSelfChange,
   onAssign,
   onClear,
   onReorder,
+  onToggleNotifyByEmail,
+  onToggleRequireFingerprint,
   readOnly = false,
 }: Props) {
   const [slotSource, setSlotSource] = useState<Record<number, 'internal' | 'external'>>({});
@@ -347,6 +353,39 @@ export default function OrionSignerAssignment({
                         Paso {person.order} en la secuencia
                       </Badge>
                     )}
+                    {person.email ? (
+                      <Stack gap={6} mt='sm'>
+                        <Checkbox
+                          size='xs'
+                          label='Enviar correo con link de firma'
+                          description={
+                            person.type === 'external'
+                              ? 'Recomendado para socios externos (URL Orion).'
+                              : 'Opcional; los internos también reciben tarea/notificación en SynerLink.'
+                          }
+                          checked={Boolean(person.notifyByEmail)}
+                          disabled={readOnly || !onToggleNotifyByEmail}
+                          onChange={(e) =>
+                            onToggleNotifyByEmail?.(person.order, e.currentTarget.checked)
+                          }
+                        />
+                        {canUseFingerprint ? (
+                          <Checkbox
+                            size='xs'
+                            label='Requiere huella dactilar'
+                            description='Coloque una caja de huella para este firmante en el PDF.'
+                            checked={Boolean(person.requireFingerprint)}
+                            disabled={readOnly || !onToggleRequireFingerprint}
+                            onChange={(e) =>
+                              onToggleRequireFingerprint?.(
+                                person.order,
+                                e.currentTarget.checked
+                              )
+                            }
+                          />
+                        ) : null}
+                      </Stack>
+                    ) : null}
                   </Box>
 
                   {onReorder && slots.length > 1 && (

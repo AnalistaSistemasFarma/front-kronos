@@ -3,13 +3,26 @@ import { NextResponse } from 'next/server';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import { getOrionConfig } from '@/lib/orion/config';
+import {
+  getOrionPersonConsent,
+  saveOrionPersonConsent,
+} from '@/lib/orion/client';
 import { finalizeSignerTurn } from '@/lib/orion/service';
 import { normalizeSignerIdentity } from '@/lib/orion/signerIdentity';
+import {
+  BIOMETRIC_CONSENT_REQUIRED_MESSAGE,
+  BIOMETRIC_CONSENT_VERSION,
+  SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE,
+  SIGNING_LEGAL_CONSENT_VERSION,
+} from '@/lib/orion/signingLegalConsent';
 
 /**
  * Confirma la firma del firmante actual: sincroniza Orion, cierra su tarea
  * y abre la del siguiente firmante en la secuencia.
  * POST /api/integrations/orion/complete-sign
+ *
+ * Consentimiento legal/biométrico: a nivel PERSONA (no por documento).
+ * Si el usuario ya aceptó en Orion (user-consent), no se exige checkbox otra vez.
  */
 export async function POST(req: Request) {
   try {
@@ -39,6 +52,67 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'requestId inválido' }, { status: 400 });
     }
 
+    // Consentimiento guardado en el perfil Orion (abarca a la persona).
+    let personHasSigning = false;
+    let personHasBiometric = false;
+    try {
+      const consentRes = await getOrionPersonConsent(email);
+      if (consentRes.ok && consentRes.data) {
+        personHasSigning = Boolean(consentRes.data.hasSigningLegalConsent);
+        personHasBiometric = Boolean(consentRes.data.hasBiometricConsent);
+      }
+    } catch {
+      /* si falla la consulta, exigir checkbox de esta sesión */
+    }
+
+    const acceptedTerms = body.acceptedTerms === true || personHasSigning;
+    const acceptedBiometric = body.acceptedBiometric === true || personHasBiometric;
+    if (!acceptedTerms) {
+      return NextResponse.json(
+        { error: SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE },
+        { status: 422 }
+      );
+    }
+    if (fingerprintDataUrl?.startsWith('data:image/') && !acceptedBiometric) {
+      return NextResponse.json(
+        { error: BIOMETRIC_CONSENT_REQUIRED_MESSAGE },
+        { status: 422 }
+      );
+    }
+
+    // Primera aceptación: persistir en perfil para no pedir por cada documento.
+    if (
+      (!personHasSigning && body.acceptedTerms === true) ||
+      (!personHasBiometric &&
+        body.acceptedBiometric === true &&
+        fingerprintDataUrl?.startsWith('data:image/'))
+    ) {
+      const now = new Date().toISOString();
+      try {
+        await saveOrionPersonConsent(email, {
+          ...(!personHasSigning && body.acceptedTerms === true
+            ? {
+                legalConsentAccepted: true,
+                legalConsentKind: 'ELECTRONIC' as const,
+                legalConsentVersion: SIGNING_LEGAL_CONSENT_VERSION,
+                legalConsentAcceptedAt: now,
+              }
+            : {}),
+          ...(!personHasBiometric &&
+          body.acceptedBiometric === true &&
+          fingerprintDataUrl?.startsWith('data:image/')
+            ? {
+                biometricConsentAccepted: true,
+                biometricConsentVersion: BIOMETRIC_CONSENT_VERSION,
+                biometricConsentAcceptedAt: now,
+              }
+            : {}),
+        });
+      } catch {
+        /* no bloquear firma; el panel también intenta persistir */
+      }
+    }
+
     const identity = normalizeSignerIdentity(
       {
         fullName: typeof body.fullName === 'string' ? body.fullName : '',
@@ -48,6 +122,8 @@ export async function POST(req: Request) {
         companyName: typeof body.companyName === 'string' ? body.companyName : null,
         companyNit: typeof body.companyNit === 'string' ? body.companyNit : null,
         jobTitle: typeof body.jobTitle === 'string' ? body.jobTitle : null,
+        acceptedTerms: true,
+        acceptedBiometric: acceptedBiometric ? true : undefined,
       },
       session.user.name || email
     );

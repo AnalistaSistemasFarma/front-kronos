@@ -52,6 +52,12 @@ export default function FirmaExternaPage() {
         if (!cancelled) {
           setInfo(data as InviteInfo);
           if (data.alreadySigned) setDone(true);
+          // Redirigir al enlace público Orion (/sign/...), no quedarse en SynerLink.
+          const orionUrl = String(data.signUrl || '').trim();
+          if (orionUrl && /\/sign\//i.test(orionUrl) && !data.alreadySigned) {
+            window.location.replace(orionUrl);
+            return;
+          }
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Error');

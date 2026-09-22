@@ -10,6 +10,8 @@ import {
   getOrionDocumentFromBag,
   hasOrionActiveSignFlow,
   mergeOrionSignatureState,
+  normalizeOrionFingerprintRequirements,
+  preserveOrionFingerprintPrefs,
   parseOrionSignatureBagBag,
   resolveOrionSignatureIntent,
   serializeOrionSignatureBagBag,
@@ -24,7 +26,8 @@ import {
   parseFileIdFromExternalRef,
   resolveOrionTenantId,
 } from './config';
-import { acceptOrionSignerTurn, buildOrionSignedFileApiUrl, createOrionDocument, getOrionDocument, getOrionDocumentByRef, rebuildOrionSignedPdf, returnOrionDocument, saveOrionSignatureFields } from './client';
+import { acceptOrionSignerTurn, buildOrionSignedFileApiUrl, createOrionDocument, getOrionDocument, getOrionDocumentByRef, getOrionPersonConsent, rebuildOrionSignedPdf, resolveOrionAbsoluteUrl, returnOrionDocument, saveOrionSignatureFields } from './client';
+import { isAllowedServerPdfFetchUrl } from './signedFileAccess';
 import { deleteOneDriveItem } from '../onedrive/graphFolderUpload';
 import { mapOrionFieldsToPlacements, normalizeFieldsForStorage, parseEmbedTokenFromUrl, toOrionSignatureFields, type SignatureFieldPlacement } from './signatureFields';
 import { advanceSequentialTask } from '../workflow/advanceSequentialTask.js';
@@ -53,6 +56,11 @@ import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/micr
 import type { SignerAcceptIdentity } from './signerIdentity';
 import { normalizeSignerIdentity } from './signerIdentity';
 import {
+  BIOMETRIC_CONSENT_REQUIRED_MESSAGE,
+  BIOMETRIC_CONSENT_VERSION,
+  SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE,
+} from './signingLegalConsent';
+import {
   fireAndForgetNotification,
   notifyOrionSignatureProgress,
 } from '../notificationEvents.js';
@@ -71,8 +79,17 @@ export async function resolveOriginalPdfBase64(params: {
   versions?: OrionSignatureState['versions'];
 }): Promise<{ base64: string | null; sourceUrl: string | null }> {
   const tryUrl = async (url: string): Promise<string | null> => {
+    if (!isAllowedServerPdfFetchUrl(url)) return null;
     try {
-      const res = await fetch(url, { cache: 'no-store' });
+      const res = await fetch(url, { cache: 'no-store', redirect: 'manual' });
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get('location');
+        if (!loc || !isAllowedServerPdfFetchUrl(loc)) return null;
+        const follow = await fetch(loc, { cache: 'no-store', redirect: 'error' });
+        if (!follow.ok) return null;
+        const buf = Buffer.from(await follow.arrayBuffer());
+        return buf.byteLength > 0 ? buf.toString('base64') : null;
+      }
       if (!res.ok) return null;
       const buf = Buffer.from(await res.arrayBuffer());
       return buf.byteLength > 0 ? buf.toString('base64') : null;
@@ -347,6 +364,11 @@ function mapOrionResponseToState(
   fileName?: string | null
 ): OrionSignatureState {
   const orionDocumentId = doc.orionDocumentId;
+  const signers = (doc.signers ?? []).map((s) => ({
+    ...s,
+    // Orion entrega /sign/{token}; persistimos URL absoluta para invitar/copiar.
+    signUrl: resolveOrionAbsoluteUrl(s.signUrl) || s.signUrl || null,
+  }));
   return {
     orionDocumentId,
     externalRef: doc.externalRef ?? externalRef,
@@ -356,7 +378,7 @@ function mapOrionResponseToState(
     embedUrl: doc.embedUrl ?? null,
     signedFileUrl: doc.signedFileUrl ?? null,
     signedAt: doc.signedAt ?? null,
-    signers: doc.signers,
+    signers,
     auditSummary: doc.auditSummary ?? null,
     ...(doc.signatureFields
       ? { signatureFields: mapOrionFieldsToPlacements(doc.signatureFields, orionDocumentId) }
@@ -1065,6 +1087,7 @@ export async function syncOrionDocumentState(
       current,
       mapOrionResponseToState(externalRef, live.data, fid, current.fileName)
     );
+    state = preserveOrionFingerprintPrefs(current, state);
 
     // Solo normalizar slots con evidencia de firma (signedAt / status).
     // No marcar PENDIENTE→FIRMADO solo porque Orion diga FIRMADO: eso bloquea
@@ -1118,7 +1141,102 @@ export async function syncOrionDocumentState(
       state.originalFileUrl ?? current.originalFileUrl ?? null,
       buildOrionSignedFileApiUrl(String(state.orionDocumentId || current.orionDocumentId))
     );
+
+    // Legacy “huella para todos” → migra a per-signer y limpia Orion si cambió.
+    const beforeFp = state;
+    state = normalizeOrionFingerprintRequirements(state);
+    if (state !== beforeFp && state.orionDocumentId) {
+      const fieldsChanged =
+        JSON.stringify(beforeFp.signatureFields ?? []) !==
+        JSON.stringify(state.signatureFields ?? []);
+      const prefsChanged =
+        JSON.stringify(
+          (beforeFp.signers ?? []).map((s) => [
+            String(s.email || '').toLowerCase(),
+            Boolean(s.requireFingerprint),
+          ])
+        ) !==
+        JSON.stringify(
+          (state.signers ?? []).map((s) => [
+            String(s.email || '').toLowerCase(),
+            Boolean(s.requireFingerprint),
+          ])
+        );
+      if (fieldsChanged || prefsChanged || beforeFp.fingerprintPolicy !== state.fingerprintPolicy) {
+        try {
+          const signerRequireFingerprint: Record<string, boolean> = {};
+          const signerRequireFingerprintByOrder: Record<string, boolean> = {};
+          const emailCounts = new Map<string, number>();
+          for (const s of state.signers ?? []) {
+            const email = String(s.email || '').trim().toLowerCase();
+            if (!email) continue;
+            emailCounts.set(email, (emailCounts.get(email) ?? 0) + 1);
+          }
+          for (const s of state.signers ?? []) {
+            const order = Number(s.order);
+            if (Number.isFinite(order) && order > 0) {
+              signerRequireFingerprintByOrder[String(order)] =
+                s.requireFingerprint === true;
+            }
+            const email = String(s.email || '').trim().toLowerCase();
+            if (!email) continue;
+            if ((emailCounts.get(email) ?? 0) === 1) {
+              signerRequireFingerprint[email] = s.requireFingerprint === true;
+            }
+          }
+          await saveOrionSignatureFields({
+            orionDocumentId: String(state.orionDocumentId),
+            signatureFields: toOrionSignatureFields(state.signatureFields ?? []),
+            signerRequireFingerprint,
+            signerRequireFingerprintByOrder,
+          });
+        } catch (err) {
+          console.warn('[orion/sync] normalize fingerprint → Orion:', err);
+        }
+      }
+    }
+
+    const prevStatus = String(current.status || '').toUpperCase();
+    const nextStatus = String(state.status || '').toUpperCase();
+    const turnAdvanced = newlyCompletedSigners(current.signers, state.signers).length > 0;
+    const terminalChanged =
+      nextStatus !== prevStatus &&
+      (nextStatus === 'FIRMADO' || nextStatus === 'RECHAZADO' || nextStatus === 'DEVUELTO');
+
     bag = setOrionDocumentInBag(bag, fid, state);
+
+    // Firma por URL Orion: el webhook a veces no llega (URL mal apuntada / local).
+    // Al sincronizar desde Orion, aplicar mismos efectos (tareas, bag, auth).
+    if (turnAdvanced || terminalChanged) {
+      try {
+        const ctx = await getRequestOrionContext(pool, requestId);
+        const outcome = await applyOrionWebhookToRequest(pool, {
+          requestId,
+          fileId: fid,
+          bag,
+          fieldId: loaded.field.id_form_field,
+          status: nextStatus || 'EN_PROCESO',
+          noteAuthorUserId: ctx?.id_requester ?? null,
+          auditSummary:
+            turnAdvanced || terminalChanged
+              ? `Sincronizado desde Orion (${nextStatus || 'EN_PROCESO'}).`
+              : null,
+          patch: {
+            orionDocumentId: state.orionDocumentId,
+            externalRef: state.externalRef,
+            status: nextStatus || state.status,
+            signedFileUrl: state.signedFileUrl ?? null,
+            signedAt: state.signedAt ?? null,
+            signers: state.signers,
+            versions: state.versions,
+            auditSummary: state.auditSummary ?? null,
+          },
+        });
+        bag = outcome.bag;
+      } catch (err) {
+        console.warn('[orion/syncOrionDocumentState] applyWebhook:', err);
+      }
+    }
   }
 
   const bagAfter = serializeOrionSignatureBagBag(bag);
@@ -1510,6 +1628,41 @@ export async function userHasOrionSignPermission(
 }
 
 /**
+ * Permiso Registrar huella.
+ * Sin él: no se puede exigir/colocar huella en preparación ni aportar huella al firmar.
+ */
+export async function userHasOrionFingerprintPermission(
+  pool: SqlPool,
+  userId: string,
+  _isAdmin = false
+): Promise<boolean> {
+  void _isAdmin;
+  if (!userId) return false;
+
+  const { ORION_FIRMA_FINGERPRINT_URL } = await import('./access');
+  const permitted = await pool
+    .request()
+    .input('id_user', sql.NVarChar(255), userId)
+    .input('urlFp', sql.NVarChar(255), ORION_FIRMA_FINGERPRINT_URL)
+    .query(`
+      SELECT TOP 1 suc.id_subprocess_user_company AS id
+      FROM subprocess_user_company suc
+      INNER JOIN company_user cu
+        ON cu.id_company_user = suc.id_company_user
+      INNER JOIN subprocess s
+        ON s.id_subprocess = suc.id_subprocess
+      WHERE cu.id_user = @id_user
+        AND (
+          LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N'')))) = LOWER(LTRIM(RTRIM(@urlFp)))
+          OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N'')))) LIKE N'%registrar huella%'
+          OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N'')))) LIKE N'%poner huella%'
+        )
+    `);
+
+  return Boolean(permitted.recordset[0]?.id);
+}
+
+/**
  * Puede preparar firma en la solicitud: solo permiso Preparar (no creador/admin automático).
  */
 export async function userCanManageOrionRequest(
@@ -1771,6 +1924,46 @@ export async function finalizeSignerTurn(
     current,
     mapOrionResponseToState(externalRef, live.data, fileId, current.fileName)
   );
+  // No reponer huella legacy desde Orion; migrar docs actuales antes de validar.
+  liveState = preserveOrionFingerprintPrefs(current, liveState);
+  const beforeFp = liveState;
+  liveState = normalizeOrionFingerprintRequirements(liveState);
+  if (liveState !== beforeFp) {
+    bag = setOrionDocumentInBag(bag, fileId, liveState);
+    await upsertOrionFormBag(pool, params.requestId, loaded.field.id_form_field, bag);
+    if (liveState.orionDocumentId) {
+      try {
+        const signerRequireFingerprint: Record<string, boolean> = {};
+        const signerRequireFingerprintByOrder: Record<string, boolean> = {};
+        const emailCounts = new Map<string, number>();
+        for (const s of liveState.signers ?? []) {
+          const email = String(s.email || '').trim().toLowerCase();
+          if (!email) continue;
+          emailCounts.set(email, (emailCounts.get(email) ?? 0) + 1);
+        }
+        for (const s of liveState.signers ?? []) {
+          const order = Number(s.order);
+          if (Number.isFinite(order) && order > 0) {
+            signerRequireFingerprintByOrder[String(order)] =
+              s.requireFingerprint === true;
+          }
+          const email = String(s.email || '').trim().toLowerCase();
+          if (!email) continue;
+          if ((emailCounts.get(email) ?? 0) === 1) {
+            signerRequireFingerprint[email] = s.requireFingerprint === true;
+          }
+        }
+        await saveOrionSignatureFields({
+          orionDocumentId: String(liveState.orionDocumentId),
+          signatureFields: toOrionSignatureFields(liveState.signatureFields ?? []),
+          signerRequireFingerprint,
+          signerRequireFingerprintByOrder,
+        });
+      } catch (err) {
+        console.warn('[orion/complete-sign] normalize fingerprint → Orion:', err);
+      }
+    }
+  }
 
   const mySlots = liveState.signers?.filter(
     (s) => normalizeSignerEmail(s.email) === me
@@ -1838,14 +2031,41 @@ export async function finalizeSignerTurn(
     const identity = params.identity
       ? normalizeSignerIdentity(params.identity, turnSigner.name || params.userEmail)
       : null;
-    const needsFingerprint =
-      Boolean(current.requireFingerprint) ||
-      (current.signatureFields ?? []).some(
-        (f) =>
-          Number(f.signerOrder) === Number(turnSigner.order) &&
-          String(f.kind || '').toLowerCase() === 'fingerprint'
+    // Consentimiento a nivel persona (Orion users.*): no exigir checkbox por documento.
+    let personHasSigning = false;
+    let personHasBiometric = false;
+    try {
+      const consentRes = await getOrionPersonConsent(params.userEmail);
+      if (consentRes.ok && consentRes.data) {
+        personHasSigning = Boolean(consentRes.data.hasSigningLegalConsent);
+        personHasBiometric = Boolean(consentRes.data.hasBiometricConsent);
+      }
+    } catch {
+      /* si falla, caer al flag del formulario */
+    }
+    const termsOk = identity?.acceptedTerms === true || personHasSigning;
+    if (!identity || !termsOk) {
+      throw Object.assign(new Error(SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE), { status: 422 });
+    }
+    const needsFingerprint = turnSigner.requireFingerprint === true;
+    if (needsFingerprint) {
+      const canFingerprint = await userHasOrionFingerprintPermission(
+        pool,
+        params.userId,
+        false
       );
-    const fingerprintDataUrl = String(params.fingerprintDataUrl || '').trim();
+      if (!canFingerprint) {
+        throw Object.assign(
+          new Error(
+            'No tiene permiso “Registrar huella”. Sin ese permiso no puede aportar huella en este documento. Asígueselo en Administración → Usuarios.'
+          ),
+          { status: 403 }
+        );
+      }
+    }
+    const fingerprintDataUrl = needsFingerprint
+      ? String(params.fingerprintDataUrl || '').trim()
+      : '';
     if (needsFingerprint && !fingerprintDataUrl.startsWith('data:image/')) {
       throw Object.assign(
         new Error(
@@ -1854,10 +2074,28 @@ export async function finalizeSignerTurn(
         { status: 422 }
       );
     }
+    const biometricOk =
+      identity.acceptedBiometric === true || personHasBiometric;
+    if (needsFingerprint && !biometricOk) {
+      throw Object.assign(new Error(BIOMETRIC_CONSENT_REQUIRED_MESSAGE), { status: 422 });
+    }
     // Cliente omite signatureDataUrl si Orion ya tiene rúbrica (hasSignature).
+    const biometricAcceptedAt = new Date().toISOString();
     const acceptPayload = {
       signatureDataUrl: params.signatureDataUrl,
-      fingerprintDataUrl: fingerprintDataUrl || null,
+      // Nunca enviar huella en un turno que no la exige (evita 422 biométrico en Orion).
+      fingerprintDataUrl: needsFingerprint ? fingerprintDataUrl || null : null,
+      requireFingerprint: needsFingerprint,
+      signOrder: Number(turnSigner.order) || null,
+      legalConsentAccepted: true as const,
+      legalConsentKind: 'ELECTRONIC' as const,
+      ...(needsFingerprint
+        ? {
+            biometricConsentAccepted: true as const,
+            biometricConsentVersion: BIOMETRIC_CONSENT_VERSION,
+            biometricConsentAcceptedAt: biometricAcceptedAt,
+          }
+        : {}),
       ...(identity
         ? {
             fullName: identity.fullName,

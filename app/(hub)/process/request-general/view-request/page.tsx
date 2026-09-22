@@ -3103,6 +3103,8 @@ function ViewRequestPage() {
                   return [...prev, optimistic];
                 });
               }
+              const fileName = uploaded.graphItem?.name || uploaded.file.name;
+              void addSystemNote(`Documento adjunto: ${fileName}`);
               refreshAttachmentsAfterUpload();
               void triggerSapsendFiles(false);
             }}

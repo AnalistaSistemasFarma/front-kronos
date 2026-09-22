@@ -3,6 +3,7 @@
 import {
   ActionIcon,
   Alert,
+  Badge,
   Button,
   CopyButton,
   Group,
@@ -23,9 +24,12 @@ type SignerRow = {
   status: string | null;
   signUrl: string | null;
   inviteUrl: string | null;
+  shareUrl?: string | null;
+  shareSource?: 'orion' | 'synerlink' | null;
   inviteSentAt: string | null;
   inviteExpiresAt: string | null;
   cardCode: string | null;
+  isExternal?: boolean;
 };
 
 type Props = {
@@ -48,6 +52,10 @@ export default function OrionFirmantesInviteModal({
   const [error, setError] = useState<string | null>(null);
   const [busyEmail, setBusyEmail] = useState<string | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
+  const [sources, setSources] = useState<Record<string, 'orion' | 'synerlink' | null>>({});
+  const [orionSynced, setOrionSynced] = useState<boolean | null>(null);
+  const [orionError, setOrionError] = useState<string | null>(null);
+  const [missingOrionUrl, setMissingOrionUrl] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,7 +66,23 @@ export default function OrionFirmantesInviteModal({
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'No se pudieron cargar firmantes');
-      setSigners((data.signers || []) as SignerRow[]);
+      const rows = (data.signers || []) as SignerRow[];
+      setSigners(rows);
+      setOrionSynced(typeof data.orionSynced === 'boolean' ? data.orionSynced : null);
+      setOrionError(typeof data.orionError === 'string' ? data.orionError : null);
+      setMissingOrionUrl(Array.isArray(data.missingOrionUrl) ? data.missingOrionUrl : []);
+      const nextUrls: Record<string, string> = {};
+      const nextSources: Record<string, 'orion' | 'synerlink' | null> = {};
+      for (const s of rows) {
+        const u = String(s.shareUrl || s.inviteUrl || s.signUrl || '').trim();
+        if (u) {
+          nextUrls[s.email] = u;
+          if (s.order != null) nextUrls[`${s.email}#${s.order}`] = u;
+        }
+        nextSources[s.email] = s.shareSource ?? null;
+      }
+      setUrls(nextUrls);
+      setSources(nextSources);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error');
     } finally {
@@ -70,21 +94,32 @@ export default function OrionFirmantesInviteModal({
     if (opened) void load();
   }, [opened, load]);
 
-  const ensureUrl = async (email: string) => {
+  const ensureUrl = async (email: string, order?: number | null) => {
     setBusyEmail(email);
     setError(null);
     try {
       const res = await fetch('/api/integrations/orion/signer-invites', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, fileId, email, action: 'url' }),
+        body: JSON.stringify({
+          requestId,
+          fileId,
+          email,
+          order: order ?? undefined,
+          action: 'url',
+        }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'No se pudo generar la URL');
-      if (data.inviteUrl) {
-        setUrls((prev) => ({ ...prev, [email]: (data.shareUrl || data.signUrl || data.inviteUrl) as string }));
+      if (!res.ok) throw new Error(data.error || 'No se pudo obtener la URL');
+      const next = String(data.shareUrl || data.signUrl || data.inviteUrl || '').trim();
+      const key = order != null ? `${email}#${order}` : email;
+      if (next) setUrls((prev) => ({ ...prev, [email]: next, [key]: next }));
+      if (data.shareSource) {
+        setSources((prev) => ({ ...prev, [email]: data.shareSource }));
       }
-      return (data.shareUrl || data.signUrl || data.inviteUrl) as string | undefined;
+      if (typeof data.orionSynced === 'boolean') setOrionSynced(data.orionSynced);
+      if (data.orionError) setOrionError(String(data.orionError));
+      return next || undefined;
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error');
       return undefined;
@@ -93,22 +128,27 @@ export default function OrionFirmantesInviteModal({
     }
   };
 
-  const sendMail = async (email: string) => {
+  const sendMail = async (email: string, order?: number | null) => {
     setBusyEmail(email);
     setError(null);
     try {
       const res = await fetch('/api/integrations/orion/signer-invites', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, fileId, email, action: 'send' }),
+        body: JSON.stringify({
+          requestId,
+          fileId,
+          email,
+          order: order ?? undefined,
+          action: 'send',
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'No se pudo enviar el correo');
-      if (data.inviteUrl || data.shareUrl) {
-        setUrls((prev) => ({
-          ...prev,
-          [email]: (data.shareUrl || data.signUrl || data.inviteUrl) as string,
-        }));
+      const next = String(data.shareUrl || data.signUrl || data.inviteUrl || '').trim();
+      if (next) setUrls((prev) => ({ ...prev, [email]: next }));
+      if (data.shareSource) {
+        setSources((prev) => ({ ...prev, [email]: data.shareSource }));
       }
       await load();
     } catch (e) {
@@ -122,24 +162,51 @@ export default function OrionFirmantesInviteModal({
     <Modal
       opened={opened}
       onClose={onClose}
-      title={fileName ? `Firmantes · ${fileName}` : 'Firmantes'}
+      title={fileName ? `Invitar a firmar · ${fileName}` : 'Invitar a firmar'}
       size='lg'
     >
       <Stack gap='md'>
+        <Text size='sm' c='dimmed'>
+          El correo y la URL usan el enlace público de <strong>Orion</strong> (
+          <code>/sign/…</code>), no el de SynerLink.
+        </Text>
+
+        {orionSynced === true ? (
+          <Alert color='teal' variant='light'>
+            Sincronizado con Orion. Las URLs corresponden al documento en GSS Firma.
+          </Alert>
+        ) : null}
+        {orionSynced === false || orionError ? (
+          <Alert color='orange' variant='light'>
+            {orionError ||
+              'No hay sync con Orion. Envíe el documento a firma para que Orion cree los enlaces /sign/{token}.'}
+          </Alert>
+        ) : null}
+        {missingOrionUrl.length > 0 ? (
+          <Alert color='yellow' variant='light'>
+            Sin URL Orion aún: {missingOrionUrl.join(', ')}. Tras “Enviar a firma”, pulse renovar.
+          </Alert>
+        ) : null}
+
         {error ? (
           <Alert color='red' variant='light'>
             {error}
           </Alert>
         ) : null}
-        {loading ? <Text size='sm'>Cargando…</Text> : null}
+        {loading ? <Text size='sm'>Sincronizando con Orion…</Text> : null}
         {!loading && signers.length === 0 ? (
           <Text size='sm' c='dimmed'>
-            No hay firmantes asignados.
+            No hay firmantes asignados. Primero prepare el documento y asigne firmantes.
           </Text>
         ) : null}
+
         {signers.map((s) => {
-          const isExternal = String(s.type).toLowerCase() === 'external';
-          const url = urls[s.email] || s.signUrl || s.inviteUrl || '';
+          const isExternal = String(s.type).toLowerCase() === 'external' || s.isExternal;
+          const orderKey = s.order != null ? `${s.email}#${s.order}` : s.email;
+          const url =
+            urls[orderKey] || urls[s.email] || s.shareUrl || s.inviteUrl || s.signUrl || '';
+          const source = sources[s.email] ?? s.shareSource ?? null;
+          const busyKey = orderKey;
           return (
             <Stack
               key={`${s.order}-${s.email}`}
@@ -159,58 +226,65 @@ export default function OrionFirmantesInviteModal({
                     {s.status ? ` · ${s.status}` : ''}
                   </Text>
                 </div>
+                {source === 'orion' ? (
+                  <Badge size='sm' color='teal' variant='light'>
+                    Orion
+                  </Badge>
+                ) : source === 'synerlink' ? (
+                  <Badge size='sm' color='gray' variant='light'>
+                    Respaldo SynerLink
+                  </Badge>
+                ) : null}
               </Group>
-              {isExternal ? (
-                <>
-                  <Group gap='xs' align='flex-end' wrap='nowrap'>
-                    <TextInput
-                      label='URL de firma'
-                      value={url}
-                      readOnly
-                      style={{ flex: 1 }}
-                      placeholder='Genere la URL para compartirla'
-                    />
-                    <Tooltip label='Generar / renovar URL'>
-                      <ActionIcon
-                        variant='light'
-                        loading={busyEmail === s.email}
-                        onClick={() => void ensureUrl(s.email)}
-                        mb={2}
-                      >
-                        <IconRefresh size={16} />
-                      </ActionIcon>
-                    </Tooltip>
-                    {url ? (
-                      <CopyButton value={url}>
-                        {({ copied, copy }) => (
-                          <Tooltip label={copied ? 'Copiado' : 'Copiar'}>
-                            <ActionIcon variant='light' color={copied ? 'teal' : 'blue'} onClick={copy} mb={2}>
-                              {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
-                            </ActionIcon>
-                          </Tooltip>
-                        )}
-                      </CopyButton>
-                    ) : null}
-                  </Group>
-                  <Button
-                    size='xs'
-                    leftSection={<IconMail size={14} />}
-                    loading={busyEmail === s.email}
-                    onClick={() => void sendMail(s.email)}
+              <Group gap='xs' align='flex-end' wrap='nowrap'>
+                <TextInput
+                  label='URL de firma (Orion)'
+                  value={url}
+                  readOnly
+                  style={{ flex: 1 }}
+                  placeholder='Sincronice con Orion o envíe el documento a firma'
+                />
+                <Tooltip label='Sincronizar / renovar desde Orion'>
+                  <ActionIcon
+                    variant='light'
+                    loading={busyEmail === s.email || busyEmail === busyKey}
+                    onClick={() => void ensureUrl(s.email, s.order)}
+                    mb={2}
                   >
-                    Enviar al correo
-                  </Button>
-                  {s.inviteSentAt ? (
-                    <Text size='xs' c='dimmed'>
-                      Último envío: {new Date(s.inviteSentAt).toLocaleString('es-CO')}
-                    </Text>
-                  ) : null}
-                </>
-              ) : (
+                    <IconRefresh size={16} />
+                  </ActionIcon>
+                </Tooltip>
+                {url ? (
+                  <CopyButton value={url}>
+                    {({ copied, copy }) => (
+                      <Tooltip label={copied ? 'Copiado' : 'Copiar'}>
+                        <ActionIcon
+                          variant='light'
+                          color={copied ? 'teal' : 'blue'}
+                          onClick={copy}
+                          mb={2}
+                        >
+                          {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                        </ActionIcon>
+                      </Tooltip>
+                    )}
+                  </CopyButton>
+                ) : null}
+              </Group>
+              <Button
+                size='xs'
+                leftSection={<IconMail size={14} />}
+                loading={busyEmail === s.email || busyEmail === busyKey}
+                disabled={!url}
+                onClick={() => void sendMail(s.email, s.order)}
+              >
+                Enviar URL al correo
+              </Button>
+              {s.inviteSentAt ? (
                 <Text size='xs' c='dimmed'>
-                  Firmante interno: firma desde SynerLink / Autorizaciones.
+                  Último envío: {new Date(s.inviteSentAt).toLocaleString('es-CO')}
                 </Text>
-              )}
+              ) : null}
             </Stack>
           );
         })}

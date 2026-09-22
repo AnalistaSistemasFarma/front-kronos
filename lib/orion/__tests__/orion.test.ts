@@ -4,6 +4,7 @@ import {
   hasOrionActiveSignFlow,
   isOrionSignDocument,
   mergeOrionSignatureState,
+  normalizeOrionFingerprintRequirements,
   parseOrionSignatureBagBag,
   parseOrionSignatureState,
   resolveOrionDocumentForAttachment,
@@ -28,8 +29,10 @@ import { resolveOrionPermissions } from '../permissions';
 import {
   isFirmaRequestCategoryOrProcess,
   isHubHiddenSubprocess,
+  isOrionFirmaFingerprintSubprocess,
   isOrionFirmaPrepareSubprocess,
   isOrionFirmaSignSubprocess,
+  ORION_FIRMA_FINGERPRINT_URL,
   ORION_FIRMA_MANAGE_URL,
   ORION_FIRMA_PREPARE_URL,
   ORION_FIRMA_SIGN_URL,
@@ -73,17 +76,35 @@ describe('orion access subprocesses', () => {
     ).toBe(false);
   });
 
-  it('oculta prepare y sign en el hub', () => {
+  it('oculta prepare, sign y fingerprint en el hub', () => {
     expect(isHubHiddenSubprocess({ url: ORION_FIRMA_PREPARE_URL, name: 'Preparar firma' })).toBe(
       true
     );
     expect(isHubHiddenSubprocess({ url: ORION_FIRMA_SIGN_URL, name: 'Firmar documento' })).toBe(
       true
     );
+    expect(
+      isHubHiddenSubprocess({ url: ORION_FIRMA_FINGERPRINT_URL, name: 'Registrar huella' })
+    ).toBe(true);
     expect(isHubHiddenSubprocess({ url: ORION_FIRMA_MANAGE_URL, name: 'Firma digital' })).toBe(
       true
     );
     expect(isHubHiddenSubprocess({ url: '/process/other', name: 'Otro' })).toBe(false);
+  });
+
+  it('detecta Registrar huella', () => {
+    expect(
+      isOrionFirmaFingerprintSubprocess({
+        subprocess: 'Registrar huella',
+        subprocess_url: ORION_FIRMA_FINGERPRINT_URL,
+      })
+    ).toBe(true);
+    expect(
+      isOrionFirmaFingerprintSubprocess({
+        subprocess: 'Firmar documento',
+        subprocess_url: ORION_FIRMA_SIGN_URL,
+      })
+    ).toBe(false);
   });
 
   it('no oculta el proceso de negocio Solicitud de firma al crear solicitudes', () => {
@@ -766,5 +787,44 @@ describe('isFirmaAuthorizationItem', () => {
         taskName: 'Autorizar pago',
       })
     ).toBe(false);
+  });
+});
+
+
+describe('orion fingerprint legacy migration', () => {
+  it('limpia huella global en docs actuales sin política per-signer', () => {
+    const next = normalizeOrionFingerprintRequirements({
+      requireFingerprint: true,
+      signers: [
+        { email: 'a@x.com', order: 1, requireFingerprint: true },
+        { email: 'b@x.com', order: 2, requireFingerprint: true },
+      ],
+      signatureFields: [
+        { id: 's1', documentId: 'd', signerOrder: 1, page: 1, x: 0, y: 0, width: 1, height: 1, kind: 'signature' },
+        { id: 'f1', documentId: 'd', signerOrder: 1, page: 1, x: 0, y: 0, width: 1, height: 1, kind: 'fingerprint' },
+        { id: 'f2', documentId: 'd', signerOrder: 2, page: 1, x: 0, y: 0, width: 1, height: 1, kind: 'fingerprint' },
+      ],
+    });
+    expect(next.fingerprintPolicy).toBe('per-signer');
+    expect(next.requireFingerprint).toBe(false);
+    expect(next.signers?.every((s) => s.requireFingerprint !== true)).toBe(true);
+    expect(next.signatureFields?.some((f) => f.kind === 'fingerprint')).toBe(false);
+  });
+
+  it('conserva marcas selectivas ya existentes', () => {
+    const next = normalizeOrionFingerprintRequirements({
+      signers: [
+        { email: 'a@x.com', order: 1, requireFingerprint: true },
+        { email: 'b@x.com', order: 2, requireFingerprint: false },
+      ],
+      signatureFields: [
+        { id: 'f1', documentId: 'd', signerOrder: 1, page: 1, x: 0, y: 0, width: 1, height: 1, kind: 'fingerprint' },
+        { id: 'f2', documentId: 'd', signerOrder: 2, page: 1, x: 0, y: 0, width: 1, height: 1, kind: 'fingerprint' },
+      ],
+    });
+    expect(next.fingerprintPolicy).toBe('per-signer');
+    expect(next.signers?.[0]?.requireFingerprint).toBe(true);
+    expect(next.signers?.[1]?.requireFingerprint).toBe(false);
+    expect(next.signatureFields?.map((f) => f.id)).toEqual(['f1']);
   });
 });

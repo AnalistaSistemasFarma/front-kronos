@@ -23,6 +23,12 @@ export type OrionSignerState = {
   expiresAt?: string | null;
   /** El firmante pidió renovar el plazo al líder. */
   extensionRequestedAt?: string | null;
+  /** Enviar correo con link Orion al enviar a firma / turno. */
+  notifyByEmail?: boolean | null;
+  /** Este firmante debe aportar huella (además de rúbrica). */
+  requireFingerprint?: boolean | null;
+  /** Orion: accept-sign exigirá biometricConsent* (huella / caja fingerprint). */
+  requiresBiometricConsent?: boolean | null;
 };
 
 export type OrionDocumentVersionKind = 'original' | 'partial' | 'final' | 'validated';
@@ -79,6 +85,11 @@ export type OrionSignatureState = {
   signatureKind?: OrionDocumentSignatureKind | null;
   /** Si true, el firmante debe aportar huella además de rúbrica. */
   requireFingerprint?: boolean | null;
+  /**
+   * Política de huella: `per-signer` = solo quien tenga requireFingerprint.
+   * Ausente en bags legacy (checkbox global / cajas para todos) → se migra al sincronizar.
+   */
+  fingerprintPolicy?: 'per-signer' | null;
   status?: OrionDocumentStatus;
   embedUrl?: string | null;
   signedFileUrl?: string | null;
@@ -142,6 +153,10 @@ export type OrionAssignSignersPayload = {
     order?: number;
     type?: 'internal' | 'external';
     cardCode?: string;
+    /** Si true, Orion marca invitedAt y puede enviar correo. */
+    notifyByEmail?: boolean;
+    /** Si true, este firmante exige caja/huella. */
+    requireFingerprint?: boolean;
   }>;
 };
 

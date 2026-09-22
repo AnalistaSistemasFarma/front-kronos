@@ -27,6 +27,7 @@ import {
 import { useGetMicrosoftToken as getMicrosoftToken } from '../microsoft-365/useGetMicrosoftToken';
 import { sanitizeOneDriveName } from '../../lib/onedriveName';
 import { ensureOneDriveFolderPath, uploadFileToOneDriveFolder } from '../../lib/onedrive/graphFolderUpload';
+import toast from 'react-hot-toast';
 
 export interface UploadedFile {
   id: string;
@@ -196,6 +197,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       };
       queueMicrotask(() => {
         onUploadCompleteRef.current?.(completed);
+        toast.success(`Documento adjunto: ${file.name}`);
         // Limpiar de la cola de subida tras éxito: la tabla de adjuntos es la fuente de verdad.
         window.setTimeout(() => {
           setFiles((prev) => prev.filter((f) => f.id !== fileId || f.status !== 'success'));
@@ -203,14 +205,16 @@ const FileUpload: React.FC<FileUploadProps> = ({
       });
     } catch (error) {
       console.error('Error uploading file:', error);
+      const message =
+        error instanceof Error ? error.message : 'Error desconocido al subir el archivo';
+      toast.error(message);
       setFiles((prev) =>
         prev.map((f) =>
           f.id === fileId
             ? {
                 ...f,
                 status: 'error',
-                error:
-                  error instanceof Error ? error.message : 'Error desconocido al subir el archivo',
+                error: message,
               }
             : f
         )

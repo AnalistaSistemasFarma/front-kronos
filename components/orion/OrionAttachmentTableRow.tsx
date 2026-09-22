@@ -426,22 +426,8 @@ export default function OrionAttachmentTableRow({
           <div className={isClosed ? 'doc-dossier doc-dossier--closed' : 'doc-dossier'}>
             <div className='doc-dossier__rail' />
             <Stack gap={4} className='doc-dossier__body'>
-            <Text
-              size='10px'
-              c='dimmed'
-              tt='uppercase'
-              fw={700}
-              style={{ letterSpacing: 0.6 }}
-            >
-              Para firmar · Orion
-            </Text>
-            {!d.hasOrionDoc ? (
-              <Text size='xs' c='dimmed' className='doc-dossier__hint'>
-                Pulse “Preparar documento” para enviarlo a Orion. Mientras no se prepare, puede
-                volver a Solo ver (OneDrive SynerLink). Tras preparar o firmar, el destino queda
-                fijado en Orion.
-              </Text>
-            ) : null}
+
+            
 
             {d.hasOrionDoc && d.signers.length > 0 ? (
               <OrionSignatureFlow
@@ -491,7 +477,7 @@ export default function OrionAttachmentTableRow({
               {d.hasOrionDoc && d.signers.length > 0 ? (
                 <ActionLink
                   icon={<IconUsers size={15} stroke={1.6} />}
-                  label='Firmantes'
+                  label='Invitar / URL de firma'
                   onClick={() => setFirmantesOpen(true)}
                 />
               ) : null}

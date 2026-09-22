@@ -16,7 +16,7 @@ import {
   markInviteUsed,
   verifySignedInviteToken,
 } from '@/lib/orion/signerInvites';
-import { acceptOrionSignerTurn, resolveOrionAbsoluteUrl } from '@/lib/orion/client';
+import { acceptOrionSignerTurn, ORION_BIOMETRIC_CONSENT_VERSION, resolveOrionAbsoluteUrl, fetchOrionSignerSignUrl } from '@/lib/orion/client';
 import {
   getCurrentPendingSigner,
   isSignerCompleted,
@@ -63,15 +63,21 @@ export async function GET(
       const isMyTurn = normalizeEmail(pending?.email) === payload.e;
       const alreadySigned = signer ? isSignerCompleted(signer.status) : false;
       const ctx = await getRequestOrionContext(pool, payload.r);
-      const signUrlRaw = String(signer?.signUrl || invite.signUrl || '').trim() || null;
-      const signUrl = signUrlRaw ? resolveOrionAbsoluteUrl(signUrlRaw) || signUrlRaw : null;
-      const needsFingerprint =
-        Boolean(state.requireFingerprint) ||
-        (state.signatureFields ?? []).some(
-          (f) =>
-            Number(f.signerOrder) === Number(signer?.order) &&
-            String(f.kind || '').toLowerCase() === 'fingerprint'
+      let signUrlRaw = String(signer?.signUrl || invite.signUrl || '').trim() || null;
+      let signUrl = signUrlRaw ? resolveOrionAbsoluteUrl(signUrlRaw) || signUrlRaw : null;
+      // Si el bag no tiene /sign/ de Orion, pedirlo en vivo (evita 404 en /firma/externa).
+      if ((!signUrl || !/\/sign\//i.test(signUrl)) && state.orionDocumentId) {
+        const live = await fetchOrionSignerSignUrl(
+          state.orionDocumentId,
+          payload.e,
+          signer?.order
         );
+        if (live.ok && live.signUrl) {
+          signUrl = live.signUrl;
+          signUrlRaw = live.signUrl;
+        }
+      }
+      const needsFingerprint = signer?.requireFingerprint === true;
 
       return {
         requestId: payload.r,
@@ -152,10 +158,21 @@ export async function POST(
         );
       }
 
+      const needsFingerprint = signer?.requireFingerprint === true;
+
       const accept = await acceptOrionSignerTurn(state.orionDocumentId, payload.e, {
         signatureDataUrl,
-        fingerprintDataUrl,
+        fingerprintDataUrl: needsFingerprint ? fingerprintDataUrl : null,
         fullName: invite.name || signer.name,
+        requireFingerprint: needsFingerprint,
+        signOrder: Number(signer?.order) || null,
+        ...(needsFingerprint
+          ? {
+              biometricConsentAccepted: true,
+              biometricConsentVersion: ORION_BIOMETRIC_CONSENT_VERSION,
+              biometricConsentAcceptedAt: new Date().toISOString(),
+            }
+          : {}),
       });
       if (!accept.ok) {
         throw Object.assign(new Error(accept.error || 'No se pudo registrar la firma en Orion'), {
