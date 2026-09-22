@@ -1833,6 +1833,70 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   }
 }
 
+/* ── Animación de letras del compositor (ComposerLetterFx.tsx, 2026-09-22) ──
+   Capa puramente decorativa: cada carácter que se escribe o se borra al final
+   del mensaje entra/sale con un fundido + leve escala, usando SOLO
+   opacity/transform (nunca `height` ni nada que dispare reflow) para no
+   repetir el tirón que causaba animar el alto del renglón (ver el comentario
+   de `.chat-composer__input` más arriba, 2026-09-09: "SIN transición de
+   height, a propósito"). El componente decide cuándo es seguro activarla
+   (cursor libre, sin menciones abiertas, mensaje corto, sin
+   prefers-reduced-motion); fuera de eso esta clase ni se aplica y el campo
+   se ve y se comporta exactamente como siempre. */
+.chat-composer--letterfx-active .chat-composer__input {
+  color: transparent !important;
+  caret-color: var(--app-text, var(--foreground));
+}
+
+.chat-composer__letterfx {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--app-text, var(--foreground));
+}
+
+.chat-composer__letterfx-char {
+  display: inline-block;
+  white-space: pre-wrap;
+  animation: chat-letterfx-in 200ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.chat-composer__letterfx-char.is-leaving {
+  animation: chat-letterfx-out 160ms ease-in forwards;
+}
+
+@keyframes chat-letterfx-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes chat-letterfx-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer__letterfx-char,
+  .chat-composer__letterfx-char.is-leaving {
+    animation: none;
+  }
+}
+
 .chat-composer__preview {
   min-height: 66px;
   padding: 8px 12px;
