@@ -2052,7 +2052,7 @@ function RequestBoard() {
                       p='xs'
                       radius='md'
                       withBorder
-                      className='bg-white max-h-64 overflow-y-auto'
+                      className='max-h-64 overflow-y-auto'
                     >
                       <Stack gap='xs'>
                         <Text size='xs' c='gray.5' fw={500}>

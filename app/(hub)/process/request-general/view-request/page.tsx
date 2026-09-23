@@ -329,6 +329,8 @@ function ViewRequestPage() {
     notificarPorCorreo: false,
   });
   const [modalTasksOpened, setModalTasksOpened] = useState(false);
+  /** Preparador documento del process_category (Administración → Preparadores documento). */
+  const [isDocumentPreparer, setIsDocumentPreparer] = useState(false);
   const [reopenModalOpened, setReopenModalOpened] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
   const [reopenSubmitting, setReopenSubmitting] = useState(false);
@@ -948,6 +950,34 @@ function ViewRequestPage() {
       checkEditPermissions();
     }
   }, [request?.id, request?.id_requester, request?.requester, request?.user, request?.assignedUserName, session, userName, session?.user?.id]);
+
+  useEffect(() => {
+    const processId = Number(request?.id_process_category);
+    const uid = session?.user?.id != null ? String(session.user.id) : '';
+    if (!Number.isInteger(processId) || processId <= 0 || !uid) {
+      setIsDocumentPreparer(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/requests-general/assign-preparer?id_process_category=${processId}`
+        );
+        const data = await res.json().catch(() => ({}));
+        if (cancelled || !res.ok) return;
+        const list = Array.isArray(data.preparers)
+          ? data.preparers.map((p: string | number) => String(p))
+          : [];
+        setIsDocumentPreparer(list.includes(uid));
+      } catch {
+        if (!cancelled) setIsDocumentPreparer(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [request?.id_process_category, session?.user?.id]);
 
   useEffect(() => {
     if (request?.category) {
@@ -1900,7 +1930,7 @@ function ViewRequestPage() {
   
   if (loading) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <div className='text-center'>
           <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4'></div>
           <Text size='lg'>Cargando detalles de la solicitud...</Text>
@@ -1911,7 +1941,7 @@ function ViewRequestPage() {
 
   if (error) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <Card shadow='sm' p='xl' radius='md' withBorder className='max-w-md'>
           <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' mb='md'>
             {error}
@@ -1930,7 +1960,7 @@ function ViewRequestPage() {
 
   if (!request) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <Card shadow='sm' p='xl' radius='md' withBorder className='max-w-md'>
           <Text size='lg' fw={500} mb='md' className='text-center'>
             Solicitud no encontrada
@@ -2138,9 +2168,9 @@ function ViewRequestPage() {
 
   return (
     <OrionSignatureProvider>
-    <div className='min-h-screen bg-gray-50'>
+    <div className='app-canvas'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -2369,7 +2399,7 @@ function ViewRequestPage() {
           </div>
 
           <div className='w-full lg:w-150 order-1 lg:order-2'>
-            <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white'>
+            <Card shadow='sm' p='xl' radius='md' withBorder>
               <Title order={4} mb='md' className='flex items-center gap-2'>
                 <IconFileDescription size={18} />
                 Detalles de la Solicitud
@@ -2401,7 +2431,7 @@ function ViewRequestPage() {
                   <Text size='sm' color='gray.6' fw={500}>
                     Compañia
                   </Text>
-                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
+                  <Card withBorder radius='md' p='md' mt='xs'>
                     <Group>
                       <IconBuilding size={16} />
                       <Text size='sm'>
@@ -2417,7 +2447,7 @@ function ViewRequestPage() {
                     Asunto
                   </Text>
 
-                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
+                  <Card withBorder radius='md' p='md' mt='xs'>
                     <Group>
                       <IconFileDescription size={16} />
                       <Text size='sm'>{request?.subject}</Text>
@@ -2430,7 +2460,7 @@ function ViewRequestPage() {
                     Descripción
                   </Text>
 
-                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
+                  <Card withBorder radius='md' p='md' mt='xs'>
                     <Text size='sm' className='whitespace-pre-line text-gray-700'>
                       {request.description}
                     </Text>
@@ -2505,7 +2535,7 @@ function ViewRequestPage() {
                   </Text>
                   <Grid>
                     <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Card withBorder radius='md' p='md' bg='gray.0'>
+                      <Card withBorder radius='md' p='md'>
                         <Group>
                           <IconTag size={16} />
                           <div>
@@ -2522,7 +2552,7 @@ function ViewRequestPage() {
                       </Card>
                     </Grid.Col>
                     <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Card withBorder radius='md' p='md' bg='gray.0'>
+                      <Card withBorder radius='md' p='md'>
                         <Group>
                           <IconProgress size={16} />
                           <div>
@@ -2801,7 +2831,7 @@ function ViewRequestPage() {
           </Card>
         )}
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           <Group justify='space-between' align='center' mb='md' wrap='wrap'>
             <Title order={3} className='flex items-center gap-2'>
               <IconEye size={20} />
@@ -3121,6 +3151,8 @@ function ViewRequestPage() {
                   return [...prev, optimistic];
                 });
               }
+              const fileName = uploaded.graphItem?.name || uploaded.file.name;
+              void addSystemNote(`Documento adjunto: ${fileName}`);
               refreshAttachmentsAfterUpload();
               void triggerSapsendFiles(false);
             }}
@@ -3130,7 +3162,7 @@ function ViewRequestPage() {
           />
         </Card>
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           {updateMessage && (
             <Alert
               color={updateMessage.type === 'success' ? 'green' : 'red'}
@@ -3199,8 +3231,9 @@ function ViewRequestPage() {
                   Las solicitudes completadas no se pueden modificar.
                 </Text>
               )}
-              {String(request.id_assigned_process_category || request.id_assigned_category || '') ===
-                String(userId || '') && (
+              {(String(request.id_assigned_process_category || request.id_assigned_category || '') ===
+                String(userId || '') ||
+                isDocumentPreparer) && (
                 <Button
                   color='blue'
                   onClick={() => {

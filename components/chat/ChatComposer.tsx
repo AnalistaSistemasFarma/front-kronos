@@ -25,13 +25,23 @@ import {
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import ChatMarkdown from './ChatMarkdown';
+import ComposerLetterFx from './ComposerLetterFx';
 import { MAX_USER_MESSAGE_CHARS } from '../../lib/chat/constants';
 import {
   MAX_CHAT_ATTACHMENTS_PER_MESSAGE,
   formatBytes,
   getChatAttachmentError,
 } from '../../lib/chat/attachments';
+import ChatVoice from './ChatVoice';
 import type { ChatReplyToDto } from '../../lib/chat/client';
+
+/**
+ * Tope de caracteres para la animación de letras (ComposerLetterFx). Mensajes
+ * más largos que esto se ven y se comportan como siempre, sin la capa
+ * decorativa — no vale la pena mantener cientos de `<span>` animados para un
+ * mensaje largo que casi siempre es un pegado, no algo tecleado letra a letra.
+ */
+const LETTERFX_MAX_CHARS = 600;
 
 /**
  * Entrada de texto del chat — v1: Markdown CRUDO con ayudas.
@@ -126,6 +136,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
    */
   cita?: ChatReplyToDto | null;
   onQuitarCita?: () => void;
+  voiceConversationId?: number;
 }>(function ChatComposer(
   {
     onSend,
@@ -136,6 +147,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     menciones = [],
     cita = null,
     onQuitarCita,
+    voiceConversationId,
   },
   ref
 ) {
@@ -148,6 +160,10 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   // Enter físico y ahí Enter debe seguir enviando. Pedido de Nicolás
   // (2026-09-08): en el celular no hay un Shift+Enter cómodo.
   const tecladoTactil = useMediaQuery('(pointer: coarse)');
+  // Apaga la animación de letras (ComposerLetterFx) para quien pide menos
+  // movimiento en el sistema — la misma señal que ya se respeta en el resto
+  // del chat.
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   // El id amarra la opción "Adjuntar archivos" (una <label>) con el input de
   // archivos. Va con useId y no con una constante porque puede haber más de un
   // compositor montado (el panel flotante y la página) y dos labels apuntando
@@ -244,6 +260,13 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   );
 
   const tooLong = value.length > MAX_USER_MESSAGE_CHARS;
+  // Solo se activa la capa decorativa de letras cuando es seguro: sin
+  // menciones abiertas (esa lista depende de leer el texto real a tiempo),
+  // sin vista previa de Markdown, mensaje corto, y sin
+  // `prefers-reduced-motion`. Fuera de estas condiciones el campo se ve y se
+  // comporta exactamente como siempre — nunca a medias.
+  const letterFxActive =
+    !preview && !mencionVisible && !disabled && !reducedMotion && value.length <= LETTERFX_MAX_CHARS;
   // Con adjuntos el texto puede ir vacío (mandar solo un archivo es válido);
   // lo que no se puede enviar es un mensaje sin texto Y sin archivos.
   const canSend = (value.trim().length > 0 || files.length > 0) && !disabled && !sending && !tooLong;
@@ -542,7 +565,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   );
 
   return (
-    <Box className='chat-composer'>
+    <Box className={`chat-composer${letterFxActive ? ' chat-composer--letterfx-active' : ''}`}>
       {/* Lista de menciones. Va como primer hijo del compositor, así que se
           dibuja ARRIBA de la caja de escribir: en el celular, un menú que
           apareciera debajo quedaría tapado por el teclado. */}
@@ -669,14 +692,14 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         {preview ? (
           <Box
             className='chat-composer__preview'
-            style={{ flex: 1, minWidth: 0 }}
+            style={{ minHeight: 42, paddingRight: voiceConversationId ? 84 : 42 }}
             onDoubleClick={() => setPreview(false)}
           >
             <ChatMarkdown content={value} />
           </Box>
         ) : null}
-        {preview && menuClip}
         {!preview && (
+          <Box pos='relative' style={{ display: 'flex', flex: 1, minWidth: 0 }}>
           <Textarea
             ref={textareaRef}
             value={value}
@@ -703,6 +726,15 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             autoCorrect='off'
             autoCapitalize='off'
             autosize
+            /* size='md': Mantine no expone `size`, así que caía en su default
+               ("sm") y ponía `--input-fz: 0.875rem` (14px) en el wrapper. Esa
+               variable la hereda el `<textarea>` real y gana el empate de
+               especificidad contra `.chat-composer__input` en globals.css
+               (mismo peso, una sola clase, y `@mantine/core/styles.css` carga
+               DESPUÉS en app/layout.tsx) — por eso el input seguía quedando
+               en 14px pese al `font-size: 16px` del CSS, y Safari le seguía
+               haciendo zoom al enfocarlo. */
+            size='md'
             radius={23}
             /* Arranca en UN renglón, como WhatsApp, y crece al escribir. */
             minRows={1}
@@ -710,18 +742,29 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
             disabled={disabled}
             autoFocus={autoFocus}
             error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
-            style={{ flex: 1, minWidth: 0 }}
             classNames={{ root: 'chat-composer__field', input: 'chat-composer__input' }}
-            /* El clip va DENTRO de la caja. `rightSectionPointerEvents='all'`
-               no es opcional: por defecto Mantine le pone `pointer-events:
-               none` a esa zona —está pensada para iconos decorativos— y el
-               botón quedaría pintado pero muerto al tacto. */
-            rightSection={menuClip}
-            rightSectionWidth={42}
+            /* El clip (y, si la conversación admite voz, el ícono de llamada)
+               va DENTRO de la caja. `rightSectionPointerEvents='all'` no es
+               opcional: por defecto Mantine le pone `pointer-events: none` a
+               esa zona —está pensada para iconos decorativos— y el botón
+               quedaría pintado pero muerto al tacto. El ancho y el padding
+               crecen de 42 a 84 px cuando hay ícono de voz, para que no se
+               encimen los dos botones. */
+            rightSection={
+              <Group gap={0} wrap='nowrap'>
+                {menuClip}
+                {voiceConversationId && (
+                  <ChatVoice key={voiceConversationId} conversationId={voiceConversationId} />
+                )}
+              </Group>
+            }
+            rightSectionWidth={voiceConversationId ? 84 : 42}
             rightSectionPointerEvents='all'
+            styles={{ input: { paddingRight: voiceConversationId ? 84 : 42 } }}
           />
+          {letterFxActive && <ComposerLetterFx textareaRef={textareaRef} value={value} />}
+          </Box>
         )}
-
 
         {/* El recordatorio de Enter / Shift+Enter era un renglón entero; ahora
             vive en el globo de este botón. */}

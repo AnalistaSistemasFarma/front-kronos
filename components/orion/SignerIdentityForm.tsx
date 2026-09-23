@@ -1,27 +1,55 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Group, Select, Stack, Text, TextInput } from '@mantine/core';
+import { useEffect, useState } from 'react';
 import {
+  Alert,
+  Button,
+  Checkbox,
+  Collapse,
+  Group,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+} from '@mantine/core';
+import {
+  clearStoredSignerIdentity,
+  normalizeSignerIdentity,
   SIGNER_ID_DOCUMENT_OPTIONS,
   formatSignerIdLabel,
   isCompanyNitDocumentType,
-  loadStoredSignerIdentity,
-  normalizeSignerIdentity,
-  storeSignerIdentity,
   validateSignerIdentity,
   type SignerAcceptIdentity,
   type SignerIdDocumentType,
 } from '../../lib/orion/signerIdentity';
+import {
+  BIOMETRIC_CONSENT_COPY,
+  BIOMETRIC_CONSENT_REQUIRED_MESSAGE,
+  SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE,
+  SIGNING_LEGAL_CONSENT_VERSION,
+  SIGNING_LEGAL_COPY,
+} from '../../lib/orion/signingLegalConsent';
 
 type Props = {
   defaultName?: string | null;
   currentUserEmail?: string | null;
   confirming?: boolean;
-  /** Error del API / padre (visible dentro del modal). */
   externalError?: string | null;
+  onClearExternalError?: () => void;
   onCancel: () => void;
   onConfirm: (identity: SignerAcceptIdentity) => void | Promise<void>;
+  /** Captura de huella (si el documento la exige). */
+  fingerprintSlot?: React.ReactNode;
+  /** Exige autorización biométrica (Ley 1581 art. 6) además del consentimiento de firma. */
+  requireBiometricConsent?: boolean;
+  /** ELECTRONIC (default) | DIGITAL */
+  legalKind?: 'ELECTRONIC' | 'DIGITAL';
+  /**
+   * Consentimiento ya guardado a nivel persona (no por documento).
+   * Si la versión vigente coincide, no se vuelve a pedir checkbox.
+   */
+  personHasSigningConsent?: boolean;
+  personHasBiometricConsent?: boolean;
 };
 
 export default function SignerIdentityForm({
@@ -29,24 +57,36 @@ export default function SignerIdentityForm({
   currentUserEmail,
   confirming = false,
   externalError = null,
+  onClearExternalError,
   onCancel,
   onConfirm,
+  fingerprintSlot = null,
+  requireBiometricConsent = false,
+  legalKind = 'ELECTRONIC',
+  personHasSigningConsent = false,
+  personHasBiometricConsent = false,
 }: Props) {
-  const stored = useMemo(
-    () => loadStoredSignerIdentity(currentUserEmail),
-    [currentUserEmail]
-  );
+  const legal = SIGNING_LEGAL_COPY[legalKind] ?? SIGNING_LEGAL_COPY.ELECTRONIC;
 
-  const [fullName, setFullName] = useState(
-    () => stored?.fullName || defaultName || ''
+  const [fullName, setFullName] = useState(() => defaultName || '');
+  const [idDocumentType, setIdDocumentType] = useState<SignerIdDocumentType>('CC');
+  const [idNumber, setIdNumber] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [jobTitle, setJobTitle] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(() => personHasSigningConsent);
+  const [acceptedBiometric, setAcceptedBiometric] = useState(
+    () => personHasBiometricConsent && requireBiometricConsent
   );
-  const [idDocumentType, setIdDocumentType] = useState<SignerIdDocumentType>(
-    () => (stored?.idDocumentType as SignerIdDocumentType) || 'CC'
+  const [termsOpen, setTermsOpen] = useState(!personHasSigningConsent);
+  const [biometricOpen, setBiometricOpen] = useState(
+    !(personHasBiometricConsent && requireBiometricConsent)
   );
-  const [idNumber, setIdNumber] = useState(() => stored?.idNumber || '');
-  const [companyName, setCompanyName] = useState(() => stored?.companyName || '');
-  const [jobTitle, setJobTitle] = useState(() => stored?.jobTitle || '');
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Limpia residuos de identidad en localStorage (versiones anteriores).
+  useEffect(() => {
+    clearStoredSignerIdentity();
+  }, []);
 
   useEffect(() => {
     if (!fullName.trim() && defaultName) setFullName(defaultName);
@@ -56,11 +96,43 @@ export default function SignerIdentityForm({
     if (externalError) setFormError(null);
   }, [externalError]);
 
-  const isNitEmpresa = isCompanyNitDocumentType(idDocumentType);
+  useEffect(() => {
+    if (personHasSigningConsent) {
+      setAcceptedTerms(true);
+      setTermsOpen(false);
+    }
+  }, [personHasSigningConsent]);
 
+  useEffect(() => {
+    if (!requireBiometricConsent) {
+      setAcceptedBiometric(false);
+      return;
+    }
+    if (personHasBiometricConsent) {
+      setAcceptedBiometric(true);
+      setBiometricOpen(false);
+    }
+  }, [requireBiometricConsent, personHasBiometricConsent]);
+
+  const isNitEmpresa = isCompanyNitDocumentType(idDocumentType);
   const previewLabel = formatSignerIdLabel(idDocumentType, idNumber);
+  const needsTermsCheckbox = !personHasSigningConsent;
+  const needsBiometricCheckbox = requireBiometricConsent && !personHasBiometricConsent;
+  const canSubmit =
+    (personHasSigningConsent || acceptedTerms) &&
+    (!requireBiometricConsent || personHasBiometricConsent || acceptedBiometric) &&
+    !confirming;
 
   const handleSubmit = async () => {
+    if (!personHasSigningConsent && !acceptedTerms) {
+      setFormError(SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE);
+      return;
+    }
+    if (requireBiometricConsent && !personHasBiometricConsent && !acceptedBiometric) {
+      setFormError(BIOMETRIC_CONSENT_REQUIRED_MESSAGE);
+      return;
+    }
+
     const draft = normalizeSignerIdentity(
       {
         fullName,
@@ -69,6 +141,8 @@ export default function SignerIdentityForm({
         companyName,
         companySlug: companyName,
         jobTitle,
+        acceptedTerms: true,
+        acceptedBiometric: requireBiometricConsent ? true : undefined,
       },
       defaultName
     );
@@ -77,15 +151,26 @@ export default function SignerIdentityForm({
       setFormError(error);
       return;
     }
+
     setFormError(null);
-    storeSignerIdentity(currentUserEmail, draft);
-    await onConfirm(draft);
+    onClearExternalError?.();
+
+    try {
+      await onConfirm({
+        ...draft,
+        acceptedTerms: true,
+        acceptedBiometric: requireBiometricConsent ? true : undefined,
+      });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'No se pudo confirmar la firma.');
+    }
   };
 
   return (
     <Stack gap='sm'>
       <Text size='sm' c='dimmed'>
         Indique su nombre. Tipo y número de documento son opcionales (igual que en GSS Firma).
+        Los datos no se guardan en este navegador.
       </Text>
 
       <TextInput
@@ -173,6 +258,90 @@ export default function SignerIdentityForm({
         </Text>
       )}
 
+      {fingerprintSlot}
+
+      <Stack gap={6}>
+        <Text size='sm' fw={600}>
+          {legal.title}
+        </Text>
+        <Text
+          size='xs'
+          c='blue'
+          style={{ cursor: 'pointer', textDecoration: 'underline', width: 'fit-content' }}
+          onClick={() => setTermsOpen((o) => !o)}
+        >
+          {termsOpen ? 'Ocultar condiciones' : 'Ver condiciones de firma'}
+        </Text>
+        <Collapse in={termsOpen}>
+          <Alert color='gray' variant='light'>
+            <Text size='xs'>{legal.body}</Text>
+            <Text size='xs' c='dimmed' mt={6}>
+              Versión de consentimiento: {SIGNING_LEGAL_CONSENT_VERSION}
+              {currentUserEmail ? ` · ${currentUserEmail}` : ''}
+            </Text>
+          </Alert>
+        </Collapse>
+        {personHasSigningConsent ? (
+          <Alert color='green' variant='light'>
+            <Text size='xs'>
+              Ya autorizó el marco de firma electrónica a nivel de su perfil (válido para todos
+              los documentos). No es necesario volver a aceptar por cada firma.
+            </Text>
+          </Alert>
+        ) : (
+          <Checkbox
+            checked={acceptedTerms}
+            disabled={confirming}
+            label={legal.checkbox}
+            onChange={(e) => {
+              const checked = e.currentTarget.checked;
+              setAcceptedTerms(checked);
+              setFormError(null);
+              if (checked) onClearExternalError?.();
+            }}
+          />
+        )}
+      </Stack>
+
+      {requireBiometricConsent ? (
+        <Stack gap={6}>
+          <Text size='sm' fw={600}>
+            {BIOMETRIC_CONSENT_COPY.title}
+          </Text>
+          <Text
+            size='xs'
+            c='blue'
+            style={{ cursor: 'pointer', textDecoration: 'underline', width: 'fit-content' }}
+            onClick={() => setBiometricOpen((o) => !o)}
+          >
+            {biometricOpen ? 'Ocultar autorización biométrica' : 'Ver autorización biométrica'}
+          </Text>
+          <Collapse in={biometricOpen}>
+            <Alert color='orange' variant='light'>
+              <Text size='xs'>{BIOMETRIC_CONSENT_COPY.body}</Text>
+            </Alert>
+          </Collapse>
+          {personHasBiometricConsent ? (
+            <Alert color='green' variant='light'>
+              <Text size='xs'>
+                Ya autorizó el tratamiento de huella a nivel de su perfil. Solo se pedirá de nuevo
+                si cambia la normativa.
+              </Text>
+            </Alert>
+          ) : needsBiometricCheckbox ? (
+            <Checkbox
+              checked={acceptedBiometric}
+              disabled={confirming}
+              label={BIOMETRIC_CONSENT_COPY.checkbox}
+              onChange={(e) => {
+                setAcceptedBiometric(e.currentTarget.checked);
+                setFormError(null);
+              }}
+            />
+          ) : null}
+        </Stack>
+      ) : null}
+
       {(formError || externalError) && (
         <Alert color='red' variant='light'>
           {formError || externalError}
@@ -183,7 +352,12 @@ export default function SignerIdentityForm({
         <Button variant='default' disabled={confirming} onClick={onCancel}>
           Volver
         </Button>
-        <Button color='green' loading={confirming} onClick={() => void handleSubmit()}>
+        <Button
+          color='green'
+          loading={confirming}
+          disabled={!canSubmit}
+          onClick={() => void handleSubmit()}
+        >
           Confirmar y firmar
         </Button>
       </Group>

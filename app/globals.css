@@ -87,47 +87,117 @@ html[data-landing] body {
   min-height: 100vh;
 }
 
+/* Lienzo de página autenticada: respeta claro/oscuro del perfil */
+.app-canvas {
+  min-height: 100vh;
+  background-color: var(--app-bg, var(--background));
+  color: var(--app-text, var(--foreground));
+}
+
+/* Remapeo de utilidades “siempre claras” → tokens del tema (html.dark) */
+html.dark .bg-white,
 .dark .bg-white {
   background-color: var(--app-surface, var(--surface)) !important;
   color: var(--app-text, var(--foreground));
 }
 
-.dark .bg-gray-50 {
+html.dark .bg-gray-50,
+.dark .bg-gray-50,
+html.dark .bg-slate-50,
+.dark .bg-slate-50,
+html.dark .bg-zinc-50,
+.dark .bg-zinc-50,
+html.dark .bg-neutral-50,
+.dark .bg-neutral-50 {
   background-color: var(--app-bg, var(--background)) !important;
 }
 
-.dark .bg-gray-100 {
+html.dark .bg-gray-100,
+.dark .bg-gray-100,
+html.dark .bg-slate-100,
+.dark .bg-slate-100 {
   background-color: var(--app-surface-raised, var(--surface-muted)) !important;
 }
 
-.dark .hover\:bg-gray-50:hover {
+html.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-gray-50:hover,
+html.dark .hover\:bg-white:hover,
+.dark .hover\:bg-white:hover {
   background-color: var(--app-surface-raised, var(--surface-muted)) !important;
 }
 
+html.dark .border-gray-200,
 .dark .border-gray-200,
-.dark .border-gray-300 {
+html.dark .border-gray-300,
+.dark .border-gray-300,
+html.dark .border-slate-200,
+.dark .border-slate-200 {
   border-color: var(--app-border, var(--border-subtle)) !important;
 }
 
-.dark .text-gray-900 {
+html.dark .text-gray-900,
+.dark .text-gray-900,
+html.dark .text-slate-900,
+.dark .text-slate-900 {
   color: var(--app-text, var(--foreground)) !important;
 }
 
+html.dark .text-gray-800,
 .dark .text-gray-800,
-.dark .text-gray-700 {
+html.dark .text-gray-700,
+.dark .text-gray-700,
+html.dark .text-slate-800,
+.dark .text-slate-800,
+html.dark .text-slate-700,
+.dark .text-slate-700 {
   color: var(--app-text, var(--foreground)) !important;
 }
 
+html.dark .text-gray-600,
 .dark .text-gray-600,
+html.dark .text-gray-500,
 .dark .text-gray-500,
-.dark .text-gray-400 {
+html.dark .text-gray-400,
+.dark .text-gray-400,
+html.dark .text-slate-600,
+.dark .text-slate-600,
+html.dark .text-slate-500,
+.dark .text-slate-500 {
   color: var(--app-text-muted, #b0b4bc) !important;
 }
 
+html.dark input,
 .dark input,
+html.dark textarea,
 .dark textarea,
+html.dark select,
 .dark select {
   color: var(--app-text, var(--foreground));
+}
+
+html.dark .bg-blue-50,
+.dark .bg-blue-50 {
+  background-color: color-mix(in srgb, var(--app-accent, #3b82f6) 18%, var(--app-surface, #28292e)) !important;
+}
+html.dark .bg-yellow-50,
+.dark .bg-yellow-50 {
+  background-color: color-mix(in srgb, #eab308 16%, var(--app-surface, #28292e)) !important;
+}
+html.dark .bg-green-50,
+.dark .bg-green-50 {
+  background-color: color-mix(in srgb, #22c55e 16%, var(--app-surface, #28292e)) !important;
+}
+html.dark .bg-violet-50,
+.dark .bg-violet-50 {
+  background-color: color-mix(in srgb, #8b5cf6 16%, var(--app-surface, #28292e)) !important;
+}
+html.dark .bg-teal-50,
+.dark .bg-teal-50 {
+  background-color: color-mix(in srgb, #14b8a6 16%, var(--app-surface, #28292e)) !important;
+}
+html.dark .bg-red-50,
+.dark .bg-red-50 {
+  background-color: color-mix(in srgb, #ef4444 16%, var(--app-surface, #28292e)) !important;
 }
 
 /* Iconos SVG heredan color en zonas con texto */
@@ -1756,8 +1826,17 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
      parche que solo subía a 16 por debajo de 768 px; el parche no bastó y
      además se leía chiquito en el computador. Ahora son 16 px SIEMPRE, que es
      lo que Nicolás pidió y de paso mata el zoom en todos los anchos
-     (2026-09-08). No la baje de 16. */
-  font-size: 16px;
+     (2026-09-08). No la baje de 16.
+     !important a propósito (2026-09-21): esta regla y la base de Mantine
+     (`font-size: var(--_input-fz, var(--input-fz, ...))`) tienen la MISMA
+     especificidad (una clase), y Mantine ganaba el empate porque
+     `@mantine/core/styles.css` carga después de este archivo en
+     app/layout.tsx — el Textarea heredaba `--input-fz` en 14px (su size
+     "sm" por defecto) y el zoom volvía pese a este 16px. El fix real es
+     pasarle `size='md'` al Textarea en ChatComposer.tsx; este !important
+     se deja de respaldo para que un cambio futuro de size/orden de imports
+     no reabra el mismo bug en silencio. */
+  font-size: 16px !important;
   /* Cápsula, como la caja de WhatsApp. Con un renglón queda redonda y al crecer
      se ve como una caja de bordes suaves.
      21 px = la MITAD del `min-height` de 42 px, o sea el radio máximo que
@@ -1821,6 +1900,98 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   .chat-panel input,
   .chat-panel textarea {
     font-size: 16px;
+  }
+}
+
+/* ── Animación de letras del compositor (ComposerLetterFx.tsx, 2026-09-22) ──
+   Capa puramente decorativa: cada carácter que se escribe o se borra al final
+   del mensaje entra/sale con un fundido + leve escala, usando SOLO
+   opacity/transform (nunca `height` ni nada que dispare reflow) para no
+   repetir el tirón que causaba animar el alto del renglón (ver el comentario
+   de `.chat-composer__input` más arriba, 2026-09-09: "SIN transición de
+   height, a propósito"). El componente decide cuándo es seguro activarla
+   (cursor libre, sin menciones abiertas, mensaje corto, sin
+   prefers-reduced-motion); fuera de eso esta clase ni se aplica y el campo
+   se ve y se comporta exactamente como siempre. */
+.chat-composer--letterfx-active .chat-composer__input {
+  color: transparent !important;
+  caret-color: var(--app-text, var(--foreground));
+}
+
+.chat-composer__letterfx {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--app-text, var(--foreground));
+  /* El preflight de Tailwind pone `border: 0 solid` en TODO elemento (color
+     implícito `currentColor`, ancho 0). El efecto de espejo de
+     ComposerLetterFx.tsx copia el ancho de borde REAL del textarea (para que
+     la caja de contenido coincida en tamaño), pero nunca su color — así que
+     ese borde, antes invisible por ancho 0, pasaba a dibujarse con
+     `currentColor` (el texto del tema, casi blanco en oscuro) y sin
+     `border-radius` (que tampoco se espeja), como un rectángulo blanco de
+     esquinas cuadradas encima de la cápsula redondeada del input (reportado
+     por Nicolás, 2026-09-22). El ancho SÍ debe seguir copiándose para que el
+     texto quede alineado con el real; lo único que sobra es el color. */
+  border-color: transparent;
+  background-color: transparent;
+}
+
+.chat-composer__letterfx-char {
+  display: inline-block;
+  white-space: pre-wrap;
+  animation: chat-letterfx-in 200ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* Agrupa las letras de una misma "palabra" para que la línea solo pueda
+   partirse en los espacios, igual que el textarea real — no entre cualquier
+   par de letras. Cada carácter sigue siendo su propio <span> animable
+   (chat-composer__letterfx-char) para la entrada/salida; lo que cambia es que
+   viven dentro de un contenedor `nowrap`, así que el navegador los trata como
+   un solo bloque indivisible al decidir dónde envolver el renglón. Sin esto,
+   cada letra es una caja `inline-block` independiente y el navegador puede
+   partir CUALQUIER letra al llegar al borde — el mensaje quedaba partido a
+   mitad de palabra ("se separa m" / "ucho del texto") con puntos de quiebre
+   distintos a los del textarea real, y el cursor nativo (que sí sigue el
+   renglonado real) terminaba lejos del último carácter dibujado (reportado
+   por Nicolás, 2026-09-22). */
+.chat-composer__letterfx-word {
+  white-space: nowrap;
+}
+
+.chat-composer__letterfx-char.is-leaving {
+  animation: chat-letterfx-out 160ms ease-in forwards;
+}
+
+@keyframes chat-letterfx-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes chat-letterfx-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer__letterfx-char,
+  .chat-composer__letterfx-char.is-leaving {
+    animation: none;
   }
 }
 

@@ -26,6 +26,7 @@ jobs:
     runs-on: [self-hosted, kronos-230]
     env:
       PROJECT_DIR: C:\Users\nicolas.rivera\projects\front-kronos-test
+      STALE_RUN: "false"
     steps:
       - name: Mostrar contexto
         shell: powershell
@@ -35,7 +36,27 @@ jobs:
           Write-Host "Trigger: $env:GITHUB_EVENT_NAME"
           Write-Host "Dir:     $env:PROJECT_DIR"
 
+      - name: Omitir despliegue obsoleto
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:PROJECT_DIR
+          # Los pushes pueden llegar más rápido que un build. Un run viejo no
+          # debe detener/recompilar apps si origin/testing ya avanzó: el run
+          # más reciente, que quedó en cola, hará el único despliegue útil.
+          git fetch origin testing
+          if ($LASTEXITCODE -ne 0) { throw "git fetch fallo" }
+          $latest = (git rev-parse origin/testing).Trim()
+          if ($env:GITHUB_SHA -ne $latest) {
+            "STALE_RUN=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "::notice::Run obsoleto ($env:GITHUB_SHA); testing ya está en $latest. Se omite sin tocar PM2."
+          } else {
+            "STALE_RUN=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "Run vigente para $latest."
+          }
+
       - name: Actualizar codigo (fetch + reset a origin/testing)
+        if: env.STALE_RUN != 'true'
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
@@ -54,6 +75,7 @@ jobs:
           git rev-parse HEAD
 
       - name: Verificar que los .env locales siguen presentes
+        if: env.STALE_RUN != 'true'
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
@@ -63,6 +85,7 @@ jobs:
           Write-Host "OK: .env (front) y mcp\.env presentes."
 
       - name: Detener apps del test (liberar locks de binarios nativos)
+        if: env.STALE_RUN != 'true'
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
@@ -77,37 +100,56 @@ jobs:
           Write-Host "Apps del test detenidas (cf-kronos-test sigue arriba)."
 
       - name: Instalar dependencias y generar Prisma (front)
+        if: env.STALE_RUN != 'true'
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           Set-Location $env:PROJECT_DIR
-          npm ci
-          if ($LASTEXITCODE -ne 0) { throw "npm ci (front) fallo" }
+          npm install --prefer-offline --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw "npm install (front) fallo" }
           npx prisma generate
           if ($LASTEXITCODE -ne 0) { throw "prisma generate fallo" }
 
+      - name: Aplicar migración aditiva de estado compartido de voz
+        if: env.STALE_RUN != 'true'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:PROJECT_DIR
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260921193000_chat_voice_shared_state/migration.sql
+          if ($LASTEXITCODE -ne 0) { throw "migración de voz fallo" }
+
       - name: Build front (Next.js)
+        if: env.STALE_RUN != 'true'
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           Set-Location $env:PROJECT_DIR
           npm run build
-          if ($LASTEXITCODE -ne 0) { throw "npm run build (front) fallo" }
+          if ($LASTEXITCODE -ne 0) {
+            # Reintento unico: mismo flakiness de Turbopack/filesystem lento
+            # visto en el deploy de produccion del 2026-09-22 (ver main.yml).
+            Write-Host "fallo el primer intento de build; espero y reintento una vez"
+            Start-Sleep -Seconds 5
+            npm run build
+            if ($LASTEXITCODE -ne 0) { throw "npm run build (front) fallo tras reintento" }
+          }
 
       - name: Build MCP
+        if: env.STALE_RUN != 'true'
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           Set-Location (Join-Path $env:PROJECT_DIR "mcp")
-          npm ci
-          if ($LASTEXITCODE -ne 0) { throw "npm ci (mcp) fallo" }
+          npm install --prefer-offline --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw "npm install (mcp) fallo" }
           npm run build
           if ($LASTEXITCODE -ne 0) { throw "npm run build (mcp) fallo" }
 
       - name: Arrancar apps pm2 del entorno de pruebas
         # always(): aunque un paso previo falle, volvemos a levantar las apps para
         # no dejar el entorno de pruebas caido (usaria el ultimo build valido).
-        if: always()
+        if: ${{ always() && env.STALE_RUN != 'true' }}
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
@@ -121,6 +163,7 @@ jobs:
           pm2 list
 
       - name: Smoke test (HTTP 200 en localhost:3030)
+        if: env.STALE_RUN != 'true'
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
