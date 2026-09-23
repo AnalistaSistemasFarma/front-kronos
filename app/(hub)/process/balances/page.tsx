@@ -24,7 +24,11 @@ import { IconAlertTriangle, IconPlayerPlay } from '@tabler/icons-react';
  * corrida activa, para reflejar running/success/failed sin bloquear el request.
  */
 
-const COMPANIES = [{ idCompany: 1, displayName: 'Farmalogica' }] as const;
+const COMPANIES = [
+  { idCompany: 1, displayName: 'Farmalogica' },
+  { idCompany: 3, displayName: 'One Latam Pharma' },
+  { idCompany: 8, displayName: 'GSS' },
+] as const;
 
 interface RunRow {
   id: number;
