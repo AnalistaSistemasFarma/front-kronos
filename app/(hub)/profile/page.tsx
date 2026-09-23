@@ -239,6 +239,8 @@ export default function ProfileSettingsPage() {
         setErrorMessage(error.error || 'Error al guardar la apariencia');
         return;
       }
+      // Refresca el JWT para que al navegar/recargar no vuelva el tema viejo de la sesión.
+      await update();
       setErrorMessage('');
       setSuccessMessage('Apariencia actualizada');
     } catch {

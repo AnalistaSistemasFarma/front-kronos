@@ -1091,7 +1091,7 @@ function ViewTicketPage() {
 
   if (loading) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <div className='text-center'>
           <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4'></div>
           <Text size='lg' color='gray.6'>
@@ -1104,7 +1104,7 @@ function ViewTicketPage() {
 
   if (error) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <Card shadow='sm' p='xl' radius='md' withBorder className='max-w-md'>
           <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' mb='md'>
             {error}
@@ -1123,7 +1123,7 @@ function ViewTicketPage() {
 
   if (!ticket) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <Card shadow='sm' p='xl' radius='md' withBorder className='max-w-md'>
           <Text size='lg' fw={500} mb='md' className='text-center'>
             Caso no encontrado
@@ -1141,10 +1141,10 @@ function ViewTicketPage() {
   }
 
   return (
-    <div className='min-h-screen bg-gray-50'>
+    <div className='app-canvas'>
       <div className='max-w-6xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
         {/* Header */}
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -1218,7 +1218,7 @@ function ViewTicketPage() {
 
         <Grid>
           <Grid.Col span={{ base: 12, lg: 8 }}>
-            <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white h-full'>
+            <Card shadow='sm' p='xl' radius='md' withBorder className='h-full'>
               <Title order={3} mb='md' className='flex items-center gap-2'>
                 <IconNote size={20} />
                 Detalles del Caso - {ticket.company}
@@ -1243,7 +1243,7 @@ function ViewTicketPage() {
                   <Text fw={600} mb='xs'>
                     Descripción del Caso
                   </Text>
-                  <Card withBorder radius='md' p='md' bg='gray.0'>
+                  <Card withBorder radius='md' p='md'>
                     <Text size='sm' className='whitespace-pre-line text-gray-700'>
                       {ticket.description}
                     </Text>
@@ -1253,7 +1253,7 @@ function ViewTicketPage() {
                 <Divider />
 
                 {/* Notas del caso */}
-                <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+                <Card shadow='sm' p='lg' radius='md' withBorder>
                   <Title order={4} mb='md' className='flex items-center gap-2'>
                     <IconNote size={18} className='text-blue-6' />
                     Notas del Caso
@@ -1379,7 +1379,7 @@ function ViewTicketPage() {
                 <Divider />
 
                 {/* Resolución del caso */}
-                <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+                <Card shadow='sm' p='lg' radius='md' withBorder>
                   <Group justify='space-between' mb='md'>
                     <Title order={4} className='flex items-center gap-2'>
                       <IconCheck size={18} className='text-green-6' />
@@ -1504,7 +1504,7 @@ function ViewTicketPage() {
           <Grid.Col span={{ base: 12, lg: 4 }}>
             <Stack gap='md'>
               {/* Información General */}
-              <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+              <Card shadow='sm' p='lg' radius='md' withBorder>
                 <Title order={4} mb='md' className='flex items-center gap-2'>
                   <IconCalendar size={18} />
                   Información General
@@ -1569,7 +1569,7 @@ function ViewTicketPage() {
               </Card>
 
               {/* Categorización */}
-              <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+              <Card shadow='sm' p='lg' radius='md' withBorder>
                 <Title order={4} mb='md' className='flex items-center gap-2'>
                   <IconFilter size={18} />
                   Categorización
@@ -1623,7 +1623,7 @@ function ViewTicketPage() {
               </Card>
 
               {/* Contacto del solicitante */}
-              <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+              <Card shadow='sm' p='lg' radius='md' withBorder>
                 <Title order={4} mb='md' className='flex items-center gap-2'>
                   <IconAt size={18} />
                   Contacto del solicitante
@@ -1649,7 +1649,7 @@ function ViewTicketPage() {
         </Grid>
 
         {/* File Attachments */}
-        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           <Title order={3} mb='md' className='flex items-center gap-2'>
             <IconUpload size={20} />
             Archivos Adjuntos
@@ -1662,7 +1662,7 @@ function ViewTicketPage() {
                 Archivos existentes en el ticket ({folderContents.length})
               </Text>
               {folderContents.map((file: FolderFile) => (
-                <Card key={file.id} withBorder p='sm' bg='gray.0'>
+                <Card key={file.id} withBorder p='sm'>
                   <Flex align='center' gap='sm'>
                     <Box c='blue'>
                       {file.name.toLowerCase().endsWith('.pdf') && <IconFileText size={20} />}
@@ -1723,7 +1723,7 @@ function ViewTicketPage() {
         </Card>
 
         {/* Actions */}
-        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           {/* Mensaje de actualización */}
           {updateMessage && (
             <Alert

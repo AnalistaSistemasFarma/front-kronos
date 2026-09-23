@@ -668,10 +668,10 @@ function TicketsBoard() {
   }
 
   return (
-    <div className='min-h-screen bg-gray-50'>
+    <div className='app-canvas'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
         {/* Header Section */}
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -803,7 +803,7 @@ function TicketsBoard() {
           resultCount={tickets.length}
         />
 
-        <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden' p='lg'>
+        <Card shadow='sm' radius='md' withBorder className='overflow-hidden' p='lg'>
           <LoadingOverlay visible={tableRefreshing} zIndex={50} overlayProps={{ blur: 1 }} />
 
           <Title order={3} mb='md' className='flex items-center gap-2'>

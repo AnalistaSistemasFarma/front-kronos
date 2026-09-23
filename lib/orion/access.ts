@@ -3,6 +3,7 @@
  *
  * - Preparar firma: marcar PDF, firmantes, ubicaciones, enviar
  * - Firmar documento: obligatorio para confirmar firma (aunque sea firmante)
+ * - Registrar huella: activar/colocar huella en preparación y aportar huella al firmar
  * - Legacy `/process/firma/manage` (“Firma digital”) = alias de Preparar
  */
 
@@ -16,6 +17,9 @@ export const ORION_FIRMA_PREPARE_NAME = 'Preparar firma';
 
 export const ORION_FIRMA_SIGN_URL = '/process/firma/sign';
 export const ORION_FIRMA_SIGN_NAME = 'Firmar documento';
+
+export const ORION_FIRMA_FINGERPRINT_URL = '/process/firma/fingerprint';
+export const ORION_FIRMA_FINGERPRINT_NAME = 'Registrar huella';
 
 /**
  * Categoría o proceso técnico legado de Orion (nombre exacto FIRMA / Firma digital).
@@ -85,6 +89,21 @@ export function isOrionFirmaSignSubprocess(subprocess: {
   return name === ORION_FIRMA_SIGN_NAME.toLowerCase() || name.includes('firmar documento');
 }
 
+/** Subproceso registrar / aportar huella dactilar. */
+export function isOrionFirmaFingerprintSubprocess(subprocess: {
+  subprocess?: string | null;
+  subprocess_url?: string | null;
+}): boolean {
+  const url = normalizeSubUrl(subprocess.subprocess_url);
+  if (url === ORION_FIRMA_FINGERPRINT_URL.toLowerCase()) return true;
+  const name = normalizeSubName(subprocess.subprocess);
+  return (
+    name === ORION_FIRMA_FINGERPRINT_NAME.toLowerCase() ||
+    name.includes('registrar huella') ||
+    name.includes('poner huella')
+  );
+}
+
 /**
  * Subprocesos que no deben mostrarse como tarjetas del hub
  * (permisos técnicos / invisibles).
@@ -94,8 +113,13 @@ export function isHubHiddenSubprocess(params: {
   name?: string | null;
 }): boolean {
   const sub = { subprocess: params.name, subprocess_url: params.url };
-  if (isOrionFirmaPrepareSubprocess(sub) || isOrionFirmaSignSubprocess(sub)) return true;
-  // Evitar import circular: detectar por URL/nombre aquí también.
+  if (
+    isOrionFirmaPrepareSubprocess(sub) ||
+    isOrionFirmaSignSubprocess(sub) ||
+    isOrionFirmaFingerprintSubprocess(sub)
+  ) {
+    return true;
+  }
   const url = normalizeSubUrl(params.url);
   const name = normalizeSubName(params.name);
   return (

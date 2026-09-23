@@ -87,47 +87,117 @@ html[data-landing] body {
   min-height: 100vh;
 }
 
+/* Lienzo de página autenticada: respeta claro/oscuro del perfil */
+.app-canvas {
+  min-height: 100vh;
+  background-color: var(--app-bg, var(--background));
+  color: var(--app-text, var(--foreground));
+}
+
+/* Remapeo de utilidades “siempre claras” → tokens del tema (html.dark) */
+html.dark .bg-white,
 .dark .bg-white {
   background-color: var(--app-surface, var(--surface)) !important;
   color: var(--app-text, var(--foreground));
 }
 
-.dark .bg-gray-50 {
+html.dark .bg-gray-50,
+.dark .bg-gray-50,
+html.dark .bg-slate-50,
+.dark .bg-slate-50,
+html.dark .bg-zinc-50,
+.dark .bg-zinc-50,
+html.dark .bg-neutral-50,
+.dark .bg-neutral-50 {
   background-color: var(--app-bg, var(--background)) !important;
 }
 
-.dark .bg-gray-100 {
+html.dark .bg-gray-100,
+.dark .bg-gray-100,
+html.dark .bg-slate-100,
+.dark .bg-slate-100 {
   background-color: var(--app-surface-raised, var(--surface-muted)) !important;
 }
 
-.dark .hover\:bg-gray-50:hover {
+html.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-gray-50:hover,
+html.dark .hover\:bg-white:hover,
+.dark .hover\:bg-white:hover {
   background-color: var(--app-surface-raised, var(--surface-muted)) !important;
 }
 
+html.dark .border-gray-200,
 .dark .border-gray-200,
-.dark .border-gray-300 {
+html.dark .border-gray-300,
+.dark .border-gray-300,
+html.dark .border-slate-200,
+.dark .border-slate-200 {
   border-color: var(--app-border, var(--border-subtle)) !important;
 }
 
-.dark .text-gray-900 {
+html.dark .text-gray-900,
+.dark .text-gray-900,
+html.dark .text-slate-900,
+.dark .text-slate-900 {
   color: var(--app-text, var(--foreground)) !important;
 }
 
+html.dark .text-gray-800,
 .dark .text-gray-800,
-.dark .text-gray-700 {
+html.dark .text-gray-700,
+.dark .text-gray-700,
+html.dark .text-slate-800,
+.dark .text-slate-800,
+html.dark .text-slate-700,
+.dark .text-slate-700 {
   color: var(--app-text, var(--foreground)) !important;
 }
 
+html.dark .text-gray-600,
 .dark .text-gray-600,
+html.dark .text-gray-500,
 .dark .text-gray-500,
-.dark .text-gray-400 {
+html.dark .text-gray-400,
+.dark .text-gray-400,
+html.dark .text-slate-600,
+.dark .text-slate-600,
+html.dark .text-slate-500,
+.dark .text-slate-500 {
   color: var(--app-text-muted, #b0b4bc) !important;
 }
 
+html.dark input,
 .dark input,
+html.dark textarea,
 .dark textarea,
+html.dark select,
 .dark select {
   color: var(--app-text, var(--foreground));
+}
+
+html.dark .bg-blue-50,
+.dark .bg-blue-50 {
+  background-color: color-mix(in srgb, var(--app-accent, #3b82f6) 18%, var(--app-surface, #28292e)) !important;
+}
+html.dark .bg-yellow-50,
+.dark .bg-yellow-50 {
+  background-color: color-mix(in srgb, #eab308 16%, var(--app-surface, #28292e)) !important;
+}
+html.dark .bg-green-50,
+.dark .bg-green-50 {
+  background-color: color-mix(in srgb, #22c55e 16%, var(--app-surface, #28292e)) !important;
+}
+html.dark .bg-violet-50,
+.dark .bg-violet-50 {
+  background-color: color-mix(in srgb, #8b5cf6 16%, var(--app-surface, #28292e)) !important;
+}
+html.dark .bg-teal-50,
+.dark .bg-teal-50 {
+  background-color: color-mix(in srgb, #14b8a6 16%, var(--app-surface, #28292e)) !important;
+}
+html.dark .bg-red-50,
+.dark .bg-red-50 {
+  background-color: color-mix(in srgb, #ef4444 16%, var(--app-surface, #28292e)) !important;
 }
 
 /* Iconos SVG heredan color en zonas con texto */
