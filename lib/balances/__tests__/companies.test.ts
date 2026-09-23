@@ -7,14 +7,14 @@ import {
 import { getBalancesConfigurationError } from '../adminPool';
 
 describe('configuración de Balances', () => {
-  it('habilita exclusivamente Farmalogica para la salida inicial', () => {
-    expect(getEnabledBalanceCompanies().map((company) => company.idCompany)).toEqual([1]);
+  it('habilita Farmalogica, OLP y GSS', () => {
+    expect(getEnabledBalanceCompanies().map((company) => company.idCompany)).toEqual([1, 3, 8]);
     expect(getBalanceCompany(1)?.enabled).toBe(true);
   });
 
-  it('mantiene OLP y GSS configuradas pero bloqueadas', () => {
-    expect(getBalanceCompany(3)).toMatchObject({ enabled: false, slug: 'olp' });
-    expect(getBalanceCompany(8)).toMatchObject({ enabled: false, slug: 'gss' });
+  it('tiene OLP y GSS configuradas y habilitadas', () => {
+    expect(getBalanceCompany(3)).toMatchObject({ enabled: true, slug: 'olp' });
+    expect(getBalanceCompany(8)).toMatchObject({ enabled: true, slug: 'gss' });
     expect(BALANCE_COMPANIES).toHaveLength(3);
   });
 

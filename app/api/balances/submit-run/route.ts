@@ -18,9 +18,8 @@ import {
  * Sprint 2: registra la corrida y devuelve 202 inmediatamente. La ejecución
  * continúa en background; la interfaz consulta la tabla `balance_run`.
  *
- * ALCANCE HABILITADO: solo Farmalogica. OLP/GSS siguen presentes como
- * configuraciones deshabilitadas y el servidor los rechaza hasta que exista
- * una activación operativa independiente. Ejecuta el SQL extraído del job
+ * ALCANCE HABILITADO: Farmalogica, OLP y GSS; el servidor rechaza las
+ * empresas deshabilitadas en lib/balances/companies.ts. Ejecuta el SQL extraído del job
  * compartido en el 10.7, sin pasar por sp_start_job.
  */
 export async function POST(request: NextRequest) {
