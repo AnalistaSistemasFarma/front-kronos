@@ -138,13 +138,17 @@ export default function ComposerLetterFx({
       // Se borró del final (Backspace/Supr sobre el último tramo): los
       // caracteres sobrantes se marcan "leaving" y se quitan solos cuando
       // termina su propia animación de salida (onAnimationEnd de cada span).
+      // Los saltos de línea (`\n`) son la excepción: se renderizan como <br>
+      // (ver renderChar) para forzar un salto real en el flujo, y un <br> no
+      // dispara `onAnimationEnd` — se quitan de inmediato, sin animar salida.
       setGhosts((g) => {
         const activos = g.filter((x) => !x.leaving);
         const cut = activos.length - value.length;
         if (cut <= 0) return g;
+        const cortados = activos.slice(activos.length - cut);
         return [
           ...activos.slice(0, activos.length - cut),
-          ...activos.slice(activos.length - cut).map((x) => ({ ...x, leaving: true })),
+          ...cortados.filter((x) => x.char !== '\n').map((x) => ({ ...x, leaving: true })),
           ...g.filter((x) => x.leaving),
         ];
       });
@@ -160,17 +164,31 @@ export default function ComposerLetterFx({
     setGhosts(chars.map((char, i) => ({ id: i, char, leaving: false })));
   }, [value]);
 
-  const renderChar = (g: Ghost) => (
-    <span
-      key={g.id}
-      className={`chat-composer__letterfx-char${g.leaving ? ' is-leaving' : ''}`}
-      onAnimationEnd={() => {
-        if (g.leaving) setGhosts((cur) => cur.filter((x) => x.id !== g.id));
-      }}
-    >
-      {g.char}
-    </span>
-  );
+  const renderChar = (g: Ghost) => {
+    if (g.char === '\n') {
+      // Un salto de línea real dentro de un <span inline-block> (con
+      // white-space:pre-wrap) solo rompe el flujo DENTRO de esa caja atómica,
+      // no en el flujo exterior del overlay — el navegador la trata como un
+      // único bloque más alto, sin encadenar el renglón siguiente. El
+      // resultado: el overlay no baja de línea donde el textarea real sí lo
+      // hace, y el cursor nativo (que sigue el renglonado real) termina muy
+      // lejos del último carácter dibujado (reportado por Nicolás,
+      // 2026-09-23). <br> sí fuerza el salto en el flujo exterior, igual que
+      // en el textarea real.
+      return <br key={g.id} />;
+    }
+    return (
+      <span
+        key={g.id}
+        className={`chat-composer__letterfx-char${g.leaving ? ' is-leaving' : ''}`}
+        onAnimationEnd={() => {
+          if (g.leaving) setGhosts((cur) => cur.filter((x) => x.id !== g.id));
+        }}
+      >
+        {g.char}
+      </span>
+    );
+  };
 
   return (
     <div ref={overlayRef} className='chat-composer__letterfx' aria-hidden='true'>
