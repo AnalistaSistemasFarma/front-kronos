@@ -7,15 +7,21 @@ import {
 import { getBalancesConfigurationError } from '../adminPool';
 
 describe('configuración de Balances', () => {
-  it('habilita Farmalogica, OLP y GSS', () => {
-    expect(getEnabledBalanceCompanies().map((company) => company.idCompany)).toEqual([1, 3, 8]);
+  it('habilita Farmalogica, OLP, GSS y Abamia', () => {
+    expect(getEnabledBalanceCompanies().map((company) => company.idCompany)).toEqual([1, 3, 8, 9]);
     expect(getBalanceCompany(1)?.enabled).toBe(true);
   });
 
   it('tiene OLP y GSS configuradas y habilitadas', () => {
     expect(getBalanceCompany(3)).toMatchObject({ enabled: true, slug: 'olp' });
     expect(getBalanceCompany(8)).toMatchObject({ enabled: true, slug: 'gss' });
-    expect(BALANCE_COMPANIES).toHaveLength(3);
+    expect(getBalanceCompany(9)).toMatchObject({
+      enabled: true,
+      slug: 'abamia',
+      balanceSqlFile: 'abamia-balance.sql',
+      acumuladoSqlFile: 'abamia-acumulado.sql',
+    });
+    expect(BALANCE_COMPANIES).toHaveLength(4);
   });
 
   it('no tiene configuración para compañías fuera del alcance', () => {

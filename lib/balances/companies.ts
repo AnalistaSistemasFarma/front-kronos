@@ -5,17 +5,18 @@ import path from 'node:path';
 /**
  * Empresas configuradas para el módulo de Balances.
  *
- * Habilitadas: Farmalogica, OLP y GSS.
- * Ryan/Abamia/Kelab/Meditrack siguen fuera del módulo porque todavía no existe
- * SQL de balance validado para ellas.
+ * Habilitadas: Farmalogica, OLP, GSS y Abamia.
+ * Meditrack y Kelab ya tienen SQL (lib/balances/sql/meditrack-*, kelab-*) pero
+ * quedan fuera hasta que exista su registro en `company` de KRONOSDB.
+ * Ryan sigue fuera porque todavía no existe SQL de balance para ella.
  *
  * `idCompany` coincide con `company.id_company` en KRONOSDB
- * (1=Farmalogica, 3=OneLatamPharma/OLP, 8=GSS).
+ * (1=Farmalogica, 3=OneLatamPharma/OLP, 8=GSS, 9=Abamia).
  */
 
 export interface BalanceCompanyConfig {
   idCompany: number;
-  slug: 'farmalogica' | 'olp' | 'gss';
+  slug: 'farmalogica' | 'olp' | 'gss' | 'abamia';
   displayName: string;
   balanceSqlFile: string;
   acumuladoSqlFile: string;
@@ -48,6 +49,14 @@ export const BALANCE_COMPANIES: readonly BalanceCompanyConfig[] = [
     displayName: 'GSS',
     balanceSqlFile: 'gss-balance.sql',
     acumuladoSqlFile: 'gss-acumulado.sql',
+    enabled: true,
+  },
+  {
+    idCompany: 9,
+    slug: 'abamia',
+    displayName: 'Abamia',
+    balanceSqlFile: 'abamia-balance.sql',
+    acumuladoSqlFile: 'abamia-acumulado.sql',
     enabled: true,
   },
 ];
