@@ -10,13 +10,14 @@ import path from 'node:path';
  * quedan fuera hasta que exista su registro en `company` de KRONOSDB.
  * Ryan sigue fuera porque todavía no existe SQL de balance para ella.
  *
- * `idCompany` coincide con `company.id_company` en KRONOSDB
+ * `idCompany` coincide con `company.id_company` en KRONOSDB (producción; en
+ * KRONOSDB_PRUEBAS los ids 6/7/9 son otras empresas)
  * (1=Farmalogica, 3=OneLatamPharma/OLP, 8=GSS, 9=Abamia).
  */
 
 export interface BalanceCompanyConfig {
   idCompany: number;
-  slug: 'farmalogica' | 'olp' | 'gss' | 'abamia';
+  slug: 'farmalogica' | 'olp' | 'gss' | 'meditrack' | 'abamia' | 'kelab';
   displayName: string;
   balanceSqlFile: string;
   acumuladoSqlFile: string;
@@ -52,11 +53,27 @@ export const BALANCE_COMPANIES: readonly BalanceCompanyConfig[] = [
     enabled: true,
   },
   {
-    idCompany: 9,
+    idCompany: 6,
+    slug: 'meditrack',
+    displayName: 'Meditrack',
+    balanceSqlFile: 'meditrack-balance.sql',
+    acumuladoSqlFile: 'meditrack-acumulado.sql',
+    enabled: true,
+  },
+  {
+    idCompany: 7,
     slug: 'abamia',
     displayName: 'Abamia',
     balanceSqlFile: 'abamia-balance.sql',
     acumuladoSqlFile: 'abamia-acumulado.sql',
+    enabled: true,
+  },
+  {
+    idCompany: 9,
+    slug: 'kelab',
+    displayName: 'Kelab',
+    balanceSqlFile: 'kelab-balance.sql',
+    acumuladoSqlFile: 'kelab-acumulado.sql',
     enabled: true,
   },
 ];

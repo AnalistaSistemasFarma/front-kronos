@@ -28,7 +28,9 @@ const COMPANIES = [
   { idCompany: 1, displayName: 'Farmalogica' },
   { idCompany: 3, displayName: 'One Latam Pharma' },
   { idCompany: 8, displayName: 'GSS' },
-  { idCompany: 9, displayName: 'Abamia' },
+  { idCompany: 6, displayName: 'Meditrack' },
+  { idCompany: 7, displayName: 'Abamia' },
+  { idCompany: 9, displayName: 'Kelab' },
 ] as const;
 
 interface RunRow {
@@ -125,7 +127,7 @@ export default function BalancesPage() {
         </Alert>
       )}
 
-      <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }}>
+      <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
         {COMPANIES.map((c) => {
           const blockedByOther = globallyRunning !== null && globallyRunning.id_company !== c.idCompany;
           return (
