@@ -164,6 +164,7 @@ export default function OrionSignaturePanel({
   const [canManage, setCanManage] = useState(false);
   const [canSignPermission, setCanSignPermission] = useState(false);
   const [canFingerprintPermission, setCanFingerprintPermission] = useState(false);
+  const [isFlowResponsible, setIsFlowResponsible] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -196,7 +197,6 @@ export default function OrionSignaturePanel({
   const [identityError, setIdentityError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const userRoleRef = useRef<'coordinator' | 'signer' | 'waiting' | 'viewer'>('viewer');
-  const mountedRef = useRef(false);
   const autoOpenedRef = useRef(false);
   const lastNotifyKeyRef = useRef('');
   const lastPatchKeyRef = useRef('');
@@ -336,6 +336,9 @@ export default function OrionSignaturePanel({
         if (typeof data.canFingerprintPermission === 'boolean') {
           setCanFingerprintPermission(data.canFingerprintPermission);
         }
+        if (typeof data.isFlowResponsible === 'boolean') {
+          setIsFlowResponsible(data.isFlowResponsible);
+        }
         if (typeof data.isAdmin === 'boolean') setIsAdmin(data.isAdmin);
         if (data.documents && typeof data.documents === 'object') {
           notifyDocuments(data.documents as Record<string, OrionSignatureState>);
@@ -366,20 +369,24 @@ export default function OrionSignaturePanel({
   );
 
   useEffect(() => {
-    if (mountedRef.current) return;
     if (!isValidRequestId) {
       setPermissionsReady(true);
       return;
     }
-    mountedRef.current = true;
     // lite: permisos/BD al instante. Luego sync real con Orion (sin soft)
     // para traer firmas hechas por /sign/{token} cuando el webhook no llegó.
+    // Importante: no usar mountedRef aquí — si refreshState cambia, el cleanup
+    // cancelaba el timer y el early-return impedía volver a sincronizar.
+    let cancelled = false;
     void refreshState(undefined, { lite: true, markReady: true });
     const syncTimer = window.setTimeout(() => {
-      if (document.visibilityState !== 'visible') return;
+      if (cancelled || document.visibilityState !== 'visible') return;
       void refreshState(undefined, { markReady: false });
     }, 800);
-    return () => window.clearTimeout(syncTimer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(syncTimer);
+    };
   }, [isValidRequestId, refreshState]);
 
   // Consentimiento a nivel persona (una vez por usuario, no por documento).
@@ -543,6 +550,7 @@ export default function OrionSignaturePanel({
         currentUserId,
         createdByEmail,
         requesterId,
+        isFlowResponsible,
         state,
         hasAttachment: Boolean(activeFile?.pdfUrl),
         hasPersonalSignature: hasSignature,
@@ -556,6 +564,7 @@ export default function OrionSignaturePanel({
       currentUserId,
       hasSignature,
       isAdmin,
+      isFlowResponsible,
       requesterId,
       state,
       workflowLocked,
@@ -901,6 +910,7 @@ export default function OrionSignaturePanel({
         currentUserId,
         createdByEmail,
         requesterId,
+        isFlowResponsible,
         state: fileState,
         hasAttachment: true,
         hasPersonalSignature: hasSignature,
@@ -909,7 +919,9 @@ export default function OrionSignaturePanel({
 
       if (!filePerms.canManageWorkflow) {
         setError(
-          'No tiene permiso “Preparar firma”. Asígueselo en Administración → Usuarios.'
+          filePerms.isFlowResponsible
+            ? 'No tiene permiso “Preparar firma”. Asígueselo en Administración → Usuarios.'
+            : 'Solo un preparador documento asignado al flujo (con permiso Preparar firma) puede preparar el documento.'
         );
         return false;
       }
@@ -1040,6 +1052,7 @@ export default function OrionSignaturePanel({
       ensureDocument,
       hasSignature,
       isAdmin,
+      isFlowResponsible,
       loadUserSignature,
       notifyDocuments,
       requestId,
@@ -1186,6 +1199,7 @@ export default function OrionSignaturePanel({
           currentUserId,
           createdByEmail,
           requesterId,
+          isFlowResponsible,
           state: fileState,
           hasAttachment: true,
           hasPersonalSignature: true,
@@ -1214,6 +1228,7 @@ export default function OrionSignaturePanel({
       documents,
       fromAuthorization,
       isAdmin,
+      isFlowResponsible,
       loadUserSignature,
       notifyDocuments,
       requestId,
@@ -1521,7 +1536,8 @@ export default function OrionSignaturePanel({
     requesterId,
     currentUserEmail,
     requesterEmail: createdByEmail,
-    // Admin que también es firmante no ve historial (salvo que sea el creador).
+    isFlowResponsible,
+    // Admin que también es firmante no ve historial (salvo que sea el creador/preparador).
     isSigner: Object.values(documents).some((doc) =>
       isOrionDocumentSigner(doc, currentUserEmail)
     ),
@@ -1537,6 +1553,7 @@ export default function OrionSignaturePanel({
       canManage,
       canSignPermission,
       canFingerprintPermission,
+      isFlowResponsible,
       permissionsReady,
       isAdmin,
       canViewVersions,
@@ -1551,6 +1568,7 @@ export default function OrionSignaturePanel({
           currentUserId,
           createdByEmail,
           requesterId,
+          isFlowResponsible,
           state: fileState,
           hasAttachment: true,
           hasPersonalSignature: hasSignature,
@@ -1589,6 +1607,7 @@ export default function OrionSignaturePanel({
     handleAcceptSign,
     hasSignature,
     isAdmin,
+    isFlowResponsible,
     openDocumentEditor,
     openSignedDocument,
     openSignerView,

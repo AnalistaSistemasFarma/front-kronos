@@ -8,10 +8,10 @@ import {
   setOrionDocumentInBag,
 } from '@/lib/orion/formValue';
 import {
+  assertUserIsOrionDocumentPreparer,
   getRequestOrionContext,
   loadOrionFormBag,
   upsertOrionFormBag,
-  userCanManageOrionRequest,
 } from '@/lib/orion/service';
 import {
   createOrionSignerInvite,
@@ -151,15 +151,12 @@ export async function GET(req: Request) {
     const origin = resolvePublicAppOrigin(req.headers.get('origin'));
 
     const data = await withMssqlPool(async (pool) => {
-      const canManage = await userCanManageOrionRequest(
-        pool,
+      await assertUserIsOrionDocumentPreparer(pool, {
         requestId,
-        String(session.user.id),
-        isAdmin
-      );
-      if (!canManage) {
-        throw Object.assign(new Error('Sin permiso para gestionar firmantes'), { status: 403 });
-      }
+        userId: String(session.user.id),
+        userEmail: String(session.user.email || ''),
+        isAdmin,
+      });
 
       const loaded = await loadOrionFormBag(pool, requestId);
       if (!loaded) {
@@ -264,15 +261,12 @@ export async function POST(req: Request) {
     }
 
     const outcome = await withMssqlPool(async (pool) => {
-      const canManage = await userCanManageOrionRequest(
-        pool,
+      await assertUserIsOrionDocumentPreparer(pool, {
         requestId,
-        String(session.user.id),
-        isAdmin
-      );
-      if (!canManage) {
-        throw Object.assign(new Error('Sin permiso para gestionar firmantes'), { status: 403 });
-      }
+        userId: String(session.user.id),
+        userEmail: String(session.user.email || ''),
+        isAdmin,
+      });
 
       const loaded = await loadOrionFormBag(pool, requestId);
       if (!loaded) {

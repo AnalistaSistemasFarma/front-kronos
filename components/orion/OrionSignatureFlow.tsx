@@ -245,21 +245,51 @@ function FlowContent({
           p='sm'
           style={{
             borderRadius: 10,
-            background: 'var(--mantine-color-teal-0)',
-            border: '1px solid var(--mantine-color-teal-3)',
+            background: 'light-dark(var(--mantine-color-teal-0), rgba(18, 184, 134, 0.14))',
+            border: '1px solid light-dark(var(--mantine-color-teal-3), rgba(18, 184, 134, 0.45))',
           }}
         >
           <Group gap={8} wrap='nowrap'>
-            <IconShieldCheck size={18} color='var(--mantine-color-teal-7)' />
+            <IconShieldCheck
+              size={18}
+              style={{
+                color:
+                  'light-dark(var(--mantine-color-teal-7), var(--mantine-color-teal-4))',
+                flexShrink: 0,
+              }}
+            />
             <Box style={{ minWidth: 0 }}>
-              <Text size='xs' fw={700} c='teal' tt='uppercase' style={{ letterSpacing: 0.4 }}>
+              <Text
+                size='xs'
+                fw={700}
+                tt='uppercase'
+                style={{
+                  letterSpacing: 0.4,
+                  color:
+                    'light-dark(var(--mantine-color-teal-7), var(--mantine-color-teal-4))',
+                }}
+              >
                 Documento validado
               </Text>
-              <Text size='sm' fw={600} lineClamp={1}>
+              <Text
+                size='sm'
+                fw={600}
+                lineClamp={1}
+                style={{
+                  color:
+                    'light-dark(var(--mantine-color-dark-7), var(--mantine-color-gray-0))',
+                }}
+              >
                 Aprobado finalmente por {lastApprover.name || lastApprover.email}
               </Text>
               {formatSignedAt(lastApprover.signedAt) ? (
-                <Text size='xs' c='dimmed'>
+                <Text
+                  size='xs'
+                  style={{
+                    color:
+                      'light-dark(var(--mantine-color-dark-3), var(--mantine-color-gray-5))',
+                  }}
+                >
                   {formatSignedAt(lastApprover.signedAt)}
                 </Text>
               ) : null}

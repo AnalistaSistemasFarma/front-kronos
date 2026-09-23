@@ -38,6 +38,8 @@ export type OrionSignatureApi = {
   canSignPermission: boolean;
   /** Permiso “Registrar huella” (exigir/colocar/aportar huella). */
   canFingerprintPermission: boolean;
+  /** Asignado como preparador documento del flujo (Administración → Preparadores documento). */
+  isFlowResponsible: boolean;
   /** true cuando ya respondió el primer ensure-document (canManage fiable). */
   permissionsReady: boolean;
   isAdmin: boolean;

@@ -15,6 +15,7 @@ import {
   userCanManageOrionRequest,
   userHasOrionFingerprintPermission,
   userHasOrionSignPermission,
+  userIsOrionFlowSignatureResponsible,
 } from '@/lib/orion/service';
 import { syncOrionSignerTasks } from '@/lib/orion/signerTasks';
 import {
@@ -149,13 +150,17 @@ export async function GET(req: Request) {
           userId: sessionUserId,
           email: session.user.email,
         });
-        const [canManage, canSignPermission, canFingerprintPermission, loaded] = await Promise.all([
+        const [canManage, canSignPermission, canFingerprintPermission, isFlowResponsible, loaded] =
+          await Promise.all([
           actorId
             ? userCanManageOrionRequest(pool, requestId, actorId, isAdmin)
             : Promise.resolve(false),
           actorId ? userHasOrionSignPermission(pool, actorId, false) : Promise.resolve(false),
           actorId
             ? userHasOrionFingerprintPermission(pool, actorId, false)
+            : Promise.resolve(false),
+          actorId
+            ? userIsOrionFlowSignatureResponsible(pool, requestId, actorId)
             : Promise.resolve(false),
           loadOrionFormBag(pool, requestId),
         ]);
@@ -173,6 +178,7 @@ export async function GET(req: Request) {
           canManage,
           canSignPermission,
           canFingerprintPermission,
+          isFlowResponsible,
           bag,
         };
       });
@@ -187,6 +193,7 @@ export async function GET(req: Request) {
           canManage: boot.canManage,
           canSignPermission: boot.canSignPermission,
           canFingerprintPermission: boot.canFingerprintPermission,
+          isFlowResponsible: boot.isFlowResponsible,
           isAdmin,
           pendingAuthorization: false,
           embedOrigin: cfg.embedOrigin,
@@ -217,13 +224,22 @@ export async function GET(req: Request) {
       const canFingerprintPromise = actorId
         ? userHasOrionFingerprintPermission(pool, actorId, false)
         : Promise.resolve(false);
+      const isFlowResponsiblePromise = actorId
+        ? userIsOrionFlowSignatureResponsible(pool, requestId, actorId)
+        : Promise.resolve(false);
 
       if (softBagOnly) {
-        const [canManage, canSignPermission, canFingerprintPermission, loaded] =
-          await Promise.all([
+        const [
+          canManage,
+          canSignPermission,
+          canFingerprintPermission,
+          isFlowResponsible,
+          loaded,
+        ] = await Promise.all([
             canManagePromise,
             canSignPromise,
             canFingerprintPromise,
+            isFlowResponsiblePromise,
             loadOrionFormBag(pool, requestId),
           ]);
         let bag = loaded?.bag ?? { documents: {} as Record<string, OrionSignatureState> };
@@ -271,6 +287,7 @@ export async function GET(req: Request) {
           canManage,
           canSignPermission,
           canFingerprintPermission,
+          isFlowResponsible,
           payload: loaded
             ? {
                 state: {},
@@ -283,11 +300,17 @@ export async function GET(req: Request) {
         };
       }
 
-      const [canManage, canSignPermission, canFingerprintPermission, synced] =
-        await Promise.all([
+      const [
+        canManage,
+        canSignPermission,
+        canFingerprintPermission,
+        isFlowResponsible,
+        synced,
+      ] = await Promise.all([
           canManagePromise,
           canSignPromise,
           canFingerprintPromise,
+          isFlowResponsiblePromise,
           syncOrionDocumentState(pool, requestId, fileId, {
             rebuildSigned,
           }),
@@ -297,6 +320,7 @@ export async function GET(req: Request) {
           canManage,
           canSignPermission,
           canFingerprintPermission,
+          isFlowResponsible,
           payload: null as Awaited<ReturnType<typeof syncOrionDocumentState>>,
           pendingAuthorization: false,
           pendingAuthorizationByFile: {} as Record<string, boolean>,
@@ -370,6 +394,7 @@ export async function GET(req: Request) {
         canManage,
         canSignPermission,
         canFingerprintPermission,
+        isFlowResponsible,
         payload: synced,
         pendingAuthorization,
         pendingAuthorizationByFile,
@@ -387,6 +412,7 @@ export async function GET(req: Request) {
           canManage: result.canManage,
           canSignPermission: result.canSignPermission,
           canFingerprintPermission: result.canFingerprintPermission,
+          isFlowResponsible: result.isFlowResponsible,
           isAdmin,
           pendingAuthorization: false,
           pendingAuthorizationByFile: {},
@@ -404,6 +430,7 @@ export async function GET(req: Request) {
       canManage: result.canManage,
       isAdmin,
       currentUserEmail: session.user.email,
+      isFlowResponsible: result.isFlowResponsible,
       state,
     });
 
@@ -416,6 +443,7 @@ export async function GET(req: Request) {
         canManage: result.canManage,
         canSignPermission: result.canSignPermission,
         canFingerprintPermission: result.canFingerprintPermission,
+        isFlowResponsible: result.isFlowResponsible,
         isAdmin,
         permissions,
         pendingAuthorization: result.pendingAuthorization,

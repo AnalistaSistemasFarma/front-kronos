@@ -20,9 +20,10 @@ function versionIdForSigner(signer: OrionSignerState): string {
 
 /**
  * Historial de versiones / descargas:
- * - Siempre: quien creó la solicitud (dueño del flujo).
+ * - Quien creó la solicitud (solicitante).
+ * - Preparador documento del flujo (Administración → Preparadores documento).
  * - Admin: solo si NO es firmante de ese documento (evita fuga a firmantes con rol admin).
- * Firmantes y “Preparar firma” no ven el historial.
+ * Firmantes “solo firmar” no ven el historial.
  */
 export function canViewOrionDocumentVersions(params: {
   isAdmin?: boolean;
@@ -30,11 +31,15 @@ export function canViewOrionDocumentVersions(params: {
   requesterId?: string | number | null;
   currentUserEmail?: string | null;
   requesterEmail?: string | null;
-  /** Firmante del documento (aunque sea admin): no ve versiones salvo que sea el creador. */
+  /** Firmante del documento (aunque sea admin): no ve versiones salvo que sea el creador o preparador. */
   isSigner?: boolean;
-  /** @deprecated Ignorado: Preparar firma no otorga ver versiones. */
+  /** Preparador documento del flujo. */
+  isFlowResponsible?: boolean;
+  /** @deprecated Ignorado salvo que isFlowResponsible no venga; preferir isFlowResponsible. */
   canManage?: boolean;
 }): boolean {
+  if (params.isFlowResponsible) return true;
+
   const isRequester =
     (params.currentUserId != null &&
       params.requesterId != null &&

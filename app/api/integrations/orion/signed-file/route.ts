@@ -14,6 +14,8 @@ import {
   getRequestOrionContext,
   loadOrionFormBag,
   resolveOriginalPdfBase64,
+  resolveOrionActorUserId,
+  userIsOrionFlowSignatureResponsible,
 } from '@/lib/orion/service';
 import { isOrionProtectedFileUrl, isAllowedServerPdfFetchUrl, orionDocumentHasSignedCopy } from '@/lib/orion/signedFileAccess';
 
@@ -60,6 +62,14 @@ export async function GET(req: Request) {
       try {
         const ctx = await getRequestOrionContext(pool, requestId);
         const isSigner = isOrionDocumentSigner(state, me);
+        const actorId =
+          (await resolveOrionActorUserId(pool, {
+            userId,
+            email: me,
+          })) || userId;
+        const isFlowResponsible = actorId
+          ? await userIsOrionFlowSignatureResponsible(pool, requestId, actorId)
+          : false;
         canViewVersions = canViewOrionDocumentVersions({
           isAdmin,
           currentUserId: userId,
@@ -67,6 +77,7 @@ export async function GET(req: Request) {
           currentUserEmail: me,
           requesterEmail: ctx?.requester_email ?? null,
           isSigner,
+          isFlowResponsible,
         });
       } catch {
         canViewVersions = false;
@@ -129,11 +140,11 @@ export async function GET(req: Request) {
       ? orderedVersions.find((v) => v.id === versionId) ?? null
       : null;
 
-    // Historial / original: solo quien creó el flujo (solicitante) o admin.
+    // Historial / original: solicitante, preparador documento o admin.
     if (versionId === 'original') {
       if (!canViewVersions) {
         return NextResponse.json(
-          { error: 'Solo quien creó el flujo puede descargar el original' },
+          { error: 'Solo el solicitante o un preparador documento del flujo puede descargar el original' },
           { status: 403 }
         );
       }
@@ -144,7 +155,10 @@ export async function GET(req: Request) {
     } else if (versionId && selectedVersion) {
       if (!canViewVersions) {
         return NextResponse.json(
-          { error: 'Solo quien creó el flujo puede descargar versiones' },
+          {
+            error:
+              'Solo el solicitante o un preparador documento del flujo puede descargar versiones',
+          },
           { status: 403 }
         );
       }

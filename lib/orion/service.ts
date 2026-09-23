@@ -1090,8 +1090,8 @@ export async function syncOrionDocumentState(
     state = preserveOrionFingerprintPrefs(current, state);
 
     // Solo normalizar slots con evidencia de firma (signedAt / status).
-    // No marcar PENDIENTE→FIRMADO solo porque Orion diga FIRMADO: eso bloquea
-    // la notificación/autorización del siguiente firmante.
+    // Si ya hay firmas pero el status quedó en BORRADOR (firma por URL / webhook
+    // atrasado), subir a EN_PROCESO o FIRMADO.
     const liveStatus = String(state.status || '').toUpperCase();
     if ((state.signers?.length ?? 0) > 0) {
       const normalized = (state.signers ?? []).map((s) => {
@@ -1099,15 +1099,22 @@ export async function syncOrionDocumentState(
         return { ...s, status: 'FIRMADO' as const };
       });
       const changed = normalized.some((s, i) => s !== state.signers![i]);
-      if (changed || (['FIRMADO', 'SIGNED', 'COMPLETED'].includes(liveStatus) && allSignersCompleted(normalized))) {
+      const anyDone = normalized.some((s) => isSignerCompleted(s.status));
+      const allDone = allSignersCompleted(normalized);
+      let nextStatus = liveStatus || String(state.status || '').toUpperCase();
+      if (allDone) {
+        nextStatus = 'FIRMADO';
+      } else if (
+        anyDone &&
+        (!nextStatus || nextStatus === 'BORRADOR' || nextStatus === 'DEVUELTO')
+      ) {
+        nextStatus = 'EN_PROCESO';
+      }
+      if (changed || anyDone || allDone || nextStatus !== liveStatus) {
         state = {
           ...state,
           signers: normalized,
-          status: allSignersCompleted(normalized)
-            ? 'FIRMADO'
-            : state.status && liveStatus !== 'BORRADOR'
-              ? state.status
-              : 'EN_PROCESO',
+          status: nextStatus || state.status || 'EN_PROCESO',
         };
       }
     }
@@ -1678,7 +1685,101 @@ export async function userCanManageOrionRequest(
 }
 
 /**
- * Edición de preparación: permiso Preparar + abierta + sin firmas completadas.
+ * Preparador de documento del flujo: asignado en Administración de flujo →
+ * “Preparadores documento” (preparers_process_category).
+ * Tiene que ir junto con el permiso Preparar firma; no basta el permiso solo.
+ */
+export async function userIsOrionFlowSignatureResponsible(
+  pool: SqlPool,
+  requestId: number,
+  userId: string
+): Promise<boolean> {
+  const uid = String(userId || '').trim();
+  if (!uid || !Number.isInteger(requestId) || requestId <= 0) return false;
+
+  try {
+    const assigned = await pool
+      .request()
+      .input('requestId', sql.Int, requestId)
+      .input('userId', sql.NVarChar(1000), uid)
+      .query(`
+        SELECT TOP 1 1 AS ok
+        FROM process_category_request_general pcrg
+        INNER JOIN preparers_process_category ppc
+          ON ppc.id_process_category = pcrg.id_process_category
+        WHERE pcrg.id_request_general = @requestId
+          AND LTRIM(RTRIM(CAST(ppc.id_preparer AS NVARCHAR(1000)))) = LTRIM(RTRIM(@userId))
+      `);
+    return Boolean(assigned.recordset[0]);
+  } catch (err) {
+    // Tabla aún no migrada: no conceder acceso por defecto.
+    console.warn('[orion] preparers_process_category no disponible:', err);
+    return false;
+  }
+}
+
+/**
+ * Solo identidad de preparador: permiso Preparar + lista Preparadores documento.
+ * No exige “sin firmas” (sirve para invitar / reenviar URL con el flujo ya en curso).
+ */
+export async function assertUserIsOrionDocumentPreparer(
+  pool: SqlPool,
+  params: {
+    requestId: number;
+    userId: string;
+    userEmail?: string;
+    isAdmin?: boolean;
+  }
+): Promise<{ ctx: RequestOrionContext; actorId: string }> {
+  const actorId =
+    (await resolveOrionActorUserId(pool, {
+      userId: params.userId,
+      email: params.userEmail,
+    })) || String(params.userId || '').trim();
+
+  if (!actorId) {
+    throw Object.assign(new Error('No se pudo identificar al usuario'), { status: 401 });
+  }
+
+  const canManage = await userCanManageOrionRequest(
+    pool,
+    params.requestId,
+    actorId,
+    Boolean(params.isAdmin)
+  );
+  if (!canManage) {
+    throw Object.assign(
+      new Error(
+        'No tiene permiso “Preparar firma”. Asígueselo en Administración → Usuarios.'
+      ),
+      { status: 403 }
+    );
+  }
+
+  const ctx = await getRequestOrionContext(pool, params.requestId);
+  if (!ctx) {
+    throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+  }
+
+  const isFlowResponsible = await userIsOrionFlowSignatureResponsible(
+    pool,
+    params.requestId,
+    actorId
+  );
+  if (!isFlowResponsible) {
+    throw Object.assign(
+      new Error(
+        'Solo un preparador documento asignado al flujo (Administración de flujo → Preparadores documento) puede gestionar firmas de esta solicitud.'
+      ),
+      { status: 403 }
+    );
+  }
+
+  return { ctx, actorId };
+}
+
+/**
+ * Edición de preparación: preparador + abierta + sin firmas completadas.
  */
 export async function assertUserCanEditOrionPreparation(
   pool: SqlPool,
@@ -1690,25 +1791,16 @@ export async function assertUserCanEditOrionPreparation(
     fileId?: string | null;
   }
 ): Promise<{ ctx: RequestOrionContext; state: OrionSignatureState | null }> {
-  const { canEditOrionPreparation } = await import('./permissions');
-  const canManage = await userCanManageOrionRequest(
-    pool,
-    params.requestId,
-    params.userId,
-    Boolean(params.isAdmin)
+  const { canEditOrionPreparation, hasAnyCompletedOrionSignature } = await import(
+    './permissions'
   );
-  if (!canManage) {
-    throw Object.assign(
-      new Error(
-        'No tiene permiso “Preparar firma”. Asígueselo en Administración → Usuarios.'
-      ),
-      { status: 403 }
-    );
-  }
+  const { ctx, actorId } = await assertUserIsOrionDocumentPreparer(pool, params);
+
   const locked = await isOrionRequestWorkflowLocked(pool, params.requestId);
-  const ctx = await getRequestOrionContext(pool, params.requestId);
-  if (!ctx) {
-    throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+  if (locked) {
+    throw Object.assign(new Error('La solicitud está cerrada; no se puede editar la preparación.'), {
+      status: 403,
+    });
   }
 
   let state: OrionSignatureState | null = null;
@@ -1719,29 +1811,36 @@ export async function assertUserCanEditOrionPreparation(
     }
   }
 
-  const allowed = canEditOrionPreparation({
-    canManage,
-    workflowLocked: locked,
-    state,
-    currentUserEmail: params.userEmail,
-    currentUserId: params.userId,
-    createdByEmail: ctx.requester_email,
-    requesterId: ctx.id_requester,
-  });
-
-  if (!allowed) {
+  if (hasAnyCompletedOrionSignature(state)) {
     throw Object.assign(
       new Error(
-        'Solo quien tiene permiso Preparar firma puede editar el documento, firmantes o posiciones mientras la solicitud esté abierta y nadie haya firmado.'
+        'Ya hay firmas en este documento: no se pueden cambiar firmantes ni posiciones. Puede usar Invitar / URL de firma para los pendientes.'
       ),
       { status: 403 }
     );
   }
 
+  const allowed = canEditOrionPreparation({
+    canManage: true,
+    workflowLocked: locked,
+    state,
+    isFlowResponsible: true,
+  });
+
+  if (!allowed) {
+    throw Object.assign(
+      new Error(
+        'No se puede editar la preparación del documento en el estado actual.'
+      ),
+      { status: 403 }
+    );
+  }
+
+  void actorId;
   return { ctx, state };
 }
 
-/** Marca un PDF como para firmar o solo ver (permiso Preparar). */
+/** Marca un PDF como para firmar o solo ver (preparador documento del flujo + permiso Preparar). */
 export async function setOrionDocumentSignatureIntent(
   pool: SqlPool,
   params: {
@@ -1781,6 +1880,25 @@ export async function setOrionDocumentSignatureIntent(
   const locked = await isOrionRequestWorkflowLocked(pool, params.requestId);
   if (locked) {
     throw Object.assign(new Error('La solicitud está cerrada'), { status: 403 });
+  }
+
+  const ctx = await getRequestOrionContext(pool, params.requestId);
+  if (!ctx) {
+    throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+  }
+
+  const isFlowResponsible = await userIsOrionFlowSignatureResponsible(
+    pool,
+    params.requestId,
+    params.userId
+  );
+  if (!isFlowResponsible) {
+    throw Object.assign(
+      new Error(
+        'Solo un preparador documento asignado al flujo puede marcar el documento como “Para firmar” o “Solo ver”.'
+      ),
+      { status: 403 }
+    );
   }
 
   const { field, bag: loadedBag } = await loadOrionFormBagEnsured(pool, params.requestId);

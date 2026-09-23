@@ -342,7 +342,12 @@ export default function OrionAttachmentTableRow({
             </Tooltip>
           ) : d.enabled ? (
             <Tooltip
-              label='Solo ver · OneDrive SynerLink'
+              label={
+                d.intentLockedReason ||
+                'Solo ver · OneDrive SynerLink'
+              }
+              multiline
+              maw={280}
               withArrow
             >
               <Badge
