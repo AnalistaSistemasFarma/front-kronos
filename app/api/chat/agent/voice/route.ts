@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 export async function GET(request: Request) {
   const agent = await authenticateAgent(request);
   if (!agent || agent.code !== 'duo') return unauthorized();
-  return jsonNoStore(pollVoiceCalls(agent.idAgent));
+  return jsonNoStore(await pollVoiceCalls(agent.idAgent));
 }
 export async function POST(request: Request) {
   const agent = await authenticateAgent(request);
@@ -30,5 +30,5 @@ export async function POST(request: Request) {
     }
   }
   if (body.action !== undefined) return jsonNoStore({ error: 'Acción inválida.' }, { status: 400 });
-  return jsonNoStore({ ok: answerVoiceCall(agent.idAgent, body.callId, body.sdp) });
+  return jsonNoStore({ ok: await answerVoiceCall(agent.idAgent, body.callId, body.sdp) });
 }

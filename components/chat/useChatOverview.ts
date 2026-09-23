@@ -115,6 +115,12 @@ export function useChatOverview(): ChatOverview {
   const accessAbort = useRef<AbortController | null>(null);
   const listAbort = useRef<AbortController | null>(null);
   const inFlight = useRef(false);
+  // Última respuesta serializada: el sondeo de 30s trae casi siempre lo mismo
+  // (nada nuevo que leer), y sin esto cada vuelta reemplazaba `conversations`
+  // por un arreglo nuevo con el mismo contenido, disparando un re-render de
+  // TODA la página de chat (barra de avatares, lista, no leídos) cada 30s
+  // aunque no hubiera cambiado nada.
+  const lastConversationsJson = useRef<string>(JSON.stringify(inicial?.conversations ?? []));
 
   const fetchAccess = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -152,6 +158,9 @@ export function useChatOverview(): ChatOverview {
       );
       if (controller.signal.aborted || !data) return;
       const lista = data.conversations ?? [];
+      const listaJson = JSON.stringify(lista);
+      if (listaJson === lastConversationsJson.current) return;
+      lastConversationsJson.current = listaJson;
       setConversations(lista);
       escribirCache(email, { conversations: lista });
     } catch (err) {
@@ -176,6 +185,7 @@ export function useChatOverview(): ChatOverview {
       cache = null;
       setAccess(null);
       setConversations([]);
+      lastConversationsJson.current = JSON.stringify([]);
       return;
     }
 

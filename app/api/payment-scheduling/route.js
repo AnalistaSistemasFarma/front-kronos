@@ -184,7 +184,9 @@ export async function GET(req) {
         c.company,
         rg.created_at,
         rg.id_requester,
-        uc.name;
+        uc.name
+
+        ORDER BY trg.id DESC;
 
     `;
 

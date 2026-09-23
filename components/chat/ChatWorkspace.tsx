@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { useMediaQuery } from '@mantine/hooks';
@@ -41,10 +42,21 @@ import {
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import { EsqueletoPantallaChat } from './ChatSkeletons';
-import AgentDetailModal from './AgentDetailModal';
-import ChatBroadcastModal from './ChatBroadcastModal';
-import ChatGroupModal from './ChatGroupModal';
 import ChatThread from './ChatThread';
+
+/*
+ * Los tres cuadros (detalle de agente, mensaje masivo, grupo nuevo) quedan
+ * SIEMPRE montados en el árbol —los controla su propio prop `abierto`/
+ * `opened`, no un `{condicion && <Modal/>}`— para no perder la animación de
+ * cierre. Cargarlos con `next/dynamic` (`ssr:false`) no cambia eso: solo saca
+ * sus ~800 líneas del bundle que el navegador tiene que parsear e hidratar
+ * ANTES de que el campo de texto responda. En un iPhone con red móvil, ese
+ * trabajo de JS que nadie pidió todavía es justo lo que se siente como
+ * "lento" al abrir el chat.
+ */
+const AgentDetailModal = dynamic(() => import('./AgentDetailModal'), { ssr: false });
+const ChatBroadcastModal = dynamic(() => import('./ChatBroadcastModal'), { ssr: false });
+const ChatGroupModal = dynamic(() => import('./ChatGroupModal'), { ssr: false });
 import { useChatOverview } from './useChatOverview';
 import {
   describeAgentStatus,
