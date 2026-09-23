@@ -77,6 +77,11 @@ import {
   rememberPendingAttachment,
   removeFromAttachmentCache,
 } from '../../../../../lib/attachments/pendingOptimistic';
+import {
+  TABLE_FIELD_TYPE,
+  parseTableConfig,
+  parseTableValue,
+} from '../../../../../lib/requests-general/tableField';
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
 import { allSlotsCompletedForEmail, getCurrentPendingSigner, isSignerCompleted } from '../../../../../lib/orion/signerStatus';
 import {
@@ -2055,6 +2060,86 @@ function ViewRequestPage() {
             </Card>
           </div>
         </div>
+
+        {requestFormValues.filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE).length > 0 && (
+          <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
+            <Title order={3} mb='md' className='flex items-center gap-2'>
+              <IconTag size={20} />
+              Información adicional
+            </Title>
+            <Grid>
+              {requestFormValues
+                .filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE)
+                .map((fv, fvIndex) => {
+                if (fv.field_type === TABLE_FIELD_TYPE) {
+                  const columns = parseTableConfig(fv.config_json).columns;
+                  const rows = parseTableValue(fv.value_text).rows;
+                  const renderCellValue = (value: unknown) => {
+                    if (value === true) return 'Sí';
+                    if (value === false) return 'No';
+                    if (value === undefined || value === null || value === '') return '—';
+                    return String(value);
+                  };
+                  return (
+                    <Grid.Col
+                      span={12}
+                      key={`rfv-${fvIndex}-${fv.id ?? 'x'}-${fv.id_form_field ?? 'y'}`}
+                    >
+                      <Card withBorder radius='md' p='md'>
+                        <Text size='xs' c='dimmed' fw={500} className='uppercase' mb='xs'>
+                          {fv.field_label}
+                        </Text>
+                        {columns.length === 0 || rows.length === 0 ? (
+                          <Text size='sm' c='dimmed'>
+                            Sin datos.
+                          </Text>
+                        ) : (
+                          <ScrollArea>
+                            <Table withTableBorder withColumnBorders striped>
+                              <Table.Thead>
+                                <Table.Tr>
+                                  {columns.map((col) => (
+                                    <Table.Th key={col.key}>{col.label}</Table.Th>
+                                  ))}
+                                </Table.Tr>
+                              </Table.Thead>
+                              <Table.Tbody>
+                                {rows.map((row, ri) => (
+                                  <Table.Tr key={ri}>
+                                    {columns.map((col) => (
+                                      <Table.Td key={col.key}>
+                                        {renderCellValue(row[col.key])}
+                                      </Table.Td>
+                                    ))}
+                                  </Table.Tr>
+                                ))}
+                              </Table.Tbody>
+                            </Table>
+                          </ScrollArea>
+                        )}
+                      </Card>
+                    </Grid.Col>
+                  );
+                }
+                return (
+                  <Grid.Col
+                    span={{ base: 12, md: 6 }}
+                    key={`rfv-sm-${fvIndex}-${fv.id ?? 'x'}-${fv.id_form_field ?? 'y'}`}
+                  >
+                    <Card withBorder radius='md' p='md'>
+                      <Text size='xs' c='dimmed' fw={500} className='uppercase'>
+                        {fv.field_label}
+                      </Text>
+                      <Text size='md' fw={600} mt={4}>
+                        {fv.option_label || fv.value_text || '—'}
+                      </Text>
+                    </Card>
+                  </Grid.Col>
+                );
+              })}
+            </Grid>
+          </Card>
+        )}
 
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
           <Group justify='space-between' align='center' mb='md' wrap='wrap'>
