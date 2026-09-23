@@ -9,11 +9,21 @@ function normalizeEmail(email?: string | null): string {
     .toLowerCase();
 }
 
+/**
+ * Secreto HMAC de los tokens públicos `/firma/externa/[token]`.
+ * Preferir ORION_INVITE_SECRET; si no, NEXTAUTH_SECRET (mismo criterio que el portal).
+ * Sin fallback literario: un secreto committeado permitiría forjar invitaciones (CWE-798).
+ */
 function inviteSecret(): string {
-  return (
-    String(process.env.ORION_INVITE_SECRET || process.env.NEXTAUTH_SECRET || 'synerlink-orion-invite')
-      .trim() || 'synerlink-orion-invite'
-  );
+  const s = String(
+    process.env.ORION_INVITE_SECRET || process.env.NEXTAUTH_SECRET || ''
+  ).trim();
+  if (!s) {
+    throw new Error(
+      'Falta ORION_INVITE_SECRET o NEXTAUTH_SECRET: no se pueden firmar invitaciones Orion.'
+    );
+  }
+  return s;
 }
 
 export type InviteTokenPayload = {
