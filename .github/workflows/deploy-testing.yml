@@ -126,7 +126,14 @@ jobs:
           $ErrorActionPreference = "Stop"
           Set-Location $env:PROJECT_DIR
           npm run build
-          if ($LASTEXITCODE -ne 0) { throw "npm run build (front) fallo" }
+          if ($LASTEXITCODE -ne 0) {
+            # Reintento unico: mismo flakiness de Turbopack/filesystem lento
+            # visto en el deploy de produccion del 2026-09-22 (ver main.yml).
+            Write-Host "fallo el primer intento de build; espero y reintento una vez"
+            Start-Sleep -Seconds 5
+            npm run build
+            if ($LASTEXITCODE -ne 0) { throw "npm run build (front) fallo tras reintento" }
+          }
 
       - name: Build MCP
         if: env.STALE_RUN != 'true'

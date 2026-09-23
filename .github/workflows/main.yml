@@ -102,7 +102,17 @@ jobs:
         run: |
           cd /d %PROJECT_DIR% || exit /b 1
           echo === next build ===
+          call npm run build && goto :build_ok
+          rem Reintento unico: el 2026-09-22 el build fallo con
+          rem TurbopackInternalError ("failed to receive message... deadline
+          rem has elapsed") precedido de "Slow filesystem detected" en este
+          rem runner Windows -- flakiness del worker, no un error de codigo
+          rem (el mismo commit habia compilado limpio en el CI de Linux).
+          rem Antes de tumbar el deploy completo, reintentamos una vez.
+          echo    fallo el primer intento de build; espero y reintento una vez
+          timeout /t 5 /nobreak >nul
           call npm run build || exit /b 1
+          :build_ok
 
       - name: Levantar o recargar GSS-Front
         shell: cmd
