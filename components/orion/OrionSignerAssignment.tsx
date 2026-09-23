@@ -7,15 +7,18 @@ import {
   Box,
   Checkbox,
   Group,
+  Loader,
   NumberInput,
   Paper,
+  SegmentedControl,
   Stack,
   Text,
   ThemeIcon,
   Tooltip,
 } from '@mantine/core';
 import { IconArrowDown, IconArrowUp, IconCheck, IconClock, IconX } from '@tabler/icons-react';
-import type { OrionParticipant } from '../../lib/orion/participants';
+import { useCallback, useEffect, useState } from 'react';
+import type { OrionParticipant, OrionParticipantType } from '../../lib/orion/participants';
 import { parseUserOptionLabel, type OrionUserOption } from '../../lib/orion/participants';
 
 type Props = {
@@ -27,12 +30,21 @@ type Props = {
   currentUserEmail?: string;
   currentUserName?: string;
   signerStatuses?: Record<string, string>;
+  companyId?: number | null;
+  canUseFingerprint?: boolean;
   onSignerCountChange: (count: number) => void;
   onSequentialChange: (value: boolean) => void;
   onIncludeSelfChange: (value: boolean) => void;
-  onAssign: (order: number, email: string, name: string) => void;
+  onAssign: (
+    order: number,
+    email: string,
+    name: string,
+    meta?: { type?: OrionParticipantType; cardCode?: string | null }
+  ) => void;
   onClear: (order: number) => void;
   onReorder?: (order: number, direction: 'up' | 'down') => void;
+  onToggleNotifyByEmail?: (order: number, value: boolean) => void;
+  onToggleRequireFingerprint?: (order: number, value: boolean) => void;
   readOnly?: boolean;
 };
 
@@ -52,6 +64,131 @@ function statusFor(
   return { label: 'Sin asignar', color: 'gray', done: false };
 }
 
+type PartnerOption = {
+  value: string;
+  label: string;
+  cardCode: string;
+  cardName: string;
+  email: string;
+};
+
+function PartnerSearch({
+  companyId,
+  disabled,
+  onPick,
+}: {
+  companyId?: number | null;
+  disabled?: boolean;
+  onPick: (p: PartnerOption) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [options, setOptions] = useState<PartnerOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!companyId || q.trim().length < 2) {
+      setOptions([]);
+      setSearchError(null);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      setLoading(true);
+      setSearchError(null);
+      void fetch(
+        `/api/integrations/orion/external-partners?companyId=${companyId}&q=${encodeURIComponent(q.trim())}`
+      )
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (cancelled) return;
+          if (!res.ok) {
+            setOptions([]);
+            setSearchError(
+              typeof data.error === 'string' ? data.error : 'No se pudo buscar socios'
+            );
+            return;
+          }
+          const raw = Array.isArray(data.options) ? data.options : [];
+          // Valor único por CardCode (evita crash de Autocomplete con emails duplicados/vacíos).
+          const seen = new Set<string>();
+          const next: PartnerOption[] = [];
+          for (const row of raw as PartnerOption[]) {
+            const cardCode = String(row?.cardCode || '').trim();
+            const email = String(row?.email || '')
+              .trim()
+              .toLowerCase();
+            if (!cardCode || !email || !email.includes('@') || seen.has(cardCode)) continue;
+            seen.add(cardCode);
+            next.push({
+              value: cardCode,
+              label: String(row.label || `${row.cardName || cardCode} <${email}>`),
+              cardCode,
+              cardName: String(row.cardName || cardCode),
+              email,
+            });
+          }
+          setOptions(next);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setOptions([]);
+            setSearchError('Error de red al buscar socios');
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, 280);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [companyId, q]);
+
+  return (
+    <Stack gap={4}>
+      <Autocomplete
+        placeholder={
+          companyId
+            ? 'Buscar socio por nombre, código o correo…'
+            : 'Falta empresa de la solicitud para buscar socios'
+        }
+        data={options.map((o) => ({ value: o.cardCode, label: o.label }))}
+        value={q}
+        onChange={setQ}
+        disabled={disabled || !companyId}
+        limit={12}
+        rightSection={loading ? <Loader size={14} /> : null}
+        onOptionSubmit={(value) => {
+          try {
+            const match = options.find(
+              (o) => o.cardCode === value || o.email === value || o.value === value
+            );
+            if (!match?.email) return;
+            onPick(match);
+            setQ('');
+            setOptions([]);
+          } catch (err) {
+            console.error('[orion] PartnerSearch onOptionSubmit', err);
+            setSearchError('No se pudo asignar este socio. Intente de nuevo.');
+          }
+        }}
+      />
+      {searchError ? (
+        <Text size='xs' c='red'>
+          {searchError}
+        </Text>
+      ) : null}
+      {!loading && q.trim().length >= 2 && options.length === 0 && !searchError ? (
+        <Text size='xs' c='dimmed'>
+          Sin resultados con correo válido en SAP.
+        </Text>
+      ) : null}
+    </Stack>
+  );
+}
+
 export default function OrionSignerAssignment({
   participants,
   signerCount,
@@ -61,14 +198,20 @@ export default function OrionSignerAssignment({
   currentUserEmail,
   currentUserName,
   signerStatuses = {},
+  companyId,
+  canUseFingerprint = false,
   onSignerCountChange,
   onSequentialChange,
   onIncludeSelfChange,
   onAssign,
   onClear,
   onReorder,
+  onToggleNotifyByEmail,
+  onToggleRequireFingerprint,
   readOnly = false,
 }: Props) {
+  const [slotSource, setSlotSource] = useState<Record<number, 'internal' | 'external'>>({});
+
   const slots = Array.from({ length: signerCount }, (_, idx) => {
     const order = idx + 1;
     return (
@@ -77,9 +220,20 @@ export default function OrionSignerAssignment({
         email: '',
         name: '',
         role: 'Firmante' as const,
+        type: 'internal' as const,
       }
     );
   });
+
+  const sourceFor = useCallback(
+    (person: OrionParticipant) => {
+      if (person.email) {
+        return person.type === 'external' ? 'external' : 'internal';
+      }
+      return slotSource[person.order] || 'internal';
+    },
+    [slotSource]
+  );
 
   return (
     <Stack gap='md'>
@@ -120,8 +274,7 @@ export default function OrionSignerAssignment({
           Asignar firmantes
         </Text>
         <Text size='xs' c='dimmed' mb='md'>
-          Busque cada firmante por nombre o correo. La misma persona puede firmar más de una vez
-          (distintos turnos). Use las flechas para cambiar el orden. Plazo por turno: 24 horas.
+          Usuarios SynerLink o socios de negocio (externos). Plazo por turno: 24 horas.
         </Text>
 
         <Stack gap='sm'>
@@ -129,7 +282,7 @@ export default function OrionSignerAssignment({
             const status = statusFor(person, signerStatuses);
             const canMoveUp = Boolean(onReorder) && idx > 0;
             const canMoveDown = Boolean(onReorder) && idx < slots.length - 1;
-            const options = availableUsers;
+            const source = sourceFor(person);
 
             return (
               <Paper
@@ -150,11 +303,17 @@ export default function OrionSignerAssignment({
                     {person.email ? (
                       <Group justify='space-between' wrap='nowrap' gap='xs' mb={6}>
                         <Box style={{ minWidth: 0 }}>
-                          <Text size='sm' fw={700} lineClamp={1}>
-                            {person.name}
-                          </Text>
+                          <Group gap={6} mb={2}>
+                            <Text size='sm' fw={700} lineClamp={1}>
+                              {person.name}
+                            </Text>
+                            <Badge size='xs' variant='light' color={person.type === 'external' ? 'orange' : 'blue'}>
+                              {person.type === 'external' ? 'Externo' : 'Interno'}
+                            </Badge>
+                          </Group>
                           <Text size='xs' c='dimmed' lineClamp={1}>
                             {person.email}
+                            {person.cardCode ? ` · ${person.cardCode}` : ''}
                           </Text>
                         </Box>
                         <Group gap={6} style={{ flexShrink: 0 }}>
@@ -180,43 +339,91 @@ export default function OrionSignerAssignment({
                         </Group>
                       </Group>
                     ) : (
-                      <Autocomplete
-                        placeholder='Buscar firmante por nombre o correo…'
-                        data={options}
-                        limit={12}
-                        disabled={readOnly}
-                        onOptionSubmit={(value) => {
-                          const match = availableUsers.find(
-                            (u) => u.value.toLowerCase() === value.toLowerCase()
-                          );
-                          if (!match) return;
-                          onAssign(
-                            person.order,
-                            match.value,
-                            parseUserOptionLabel(match.label)
-                          );
-                        }}
-                        onChange={(value) => {
-                          const match = availableUsers.find(
-                            (u) =>
-                              u.value.toLowerCase() === value.toLowerCase() ||
-                              u.label.toLowerCase() === value.toLowerCase()
-                          );
-                          if (match) {
-                            onAssign(
-                              person.order,
-                              match.value,
-                              parseUserOptionLabel(match.label)
-                            );
+                      <Stack gap='xs'>
+                        <SegmentedControl
+                          size='xs'
+                          value={source}
+                          disabled={readOnly}
+                          onChange={(v) =>
+                            setSlotSource((prev) => ({
+                              ...prev,
+                              [person.order]: v as 'internal' | 'external',
+                            }))
                           }
-                        }}
-                      />
+                          data={[
+                            { label: 'Usuario SynerLink', value: 'internal' },
+                            { label: 'Socio de negocio', value: 'external' },
+                          ]}
+                        />
+                        {source === 'external' ? (
+                          <PartnerSearch
+                            companyId={companyId}
+                            disabled={readOnly}
+                            onPick={(p) =>
+                              onAssign(person.order, p.email, p.cardName, {
+                                type: 'external',
+                                cardCode: p.cardCode,
+                              })
+                            }
+                          />
+                        ) : (
+                          <Autocomplete
+                            placeholder='Buscar firmante por nombre o correo…'
+                            data={availableUsers}
+                            limit={12}
+                            disabled={readOnly}
+                            onOptionSubmit={(value) => {
+                              const match = availableUsers.find(
+                                (u) => u.value.toLowerCase() === value.toLowerCase()
+                              );
+                              if (!match) return;
+                              onAssign(
+                                person.order,
+                                match.value,
+                                parseUserOptionLabel(match.label),
+                                { type: 'internal', cardCode: null }
+                              );
+                            }}
+                            onChange={(value) => {
+                              const match = availableUsers.find(
+                                (u) =>
+                                  u.value.toLowerCase() === value.toLowerCase() ||
+                                  u.label.toLowerCase() === value.toLowerCase()
+                              );
+                              if (match) {
+                                onAssign(
+                                  person.order,
+                                  match.value,
+                                  parseUserOptionLabel(match.label),
+                                  { type: 'internal', cardCode: null }
+                                );
+                              }
+                            }}
+                          />
+                        )}
+                      </Stack>
                     )}
                     {sequential && (
                       <Badge size='xs' variant='outline' color='gray' mt={8}>
                         Paso {person.order} en la secuencia
                       </Badge>
                     )}
+                    {person.email && canUseFingerprint ? (
+                      <Checkbox
+                        size='xs'
+                        mt='sm'
+                        label='Requiere huella dactilar'
+                        description='Coloque una caja de huella para este firmante en el PDF.'
+                        checked={Boolean(person.requireFingerprint)}
+                        disabled={readOnly || !onToggleRequireFingerprint}
+                        onChange={(e) =>
+                          onToggleRequireFingerprint?.(
+                            person.order,
+                            e.currentTarget.checked
+                          )
+                        }
+                      />
+                    ) : null}
                   </Box>
 
                   {onReorder && slots.length > 1 && (
@@ -225,7 +432,7 @@ export default function OrionSignerAssignment({
                         <ActionIcon
                           size='sm'
                           variant='subtle'
-                          disabled={!canMoveUp}
+                          disabled={!canMoveUp || readOnly}
                           onClick={() => onReorder(person.order, 'up')}
                         >
                           <IconArrowUp size={14} />
@@ -235,7 +442,7 @@ export default function OrionSignerAssignment({
                         <ActionIcon
                           size='sm'
                           variant='subtle'
-                          disabled={!canMoveDown}
+                          disabled={!canMoveDown || readOnly}
                           onClick={() => onReorder(person.order, 'down')}
                         >
                           <IconArrowDown size={14} />

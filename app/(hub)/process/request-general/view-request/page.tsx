@@ -42,6 +42,7 @@ import {
   Table,
   UnstyledButton,
   Tooltip,
+  Progress,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -112,6 +113,7 @@ import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttach
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import TableFieldInput from '../create-request/TableFieldInput';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
+import { partitionTasksForDisplay } from '@/lib/orion/taskProgress';
 
 interface Request {
   id: number;
@@ -690,6 +692,22 @@ function ViewRequestPage() {
       session?.user?.email,
       taskRQ,
     ]
+  );
+
+  const { businessTasks: modalBusinessTasks, orionByFile: modalOrionByFile } = useMemo(
+    () => partitionTasksForDisplay(taskRQ),
+    [taskRQ]
+  );
+
+  const modalTimelineTasks = useMemo(
+    () =>
+      [...modalBusinessTasks].sort((a, b) => {
+        const da = a.display_order ?? 0;
+        const db = b.display_order ?? 0;
+        if (da !== db) return da - db;
+        return a.id_task - b.id_task;
+      }),
+    [modalBusinessTasks]
   );
 
   const startEditingField = (fv: (typeof requestFormValues)[number]) => {
@@ -2338,6 +2356,7 @@ function ViewRequestPage() {
                 participants={orionParticipants}
                 availableUsers={availableUsers}
                 currentUserName={session?.user?.name ?? undefined}
+                companyId={request?.id_company ?? null}
                 onDocumentsChange={handleOrionDocumentsChange}
                 workflowLocked={orionWorkflowLocked}
                 autoOpenFileId={deepLinkFileId}
@@ -3286,15 +3305,65 @@ function ViewRequestPage() {
             </div>
           ) : taskRQ.length > 0 ? (
 <ScrollArea.Autosize mah="65vh" offsetScrollbars>
+              <Stack gap="md">
+              {modalOrionByFile.length > 0 ? (
+                <Stack gap="sm">
+                  <Text size="sm" fw={600}>
+                    Firmas por documento
+                  </Text>
+                  {modalOrionByFile.map((group) => {
+                    const firstTaskId = group.taskIds[0];
+                    const firstTask = taskRQ.find((t) => String(t.id) === String(firstTaskId));
+                    return (
+                      <Paper key={group.fileId} withBorder p="sm" radius="md">
+                        <Group justify="space-between" align="flex-start" wrap="nowrap" mb={8}>
+                          <Box style={{ flex: 1, minWidth: 0 }}>
+                            <Text fw={600} lineClamp={1}>
+                              Firma · {group.label}
+                            </Text>
+                            <Text size="xs" c="dimmed" mt={2}>
+                              {group.completedSignTasks}/{group.totalSignTasks} firmas
+                              {group.totalAuthTasks > 0
+                                ? ` · ${group.completedAuthTasks}/${group.totalAuthTasks} autorizaciones`
+                                : ''}
+                            </Text>
+                          </Box>
+                          <Badge
+                            color={group.allDone ? 'green' : 'blue'}
+                            variant="light"
+                            size="sm"
+                          >
+                            {group.allDone ? 'Resuelto' : `${group.percent}%`}
+                          </Badge>
+                        </Group>
+                        <Progress
+                          value={group.percent}
+                          color={group.allDone ? 'green' : 'blue'}
+                          size="sm"
+                          radius="xl"
+                          mb={firstTask ? 8 : 0}
+                        />
+                        {firstTask ? (
+                          <Group justify="flex-end">
+                            <ActionIcon
+                              variant="subtle"
+                              color="blue"
+                              onClick={() => handleViewTask(firstTask)}
+                              title="Ver tarea de firma"
+                            >
+                              <IconEye size={18} />
+                            </ActionIcon>
+                          </Group>
+                        ) : null}
+                      </Paper>
+                    );
+                  })}
+                </Stack>
+              ) : null}
+
+              {modalTimelineTasks.length > 0 ? (
               <Stack gap={0}>
-              {[...taskRQ]
-                .sort((a, b) => {
-                  const da = a.display_order ?? 0;
-                  const db = b.display_order ?? 0;
-                  if (da !== db) return da - db;
-                  return a.id_task - b.id_task;
-                })
-                .map((task, index, arr) => {
+              {modalTimelineTasks.map((task, index, arr) => {
                   const isLast = index === arr.length - 1;
                   const statusLower = task.status?.toLowerCase();
                   const isResolved = task.id_status === 2 || statusLower === 'resuelto';
@@ -3446,6 +3515,14 @@ function ViewRequestPage() {
                     </Flex>
                   );
                 })}
+              </Stack>
+              ) : null}
+
+              {modalOrionByFile.length === 0 && modalTimelineTasks.length === 0 ? (
+                <Text c="dimmed" ta="center">
+                  No hay tareas para mostrar
+                </Text>
+              ) : null}
               </Stack>
             </ScrollArea.Autosize>
           ) : (

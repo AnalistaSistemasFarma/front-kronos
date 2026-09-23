@@ -5,14 +5,81 @@ import type {
   OrionDocumentResponse,
 } from './types';
 
+function isLoopbackUrl(url: string): boolean {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+  } catch {
+    return /localhost|127\.0\.0\.1/i.test(url);
+  }
+}
+
+/** Base pública de Orion (nunca loopback). */
+export function getOrionPublicBaseUrl(): string | null {
+  const candidates = [
+    process.env.ORION_PUBLIC_URL,
+    process.env.ORION_EMBED_ORIGIN,
+    process.env.ORION_API_BASE_URL,
+    getOrionConfig().embedOrigin,
+    getOrionConfig().apiBaseUrl,
+  ];
+  for (const raw of candidates) {
+    const base = String(raw || '')
+      .trim()
+      .replace(/\/$/, '');
+    if (base && /^https?:\/\//i.test(base) && !isLoopbackUrl(base)) return base;
+  }
+  return null;
+}
+
+/**
+ * Origen público de SynerLink para invitaciones (nunca localhost de Origin).
+ */
+export function resolvePublicAppOrigin(requestOrigin?: string | null): string | null {
+  const candidates = [
+    process.env.NEXTAUTH_URL,
+    process.env.APP_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    requestOrigin,
+  ];
+  let loopbackFallback: string | null = null;
+  for (const raw of candidates) {
+    const base = String(raw || '')
+      .trim()
+      .replace(/\/$/, '');
+    if (!base || !/^https?:\/\//i.test(base)) continue;
+    if (isLoopbackUrl(base)) {
+      if (!loopbackFallback) loopbackFallback = base;
+      continue;
+    }
+    return base;
+  }
+  return loopbackFallback;
+}
+
 /** Convierte rutas relativas de Orion en URL absoluta usando ORION_API_BASE_URL. */
 export function resolveOrionAbsoluteUrl(urlOrPath: string | null | undefined): string | null {
   const value = String(urlOrPath || '').trim();
   if (!value) return null;
-  if (/^https?:\/\//i.test(value)) return value;
+
+  const publicBase = getOrionPublicBaseUrl();
   const { apiBaseUrl } = getOrionConfig();
-  if (!apiBaseUrl) return null;
-  return `${apiBaseUrl}${value.startsWith('/') ? value : `/${value}`}`;
+  const rewriteBase = publicBase || apiBaseUrl;
+
+  if (/^https?:\/\//i.test(value)) {
+    if (!isLoopbackUrl(value) || !rewriteBase) return value;
+    try {
+      const u = new URL(value);
+      const base = new URL(rewriteBase);
+      u.protocol = base.protocol;
+      u.host = base.host;
+      return u.toString();
+    } catch {
+      return value;
+    }
+  }
+  if (!rewriteBase) return null;
+  return `${rewriteBase}${value.startsWith('/') ? value : `/${value}`}`;
 }
 
 /** URL canónica del PDF firmado en Orion (preferida sobre signedFileUrl almacenado). */
@@ -236,6 +303,43 @@ export async function getOrionSignatureEmbedUrl(
     `/api/integrations/synerlink/embed/signature-url?email=${encoded}`,
     { method: 'GET' }
   );
+}
+
+/**
+ * Pide a Orion la URL pública de firma (`/sign/{token}`).
+ * No usar /firma/externa de SynerLink en correos.
+ */
+export async function fetchOrionSignerSignUrl(
+  orionDocumentId: string,
+  email: string,
+  signOrder?: number | null
+): Promise<{ ok: boolean; status: number; signUrl: string | null; error?: string }> {
+  const docId = String(orionDocumentId || '').trim();
+  const mail = String(email || '')
+    .trim()
+    .toLowerCase();
+  if (!docId || !mail) {
+    return { ok: false, status: 400, signUrl: null, error: 'docId y email son obligatorios' };
+  }
+  const qs = new URLSearchParams({ docId, email: mail });
+  const order = Number(signOrder);
+  if (Number.isFinite(order) && order > 0) qs.set('signOrder', String(order));
+
+  const res = await orionFetch<{ signUrl?: string; email?: string }>(
+    `/api/integrations/synerlink/embed/sign-url?${qs.toString()}`,
+    { method: 'GET' }
+  );
+  const raw = String(res.data?.signUrl || '').trim();
+  const signUrl = resolveOrionAbsoluteUrl(raw) || raw || null;
+  if (!res.ok || !signUrl) {
+    return {
+      ok: false,
+      status: res.status,
+      signUrl: null,
+      error: res.error || 'Orion no devolvió URL de firma',
+    };
+  }
+  return { ok: true, status: res.status, signUrl };
 }
 
 export async function loadOrionUserSignature(email: string) {
