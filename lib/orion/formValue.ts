@@ -1,3 +1,4 @@
+import { normalizeAttachmentStem } from './attachmentList';
 import { ORION_LEGACY_FILE_ID } from './config';
 import type {
   OrionSignatureBagBag,
@@ -327,6 +328,33 @@ export function resolveOrionDocumentForAttachment(params: {
       .toLowerCase();
     if (!name || !legacyName || name === legacyName || entries.length === 1) {
       return { ...legacy, fileId: fileId || ORION_LEGACY_FILE_ID };
+    }
+  }
+
+  // Copia de versión (X-firmado.pdf) tras liberar el original: mismo stem → mismo doc Orion.
+  // Solo si hay exactamente un candidato (no cruzar PDFs distintos).
+  const lookupStem = normalizeAttachmentStem(params.fileName);
+  const isVersionCopy = /-(firmado|original|parcial)(\s*\(\d+\))?\.pdf$/i.test(
+    String(params.fileName || '').trim()
+  );
+  if (lookupStem && isVersionCopy) {
+    const stemMatches = entries.filter(([, doc]) => {
+      if (!doc) return false;
+      if (
+        !(
+          doc.orionDocumentId ||
+          (doc.signers?.length ?? 0) > 0 ||
+          doc.status ||
+          doc.signatureIntent
+        )
+      ) {
+        return false;
+      }
+      return normalizeAttachmentStem(doc.fileName) === lookupStem;
+    });
+    if (stemMatches.length === 1) {
+      const [, doc] = stemMatches[0];
+      return { ...doc, fileId: fileId || doc.fileId };
     }
   }
 

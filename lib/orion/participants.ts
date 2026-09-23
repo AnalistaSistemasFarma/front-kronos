@@ -77,7 +77,7 @@ export function mergeParticipantSources(
           type,
           cardCode: s.cardCode ?? null,
           notifyByEmail:
-            s.notifyByEmail == null ? type === 'external' : Boolean(s.notifyByEmail),
+            s.notifyByEmail == null ? true : Boolean(s.notifyByEmail),
           requireFingerprint: Boolean(s.requireFingerprint),
         };
       });
@@ -93,7 +93,7 @@ export function emptySignerSlot(order: number): OrionParticipant {
     role: 'Firmante',
     type: 'internal',
     cardCode: null,
-    notifyByEmail: false,
+    notifyByEmail: true,
     requireFingerprint: false,
   };
 }

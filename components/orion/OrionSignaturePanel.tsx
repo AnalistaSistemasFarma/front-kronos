@@ -54,7 +54,7 @@ type Props = {
   participants?: OrionParticipant[];
   availableUsers?: OrionUserOption[];
   currentUserName?: string;
-  /** Empresa de la solicitud (socios externos). */
+  /** Empresa de la solicitud (búsqueda de socios externos). */
   companyId?: number | null;
   onDocumentsChange?: (documents: Record<string, OrionSignatureState>) => void;
   workflowLocked?: boolean;
@@ -1840,17 +1840,18 @@ export default function OrionSignaturePanel({
               ? 'Aceptar y firmar documento'
               : 'Documento'
         }
-        size='xl'
+        size='100%'
         centered
         zIndex={300}
         trapFocus={!identityModalOpen && !signatureModalOpen && !returnModalOpen}
-        padding='lg'
+        padding='md'
         overlayProps={{ blur: 3, backgroundOpacity: 0.45 }}
         styles={{
           content: {
-            maxWidth: 1100,
-            width: '96vw',
-            maxHeight: '92vh',
+            maxWidth: 'min(1600px, 98vw)',
+            width: '98vw',
+            height: '96vh',
+            maxHeight: '96vh',
             display: 'flex',
             flexDirection: 'column',
             background: 'var(--app-surface)',
@@ -1858,6 +1859,7 @@ export default function OrionSignaturePanel({
           header: {
             background: 'var(--app-surface)',
             borderBottom: '1px solid var(--app-border)',
+            flexShrink: 0,
           },
           title: {
             fontWeight: 700,
@@ -1868,7 +1870,7 @@ export default function OrionSignaturePanel({
             minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
-            overflow: 'auto',
+            overflow: 'hidden',
             background: 'var(--app-surface)',
           },
         }}
@@ -1964,6 +1966,7 @@ export default function OrionSignaturePanel({
             </Text>
           </Group>
         ) : useNativeEditor && state.orionDocumentId && activeFile ? (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <OrionDocumentEditor
             requestId={requestId}
             documentId={state.orionDocumentId}
@@ -1992,6 +1995,7 @@ export default function OrionSignaturePanel({
             initialStep={editorInitialStep}
             openNonce={editorOpenNonce}
           />
+          </div>
         ) : signOnlyMode &&
           (signerModalIntent === 'view' || signerModalIntent === 'sign') &&
           (signerPdfUrl || signerPdfFallback) ? (

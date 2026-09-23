@@ -38,6 +38,10 @@ import {
   ORION_FIRMA_SIGN_URL,
 } from '../access';
 import { isFirmaAuthorizationItem } from '../signerAuthMarkers';
+import {
+  mergeOneDriveWithOrionDocuments,
+  normalizeAttachmentStem,
+} from '../attachmentList';
 
 describe('orion access subprocesses', () => {
   it('detecta Preparar (prepare y legacy manage)', () => {
@@ -497,12 +501,31 @@ describe('orion formValue', () => {
     };
     const resolved = resolveOrionDocumentForAttachment({
       fileId: 'file-b',
-      fileName: 'Documento escaneado.pdf',
+      fileName: 'otro-contrato.pdf',
       documents,
     });
     expect(resolved.orionDocumentId).toBeUndefined();
     expect(resolved.status).toBeUndefined();
     expect(resolved.signers).toBeUndefined();
+  });
+
+  it('adopta estado Orion en copia *-firmado con otro fileId (mismo stem)', () => {
+    const documents = {
+      'file-orig': {
+        orionDocumentId: 'doc-1',
+        status: 'FIRMADO',
+        fileName: 'contrato_ejemplo (1).pdf',
+        fileId: 'file-orig',
+        signedFileUrl: 'https://example.com/signed.pdf',
+      },
+    };
+    const resolved = resolveOrionDocumentForAttachment({
+      fileId: 'file-firmado-copy',
+      fileName: 'contrato_ejemplo (1)-firmado.pdf',
+      documents,
+    });
+    expect(resolved.orionDocumentId).toBe('doc-1');
+    expect(resolved.status).toBe('FIRMADO');
   });
 
   it('adopta solo el documento legacy cuando no hay clave por fileId', () => {
@@ -854,6 +877,70 @@ describe('isFirmaAuthorizationItem', () => {
   });
 });
 
+describe('orion attachmentList', () => {
+  it('normaliza stem quitando -firmado/-original/-parcial', () => {
+    expect(normalizeAttachmentStem('contrato_ejemplo (1)-firmado.pdf')).toBe(
+      'contrato_ejemplo (1)'
+    );
+    expect(normalizeAttachmentStem('contrato_ejemplo (1).pdf')).toBe('contrato_ejemplo (1)');
+    expect(normalizeAttachmentStem('doc-parcial (2).pdf')).toBe('doc');
+  });
+
+  it('oculta *-firmado de OneDrive cuando el bag Orion ya es dueño del documento', () => {
+    const merged = mergeOneDriveWithOrionDocuments(
+      [
+        {
+          id: 'od-firmado',
+          name: 'contrato_ejemplo (1)-firmado.pdf',
+          size: 10,
+        },
+        { id: 'od-firmaas', name: 'firmaas.pdf', size: 20 },
+      ],
+      {
+        'od-orig': {
+          orionDocumentId: 'orion-1',
+          status: 'FIRMADO',
+          fileId: 'od-orig',
+          fileName: 'contrato_ejemplo (1).pdf',
+          signedFileUrl: 'https://example.com/signed.pdf',
+        },
+        'od-firmaas': {
+          orionDocumentId: 'orion-2',
+          status: 'EN_PROCESO',
+          fileId: 'od-firmaas',
+          fileName: 'firmaas.pdf',
+        },
+      }
+    );
+
+    expect(merged.map((f) => f.name)).toEqual([
+      'contrato_ejemplo (1).pdf',
+      'firmaas.pdf',
+    ]);
+    expect(merged.find((f) => f.name.includes('contrato'))?.fromOrionBag).toBe(true);
+    expect(merged.find((f) => f.name === 'firmaas.pdf')?.fromOrionBag).toBeUndefined();
+  });
+
+  it('ordena por nombre y no duplica si OneDrive aún tiene el original', () => {
+    const merged = mergeOneDriveWithOrionDocuments(
+      [
+        { id: 'b', name: 'zeta.pdf' },
+        { id: 'a', name: 'alfa.pdf' },
+        { id: 'a-firmado', name: 'alfa-firmado.pdf' },
+      ],
+      {
+        a: {
+          orionDocumentId: 'd1',
+          status: 'FIRMADO',
+          fileId: 'a',
+          fileName: 'alfa.pdf',
+          signedFileUrl: 'https://example.com/a.pdf',
+        },
+      }
+    );
+    expect(merged.map((f) => f.name)).toEqual(['alfa.pdf', 'zeta.pdf']);
+  });
+});
 
 describe('orion fingerprint legacy migration', () => {
   it('limpia huella global en docs actuales sin política per-signer', () => {
