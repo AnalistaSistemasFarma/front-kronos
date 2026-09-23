@@ -5,9 +5,7 @@ import path from 'node:path';
 /**
  * Empresas configuradas para el módulo de Balances.
  *
- * Solo Farmalogica está habilitada en este momento. Aunque el SQL histórico de
- * OLP y GSS permanece versionado, esas empresas quedan bloqueadas desde el
- * servidor hasta que se complete y valide su configuración operativa propia.
+ * Habilitadas: Farmalogica, OLP y GSS.
  * Ryan/Abamia/Kelab/Meditrack siguen fuera del módulo porque todavía no existe
  * SQL de balance validado para ellas.
  *
@@ -42,8 +40,7 @@ export const BALANCE_COMPANIES: readonly BalanceCompanyConfig[] = [
     displayName: 'One Latam Pharma',
     balanceSqlFile: 'olp-balance.sql',
     acumuladoSqlFile: 'olp-acumulado.sql',
-    enabled: false,
-    disabledReason: 'Pendiente de configuración y validación operativa exclusiva para OLP.',
+    enabled: true,
   },
   {
     idCompany: 8,
@@ -51,8 +48,7 @@ export const BALANCE_COMPANIES: readonly BalanceCompanyConfig[] = [
     displayName: 'GSS',
     balanceSqlFile: 'gss-balance.sql',
     acumuladoSqlFile: 'gss-acumulado.sql',
-    enabled: false,
-    disabledReason: 'Pendiente de configuración y validación operativa exclusiva para GSS.',
+    enabled: true,
   },
 ];
 

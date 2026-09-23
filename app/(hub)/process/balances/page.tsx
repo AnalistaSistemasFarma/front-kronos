@@ -18,8 +18,7 @@ import { IconAlertTriangle, IconPlayerPlay } from '@tabler/icons-react';
 /**
  * Balances — Sprint 2.
  *
- * Solo Farmalogica está habilitada para la salida inicial. OLP y GSS se
- * conservan bloqueadas en el servidor hasta completar su activación propia.
+ * Habilitadas: Farmalogica, OLP y GSS (ver lib/balances/companies.ts).
  * Cada botón dispara /api/balances/submit-run y la corrida continúa en
  * background. El historial se consulta cada 2 segundos mientras hay una
  * corrida activa, para reflejar running/success/failed sin bloquear el request.
