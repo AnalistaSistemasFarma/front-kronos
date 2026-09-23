@@ -5,13 +5,11 @@ import { Box, Loader, ScrollArea, Stack, Text } from '@mantine/core';
 import {
   clampFieldSize,
   createFieldId,
-  DEFAULT_FIELD_HEIGHT,
-  DEFAULT_FIELD_WIDTH,
-  MAX_FIELD_HEIGHT,
-  MAX_FIELD_WIDTH,
-  MIN_FIELD_HEIGHT,
-  MIN_FIELD_WIDTH,
+  defaultSizeForKind,
+  normalizeFieldKind,
   pctFromClientPoint,
+  sizeBoundsForKind,
+  type SignatureFieldKind,
   type SignatureFieldPlacement,
 } from '../../lib/orion/signatureFields';
 import type { OrionParticipant } from '../../lib/orion/participants';
@@ -22,6 +20,8 @@ type Props = {
   documentId: string;
   participants: OrionParticipant[];
   activeOrder: number;
+  /** Tipo de caja a colocar (firma / huella / validación). */
+  activeKind?: SignatureFieldKind;
   fields: SignatureFieldPlacement[];
   onChange: (fields: SignatureFieldPlacement[]) => void;
 };
@@ -50,6 +50,7 @@ export default function SignaturePlacementCanvas({
   documentId,
   participants,
   activeOrder,
+  activeKind = 'signature',
   fields,
   onChange,
 }: Props) {
@@ -92,21 +93,30 @@ export default function SignaturePlacementCanvas({
     (page: number, xPct: number, yPct: number) => {
       const currentFields = fieldsRef.current;
       const signer = participants.find((p) => p.order === activeOrder);
-      const existing = currentFields.find((f) => f.signerOrder === activeOrder);
-      const width = clamp(existing?.width ?? DEFAULT_FIELD_WIDTH, MIN_FIELD_WIDTH, MAX_FIELD_WIDTH);
-      const height = clamp(
-        existing?.height ?? DEFAULT_FIELD_HEIGHT,
-        MIN_FIELD_HEIGHT,
-        MAX_FIELD_HEIGHT
+      const kind = normalizeFieldKind(activeKind);
+      const defaults = defaultSizeForKind(kind);
+      const bounds = sizeBoundsForKind(kind);
+      const existing = currentFields.find(
+        (f) => f.signerOrder === activeOrder && normalizeFieldKind(f.kind) === kind
       );
+      const width = clamp(existing?.width ?? defaults.width, bounds.minW, bounds.maxW);
+      const height = clamp(existing?.height ?? defaults.height, bounds.minH, bounds.maxH);
       const x = clamp(xPct - width / 2, 0, 100 - width);
       const y = clamp(yPct - height / 2, 0, 100 - height);
+
+      const labelBase = signer?.name || existing?.label || `Firma ${activeOrder}`;
+      const label =
+        kind === 'validation'
+          ? existing?.label || 'Elaboró'
+          : kind === 'fingerprint'
+            ? `Huella · ${signer?.name || activeOrder}`
+            : labelBase;
 
       if (existing) {
         onChangeRef.current(
           currentFields.map((f) =>
             f.id === existing.id
-              ? clampFieldSize({ ...f, page, x, y, label: signer?.name || f.label })
+              ? clampFieldSize({ ...f, page, x, y, width, height, label, kind })
               : f
           )
         );
@@ -124,11 +134,12 @@ export default function SignaturePlacementCanvas({
           y,
           width,
           height,
-          label: signer?.name || `Firma ${activeOrder}`,
+          label,
+          kind,
         }),
       ]);
     },
-    [activeOrder, documentId, participants]
+    [activeKind, activeOrder, documentId, participants]
   );
 
   const handlePageClick = (page: number, e: React.MouseEvent<HTMLDivElement>) => {
@@ -160,8 +171,9 @@ export default function SignaturePlacementCanvas({
         return;
       }
 
-      const width = clamp(pct.x - field.x, MIN_FIELD_WIDTH, MAX_FIELD_WIDTH);
-      const height = clamp(pct.y - field.y, MIN_FIELD_HEIGHT, MAX_FIELD_HEIGHT);
+      const bounds = sizeBoundsForKind(field.kind);
+      const width = clamp(pct.x - field.x, bounds.minW, bounds.maxW);
+      const height = clamp(pct.y - field.y, bounds.minH, bounds.maxH);
       onChangeRef.current(
         currentFields.map((f) =>
           f.id === drag.fieldId ? clampFieldSize({ ...f, width, height }) : f
@@ -288,6 +300,7 @@ export default function SignaturePlacementCanvas({
   }
 
   const interacting = Boolean(dragRef.current);
+  const kindBounds = sizeBoundsForKind(activeKind);
 
   return (
     <Stack gap='sm' style={{ height: '100%', minHeight: 0 }}>
@@ -306,7 +319,7 @@ export default function SignaturePlacementCanvas({
         </Text>
         <Text size='xs' c='dimmed' mt={4}>
           Clic para colocar · arrastre para mover · esquina inferior para redimensionar (
-          {MIN_FIELD_WIDTH}–{MAX_FIELD_WIDTH}% × {MIN_FIELD_HEIGHT}–{MAX_FIELD_HEIGHT}%).
+          {kindBounds.minW}–{kindBounds.maxW}% × {kindBounds.minH}–{kindBounds.maxH}%).
         </Text>
       </Box>
       <ScrollArea
@@ -404,7 +417,15 @@ export default function SignaturePlacementCanvas({
                         fw={600}
                         style={{ lineHeight: 1.2, marginTop: 2, pointerEvents: 'none' }}
                       >
-                        {(person?.name || field.label || 'Firmante').toUpperCase()}
+                        {(
+                          field.label ||
+                          (normalizeFieldKind(field.kind) === 'fingerprint'
+                            ? 'Huella'
+                            : normalizeFieldKind(field.kind) === 'validation'
+                              ? 'Validación'
+                              : person?.name) ||
+                          'Firmante'
+                        ).toUpperCase()}
                       </Text>
                       <Box
                         onPointerDown={(e) => startResize(e, field, page.page)}

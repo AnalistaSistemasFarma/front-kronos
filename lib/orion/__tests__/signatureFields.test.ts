@@ -61,6 +61,7 @@ describe('signatureFields', () => {
       y: 78,
       width: 36,
       height: 16,
+      kind: 'signature',
     });
     expect('documentId' in (payload[0] as object)).toBe(false);
   });

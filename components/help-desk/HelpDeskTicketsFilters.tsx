@@ -96,7 +96,7 @@ export function HelpDeskTicketsFilters({
       radius='md'
       withBorder
       mb='md'
-      className='bg-white overflow-hidden'
+      className='overflow-hidden'
       style={{ borderTop: '3px solid var(--mantine-color-blue-6)' }}
     >
       <Group justify='space-between' wrap='wrap' gap='sm'>

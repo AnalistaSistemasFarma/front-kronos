@@ -15,15 +15,23 @@ export type OrionSignerState = {
   signUrl?: string | null;
   order?: number;
   type?: 'internal' | 'external' | string;
+  /** CardCode SAP cuando type = external. */
+  cardCode?: string | null;
   /** Inicio del turno activo (ISO). */
   turnStartedAt?: string | null;
   /** Vencimiento del turno (ISO). Por defecto turnStartedAt + 24h. */
   expiresAt?: string | null;
   /** El firmante pidió renovar el plazo al líder. */
   extensionRequestedAt?: string | null;
+  /** Enviar correo con link Orion al enviar a firma / turno. */
+  notifyByEmail?: boolean | null;
+  /** Este firmante debe aportar huella (además de rúbrica). */
+  requireFingerprint?: boolean | null;
+  /** Orion: accept-sign exigirá biometricConsent* (huella / caja fingerprint). */
+  requiresBiometricConsent?: boolean | null;
 };
 
-export type OrionDocumentVersionKind = 'original' | 'partial' | 'final';
+export type OrionDocumentVersionKind = 'original' | 'partial' | 'final' | 'validated';
 
 export type OrionDocumentVersion = {
   id: string;
@@ -33,6 +41,21 @@ export type OrionDocumentVersion = {
   createdAt: string;
   signerEmail?: string | null;
   signerName?: string | null;
+};
+
+/** Invite SynerLink para firmante externo (token en hash; plain solo al crear/enviar). */
+export type OrionSignerInvite = {
+  email: string;
+  name?: string | null;
+  /** SHA-256 del token en claro. */
+  tokenHash: string;
+  createdAt: string;
+  expiresAt: string;
+  sentAt?: string | null;
+  usedAt?: string | null;
+  /** Preferido: signUrl de Orion si existe. */
+  signUrl?: string | null;
+  cardCode?: string | null;
 };
 
 /** Intent de firma por adjunto: gestionar/firmar vs solo ver. */
@@ -60,6 +83,13 @@ export type OrionSignatureState = {
   signatureIntent?: OrionSignatureIntent | null;
   /** Preferencia de tipo de firma en preparación (default operativo: electronic). */
   signatureKind?: OrionDocumentSignatureKind | null;
+  /** Si true, el firmante debe aportar huella además de rúbrica. */
+  requireFingerprint?: boolean | null;
+  /**
+   * Política de huella: `per-signer` = solo quien tenga requireFingerprint.
+   * Ausente en bags legacy (checkbox global / cajas para todos) → se migra al sincronizar.
+   */
+  fingerprintPolicy?: 'per-signer' | null;
   status?: OrionDocumentStatus;
   embedUrl?: string | null;
   signedFileUrl?: string | null;
@@ -69,6 +99,8 @@ export type OrionSignatureState = {
   returnReason?: string | null;
   returnedBy?: string | null;
   signers?: OrionSignerState[];
+  /** Invites SynerLink para firmantes external (URL pública + correo). */
+  signerInvites?: OrionSignerInvite[];
   /** Historial de versiones (original + tras cada firma) */
   versions?: OrionDocumentVersion[];
   signatureFields?: Array<{
@@ -81,6 +113,7 @@ export type OrionSignatureState = {
     width: number;
     height: number;
     label?: string;
+    kind?: 'signature' | 'fingerprint' | 'validation';
   }>;
   updatedAt?: string;
 };
@@ -119,6 +152,11 @@ export type OrionAssignSignersPayload = {
     name?: string;
     order?: number;
     type?: 'internal' | 'external';
+    cardCode?: string;
+    /** Si true, Orion marca invitedAt y puede enviar correo. */
+    notifyByEmail?: boolean;
+    /** Si true, este firmante exige caja/huella. */
+    requireFingerprint?: boolean;
   }>;
 };
 
@@ -141,6 +179,7 @@ export type OrionDocumentResponse = {
     width: number;
     height: number;
     label?: string;
+    kind?: 'signature' | 'fingerprint' | 'validation';
   }>;
 };
 

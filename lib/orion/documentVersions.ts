@@ -20,9 +20,10 @@ function versionIdForSigner(signer: OrionSignerState): string {
 
 /**
  * Historial de versiones / descargas:
- * - Siempre: quien creó la solicitud (dueño del flujo).
+ * - Quien creó la solicitud (solicitante).
+ * - Preparador documento del flujo (Administración → Preparadores documento).
  * - Admin: solo si NO es firmante de ese documento (evita fuga a firmantes con rol admin).
- * Firmantes y “Preparar firma” no ven el historial.
+ * Firmantes “solo firmar” no ven el historial.
  */
 export function canViewOrionDocumentVersions(params: {
   isAdmin?: boolean;
@@ -30,11 +31,15 @@ export function canViewOrionDocumentVersions(params: {
   requesterId?: string | number | null;
   currentUserEmail?: string | null;
   requesterEmail?: string | null;
-  /** Firmante del documento (aunque sea admin): no ve versiones salvo que sea el creador. */
+  /** Firmante del documento (aunque sea admin): no ve versiones salvo que sea el creador o preparador. */
   isSigner?: boolean;
-  /** @deprecated Ignorado: Preparar firma no otorga ver versiones. */
+  /** Preparador documento del flujo. */
+  isFlowResponsible?: boolean;
+  /** @deprecated Ignorado salvo que isFlowResponsible no venga; preferir isFlowResponsible. */
   canManage?: boolean;
 }): boolean {
+  if (params.isFlowResponsible) return true;
+
   const isRequester =
     (params.currentUserId != null &&
       params.requesterId != null &&
@@ -70,6 +75,9 @@ export function resolveOrionPdfUrl(
   const ordered = listOrionDocumentVersions(state);
   const signedVersions = ordered.filter((v) => v.kind !== 'original');
   if (signedVersions.length > 0) {
+    // Preferir validated (DOCUMENTO VALIDADO) como vigente.
+    const validated = [...signedVersions].reverse().find((v) => v.kind === 'validated');
+    if (validated) return validated.url;
     return signedVersions[signedVersions.length - 1]!.url;
   }
 
@@ -108,6 +116,7 @@ export function listOrionDocumentVersions(
 
   const rank = (v: OrionDocumentVersion): number => {
     if (v.kind === 'original') return 0;
+    if (v.kind === 'validated') return 20_000;
     if (v.kind === 'final') return 10_000;
     const email = normalizeEmail(v.signerEmail);
     // Si la versión guarda order implícito vía id sign-email-order-..., usarlo.
@@ -264,6 +273,20 @@ export function applyOrionVersionHistory(params: {
     });
   }
 
+  if (
+    workingUrl &&
+    String(merged.status || '').toUpperCase() === 'FIRMADO' &&
+    !versions.some((v) => v.kind === 'validated')
+  ) {
+    versions.push({
+      id: `validated-orion-${merged.signedAt ?? Date.now()}`,
+      kind: 'validated',
+      label: 'DOCUMENTO VALIDADO',
+      url: workingUrl,
+      createdAt: merged.signedAt ?? new Date().toISOString(),
+    });
+  }
+
   merged = { ...merged, versions };
   return merged;
 }
@@ -280,6 +303,13 @@ export function rebuildOrionVersionHistory(
   const workingUrl =
     String(state.signedFileUrl || signedFileUrlFallback || '').trim() || null;
   const prevOriginal = (state.versions ?? []).find((v) => v.kind === 'original');
+  const prevValidated = (state.versions ?? []).find(
+    (v) =>
+      v.kind === 'validated' ||
+      String(v.label || '')
+        .toUpperCase()
+        .includes('DOCUMENTO VALIDADO')
+  );
   const base = ensureOriginalOrionVersion(
     {
       ...state,
@@ -327,6 +357,22 @@ export function rebuildOrionVersionHistory(
       url: workingUrl,
       createdAt: base.signedAt ?? new Date().toISOString(),
     });
+  }
+
+  // DOCUMENTO VALIDADO queda al final, aparte de las firmas (misma URL; el proxy
+  // regenera con ?validated=1).
+  if (fullySigned && workingUrl) {
+    versions.push(
+      prevValidated
+        ? { ...prevValidated, url: workingUrl, kind: 'validated' as const }
+        : {
+            id: `validated-orion-${base.signedAt ?? Date.now()}`,
+            kind: 'validated' as const,
+            label: 'DOCUMENTO VALIDADO',
+            url: workingUrl,
+            createdAt: base.signedAt ?? new Date().toISOString(),
+          }
+    );
   }
 
   return { ...base, signedFileUrl: workingUrl, versions };

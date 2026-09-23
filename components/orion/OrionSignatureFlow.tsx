@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from 'react';
 import { Box, Button, Group, Modal, Progress, Stack, Text, UnstyledButton } from '@mantine/core';
-import { IconArrowLeft, IconCheck } from '@tabler/icons-react';
+import { IconArrowLeft, IconCheck, IconShieldCheck } from '@tabler/icons-react';
 import { isSignerTurnExpired } from '../../lib/orion/signerDeadline';
 import {
   getCurrentPendingSigner,
@@ -14,8 +14,14 @@ import type { OrionSignatureState, OrionSignerState } from '../../lib/orion/type
 type Props = {
   state: OrionSignatureState;
   currentUserEmail?: string | null;
-  /** Si true (default), muestra solo el enlace "Ver flujo de firma →". */
+  /** Si true (default), muestra solo el enlace. */
   compact?: boolean;
+  /**
+   * firma = progreso de firmantes.
+   * validacion = cadena de quién pasó / quién aprobó (ideal al cierre).
+   * auto = validacion si FIRMADO o hay cajas validation; si no, firma.
+   */
+  mode?: 'firma' | 'validacion' | 'auto';
   onRenewDeadline?: (() => void) | null;
   renewLoading?: boolean;
   canRenewDeadline?: boolean;
@@ -36,7 +42,7 @@ function documentStatusMeta(status?: string | null): {
   color: string;
 } {
   const value = String(status || '').toUpperCase();
-  if (value === 'FIRMADO') return { label: 'Firmado', color: 'var(--mantine-color-teal-6)' };
+  if (value === 'FIRMADO') return { label: 'Validado', color: 'var(--mantine-color-teal-6)' };
   if (value === 'RECHAZADO') return { label: 'Rechazado', color: 'var(--mantine-color-red-6)' };
   if (value === 'DEVUELTO') return { label: 'Devuelto', color: 'var(--mantine-color-orange-6)' };
   if (value === 'BORRADOR') return { label: 'Borrador', color: 'var(--mantine-color-gray-6)' };
@@ -46,15 +52,61 @@ function documentStatusMeta(status?: string | null): {
   return { label: 'En proceso', color: 'var(--mantine-color-blue-6)' };
 }
 
+function resolveMode(
+  state: OrionSignatureState,
+  mode: 'firma' | 'validacion' | 'auto' | undefined
+): 'firma' | 'validacion' {
+  if (mode === 'firma' || mode === 'validacion') return mode;
+  const status = String(state.status || '').toUpperCase();
+  if (status === 'FIRMADO' || status === 'SIGNED' || status === 'COMPLETED') return 'validacion';
+  const hasValidation = (state.signatureFields ?? []).some(
+    (f) => String(f.kind || '').toLowerCase() === 'validation'
+  );
+  return hasValidation ? 'validacion' : 'firma';
+}
+
+function signerRoleLabel(
+  signer: OrionSignerState,
+  state: OrionSignatureState,
+  validationMode: boolean
+): string {
+  const order = Number(signer.order);
+  const kinds = new Set(
+    (state.signatureFields ?? [])
+      .filter((f) => Number(f.signerOrder) === order)
+      .map((f) => String(f.kind || 'signature').toLowerCase())
+  );
+  if (kinds.has('validation') && !kinds.has('signature')) {
+    return validationMode ? 'Revisor / elaboró' : 'Validación';
+  }
+  if (kinds.has('fingerprint')) {
+    return validationMode ? 'Firmante (con huella)' : 'Firma + huella';
+  }
+  return validationMode ? 'Firmante / aprobador' : 'Firmante';
+}
+
+function formatSignedAt(iso?: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString('es-CO', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+
 function signerStepMeta(
   signer: OrionSignerState,
-  pendingEmail: string | null
+  pendingEmail: string | null,
+  validationMode: boolean
 ): { label: string; tone: 'done' | 'active' | 'pending' | 'expired' } {
-  if (isSignerCompleted(signer.status)) return { label: 'Completado', tone: 'done' };
+  if (isSignerCompleted(signer.status)) {
+    return { label: validationMode ? 'Aprobado' : 'Completado', tone: 'done' };
+  }
   const email = normalizeEmail(signer.email);
   const isPending = Boolean(pendingEmail && email === pendingEmail);
   if (isPending && isSignerTurnExpired(signer)) return { label: 'Vencido', tone: 'expired' };
-  if (isPending) return { label: 'En proceso', tone: 'active' };
+  if (isPending) return { label: validationMode ? 'En revisión' : 'En proceso', tone: 'active' };
   return { label: 'Pendiente', tone: 'pending' };
 }
 
@@ -111,8 +163,10 @@ function FlowContent({
   processName,
   requesterName,
   fileName,
+  resolvedMode,
   onClose,
-}: Props & { onClose?: () => void }) {
+}: Props & { onClose?: () => void; resolvedMode: 'firma' | 'validacion' }) {
+  const validationMode = resolvedMode === 'validacion';
   const signers = useMemo(() => orderedSigners(state.signers), [state.signers]);
   const pending = getCurrentPendingSigner(signers);
   const pendingEmail = normalizeEmail(pending?.email);
@@ -121,6 +175,11 @@ function FlowContent({
   const percent = total > 0 ? Math.round((completedCount / total) * 100) : 0;
   const statusMeta = documentStatusMeta(state.status);
   const expired = Boolean(pending && isSignerTurnExpired(pending));
+  const isClosed =
+    String(state.status || '').toUpperCase() === 'FIRMADO' ||
+    String(state.status || '').toUpperCase() === 'SIGNED' ||
+    String(state.status || '').toUpperCase() === 'COMPLETED';
+  const lastApprover = [...signers].reverse().find((s) => isSignerCompleted(s.status));
   const headlineId =
     requestId != null
       ? String(requestId)
@@ -145,7 +204,7 @@ function FlowContent({
           c='dimmed'
           style={{ letterSpacing: 1.2, textTransform: 'uppercase' }}
         >
-          Documento en flujo
+          {validationMode ? 'Cadena de validación' : 'Documento en flujo'}
         </Text>
         <Box
           px={10}
@@ -172,16 +231,76 @@ function FlowContent({
         </Text>
       ) : null}
       <Text size='sm' mb='lg'>
-        Firmantes {completedCount}/{total || 0}
+        {validationMode
+          ? `Aprobaciones ${completedCount}/${total || 0}`
+          : `Firmantes ${completedCount}/${total || 0}`}
         <Text span c='dimmed'>
-          {' '}
-          · Firma secuencial
+          {validationMode ? ' · Quién pasó y quién aprobó' : ' · Firma secuencial'}
         </Text>
       </Text>
 
+      {validationMode && isClosed && lastApprover ? (
+        <Box
+          mb='lg'
+          p='sm'
+          style={{
+            borderRadius: 10,
+            background: 'light-dark(var(--mantine-color-teal-0), rgba(18, 184, 134, 0.14))',
+            border: '1px solid light-dark(var(--mantine-color-teal-3), rgba(18, 184, 134, 0.45))',
+          }}
+        >
+          <Group gap={8} wrap='nowrap'>
+            <IconShieldCheck
+              size={18}
+              style={{
+                color:
+                  'light-dark(var(--mantine-color-teal-7), var(--mantine-color-teal-4))',
+                flexShrink: 0,
+              }}
+            />
+            <Box style={{ minWidth: 0 }}>
+              <Text
+                size='xs'
+                fw={700}
+                tt='uppercase'
+                style={{
+                  letterSpacing: 0.4,
+                  color:
+                    'light-dark(var(--mantine-color-teal-7), var(--mantine-color-teal-4))',
+                }}
+              >
+                Documento validado
+              </Text>
+              <Text
+                size='sm'
+                fw={600}
+                lineClamp={1}
+                style={{
+                  color:
+                    'light-dark(var(--mantine-color-dark-7), var(--mantine-color-gray-0))',
+                }}
+              >
+                Aprobado finalmente por {lastApprover.name || lastApprover.email}
+              </Text>
+              {formatSignedAt(lastApprover.signedAt) ? (
+                <Text
+                  size='xs'
+                  style={{
+                    color:
+                      'light-dark(var(--mantine-color-dark-3), var(--mantine-color-gray-5))',
+                  }}
+                >
+                  {formatSignedAt(lastApprover.signedAt)}
+                </Text>
+              ) : null}
+            </Box>
+          </Group>
+        </Box>
+      ) : null}
+
       <Group justify='space-between' mb={6}>
         <Text size='sm' fw={700}>
-          Progreso del flujo
+          {validationMode ? 'Recorrido del documento' : 'Progreso del flujo'}
         </Text>
         <Text size='sm' c='dimmed'>
           {percent}%
@@ -206,9 +325,16 @@ function FlowContent({
             <StepDot tone='done' />
           </Box>
           <Group justify='space-between' style={{ flex: 1, minWidth: 0 }} wrap='nowrap' pb='md'>
-            <Text size='sm' fw={700}>
-              Documento creado
-            </Text>
+            <Box style={{ minWidth: 0 }}>
+              <Text size='sm' fw={700}>
+                Documento creado
+              </Text>
+              {requesterName ? (
+                <Text size='xs' c='dimmed' lineClamp={1}>
+                  Solicitante: {requesterName}
+                </Text>
+              ) : null}
+            </Box>
             <Text size='sm' fw={600} c='teal' style={{ whiteSpace: 'nowrap' }}>
               Completado
             </Text>
@@ -216,9 +342,11 @@ function FlowContent({
         </Group>
 
         {signers.map((signer, index) => {
-          const meta = signerStepMeta(signer, pendingEmail || null);
-          const isLast = index === signers.length - 1;
+          const meta = signerStepMeta(signer, pendingEmail || null, validationMode);
+          const isLast = index === signers.length - 1 && !isClosed;
           const name = signer.name || signer.email || `Firmante ${index + 1}`;
+          const role = signerRoleLabel(signer, state, validationMode);
+          const signedAtLabel = formatSignedAt(signer.signedAt);
           const lineColor =
             meta.tone === 'done'
               ? 'var(--mantine-color-teal-5)'
@@ -235,7 +363,7 @@ function FlowContent({
               style={{ position: 'relative' }}
             >
               <Box style={{ position: 'relative', width: 28, flexShrink: 0 }}>
-                {!isLast && (
+                {(!isLast || isClosed) && (
                   <Box
                     style={{
                       position: 'absolute',
@@ -256,7 +384,7 @@ function FlowContent({
                 style={{ flex: 1, minWidth: 0 }}
                 wrap='nowrap'
                 gap='md'
-                pb={isLast ? 0 : 'md'}
+                pb={isLast && !isClosed ? 0 : 'md'}
               >
                 <Box style={{ minWidth: 0 }}>
                   <Text
@@ -265,11 +393,15 @@ function FlowContent({
                     c={meta.tone === 'active' ? 'blue' : undefined}
                     lineClamp={1}
                   >
-                    {index + 1} {name}
+                    {index + 1}. {name}
                   </Text>
-                  {signer.email ? (
-                    <Text size='xs' c='dimmed' lineClamp={1}>
-                      {signer.email}
+                  <Text size='xs' c='dimmed' lineClamp={1}>
+                    {role}
+                    {signer.email ? ` · ${signer.email}` : ''}
+                  </Text>
+                  {signedAtLabel ? (
+                    <Text size='xs' c='teal'>
+                      {validationMode ? `Aprobó: ${signedAtLabel}` : `Firmó: ${signedAtLabel}`}
                     </Text>
                   ) : null}
                 </Box>
@@ -284,6 +416,29 @@ function FlowContent({
             </Group>
           );
         })}
+
+        {isClosed ? (
+          <Group align='flex-start' wrap='nowrap' gap='sm' style={{ position: 'relative' }}>
+            <Box style={{ position: 'relative', width: 28, flexShrink: 0 }}>
+              <StepDot tone='done'>
+                <IconShieldCheck size={14} stroke={2.5} color='#fff' />
+              </StepDot>
+            </Box>
+            <Group justify='space-between' style={{ flex: 1, minWidth: 0 }} wrap='nowrap'>
+              <Box style={{ minWidth: 0 }}>
+                <Text size='sm' fw={700}>
+                  Documento validado
+                </Text>
+                <Text size='xs' c='dimmed'>
+                  Marca de agua “DOCUMENTO VALIDADO” en todas las hojas
+                </Text>
+              </Box>
+              <Text size='sm' fw={600} c='teal' style={{ whiteSpace: 'nowrap' }}>
+                Cerrado
+              </Text>
+            </Group>
+          </Group>
+        ) : null}
       </Stack>
 
       {canRenewDeadline &&
@@ -320,16 +475,19 @@ function FlowContent({
   );
 }
 
-/** Enlace + modal de flujo (mismo layout Orion, colores del tema de la página). */
+/** Enlace + modal de flujo (firma o validación). */
 export default function OrionSignatureFlow(props: Props) {
   const [opened, setOpened] = useState(false);
   const signers = useMemo(() => orderedSigners(props.state.signers), [props.state.signers]);
   const compact = props.compact !== false;
+  const resolvedMode = resolveMode(props.state, props.mode);
+  const linkLabel =
+    resolvedMode === 'validacion' ? 'Ver flujo de validación →' : 'Ver flujo de firma →';
 
   if (signers.length === 0) return null;
 
   if (!compact) {
-    return <FlowContent {...props} />;
+    return <FlowContent {...props} resolvedMode={resolvedMode} />;
   }
 
   return (
@@ -347,7 +505,7 @@ export default function OrionSignatureFlow(props: Props) {
           textUnderlineOffset: 3,
         }}
       >
-        Ver flujo de firma →
+        {linkLabel}
       </UnstyledButton>
 
       <Modal
@@ -355,7 +513,7 @@ export default function OrionSignatureFlow(props: Props) {
         onClose={() => setOpened(false)}
         withCloseButton={false}
         centered
-        size={420}
+        size={440}
         padding={0}
         radius='lg'
         overlayProps={{ backgroundOpacity: 0.35, blur: 1 }}
@@ -367,7 +525,11 @@ export default function OrionSignatureFlow(props: Props) {
           body: { padding: 0 },
         }}
       >
-        <FlowContent {...props} onClose={() => setOpened(false)} />
+        <FlowContent
+          {...props}
+          resolvedMode={resolvedMode}
+          onClose={() => setOpened(false)}
+        />
       </Modal>
     </>
   );

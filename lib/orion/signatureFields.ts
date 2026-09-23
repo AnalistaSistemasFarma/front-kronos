@@ -1,3 +1,5 @@
+export type SignatureFieldKind = 'signature' | 'fingerprint' | 'validation';
+
 export type SignatureFieldPlacement = {
   id: string;
   documentId: string;
@@ -8,6 +10,8 @@ export type SignatureFieldPlacement = {
   width: number;
   height: number;
   label?: string;
+  /** signature = rúbrica; fingerprint = huella; validation = Elaboró/Revisó (pequeña). */
+  kind?: SignatureFieldKind;
 };
 
 /** Payload enviado a Orion (sin documentId). */
@@ -20,6 +24,7 @@ export type OrionSignatureFieldPayload = {
   width: number;
   height: number;
   label?: string;
+  kind?: SignatureFieldKind;
 };
 
 export const DEFAULT_FIELD_WIDTH = 36;
@@ -31,6 +36,12 @@ export const MIN_FIELD_WIDTH = 22;
 export const MAX_FIELD_WIDTH = 55;
 export const MIN_FIELD_HEIGHT = 12;
 export const MAX_FIELD_HEIGHT = 36;
+
+/** Tamaño por defecto para firmas de validación (Elaboró / Revisó). */
+export const VALIDATION_FIELD_WIDTH = 16;
+export const VALIDATION_FIELD_HEIGHT = 8;
+export const FINGERPRINT_FIELD_WIDTH = 18;
+export const FINGERPRINT_FIELD_HEIGHT = 22;
 
 export function createFieldId(): string {
   return `sf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -45,11 +56,50 @@ export function roundPct(n: number, decimals = 2): number {
   return Math.round(n * factor) / factor;
 }
 
+export function normalizeFieldKind(kind?: string | null): SignatureFieldKind {
+  const raw = String(kind || '')
+    .trim()
+    .toLowerCase();
+  if (raw === 'fingerprint' || raw === 'huella') return 'fingerprint';
+  if (raw === 'validation' || raw === 'validacion' || raw === 'validación') return 'validation';
+  return 'signature';
+}
+
+export function defaultSizeForKind(kind?: SignatureFieldKind | null): {
+  width: number;
+  height: number;
+} {
+  const k = normalizeFieldKind(kind);
+  if (k === 'validation') return { width: VALIDATION_FIELD_WIDTH, height: VALIDATION_FIELD_HEIGHT };
+  if (k === 'fingerprint') return { width: FINGERPRINT_FIELD_WIDTH, height: FINGERPRINT_FIELD_HEIGHT };
+  return { width: DEFAULT_FIELD_WIDTH, height: DEFAULT_FIELD_HEIGHT };
+}
+
+export function sizeBoundsForKind(kind?: SignatureFieldKind | null): {
+  minW: number;
+  maxW: number;
+  minH: number;
+  maxH: number;
+} {
+  const k = normalizeFieldKind(kind);
+  if (k === 'validation') return { minW: 10, maxW: 28, minH: 5, maxH: 14 };
+  if (k === 'fingerprint') return { minW: 12, maxW: 28, minH: 14, maxH: 32 };
+  return {
+    minW: MIN_FIELD_WIDTH,
+    maxW: MAX_FIELD_WIDTH,
+    minH: MIN_FIELD_HEIGHT,
+    maxH: MAX_FIELD_HEIGHT,
+  };
+}
+
 export function clampFieldSize(field: SignatureFieldPlacement): SignatureFieldPlacement {
-  const width = clamp(field.width, MIN_FIELD_WIDTH, MAX_FIELD_WIDTH);
-  const height = clamp(field.height, MIN_FIELD_HEIGHT, MAX_FIELD_HEIGHT);
+  const kind = normalizeFieldKind(field.kind);
+  const { minW, maxW, minH, maxH } = sizeBoundsForKind(kind);
+  const width = clamp(field.width, minW, maxW);
+  const height = clamp(field.height, minH, maxH);
   return {
     ...field,
+    kind,
     width: roundPct(width),
     height: roundPct(height),
     x: roundPct(clamp(field.x, 0, 100 - width)),
@@ -66,8 +116,11 @@ export function fieldFromRect(params: {
   documentId: string;
   id?: string;
   label?: string;
+  kind?: SignatureFieldKind;
 }): SignatureFieldPlacement {
   const { pageRect: pr, fieldRect: fr } = params;
+  const kind = normalizeFieldKind(params.kind);
+  const defaults = defaultSizeForKind(kind);
   if (pr.width < 1 || pr.height < 1) {
     return clampFieldSize({
       id: params.id ?? createFieldId(),
@@ -76,9 +129,10 @@ export function fieldFromRect(params: {
       page: params.page,
       x: DEFAULT_FIELD_X,
       y: DEFAULT_FIELD_Y,
-      width: DEFAULT_FIELD_WIDTH,
-      height: DEFAULT_FIELD_HEIGHT,
+      width: defaults.width,
+      height: defaults.height,
       label: params.label,
+      kind,
     });
   }
 
@@ -92,6 +146,7 @@ export function fieldFromRect(params: {
     width: (fr.width / pr.width) * 100,
     height: (fr.height / pr.height) * 100,
     label: params.label,
+    kind,
   });
 }
 
@@ -117,6 +172,7 @@ export function normalizeFieldsForStorage(
       documentId: f.documentId || documentId,
       page: Math.max(1, Math.floor(f.page)),
       signerOrder: Math.max(1, Math.floor(f.signerOrder)),
+      kind: normalizeFieldKind(f.kind),
     })
   );
 }
@@ -161,6 +217,7 @@ export function mapOrionFieldsToPlacements(
       width: f.width,
       height: f.height,
       label: f.label,
+      kind: normalizeFieldKind(f.kind),
     })
   );
 }

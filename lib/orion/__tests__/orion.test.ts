@@ -4,6 +4,7 @@ import {
   hasOrionActiveSignFlow,
   isOrionSignDocument,
   mergeOrionSignatureState,
+  normalizeOrionFingerprintRequirements,
   parseOrionSignatureBagBag,
   parseOrionSignatureState,
   resolveOrionDocumentForAttachment,
@@ -28,8 +29,10 @@ import { resolveOrionPermissions } from '../permissions';
 import {
   isFirmaRequestCategoryOrProcess,
   isHubHiddenSubprocess,
+  isOrionFirmaFingerprintSubprocess,
   isOrionFirmaPrepareSubprocess,
   isOrionFirmaSignSubprocess,
+  ORION_FIRMA_FINGERPRINT_URL,
   ORION_FIRMA_MANAGE_URL,
   ORION_FIRMA_PREPARE_URL,
   ORION_FIRMA_SIGN_URL,
@@ -73,17 +76,35 @@ describe('orion access subprocesses', () => {
     ).toBe(false);
   });
 
-  it('oculta prepare y sign en el hub', () => {
+  it('oculta prepare, sign y fingerprint en el hub', () => {
     expect(isHubHiddenSubprocess({ url: ORION_FIRMA_PREPARE_URL, name: 'Preparar firma' })).toBe(
       true
     );
     expect(isHubHiddenSubprocess({ url: ORION_FIRMA_SIGN_URL, name: 'Firmar documento' })).toBe(
       true
     );
+    expect(
+      isHubHiddenSubprocess({ url: ORION_FIRMA_FINGERPRINT_URL, name: 'Registrar huella' })
+    ).toBe(true);
     expect(isHubHiddenSubprocess({ url: ORION_FIRMA_MANAGE_URL, name: 'Firma digital' })).toBe(
       true
     );
     expect(isHubHiddenSubprocess({ url: '/process/other', name: 'Otro' })).toBe(false);
+  });
+
+  it('detecta Registrar huella', () => {
+    expect(
+      isOrionFirmaFingerprintSubprocess({
+        subprocess: 'Registrar huella',
+        subprocess_url: ORION_FIRMA_FINGERPRINT_URL,
+      })
+    ).toBe(true);
+    expect(
+      isOrionFirmaFingerprintSubprocess({
+        subprocess: 'Firmar documento',
+        subprocess_url: ORION_FIRMA_SIGN_URL,
+      })
+    ).toBe(false);
   });
 
   it('no oculta el proceso de negocio Solicitud de firma al crear solicitudes', () => {
@@ -177,15 +198,17 @@ describe('orion signerDeadline', () => {
 });
 
 describe('orion permissions', () => {
-  it('coordinador creador en fase de configuración', () => {
+  it('preparador documento en fase de configuración', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
+      isFlowResponsible: true,
       currentUserEmail: 'coord@test.com',
       createdByEmail: 'coord@test.com',
       state: { status: 'BORRADOR', orionDocumentId: 'doc-1', embedUrl: 'https://orion/embed' },
       hasAttachment: true,
     });
     expect(perms.userRole).toBe('coordinator');
+    expect(perms.isFlowResponsible).toBe(true);
     expect(perms.canAssignSigners).toBe(true);
     expect(perms.canPlaceSignatures).toBe(true);
     expect(perms.canAcceptSign).toBe(false);
@@ -194,6 +217,7 @@ describe('orion permissions', () => {
   it('sin canManage no edita (gestión = permiso Preparar vía API)', () => {
     const perms = resolveOrionPermissions({
       canManage: false,
+      isFlowResponsible: true,
       currentUserEmail: 'otro@test.com',
       createdByEmail: 'coord@test.com',
       state: { status: 'BORRADOR', orionDocumentId: 'doc-1', embedUrl: 'https://orion/embed' },
@@ -203,21 +227,60 @@ describe('orion permissions', () => {
     expect(perms.canManageWorkflow).toBe(false);
   });
 
-  it('canManage permite editar aunque el email no coincida (permiso Preparar ya validado en API)', () => {
+  it('canManage sin ser preparador documento no edita', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
+      isFlowResponsible: false,
       currentUserEmail: 'admin@test.com',
       createdByEmail: 'coord@test.com',
+      requesterId: 'user-coord',
+      currentUserId: 'user-admin',
       state: { status: 'BORRADOR', orionDocumentId: 'doc-1', embedUrl: 'https://orion/embed' },
       hasAttachment: true,
     });
-    expect(perms.userRole).toBe('coordinator');
-    expect(perms.canManageWorkflow).toBe(true);
+    expect(perms.isRequestCreator).toBe(false);
+    expect(perms.isFlowResponsible).toBe(false);
+    expect(perms.canManageWorkflow).toBe(false);
+    expect(perms.canAssignSigners).toBe(false);
   });
 
-  it('creador listado como firmante en BORRADOR sigue siendo coordinador', () => {
+  it('preparador documento con permiso Preparar sí edita (aunque no sea creador)', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
+      isFlowResponsible: true,
+      currentUserEmail: 'resp@test.com',
+      createdByEmail: 'coord@test.com',
+      requesterId: 'user-coord',
+      currentUserId: 'user-resp',
+      state: { status: 'BORRADOR', orionDocumentId: 'doc-1', embedUrl: 'https://orion/embed' },
+      hasAttachment: true,
+    });
+    expect(perms.isRequestCreator).toBe(false);
+    expect(perms.isFlowResponsible).toBe(true);
+    expect(perms.canManageWorkflow).toBe(true);
+    expect(perms.canAssignSigners).toBe(true);
+  });
+
+  it('creador sin ser preparador documento no edita', () => {
+    const perms = resolveOrionPermissions({
+      canManage: true,
+      isFlowResponsible: false,
+      currentUserEmail: 'coord@test.com',
+      createdByEmail: 'coord@test.com',
+      requesterId: 'user-coord',
+      currentUserId: 'user-coord',
+      state: { status: 'BORRADOR', orionDocumentId: 'doc-1', embedUrl: 'https://orion/embed' },
+      hasAttachment: true,
+    });
+    expect(perms.isRequestCreator).toBe(true);
+    expect(perms.canManageWorkflow).toBe(false);
+    expect(perms.canAssignSigners).toBe(false);
+  });
+
+  it('preparador listado como firmante en BORRADOR sigue siendo coordinador', () => {
+    const perms = resolveOrionPermissions({
+      canManage: true,
+      isFlowResponsible: true,
       currentUserEmail: 'coord@test.com',
       createdByEmail: 'coord@test.com',
       state: {
@@ -237,9 +300,10 @@ describe('orion permissions', () => {
     expect(perms.canAcceptSign).toBe(false);
   });
 
-  it('documento DEVUELTO permite al creador gestionar de nuevo si nadie firmó', () => {
+  it('documento DEVUELTO permite al preparador gestionar de nuevo si nadie firmó', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
+      isFlowResponsible: true,
       currentUserEmail: 'coord@test.com',
       createdByEmail: 'coord@test.com',
       state: {
@@ -263,6 +327,7 @@ describe('orion permissions', () => {
   it('bloquea edición si ya hay una firma completada', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
+      isFlowResponsible: true,
       currentUserEmail: 'coord@test.com',
       createdByEmail: 'coord@test.com',
       state: {
@@ -280,9 +345,10 @@ describe('orion permissions', () => {
     expect(perms.canRenewDeadline).toBe(true);
   });
 
-  it('permite editar en EN_PROCESO sin firmas si es el creador', () => {
+  it('permite editar en EN_PROCESO sin firmas si es preparador documento', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
+      isFlowResponsible: true,
       currentUserEmail: 'coord@test.com',
       createdByEmail: 'coord@test.com',
       state: {
@@ -300,6 +366,7 @@ describe('orion permissions', () => {
   it('bloquea edición cuando tarea o solicitud cerrada', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
+      isFlowResponsible: true,
       currentUserEmail: 'coord@test.com',
       createdByEmail: 'coord@test.com',
       state: {
@@ -315,6 +382,7 @@ describe('orion permissions', () => {
   it('firmante en turno durante fase de firma', () => {
     const perms = resolveOrionPermissions({
       canManage: true,
+      isFlowResponsible: false,
       currentUserEmail: 'b@test.com',
       createdByEmail: 'coord@test.com',
       hasPersonalSignature: true,
@@ -337,6 +405,7 @@ describe('orion permissions', () => {
   it('sin canManage no gestiona aunque isAdmin en el cliente', () => {
     const perms = resolveOrionPermissions({
       canManage: false,
+      isFlowResponsible: true,
       isAdmin: true,
       currentUserEmail: 'admin@test.com',
       createdByEmail: 'admin@test.com',
@@ -609,7 +678,7 @@ describe('documentVersions', () => {
     );
   });
 
-  it('rebuildOrionVersionHistory reconstruye original + firmantes en orden', async () => {
+  it('rebuildOrionVersionHistory reconstruye original + firmantes + validated', async () => {
     const { rebuildOrionVersionHistory } = await import('../documentVersions');
     const rebuilt = rebuildOrionVersionHistory(
       {
@@ -637,12 +706,19 @@ describe('documentVersions', () => {
       null,
       null
     );
-    expect(rebuilt.versions?.map((v) => v.kind)).toEqual(['original', 'partial', 'final']);
+    // Todos firmaron → última firma = final + capa DOCUMENTO VALIDADO.
+    expect(rebuilt.versions?.map((v) => v.kind)).toEqual([
+      'original',
+      'partial',
+      'final',
+      'validated',
+    ]);
     expect(rebuilt.versions?.[1]?.signerEmail).toBe('a@test.com');
     expect(rebuilt.versions?.[2]?.signerEmail).toBe('b@test.com');
+    expect(rebuilt.versions?.[3]?.label).toMatch(/DOCUMENTO VALIDADO/i);
   });
 
-  it('canViewOrionDocumentVersions: creador siempre; admin solo si no es firmante', async () => {
+  it('canViewOrionDocumentVersions: creador, preparador; admin solo si no es firmante', async () => {
     const { canViewOrionDocumentVersions } = await import('../documentVersions');
     expect(canViewOrionDocumentVersions({ isAdmin: true, currentUserId: 'x', requesterId: 'y' })).toBe(
       true
@@ -684,6 +760,15 @@ describe('documentVersions', () => {
         requesterId: 'owner',
       })
     ).toBe(false);
+    expect(
+      canViewOrionDocumentVersions({
+        isAdmin: false,
+        isFlowResponsible: true,
+        isSigner: true,
+        currentUserId: 'preparer',
+        requesterId: 'owner',
+      })
+    ).toBe(true);
   });
 
   it('pone la fecha del original antes de la primera firma', async () => {
@@ -766,5 +851,44 @@ describe('isFirmaAuthorizationItem', () => {
         taskName: 'Autorizar pago',
       })
     ).toBe(false);
+  });
+});
+
+
+describe('orion fingerprint legacy migration', () => {
+  it('limpia huella global en docs actuales sin política per-signer', () => {
+    const next = normalizeOrionFingerprintRequirements({
+      requireFingerprint: true,
+      signers: [
+        { email: 'a@x.com', order: 1, requireFingerprint: true },
+        { email: 'b@x.com', order: 2, requireFingerprint: true },
+      ],
+      signatureFields: [
+        { id: 's1', documentId: 'd', signerOrder: 1, page: 1, x: 0, y: 0, width: 1, height: 1, kind: 'signature' },
+        { id: 'f1', documentId: 'd', signerOrder: 1, page: 1, x: 0, y: 0, width: 1, height: 1, kind: 'fingerprint' },
+        { id: 'f2', documentId: 'd', signerOrder: 2, page: 1, x: 0, y: 0, width: 1, height: 1, kind: 'fingerprint' },
+      ],
+    });
+    expect(next.fingerprintPolicy).toBe('per-signer');
+    expect(next.requireFingerprint).toBe(false);
+    expect(next.signers?.every((s) => s.requireFingerprint !== true)).toBe(true);
+    expect(next.signatureFields?.some((f) => f.kind === 'fingerprint')).toBe(false);
+  });
+
+  it('conserva marcas selectivas ya existentes', () => {
+    const next = normalizeOrionFingerprintRequirements({
+      signers: [
+        { email: 'a@x.com', order: 1, requireFingerprint: true },
+        { email: 'b@x.com', order: 2, requireFingerprint: false },
+      ],
+      signatureFields: [
+        { id: 'f1', documentId: 'd', signerOrder: 1, page: 1, x: 0, y: 0, width: 1, height: 1, kind: 'fingerprint' },
+        { id: 'f2', documentId: 'd', signerOrder: 2, page: 1, x: 0, y: 0, width: 1, height: 1, kind: 'fingerprint' },
+      ],
+    });
+    expect(next.fingerprintPolicy).toBe('per-signer');
+    expect(next.signers?.[0]?.requireFingerprint).toBe(true);
+    expect(next.signers?.[1]?.requireFingerprint).toBe(false);
+    expect(next.signatureFields?.map((f) => f.id)).toEqual(['f1']);
   });
 });

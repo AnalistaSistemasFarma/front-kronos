@@ -125,6 +125,7 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     currentUserId,
     createdByEmail,
     requesterId,
+    isFlowResponsible: api?.isFlowResponsible ?? false,
     state: forSigning ? state : { ...state, status: state.status || 'BORRADOR' },
     hasAttachment: true,
     hasPersonalSignature: api?.hasSignature ?? false,
@@ -215,21 +216,24 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
 
   const hasCompletedSignatures = (state.signers ?? []).some((s) => isSignerCompleted(s.status));
   const activeSignFlow = hasOrionActiveSignFlow(state);
-  /** Solo se puede cambiar Estado mientras el PDF vive solo en SynerLink (aún no Orion). */
+  /** Solo el responsable del flujo puede cambiar Para firmar / Solo ver (y aún sin Orion). */
   const canToggleIntent =
     Boolean(api?.canManage) &&
+    Boolean(permissions.isFlowResponsible) &&
     !workflowLocked &&
     !isTerminal &&
     !activeSignFlow &&
     !hasCompletedSignatures;
   const permissionsPending = Boolean(api) && api?.permissionsReady === false;
-  const intentLockedReason = activeSignFlow
-    ? hasCompletedSignatures
-      ? 'Ya hay firmas: el documento queda en Orion y no puede pasar a Solo ver.'
-      : 'El PDF ya está en Orion (preparado o con firmantes). Solo ver solo aplica mientras esté en OneDrive SynerLink.'
-    : hasCompletedSignatures
-      ? 'Ya hay firmas: no se puede cambiar a Solo ver.'
-      : null;
+  const intentLockedReason = !permissions.isFlowResponsible
+    ? 'Solo un preparador documento asignado al flujo puede marcar el documento como “Para firmar” o “Solo ver”.'
+    : activeSignFlow
+      ? hasCompletedSignatures
+        ? 'Ya hay firmas: el documento queda en Orion y no puede pasar a Solo ver.'
+        : 'El PDF ya está en Orion (preparado o con firmantes). Solo ver solo aplica mientras esté en OneDrive SynerLink.'
+      : hasCompletedSignatures
+        ? 'Ya hay firmas: no se puede cambiar a Solo ver.'
+        : null;
 
   const setSignatureIntent = useCallback(
     async (intent: OrionSignatureIntent) => {
