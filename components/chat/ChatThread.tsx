@@ -591,6 +591,19 @@ export default function ChatThread({
   // pantalla entera se sacudiría, que es justo lo contrario de lo que se
   // busca. Se llena una sola vez, con el primer lote que llega.
   const yaEstaban = useRef<Set<string | number> | null>(null);
+  // Al cambiar de hilo (el componente NO se remonta) todo vuelve a empezar:
+  // pegado al fondo, sin interacción del usuario y sin mensajes "vistos". Si no,
+  // un hilo heredaba el `stickToBottom = false` del anterior y quedaba subido.
+  const hiloPrevioRef = useRef(claveHilo);
+  const usuarioMovioRef = useRef(false);
+  if (hiloPrevioRef.current !== claveHilo) {
+    hiloPrevioRef.current = claveHilo;
+    yaEstaban.current = null;
+    usuarioMovioRef.current = false;
+    lastCountRef.current = 0;
+    stickToBottomRef.current = true;
+    if (!stickToBottom) setStickToBottom(true);
+  }
   if (yaEstaban.current === null && thread.messages.length > 0) {
     yaEstaban.current = new Set(thread.messages.map((m) => m.id));
   }
@@ -600,9 +613,18 @@ export default function ChatThread({
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
+    const primerLote = lastCountRef.current === 0;
     const grew = thread.messages.length > lastCountRef.current;
     lastCountRef.current = thread.messages.length;
     if (!grew || !stickToBottom) return;
+    // El primer lote (abrir el hilo) va al fondo SIN animación: un `smooth`
+    // desde arriba emite eventos de scroll intermedios que apagaban el
+    // `stickToBottom`, y lo que crecía después (imágenes, Markdown, el
+    // indicador) dejaba la conversación subida.
+    if (primerLote) {
+      viewport.scrollTop = viewport.scrollHeight;
+      return;
+    }
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
   }, [thread.messages, stickToBottom]);
 
@@ -613,7 +635,7 @@ export default function ChatThread({
     const viewport = viewportRef.current;
     if (!viewport || thread.loading) return;
     viewport.scrollTop = viewport.scrollHeight;
-  }, [thread.loading, claveHilo]);
+  }, [thread.loading, claveHilo, thread.conversation?.id]);
 
   /**
    * PEGADO AL FONDO de verdad, mientras el usuario esté abajo.
@@ -738,7 +760,15 @@ export default function ChatThread({
     const viewport = viewportRef.current;
     if (!viewport) return;
     const distanceToBottom = viewport.scrollHeight - viewport.clientHeight - y;
+    // Mientras el usuario no haya tocado el scroll de este hilo, se sigue
+    // pegado al fondo: los eventos de scroll que produce el propio reacomodo
+    // (contenido que crece, teclado, ajustes programáticos) no cuentan como
+    // "el usuario subió a leer".
+    if (!usuarioMovioRef.current && distanceToBottom >= 80) return;
     setStickToBottom(distanceToBottom < 80);
+  };
+  const marcarInteraccion = () => {
+    usuarioMovioRef.current = true;
   };
 
   return (
@@ -768,6 +798,10 @@ export default function ChatThread({
         className='chat-thread__scroll'
         viewportRef={viewportRef}
         onScrollPositionChange={onScrollPositionChange}
+        onWheel={marcarInteraccion}
+        onTouchMove={marcarInteraccion}
+        onKeyDown={marcarInteraccion}
+        onPointerDown={marcarInteraccion}
         offsetScrollbars
       >
         <Stack gap='sm' p='sm' ref={contenidoRef}>
