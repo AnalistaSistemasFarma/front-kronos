@@ -39,11 +39,12 @@ function isOrionSignUrl(url?: string | null): boolean {
   return /\/sign\/[^/?#]+/i.test(u);
 }
 
-/** URL de invitación: SOLO Orion /sign/…. SynerLink /firma/externa no se usa en correo. */
+/** URL de invitación: SOLO Orion `/sign/{token}` (como genera front-orion). */
 function pickShareUrl(params: {
   orionSignUrl?: string | null;
 }): { shareUrl: string | null; source: 'orion' | null } {
-  const orion = resolveOrionAbsoluteUrl(params.orionSignUrl) || String(params.orionSignUrl || '').trim();
+  const orion =
+    resolveOrionAbsoluteUrl(params.orionSignUrl) || String(params.orionSignUrl || '').trim();
   if (orion && isOrionSignUrl(orion)) {
     return { shareUrl: orion, source: 'orion' };
   }
@@ -51,25 +52,44 @@ function pickShareUrl(params: {
 }
 
 /**
- * Resuelve la URL pública Orion para un firmante (sync bag + API sign-url).
+ * Resuelve la URL pública Orion `/sign/{token}` para un firmante.
+ * 1) Bag (si ya es Orion)
+ * 2) GET embed/sign-url de Orion (crea/reutiliza invitación pendiente)
  */
 async function resolveLiveOrionSignUrl(params: {
   orionDocumentId?: string | null;
   email: string;
   signOrder?: number | null;
   bagSignUrl?: string | null;
-}): Promise<string | null> {
-  const fromBag = resolveOrionAbsoluteUrl(params.bagSignUrl) || String(params.bagSignUrl || '').trim();
-  if (fromBag && isOrionSignUrl(fromBag)) return fromBag;
+  /** Si true, Orion también reenvía el correo (POST sendEmail). */
+  sendEmail?: boolean;
+}): Promise<{ signUrl: string | null; error?: string }> {
+  const fromBag =
+    resolveOrionAbsoluteUrl(params.bagSignUrl) || String(params.bagSignUrl || '').trim();
+  if (fromBag && isOrionSignUrl(fromBag)) {
+    return { signUrl: fromBag };
+  }
 
   const docId = String(params.orionDocumentId || '').trim();
-  if (!docId) return null;
-
-  const live = await fetchOrionSignerSignUrl(docId, params.email, params.signOrder);
-  if (live.ok && live.signUrl && isOrionSignUrl(live.signUrl)) {
-    return live.signUrl;
+  if (!docId) {
+    return {
+      signUrl: null,
+      error: 'Documento aún no vinculado a Orion. Prepare el PDF y envíe a firma.',
+    };
   }
-  return null;
+
+  const live = await fetchOrionSignerSignUrl(docId, params.email, params.signOrder, {
+    sendEmail: params.sendEmail === true,
+  });
+  if (live.ok && live.signUrl && isOrionSignUrl(live.signUrl)) {
+    return { signUrl: live.signUrl };
+  }
+  return {
+    signUrl: null,
+    error:
+      live.error ||
+      'Orion no devolvió /sign/… (¿firmante asignado y en PENDIENTE? ¿documento enviado a firma?)',
+  };
 }
 
 /**
@@ -168,36 +188,40 @@ export async function GET(req: Request) {
       const synced = await syncStateFromOrion({ requestId, fileId, state });
       state = synced.state;
 
-      // Invites locales solo para auditoría; el correo/UI usan /sign/ de Orion.
+      // Invites locales solo auditoría; la URL que se muestra es siempre Orion /sign/.
       const ensured = ensureSignerInvites({ state, requestId, fileId, origin });
       state = ensured.state;
 
       const bag = setOrionDocumentInBag(loaded.bag, fileId, state);
       await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
 
+      const resolveErrors: string[] = [];
       const signers = await Promise.all(
         (state.signers ?? []).map(async (s) => {
           const email = normalizeEmail(s.email);
           const invite = findInviteByEmail(state, email);
           const isExternal = String(s.type || '').toLowerCase() === 'external';
-          const liveUrl = await resolveLiveOrionSignUrl({
+          // Tras sync, s.signUrl ya puede venir de Orion (buildSignerResponses).
+          const resolved = await resolveLiveOrionSignUrl({
             orionDocumentId: state.orionDocumentId,
             email,
             signOrder: s.order,
             bagSignUrl: s.signUrl || invite?.signUrl,
           });
-          // Persistir signUrl Orion en el bag si venía vacío.
-          if (liveUrl && !isOrionSignUrl(s.signUrl || '')) {
-            s.signUrl = liveUrl;
+          if (resolved.error && !resolved.signUrl) {
+            resolveErrors.push(`${email}: ${resolved.error}`);
           }
-          const picked = pickShareUrl({ orionSignUrl: liveUrl });
+          if (resolved.signUrl) {
+            s.signUrl = resolved.signUrl;
+          }
+          const picked = pickShareUrl({ orionSignUrl: resolved.signUrl });
           return {
             email,
             name: s.name || null,
             order: s.order ?? null,
             type: s.type || 'internal',
             status: s.status || null,
-            signUrl: liveUrl,
+            signUrl: picked.shareUrl,
             inviteUrl: picked.shareUrl,
             shareUrl: picked.shareUrl,
             shareSource: picked.source,
@@ -223,7 +247,9 @@ export async function GET(req: Request) {
         status: state.status || null,
         orionDocumentId: state.orionDocumentId || null,
         orionSynced: synced.orionSynced,
-        orionError: synced.orionError || null,
+        orionError:
+          synced.orionError ||
+          (resolveErrors.length > 0 ? resolveErrors.slice(0, 3).join(' · ') : null),
         missingOrionUrl,
       };
     });
@@ -314,13 +340,15 @@ export async function POST(req: Request) {
         throw Object.assign(new Error('Firmante no encontrado en este documento'), { status: 404 });
       }
 
-      // Siempre pedir /sign/{token} a Orion (nunca /firma/externa).
-      const orionSignUrl = await resolveLiveOrionSignUrl({
+      // Pedir /sign/{token} por POST (Orion ya no lo expone en GET).
+      const resolved = await resolveLiveOrionSignUrl({
         orionDocumentId: state.orionDocumentId,
         email,
         signOrder: signer.order,
         bagSignUrl: signer.signUrl,
+        sendEmail: false,
       });
+      const orionSignUrl = resolved.signUrl;
       if (orionSignUrl) {
         signer.signUrl = orionSignUrl;
       }
@@ -342,7 +370,8 @@ export async function POST(req: Request) {
       if (!picked.shareUrl) {
         throw Object.assign(
           new Error(
-            'Orion aún no tiene URL de firma (/sign/…) para este firmante. Envíe el documento a firma en GSS Firma y vuelva a intentar.'
+            resolved.error ||
+              'Orion aún no tiene URL /sign/… para este firmante. Asigne firmantes, envíe a firma en GSS Firma y pulse renovar.'
           ),
           { status: 422 }
         );
@@ -353,7 +382,7 @@ export async function POST(req: Request) {
         if (/localhost|127\.0\.0\.1/i.test(mailUrl) || /\/firma\/externa\//i.test(mailUrl)) {
           throw Object.assign(
             new Error(
-              'El enlace de firma no es el público de Orion. Configure ORION_PUBLIC_URL / ORION_API_BASE_URL y sincronice de nuevo.'
+              'El enlace de firma no es el público de Orion. Configure ORION_PUBLIC_URL en Orion y sincronice de nuevo.'
             ),
             { status: 422 }
           );
@@ -380,7 +409,7 @@ export async function POST(req: Request) {
         shareUrl: picked.shareUrl,
         shareSource: picked.source,
         orionSynced: synced.orionSynced,
-        orionError: synced.orionError || null,
+        orionError: synced.orionError || resolved.error || null,
         plainToken:
           action === 'regenerate' || action === 'url' || action === 'send' ? plainToken : undefined,
         sent: action === 'send',

@@ -105,12 +105,18 @@ export default function SignaturePlacementCanvas({
       const y = clamp(yPct - height / 2, 0, 100 - height);
 
       const labelBase = signer?.name || existing?.label || `Firma ${activeOrder}`;
+      const markId =
+        signer &&
+        Number.isFinite(Number(signer.signatureMarkId)) &&
+        Number(signer.signatureMarkId) >= 1
+          ? Math.trunc(Number(signer.signatureMarkId))
+          : activeOrder;
       const label =
         kind === 'validation'
           ? existing?.label || 'Elaboró'
           : kind === 'fingerprint'
-            ? `Huella · ${signer?.name || activeOrder}`
-            : labelBase;
+            ? `Huella · ${markId} · ${signer?.name || activeOrder}`
+            : `Firma ${markId} · ${labelBase}`;
 
       if (existing) {
         onChangeRef.current(

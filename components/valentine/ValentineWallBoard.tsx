@@ -116,10 +116,34 @@ export default function ValentineWallBoard({
   const [reactingId, setReactingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(true);
-  const [composerOpen, setComposerOpen] = useState(true);
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 820px)').matches : false
+  );
+  const [composerOpen, setComposerOpen] = useState(() =>
+    typeof window !== 'undefined'
+      ? !window.matchMedia('(max-width: 820px)').matches
+      : true
+  );
   const [zoomLabel, setZoomLabel] = useState(65);
   const [dragging, setDragging] = useState(false);
   const [revealDone, setRevealDone] = useState(false);
+
+  // Móvil: solo tablero O solo escribir (nunca ambos a la vez).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 820px)');
+    const sync = () => {
+      const mobile = mq.matches;
+      setIsMobile(mobile);
+      if (mobile) setComposerOpen(false);
+    };
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  const showComposer = composerOpen;
+  const showBoard = !isMobile || !composerOpen;
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const planeRef = useRef<HTMLDivElement>(null);
@@ -247,6 +271,8 @@ export default function ValentineWallBoard({
     'vw-board-shell--blush',
     'vw-board-shell--expanded',
     revealDone ? 'vw-board-shell--settled' : 'vw-board-shell--emerge',
+    isMobile && composerOpen ? 'vw-board-shell--writing' : '',
+    isMobile && !composerOpen ? 'vw-board-shell--board-only' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -306,8 +332,16 @@ export default function ValentineWallBoard({
         </ActionIcon>
       </header>
 
-      <div className={composerOpen ? 'vw-board-body' : 'vw-board-body vw-board-body--full'}>
-        {composerOpen ? (
+      <div
+        className={
+          showComposer && showBoard
+            ? 'vw-board-body'
+            : showComposer
+              ? 'vw-board-body vw-board-body--compose'
+              : 'vw-board-body vw-board-body--full'
+        }
+      >
+        {showComposer ? (
           <div className='vw-composer-col vw-cork-ui'>
             <div className='vw-board-heart vw-board-heart--title vw-board-heart--3d'>
               — DOSIS —
@@ -317,7 +351,9 @@ export default function ValentineWallBoard({
             <aside className='vw-composer vw-composer--3d'>
               <h3>Escribe tu dosis</h3>
               <Text size='xs' c='dimmed'>
-                Mensajes anónimos. Arrastra el muro · rueda para mover · Ctrl+rueda zoom.
+                {isMobile
+                  ? 'Mensajes anónimos. Al publicar vuelves al tablero.'
+                  : 'Mensajes anónimos. Arrastra el muro · rueda para mover · Ctrl+rueda zoom.'}
               </Text>
 
               <div className='vw-composer-cats'>
@@ -357,42 +393,56 @@ export default function ValentineWallBoard({
                 value={message}
                 onChange={(e) => setMessage(e.currentTarget.value)}
                 maxLength={VALENTINE_MESSAGE_MAX}
-                minRows={3}
+                minRows={isMobile ? 4 : 3}
                 autosize
                 size='sm'
               />
-              <Group justify='space-between'>
+              <Group justify='space-between' wrap='wrap' gap='sm'>
                 <Text size='xs' c='dimmed'>
                   {message.length}/{VALENTINE_MESSAGE_MAX}
                 </Text>
-                <Button
-                  color='grape'
-                  radius='xl'
-                  loading={posting}
-                  disabled={!canSend}
-                  onClick={() => {
-                    void (async () => {
-                      try {
-                        await onSubmit({
-                          message: message.trim(),
-                          categoryId,
-                          toName: toName.trim() || null,
-                        });
-                        setMessage('');
-                        setToName('');
-                      } catch {
-                        /* toast en el padre */
-                      }
-                    })();
-                  }}
-                >
-                  Pegar en el tablero ♥
-                </Button>
+                <Group gap='xs'>
+                  {isMobile ? (
+                    <Button
+                      variant='light'
+                      color='grape'
+                      radius='xl'
+                      onClick={() => setComposerOpen(false)}
+                    >
+                      Ver tablero
+                    </Button>
+                  ) : null}
+                  <Button
+                    color='grape'
+                    radius='xl'
+                    loading={posting}
+                    disabled={!canSend}
+                    onClick={() => {
+                      void (async () => {
+                        try {
+                          await onSubmit({
+                            message: message.trim(),
+                            categoryId,
+                            toName: toName.trim() || null,
+                          });
+                          setMessage('');
+                          setToName('');
+                          if (isMobile) setComposerOpen(false);
+                        } catch {
+                          /* toast en el padre */
+                        }
+                      })();
+                    }}
+                  >
+                    Pegar en el tablero ♥
+                  </Button>
+                </Group>
               </Group>
             </aside>
           </div>
         ) : null}
 
+        {showBoard ? (
         <div
           ref={viewportRef}
           className={
@@ -521,9 +571,10 @@ export default function ValentineWallBoard({
             )}
           </div>
         </div>
+        ) : null}
       </div>
 
-      {revealDone ? (
+      {revealDone && showBoard ? (
         <div
           className='vw-board-heart vw-board-heart--quote vw-board-heart--3d vw-quote-overlay vw-cork-ui'
           onPointerDown={(e) => e.stopPropagation()}
@@ -533,6 +584,7 @@ export default function ValentineWallBoard({
       ) : null}
 
       <footer className='vw-board-footer vw-cork-ui'>
+        {showBoard ? (
         <div className='vw-footer-left'>
           <Tooltip label={expanded ? 'Salir de pantalla completa' : 'Ampliar tablero'}>
             <ActionIcon
@@ -584,6 +636,9 @@ export default function ValentineWallBoard({
             </ActionIcon>
           </Tooltip>
         </div>
+        ) : (
+          <div className='vw-footer-left vw-footer-left--spacer' aria-hidden />
+        )}
 
         <div className='vw-footer-logo'>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -598,13 +653,19 @@ export default function ValentineWallBoard({
 
         <div className='vw-footer-right'>
           <Button
-            size='sm'
-            variant={composerOpen ? 'filled' : 'light'}
+            size={isMobile ? 'md' : 'sm'}
+            variant={composerOpen ? 'light' : 'filled'}
             color='grape'
             radius='xl'
+            fullWidth={isMobile}
+            className='vw-mode-toggle'
             onClick={() => setComposerOpen((v) => !v)}
           >
-            {composerOpen ? 'Ocultar escribir' : 'Escribir dosis'}
+            {composerOpen
+              ? isMobile
+                ? 'Ver tablero'
+                : 'Ocultar escribir'
+              : 'Escribir dosis'}
           </Button>
         </div>
       </footer>

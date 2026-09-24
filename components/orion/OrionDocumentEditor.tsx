@@ -273,6 +273,7 @@ export default function OrionDocumentEditor({
                 // Siempre notificar por correo al enviar a firma (sin checkbox en UI).
                 notifyByEmail: true,
                 requireFingerprint: Boolean(p.requireFingerprint),
+                signatureMarkId: p.signatureMarkId ?? p.order,
               }
             : p
         )
@@ -293,6 +294,28 @@ export default function OrionDocumentEditor({
         )
       );
     }
+  }, []);
+
+  const handleSignatureMarkIdChange = useCallback((order: number, markId: number) => {
+    setOrderedParticipants((prev) => {
+      const next = prev.map((p) =>
+        p.order === order ? { ...p, signatureMarkId: markId } : p
+      );
+      const signer = next.find((p) => p.order === order);
+      const name = signer?.name?.trim() || `Firma ${markId}`;
+      setFields((fields) =>
+        fields.map((f) => {
+          if (f.signerOrder !== order) return f;
+          const kind = normalizeFieldKind(f.kind);
+          if (kind === 'validation') return f;
+          if (kind === 'fingerprint') {
+            return { ...f, label: `Huella · ${markId} · ${name}` };
+          }
+          return { ...f, label: `Firma ${markId} · ${name}` };
+        })
+      );
+      return next;
+    });
   }, []);
 
   const handleClearSigner = useCallback((order: number) => {
@@ -324,6 +347,7 @@ export default function OrionDocumentEditor({
             cardCode: null,
             notifyByEmail: true,
             requireFingerprint: Boolean(slot1.requireFingerprint),
+            signatureMarkId: slot1.signatureMarkId ?? 1,
           };
           const without1 = next.filter((p) => p.order !== 1);
           return reindexParticipants(
@@ -372,6 +396,15 @@ export default function OrionDocumentEditor({
     if (pending.length > 0) {
       return `Asigne todos los firmantes (${pending.length} pendiente(s)).`;
     }
+    const marks = orderedParticipants.map((p) =>
+      Number.isFinite(Number(p.signatureMarkId)) && Number(p.signatureMarkId) >= 1
+        ? Math.trunc(Number(p.signatureMarkId))
+        : p.order
+    );
+    const unique = new Set(marks);
+    if (unique.size !== marks.length) {
+      return 'Cada firmante debe tener un ID de firma distinto.';
+    }
     return null;
   }, [orderedParticipants]);
 
@@ -396,6 +429,10 @@ export default function OrionDocumentEditor({
             ...(p.cardCode ? { cardCode: p.cardCode } : {}),
             notifyByEmail: true,
             requireFingerprint: Boolean(p.requireFingerprint),
+            signatureMarkId:
+              Number.isFinite(Number(p.signatureMarkId)) && Number(p.signatureMarkId) >= 1
+                ? Math.trunc(Number(p.signatureMarkId))
+                : p.order,
           })),
       }),
     });
@@ -420,6 +457,10 @@ export default function OrionDocumentEditor({
           cardCode: local.cardCode ?? s.cardCode ?? null,
           notifyByEmail: true,
           requireFingerprint: Boolean(local.requireFingerprint),
+          signatureMarkId:
+            local.signatureMarkId != null
+              ? local.signatureMarkId
+              : s.signatureMarkId ?? s.order,
         };
       });
       onStateUpdate({
@@ -893,6 +934,9 @@ export default function OrionDocumentEditor({
                 assignmentsEditable && canUseFingerprint
                   ? handleToggleRequireFingerprint
                   : undefined
+              }
+              onSignatureMarkIdChange={
+                assignmentsEditable ? handleSignatureMarkIdChange : undefined
               }
             />
             {assignmentsEditable && !canUseFingerprint ? (

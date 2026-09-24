@@ -86,11 +86,16 @@ export async function POST(req: Request) {
       // Huella/correo por orden (mismo email en 2 slots no debe pisarse).
       const fpByOrder = new Map<number, boolean>();
       const notifyByOrder = new Map<number, boolean>();
+      const markByOrder = new Map<number, number>();
       for (const s of payload.signers) {
         const order = Number(s.order);
         if (!Number.isFinite(order) || order < 1) continue;
         fpByOrder.set(order, Boolean(s.requireFingerprint));
         if (s.notifyByEmail != null) notifyByOrder.set(order, Boolean(s.notifyByEmail));
+        const mark = Number(
+          (s as { signatureMarkId?: number | null }).signatureMarkId
+        );
+        if (Number.isFinite(mark) && mark >= 1) markByOrder.set(order, Math.trunc(mark));
       }
       const nextSigners = (state.signers ?? []).map((s, index) => {
         const order = Number(s.order);
@@ -103,6 +108,9 @@ export async function POST(req: Request) {
           notifyByEmail: notifyByOrder.has(key)
             ? notifyByOrder.get(key)
             : s.notifyByEmail,
+          signatureMarkId: markByOrder.has(key)
+            ? markByOrder.get(key)
+            : s.signatureMarkId ?? key,
         };
       });
       state = {

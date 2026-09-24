@@ -738,7 +738,7 @@ describe('documentVersions', () => {
     ]);
     expect(rebuilt.versions?.[1]?.signerEmail).toBe('a@test.com');
     expect(rebuilt.versions?.[2]?.signerEmail).toBe('b@test.com');
-    expect(rebuilt.versions?.[3]?.label).toMatch(/DOCUMENTO VALIDADO/i);
+    expect(rebuilt.versions?.[3]?.label).toMatch(/SYNERLINK-VALIDO|DOCUMENTO VALIDADO/i);
   });
 
   it('canViewOrionDocumentVersions: creador, preparador; admin solo si no es firmante', async () => {

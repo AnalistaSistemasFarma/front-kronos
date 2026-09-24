@@ -24,7 +24,7 @@ export function isValentineWallSubprocess(subprocess: {
 
 export const VALENTINE_MESSAGE_MAX = 160;
 
-export const VALENTINE_REACTIONS = ['❤️', '💕', '🥰', '✨', '👏'] as const;
+export const VALENTINE_REACTIONS = ['❤️', '💕', '🥰', '😂', '✨', '👏', '🙌', '💪'] as const;
 export type ValentineReactionEmoji = (typeof VALENTINE_REACTIONS)[number];
 
 export const VALENTINE_CATEGORIES = [

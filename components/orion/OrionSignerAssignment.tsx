@@ -19,7 +19,12 @@ import {
 import { IconArrowDown, IconArrowUp, IconCheck, IconClock, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { OrionParticipant, OrionParticipantType } from '../../lib/orion/participants';
-import { parseUserOptionLabel, type OrionUserOption } from '../../lib/orion/participants';
+import {
+  parseUserOptionLabel,
+  resolveSignatureMarkId,
+  type OrionUserOption,
+} from '../../lib/orion/participants';
+import toast from 'react-hot-toast';
 
 type Props = {
   participants: OrionParticipant[];
@@ -45,6 +50,7 @@ type Props = {
   onReorder?: (order: number, direction: 'up' | 'down') => void;
   onToggleNotifyByEmail?: (order: number, value: boolean) => void;
   onToggleRequireFingerprint?: (order: number, value: boolean) => void;
+  onSignatureMarkIdChange?: (order: number, markId: number) => void;
   readOnly?: boolean;
 };
 
@@ -208,6 +214,7 @@ export default function OrionSignerAssignment({
   onReorder,
   onToggleNotifyByEmail,
   onToggleRequireFingerprint,
+  onSignatureMarkIdChange,
   readOnly = false,
 }: Props) {
   const [slotSource, setSlotSource] = useState<Record<number, 'internal' | 'external'>>({});
@@ -295,7 +302,7 @@ export default function OrionSignerAssignment({
                 <Group align='flex-start' wrap='nowrap' gap='sm'>
                   <ThemeIcon size={36} radius='xl' variant='light' color='blue' style={{ flexShrink: 0 }}>
                     <Text size='sm' fw={700}>
-                      {person.order}
+                      {resolveSignatureMarkId(person)}
                     </Text>
                   </ThemeIcon>
 
@@ -408,6 +415,32 @@ export default function OrionSignerAssignment({
                         Paso {person.order} en la secuencia
                       </Badge>
                     )}
+                    <NumberInput
+                      mt='sm'
+                      size='xs'
+                      label='ID firma'
+                      description='Número visible en el documento (ej. 1, 2…).'
+                      value={resolveSignatureMarkId(person)}
+                      min={1}
+                      max={99}
+                      disabled={readOnly || !onSignatureMarkIdChange}
+                      w={120}
+                      onChange={(value) => {
+                        const next = typeof value === 'number' ? value : Number(value);
+                        if (!Number.isFinite(next) || next < 1) return;
+                        const markId = Math.trunc(next);
+                        const clash = slots.some(
+                          (other) =>
+                            other.order !== person.order &&
+                            resolveSignatureMarkId(other) === markId
+                        );
+                        if (clash) {
+                          toast.error(`El ID de firma ${markId} ya está en uso`);
+                          return;
+                        }
+                        onSignatureMarkIdChange?.(person.order, markId);
+                      }}
+                    />
                     {person.email && canUseFingerprint ? (
                       <Checkbox
                         size='xs'
