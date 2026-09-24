@@ -571,6 +571,15 @@ export default function ChatThread({
       // fondo real. Esperar un segundo cuadro le da tiempo al reflow de
       // asentarse antes de fijar la posición. Nicolás lo reportó como "la
       // conversación se sube más de lo que debía".
+      //
+      // SÍNCRONO PRIMERO (2026-09-23, "salto feo al abrir el teclado"): el
+      // doble rAF dejaba ver dos cuadros con el contenedor ya encogido y el
+      // scroll viejo — los últimos mensajes tapados y luego el brinco. El
+      // hook ya escribió `--alto-visible`; leer `scrollHeight` aquí fuerza el
+      // reflow con el alto nuevo, así que se fija el fondo en ESTE cuadro,
+      // antes de pintar. El doble rAF se conserva como red de seguridad para
+      // el caso de #374: si ya estaba en el fondo, no mueve nada.
+      viewport.scrollTop = viewport.scrollHeight;
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           viewport.scrollTop = viewport.scrollHeight;
