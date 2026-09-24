@@ -26,7 +26,7 @@ import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
 import { useChatConversation, type ChatTarget } from './useChatConversation';
-import { useAltoVisible } from './useAltoVisible';
+import { useAltoVisible, usuarioInteractuando } from './useAltoVisible';
 import {
   describeAgentStatus,
   formatChatTime,
@@ -558,7 +558,7 @@ export default function ChatThread({
   useAltoVisible(
     useCallback(() => {
       const viewport = viewportRef.current;
-      if (!viewport || !stickToBottomRef.current) return;
+      if (!viewport || !stickToBottomRef.current || usuarioInteractuando()) return;
       // En el mismo cuadro el navegador todavía no reacomodó el layout con el
       // alto nuevo; se espera al siguiente. No encadenar animaciones smooth
       // mientras el teclado cambia el viewport en cada cuadro.
@@ -582,6 +582,7 @@ export default function ChatThread({
       viewport.scrollTop = viewport.scrollHeight;
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
+          if (!stickToBottomRef.current || usuarioInteractuando()) return;
           viewport.scrollTop = viewport.scrollHeight;
         });
       });
@@ -696,12 +697,15 @@ export default function ChatThread({
     if (!contenido || !viewport || typeof ResizeObserver === 'undefined') return;
 
     const observador = new ResizeObserver(() => {
-      if (!stickToBottomRef.current) return;
+      // Nunca re-anclar con el dedo puesto o en plena inercia: eso era lo que
+      // "subía" (o bajaba) el hilo en contra del gesto.
+      if (!stickToBottomRef.current || usuarioInteractuando()) return;
       // Mismo motivo del doble rAF de arriba: si el contenido crece justo
       // mientras el teclado todavía está animando el viewport, un solo
       // cuadro puede leer un `scrollHeight` que no es el final.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
+          if (!stickToBottomRef.current || usuarioInteractuando()) return;
           viewport.scrollTop = viewport.scrollHeight;
         });
       });
