@@ -917,6 +917,15 @@ export default function ChatThread({
           voiceConversationId={agent?.code === 'duo' ? thread.conversation?.id : undefined}
           ref={composerRef}
           onSend={async (body, files) => {
+            // Al ENVIAR se vuelve al fondo aunque el usuario hubiera subido a
+            // leer: quiere ver lo que acaba de escribir y la respuesta. Se
+            // olvida la interacción previa para que el scroll animado hacia el
+            // mensaje optimista no vuelva a soltar el anclaje a mitad de camino.
+            usuarioMovioRef.current = false;
+            stickToBottomRef.current = true;
+            setStickToBottom(true);
+            const vp = viewportRef.current;
+            if (vp) vp.scrollTop = vp.scrollHeight;
             const enviado = await thread.send(body, files, cita);
             // La cita se limpia solo si el mensaje SALIÓ: si falló, el usuario
             // reintenta y la cita tiene que seguir puesta.
