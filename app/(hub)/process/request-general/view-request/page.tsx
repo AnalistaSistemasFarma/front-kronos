@@ -740,18 +740,27 @@ function ViewRequestPage() {
       setSavingFieldValue(true);
 
       let value: { id_field: number; id_option?: number | null; value_text?: string | null };
+      let previousDisplay: string;
+      let newDisplay: string;
       if (fv.field_type === TABLE_FIELD_TYPE) {
         value = {
           id_field: fv.id_form_field,
           value_text: serializeTableValue(editingTableRows),
         };
+        previousDisplay = `${parseTableValue(fv.value_text).rows.length} fila(s)`;
+        newDisplay = `${editingTableRows.length} fila(s)`;
       } else if (fv.field_type === 'select') {
         value = {
           id_field: fv.id_form_field,
           id_option: editingValue ? parseInt(editingValue, 10) : null,
         };
+        previousDisplay = fv.option_label || '—';
+        newDisplay =
+          (fv.options || []).find((o) => String(o.id) === editingValue)?.option_label || '—';
       } else {
         value = { id_field: fv.id_form_field, value_text: editingValue };
+        previousDisplay = fv.value_text || '—';
+        newDisplay = editingValue || '—';
       }
 
       const response = await fetch('/api/requests-general/update-form-values', {
@@ -766,6 +775,9 @@ function ViewRequestPage() {
       }
 
       toast.success('Campo actualizado correctamente.');
+      await addSystemNote(
+        `Se modificó el campo adicional "${fv.field_label}": de "${previousDisplay}" a "${newDisplay}".`
+      );
       cancelEditingField();
       fetchFormValues(request.id);
     } catch (err) {
@@ -3130,6 +3142,7 @@ function ViewRequestPage() {
             ticketId={request.id}
             onFilesChange={handleFilesChange}
             onUploadComplete={(uploaded) => {
+              void addSystemNote('Se cargaron archivos a la solicitud.');
               if (uploaded.graphItem?.id) {
                 const optimistic: FolderFile = {
                   id: uploaded.graphItem.id,
