@@ -2,7 +2,6 @@ import 'server-only';
 import type { ConnectionPool } from 'mssql';
 import { sql } from '../mssqlPool';
 import {
-  OLP_COMPANY_ID,
   VALENTINE_CATEGORIES,
   VALENTINE_MESSAGE_MAX,
   VALENTINE_REACTIONS,
@@ -84,7 +83,6 @@ function isValidReaction(emoji: string): emoji is ValentineReactionEmoji {
 function formatPostDate(value: string | Date | null | undefined): string {
   if (!value) return '';
   const raw = String(value);
-  // Preferir YYYY-MM-DD sin hora (UTC o local del servidor)
   const isoDay = raw.slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(isoDay)) {
     const [y, m, d] = isoDay.split('-');
@@ -100,13 +98,14 @@ function formatPostDate(value: string | Date | null | undefined): string {
 
 export async function listValentinePosts(
   pool: ConnectionPool,
-  viewerUserId: string
+  viewerUserId: string,
+  idCompany: number
 ): Promise<ValentinePostRow[]> {
   await ensureValentineTables(pool);
 
   const postsResult = await pool
     .request()
-    .input('idCompany', sql.Int, OLP_COMPANY_ID)
+    .input('idCompany', sql.Int, idCompany)
     .query(`
       SELECT TOP 200
         id,
@@ -177,6 +176,7 @@ export async function listValentinePosts(
 export async function createValentinePost(
   pool: ConnectionPool,
   params: {
+    idCompany: number;
     authorUserId: string;
     authorEmail: string;
     authorName: string;
@@ -200,7 +200,7 @@ export async function createValentinePost(
 
   const insert = await pool
     .request()
-    .input('idCompany', sql.Int, OLP_COMPANY_ID)
+    .input('idCompany', sql.Int, params.idCompany)
     .input('authorUserId', sql.NVarChar(64), params.authorUserId)
     .input('authorEmail', sql.NVarChar(255), params.authorEmail)
     .input('authorName', sql.NVarChar(255), params.authorName.slice(0, 120))
@@ -240,13 +240,14 @@ export async function createValentinePost(
 /** Soft-delete (admin). Marca deleted_at; no borra filas físicas. */
 export async function softDeleteValentinePost(
   pool: ConnectionPool,
-  postId: number
+  postId: number,
+  idCompany: number
 ): Promise<boolean> {
   await ensureValentineTables(pool);
   const result = await pool
     .request()
     .input('postId', sql.Int, postId)
-    .input('idCompany', sql.Int, OLP_COMPANY_ID)
+    .input('idCompany', sql.Int, idCompany)
     .query(`
       UPDATE valentine_wall_posts
       SET deleted_at = SYSUTCDATETIME()
@@ -262,6 +263,7 @@ export async function toggleValentineReaction(
   pool: ConnectionPool,
   params: {
     postId: number;
+    idCompany: number;
     userId: string;
     email: string;
     emoji: string;
@@ -294,7 +296,7 @@ export async function toggleValentineReaction(
   const postOk = await pool
     .request()
     .input('postId', sql.Int, params.postId)
-    .input('idCompany', sql.Int, OLP_COMPANY_ID)
+    .input('idCompany', sql.Int, params.idCompany)
     .query(`
       SELECT TOP 1 id FROM valentine_wall_posts
       WHERE id = @postId AND id_company = @idCompany AND deleted_at IS NULL

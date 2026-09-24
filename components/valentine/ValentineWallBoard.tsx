@@ -14,6 +14,7 @@ import {
   Button,
   Group,
   Loader,
+  Select,
   Text,
   Textarea,
   TextInput,
@@ -29,7 +30,6 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import {
-  OLP_COMPANY_DISPLAY_NAME,
   VALENTINE_CATEGORIES,
   VALENTINE_MESSAGE_MAX,
   VALENTINE_REACTIONS,
@@ -53,6 +53,10 @@ type Props = {
   posting: boolean;
   freshPostId?: number | null;
   canModerate?: boolean;
+  companyName?: string;
+  companyId?: number | null;
+  companies?: Array<{ idCompany: number; companyName: string }>;
+  onCompanyChange?: (idCompany: number) => void;
   onClose: () => void;
   onSubmit: (payload: {
     message: string;
@@ -95,6 +99,10 @@ export default function ValentineWallBoard({
   posting,
   freshPostId = null,
   canModerate = false,
+  companyName = '',
+  companyId = null,
+  companies = [],
+  onCompanyChange,
   onClose,
   onSubmit,
   onReact,
@@ -257,9 +265,34 @@ export default function ValentineWallBoard({
       <div className='vw-board-edge vw-board-edge--bottom' aria-hidden />
 
       <header className='vw-board-header vw-cork-ui'>
-        <div className='vw-header-company' aria-label={`Empresa ${OLP_COMPANY_DISPLAY_NAME}`}>
-          {OLP_COMPANY_DISPLAY_NAME}
-        </div>
+        {companies.length > 1 && onCompanyChange ? (
+          <div className='vw-header-company vw-header-company--select'>
+            <Select
+              aria-label='Elegir tablero de empresa'
+              data={companies.map((c) => ({
+                value: String(c.idCompany),
+                label: c.companyName,
+              }))}
+              value={companyId != null ? String(companyId) : null}
+              onChange={(v) => {
+                const id = Number(v);
+                if (Number.isFinite(id) && id > 0) onCompanyChange(id);
+              }}
+              allowDeselect={false}
+              searchable={companies.length > 5}
+              size='sm'
+              radius='md'
+              comboboxProps={{ withinPortal: true, zIndex: 10050 }}
+            />
+          </div>
+        ) : (
+          <div
+            className='vw-header-company'
+            aria-label={companyName ? `Empresa ${companyName}` : 'Empresa'}
+          >
+            {companyName || '—'}
+          </div>
+        )}
         <ActionIcon
           className='vw-board-close'
           variant='filled'

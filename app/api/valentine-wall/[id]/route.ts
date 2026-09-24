@@ -4,6 +4,7 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import {
   assertValentineWallAccess,
+  parsePreferredCompanyId,
   userCanModerateValentineWall,
 } from '@/lib/valentine/access';
 import { softDeleteValentinePost } from '@/lib/valentine/db';
@@ -12,7 +13,7 @@ export const dynamic = 'force-dynamic';
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function DELETE(_req: NextRequest, ctx: Ctx) {
+export async function DELETE(req: NextRequest, ctx: Ctx) {
   try {
     const session = await getServerSession(authOptions);
     const email = String(session?.user?.email || '')
@@ -22,8 +23,11 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
-    const access = await assertValentineWallAccess(email);
-    if (!access.ok) {
+    const preferred = parsePreferredCompanyId(
+      req.nextUrl.searchParams.get('companyId')
+    );
+    const access = await assertValentineWallAccess(email, preferred);
+    if (!access.ok || !access.company) {
       return NextResponse.json({ error: 'Sin acceso', reason: access.reason }, { status: 403 });
     }
 
@@ -41,7 +45,9 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
       return NextResponse.json({ error: 'id inválido' }, { status: 400 });
     }
 
-    const deleted = await withMssqlPool((pool) => softDeleteValentinePost(pool, postId));
+    const deleted = await withMssqlPool((pool) =>
+      softDeleteValentinePost(pool, postId, access.company!.idCompany)
+    );
     if (!deleted) {
       return NextResponse.json({ error: 'Mensaje no encontrado' }, { status: 404 });
     }
