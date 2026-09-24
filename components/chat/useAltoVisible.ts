@@ -2,6 +2,21 @@
 
 import { useEffect, useRef } from 'react';
 
+/*
+ * GESTO DEL USUARIO EN CURSO (2026-09-23, "hago scroll un poco hacia arriba y
+ * se sube mucho"). Mientras el dedo está puesto —y durante la inercia, hasta
+ * ~250 ms después del último scroll— nadie debe tocar `scrollTop` ni
+ * `window.scrollTo`: en iOS el arrastre del hilo encadena rebote al documento,
+ * eso dispara `visualViewport` scroll, y las correcciones (devolver el
+ * documento a 0 + fijar el fondo) se sumaban al movimiento del dedo.
+ */
+let tocando = false;
+let ultimoScrollUsuario = 0;
+const QUIETUD_MS = 250;
+export function usuarioInteractuando() {
+  return tocando || Date.now() - ultimoScrollUsuario < QUIETUD_MS;
+}
+
 /**
  * Publica el alto REALMENTE visible de la pantalla en la variable CSS
  * `--alto-visible`, y lo mantiene al día cuando sale o se guarda el teclado.
@@ -50,7 +65,7 @@ export function useAltoVisible(alCambiar?: () => void) {
       ultimoOffset = offset;
       raiz.style.setProperty('--alto-visible', `${alto}px`);
       raiz.style.setProperty('--desplazamiento-visible', `${offset}px`);
-      avisar.current?.();
+      if (!usuarioInteractuando()) avisar.current?.();
     };
 
     /*
@@ -92,6 +107,7 @@ export function useAltoVisible(alCambiar?: () => void) {
      */
     const tactil = window.matchMedia?.('(pointer: coarse)').matches ?? false;
     const fijarDocumento = () => {
+      if (usuarioInteractuando()) return;
       if (!raiz.classList.contains('chat-inmersivo')) return;
       if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
     };
@@ -114,6 +130,27 @@ export function useAltoVisible(alCambiar?: () => void) {
       window.requestAnimationFrame(fijarDocumento);
     };
 
+    const alTocar = () => {
+      tocando = true;
+      ultimoScrollUsuario = Date.now();
+    };
+    const alSoltar = () => {
+      tocando = false;
+      ultimoScrollUsuario = Date.now();
+    };
+    // Cualquier scroll con el dedo puesto o justo después (inercia) extiende
+    // la ventana de quietud.
+    const alScrollDocumento = () => {
+      if (tocando || Date.now() - ultimoScrollUsuario < QUIETUD_MS) ultimoScrollUsuario = Date.now();
+    };
+    const opcionesPasivas = { capture: true, passive: true } as const;
+    if (tactil) {
+      window.addEventListener('touchstart', alTocar, opcionesPasivas);
+      window.addEventListener('touchend', alSoltar, opcionesPasivas);
+      window.addEventListener('touchcancel', alSoltar, opcionesPasivas);
+      window.addEventListener('scroll', alScrollDocumento, opcionesPasivas);
+    }
+
     escribir();
     vv.addEventListener('resize', tactil ? alRedimensionar : actualizar);
     vv.addEventListener('scroll', tactil ? alDesplazar : actualizar);
@@ -123,7 +160,13 @@ export function useAltoVisible(alCambiar?: () => void) {
       if (pendiente) window.cancelAnimationFrame(pendiente);
       vv.removeEventListener('resize', tactil ? alRedimensionar : actualizar);
       vv.removeEventListener('scroll', tactil ? alDesplazar : actualizar);
-      if (tactil) window.removeEventListener('focusin', alEnfocar);
+      if (tactil) {
+        window.removeEventListener('focusin', alEnfocar);
+        window.removeEventListener('touchstart', alTocar, opcionesPasivas);
+        window.removeEventListener('touchend', alSoltar, opcionesPasivas);
+        window.removeEventListener('touchcancel', alSoltar, opcionesPasivas);
+        window.removeEventListener('scroll', alScrollDocumento, opcionesPasivas);
+      }
       raiz.style.removeProperty('--alto-visible');
       raiz.style.removeProperty('--desplazamiento-visible');
     };
