@@ -26,6 +26,7 @@ import {
   IconUserOff,
   IconX,
 } from '@tabler/icons-react';
+import { TECHNICIAN_UNASSIGNED_VALUE } from '@/lib/help-desk/requesterSql';
 
 export type TicketsBoardFilters = {
   priority: string;
@@ -55,10 +56,8 @@ interface HelpDeskTicketsFiltersProps {
   resultCount: number;
 }
 
-const UNASSIGNED_TECHNICIAN = 'unassigned';
-
 export function getTechnicianFilterOptions(technicals: Option[]): Option[] {
-  return [{ value: UNASSIGNED_TECHNICIAN, label: 'Sin asignar' }, ...technicals];
+  return [{ value: TECHNICIAN_UNASSIGNED_VALUE, label: 'Sin asignar' }, ...technicals];
 }
 
 export function countActiveFilters(filters: TicketsBoardFilters, searchQuery: string): number {
@@ -172,7 +171,7 @@ export function HelpDeskTicketsFilters({
                 value={filters.technician || null}
                 onChange={(value) => onFilterChange('technician', value || '')}
                 leftSection={
-                  filters.technician === UNASSIGNED_TECHNICIAN ? (
+                  filters.technician === TECHNICIAN_UNASSIGNED_VALUE ? (
                     <IconUserOff size={16} className='text-orange-600' />
                   ) : (
                     <IconUser size={16} className='text-blue-600' />
