@@ -42,6 +42,7 @@ import {
   Table,
   UnstyledButton,
   Tooltip,
+  Progress,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -68,6 +69,7 @@ import {
   IconPhoto,
   IconEye,
   IconLock,
+  IconPencil,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
@@ -78,6 +80,14 @@ import {
   rememberPendingAttachment,
   removeFromAttachmentCache,
 } from '../../../../../lib/attachments/pendingOptimistic';
+import {
+  TABLE_FIELD_TYPE,
+  parseTableConfig,
+  parseTableValue,
+  serializeTableValue,
+  type TableRow,
+} from '../../../../../lib/requests-general/tableField';
+import TableFieldInput from '../create-request/TableFieldInput';
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
 import { allSlotsCompletedForEmail, getCurrentPendingSigner, isSignerCompleted } from '../../../../../lib/orion/signerStatus';
 import {
@@ -105,6 +115,7 @@ import { OrionSignatureProvider } from '../../../../../components/orion/OrionSig
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
+import { partitionTasksForDisplay } from '@/lib/orion/taskProgress';
 
 interface Request {
   id: number;
@@ -276,11 +287,18 @@ function ViewRequestPage() {
       id_form_field?: number;
       field_label: string;
       field_type?: string | null;
+      editable?: boolean;
       config_json?: string | null;
+      id_option?: number | null;
       option_label: string | null;
       value_text: string | null;
+      options?: { id: number; option_label: string }[];
     }[]
   >([]);
+  const [editingFieldId, setEditingFieldId] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState<string>('');
+  const [editingTableRows, setEditingTableRows] = useState<TableRow[]>([]);
+  const [savingFieldValue, setSavingFieldValue] = useState(false);
   const lastOrionFormFetchKeyRef = useRef('');
   const [orionDocuments, setOrionDocuments] = useState<Record<string, OrionSignatureState>>({});
 
@@ -721,6 +739,82 @@ function ViewRequestPage() {
     }
   };
 
+  const startEditingField = (fv: (typeof requestFormValues)[number]) => {
+    if (fv.id_form_field == null) return;
+    setEditingFieldId(fv.id_form_field);
+    if (fv.field_type === TABLE_FIELD_TYPE) {
+      setEditingTableRows(parseTableValue(fv.value_text).rows);
+      setEditingValue('');
+    } else if (fv.field_type === 'select') {
+      setEditingValue(fv.id_option != null ? String(fv.id_option) : '');
+      setEditingTableRows([]);
+    } else {
+      setEditingValue(fv.value_text ?? '');
+      setEditingTableRows([]);
+    }
+  };
+
+  const cancelEditingField = () => {
+    setEditingFieldId(null);
+    setEditingValue('');
+    setEditingTableRows([]);
+  };
+
+  const saveFieldValue = async (fv: (typeof requestFormValues)[number]) => {
+    if (!request?.id_request_general || fv.id_form_field == null) return;
+
+    try {
+      setSavingFieldValue(true);
+
+      let value: { id_field: number; id_option?: number | null; value_text?: string | null };
+      let previousDisplay: string;
+      let newDisplay: string;
+      if (fv.field_type === TABLE_FIELD_TYPE) {
+        value = {
+          id_field: fv.id_form_field,
+          value_text: serializeTableValue(editingTableRows),
+        };
+        previousDisplay = `${parseTableValue(fv.value_text).rows.length} fila(s)`;
+        newDisplay = `${editingTableRows.length} fila(s)`;
+      } else if (fv.field_type === 'select') {
+        value = {
+          id_field: fv.id_form_field,
+          id_option: editingValue ? parseInt(editingValue, 10) : null,
+        };
+        previousDisplay = fv.option_label || '—';
+        newDisplay =
+          (fv.options || []).find((o) => String(o.id) === editingValue)?.option_label || '—';
+      } else {
+        value = { id_field: fv.id_form_field, value_text: editingValue };
+        previousDisplay = fv.value_text || '—';
+        newDisplay = editingValue || '—';
+      }
+
+      const response = await fetch('/api/requests-general/update-form-values', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_request: request.id_request_general, values: [value] }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Error al actualizar el campo');
+      }
+
+      toast.success('Campo actualizado correctamente.');
+      await addSystemNote(
+        `Se modificó el campo adicional "${fv.field_label}": de "${previousDisplay}" a "${newDisplay}".`
+      );
+      cancelEditingField();
+      fetchFormValues(request.id_request_general);
+    } catch (err) {
+      console.error('Error al actualizar el campo:', err);
+      toast.error(err instanceof Error ? err.message : 'Error al actualizar el campo');
+    } finally {
+      setSavingFieldValue(false);
+    }
+  };
+
   const orionValueText = useMemo(() => {
     const field = requestFormValues.find((fv) => fv.field_type === ORION_SIGNATURE_FIELD_TYPE);
     return field?.value_text ?? null;
@@ -865,6 +959,22 @@ function ViewRequestPage() {
       session?.user?.email,
       taskRQ,
     ]
+  );
+
+  const { businessTasks: modalBusinessTasks, orionByFile: modalOrionByFile } = useMemo(
+    () => partitionTasksForDisplay(taskRQ),
+    [taskRQ]
+  );
+
+  const modalTimelineTasks = useMemo(
+    () =>
+      [...modalBusinessTasks].sort((a, b) => {
+        const da = a.display_order ?? 0;
+        const db = b.display_order ?? 0;
+        if (da !== db) return da - db;
+        return a.id_task - b.id_task;
+      }),
+    [modalBusinessTasks]
   );
 
   async function CheckOrCreateFolderAndUpload(
@@ -1725,7 +1835,7 @@ function ViewRequestPage() {
                 participants={orionParticipants}
                 availableUsers={availableUsers}
                 currentUserName={session?.user?.name ?? undefined}
-                companyId={request?.id_company}
+                companyId={request?.id_company ?? null}
                 onDocumentsChange={handleOrionDocumentsChange}
                 workflowLocked={orionWorkflowLocked}
                 autoOpenFileId={deepLinkFileId}
@@ -2100,6 +2210,168 @@ function ViewRequestPage() {
           </div>
         </div>
 
+        {requestFormValues.filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE).length > 0 && (
+          <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
+            <Title order={3} mb='md' className='flex items-center gap-2'>
+              <IconTag size={20} />
+              Información adicional
+            </Title>
+            <Grid>
+              {requestFormValues
+                .filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE)
+                .map((fv, fvIndex) => {
+                const canEditField = Boolean(fv.editable) && !isRequestResolved();
+                const isEditingThis = editingFieldId === fv.id_form_field;
+                const editButton = canEditField && !isEditingThis && (
+                  <ActionIcon
+                    variant='subtle'
+                    color='blue'
+                    onClick={() => startEditingField(fv)}
+                    title='Editar campo'
+                  >
+                    <IconPencil size={16} />
+                  </ActionIcon>
+                );
+                const editActions = (
+                  <Group justify='flex-end' gap='xs'>
+                    <Button
+                      variant='outline'
+                      size='xs'
+                      onClick={cancelEditingField}
+                      disabled={savingFieldValue}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      size='xs'
+                      leftSection={<IconCheck size={14} />}
+                      loading={savingFieldValue}
+                      onClick={() => saveFieldValue(fv)}
+                    >
+                      Guardar
+                    </Button>
+                  </Group>
+                );
+
+                if (fv.field_type === TABLE_FIELD_TYPE) {
+                  const columns = parseTableConfig(fv.config_json).columns;
+                  const rows = parseTableValue(fv.value_text).rows;
+                  const renderCellValue = (value: unknown) => {
+                    if (value === true) return 'Sí';
+                    if (value === false) return 'No';
+                    if (value === undefined || value === null || value === '') return '—';
+                    return String(value);
+                  };
+                  return (
+                    <Grid.Col
+                      span={12}
+                      key={`rfv-${fvIndex}-${fv.id ?? 'x'}-${fv.id_form_field ?? 'y'}`}
+                    >
+                      <Card withBorder radius='md' p='md'>
+                        <Group justify='space-between' mb='xs'>
+                          <Text size='xs' c='dimmed' fw={500} className='uppercase'>
+                            {fv.field_label}
+                          </Text>
+                          {editButton}
+                        </Group>
+                        {isEditingThis ? (
+                          <Stack gap='sm'>
+                            <TableFieldInput
+                              label={fv.field_label}
+                              required={false}
+                              columns={columns}
+                              rows={editingTableRows}
+                              onChange={setEditingTableRows}
+                              companyId={request?.id_company}
+                            />
+                            {editActions}
+                          </Stack>
+                        ) : columns.length === 0 || rows.length === 0 ? (
+                          <Text size='sm' c='dimmed'>
+                            Sin datos.
+                          </Text>
+                        ) : (
+                          <ScrollArea>
+                            <Table withTableBorder withColumnBorders striped>
+                              <Table.Thead>
+                                <Table.Tr>
+                                  {columns.map((col) => (
+                                    <Table.Th key={col.key}>{col.label}</Table.Th>
+                                  ))}
+                                </Table.Tr>
+                              </Table.Thead>
+                              <Table.Tbody>
+                                {rows.map((row, ri) => (
+                                  <Table.Tr key={ri}>
+                                    {columns.map((col) => (
+                                      <Table.Td key={col.key}>
+                                        {renderCellValue(row[col.key])}
+                                      </Table.Td>
+                                    ))}
+                                  </Table.Tr>
+                                ))}
+                              </Table.Tbody>
+                            </Table>
+                          </ScrollArea>
+                        )}
+                      </Card>
+                    </Grid.Col>
+                  );
+                }
+                return (
+                  <Grid.Col
+                    span={{ base: 12, md: 6 }}
+                    key={`rfv-sm-${fvIndex}-${fv.id ?? 'x'}-${fv.id_form_field ?? 'y'}`}
+                  >
+                    <Card withBorder radius='md' p='md'>
+                      <Group justify='space-between'>
+                        <Text size='xs' c='dimmed' fw={500} className='uppercase'>
+                          {fv.field_label}
+                        </Text>
+                        {editButton}
+                      </Group>
+                      {isEditingThis ? (
+                        <Stack gap='xs' mt={4}>
+                          {fv.field_type === 'select' ? (
+                            <Select
+                              data={(fv.options || []).map((o) => ({
+                                value: String(o.id),
+                                label: o.option_label,
+                              }))}
+                              value={editingValue || null}
+                              onChange={(v) => setEditingValue(v || '')}
+                              searchable
+                              clearable
+                              placeholder='Seleccione una opción'
+                            />
+                          ) : (
+                            <TextInput
+                              type={
+                                fv.field_type === 'number'
+                                  ? 'number'
+                                  : fv.field_type === 'date'
+                                    ? 'date'
+                                    : 'text'
+                              }
+                              value={editingValue}
+                              onChange={(e) => setEditingValue(e.target.value)}
+                            />
+                          )}
+                          {editActions}
+                        </Stack>
+                      ) : (
+                        <Text size='md' fw={600} mt={4}>
+                          {fv.option_label || fv.value_text || '—'}
+                        </Text>
+                      )}
+                    </Card>
+                  </Grid.Col>
+                );
+              })}
+            </Grid>
+          </Card>
+        )}
+
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           <Group justify='space-between' align='center' mb='md' wrap='wrap'>
             <Title order={3} className='flex items-center gap-2'>
@@ -2382,6 +2654,7 @@ function ViewRequestPage() {
             ticketId={request.id_request_general}
             onFilesChange={setAttachedFiles}
             onUploadComplete={(uploaded) => {
+              void addSystemNote('Se cargaron archivos a la solicitud.');
               if (uploaded.graphItem?.id && request?.id_request_general) {
                 const optimistic = {
                   id: uploaded.graphItem.id,
@@ -2525,15 +2798,48 @@ function ViewRequestPage() {
             </div>
           ) : taskRQ.length > 0 ? (
 <ScrollArea.Autosize mah="65vh" offsetScrollbars>
+              <Stack gap="md">
+              {modalOrionByFile.length > 0 ? (
+                <Stack gap="sm">
+                  <Text size="sm" fw={600}>
+                    Firmas por documento
+                  </Text>
+                  {modalOrionByFile.map((group) => (
+                    <Paper key={group.fileId} withBorder p="sm" radius="md">
+                      <Group justify="space-between" align="flex-start" wrap="nowrap" mb={8}>
+                        <Box style={{ flex: 1, minWidth: 0 }}>
+                          <Text fw={600} lineClamp={1}>
+                            Firma · {group.label}
+                          </Text>
+                          <Text size="xs" c="dimmed" mt={2}>
+                            {group.completedSignTasks}/{group.totalSignTasks} firmas
+                            {group.totalAuthTasks > 0
+                              ? ` · ${group.completedAuthTasks}/${group.totalAuthTasks} autorizaciones`
+                              : ''}
+                          </Text>
+                        </Box>
+                        <Badge
+                          color={group.allDone ? 'green' : 'blue'}
+                          variant="light"
+                          size="sm"
+                        >
+                          {group.allDone ? 'Resuelto' : `${group.percent}%`}
+                        </Badge>
+                      </Group>
+                      <Progress
+                        value={group.percent}
+                        color={group.allDone ? 'green' : 'blue'}
+                        size="sm"
+                        radius="xl"
+                      />
+                    </Paper>
+                  ))}
+                </Stack>
+              ) : null}
+
+              {modalTimelineTasks.length > 0 ? (
               <Stack gap={0}>
-              {[...taskRQ]
-                .sort((a, b) => {
-                  const da = a.display_order ?? 0;
-                  const db = b.display_order ?? 0;
-                  if (da !== db) return da - db;
-                  return a.id_task - b.id_task;
-                })
-                .map((task, index, arr) => {
+              {modalTimelineTasks.map((task, index, arr) => {
                   const isLast = index === arr.length - 1;
                   const statusLower = task.status?.toLowerCase();
                   const isResolved = task.id_status === 2 || statusLower === 'resuelto';
@@ -2662,6 +2968,8 @@ function ViewRequestPage() {
                     </Flex>
                   );
                 })}
+              </Stack>
+              ) : null}
               </Stack>
             </ScrollArea.Autosize>
           ) : (

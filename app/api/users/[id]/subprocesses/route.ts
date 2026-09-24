@@ -7,6 +7,7 @@ import {
   getUserCompanyUsersWithSubprocesses,
   groupAssignmentsByCompany,
   normalizeSubprocessIds,
+  syncUserCompanySubprocesses,
 } from '../../../../../lib/process/subprocessAssignments';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 
@@ -67,64 +68,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    await consolidateDuplicateCompanyUsers(userId);
-
-    let companyUsers = await prisma.companyUser.findMany({
-      where: {
-        id_user: userId,
-        id_company: companyId,
-      },
-      orderBy: { id_company_user: 'asc' },
-    });
-
-    if (companyUsers.length === 0) {
-      const created = await prisma.companyUser.create({
-        data: {
-          id_user: userId,
-          id_company: companyId,
-        },
-      });
-      companyUsers = [created];
-    }
-
-    const primaryCompanyUser = companyUsers[0];
-    const allCompanyUserIds = companyUsers.map((cu) => cu.id_company_user);
-
-    const existingAssignments = await prisma.subprocessUserCompany.findMany({
-      where: {
-        id_company_user: { in: allCompanyUserIds },
-      },
-      select: { id_subprocess: true },
-    });
-
-    const existingSubprocessIds = [...new Set(existingAssignments.map((a) => a.id_subprocess))];
-    const desiredSet = new Set(desiredSubprocessIds);
-    const removed = existingSubprocessIds.filter((id) => !desiredSet.has(id));
-    const added = desiredSubprocessIds.filter((id) => !existingSubprocessIds.includes(id));
-
-    await prisma.$transaction(async (tx) => {
-      await tx.subprocessUserCompany.deleteMany({
-        where: {
-          id_company_user: { in: allCompanyUserIds },
-        },
-      });
-
-      if (desiredSubprocessIds.length > 0) {
-        await tx.subprocessUserCompany.createMany({
-          data: desiredSubprocessIds.map((subprocessId) => ({
-            id_company_user: primaryCompanyUser.id_company_user,
-            id_subprocess: subprocessId,
-          })),
-        });
-      }
-
-      if (allCompanyUserIds.length > 1) {
-        await tx.companyUser.deleteMany({
-          where: {
-            id_company_user: { in: allCompanyUserIds.slice(1) },
-          },
-        });
-      }
+    const result = await syncUserCompanySubprocesses({
+      userId,
+      companyId,
+      subprocessIds: desiredSubprocessIds,
+      mode: 'replace',
     });
 
     await prisma.userAuditLog.create({
@@ -132,14 +80,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         user_id: userId,
         action: 'UPDATE_SUBPROCESSES',
         performed_by: session.user.email,
-        details: `Company ${companyId}: assigned ${added.length}, removed ${removed.length}. Final: [${desiredSubprocessIds.join(', ')}]`,
+        details: `Company ${companyId}: assigned ${result.added}, removed ${result.removed}. Final: [${result.finalIds.join(', ')}]`,
       },
     });
 
     return NextResponse.json({
       message: 'Subprocesses updated successfully',
-      added: added.length,
-      removed: removed.length,
+      added: result.added,
+      removed: result.removed,
     });
   } catch (error) {
     console.error('Error assigning subprocesses:', error);

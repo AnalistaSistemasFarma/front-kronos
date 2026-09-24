@@ -13,6 +13,7 @@ import {
   Anchor,
   Table,
   TextInput,
+  Textarea,
   Select,
   MultiSelect,
   Button,
@@ -30,6 +31,9 @@ import {
   Box,
   SimpleGrid,
   Tooltip,
+  Checkbox,
+  ScrollArea,
+  SegmentedControl,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -45,6 +49,7 @@ import {
   IconX,
   IconUsers,
   IconShield,
+  IconUsersGroup,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { notifySubprocessAssignmentsChanged } from '@/lib/process/subprocessAssignmentsEvents';
@@ -127,7 +132,6 @@ function UserManagement() {
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState('');
   const [filters, setFilters] = useState({
@@ -159,6 +163,55 @@ function UserManagement() {
   const [subprocessSearch, setSubprocessSearch] = useState('');
   const [subprocessLoading, setSubprocessLoading] = useState(false);
 
+  // Bulk assignment
+  const [bulkModalOpened, setBulkModalOpened] = useState(false);
+  const [bulkEmailDomain, setBulkEmailDomain] = useState('');
+  const [bulkEmailsText, setBulkEmailsText] = useState('');
+  const [bulkCompany, setBulkCompany] = useState('');
+  const [bulkSubprocessIds, setBulkSubprocessIds] = useState<number[]>([]);
+  const [bulkSubprocessSearch, setBulkSubprocessSearch] = useState('');
+  const [bulkMode, setBulkMode] = useState<'add' | 'replace' | 'remove'>('add');
+  const [bulkPreviewUsers, setBulkPreviewUsers] = useState<
+    { id: string; name: string | null; email: string; role: string; isActive: boolean }[]
+  >([]);
+  const [bulkSelectedUserIds, setBulkSelectedUserIds] = useState<string[]>([]);
+  const [bulkPreviewLoading, setBulkPreviewLoading] = useState(false);
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkTruncated, setBulkTruncated] = useState(false);
+  const [bulkCoverageLoading, setBulkCoverageLoading] = useState(false);
+  const [bulkCoverage, setBulkCoverage] = useState<{
+    summary: {
+      all: number;
+      some: number;
+      none: number;
+      total: number;
+      hasAnywhere?: number;
+      scope?: string;
+      companyName?: string | null;
+    };
+    bySubprocess: {
+      id: number;
+      name: string;
+      processName: string;
+      withCount: number;
+      withoutCount: number;
+      withAnywhereCount?: number;
+    }[];
+    rowsByUserId: Record<
+      string,
+      {
+        status: 'all' | 'some' | 'none';
+        hasCount: number;
+        totalCount: number;
+        presentNames: string[];
+        missingNames: string[];
+        presentElsewhereNames?: string[];
+        companies?: string[];
+        hasAnywhere?: boolean;
+      }
+    >;
+  } | null>(null);
+
   // Authorization types states (submodal shown when the "Autorización" subprocess is assigned)
   const [authTypeModalOpened, setAuthTypeModalOpened] = useState(false);
   const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
@@ -189,7 +242,8 @@ function UserManagement() {
     allSubprocesses.find((s) => s.subprocess_url === '/process/authorization')?.id_subprocess ??
     null;
 
-  // Debounce del buscador (igual que help-desk): no fetch en cada tecla
+  // Debounce del buscador: refresca la tabla automáticamente buscando en TODA la BD
+  // (el API aplica el filtro antes de paginar). Al buscar siempre volvemos a página 1.
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const next = searchInput.trim();
@@ -197,21 +251,15 @@ function UserManagement() {
         if (prev.search === next) return prev;
         return { ...prev, search: next };
       });
-    }, 350);
+      setPagination((prev) => (prev.page === 1 ? prev : { ...prev, page: 1 }));
+    }, 150);
     return () => window.clearTimeout(timer);
   }, [searchInput]);
 
-  const prevSearchRef = useRef(filters.search);
-  useEffect(() => {
-    if (prevSearchRef.current === filters.search) return;
-    prevSearchRef.current = filters.search;
-    setPagination((prev) => (prev.page === 1 ? prev : { ...prev, page: 1 }));
-  }, [filters.search]);
-
   const fetchUsers = useCallback(async () => {
     try {
-      if (hasLoadedOnce.current) setRefreshing(true);
-      else setLoading(true);
+      // Solo bloquea la UI en la primera carga; al filtrar/paginar se actualiza en silencio.
+      if (!hasLoadedOnce.current) setLoading(true);
 
       const params = new URLSearchParams({
         page: pagination.page.toString(),
@@ -245,7 +293,6 @@ function UserManagement() {
       console.error('Error fetching users:', err);
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }, [filters.search, filters.role, filters.status, pagination.page, pagination.limit]);
 
@@ -688,6 +735,267 @@ function UserManagement() {
     }
   };
 
+  const openBulkModal = async () => {
+    setBulkModalOpened(true);
+    setBulkEmailDomain('');
+    setBulkEmailsText('');
+    setBulkCompany('');
+    setBulkSubprocessIds([]);
+    setBulkSubprocessSearch('');
+    setBulkMode('add');
+    setBulkPreviewUsers([]);
+    setBulkSelectedUserIds([]);
+    setBulkTruncated(false);
+    setBulkCoverage(null);
+
+    try {
+      const [subprocessesResponse, companiesResponse] = await Promise.all([
+        fetch('/api/subprocesses', { cache: 'no-store' }),
+        fetch('/api/companies', { cache: 'no-store' }),
+      ]);
+
+      if (companiesResponse.ok) {
+        const companiesData: Company[] = await companiesResponse.json();
+        setCompanies(companiesData);
+        setBulkCompany('all');
+      }
+
+      if (subprocessesResponse.ok) {
+        const { subprocesses } = await subprocessesResponse.json();
+        setAllSubprocesses(subprocesses);
+      }
+    } catch (error) {
+      console.error('Error loading bulk assignment data:', error);
+      toast.error('Error al cargar datos para asignación masiva');
+    }
+  };
+
+  const handleBulkPreview = async () => {
+    const emailDomain = bulkEmailDomain.trim();
+    const emails = bulkEmailsText.trim();
+    if (!emailDomain && !emails) {
+      toast.error('Indique un dominio (ej. onelatampharma) o una lista de correos');
+      return;
+    }
+
+    try {
+      setBulkPreviewLoading(true);
+      const params = new URLSearchParams();
+      if (emailDomain) params.set('emailDomain', emailDomain);
+      if (emails) params.set('emails', emails);
+
+      const response = await fetch(`/api/users/bulk-subprocesses?${params.toString()}`, {
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || 'No se pudo previsualizar usuarios');
+      }
+      const data = await response.json();
+      const list = (data.users || []) as typeof bulkPreviewUsers;
+      setBulkPreviewUsers(list);
+      setBulkSelectedUserIds(list.map((u) => u.id));
+      setBulkTruncated(Boolean(data.truncated));
+      if (list.length === 0) {
+        toast.error('No se encontraron usuarios activos con ese criterio');
+      } else {
+        toast.success(`${list.length} usuario(s) encontrados`);
+      }
+    } catch (error) {
+      console.error('Error previewing bulk users:', error);
+      toast.error(error instanceof Error ? error.message : 'Error al previsualizar');
+    } finally {
+      setBulkPreviewLoading(false);
+    }
+  };
+
+  const getBulkFilteredSubprocesses = () => {
+    if (!bulkSubprocessSearch) return allSubprocesses;
+    const searchLower = bulkSubprocessSearch.toLowerCase();
+    return allSubprocesses.filter(
+      (s) =>
+        s.subprocess.toLowerCase().includes(searchLower) ||
+        s.process.process.toLowerCase().includes(searchLower)
+    );
+  };
+
+  const handleBulkCheckCoverage = async () => {
+    if (!bulkCompany) {
+      toast.error('Seleccione una empresa o “Todas las empresas”');
+      return;
+    }
+    if (bulkSubprocessIds.length === 0) {
+      toast.error('Seleccione al menos un subproceso');
+      return;
+    }
+    if (bulkSelectedUserIds.length === 0) {
+      toast.error('Seleccione al menos un usuario');
+      return;
+    }
+
+    try {
+      setBulkCoverageLoading(true);
+      const response = await fetch('/api/users/bulk-subprocesses/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: bulkCompany === 'all' ? 'all' : parseInt(bulkCompany, 10),
+          subprocessIds: bulkSubprocessIds,
+          userIds: bulkSelectedUserIds,
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || 'No se pudo verificar la cobertura');
+      }
+      const data = await response.json();
+      const rowsByUserId: NonNullable<typeof bulkCoverage>['rowsByUserId'] = {};
+      for (const row of data.rows as Array<{
+        userId: string;
+        status: 'all' | 'some' | 'none';
+        hasCount: number;
+        totalCount: number;
+        presentNames: string[];
+        missingNames: string[];
+        presentElsewhereNames?: string[];
+        companies?: string[];
+        hasAnywhere?: boolean;
+      }>) {
+        rowsByUserId[row.userId] = {
+          status: row.status,
+          hasCount: row.hasCount,
+          totalCount: row.totalCount,
+          presentNames: row.presentNames,
+          missingNames: row.missingNames,
+          presentElsewhereNames: row.presentElsewhereNames,
+          companies: row.companies,
+          hasAnywhere: row.hasAnywhere,
+        };
+      }
+      setBulkCoverage({
+        summary: data.summary,
+        bySubprocess: data.bySubprocess,
+        rowsByUserId,
+      });
+      const elsewhere =
+        typeof data.summary.hasAnywhere === 'number' &&
+        data.summary.hasAnywhere > data.summary.all + data.summary.some
+          ? ` · ${data.summary.hasAnywhere} lo tienen en alguna empresa`
+          : '';
+      toast.success(
+        `Cobertura: ${data.summary.all} con todos · ${data.summary.some} parcial · ${data.summary.none} sin ninguno${elsewhere}`
+      );
+    } catch (error) {
+      console.error('Error checking coverage:', error);
+      toast.error(error instanceof Error ? error.message : 'Error al verificar cobertura');
+    } finally {
+      setBulkCoverageLoading(false);
+    }
+  };
+
+  const selectUsersByCoverage = (status: 'all' | 'some' | 'none' | 'missingAny' | 'hasAny') => {
+    if (!bulkCoverage) {
+      toast.error('Primero verifica la cobertura');
+      return;
+    }
+    const matched = Object.entries(bulkCoverage.rowsByUserId)
+      .filter(([, row]) => {
+        if (status === 'missingAny') return row.status !== 'all';
+        if (status === 'hasAny') return row.status !== 'none';
+        return row.status === status;
+      })
+      .map(([userId]) => userId);
+    setBulkSelectedUserIds(matched);
+  };
+
+  const coverageBadge = (userId: string) => {
+    const row = bulkCoverage?.rowsByUserId[userId];
+    if (!row) return null;
+    if (row.status === 'all') {
+      return (
+        <Badge color='green' variant='light' size='xs'>
+          Tiene todos ({row.hasCount}/{row.totalCount})
+        </Badge>
+      );
+    }
+    if (row.status === 'some') {
+      return (
+        <Badge color='yellow' variant='light' size='xs'>
+          Parcial ({row.hasCount}/{row.totalCount})
+        </Badge>
+      );
+    }
+    if (row.hasAnywhere) {
+      return (
+        <Badge color='orange' variant='light' size='xs'>
+          En otra empresa
+        </Badge>
+      );
+    }
+    return (
+      <Badge color='gray' variant='light' size='xs'>
+        No tiene (0/{row.totalCount})
+      </Badge>
+    );
+  };
+
+  const handleBulkSave = async () => {
+    if (!bulkCompany || bulkCompany === 'all') {
+      toast.error('Para agregar o quitar debe seleccionar una empresa concreta');
+      return;
+    }
+    if (bulkSubprocessIds.length === 0) {
+      toast.error('Seleccione al menos un subproceso');
+      return;
+    }
+    if (bulkSelectedUserIds.length === 0) {
+      toast.error('Seleccione al menos un usuario de la vista previa');
+      return;
+    }
+
+    try {
+      setBulkSaving(true);
+      const response = await fetch('/api/users/bulk-subprocesses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: parseInt(bulkCompany, 10),
+          subprocessIds: bulkSubprocessIds,
+          mode: bulkMode,
+          userIds: bulkSelectedUserIds,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || 'Error en la asignación masiva');
+      }
+
+      const result = await response.json();
+      notifySubprocessAssignmentsChanged();
+      const actionLabel =
+        bulkMode === 'remove'
+          ? 'Retiro masivo'
+          : bulkMode === 'replace'
+            ? 'Reemplazo masivo'
+            : 'Asignación masiva';
+      toast.success(
+        `${actionLabel}: ${result.successCount} usuario(s) OK` +
+          (result.failCount ? `, ${result.failCount} con error` : '') +
+          (bulkMode === 'remove' && result.totalRemoved
+            ? ` · ${result.totalRemoved} asignación(es) quitada(s)`
+            : '')
+      );
+      setBulkModalOpened(false);
+      void fetchUsers();
+    } catch (error) {
+      console.error('Error in bulk assignment:', error);
+      toast.error(error instanceof Error ? error.message : 'Error en la asignación masiva');
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
   const exportToCSV = () => {
     const csvContent = [
       ['ID', 'Nombre', 'Email', 'Rol', 'Estado', 'Fecha de Registro'],
@@ -859,6 +1167,15 @@ function UserManagement() {
               </Button>
               <Button
                 size='sm'
+                variant='filled'
+                color='violet'
+                leftSection={<IconUsersGroup size={14} />}
+                onClick={() => void openBulkModal()}
+              >
+                Asignación masiva
+              </Button>
+              <Button
+                size='sm'
                 variant='light'
                 leftSection={<IconDownload size={14} />}
                 onClick={exportToCSV}
@@ -921,24 +1238,13 @@ function UserManagement() {
           </SimpleGrid>
         </Card>
 
-        <Card shadow='sm' radius='md' withBorder p='md' style={{ position: 'relative' }}>
-          {refreshing ? (
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                zIndex: 2,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'color-mix(in srgb, var(--mantine-color-body) 70%, transparent)',
-                borderRadius: 'inherit',
-              }}
-            >
-              <Loader size='sm' />
-            </div>
-          ) : null}
-
+        <Card
+          shadow='sm'
+          radius='md'
+          withBorder
+          p='md'
+          style={{ position: 'relative' }}
+        >
           {users.length === 0 ? (
             <Stack align='center' gap={6} py='lg'>
               <ThemeIcon size={40} radius='xl' variant='light' color='gray'>
@@ -1087,6 +1393,432 @@ function UserManagement() {
             </Flex>
           )}
         </Card>
+
+      {/* Bulk Assignment Modal */}
+      <Modal
+        opened={bulkModalOpened}
+        onClose={() => !bulkSaving && setBulkModalOpened(false)}
+        title={
+          <Group gap='xs'>
+            <IconUsersGroup size={18} />
+            <Text fw={600}>Asignación / retiro masivo</Text>
+          </Group>
+        }
+        size='xl'
+        fullScreen={!!isMobile}
+      >
+        <Stack gap='sm'>
+          <Alert color='blue' variant='light' icon={<IconAlertCircle size={16} />}>
+            Filtra por dominio de correo (ej. <strong>onelatampharma</strong>) o pega una lista de
+            emails. Luego elige empresa, subprocesos y <strong>agrega</strong> o{' '}
+            <strong>quita</strong> módulos de forma masiva.
+          </Alert>
+
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
+            <TextInput
+              label='Dominio de correo'
+              placeholder='onelatampharma o @onelatampharma.com'
+              description='Coincide con cualquier email que contenga ese texto'
+              value={bulkEmailDomain}
+              onChange={(e) => setBulkEmailDomain(e.currentTarget.value)}
+              size='sm'
+            />
+            <Textarea
+              label='Lista de correos (opcional)'
+              placeholder={'user1@empresa.com\nuser2@empresa.com'}
+              description='Separados por coma, espacio o salto de línea'
+              value={bulkEmailsText}
+              onChange={(e) => setBulkEmailsText(e.currentTarget.value)}
+              minRows={2}
+              autosize
+              maxRows={4}
+              size='sm'
+            />
+          </SimpleGrid>
+
+          <Group>
+            <Button
+              size='sm'
+              variant='light'
+              leftSection={<IconSearch size={14} />}
+              loading={bulkPreviewLoading}
+              onClick={() => void handleBulkPreview()}
+            >
+              Vista previa de usuarios
+            </Button>
+            {bulkPreviewUsers.length > 0 && (
+              <Badge variant='light' color='violet'>
+                {bulkSelectedUserIds.length} / {bulkPreviewUsers.length} seleccionados
+              </Badge>
+            )}
+          </Group>
+
+          {bulkTruncated && (
+            <Alert color='yellow' variant='light'>
+              Se limitó la vista previa a 500 usuarios. Afina el dominio si necesitas un grupo más
+              preciso.
+            </Alert>
+          )}
+
+          {bulkPreviewUsers.length > 0 && (
+            <Card withBorder padding='sm' radius='md'>
+              <Group justify='space-between' mb='xs'>
+                <Text size='sm' fw={600}>
+                  Usuarios coincidentes
+                </Text>
+                <Group gap='xs'>
+                  <Button
+                    size='compact-xs'
+                    variant='subtle'
+                    onClick={() => setBulkSelectedUserIds(bulkPreviewUsers.map((u) => u.id))}
+                  >
+                    Todos
+                  </Button>
+                  <Button
+                    size='compact-xs'
+                    variant='subtle'
+                    color='gray'
+                    onClick={() => setBulkSelectedUserIds([])}
+                  >
+                    Ninguno
+                  </Button>
+                </Group>
+              </Group>
+              <ScrollArea.Autosize mah={180}>
+                <Stack gap={4}>
+                  {bulkPreviewUsers.map((user) => (
+                    <Group key={user.id} justify='space-between' wrap='nowrap' gap='xs' align='flex-start'>
+                      <Checkbox
+                        size='sm'
+                        style={{ flex: 1, minWidth: 0 }}
+                        checked={bulkSelectedUserIds.includes(user.id)}
+                        onChange={(e) => {
+                          const checked = e.currentTarget.checked;
+                          setBulkCoverage(null);
+                          setBulkSelectedUserIds((prev) =>
+                            checked ? [...prev, user.id] : prev.filter((id) => id !== user.id)
+                          );
+                        }}
+                        label={
+                          <Text size='xs'>
+                            <Text span fw={600}>
+                              {user.name || 'Sin nombre'}
+                            </Text>{' '}
+                            · {user.email}
+                          </Text>
+                        }
+                      />
+                      {bulkCoverage?.rowsByUserId[user.id] && (
+                        <Tooltip
+                          multiline
+                          w={300}
+                          withArrow
+                          label={
+                            <Stack gap={4}>
+                              <Text size='xs'>
+                                Tiene aquí:{' '}
+                                {bulkCoverage.rowsByUserId[user.id].presentNames.join(', ') || '—'}
+                              </Text>
+                              <Text size='xs'>
+                                Falta:{' '}
+                                {bulkCoverage.rowsByUserId[user.id].missingNames.join(', ') || '—'}
+                              </Text>
+                              {(bulkCoverage.rowsByUserId[user.id].presentElsewhereNames?.length ??
+                                0) > 0 && (
+                                <Text size='xs'>
+                                  En otras empresas:{' '}
+                                  {bulkCoverage.rowsByUserId[user.id].presentElsewhereNames?.join(
+                                    ', '
+                                  )}
+                                </Text>
+                              )}
+                              {(bulkCoverage.rowsByUserId[user.id].companies?.length ?? 0) > 0 && (
+                                <Text size='xs'>
+                                  Empresas:{' '}
+                                  {bulkCoverage.rowsByUserId[user.id].companies?.join(', ')}
+                                </Text>
+                              )}
+                            </Stack>
+                          }
+                        >
+                          <span>{coverageBadge(user.id)}</span>
+                        </Tooltip>
+                      )}
+                    </Group>
+                  ))}
+                </Stack>
+              </ScrollArea.Autosize>
+            </Card>
+          )}
+
+          <Select
+            label='Empresa'
+            placeholder='Seleccione una empresa'
+            description='Para consultar cobertura puedes usar “Todas las empresas”. Para agregar/quitar sí debes elegir una empresa concreta.'
+            data={[
+              { value: 'all', label: 'Todas las empresas (solo consulta)' },
+              ...companies.map((c) => ({ value: c.id.toString(), label: c.name })),
+            ]}
+            value={bulkCompany}
+            onChange={(value) => {
+              setBulkCompany(value || '');
+              setBulkCoverage(null);
+            }}
+            required
+            size='sm'
+            comboboxProps={{ withinPortal: true }}
+          />
+
+          <div>
+            <Text size='sm' fw={500} mb={4}>
+              Acción
+            </Text>
+            <SegmentedControl
+              fullWidth
+              size='sm'
+              value={bulkMode}
+              onChange={(value) => setBulkMode(value as 'add' | 'replace' | 'remove')}
+              data={[
+                { label: 'Agregar', value: 'add' },
+                { label: 'Quitar', value: 'remove' },
+                { label: 'Reemplazar', value: 'replace' },
+              ]}
+            />
+            <Text size='xs' c='dimmed' mt={4}>
+              {bulkMode === 'add'
+                ? 'Suma los subprocesos elegidos sin quitar los que ya tengan en esa empresa.'
+                : bulkMode === 'remove'
+                  ? 'Quita solo los subprocesos seleccionados de esa empresa; conserva el resto.'
+                  : 'Deja únicamente los subprocesos seleccionados (quita los demás de esa empresa).'}
+            </Text>
+          </div>
+
+          <TextInput
+            label='Filtrar subprocesos'
+            placeholder='Buscar módulo o subproceso'
+            leftSection={<IconSearch size={14} />}
+            value={bulkSubprocessSearch}
+            onChange={(e) => setBulkSubprocessSearch(e.currentTarget.value)}
+            size='sm'
+          />
+
+          <Group gap='xs'>
+            <Button
+              size='compact-xs'
+              variant='light'
+              onClick={() => {
+                setBulkSubprocessIds(getBulkFilteredSubprocesses().map((s) => s.id_subprocess));
+                setBulkCoverage(null);
+              }}
+            >
+              Seleccionar filtrados
+            </Button>
+            <Button
+              size='compact-xs'
+              variant='subtle'
+              color='gray'
+              onClick={() => {
+                setBulkSubprocessIds([]);
+                setBulkCoverage(null);
+              }}
+            >
+              Limpiar
+            </Button>
+            <Badge variant='light' size='sm'>
+              {bulkSubprocessIds.length} subproceso(s)
+            </Badge>
+          </Group>
+
+          <ScrollArea.Autosize mah={180}>
+            <Stack gap={4}>
+              {getBulkFilteredSubprocesses().map((subprocess) => (
+                <Checkbox
+                  key={subprocess.id_subprocess}
+                  size='sm'
+                  checked={bulkSubprocessIds.includes(subprocess.id_subprocess)}
+                  onChange={() => {
+                    setBulkCoverage(null);
+                    setBulkSubprocessIds((prev) =>
+                      prev.includes(subprocess.id_subprocess)
+                        ? prev.filter((id) => id !== subprocess.id_subprocess)
+                        : [...prev, subprocess.id_subprocess]
+                    );
+                  }}
+                  label={
+                    <Text size='xs'>
+                      <Text span fw={600}>
+                        {subprocess.subprocess}
+                      </Text>{' '}
+                      <Text span c='dimmed'>
+                        · {subprocess.process.process}
+                      </Text>
+                    </Text>
+                  }
+                />
+              ))}
+            </Stack>
+          </ScrollArea.Autosize>
+
+          <Group>
+            <Button
+              size='sm'
+              variant='light'
+              color='teal'
+              leftSection={<IconSearch size={14} />}
+              loading={bulkCoverageLoading}
+              onClick={() => void handleBulkCheckCoverage()}
+              disabled={
+                bulkSelectedUserIds.length === 0 ||
+                bulkSubprocessIds.length === 0 ||
+                !bulkCompany
+              }
+            >
+              Ver quién ya los tiene
+            </Button>
+          </Group>
+
+          {bulkCoverage && (
+            <Card withBorder padding='sm' radius='md'>
+              <Text size='sm' fw={600} mb={6}>
+                Cobertura
+                {bulkCoverage.summary.scope === 'all'
+                  ? ' (todas las empresas)'
+                  : bulkCoverage.summary.companyName
+                    ? ` en ${bulkCoverage.summary.companyName}`
+                    : ''}
+              </Text>
+              <Group gap='xs' mb='sm' wrap='wrap'>
+                <Badge color='green' variant='filled'>
+                  Todos: {bulkCoverage.summary.all}
+                </Badge>
+                <Badge color='yellow' variant='filled'>
+                  Parcial: {bulkCoverage.summary.some}
+                </Badge>
+                <Badge color='gray' variant='filled'>
+                  Ninguno: {bulkCoverage.summary.none}
+                </Badge>
+                {typeof bulkCoverage.summary.hasAnywhere === 'number' && (
+                  <Badge color='teal' variant='light'>
+                    En alguna empresa: {bulkCoverage.summary.hasAnywhere}
+                  </Badge>
+                )}
+              </Group>
+
+              {bulkCoverage.summary.scope === 'company' &&
+                (bulkCoverage.summary.hasAnywhere ?? 0) >
+                  bulkCoverage.summary.all + bulkCoverage.summary.some && (
+                  <Alert color='orange' variant='light' mb='sm'>
+                    Hay usuarios que <strong>sí tienen</strong> estos módulos, pero en{' '}
+                    <strong>otra empresa</strong>. Usa “Todas las empresas” para verlos, o cambia
+                    la empresa.
+                  </Alert>
+                )}
+
+              <Group gap={6} mb='sm' wrap='wrap'>
+                <Button
+                  size='compact-xs'
+                  variant='light'
+                  color='gray'
+                  onClick={() => selectUsersByCoverage('none')}
+                >
+                  Seleccionar sin módulos
+                </Button>
+                <Button
+                  size='compact-xs'
+                  variant='light'
+                  color='yellow'
+                  onClick={() => selectUsersByCoverage('missingAny')}
+                >
+                  Seleccionar a quienes les falta
+                </Button>
+                <Button
+                  size='compact-xs'
+                  variant='light'
+                  color='green'
+                  onClick={() => selectUsersByCoverage('hasAny')}
+                >
+                  Seleccionar quienes sí tienen
+                </Button>
+                <Button
+                  size='compact-xs'
+                  variant='light'
+                  color='teal'
+                  onClick={() => selectUsersByCoverage('all')}
+                >
+                  Seleccionar con todos
+                </Button>
+              </Group>
+
+              <Text size='xs' fw={600} mb={4}>
+                Por módulo
+              </Text>
+              <Stack gap={4} mb='sm'>
+                {bulkCoverage.bySubprocess.map((sub) => (
+                  <Group key={sub.id} justify='space-between' wrap='nowrap' gap='xs'>
+                    <Text size='xs' lineClamp={1} style={{ minWidth: 0, flex: 1 }}>
+                      {sub.name}
+                      <Text span c='dimmed'>
+                        {' '}
+                        · {sub.processName}
+                      </Text>
+                    </Text>
+                    <Group gap={4} wrap='nowrap' style={{ flexShrink: 0 }}>
+                      <Badge size='xs' color='green' variant='light'>
+                        {sub.withCount} sí
+                      </Badge>
+                      <Badge size='xs' color='gray' variant='light'>
+                        {sub.withoutCount} no
+                      </Badge>
+                      {typeof sub.withAnywhereCount === 'number' &&
+                        sub.withAnywhereCount !== sub.withCount && (
+                          <Badge size='xs' color='orange' variant='light'>
+                            {sub.withAnywhereCount} en total
+                          </Badge>
+                        )}
+                    </Group>
+                  </Group>
+                ))}
+              </Stack>
+
+              <Text size='xs' c='dimmed'>
+                Hover en el badge de cada usuario para ver detalle y en qué empresas lo tiene.
+              </Text>
+            </Card>
+          )}
+
+          <Group justify='flex-end' mt='xs'>
+            <Button
+              variant='default'
+              size='sm'
+              disabled={bulkSaving}
+              onClick={() => setBulkModalOpened(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size='sm'
+              color={bulkMode === 'remove' ? 'red' : 'violet'}
+              loading={bulkSaving}
+              leftSection={
+                bulkMode === 'remove' ? <IconTrash size={14} /> : <IconUsersGroup size={14} />
+              }
+              onClick={() => void handleBulkSave()}
+              disabled={
+                bulkSelectedUserIds.length === 0 ||
+                bulkSubprocessIds.length === 0 ||
+                !bulkCompany ||
+                bulkCompany === 'all'
+              }
+            >
+              {bulkMode === 'remove'
+                ? `Quitar de ${bulkSelectedUserIds.length || 0} usuario(s)`
+                : bulkMode === 'replace'
+                  ? `Reemplazar en ${bulkSelectedUserIds.length || 0} usuario(s)`
+                  : `Asignar a ${bulkSelectedUserIds.length || 0} usuario(s)`}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       {/* Create User Modal */}
       <Modal

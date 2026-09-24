@@ -26,7 +26,7 @@ import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
 import { useChatConversation, type ChatTarget } from './useChatConversation';
-import { useAltoVisible } from './useAltoVisible';
+import { useAltoVisible, usuarioInteractuando } from './useAltoVisible';
 import {
   describeAgentStatus,
   formatChatTime,
@@ -558,7 +558,7 @@ export default function ChatThread({
   useAltoVisible(
     useCallback(() => {
       const viewport = viewportRef.current;
-      if (!viewport || !stickToBottomRef.current) return;
+      if (!viewport || !stickToBottomRef.current || usuarioInteractuando()) return;
       // En el mismo cuadro el navegador todavía no reacomodó el layout con el
       // alto nuevo; se espera al siguiente. No encadenar animaciones smooth
       // mientras el teclado cambia el viewport en cada cuadro.
@@ -571,8 +571,18 @@ export default function ChatThread({
       // fondo real. Esperar un segundo cuadro le da tiempo al reflow de
       // asentarse antes de fijar la posición. Nicolás lo reportó como "la
       // conversación se sube más de lo que debía".
+      //
+      // SÍNCRONO PRIMERO (2026-09-23, "salto feo al abrir el teclado"): el
+      // doble rAF dejaba ver dos cuadros con el contenedor ya encogido y el
+      // scroll viejo — los últimos mensajes tapados y luego el brinco. El
+      // hook ya escribió `--alto-visible`; leer `scrollHeight` aquí fuerza el
+      // reflow con el alto nuevo, así que se fija el fondo en ESTE cuadro,
+      // antes de pintar. El doble rAF se conserva como red de seguridad para
+      // el caso de #374: si ya estaba en el fondo, no mueve nada.
+      viewport.scrollTop = viewport.scrollHeight;
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
+          if (!stickToBottomRef.current || usuarioInteractuando()) return;
           viewport.scrollTop = viewport.scrollHeight;
         });
       });
@@ -591,6 +601,19 @@ export default function ChatThread({
   // pantalla entera se sacudiría, que es justo lo contrario de lo que se
   // busca. Se llena una sola vez, con el primer lote que llega.
   const yaEstaban = useRef<Set<string | number> | null>(null);
+  // Al cambiar de hilo (el componente NO se remonta) todo vuelve a empezar:
+  // pegado al fondo, sin interacción del usuario y sin mensajes "vistos". Si no,
+  // un hilo heredaba el `stickToBottom = false` del anterior y quedaba subido.
+  const hiloPrevioRef = useRef(claveHilo);
+  const usuarioMovioRef = useRef(false);
+  if (hiloPrevioRef.current !== claveHilo) {
+    hiloPrevioRef.current = claveHilo;
+    yaEstaban.current = null;
+    usuarioMovioRef.current = false;
+    lastCountRef.current = 0;
+    stickToBottomRef.current = true;
+    if (!stickToBottom) setStickToBottom(true);
+  }
   if (yaEstaban.current === null && thread.messages.length > 0) {
     yaEstaban.current = new Set(thread.messages.map((m) => m.id));
   }
@@ -600,9 +623,18 @@ export default function ChatThread({
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
+    const primerLote = lastCountRef.current === 0;
     const grew = thread.messages.length > lastCountRef.current;
     lastCountRef.current = thread.messages.length;
     if (!grew || !stickToBottom) return;
+    // El primer lote (abrir el hilo) va al fondo SIN animación: un `smooth`
+    // desde arriba emite eventos de scroll intermedios que apagaban el
+    // `stickToBottom`, y lo que crecía después (imágenes, Markdown, el
+    // indicador) dejaba la conversación subida.
+    if (primerLote) {
+      viewport.scrollTop = viewport.scrollHeight;
+      return;
+    }
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
   }, [thread.messages, stickToBottom]);
 
@@ -613,7 +645,7 @@ export default function ChatThread({
     const viewport = viewportRef.current;
     if (!viewport || thread.loading) return;
     viewport.scrollTop = viewport.scrollHeight;
-  }, [thread.loading, claveHilo]);
+  }, [thread.loading, claveHilo, thread.conversation?.id]);
 
   /**
    * PEGADO AL FONDO de verdad, mientras el usuario esté abajo.
@@ -638,25 +670,49 @@ export default function ChatThread({
    * No hay bucle: desplazarse no cambia el tamaño del contenido.
    */
   const contenidoRef = useRef<HTMLDivElement>(null);
+  // El contenido se REMONTA una sola vez por hilo: cuando pasa de vacío a
+  // tener mensajes. Así la lista entra con un fundido corto (ver
+  // .chat-thread__contenido en globals.css) en vez de reemplazar de golpe al
+  // esqueleto. Con caché los mensajes ya están desde el primer render y el
+  // fundido ocurre una sola vez, al abrir.
+  const claveContenido = `${claveHilo}:${thread.messages.length > 0 ? 'con' : 'sin'}`;
+
+  // ESQUELETO CON RETRASO: si el hilo llega en menos de 300 ms no se pinta
+  // nada intermedio. Mostrar un esqueleto medio segundo para reemplazarlo
+  // enseguida es justo el "refresco feo" que se veía al abrir el chat.
+  const esperandoPrimerLote = thread.loading && thread.messages.length === 0;
+  const [mostrarEsqueleto, setMostrarEsqueleto] = useState(false);
+  useEffect(() => {
+    if (!esperandoPrimerLote) {
+      setMostrarEsqueleto(false);
+      return;
+    }
+    const reloj = window.setTimeout(() => setMostrarEsqueleto(true), 300);
+    return () => window.clearTimeout(reloj);
+  }, [esperandoPrimerLote]);
+
   useEffect(() => {
     const contenido = contenidoRef.current;
     const viewport = viewportRef.current;
     if (!contenido || !viewport || typeof ResizeObserver === 'undefined') return;
 
     const observador = new ResizeObserver(() => {
-      if (!stickToBottomRef.current) return;
+      // Nunca re-anclar con el dedo puesto o en plena inercia: eso era lo que
+      // "subía" (o bajaba) el hilo en contra del gesto.
+      if (!stickToBottomRef.current || usuarioInteractuando()) return;
       // Mismo motivo del doble rAF de arriba: si el contenido crece justo
       // mientras el teclado todavía está animando el viewport, un solo
       // cuadro puede leer un `scrollHeight` que no es el final.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
+          if (!stickToBottomRef.current || usuarioInteractuando()) return;
           viewport.scrollTop = viewport.scrollHeight;
         });
       });
     });
     observador.observe(contenido);
     return () => observador.disconnect();
-  }, [claveHilo]);
+  }, [claveContenido]);
 
   // ── Arrastrar y soltar archivos sobre la conversación ────────────────────
   // El área de soltar es TODO el hilo (mensajes + compositor), no solo la caja
@@ -738,7 +794,15 @@ export default function ChatThread({
     const viewport = viewportRef.current;
     if (!viewport) return;
     const distanceToBottom = viewport.scrollHeight - viewport.clientHeight - y;
+    // Mientras el usuario no haya tocado el scroll de este hilo, se sigue
+    // pegado al fondo: los eventos de scroll que produce el propio reacomodo
+    // (contenido que crece, teclado, ajustes programáticos) no cuentan como
+    // "el usuario subió a leer".
+    if (!usuarioMovioRef.current && distanceToBottom >= 80) return;
     setStickToBottom(distanceToBottom < 80);
+  };
+  const marcarInteraccion = () => {
+    usuarioMovioRef.current = true;
   };
 
   return (
@@ -768,9 +832,13 @@ export default function ChatThread({
         className='chat-thread__scroll'
         viewportRef={viewportRef}
         onScrollPositionChange={onScrollPositionChange}
+        onWheel={marcarInteraccion}
+        onTouchMove={marcarInteraccion}
+        onKeyDown={marcarInteraccion}
+        onPointerDown={marcarInteraccion}
         offsetScrollbars
       >
-        <Stack gap='sm' p='sm' ref={contenidoRef}>
+        <Stack key={claveContenido} gap='sm' p='sm' ref={contenidoRef} className='chat-thread__contenido'>
           {thread.hasOlder && (
             <Center>
               <Button
@@ -784,7 +852,7 @@ export default function ChatThread({
             </Center>
           )}
 
-          {thread.loading && thread.messages.length === 0 && <EsqueletoHilo />}
+          {esperandoPrimerLote && mostrarEsqueleto && <EsqueletoHilo />}
 
           {!thread.loading && thread.messages.length === 0 && !thread.error && (
             <Center py='xl'>
@@ -853,6 +921,15 @@ export default function ChatThread({
           voiceConversationId={agent?.code === 'duo' ? thread.conversation?.id : undefined}
           ref={composerRef}
           onSend={async (body, files) => {
+            // Al ENVIAR se vuelve al fondo aunque el usuario hubiera subido a
+            // leer: quiere ver lo que acaba de escribir y la respuesta. Se
+            // olvida la interacción previa para que el scroll animado hacia el
+            // mensaje optimista no vuelva a soltar el anclaje a mitad de camino.
+            usuarioMovioRef.current = false;
+            stickToBottomRef.current = true;
+            setStickToBottom(true);
+            const vp = viewportRef.current;
+            if (vp) vp.scrollTop = vp.scrollHeight;
             const enviado = await thread.send(body, files, cita);
             // La cita se limpia solo si el mensaje SALIÓ: si falló, el usuario
             // reintenta y la cita tiene que seguir puesta.

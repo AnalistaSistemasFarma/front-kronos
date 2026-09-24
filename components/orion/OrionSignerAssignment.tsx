@@ -84,21 +84,57 @@ function PartnerSearch({
   const [q, setQ] = useState('');
   const [options, setOptions] = useState<PartnerOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!companyId || q.trim().length < 2) {
       setOptions([]);
+      setSearchError(null);
       return;
     }
     let cancelled = false;
     const t = setTimeout(() => {
       setLoading(true);
+      setSearchError(null);
       void fetch(
         `/api/integrations/orion/external-partners?companyId=${companyId}&q=${encodeURIComponent(q.trim())}`
       )
         .then(async (res) => {
           const data = await res.json().catch(() => ({}));
-          if (!cancelled) setOptions((data.options || []) as PartnerOption[]);
+          if (cancelled) return;
+          if (!res.ok) {
+            setOptions([]);
+            setSearchError(
+              typeof data.error === 'string' ? data.error : 'No se pudo buscar socios'
+            );
+            return;
+          }
+          const raw = Array.isArray(data.options) ? data.options : [];
+          // Valor único por CardCode (evita crash de Autocomplete con emails duplicados/vacíos).
+          const seen = new Set<string>();
+          const next: PartnerOption[] = [];
+          for (const row of raw as PartnerOption[]) {
+            const cardCode = String(row?.cardCode || '').trim();
+            const email = String(row?.email || '')
+              .trim()
+              .toLowerCase();
+            if (!cardCode || !email || !email.includes('@') || seen.has(cardCode)) continue;
+            seen.add(cardCode);
+            next.push({
+              value: cardCode,
+              label: String(row.label || `${row.cardName || cardCode} <${email}>`),
+              cardCode,
+              cardName: String(row.cardName || cardCode),
+              email,
+            });
+          }
+          setOptions(next);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setOptions([]);
+            setSearchError('Error de red al buscar socios');
+          }
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
@@ -111,26 +147,45 @@ function PartnerSearch({
   }, [companyId, q]);
 
   return (
-    <Autocomplete
-      placeholder={
-        companyId
-          ? 'Buscar socio por nombre, código o correo…'
-          : 'Falta empresa de la solicitud para buscar socios'
-      }
-      data={options.map((o) => ({ value: o.email, label: o.label }))}
-      value={q}
-      onChange={setQ}
-      disabled={disabled || !companyId}
-      limit={12}
-      rightSection={loading ? <Loader size={14} /> : null}
-      onOptionSubmit={(value) => {
-        const match = options.find((o) => o.email === value || o.value === value);
-        if (match) {
-          onPick(match);
-          setQ('');
+    <Stack gap={4}>
+      <Autocomplete
+        placeholder={
+          companyId
+            ? 'Buscar socio por nombre, código o correo…'
+            : 'Falta empresa de la solicitud para buscar socios'
         }
-      }}
-    />
+        data={options.map((o) => ({ value: o.cardCode, label: o.label }))}
+        value={q}
+        onChange={setQ}
+        disabled={disabled || !companyId}
+        limit={12}
+        rightSection={loading ? <Loader size={14} /> : null}
+        onOptionSubmit={(value) => {
+          try {
+            const match = options.find(
+              (o) => o.cardCode === value || o.email === value || o.value === value
+            );
+            if (!match?.email) return;
+            onPick(match);
+            setQ('');
+            setOptions([]);
+          } catch (err) {
+            console.error('[orion] PartnerSearch onOptionSubmit', err);
+            setSearchError('No se pudo asignar este socio. Intente de nuevo.');
+          }
+        }}
+      />
+      {searchError ? (
+        <Text size='xs' c='red'>
+          {searchError}
+        </Text>
+      ) : null}
+      {!loading && q.trim().length >= 2 && options.length === 0 && !searchError ? (
+        <Text size='xs' c='dimmed'>
+          Sin resultados con correo válido en SAP.
+        </Text>
+      ) : null}
+    </Stack>
   );
 }
 
@@ -353,38 +408,21 @@ export default function OrionSignerAssignment({
                         Paso {person.order} en la secuencia
                       </Badge>
                     )}
-                    {person.email ? (
-                      <Stack gap={6} mt='sm'>
-                        <Checkbox
-                          size='xs'
-                          label='Enviar correo con link de firma'
-                          description={
-                            person.type === 'external'
-                              ? 'Recomendado para socios externos (URL Orion).'
-                              : 'Opcional; los internos también reciben tarea/notificación en SynerLink.'
-                          }
-                          checked={Boolean(person.notifyByEmail)}
-                          disabled={readOnly || !onToggleNotifyByEmail}
-                          onChange={(e) =>
-                            onToggleNotifyByEmail?.(person.order, e.currentTarget.checked)
-                          }
-                        />
-                        {canUseFingerprint ? (
-                          <Checkbox
-                            size='xs'
-                            label='Requiere huella dactilar'
-                            description='Coloque una caja de huella para este firmante en el PDF.'
-                            checked={Boolean(person.requireFingerprint)}
-                            disabled={readOnly || !onToggleRequireFingerprint}
-                            onChange={(e) =>
-                              onToggleRequireFingerprint?.(
-                                person.order,
-                                e.currentTarget.checked
-                              )
-                            }
-                          />
-                        ) : null}
-                      </Stack>
+                    {person.email && canUseFingerprint ? (
+                      <Checkbox
+                        size='xs'
+                        mt='sm'
+                        label='Requiere huella dactilar'
+                        description='Coloque una caja de huella para este firmante en el PDF.'
+                        checked={Boolean(person.requireFingerprint)}
+                        disabled={readOnly || !onToggleRequireFingerprint}
+                        onChange={(e) =>
+                          onToggleRequireFingerprint?.(
+                            person.order,
+                            e.currentTarget.checked
+                          )
+                        }
+                      />
                     ) : null}
                   </Box>
 

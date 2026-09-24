@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
@@ -58,6 +58,7 @@ const AgentDetailModal = dynamic(() => import('./AgentDetailModal'), { ssr: fals
 const ChatBroadcastModal = dynamic(() => import('./ChatBroadcastModal'), { ssr: false });
 const ChatGroupModal = dynamic(() => import('./ChatGroupModal'), { ssr: false });
 import { useChatOverview } from './useChatOverview';
+import { precargarHiloDeAgente } from './useChatConversation';
 import {
   describeAgentStatus,
   findAgentByRouteKey,
@@ -101,6 +102,7 @@ function AgentCard({
   selected,
   compact,
   onSelect,
+  onPrecargar,
   status,
 }: {
   agent: ChatAgentDto;
@@ -111,11 +113,14 @@ function AgentCard({
   selected: boolean;
   compact: boolean;
   onSelect: () => void;
+  onPrecargar?: () => void;
   status: Parameters<typeof describeAgentStatus>[0];
 }) {
   return (
     <UnstyledButton
       onClick={onSelect}
+      onPointerEnter={onPrecargar}
+      onPointerDown={onPrecargar}
       className={[
         'chat-agent-card',
         compact ? 'chat-agent-card--compact' : '',
@@ -385,7 +390,7 @@ export default function ChatWorkspace({
   // de la conversación. Sin esto la página conserva su propio desplazamiento
   // detrás del marco fijo y la rueda del ratón mueve el fondo — que es
   // exactamente lo que se veía mal. La marca se quita SIEMPRE al salir.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!modoEscritorio) return;
     document.body.classList.add('chat-escritorio-abierto');
     return () => {
@@ -408,7 +413,11 @@ export default function ChatWorkspace({
   const inmersivo =
     (conversacionSola && Boolean(selectedCode || selectedGroupId)) ||
     (modoEscritorio && expandido);
-  useEffect(() => {
+  // useLayoutEffect y no useEffect: la barra se esconde ANTES del primer
+  // pintado de la conversación. Con useEffect se alcanzaba a ver un cuadro con
+  // la barra puesta y enseguida todo el hilo saltaba hacia arriba al quitarla
+  // —parte del "golpe" al abrir el chat en el celular—.
+  useLayoutEffect(() => {
     if (!inmersivo) return;
     const scrollY = window.scrollY;
     document.body.classList.add('chat-inmersivo');
@@ -824,6 +833,7 @@ export default function ChatWorkspace({
                       : null
                   }
                   lastAt={conversation?.lastMessageAt ?? null}
+                  onPrecargar={() => precargarHiloDeAgente(agent.idAgent, conversation)}
                   selected={selectedAgent?.idAgent === agent.idAgent}
                   compact={
                     comoLista || viewMode === 'list' || Boolean(selectedAgent || selectedGroup)

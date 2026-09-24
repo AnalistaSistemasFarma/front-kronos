@@ -8,7 +8,7 @@ import {
   setOrionDocumentInBag,
 } from '@/lib/orion/formValue';
 import {
-  assertUserIsOrionDocumentPreparer,
+  assertUserCanEditOrionPreparation,
   getRequestOrionContext,
   loadOrionFormBag,
   upsertOrionFormBag,
@@ -151,11 +151,12 @@ export async function GET(req: Request) {
     const origin = resolvePublicAppOrigin(req.headers.get('origin'));
 
     const data = await withMssqlPool(async (pool) => {
-      await assertUserIsOrionDocumentPreparer(pool, {
+      await assertUserCanEditOrionPreparation(pool, {
         requestId,
         userId: String(session.user.id),
         userEmail: String(session.user.email || ''),
         isAdmin,
+        fileId,
       });
 
       const loaded = await loadOrionFormBag(pool, requestId);
@@ -261,11 +262,12 @@ export async function POST(req: Request) {
     }
 
     const outcome = await withMssqlPool(async (pool) => {
-      await assertUserIsOrionDocumentPreparer(pool, {
+      await assertUserCanEditOrionPreparation(pool, {
         requestId,
         userId: String(session.user.id),
         userEmail: String(session.user.email || ''),
         isAdmin,
+        fileId,
       });
 
       const loaded = await loadOrionFormBag(pool, requestId);

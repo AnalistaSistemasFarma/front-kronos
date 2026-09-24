@@ -8,7 +8,7 @@ import { sapGet, sapLogin, sapLogout, SapError } from '@/lib/sap/serviceLayer';
 /**
  * Búsqueda de socios de negocio para firmantes externos Orion.
  * GET ?companyId=&q=
- * Devuelve { options: [{ value: email, label, cardCode, cardName, email }] }
+ * Devuelve { options: [{ value: cardCode, label, cardCode, cardName, email }] }
  */
 export async function GET(request: NextRequest) {
   try {
@@ -54,6 +54,7 @@ export async function GET(request: NextRequest) {
         value?: Array<{ CardCode?: string; CardName?: string; EmailAddress?: string }>;
       }>(sap, path);
 
+      const seen = new Set<string>();
       const options = (data.value ?? [])
         .map((row) => {
           const cardCode = String(row.CardCode || '').trim();
@@ -61,9 +62,10 @@ export async function GET(request: NextRequest) {
           const email = String(row.EmailAddress || '')
             .trim()
             .toLowerCase();
-          if (!cardCode || !email || !email.includes('@')) return null;
+          if (!cardCode || !email || !email.includes('@') || seen.has(cardCode)) return null;
+          seen.add(cardCode);
           return {
-            value: email,
+            value: cardCode,
             label: `${cardName || cardCode} <${email}>`,
             cardCode,
             cardName: cardName || cardCode,

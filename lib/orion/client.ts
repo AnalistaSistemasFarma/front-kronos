@@ -87,7 +87,6 @@ export function resolveOrionAbsoluteUrl(urlOrPath: string | null | undefined): s
       return value;
     }
   }
-
   if (!rewriteBase) return null;
   return `${rewriteBase}${value.startsWith('/') ? value : `/${value}`}`;
 }
@@ -417,7 +416,9 @@ export async function fetchOrionSignerSignUrl(
   signOrder?: number | null
 ): Promise<{ ok: boolean; status: number; signUrl: string | null; error?: string }> {
   const docId = String(orionDocumentId || '').trim();
-  const mail = String(email || '').trim().toLowerCase();
+  const mail = String(email || '')
+    .trim()
+    .toLowerCase();
   if (!docId || !mail) {
     return { ok: false, status: 400, signUrl: null, error: 'docId y email son obligatorios' };
   }
