@@ -102,6 +102,10 @@ export function isHubHiddenSubprocess(params: {
     url === '/process/request-general/delete-attachments' ||
     url.includes('/delete-attachments') ||
     name === 'eliminar adjuntos' ||
-    name.includes('eliminar adjuntos')
+    name.includes('eliminar adjuntos') ||
+    url === '/process/valentine-wall' ||
+    url.includes('/valentine-wall') ||
+    name === 'dosis de amor y amistad' ||
+    name.includes('dosis de amor')
   );
 }
