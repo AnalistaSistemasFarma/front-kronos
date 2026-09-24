@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
-import { assertValentineWallAccess } from '@/lib/valentine/access';
+import {
+  assertValentineWallAccess,
+  parsePreferredCompanyId,
+} from '@/lib/valentine/access';
 import { toggleValentineReaction } from '@/lib/valentine/db';
 
 export const dynamic = 'force-dynamic';
@@ -20,8 +23,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
-    const access = await assertValentineWallAccess(email);
-    if (!access.ok) {
+    const body = (await req.json()) as {
+      emoji?: string;
+      companyId?: number | string | null;
+    };
+
+    const preferred = parsePreferredCompanyId(body.companyId);
+    const access = await assertValentineWallAccess(email, preferred);
+    if (!access.ok || !access.company) {
       return NextResponse.json({ error: 'Sin acceso', reason: access.reason }, { status: 403 });
     }
 
@@ -31,10 +40,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return NextResponse.json({ error: 'id inválido' }, { status: 400 });
     }
 
-    const body = (await req.json()) as { emoji?: string };
     const result = await withMssqlPool((pool) =>
       toggleValentineReaction(pool, {
         postId,
+        idCompany: access.company!.idCompany,
         userId,
         email,
         emoji: String(body.emoji || ''),

@@ -1,10 +1,6 @@
-/** Campaña OLP — Dosis de Amor y Amistad */
+/** Campaña — Dosis de Amor y Amistad (un tablero por empresa). */
 
-export const OLP_COMPANY_ID = 3;
-/** Nombre visible en el tablero (centro superior). */
-export const OLP_COMPANY_DISPLAY_NAME = 'ONE LATAM PHARMA';
-
-/** Subproceso de permiso (no es tarjeta del hub). Asignar en Admin → Usuarios. */
+/** Subproceso de permiso (no es tarjeta del hub). Asignar en Admin → Usuarios por empresa. */
 export const VALENTINE_WALL_ACCESS_URL = '/process/valentine-wall';
 export const VALENTINE_WALL_ACCESS_NAME = 'Dosis de Amor y Amistad';
 
@@ -82,7 +78,7 @@ export const VALENTINE_TAGLINE =
   'Una pequeña palabra puede convertirse en una gran dosis de esperanza. ¡Escribe desde el corazón y pon tu mejor esfuerzo para hacer sonreír a alguien!';
 
 /**
- * Campaña visible para OLP.
+ * Temporada de la campaña.
  * - Febrero siempre activo
  * - O `NEXT_PUBLIC_VALENTINE_WALL_FORCE=1` (útil fuera de temporada)
  */
