@@ -20,6 +20,7 @@ import { useState, useEffect, useContext, useMemo } from 'react';
 import { useTheme } from './providers';
 import NotificationBell from './NotificationBell';
 import ChatAgentBar from './chat/ChatAgentBar';
+import ValentineWallRoot from './valentine/ValentineWallRoot';
 import {
   AppSectionContext,
   type AppSection,
@@ -318,6 +319,7 @@ export default function Header() {
                   una línea AÑADIDA al grupo de acciones, sin tocar ni
                   reordenar nada de lo que ya estaba. */}
               <ChatAgentBar />
+              <ValentineWallRoot />
               <NotificationBell />
               <ActionIcon
                 variant='subtle'
