@@ -94,24 +94,46 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       where: {
         id_company_user: { in: allCompanyUserIds },
       },
-      select: { id_subprocess: true },
+      select: { id_subprocess_user_company: true, id_subprocess: true, id_company_user: true },
     });
 
-    const existingSubprocessIds = [...new Set(existingAssignments.map((a) => a.id_subprocess))];
+    const existingSubprocessIds = [
+      ...new Set(existingAssignments.map((a) => a.id_subprocess)),
+    ];
     const desiredSet = new Set(desiredSubprocessIds);
     const removed = existingSubprocessIds.filter((id) => !desiredSet.has(id));
     const added = desiredSubprocessIds.filter((id) => !existingSubprocessIds.includes(id));
 
-    await prisma.$transaction(async (tx) => {
-      await tx.subprocessUserCompany.deleteMany({
-        where: {
-          id_company_user: { in: allCompanyUserIds },
-        },
-      });
+    // Filas a borrar: su id_subprocess ya no está en lo deseado.
+    const toRemoveIds = existingAssignments
+      .filter((a) => !desiredSet.has(a.id_subprocess))
+      .map((a) => a.id_subprocess_user_company);
 
-      if (desiredSubprocessIds.length > 0) {
+    // Filas que siguen deseadas pero viven en un company_user no primario (duplicados legacy):
+    // se mueven con UPDATE para conservar su id_subprocess_user_company, en vez de recrearlas.
+    const toMove = existingAssignments.filter(
+      (a) =>
+        desiredSet.has(a.id_subprocess) &&
+        a.id_company_user !== primaryCompanyUser.id_company_user
+    );
+
+    await prisma.$transaction(async (tx) => {
+      if (toRemoveIds.length > 0) {
+        await tx.subprocessUserCompany.deleteMany({
+          where: { id_subprocess_user_company: { in: toRemoveIds } },
+        });
+      }
+
+      for (const assignment of toMove) {
+        await tx.subprocessUserCompany.update({
+          where: { id_subprocess_user_company: assignment.id_subprocess_user_company },
+          data: { id_company_user: primaryCompanyUser.id_company_user },
+        });
+      }
+
+      if (added.length > 0) {
         await tx.subprocessUserCompany.createMany({
-          data: desiredSubprocessIds.map((subprocessId) => ({
+          data: added.map((subprocessId) => ({
             id_company_user: primaryCompanyUser.id_company_user,
             id_subprocess: subprocessId,
           })),
@@ -121,7 +143,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (allCompanyUserIds.length > 1) {
         await tx.companyUser.deleteMany({
           where: {
-            id_company_user: { in: allCompanyUserIds.slice(1) },
+            id_company_user: { in: allCompanyUserIds.filter((id) => id !== primaryCompanyUser.id_company_user) },
           },
         });
       }
