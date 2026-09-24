@@ -660,6 +660,27 @@ export default function ChatThread({
    * No hay bucle: desplazarse no cambia el tamaño del contenido.
    */
   const contenidoRef = useRef<HTMLDivElement>(null);
+  // El contenido se REMONTA una sola vez por hilo: cuando pasa de vacío a
+  // tener mensajes. Así la lista entra con un fundido corto (ver
+  // .chat-thread__contenido en globals.css) en vez de reemplazar de golpe al
+  // esqueleto. Con caché los mensajes ya están desde el primer render y el
+  // fundido ocurre una sola vez, al abrir.
+  const claveContenido = `${claveHilo}:${thread.messages.length > 0 ? 'con' : 'sin'}`;
+
+  // ESQUELETO CON RETRASO: si el hilo llega en menos de 300 ms no se pinta
+  // nada intermedio. Mostrar un esqueleto medio segundo para reemplazarlo
+  // enseguida es justo el "refresco feo" que se veía al abrir el chat.
+  const esperandoPrimerLote = thread.loading && thread.messages.length === 0;
+  const [mostrarEsqueleto, setMostrarEsqueleto] = useState(false);
+  useEffect(() => {
+    if (!esperandoPrimerLote) {
+      setMostrarEsqueleto(false);
+      return;
+    }
+    const reloj = window.setTimeout(() => setMostrarEsqueleto(true), 300);
+    return () => window.clearTimeout(reloj);
+  }, [esperandoPrimerLote]);
+
   useEffect(() => {
     const contenido = contenidoRef.current;
     const viewport = viewportRef.current;
@@ -678,7 +699,7 @@ export default function ChatThread({
     });
     observador.observe(contenido);
     return () => observador.disconnect();
-  }, [claveHilo]);
+  }, [claveContenido]);
 
   // ── Arrastrar y soltar archivos sobre la conversación ────────────────────
   // El área de soltar es TODO el hilo (mensajes + compositor), no solo la caja
@@ -804,7 +825,7 @@ export default function ChatThread({
         onPointerDown={marcarInteraccion}
         offsetScrollbars
       >
-        <Stack gap='sm' p='sm' ref={contenidoRef}>
+        <Stack key={claveContenido} gap='sm' p='sm' ref={contenidoRef} className='chat-thread__contenido'>
           {thread.hasOlder && (
             <Center>
               <Button
@@ -818,7 +839,7 @@ export default function ChatThread({
             </Center>
           )}
 
-          {thread.loading && thread.messages.length === 0 && <EsqueletoHilo />}
+          {esperandoPrimerLote && mostrarEsqueleto && <EsqueletoHilo />}
 
           {!thread.loading && thread.messages.length === 0 && !thread.error && (
             <Center py='xl'>
