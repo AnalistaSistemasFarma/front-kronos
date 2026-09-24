@@ -801,6 +801,25 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
+.vw-header-company--select {
+  padding: 0.25rem 0.35rem;
+  letter-spacing: normal;
+  text-transform: none;
+  min-width: min(92%, 320px);
+}
+
+.vw-header-company--select .mantine-Select-input {
+  font-family: var(--vw-display);
+  font-weight: 700;
+  font-size: clamp(0.95rem, 2.2vw, 1.2rem);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b3d4f;
+  border: none;
+  background: transparent;
+  text-align: center;
+}
+
 .vw-board-close {
   position: absolute;
   right: 1rem;

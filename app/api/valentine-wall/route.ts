@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
-import { assertValentineWallAccess } from '@/lib/valentine/access';
+import {
+  assertValentineWallAccess,
+  parsePreferredCompanyId,
+} from '@/lib/valentine/access';
 import { createValentinePost, listValentinePosts } from '@/lib/valentine/db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     const email = String(session?.user?.email || '')
@@ -18,13 +21,21 @@ export async function GET() {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
-    const access = await assertValentineWallAccess(email);
-    if (!access.ok) {
+    const preferred = parsePreferredCompanyId(
+      req.nextUrl.searchParams.get('companyId')
+    );
+    const access = await assertValentineWallAccess(email, preferred);
+    if (!access.ok || !access.company) {
       return NextResponse.json({ error: 'Sin acceso', reason: access.reason }, { status: 403 });
     }
 
-    const posts = await withMssqlPool((pool) => listValentinePosts(pool, userId));
-    return NextResponse.json({ posts });
+    const posts = await withMssqlPool((pool) =>
+      listValentinePosts(pool, userId, access.company!.idCompany)
+    );
+    return NextResponse.json({
+      posts,
+      company: access.company,
+    });
   } catch (err) {
     console.error('[valentine-wall GET]', err);
     return NextResponse.json({ error: 'Error al cargar el muro' }, { status: 500 });
@@ -43,19 +54,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
-    const access = await assertValentineWallAccess(email);
-    if (!access.ok) {
-      return NextResponse.json({ error: 'Sin acceso', reason: access.reason }, { status: 403 });
-    }
-
     const body = (await req.json()) as {
       message?: string;
       categoryId?: string;
       toName?: string | null;
+      companyId?: number | string | null;
     };
+
+    const preferred = parsePreferredCompanyId(body.companyId);
+    const access = await assertValentineWallAccess(email, preferred);
+    if (!access.ok || !access.company) {
+      return NextResponse.json({ error: 'Sin acceso', reason: access.reason }, { status: 403 });
+    }
 
     const post = await withMssqlPool((pool) =>
       createValentinePost(pool, {
+        idCompany: access.company!.idCompany,
         authorUserId: userId,
         authorEmail: email,
         authorName: name,
@@ -65,7 +79,7 @@ export async function POST(req: NextRequest) {
       })
     );
 
-    return NextResponse.json({ post }, { status: 201 });
+    return NextResponse.json({ post, company: access.company }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Error al publicar';
     console.error('[valentine-wall POST]', err);
