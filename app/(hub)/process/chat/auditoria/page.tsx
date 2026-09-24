@@ -339,6 +339,12 @@ export default function AuditoriaAgentesPage() {
               <span>Volver a Chat</span>
             </Group>
           </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link href='/process/chat/auditoria/skills' className='chat-text-muted' style={{ fontSize: 13 }}>
+            Ver skills de la flota
+          </Link>
         </Group>
 
         <Group gap='sm' mb={2} wrap='nowrap'>
