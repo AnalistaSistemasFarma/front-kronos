@@ -352,13 +352,81 @@ const formatDateTime = (raw: string | null | undefined) => {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
     hour12: true,
-  }).format(date);
+  }).format(new Date(date.getTime() + 5 * 60 * 60 * 1000));
 };
 
 const toDateInput = (raw: string | null | undefined) => (raw ? raw.split('T')[0] : '');
+
+const DEFAULT_RELEASE_USER_ID = 86;
+
+const formatLogValue = (value: unknown): string => {
+  if (value === null || value === undefined) return '-';
+  if (typeof value === 'string') return value.trim() || '-';
+  return String(value);
+};
+
+interface AssetLogField {
+  key: keyof Asset;
+  label: string;
+  format?: (value: unknown) => string;
+}
+
+const ASSET_LOG_FIELDS: AssetLogField[] = [
+  { key: 'nombre', label: 'Nombre' },
+  { key: 'modelo', label: 'Modelo' },
+  { key: 'serial', label: 'Serial' },
+  { key: 'etiqueta', label: 'Etiqueta' },
+  { key: 'tipo_activo', label: 'Tipo de activo' },
+  { key: 'tipo_equipo', label: 'Tipo de equipo' },
+  { key: 'usuario', label: 'Usuario asignado' },
+  { key: 'departamento', label: 'Departamento' },
+  { key: 'procesador', label: 'Procesador' },
+  { key: 'ram', label: 'Memoria RAM' },
+  { key: 'almacenamiento', label: 'Almacenamiento' },
+  { key: 'estado', label: 'Estado' },
+  {
+    key: 'costo_equipo',
+    label: 'Costo del equipo',
+    format: (v) => formatCurrency(v as Asset['costo_equipo']),
+  },
+  {
+    key: 'activo',
+    label: 'Activo',
+    format: (v) => (isActive(v as Asset['activo']) ? 'Si' : 'No'),
+  },
+  { key: 'sitio', label: 'Sitio' },
+  { key: 'so', label: 'Sistema operativo' },
+  { key: 'factura', label: 'Factura' },
+  {
+    key: 'renovacion',
+    label: 'Renovación',
+    format: (v) => (v == null ? 'No aplica' : isRenewal(v as Asset['renovacion']) ? 'Si' : 'No'),
+  },
+  {
+    key: 'renovacion_fecha',
+    label: 'Fecha de renovación',
+    format: (v) => formatDate(v as string | null),
+  },
+  { key: 'acta_salida', label: 'Acta de salida' },
+  { key: 'sim', label: 'Simcard' },
+];
+
+const buildAssetChangeLines = (before: Asset, after: Asset): string[] =>
+  ASSET_LOG_FIELDS.reduce<string[]>((lines, field) => {
+    const format = field.format ?? formatLogValue;
+    const beforeText = format(before[field.key]);
+    const afterText = format(after[field.key]);
+    if (beforeText === afterText) return lines;
+    lines.push(`${field.label}: ${beforeText} → ${afterText}`);
+    return lines;
+  }, []);
+
+const MAX_LOG_MESSAGE_LENGTH = 950;
+const truncateLogMessage = (message: string): string =>
+  message.length <= MAX_LOG_MESSAGE_LENGTH
+    ? message
+    : `${message.slice(0, MAX_LOG_MESSAGE_LENGTH)}…`;
 
 const assetToForm = (asset: Asset): AssetFormData => ({
   nombre: asset.nombre ?? '',
@@ -903,7 +971,17 @@ function ViewAsset() {
       setAsset(updated);
       sessionStorage.setItem(ASSET_STORAGE_KEY, JSON.stringify(updated));
       toast.success('Activo actualizado correctamente.');
-      createLog(`Equipo modificado por ${userName || 'Sistema'}`);
+
+      const changeLines = buildAssetChangeLines(asset, updated);
+      if (changeLines.length > 0) {
+        createLog(
+          truncateLogMessage(
+            `Cambios realizados por ${userName || 'Sistema'}:\n${changeLines
+              .map((line) => `• ${line}`)
+              .join('\n')}`
+          )
+        );
+      }
       cancelEditing();
     } catch (err) {
       console.error('Error de red al actualizar el activo:', err);
@@ -1108,11 +1186,13 @@ function ViewAsset() {
       notifyAssetAssigned(selectedUserRow?.nombre_usuario ?? '');
       setHasActa(true);
       closeCreateActa();
+
       fetchAsset(String(asset.id));
+      const previousUserName = asset.usuario || 'Sin asignar';
       createLog(
-        `Acta de entrega creada por ${userName || 'Sistema'} para ${
+        `Acta de entrega firmada por ${userName || 'Sistema'}. Usuario asignado: ${previousUserName} → ${
           selectedUserRow?.nombre_usuario ?? 'sin usuario'
-        }`
+        } (Sede: ${sede}).`
       );
     } catch (err) {
       console.error('Error de red al guardar el acta:', err);
@@ -1165,7 +1245,13 @@ function ViewAsset() {
         firma_devolucion: firma,
       });
       fetchAsset(String(asset.id));
-      createLog(`Devolución registrada por ${userName || 'Sistema'}`);
+      const previousUserName = asset.usuario || 'Sin asignar';
+      const releasedUserName =
+        userOptions.find((u) => u.id === DEFAULT_RELEASE_USER_ID)?.nombre_usuario ??
+        'usuario por defecto';
+      createLog(
+        `Devolución registrada por ${userName || 'Sistema'}. Usuario asignado: ${previousUserName} → ${releasedUserName}.`
+      );
     } catch (err) {
       console.error('Error de red al actualizar la devolución:', err);
       toast.error('No se pudo actualizar la devolución. Intente de nuevo.');
