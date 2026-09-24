@@ -7,6 +7,7 @@ import {
   parsePreferredCompanyId,
 } from '@/lib/valentine/access';
 import { toggleValentineReaction } from '@/lib/valentine/db';
+import { publishValentineEvent } from '@/lib/valentine/realtime';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,6 +50,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         emoji: String(body.emoji || ''),
       })
     );
+
+    publishValentineEvent({
+      type: 'reaction_changed',
+      companyId: access.company.idCompany,
+      postId,
+      emoji: String(body.emoji || ''),
+      added: result.added,
+      userId,
+    });
 
     return NextResponse.json(result);
   } catch (err) {

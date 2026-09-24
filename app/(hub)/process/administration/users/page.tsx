@@ -22,7 +22,16 @@ import {
   ActionIcon,
   Pagination,
   Loader,
+  Card,
+  Text,
+  Avatar,
+  ThemeIcon,
+  Flex,
+  Box,
+  SimpleGrid,
+  Tooltip,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import {
   IconAlertCircle,
   IconChevronRight,
@@ -34,6 +43,8 @@ import {
   IconSettings,
   IconCheck,
   IconX,
+  IconUsers,
+  IconShield,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { notifySubprocessAssignmentsChanged } from '@/lib/process/subprocessAssignmentsEvents';
@@ -48,6 +59,25 @@ import {
 } from '@/lib/orion/access';
 import { isDeleteAttachmentsSubprocess } from '@/lib/attachments/access';
 import { isValentineWallSubprocess } from '@/lib/valentine/constants';
+
+const AVATAR_COLORS = ['blue', 'teal', 'violet', 'indigo', 'cyan', 'grape', 'orange'] as const;
+
+function getUserInitials(name: string | null, email: string) {
+  const source = (name || email || '?').trim();
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase();
+  }
+  return source.slice(0, 2).toUpperCase();
+}
+
+function getAvatarColor(seed: string) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash + seed.charCodeAt(i) * (i + 1)) % AVATAR_COLORS.length;
+  }
+  return AVATAR_COLORS[hash] ?? 'blue';
+}
 
 interface User {
   id: string;
@@ -93,6 +123,7 @@ interface AssignedSubprocess {
 function UserManagement() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const isMobile = useMediaQuery('(max-width: 768px)', true);
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -716,6 +747,8 @@ function UserManagement() {
   const getRoleColor = (role: string) => {
     switch (role.toLowerCase()) {
       case 'admin':
+      case 'super_user':
+      case 'superadmin':
         return 'red';
       case 'user':
         return 'blue';
@@ -724,189 +757,336 @@ function UserManagement() {
     }
   };
 
-  const getStatusColor = (isActive: boolean) => {
-    return isActive ? 'green' : 'red';
+  const getRoleLabel = (role: string) => {
+    switch (role.toLowerCase()) {
+      case 'admin':
+        return 'Admin';
+      case 'super_user':
+      case 'superadmin':
+        return 'Super admin';
+      case 'user':
+        return 'Usuario';
+      default:
+        return role;
+    }
   };
 
+  const formatRegisteredAt = (value: string) =>
+    new Date(value).toLocaleDateString('es-ES', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+
+  const renderUserActions = (user: User) => (
+    <Group gap={2} wrap='nowrap' justify='flex-end'>
+      <Tooltip label='Editar usuario' withArrow>
+        <ActionIcon
+          variant='subtle'
+          color='blue'
+          size='sm'
+          onClick={() => openEditModal(user)}
+          aria-label='Editar usuario'
+        >
+          <IconEdit size={15} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label='Asignar subprocesos' withArrow>
+        <ActionIcon
+          variant='subtle'
+          color='violet'
+          size='sm'
+          onClick={() => openSubprocessModal(user)}
+          aria-label='Asignar subprocesos'
+        >
+          <IconSettings size={15} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label='Desactivar usuario' withArrow>
+        <ActionIcon
+          variant='subtle'
+          color='red'
+          size='sm'
+          onClick={() => openDeleteModal(user)}
+          aria-label='Desactivar usuario'
+        >
+          <IconTrash size={15} />
+        </ActionIcon>
+      </Tooltip>
+    </Group>
+  );
+
   return (
-    <div className='max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8'>
-      <div className='mb-8'>
-        <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
-          {breadcrumbItems}
-        </Breadcrumbs>
-        <Title order={1} className='text-3xl font-bold text-gray-900 mb-2'>
-          Administración de Usuarios
-        </Title>
-        <p className='text-gray-600'>Gestiona usuarios del sistema de manera segura y eficiente</p>
-        <br />
-        <Group>
-          <Button
-            leftSection={<IconPlus size={16} />}
-            onClick={() => {
-              setSelectedDepartmentIds([]);
-              setCreateModalOpened(true);
-            }}
+    <div style={{ minHeight: '100%', backgroundColor: 'var(--mantine-color-body)' }}>
+      <div className='max-w-7xl mx-auto py-4 px-3 sm:py-6 sm:px-6 lg:px-8'>
+        <Card shadow='sm' p='md' radius='md' withBorder mb='sm'>
+          <Breadcrumbs separator={<IconChevronRight size={14} />} mb='sm'>
+            {breadcrumbItems}
+          </Breadcrumbs>
+
+          <Flex
+            justify='space-between'
+            align={{ base: 'stretch', sm: 'center' }}
+            direction={{ base: 'column', sm: 'row' }}
+            gap='sm'
           >
-            Crear Usuario
-          </Button>
-          <Button variant='outline' leftSection={<IconDownload size={16} />} onClick={exportToCSV}>
-            Exportar CSV
-          </Button>
-        </Group>
-      </div>
+            <div style={{ minWidth: 0 }}>
+              <Group gap='xs' wrap='nowrap'>
+                <ThemeIcon size={32} radius='md' variant='light' color='blue'>
+                  <IconUsers size={18} />
+                </ThemeIcon>
+                <div style={{ minWidth: 0 }}>
+                  <Title order={2} style={{ fontSize: '1.25rem', lineHeight: 1.3 }}>
+                    Administración de Usuarios
+                  </Title>
+                  <Text size='xs' c='dimmed'>
+                    Gestiona accesos, roles y subprocesos · {pagination.total} usuarios
+                  </Text>
+                </div>
+              </Group>
+            </div>
 
-      {error && (
-        <Alert icon={<IconAlertCircle size={16} />} title='Error' color='red' mb='md'>
-          {error}
-        </Alert>
-      )}
+            <Group gap='xs' grow={!!isMobile}>
+              <Button
+                size='sm'
+                leftSection={<IconPlus size={14} />}
+                onClick={() => {
+                  setSelectedDepartmentIds([]);
+                  setCreateModalOpened(true);
+                }}
+              >
+                Crear Usuario
+              </Button>
+              <Button
+                size='sm'
+                variant='light'
+                leftSection={<IconDownload size={14} />}
+                onClick={exportToCSV}
+              >
+                Exportar CSV
+              </Button>
+            </Group>
+          </Flex>
+        </Card>
 
-      {/* Filters */}
-      <Paper shadow='sm' p='md' radius='md' withBorder mb='md'>
-        <Title order={4} mb='md'>
-          Filtros
-        </Title>
-        <Group grow>
-          <TextInput
-            label='Buscar'
-            placeholder='Nombre o email'
-            leftSection={<IconSearch size={16} />}
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.currentTarget.value)}
-          />
-          <Select
-            label='Rol'
-            placeholder='Todos los roles'
-            data={[
-              { value: '', label: 'Todos' },
-              { value: 'admin', label: 'Admin' },
-              { value: 'user', label: 'Usuario' },
-            ]}
-            value={filters.role}
-            onChange={(value) => handleFilterChange('role', value || '')}
-          />
-          <Select
-            label='Estado'
-            placeholder='Todos los estados'
-            data={[
-              { value: '', label: 'Todos' },
-              { value: 'active', label: 'Activo' },
-              { value: 'inactive', label: 'Inactivo' },
-            ]}
-            value={filters.status}
-            onChange={(value) => handleFilterChange('status', value || '')}
-          />
-        </Group>
-      </Paper>
+        {error && (
+          <Alert icon={<IconAlertCircle size={16} />} title='Error' color='red' mb='sm'>
+            {error}
+          </Alert>
+        )}
 
-      {/* Users Table */}
-      <Paper shadow='sm' radius='md' withBorder style={{ position: 'relative' }}>
-        {refreshing ? (
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              zIndex: 2,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'color-mix(in srgb, var(--mantine-color-body) 70%, transparent)',
-              borderRadius: 'inherit',
-            }}
-          >
-            <Loader size='sm' />
-          </div>
-        ) : null}
-        <div className='overflow-x-auto'>
-          <Table stickyHeader>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>ID</Table.Th>
-                <Table.Th>Nombre</Table.Th>
-                <Table.Th>Email</Table.Th>
-                <Table.Th>Rol</Table.Th>
-                <Table.Th>Estado</Table.Th>
-                <Table.Th>Fecha de Registro</Table.Th>
-                <Table.Th>Acciones</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {users.length === 0 ? (
-                <Table.Tr>
-                  <Table.Td colSpan={7} className='text-center py-8 text-gray-500'>
-                    No se encontraron usuarios
-                  </Table.Td>
-                </Table.Tr>
-              ) : (
-                users.map((user) => (
-                  <Table.Tr key={user.id}>
-                    <Table.Td className='font-mono text-sm'>{user.id.slice(0, 8)}...</Table.Td>
-                    <Table.Td className='font-medium'>{user.name || 'Sin nombre'}</Table.Td>
-                    <Table.Td>{user.email}</Table.Td>
-                    <Table.Td>
-                      <Badge color={getRoleColor(user.role)} variant='light'>
-                        {user.role}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge color={getStatusColor(user.isActive)} variant='light'>
-                        {user.isActive ? 'Activo' : 'Inactivo'}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {new Date(user.createdAt).toLocaleDateString('es-ES', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                      })}
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap='xs'>
-                        <ActionIcon
-                          variant='subtle'
-                          color='blue'
-                          onClick={() => openEditModal(user)}
-                          title='Editar usuario'
-                        >
-                          <IconEdit size={16} />
-                        </ActionIcon>
-                        <ActionIcon
-                          variant='subtle'
-                          color='violet'
-                          onClick={() => openSubprocessModal(user)}
-                          title='Asignar subprocesos'
-                        >
-                          <IconSettings size={16} />
-                        </ActionIcon>
-                        <ActionIcon
-                          variant='subtle'
-                          color='red'
-                          onClick={() => openDeleteModal(user)}
-                          title='Desactivar usuario'
-                        >
-                          <IconTrash size={16} />
-                        </ActionIcon>
-                      </Group>
-                    </Table.Td>
-                  </Table.Tr>
-                ))
-              )}
-            </Table.Tbody>
-          </Table>
-        </div>
-
-        {/* Pagination */}
-        {pagination.pages > 1 && (
-          <div className='flex justify-center p-4'>
-            <Pagination
-              total={pagination.pages}
-              value={pagination.page}
-              onChange={(page) => setPagination((prev) => ({ ...prev, page }))}
+        <Card shadow='sm' p='md' radius='md' withBorder mb='sm'>
+          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing='sm'>
+            <TextInput
+              label='Buscar'
+              placeholder='Nombre, email o dominio (ej. onelatampharma)'
+              description={
+                filters.search
+                  ? `Buscando en todos los usuarios · ${pagination.total} resultado(s)`
+                  : 'La búsqueda aplica a toda la base, no solo a esta página'
+              }
+              inputWrapperOrder={['label', 'input', 'description', 'error']}
+              leftSection={<IconSearch size={14} />}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.currentTarget.value)}
               size='sm'
             />
-          </div>
-        )}
-      </Paper>
+            <Select
+              label='Rol'
+              placeholder='Todos los roles'
+              data={[
+                { value: '', label: 'Todos' },
+                { value: 'admin', label: 'Admin' },
+                { value: 'user', label: 'Usuario' },
+              ]}
+              value={filters.role}
+              onChange={(value) => handleFilterChange('role', value || '')}
+              size='sm'
+              leftSection={<IconShield size={14} />}
+              comboboxProps={{ withinPortal: true }}
+            />
+            <Select
+              label='Estado'
+              placeholder='Todos los estados'
+              data={[
+                { value: '', label: 'Todos' },
+                { value: 'active', label: 'Activo' },
+                { value: 'inactive', label: 'Inactivo' },
+              ]}
+              value={filters.status}
+              onChange={(value) => handleFilterChange('status', value || '')}
+              size='sm'
+              comboboxProps={{ withinPortal: true }}
+            />
+          </SimpleGrid>
+        </Card>
+
+        <Card shadow='sm' radius='md' withBorder p='md' style={{ position: 'relative' }}>
+          {refreshing ? (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'color-mix(in srgb, var(--mantine-color-body) 70%, transparent)',
+                borderRadius: 'inherit',
+              }}
+            >
+              <Loader size='sm' />
+            </div>
+          ) : null}
+
+          {users.length === 0 ? (
+            <Stack align='center' gap={6} py='lg'>
+              <ThemeIcon size={40} radius='xl' variant='light' color='gray'>
+                <IconUsers size={20} />
+              </ThemeIcon>
+              <Text size='sm' fw={500}>
+                No se encontraron usuarios
+              </Text>
+              <Text size='xs' c='dimmed' ta='center'>
+                Prueba ajustando los filtros o crea un nuevo usuario
+              </Text>
+            </Stack>
+          ) : isMobile ? (
+            <Stack gap='xs'>
+              {users.map((user) => (
+                <Card
+                  key={user.id}
+                  withBorder
+                  radius='sm'
+                  padding='sm'
+                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                >
+                  <Group justify='space-between' align='flex-start' wrap='nowrap' gap='xs' mb={6}>
+                    <Group gap='xs' wrap='nowrap' style={{ minWidth: 0, flex: 1 }}>
+                      <Avatar
+                        radius='xl'
+                        size={32}
+                        color={getAvatarColor(user.id)}
+                        variant='light'
+                        style={{ flexShrink: 0 }}
+                      >
+                        {getUserInitials(user.name, user.email)}
+                      </Avatar>
+                      <div style={{ minWidth: 0 }}>
+                        <Text fw={600} size='sm'>
+                          {user.name || 'Sin nombre'}
+                        </Text>
+                        <Text size='xs' c='dimmed' style={{ wordBreak: 'break-all' }}>
+                          {user.email}
+                        </Text>
+                      </div>
+                    </Group>
+                    {renderUserActions(user)}
+                  </Group>
+                  <Group gap={6} wrap='wrap'>
+                    <Text size='xs' c='dimmed' ff='monospace'>
+                      ID {user.id.slice(0, 8)}…
+                    </Text>
+                    <Badge color={getRoleColor(user.role)} variant='light' size='xs'>
+                      {getRoleLabel(user.role)}
+                    </Badge>
+                    <Badge color={user.isActive ? 'green' : 'red'} variant='light' size='xs'>
+                      {user.isActive ? 'Activo' : 'Inactivo'}
+                    </Badge>
+                    <Text size='xs' c='dimmed'>
+                      {formatRegisteredAt(user.createdAt)}
+                    </Text>
+                  </Group>
+                </Card>
+              ))}
+            </Stack>
+          ) : (
+            <Box style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <Table
+                striped
+                highlightOnHover
+                stickyHeader
+                verticalSpacing={6}
+                horizontalSpacing='sm'
+                style={{ minWidth: 860 }}
+              >
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th style={{ width: 90 }}>ID</Table.Th>
+                    <Table.Th>Nombre</Table.Th>
+                    <Table.Th>Email</Table.Th>
+                    <Table.Th style={{ width: 110 }}>Rol</Table.Th>
+                    <Table.Th style={{ width: 100 }}>Estado</Table.Th>
+                    <Table.Th style={{ width: 120 }}>Registro</Table.Th>
+                    <Table.Th style={{ width: 110, textAlign: 'right' }}>Acciones</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {users.map((user) => (
+                    <Table.Tr key={user.id}>
+                      <Table.Td>
+                        <Text size='xs' ff='monospace' c='dimmed'>
+                          {user.id.slice(0, 8)}…
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap={8} wrap='nowrap'>
+                          <Avatar
+                            radius='xl'
+                            size={28}
+                            color={getAvatarColor(user.id)}
+                            variant='light'
+                          >
+                            {getUserInitials(user.name, user.email)}
+                          </Avatar>
+                          <Text size='sm' fw={500}>
+                            {user.name || 'Sin nombre'}
+                          </Text>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size='sm' style={{ wordBreak: 'break-word' }}>
+                          {user.email}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge color={getRoleColor(user.role)} variant='light' size='sm'>
+                          {getRoleLabel(user.role)}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge color={user.isActive ? 'green' : 'red'} variant='light' size='sm'>
+                          {user.isActive ? 'Activo' : 'Inactivo'}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size='sm'>{formatRegisteredAt(user.createdAt)}</Text>
+                      </Table.Td>
+                      <Table.Td>{renderUserActions(user)}</Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Box>
+          )}
+
+          {pagination.pages > 1 && (
+            <Flex
+              justify='center'
+              mt='sm'
+              pt='sm'
+              style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}
+            >
+              <Pagination
+                total={pagination.pages}
+                value={pagination.page}
+                onChange={(page) => setPagination((prev) => ({ ...prev, page }))}
+                size='sm'
+                radius='md'
+              />
+            </Flex>
+          )}
+        </Card>
 
       {/* Create User Modal */}
       <Modal
@@ -1330,6 +1510,7 @@ function UserManagement() {
           </Group>
         </Stack>
       </Modal>
+      </div>
     </div>
   );
 }
