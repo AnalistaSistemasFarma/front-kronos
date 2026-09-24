@@ -42,6 +42,20 @@ import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
 const FALLBACK_POLL_MS = 5_000;
 
 /**
+ * Caché en memoria del último estado visto de cada hilo (por `targetKey`).
+ * Al reabrir un hilo ya visitado se pinta de una vez lo que había —sin
+ * esqueleto, sin el "refresco" que Nicolás veía al abrir el chat— y la carga
+ * fresca corre por detrás. Vive lo que vive la pestaña; no es persistente.
+ */
+interface HiloEnCache {
+  conversation: ChatConversationDto;
+  messages: ChatMessageDto[];
+  hasOlder: boolean;
+  olderCursor: number | null;
+}
+const cacheHilos = new Map<string, HiloEnCache>();
+
+/**
  * Qué hilo abrir.
  *   - `agent`: la conversación de esta persona con ese agente. Si no existe,
  *     el servidor la crea (POST /api/chat/conversations es idempotente).
@@ -134,24 +148,53 @@ export function useChatConversation(
   useEffect(() => {
     clearTimer();
     abortRef.current?.abort();
-    conversationIdRef.current = null;
-    cursorRef.current = 0;
-    olderCursorRef.current = null;
-    setConversation(null);
-    setMessages([]);
-    setStatus(null);
-    setStatuses([]);
+    const enCache = targetKey !== null ? cacheHilos.get(targetKey) : undefined;
+    if (enCache) {
+      // Hilo ya visitado: se muestra lo que había mientras llega lo fresco.
+      const reales = enCache.messages.filter((m) => !m.pending && !m.failed);
+      conversationIdRef.current = enCache.conversation.id;
+      cursorRef.current = reales.length > 0 ? reales[reales.length - 1].id : 0;
+      olderCursorRef.current = enCache.olderCursor;
+      setConversation(enCache.conversation);
+      setMessages(reales);
+      setStatus(enCache.conversation.agentStatus);
+      setStatuses(enCache.conversation.agentStatuses ?? []);
+      setHasOlder(enCache.hasOlder);
+    } else {
+      conversationIdRef.current = null;
+      cursorRef.current = 0;
+      olderCursorRef.current = null;
+      setConversation(null);
+      setMessages([]);
+      setStatus(null);
+      setStatuses([]);
+      setHasOlder(false);
+    }
     setError(null);
-    setHasOlder(false);
 
     if (target === null) return;
 
     let cancelled = false;
-    setLoading(true);
+    // Con caché no se vuelve a "cargar": nada de esqueleto ni compositor
+    // deshabilitado. La recarga es silenciosa.
+    setLoading(!enCache);
+
+    const pedirHistorial = (idConversation: number) =>
+      chatGetJson<{
+        messages: ChatMessageDto[];
+        hasMore: boolean;
+        nextCursor: number | null;
+      }>(`/api/chat/conversations/${idConversation}/messages?limit=${MESSAGES_PAGE_DEFAULT}`);
 
     void (async () => {
       try {
         let conversacion: ChatConversationDto | null = null;
+        // Si ya se conoce el id del hilo, el histórico se pide EN PARALELO con
+        // la ficha, en vez de esperar a que vuelva el POST (dos viajes en fila
+        // eran la mayor parte de la espera al abrir).
+        const historialAnticipado = enCache ? pedirHistorial(enCache.conversation.id) : null;
+        // Si el anticipado falla, no debe quedar como promesa rechazada suelta.
+        historialAnticipado?.catch(() => null);
 
         if (target.kind === 'agent') {
           // Idempotente: si ya existe el hilo con este agente, lo devuelve.
@@ -199,18 +242,19 @@ export function useChatConversation(
         setStatus(data.conversation.agentStatus);
         setStatuses(data.conversation.agentStatuses ?? []);
 
-        const history = await chatGetJson<{
-          messages: ChatMessageDto[];
-          hasMore: boolean;
-          nextCursor: number | null;
-        }>(`/api/chat/conversations/${data.conversation.id}/messages?limit=${MESSAGES_PAGE_DEFAULT}`);
+        const history =
+          historialAnticipado && enCache?.conversation.id === data.conversation.id
+            ? await historialAnticipado
+            : await pedirHistorial(data.conversation.id);
 
         if (cancelled) return;
 
         // El endpoint devuelve del más nuevo al más viejo; la vista los quiere
         // en orden cronológico.
         const ordered = [...(history?.messages ?? [])].sort((a, b) => a.id - b.id);
-        setMessages(ordered);
+        // Se conservan los optimistas que el usuario haya enviado mientras
+        // tanto (con caché el compositor ya estaba habilitado).
+        setMessages((prev) => [...ordered, ...prev.filter((m) => m.pending || m.failed)]);
         setHasOlder(Boolean(history?.hasMore));
         olderCursorRef.current = history?.nextCursor ?? null;
         cursorRef.current = ordered.length > 0 ? ordered[ordered.length - 1].id : 0;
@@ -233,6 +277,18 @@ export function useChatConversation(
     // recargando el histórico y perdiendo el desplazamiento— sin que nada haya
     // cambiado. La cadena captura lo único que importa: cuál hilo es.
   }, [targetKey, clearTimer]);
+
+  // Mantiene la caché del hilo al día con lo último que se ve.
+  useEffect(() => {
+    if (targetKey === null || conversation === null) return;
+    if (conversationIdRef.current !== conversation.id) return;
+    cacheHilos.set(targetKey, {
+      conversation,
+      messages,
+      hasOlder,
+      olderCursor: olderCursorRef.current,
+    });
+  }, [targetKey, conversation, messages, hasOlder]);
 
   /* ──────────────────────────── Sondeo en vivo ────────────────────────── */
 
