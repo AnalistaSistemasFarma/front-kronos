@@ -1,5 +1,6 @@
 import type { NextConfig } from 'next';
 import withPWA from '@ducanh2912/next-pwa';
+import { withSentryConfig } from '@sentry/nextjs/config';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -58,9 +59,19 @@ const nextConfig: NextConfig = {
 // verdad. Si algún día se pone `disable: false`, next-pwa SOBRESCRIBIRÁ
 // `public/sw.js` con el suyo y pasará a mandar `worker/index.js`: ambos
 // archivos deben estar sincronizados antes de hacer ese cambio.
-export default withPWA({
-  dest: 'public',
-  register: true,
-  disable: true,
-  customWorkerSrc: 'worker',
-})(nextConfig);
+// Sentry: sin subida de source maps (no hay auth token en los servidores) ni telemetria.
+export default withSentryConfig(
+  withPWA({
+    dest: 'public',
+    register: true,
+    disable: true,
+    customWorkerSrc: 'worker',
+  })(nextConfig),
+  {
+    org: 'farmalogica',
+    project: 'kronos-synerlink',
+    silent: true,
+    telemetry: false,
+    sourcemaps: { disable: true },
+  },
+);
