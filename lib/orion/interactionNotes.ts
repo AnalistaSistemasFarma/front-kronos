@@ -16,8 +16,6 @@ export function isOrionDocumentInteractionNote(note?: string | null): boolean {
     /documento devuelto/i.test(text) ||
     /PDF firmado/i.test(text) ||
     /orionFile:/i.test(text) ||
-    /Se cargaron archivos/i.test(text) ||
-    /archivos a la solicitud/i.test(text) ||
     /Documento adjunto/i.test(text)
   );
 }
