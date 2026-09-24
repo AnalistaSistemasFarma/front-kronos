@@ -28,14 +28,23 @@ export async function GET(request: NextRequest) {
     const skip = (page - 1) * limit;
 
     const where: {
-      OR?: Array<{ name?: { contains: string }; email?: { contains: string } }>;
+      OR?: Array<
+        | { name?: { contains: string } }
+        | { email?: { contains: string } }
+        | { identification?: { contains: string } }
+      >;
       role?: string;
       isActive?: boolean;
     } = {};
 
     if (search) {
-      // SQL Server: no usar mode 'insensitive' (no soportado por Prisma en este provider)
-      where.OR = [{ name: { contains: search } }, { email: { contains: search } }];
+      // SQL Server: no usar mode 'insensitive' (no soportado por Prisma en este provider).
+      // Busca en toda la tabla (no solo la página actual); la paginación se aplica después.
+      where.OR = [
+        { name: { contains: search } },
+        { email: { contains: search } },
+        { identification: { contains: search } },
+      ];
     }
 
     if (role) {
