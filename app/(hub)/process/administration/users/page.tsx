@@ -13,6 +13,7 @@ import {
   Anchor,
   Table,
   TextInput,
+  Textarea,
   Select,
   MultiSelect,
   Button,
@@ -22,7 +23,19 @@ import {
   ActionIcon,
   Pagination,
   Loader,
+  Card,
+  Text,
+  Avatar,
+  ThemeIcon,
+  Flex,
+  Box,
+  SimpleGrid,
+  Tooltip,
+  Checkbox,
+  ScrollArea,
+  SegmentedControl,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import {
   IconAlertCircle,
   IconChevronRight,
@@ -34,6 +47,9 @@ import {
   IconSettings,
   IconCheck,
   IconX,
+  IconUsers,
+  IconShield,
+  IconUsersGroup,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { notifySubprocessAssignmentsChanged } from '@/lib/process/subprocessAssignmentsEvents';
@@ -47,6 +63,25 @@ import {
   isOrionFirmaSignSubprocess,
 } from '@/lib/orion/access';
 import { isDeleteAttachmentsSubprocess } from '@/lib/attachments/access';
+
+const AVATAR_COLORS = ['blue', 'teal', 'violet', 'indigo', 'cyan', 'grape', 'orange'] as const;
+
+function getUserInitials(name: string | null, email: string) {
+  const source = (name || email || '?').trim();
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase();
+  }
+  return source.slice(0, 2).toUpperCase();
+}
+
+function getAvatarColor(seed: string) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash + seed.charCodeAt(i) * (i + 1)) % AVATAR_COLORS.length;
+  }
+  return AVATAR_COLORS[hash] ?? 'blue';
+}
 
 interface User {
   id: string;
@@ -92,10 +127,10 @@ interface AssignedSubprocess {
 function UserManagement() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const isMobile = useMediaQuery('(max-width: 768px)', true);
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState('');
   const [filters, setFilters] = useState({
@@ -127,6 +162,55 @@ function UserManagement() {
   const [subprocessSearch, setSubprocessSearch] = useState('');
   const [subprocessLoading, setSubprocessLoading] = useState(false);
 
+  // Bulk assignment
+  const [bulkModalOpened, setBulkModalOpened] = useState(false);
+  const [bulkEmailDomain, setBulkEmailDomain] = useState('');
+  const [bulkEmailsText, setBulkEmailsText] = useState('');
+  const [bulkCompany, setBulkCompany] = useState('');
+  const [bulkSubprocessIds, setBulkSubprocessIds] = useState<number[]>([]);
+  const [bulkSubprocessSearch, setBulkSubprocessSearch] = useState('');
+  const [bulkMode, setBulkMode] = useState<'add' | 'replace' | 'remove'>('add');
+  const [bulkPreviewUsers, setBulkPreviewUsers] = useState<
+    { id: string; name: string | null; email: string; role: string; isActive: boolean }[]
+  >([]);
+  const [bulkSelectedUserIds, setBulkSelectedUserIds] = useState<string[]>([]);
+  const [bulkPreviewLoading, setBulkPreviewLoading] = useState(false);
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkTruncated, setBulkTruncated] = useState(false);
+  const [bulkCoverageLoading, setBulkCoverageLoading] = useState(false);
+  const [bulkCoverage, setBulkCoverage] = useState<{
+    summary: {
+      all: number;
+      some: number;
+      none: number;
+      total: number;
+      hasAnywhere?: number;
+      scope?: string;
+      companyName?: string | null;
+    };
+    bySubprocess: {
+      id: number;
+      name: string;
+      processName: string;
+      withCount: number;
+      withoutCount: number;
+      withAnywhereCount?: number;
+    }[];
+    rowsByUserId: Record<
+      string,
+      {
+        status: 'all' | 'some' | 'none';
+        hasCount: number;
+        totalCount: number;
+        presentNames: string[];
+        missingNames: string[];
+        presentElsewhereNames?: string[];
+        companies?: string[];
+        hasAnywhere?: boolean;
+      }
+    >;
+  } | null>(null);
+
   // Authorization types states (submodal shown when the "Autorización" subprocess is assigned)
   const [authTypeModalOpened, setAuthTypeModalOpened] = useState(false);
   const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
@@ -157,7 +241,8 @@ function UserManagement() {
     allSubprocesses.find((s) => s.subprocess_url === '/process/authorization')?.id_subprocess ??
     null;
 
-  // Debounce del buscador (igual que help-desk): no fetch en cada tecla
+  // Debounce del buscador: refresca la tabla automáticamente buscando en TODA la BD
+  // (el API aplica el filtro antes de paginar). Al buscar siempre volvemos a página 1.
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const next = searchInput.trim();
@@ -165,21 +250,15 @@ function UserManagement() {
         if (prev.search === next) return prev;
         return { ...prev, search: next };
       });
-    }, 350);
+      setPagination((prev) => (prev.page === 1 ? prev : { ...prev, page: 1 }));
+    }, 150);
     return () => window.clearTimeout(timer);
   }, [searchInput]);
 
-  const prevSearchRef = useRef(filters.search);
-  useEffect(() => {
-    if (prevSearchRef.current === filters.search) return;
-    prevSearchRef.current = filters.search;
-    setPagination((prev) => (prev.page === 1 ? prev : { ...prev, page: 1 }));
-  }, [filters.search]);
-
   const fetchUsers = useCallback(async () => {
     try {
-      if (hasLoadedOnce.current) setRefreshing(true);
-      else setLoading(true);
+      // Solo bloquea la UI en la primera carga; al filtrar/paginar se actualiza en silencio.
+      if (!hasLoadedOnce.current) setLoading(true);
 
       const params = new URLSearchParams({
         page: pagination.page.toString(),
@@ -213,7 +292,6 @@ function UserManagement() {
       console.error('Error fetching users:', err);
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }, [filters.search, filters.role, filters.status, pagination.page, pagination.limit]);
 
@@ -656,6 +734,267 @@ function UserManagement() {
     }
   };
 
+  const openBulkModal = async () => {
+    setBulkModalOpened(true);
+    setBulkEmailDomain('');
+    setBulkEmailsText('');
+    setBulkCompany('');
+    setBulkSubprocessIds([]);
+    setBulkSubprocessSearch('');
+    setBulkMode('add');
+    setBulkPreviewUsers([]);
+    setBulkSelectedUserIds([]);
+    setBulkTruncated(false);
+    setBulkCoverage(null);
+
+    try {
+      const [subprocessesResponse, companiesResponse] = await Promise.all([
+        fetch('/api/subprocesses', { cache: 'no-store' }),
+        fetch('/api/companies', { cache: 'no-store' }),
+      ]);
+
+      if (companiesResponse.ok) {
+        const companiesData: Company[] = await companiesResponse.json();
+        setCompanies(companiesData);
+        setBulkCompany('all');
+      }
+
+      if (subprocessesResponse.ok) {
+        const { subprocesses } = await subprocessesResponse.json();
+        setAllSubprocesses(subprocesses);
+      }
+    } catch (error) {
+      console.error('Error loading bulk assignment data:', error);
+      toast.error('Error al cargar datos para asignación masiva');
+    }
+  };
+
+  const handleBulkPreview = async () => {
+    const emailDomain = bulkEmailDomain.trim();
+    const emails = bulkEmailsText.trim();
+    if (!emailDomain && !emails) {
+      toast.error('Indique un dominio (ej. onelatampharma) o una lista de correos');
+      return;
+    }
+
+    try {
+      setBulkPreviewLoading(true);
+      const params = new URLSearchParams();
+      if (emailDomain) params.set('emailDomain', emailDomain);
+      if (emails) params.set('emails', emails);
+
+      const response = await fetch(`/api/users/bulk-subprocesses?${params.toString()}`, {
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || 'No se pudo previsualizar usuarios');
+      }
+      const data = await response.json();
+      const list = (data.users || []) as typeof bulkPreviewUsers;
+      setBulkPreviewUsers(list);
+      setBulkSelectedUserIds(list.map((u) => u.id));
+      setBulkTruncated(Boolean(data.truncated));
+      if (list.length === 0) {
+        toast.error('No se encontraron usuarios activos con ese criterio');
+      } else {
+        toast.success(`${list.length} usuario(s) encontrados`);
+      }
+    } catch (error) {
+      console.error('Error previewing bulk users:', error);
+      toast.error(error instanceof Error ? error.message : 'Error al previsualizar');
+    } finally {
+      setBulkPreviewLoading(false);
+    }
+  };
+
+  const getBulkFilteredSubprocesses = () => {
+    if (!bulkSubprocessSearch) return allSubprocesses;
+    const searchLower = bulkSubprocessSearch.toLowerCase();
+    return allSubprocesses.filter(
+      (s) =>
+        s.subprocess.toLowerCase().includes(searchLower) ||
+        s.process.process.toLowerCase().includes(searchLower)
+    );
+  };
+
+  const handleBulkCheckCoverage = async () => {
+    if (!bulkCompany) {
+      toast.error('Seleccione una empresa o “Todas las empresas”');
+      return;
+    }
+    if (bulkSubprocessIds.length === 0) {
+      toast.error('Seleccione al menos un subproceso');
+      return;
+    }
+    if (bulkSelectedUserIds.length === 0) {
+      toast.error('Seleccione al menos un usuario');
+      return;
+    }
+
+    try {
+      setBulkCoverageLoading(true);
+      const response = await fetch('/api/users/bulk-subprocesses/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: bulkCompany === 'all' ? 'all' : parseInt(bulkCompany, 10),
+          subprocessIds: bulkSubprocessIds,
+          userIds: bulkSelectedUserIds,
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || 'No se pudo verificar la cobertura');
+      }
+      const data = await response.json();
+      const rowsByUserId: NonNullable<typeof bulkCoverage>['rowsByUserId'] = {};
+      for (const row of data.rows as Array<{
+        userId: string;
+        status: 'all' | 'some' | 'none';
+        hasCount: number;
+        totalCount: number;
+        presentNames: string[];
+        missingNames: string[];
+        presentElsewhereNames?: string[];
+        companies?: string[];
+        hasAnywhere?: boolean;
+      }>) {
+        rowsByUserId[row.userId] = {
+          status: row.status,
+          hasCount: row.hasCount,
+          totalCount: row.totalCount,
+          presentNames: row.presentNames,
+          missingNames: row.missingNames,
+          presentElsewhereNames: row.presentElsewhereNames,
+          companies: row.companies,
+          hasAnywhere: row.hasAnywhere,
+        };
+      }
+      setBulkCoverage({
+        summary: data.summary,
+        bySubprocess: data.bySubprocess,
+        rowsByUserId,
+      });
+      const elsewhere =
+        typeof data.summary.hasAnywhere === 'number' &&
+        data.summary.hasAnywhere > data.summary.all + data.summary.some
+          ? ` · ${data.summary.hasAnywhere} lo tienen en alguna empresa`
+          : '';
+      toast.success(
+        `Cobertura: ${data.summary.all} con todos · ${data.summary.some} parcial · ${data.summary.none} sin ninguno${elsewhere}`
+      );
+    } catch (error) {
+      console.error('Error checking coverage:', error);
+      toast.error(error instanceof Error ? error.message : 'Error al verificar cobertura');
+    } finally {
+      setBulkCoverageLoading(false);
+    }
+  };
+
+  const selectUsersByCoverage = (status: 'all' | 'some' | 'none' | 'missingAny' | 'hasAny') => {
+    if (!bulkCoverage) {
+      toast.error('Primero verifica la cobertura');
+      return;
+    }
+    const matched = Object.entries(bulkCoverage.rowsByUserId)
+      .filter(([, row]) => {
+        if (status === 'missingAny') return row.status !== 'all';
+        if (status === 'hasAny') return row.status !== 'none';
+        return row.status === status;
+      })
+      .map(([userId]) => userId);
+    setBulkSelectedUserIds(matched);
+  };
+
+  const coverageBadge = (userId: string) => {
+    const row = bulkCoverage?.rowsByUserId[userId];
+    if (!row) return null;
+    if (row.status === 'all') {
+      return (
+        <Badge color='green' variant='light' size='xs'>
+          Tiene todos ({row.hasCount}/{row.totalCount})
+        </Badge>
+      );
+    }
+    if (row.status === 'some') {
+      return (
+        <Badge color='yellow' variant='light' size='xs'>
+          Parcial ({row.hasCount}/{row.totalCount})
+        </Badge>
+      );
+    }
+    if (row.hasAnywhere) {
+      return (
+        <Badge color='orange' variant='light' size='xs'>
+          En otra empresa
+        </Badge>
+      );
+    }
+    return (
+      <Badge color='gray' variant='light' size='xs'>
+        No tiene (0/{row.totalCount})
+      </Badge>
+    );
+  };
+
+  const handleBulkSave = async () => {
+    if (!bulkCompany || bulkCompany === 'all') {
+      toast.error('Para agregar o quitar debe seleccionar una empresa concreta');
+      return;
+    }
+    if (bulkSubprocessIds.length === 0) {
+      toast.error('Seleccione al menos un subproceso');
+      return;
+    }
+    if (bulkSelectedUserIds.length === 0) {
+      toast.error('Seleccione al menos un usuario de la vista previa');
+      return;
+    }
+
+    try {
+      setBulkSaving(true);
+      const response = await fetch('/api/users/bulk-subprocesses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: parseInt(bulkCompany, 10),
+          subprocessIds: bulkSubprocessIds,
+          mode: bulkMode,
+          userIds: bulkSelectedUserIds,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || 'Error en la asignación masiva');
+      }
+
+      const result = await response.json();
+      notifySubprocessAssignmentsChanged();
+      const actionLabel =
+        bulkMode === 'remove'
+          ? 'Retiro masivo'
+          : bulkMode === 'replace'
+            ? 'Reemplazo masivo'
+            : 'Asignación masiva';
+      toast.success(
+        `${actionLabel}: ${result.successCount} usuario(s) OK` +
+          (result.failCount ? `, ${result.failCount} con error` : '') +
+          (bulkMode === 'remove' && result.totalRemoved
+            ? ` · ${result.totalRemoved} asignación(es) quitada(s)`
+            : '')
+      );
+      setBulkModalOpened(false);
+      void fetchUsers();
+    } catch (error) {
+      console.error('Error in bulk assignment:', error);
+      toast.error(error instanceof Error ? error.message : 'Error en la asignación masiva');
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
   const exportToCSV = () => {
     const csvContent = [
       ['ID', 'Nombre', 'Email', 'Rol', 'Estado', 'Fecha de Registro'],
@@ -715,6 +1054,8 @@ function UserManagement() {
   const getRoleColor = (role: string) => {
     switch (role.toLowerCase()) {
       case 'admin':
+      case 'super_user':
+      case 'superadmin':
         return 'red';
       case 'user':
         return 'blue';
@@ -723,189 +1064,759 @@ function UserManagement() {
     }
   };
 
-  const getStatusColor = (isActive: boolean) => {
-    return isActive ? 'green' : 'red';
+  const getRoleLabel = (role: string) => {
+    switch (role.toLowerCase()) {
+      case 'admin':
+        return 'Admin';
+      case 'super_user':
+      case 'superadmin':
+        return 'Super admin';
+      case 'user':
+        return 'Usuario';
+      default:
+        return role;
+    }
   };
 
+  const formatRegisteredAt = (value: string) =>
+    new Date(value).toLocaleDateString('es-ES', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+
+  const renderUserActions = (user: User) => (
+    <Group gap={2} wrap='nowrap' justify='flex-end'>
+      <Tooltip label='Editar usuario' withArrow>
+        <ActionIcon
+          variant='subtle'
+          color='blue'
+          size='sm'
+          onClick={() => openEditModal(user)}
+          aria-label='Editar usuario'
+        >
+          <IconEdit size={15} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label='Asignar subprocesos' withArrow>
+        <ActionIcon
+          variant='subtle'
+          color='violet'
+          size='sm'
+          onClick={() => openSubprocessModal(user)}
+          aria-label='Asignar subprocesos'
+        >
+          <IconSettings size={15} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label='Desactivar usuario' withArrow>
+        <ActionIcon
+          variant='subtle'
+          color='red'
+          size='sm'
+          onClick={() => openDeleteModal(user)}
+          aria-label='Desactivar usuario'
+        >
+          <IconTrash size={15} />
+        </ActionIcon>
+      </Tooltip>
+    </Group>
+  );
+
   return (
-    <div className='max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8'>
-      <div className='mb-8'>
-        <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
-          {breadcrumbItems}
-        </Breadcrumbs>
-        <Title order={1} className='text-3xl font-bold text-gray-900 mb-2'>
-          Administración de Usuarios
-        </Title>
-        <p className='text-gray-600'>Gestiona usuarios del sistema de manera segura y eficiente</p>
-        <br />
-        <Group>
-          <Button
-            leftSection={<IconPlus size={16} />}
-            onClick={() => {
-              setSelectedDepartmentIds([]);
-              setCreateModalOpened(true);
-            }}
+    <div style={{ minHeight: '100%', backgroundColor: 'var(--mantine-color-body)' }}>
+      <div className='max-w-7xl mx-auto py-4 px-3 sm:py-6 sm:px-6 lg:px-8'>
+        <Card shadow='sm' p='md' radius='md' withBorder mb='sm'>
+          <Breadcrumbs separator={<IconChevronRight size={14} />} mb='sm'>
+            {breadcrumbItems}
+          </Breadcrumbs>
+
+          <Flex
+            justify='space-between'
+            align={{ base: 'stretch', sm: 'center' }}
+            direction={{ base: 'column', sm: 'row' }}
+            gap='sm'
           >
-            Crear Usuario
-          </Button>
-          <Button variant='outline' leftSection={<IconDownload size={16} />} onClick={exportToCSV}>
-            Exportar CSV
-          </Button>
-        </Group>
-      </div>
+            <div style={{ minWidth: 0 }}>
+              <Group gap='xs' wrap='nowrap'>
+                <ThemeIcon size={32} radius='md' variant='light' color='blue'>
+                  <IconUsers size={18} />
+                </ThemeIcon>
+                <div style={{ minWidth: 0 }}>
+                  <Title order={2} style={{ fontSize: '1.25rem', lineHeight: 1.3 }}>
+                    Administración de Usuarios
+                  </Title>
+                  <Text size='xs' c='dimmed'>
+                    Gestiona accesos, roles y subprocesos · {pagination.total} usuarios
+                  </Text>
+                </div>
+              </Group>
+            </div>
 
-      {error && (
-        <Alert icon={<IconAlertCircle size={16} />} title='Error' color='red' mb='md'>
-          {error}
-        </Alert>
-      )}
+            <Group gap='xs' grow={!!isMobile}>
+              <Button
+                size='sm'
+                leftSection={<IconPlus size={14} />}
+                onClick={() => {
+                  setSelectedDepartmentIds([]);
+                  setCreateModalOpened(true);
+                }}
+              >
+                Crear Usuario
+              </Button>
+              <Button
+                size='sm'
+                variant='filled'
+                color='violet'
+                leftSection={<IconUsersGroup size={14} />}
+                onClick={() => void openBulkModal()}
+              >
+                Asignación masiva
+              </Button>
+              <Button
+                size='sm'
+                variant='light'
+                leftSection={<IconDownload size={14} />}
+                onClick={exportToCSV}
+              >
+                Exportar CSV
+              </Button>
+            </Group>
+          </Flex>
+        </Card>
 
-      {/* Filters */}
-      <Paper shadow='sm' p='md' radius='md' withBorder mb='md'>
-        <Title order={4} mb='md'>
-          Filtros
-        </Title>
-        <Group grow>
-          <TextInput
-            label='Buscar'
-            placeholder='Nombre o email'
-            leftSection={<IconSearch size={16} />}
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.currentTarget.value)}
-          />
-          <Select
-            label='Rol'
-            placeholder='Todos los roles'
-            data={[
-              { value: '', label: 'Todos' },
-              { value: 'admin', label: 'Admin' },
-              { value: 'user', label: 'Usuario' },
-            ]}
-            value={filters.role}
-            onChange={(value) => handleFilterChange('role', value || '')}
-          />
-          <Select
-            label='Estado'
-            placeholder='Todos los estados'
-            data={[
-              { value: '', label: 'Todos' },
-              { value: 'active', label: 'Activo' },
-              { value: 'inactive', label: 'Inactivo' },
-            ]}
-            value={filters.status}
-            onChange={(value) => handleFilterChange('status', value || '')}
-          />
-        </Group>
-      </Paper>
+        {error && (
+          <Alert icon={<IconAlertCircle size={16} />} title='Error' color='red' mb='sm'>
+            {error}
+          </Alert>
+        )}
 
-      {/* Users Table */}
-      <Paper shadow='sm' radius='md' withBorder style={{ position: 'relative' }}>
-        {refreshing ? (
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              zIndex: 2,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'color-mix(in srgb, var(--mantine-color-body) 70%, transparent)',
-              borderRadius: 'inherit',
-            }}
-          >
-            <Loader size='sm' />
-          </div>
-        ) : null}
-        <div className='overflow-x-auto'>
-          <Table stickyHeader>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>ID</Table.Th>
-                <Table.Th>Nombre</Table.Th>
-                <Table.Th>Email</Table.Th>
-                <Table.Th>Rol</Table.Th>
-                <Table.Th>Estado</Table.Th>
-                <Table.Th>Fecha de Registro</Table.Th>
-                <Table.Th>Acciones</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {users.length === 0 ? (
-                <Table.Tr>
-                  <Table.Td colSpan={7} className='text-center py-8 text-gray-500'>
-                    No se encontraron usuarios
-                  </Table.Td>
-                </Table.Tr>
-              ) : (
-                users.map((user) => (
-                  <Table.Tr key={user.id}>
-                    <Table.Td className='font-mono text-sm'>{user.id.slice(0, 8)}...</Table.Td>
-                    <Table.Td className='font-medium'>{user.name || 'Sin nombre'}</Table.Td>
-                    <Table.Td>{user.email}</Table.Td>
-                    <Table.Td>
-                      <Badge color={getRoleColor(user.role)} variant='light'>
-                        {user.role}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge color={getStatusColor(user.isActive)} variant='light'>
-                        {user.isActive ? 'Activo' : 'Inactivo'}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {new Date(user.createdAt).toLocaleDateString('es-ES', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                      })}
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap='xs'>
-                        <ActionIcon
-                          variant='subtle'
-                          color='blue'
-                          onClick={() => openEditModal(user)}
-                          title='Editar usuario'
-                        >
-                          <IconEdit size={16} />
-                        </ActionIcon>
-                        <ActionIcon
-                          variant='subtle'
-                          color='violet'
-                          onClick={() => openSubprocessModal(user)}
-                          title='Asignar subprocesos'
-                        >
-                          <IconSettings size={16} />
-                        </ActionIcon>
-                        <ActionIcon
-                          variant='subtle'
-                          color='red'
-                          onClick={() => openDeleteModal(user)}
-                          title='Desactivar usuario'
-                        >
-                          <IconTrash size={16} />
-                        </ActionIcon>
-                      </Group>
-                    </Table.Td>
-                  </Table.Tr>
-                ))
-              )}
-            </Table.Tbody>
-          </Table>
-        </div>
-
-        {/* Pagination */}
-        {pagination.pages > 1 && (
-          <div className='flex justify-center p-4'>
-            <Pagination
-              total={pagination.pages}
-              value={pagination.page}
-              onChange={(page) => setPagination((prev) => ({ ...prev, page }))}
+        <Card shadow='sm' p='md' radius='md' withBorder mb='sm'>
+          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing='sm'>
+            <TextInput
+              label='Buscar'
+              placeholder='Nombre, email o dominio (ej. onelatampharma)'
+              description={
+                filters.search
+                  ? `Buscando en todos los usuarios · ${pagination.total} resultado(s)`
+                  : 'La búsqueda aplica a toda la base, no solo a esta página'
+              }
+              leftSection={<IconSearch size={14} />}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.currentTarget.value)}
               size='sm'
             />
+            <Select
+              label='Rol'
+              placeholder='Todos los roles'
+              data={[
+                { value: '', label: 'Todos' },
+                { value: 'admin', label: 'Admin' },
+                { value: 'user', label: 'Usuario' },
+              ]}
+              value={filters.role}
+              onChange={(value) => handleFilterChange('role', value || '')}
+              size='sm'
+              leftSection={<IconShield size={14} />}
+              comboboxProps={{ withinPortal: true }}
+            />
+            <Select
+              label='Estado'
+              placeholder='Todos los estados'
+              data={[
+                { value: '', label: 'Todos' },
+                { value: 'active', label: 'Activo' },
+                { value: 'inactive', label: 'Inactivo' },
+              ]}
+              value={filters.status}
+              onChange={(value) => handleFilterChange('status', value || '')}
+              size='sm'
+              comboboxProps={{ withinPortal: true }}
+            />
+          </SimpleGrid>
+        </Card>
+
+        <Card
+          shadow='sm'
+          radius='md'
+          withBorder
+          p='md'
+          style={{ position: 'relative' }}
+        >
+          {users.length === 0 ? (
+            <Stack align='center' gap={6} py='lg'>
+              <ThemeIcon size={40} radius='xl' variant='light' color='gray'>
+                <IconUsers size={20} />
+              </ThemeIcon>
+              <Text size='sm' fw={500}>
+                No se encontraron usuarios
+              </Text>
+              <Text size='xs' c='dimmed' ta='center'>
+                Prueba ajustando los filtros o crea un nuevo usuario
+              </Text>
+            </Stack>
+          ) : isMobile ? (
+            <Stack gap='xs'>
+              {users.map((user) => (
+                <Card
+                  key={user.id}
+                  withBorder
+                  radius='sm'
+                  padding='sm'
+                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                >
+                  <Group justify='space-between' align='flex-start' wrap='nowrap' gap='xs' mb={6}>
+                    <Group gap='xs' wrap='nowrap' style={{ minWidth: 0, flex: 1 }}>
+                      <Avatar
+                        radius='xl'
+                        size={32}
+                        color={getAvatarColor(user.id)}
+                        variant='light'
+                        style={{ flexShrink: 0 }}
+                      >
+                        {getUserInitials(user.name, user.email)}
+                      </Avatar>
+                      <div style={{ minWidth: 0 }}>
+                        <Text fw={600} size='sm'>
+                          {user.name || 'Sin nombre'}
+                        </Text>
+                        <Text size='xs' c='dimmed' style={{ wordBreak: 'break-all' }}>
+                          {user.email}
+                        </Text>
+                      </div>
+                    </Group>
+                    {renderUserActions(user)}
+                  </Group>
+                  <Group gap={6} wrap='wrap'>
+                    <Text size='xs' c='dimmed' ff='monospace'>
+                      ID {user.id.slice(0, 8)}…
+                    </Text>
+                    <Badge color={getRoleColor(user.role)} variant='light' size='xs'>
+                      {getRoleLabel(user.role)}
+                    </Badge>
+                    <Badge color={user.isActive ? 'green' : 'red'} variant='light' size='xs'>
+                      {user.isActive ? 'Activo' : 'Inactivo'}
+                    </Badge>
+                    <Text size='xs' c='dimmed'>
+                      {formatRegisteredAt(user.createdAt)}
+                    </Text>
+                  </Group>
+                </Card>
+              ))}
+            </Stack>
+          ) : (
+            <Box style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <Table
+                striped
+                highlightOnHover
+                stickyHeader
+                verticalSpacing={6}
+                horizontalSpacing='sm'
+                style={{ minWidth: 860 }}
+              >
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th style={{ width: 90 }}>ID</Table.Th>
+                    <Table.Th>Nombre</Table.Th>
+                    <Table.Th>Email</Table.Th>
+                    <Table.Th style={{ width: 110 }}>Rol</Table.Th>
+                    <Table.Th style={{ width: 100 }}>Estado</Table.Th>
+                    <Table.Th style={{ width: 120 }}>Registro</Table.Th>
+                    <Table.Th style={{ width: 110, textAlign: 'right' }}>Acciones</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {users.map((user) => (
+                    <Table.Tr key={user.id}>
+                      <Table.Td>
+                        <Text size='xs' ff='monospace' c='dimmed'>
+                          {user.id.slice(0, 8)}…
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap={8} wrap='nowrap'>
+                          <Avatar
+                            radius='xl'
+                            size={28}
+                            color={getAvatarColor(user.id)}
+                            variant='light'
+                          >
+                            {getUserInitials(user.name, user.email)}
+                          </Avatar>
+                          <Text size='sm' fw={500}>
+                            {user.name || 'Sin nombre'}
+                          </Text>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size='sm' style={{ wordBreak: 'break-word' }}>
+                          {user.email}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge color={getRoleColor(user.role)} variant='light' size='sm'>
+                          {getRoleLabel(user.role)}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge color={user.isActive ? 'green' : 'red'} variant='light' size='sm'>
+                          {user.isActive ? 'Activo' : 'Inactivo'}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size='sm'>{formatRegisteredAt(user.createdAt)}</Text>
+                      </Table.Td>
+                      <Table.Td>{renderUserActions(user)}</Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Box>
+          )}
+
+          {pagination.pages > 1 && (
+            <Flex
+              justify='center'
+              mt='sm'
+              pt='sm'
+              style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}
+            >
+              <Pagination
+                total={pagination.pages}
+                value={pagination.page}
+                onChange={(page) => setPagination((prev) => ({ ...prev, page }))}
+                size='sm'
+                radius='md'
+              />
+            </Flex>
+          )}
+        </Card>
+
+      {/* Bulk Assignment Modal */}
+      <Modal
+        opened={bulkModalOpened}
+        onClose={() => !bulkSaving && setBulkModalOpened(false)}
+        title={
+          <Group gap='xs'>
+            <IconUsersGroup size={18} />
+            <Text fw={600}>Asignación / retiro masivo</Text>
+          </Group>
+        }
+        size='xl'
+        fullScreen={!!isMobile}
+      >
+        <Stack gap='sm'>
+          <Alert color='blue' variant='light' icon={<IconAlertCircle size={16} />}>
+            Filtra por dominio de correo (ej. <strong>onelatampharma</strong>) o pega una lista de
+            emails. Luego elige empresa, subprocesos y <strong>agrega</strong> o{' '}
+            <strong>quita</strong> módulos de forma masiva.
+          </Alert>
+
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
+            <TextInput
+              label='Dominio de correo'
+              placeholder='onelatampharma o @onelatampharma.com'
+              description='Coincide con cualquier email que contenga ese texto'
+              value={bulkEmailDomain}
+              onChange={(e) => setBulkEmailDomain(e.currentTarget.value)}
+              size='sm'
+            />
+            <Textarea
+              label='Lista de correos (opcional)'
+              placeholder={'user1@empresa.com\nuser2@empresa.com'}
+              description='Separados por coma, espacio o salto de línea'
+              value={bulkEmailsText}
+              onChange={(e) => setBulkEmailsText(e.currentTarget.value)}
+              minRows={2}
+              autosize
+              maxRows={4}
+              size='sm'
+            />
+          </SimpleGrid>
+
+          <Group>
+            <Button
+              size='sm'
+              variant='light'
+              leftSection={<IconSearch size={14} />}
+              loading={bulkPreviewLoading}
+              onClick={() => void handleBulkPreview()}
+            >
+              Vista previa de usuarios
+            </Button>
+            {bulkPreviewUsers.length > 0 && (
+              <Badge variant='light' color='violet'>
+                {bulkSelectedUserIds.length} / {bulkPreviewUsers.length} seleccionados
+              </Badge>
+            )}
+          </Group>
+
+          {bulkTruncated && (
+            <Alert color='yellow' variant='light'>
+              Se limitó la vista previa a 500 usuarios. Afina el dominio si necesitas un grupo más
+              preciso.
+            </Alert>
+          )}
+
+          {bulkPreviewUsers.length > 0 && (
+            <Card withBorder padding='sm' radius='md'>
+              <Group justify='space-between' mb='xs'>
+                <Text size='sm' fw={600}>
+                  Usuarios coincidentes
+                </Text>
+                <Group gap='xs'>
+                  <Button
+                    size='compact-xs'
+                    variant='subtle'
+                    onClick={() => setBulkSelectedUserIds(bulkPreviewUsers.map((u) => u.id))}
+                  >
+                    Todos
+                  </Button>
+                  <Button
+                    size='compact-xs'
+                    variant='subtle'
+                    color='gray'
+                    onClick={() => setBulkSelectedUserIds([])}
+                  >
+                    Ninguno
+                  </Button>
+                </Group>
+              </Group>
+              <ScrollArea.Autosize mah={180}>
+                <Stack gap={4}>
+                  {bulkPreviewUsers.map((user) => (
+                    <Group key={user.id} justify='space-between' wrap='nowrap' gap='xs' align='flex-start'>
+                      <Checkbox
+                        size='sm'
+                        style={{ flex: 1, minWidth: 0 }}
+                        checked={bulkSelectedUserIds.includes(user.id)}
+                        onChange={(e) => {
+                          const checked = e.currentTarget.checked;
+                          setBulkCoverage(null);
+                          setBulkSelectedUserIds((prev) =>
+                            checked ? [...prev, user.id] : prev.filter((id) => id !== user.id)
+                          );
+                        }}
+                        label={
+                          <Text size='xs'>
+                            <Text span fw={600}>
+                              {user.name || 'Sin nombre'}
+                            </Text>{' '}
+                            · {user.email}
+                          </Text>
+                        }
+                      />
+                      {bulkCoverage?.rowsByUserId[user.id] && (
+                        <Tooltip
+                          multiline
+                          w={300}
+                          withArrow
+                          label={
+                            <Stack gap={4}>
+                              <Text size='xs'>
+                                Tiene aquí:{' '}
+                                {bulkCoverage.rowsByUserId[user.id].presentNames.join(', ') || '—'}
+                              </Text>
+                              <Text size='xs'>
+                                Falta:{' '}
+                                {bulkCoverage.rowsByUserId[user.id].missingNames.join(', ') || '—'}
+                              </Text>
+                              {(bulkCoverage.rowsByUserId[user.id].presentElsewhereNames?.length ??
+                                0) > 0 && (
+                                <Text size='xs'>
+                                  En otras empresas:{' '}
+                                  {bulkCoverage.rowsByUserId[user.id].presentElsewhereNames?.join(
+                                    ', '
+                                  )}
+                                </Text>
+                              )}
+                              {(bulkCoverage.rowsByUserId[user.id].companies?.length ?? 0) > 0 && (
+                                <Text size='xs'>
+                                  Empresas:{' '}
+                                  {bulkCoverage.rowsByUserId[user.id].companies?.join(', ')}
+                                </Text>
+                              )}
+                            </Stack>
+                          }
+                        >
+                          <span>{coverageBadge(user.id)}</span>
+                        </Tooltip>
+                      )}
+                    </Group>
+                  ))}
+                </Stack>
+              </ScrollArea.Autosize>
+            </Card>
+          )}
+
+          <Select
+            label='Empresa'
+            placeholder='Seleccione una empresa'
+            description='Para consultar cobertura puedes usar “Todas las empresas”. Para agregar/quitar sí debes elegir una empresa concreta.'
+            data={[
+              { value: 'all', label: 'Todas las empresas (solo consulta)' },
+              ...companies.map((c) => ({ value: c.id.toString(), label: c.name })),
+            ]}
+            value={bulkCompany}
+            onChange={(value) => {
+              setBulkCompany(value || '');
+              setBulkCoverage(null);
+            }}
+            required
+            size='sm'
+            comboboxProps={{ withinPortal: true }}
+          />
+
+          <div>
+            <Text size='sm' fw={500} mb={4}>
+              Acción
+            </Text>
+            <SegmentedControl
+              fullWidth
+              size='sm'
+              value={bulkMode}
+              onChange={(value) => setBulkMode(value as 'add' | 'replace' | 'remove')}
+              data={[
+                { label: 'Agregar', value: 'add' },
+                { label: 'Quitar', value: 'remove' },
+                { label: 'Reemplazar', value: 'replace' },
+              ]}
+            />
+            <Text size='xs' c='dimmed' mt={4}>
+              {bulkMode === 'add'
+                ? 'Suma los subprocesos elegidos sin quitar los que ya tengan en esa empresa.'
+                : bulkMode === 'remove'
+                  ? 'Quita solo los subprocesos seleccionados de esa empresa; conserva el resto.'
+                  : 'Deja únicamente los subprocesos seleccionados (quita los demás de esa empresa).'}
+            </Text>
           </div>
-        )}
-      </Paper>
+
+          <TextInput
+            label='Filtrar subprocesos'
+            placeholder='Buscar módulo o subproceso'
+            leftSection={<IconSearch size={14} />}
+            value={bulkSubprocessSearch}
+            onChange={(e) => setBulkSubprocessSearch(e.currentTarget.value)}
+            size='sm'
+          />
+
+          <Group gap='xs'>
+            <Button
+              size='compact-xs'
+              variant='light'
+              onClick={() => {
+                setBulkSubprocessIds(getBulkFilteredSubprocesses().map((s) => s.id_subprocess));
+                setBulkCoverage(null);
+              }}
+            >
+              Seleccionar filtrados
+            </Button>
+            <Button
+              size='compact-xs'
+              variant='subtle'
+              color='gray'
+              onClick={() => {
+                setBulkSubprocessIds([]);
+                setBulkCoverage(null);
+              }}
+            >
+              Limpiar
+            </Button>
+            <Badge variant='light' size='sm'>
+              {bulkSubprocessIds.length} subproceso(s)
+            </Badge>
+          </Group>
+
+          <ScrollArea.Autosize mah={180}>
+            <Stack gap={4}>
+              {getBulkFilteredSubprocesses().map((subprocess) => (
+                <Checkbox
+                  key={subprocess.id_subprocess}
+                  size='sm'
+                  checked={bulkSubprocessIds.includes(subprocess.id_subprocess)}
+                  onChange={() => {
+                    setBulkCoverage(null);
+                    setBulkSubprocessIds((prev) =>
+                      prev.includes(subprocess.id_subprocess)
+                        ? prev.filter((id) => id !== subprocess.id_subprocess)
+                        : [...prev, subprocess.id_subprocess]
+                    );
+                  }}
+                  label={
+                    <Text size='xs'>
+                      <Text span fw={600}>
+                        {subprocess.subprocess}
+                      </Text>{' '}
+                      <Text span c='dimmed'>
+                        · {subprocess.process.process}
+                      </Text>
+                    </Text>
+                  }
+                />
+              ))}
+            </Stack>
+          </ScrollArea.Autosize>
+
+          <Group>
+            <Button
+              size='sm'
+              variant='light'
+              color='teal'
+              leftSection={<IconSearch size={14} />}
+              loading={bulkCoverageLoading}
+              onClick={() => void handleBulkCheckCoverage()}
+              disabled={
+                bulkSelectedUserIds.length === 0 ||
+                bulkSubprocessIds.length === 0 ||
+                !bulkCompany
+              }
+            >
+              Ver quién ya los tiene
+            </Button>
+          </Group>
+
+          {bulkCoverage && (
+            <Card withBorder padding='sm' radius='md'>
+              <Text size='sm' fw={600} mb={6}>
+                Cobertura
+                {bulkCoverage.summary.scope === 'all'
+                  ? ' (todas las empresas)'
+                  : bulkCoverage.summary.companyName
+                    ? ` en ${bulkCoverage.summary.companyName}`
+                    : ''}
+              </Text>
+              <Group gap='xs' mb='sm' wrap='wrap'>
+                <Badge color='green' variant='filled'>
+                  Todos: {bulkCoverage.summary.all}
+                </Badge>
+                <Badge color='yellow' variant='filled'>
+                  Parcial: {bulkCoverage.summary.some}
+                </Badge>
+                <Badge color='gray' variant='filled'>
+                  Ninguno: {bulkCoverage.summary.none}
+                </Badge>
+                {typeof bulkCoverage.summary.hasAnywhere === 'number' && (
+                  <Badge color='teal' variant='light'>
+                    En alguna empresa: {bulkCoverage.summary.hasAnywhere}
+                  </Badge>
+                )}
+              </Group>
+
+              {bulkCoverage.summary.scope === 'company' &&
+                (bulkCoverage.summary.hasAnywhere ?? 0) >
+                  bulkCoverage.summary.all + bulkCoverage.summary.some && (
+                  <Alert color='orange' variant='light' mb='sm'>
+                    Hay usuarios que <strong>sí tienen</strong> estos módulos, pero en{' '}
+                    <strong>otra empresa</strong>. Usa “Todas las empresas” para verlos, o cambia
+                    la empresa.
+                  </Alert>
+                )}
+
+              <Group gap={6} mb='sm' wrap='wrap'>
+                <Button
+                  size='compact-xs'
+                  variant='light'
+                  color='gray'
+                  onClick={() => selectUsersByCoverage('none')}
+                >
+                  Seleccionar sin módulos
+                </Button>
+                <Button
+                  size='compact-xs'
+                  variant='light'
+                  color='yellow'
+                  onClick={() => selectUsersByCoverage('missingAny')}
+                >
+                  Seleccionar a quienes les falta
+                </Button>
+                <Button
+                  size='compact-xs'
+                  variant='light'
+                  color='green'
+                  onClick={() => selectUsersByCoverage('hasAny')}
+                >
+                  Seleccionar quienes sí tienen
+                </Button>
+                <Button
+                  size='compact-xs'
+                  variant='light'
+                  color='teal'
+                  onClick={() => selectUsersByCoverage('all')}
+                >
+                  Seleccionar con todos
+                </Button>
+              </Group>
+
+              <Text size='xs' fw={600} mb={4}>
+                Por módulo
+              </Text>
+              <Stack gap={4} mb='sm'>
+                {bulkCoverage.bySubprocess.map((sub) => (
+                  <Group key={sub.id} justify='space-between' wrap='nowrap' gap='xs'>
+                    <Text size='xs' lineClamp={1} style={{ minWidth: 0, flex: 1 }}>
+                      {sub.name}
+                      <Text span c='dimmed'>
+                        {' '}
+                        · {sub.processName}
+                      </Text>
+                    </Text>
+                    <Group gap={4} wrap='nowrap' style={{ flexShrink: 0 }}>
+                      <Badge size='xs' color='green' variant='light'>
+                        {sub.withCount} sí
+                      </Badge>
+                      <Badge size='xs' color='gray' variant='light'>
+                        {sub.withoutCount} no
+                      </Badge>
+                      {typeof sub.withAnywhereCount === 'number' &&
+                        sub.withAnywhereCount !== sub.withCount && (
+                          <Badge size='xs' color='orange' variant='light'>
+                            {sub.withAnywhereCount} en total
+                          </Badge>
+                        )}
+                    </Group>
+                  </Group>
+                ))}
+              </Stack>
+
+              <Text size='xs' c='dimmed'>
+                Hover en el badge de cada usuario para ver detalle y en qué empresas lo tiene.
+              </Text>
+            </Card>
+          )}
+
+          <Group justify='flex-end' mt='xs'>
+            <Button
+              variant='default'
+              size='sm'
+              disabled={bulkSaving}
+              onClick={() => setBulkModalOpened(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size='sm'
+              color={bulkMode === 'remove' ? 'red' : 'violet'}
+              loading={bulkSaving}
+              leftSection={
+                bulkMode === 'remove' ? <IconTrash size={14} /> : <IconUsersGroup size={14} />
+              }
+              onClick={() => void handleBulkSave()}
+              disabled={
+                bulkSelectedUserIds.length === 0 ||
+                bulkSubprocessIds.length === 0 ||
+                !bulkCompany ||
+                bulkCompany === 'all'
+              }
+            >
+              {bulkMode === 'remove'
+                ? `Quitar de ${bulkSelectedUserIds.length || 0} usuario(s)`
+                : bulkMode === 'replace'
+                  ? `Reemplazar en ${bulkSelectedUserIds.length || 0} usuario(s)`
+                  : `Asignar a ${bulkSelectedUserIds.length || 0} usuario(s)`}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       {/* Create User Modal */}
       <Modal
@@ -1326,6 +2237,7 @@ function UserManagement() {
           </Group>
         </Stack>
       </Modal>
+      </div>
     </div>
   );
 }
