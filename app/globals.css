@@ -1232,6 +1232,19 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   width: 100%;
 }
 
+/* Entrada suave del hilo al abrir el chat: un fundido corto en vez de que la
+   lista reemplace de golpe al esqueleto (ver claveContenido en ChatThread). */
+.chat-thread__contenido {
+  animation: chat-contenido-entra 150ms ease-out;
+}
+@keyframes chat-contenido-entra {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-thread__contenido { animation: none; }
+}
+
 .chat-thread__scroll {
   flex: 1;
   min-height: 0;

@@ -55,6 +55,42 @@ interface HiloEnCache {
 }
 const cacheHilos = new Map<string, HiloEnCache>();
 
+/** Precargas en curso, para no repetir la misma petición por cada toque. */
+const precargasEnCurso = new Set<string>();
+
+/**
+ * Precarga el histórico de un hilo DIRECTO que ya existe, antes de abrirlo.
+ *
+ * Se llama al pasar el cursor o al empezar a tocar la tarjeta del asistente:
+ * entre el `pointerdown` y el `click` pasan ~100-200 ms que antes se perdían.
+ * Solo hace un GET del histórico de una conversación que ya existe (la bandeja
+ * trae su ficha), así que no crea nada en el servidor. Si el hilo ya está en
+ * caché no hace nada: la recarga fresca la hace el propio hook al abrir.
+ */
+export function precargarHiloDeAgente(
+  idAgent: number,
+  conversation: ChatConversationDto | null
+): void {
+  if (!conversation) return;
+  const clave = `agent:${idAgent}`;
+  if (cacheHilos.has(clave) || precargasEnCurso.has(clave)) return;
+  precargasEnCurso.add(clave);
+  chatGetJson<{ messages: ChatMessageDto[]; hasMore: boolean; nextCursor: number | null }>(
+    `/api/chat/conversations/${conversation.id}/messages?limit=${MESSAGES_PAGE_DEFAULT}`
+  )
+    .then((history) => {
+      if (!history || cacheHilos.has(clave)) return;
+      cacheHilos.set(clave, {
+        conversation,
+        messages: [...(history.messages ?? [])].sort((a, b) => a.id - b.id),
+        hasOlder: Boolean(history.hasMore),
+        olderCursor: history.nextCursor ?? null,
+      });
+    })
+    .catch(() => null)
+    .finally(() => precargasEnCurso.delete(clave));
+}
+
 /**
  * Qué hilo abrir.
  *   - `agent`: la conversación de esta persona con ese agente. Si no existe,
@@ -86,11 +122,6 @@ export function useChatConversation(
   target: ChatTarget | null,
   active: boolean
 ): ChatThreadState {
-  const [conversation, setConversation] = useState<ChatConversationDto | null>(null);
-  const [messages, setMessages] = useState<ChatMessageDto[]>([]);
-  const [status, setStatus] = useState<ChatStatusDto | null>(null);
-  const [statuses, setStatuses] = useState<ChatAgentStatusDto[]>([]);
-
   // El objetivo se aplana a una cadena para poder usarlo como dependencia de
   // los efectos: un objeto nuevo en cada render reabriría el hilo sin parar.
   const targetKey =
@@ -99,10 +130,29 @@ export function useChatConversation(
       : target.kind === 'agent'
         ? `agent:${target.idAgent}`
         : `group:${target.idConversation}`;
-  const [loading, setLoading] = useState(false);
+
+  // EL PRIMER RENDER YA SALE DE LA CACHÉ. Antes el estado arrancaba vacío y
+  // con `loading = false`, y la caché se aplicaba en un efecto —después del
+  // primer pintado—: al abrir el chat se alcanzaba a ver un cuadro con
+  // "Todavía no han hablado", luego el esqueleto y luego los mensajes. Ese
+  // parpadeo era el "golpe" que Nicolás veía al abrir el chat.
+  const [inicial] = useState(() => (targetKey !== null ? cacheHilos.get(targetKey) : undefined));
+  const [conversation, setConversation] = useState<ChatConversationDto | null>(
+    inicial?.conversation ?? null
+  );
+  const [messages, setMessages] = useState<ChatMessageDto[]>(() =>
+    (inicial?.messages ?? []).filter((m) => !m.pending && !m.failed)
+  );
+  const [status, setStatus] = useState<ChatStatusDto | null>(
+    inicial?.conversation.agentStatus ?? null
+  );
+  const [statuses, setStatuses] = useState<ChatAgentStatusDto[]>(
+    inicial?.conversation.agentStatuses ?? []
+  );
+  const [loading, setLoading] = useState(target !== null && !inicial);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasOlder, setHasOlder] = useState(false);
+  const [hasOlder, setHasOlder] = useState(inicial?.hasOlder ?? false);
   const [loadingOlder, setLoadingOlder] = useState(false);
 
   // Cursor del sondeo: id del último mensaje REAL que ya tenemos.
