@@ -74,14 +74,56 @@ export function useAltoVisible(alCambiar?: () => void) {
       });
     };
 
+    /*
+     * TECLADO SIN SALTO (2026-09-23, "cuando se abre el teclado hace un salto
+     * feo"). Solo en táctil: en escritorio no hay teclado virtual y nada de
+     * esto corre.
+     *
+     * 1) `resize` se escribe EN EL MISMO EVENTO, sin esperar al rAF. Durante
+     *    la animación del teclado iOS lo emite una vez por cuadro; agruparlo
+     *    retrasaba un cuadro el alto nuevo, y el aviso (que fija el scroll al
+     *    fondo) corría otro más tarde: el contenedor se encogía, los últimos
+     *    mensajes quedaban tapados y luego "saltaban" a su sitio.
+     * 2) Al enfocar la caja, iOS DESPLAZA EL DOCUMENTO para mostrarla aunque
+     *    `html` tenga `overflow: hidden`; el contenedor fijo se corría y
+     *    `--desplazamiento-visible` lo devolvía un cuadro después. Con el chat
+     *    a pantalla completa se devuelve el documento a 0 de inmediato, así
+     *    el desplazamiento se queda en 0 y no hay nada que corregir.
+     */
+    const tactil = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+    const fijarDocumento = () => {
+      if (!raiz.classList.contains('chat-inmersivo')) return;
+      if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+    };
+    const alRedimensionar = () => {
+      fijarDocumento();
+      if (pendiente) {
+        window.cancelAnimationFrame(pendiente);
+        pendiente = 0;
+      }
+      escribir();
+    };
+    const alDesplazar = () => {
+      fijarDocumento();
+      actualizar();
+    };
+    const alEnfocar = () => {
+      fijarDocumento();
+      // Por si iOS desplaza el documento después del foco, antes del primer
+      // `resize` del teclado.
+      window.requestAnimationFrame(fijarDocumento);
+    };
+
     escribir();
-    vv.addEventListener('resize', actualizar);
-    vv.addEventListener('scroll', actualizar);
+    vv.addEventListener('resize', tactil ? alRedimensionar : actualizar);
+    vv.addEventListener('scroll', tactil ? alDesplazar : actualizar);
+    if (tactil) window.addEventListener('focusin', alEnfocar);
 
     return () => {
       if (pendiente) window.cancelAnimationFrame(pendiente);
-      vv.removeEventListener('resize', actualizar);
-      vv.removeEventListener('scroll', actualizar);
+      vv.removeEventListener('resize', tactil ? alRedimensionar : actualizar);
+      vv.removeEventListener('scroll', tactil ? alDesplazar : actualizar);
+      if (tactil) window.removeEventListener('focusin', alEnfocar);
       raiz.style.removeProperty('--alto-visible');
       raiz.style.removeProperty('--desplazamiento-visible');
     };
