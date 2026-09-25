@@ -28,6 +28,7 @@ import {
 import { Line } from 'react-chartjs-2';
 import '../../../../lib/charts/register';
 import CarteraCaja, { type Cartera } from './CarteraCaja';
+import LotesRegistros, { type LotesRegistrosData } from './LotesRegistros';
 
 /**
  * Predicciones — una pestaña por empresa (Farmalógica, Ryan, OLP, Abamia,
@@ -95,6 +96,7 @@ interface Prediccion {
   alertas: Alerta[];
   como_leer: string[];
   cartera?: Cartera | null;
+  lotes_registros?: LotesRegistrosData | null;
 }
 
 const SEMAFORO: Record<Semaforo, { color: string; emoji: string; texto: string }> = {
@@ -517,17 +519,25 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
       </Stack>
   );
 
-  if (!data.cartera) return <div>{ventasInventario}</div>;
+  if (!data.cartera && !data.lotes_registros) return <div>{ventasInventario}</div>;
   return (
     <Tabs defaultValue="ventas" variant="pills" mt="md" keepMounted={false}>
       <Tabs.List>
         <Tabs.Tab value="ventas">Ventas e inventario</Tabs.Tab>
-        <Tabs.Tab value="cartera">Cartera y caja</Tabs.Tab>
+        {data.cartera && <Tabs.Tab value="cartera">Cartera y caja</Tabs.Tab>}
+        {data.lotes_registros && <Tabs.Tab value="lotes">Lotes y registros</Tabs.Tab>}
       </Tabs.List>
       <Tabs.Panel value="ventas">{ventasInventario}</Tabs.Panel>
-      <Tabs.Panel value="cartera" pt="md">
-        <CarteraCaja data={data.cartera} />
-      </Tabs.Panel>
+      {data.cartera && (
+        <Tabs.Panel value="cartera" pt="md">
+          <CarteraCaja data={data.cartera} />
+        </Tabs.Panel>
+      )}
+      {data.lotes_registros && (
+        <Tabs.Panel value="lotes" pt="md">
+          <LotesRegistros data={data.lotes_registros} />
+        </Tabs.Panel>
+      )}
     </Tabs>
   );
 }

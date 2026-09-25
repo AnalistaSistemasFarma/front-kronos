@@ -447,6 +447,7 @@ def main():
     desc_ref = {}
     unid = defaultdict(lambda: defaultdict(float))
     valor12 = defaultdict(float)
+    unid12 = defaultdict(float)
     hace12 = add_months(completos[-1], -11)
     for v in ventas:
         if v["tipo"] != "Articulos" or not v["ref"]:
@@ -458,6 +459,7 @@ def main():
         unid[v["ref"]][ym] += v["cant"]
         if ym >= hace12:
             valor12[v["ref"]] += v["total"]
+            unid12[v["ref"]] += v["cant"]
 
     def serie_ref(ref):
         return np.array([max(unid[ref].get(m, 0.0), 0.0) for m in completos])
@@ -546,48 +548,63 @@ def main():
     productos_inv.sort(key=lambda p: p["dias_cobertura"])
     en_riesgo_quiebre = [p for p in productos_inv if p["nivel"] != "verde"]
 
-    # ---- lotes: vencimiento = fabricación + vida útil (registro sanitario)
-    vida = {}
-    for ref, vu, est in rows("far_registro_sanitario",
-                             ["Referencia", "Vida_x0020__x00da_til", "Estado_x0020_Comercializaci_x00f"]):
-        if ref and vu:
-            if ref not in vida or (est or "").lower() == "activo":
-                vida[ref] = int(vu)
-    lotes = []
-    vistos = set()
-    for ref, nom, lote, cant, fab in rows("far_lotes", [
-            "C_x00f3_digo_x0020_del_x0020_Pro", "Nombre_x0020_del_x0020_Producto", "Lote",
-            "Cantidad_x0020_Disponible", "Fecha_x0020_de_x0020_Fabricaci_x"]):
-        if not (ref and fab and cant) or (ref, lote) in vistos:
-            continue
-        vistos.add((ref, lote))
-        if ref not in vida:
-            continue
-        f = date.fromisoformat(fab[:10])
-        venc = date(*add_months((f.year, f.month), vida[ref]), min(f.day, 28))
-        lotes.append({"codigo": ref, "nombre": (nom or "").strip(), "lote": lote,
-                      "cantidad": float(cant), "vence": venc})
-    lotes_riesgo = []
-    for ref in {l["codigo"] for l in lotes}:
-        diaria = ritmo.get(ref, 0.0)
-        acumulado = 0.0
-        for l in sorted([x for x in lotes if x["codigo"] == ref], key=lambda x: x["vence"]):
-            dias = (l["vence"] - hoy).days
-            capacidad = max(dias, 0) * diaria  # lo que alcanza a venderse antes de vencer
-            acumulado += l["cantidad"]
-            sobrante = min(l["cantidad"], max(0.0, acumulado - capacidad))
-            if dias < 0:
-                nivel = "rojo"
-            elif sobrante > 0 or dias < 90:
-                nivel = "rojo" if dias < 90 or sobrante >= 0.5 * l["cantidad"] else "amarillo"
-            else:
+    # ---- lotes y registros sanitarios: vencimiento REAL por lote desde SAP
+    # (lotes_registros_farmalogica.py). Si SAP no responde, se usa el cálculo
+    # anterior: vencimiento = fabricación (FAR - LOTES) + vida útil del registro sanitario.
+    lotes_registros, lotes_riesgo, fuente_lotes = None, None, "FAR - LOTES"
+    if not args.sin_sap:
+        try:
+            from lotes_registros_farmalogica import generar as generar_lotes
+            nombres = {r: (desc_ref.get(r) or nombre_inv.get(r)) for r in set(desc_ref) | set(nombre_inv)}
+            lotes_registros, lotes_riesgo, n_lotes = generar_lotes(hoy, ritmo, valor12, unid12, nombres, CACHE_DIR)
+            fuente_lotes = "SAP Business One"
+            print("Lotes y registros:", lotes_registros["resumen"])
+        except Exception as e:  # noqa: BLE001
+            print(f"aviso: no se pudieron leer los lotes de SAP ({e}); se usa FAR - LOTES")
+            lotes_riesgo = None
+    if lotes_riesgo is None:
+        vida = {}
+        for ref, vu, est in rows("far_registro_sanitario",
+                                 ["Referencia", "Vida_x0020__x00da_til", "Estado_x0020_Comercializaci_x00f"]):
+            if ref and vu:
+                if ref not in vida or (est or "").lower() == "activo":
+                    vida[ref] = int(vu)
+        lotes = []
+        vistos = set()
+        for ref, nom, lote, cant, fab in rows("far_lotes", [
+                "C_x00f3_digo_x0020_del_x0020_Pro", "Nombre_x0020_del_x0020_Producto", "Lote",
+                "Cantidad_x0020_Disponible", "Fecha_x0020_de_x0020_Fabricaci_x"]):
+            if not (ref and fab and cant) or (ref, lote) in vistos:
                 continue
-            lotes_riesgo.append({
-                "codigo": ref, "nombre": l["nombre"], "lote": l["lote"],
-                "cantidad": round(l["cantidad"]), "vence": l["vence"].isoformat(),
-                "dias_para_vencer": dias, "unidades_sin_vender": round(sobrante), "nivel": nivel,
-            })
-    lotes_riesgo.sort(key=lambda l: l["dias_para_vencer"])
+            vistos.add((ref, lote))
+            if ref not in vida:
+                continue
+            f = date.fromisoformat(fab[:10])
+            venc = date(*add_months((f.year, f.month), vida[ref]), min(f.day, 28))
+            lotes.append({"codigo": ref, "nombre": (nom or "").strip(), "lote": lote,
+                          "cantidad": float(cant), "vence": venc})
+        lotes_riesgo = []
+        for ref in {l["codigo"] for l in lotes}:
+            diaria = ritmo.get(ref, 0.0)
+            acumulado = 0.0
+            for l in sorted([x for x in lotes if x["codigo"] == ref], key=lambda x: x["vence"]):
+                dias = (l["vence"] - hoy).days
+                capacidad = max(dias, 0) * diaria  # lo que alcanza a venderse antes de vencer
+                acumulado += l["cantidad"]
+                sobrante = min(l["cantidad"], max(0.0, acumulado - capacidad))
+                if dias < 0:
+                    nivel = "rojo"
+                elif sobrante > 0 or dias < 90:
+                    nivel = "rojo" if dias < 90 or sobrante >= 0.5 * l["cantidad"] else "amarillo"
+                else:
+                    continue
+                lotes_riesgo.append({
+                    "codigo": ref, "nombre": l["nombre"], "lote": l["lote"],
+                    "cantidad": round(l["cantidad"]), "vence": l["vence"].isoformat(),
+                    "dias_para_vencer": dias, "unidades_sin_vender": round(sobrante), "nivel": nivel,
+                })
+        lotes_riesgo.sort(key=lambda l: l["dias_para_vencer"])
+        n_lotes = len(lotes)
 
     # ---- alertas accionables (priorizadas)
     alertas = []
@@ -613,6 +630,8 @@ def main():
             txt = (f"Lote {l['lote']} de {l['nombre']} vence el {l['vence']}; al ritmo actual quedarían "
                    f"~{num(l['unidades_sin_vender'])} de {num(l['cantidad'])} unidades sin vender.")
             accion = "Priorizar su despacho (promoción, reasignación a clientes de mayor rotación)."
+        if l.get("frase"):  # lotes desde SAP: frase y acción ya redactadas
+            txt, accion = l["frase"], l["accion"]
         alertas.append({"prioridad": "alta" if l["nivel"] == "rojo" else "media", "tipo": "vencimiento",
                         "titulo": txt, "accion": accion, "codigo": l["codigo"]})
     if sin_stock:
@@ -645,6 +664,7 @@ def main():
 
     n_rojo_q = sum(1 for p in en_riesgo_quiebre if p["nivel"] == "rojo")
     n_rojo_l = sum(1 for l in lotes_riesgo if l["nivel"] == "rojo")
+    valor_l = sum(l.get("valor_en_riesgo", 0) for l in lotes_riesgo)
     mes_txt = MESES_ES[ym_obj[1] - 1]
     sube = "más" if var >= 0 else "menos"
     comp_prev = MESES_ES[ym_prev[1] - 1]
@@ -696,7 +716,8 @@ def main():
          "semaforo": "rojo" if n_rojo_q else "amarillo" if en_riesgo_quiebre else "verde",
          "frase": "Revise las alertas para saber cuánto pedir." if en_riesgo_quiebre else "Inventario suficiente."},
         {"id": "vencimiento", "titulo": "Lotes en riesgo de vencer", "valor": str(len(lotes_riesgo)),
-         "detalle": f"{n_rojo_l} urgentes" if lotes_riesgo else "Ningún lote en riesgo",
+         "detalle": ((f"{n_rojo_l} urgentes" + (f" · ≈ {pesos_corto(valor_l)} en riesgo" if valor_l else ""))
+                    if lotes_riesgo else "Ningún lote en riesgo"),
          "semaforo": "rojo" if n_rojo_l else "amarillo" if lotes_riesgo else "verde",
          "frase": "Lotes que vencerían antes de venderse al ritmo actual."},
         {"id": "confiabilidad", "titulo": "Qué tan confiable es el pronóstico", "valor": pv["confiabilidad"],
@@ -720,7 +741,8 @@ def main():
             "registros_ventas": n_crudas, "registros_ventas_unicos": len(ventas),
             "ultimo_mes_completo": ym_key(completos[-1]),
             "meses_incompletos": [ym_key(m) for m in incompletos],
-            "lotes_con_vencimiento": len(lotes),
+            "lotes_con_vencimiento": n_lotes,
+            "lotes_origen": fuente_lotes,
             "ventas_origen": fuente_ventas,
             "error_sap": error_sap,
             "conciliacion": conciliacion,
@@ -737,6 +759,7 @@ def main():
         "inventario": productos_inv[:40],
         "lotes_riesgo": lotes_riesgo,
         "alertas": alertas,
+        "lotes_registros": lotes_registros,
         "como_leer": [
             "Las cifras de ventas son netas: facturas menos notas crédito, en pesos colombianos, tomadas de SAP.",
             "Cuando un producto se vende de forma intermitente (hay meses sin venta), usamos un método "
@@ -745,7 +768,8 @@ def main():
             "La franja sombreada es el rango probable: lo normal es que el resultado caiga ahí.",
             "Semáforo: 🟢 todo bien, 🟡 conviene revisarlo, 🔴 requiere acción pronto.",
             f"Los días de inventario suponen que reponer un producto toma unos {LEAD_TIME_DIAS} días.",
-            "El vencimiento de cada lote se calcula con su fecha de fabricación y la vida útil del registro sanitario.",
+            ("El vencimiento de cada lote es la fecha registrada en SAP para ese lote." if lotes_registros else
+             "El vencimiento de cada lote se calcula con su fecha de fabricación y la vida útil del registro sanitario."),
         ],
     }
     # Cartera y flujo de caja (SAP + FAR - BANCOS MOVIMIENTOS); si falla, el resto del snapshot sigue igual
