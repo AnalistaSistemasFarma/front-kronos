@@ -1,6 +1,6 @@
 {
  "empresa": "Farmalógica S.A.",
- "generado": "2026-09-24 19:23",
+ "generado": "2026-09-24 20:39",
  "fecha_corte": "2026-09-24",
  "fuente": {
   "listas": [
@@ -10,32 +10,224 @@
    "FAR - REGISTRO SANITARIO"
   ],
   "ventas_desde": "2025-01-09",
-  "ventas_hasta": "2026-09-23",
+  "ventas_hasta": "2026-09-24",
   "registros_ventas": 31304,
-  "registros_ventas_unicos": 28006,
-  "ultimo_mes_completo": "2026-07",
+  "registros_ventas_unicos": 31362,
+  "ultimo_mes_completo": "2026-08",
   "meses_incompletos": [
-   "2026-08",
    "2026-09"
   ],
   "lotes_con_vencimiento": 13,
-  "productos_sin_stock_aprobado": 16
+  "ventas_origen": "SAP Business One (vista Farma_VentasB1SLQuery)",
+  "error_sap": null,
+  "conciliacion": [
+   {
+    "mes": "2025-01",
+    "lineas_sharepoint": 944,
+    "lineas_sap": 944,
+    "total_sharepoint": 6110338752,
+    "total_sap": 6110338752,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2025-02",
+    "lineas_sharepoint": 1366,
+    "lineas_sap": 1366,
+    "total_sharepoint": 7002550663,
+    "total_sap": 7002550663,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2025-03",
+    "lineas_sharepoint": 1414,
+    "lineas_sap": 1414,
+    "total_sharepoint": 7960734871,
+    "total_sap": 7960734871,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2025-04",
+    "lineas_sharepoint": 1750,
+    "lineas_sap": 1750,
+    "total_sharepoint": 7823761110,
+    "total_sap": 7823761110,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2025-05",
+    "lineas_sharepoint": 1625,
+    "lineas_sap": 1625,
+    "total_sharepoint": 9447999449,
+    "total_sap": 9447999449,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2025-06",
+    "lineas_sharepoint": 1765,
+    "lineas_sap": 1765,
+    "total_sharepoint": 9663400715,
+    "total_sap": 9663400715,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2025-07",
+    "lineas_sharepoint": 1540,
+    "lineas_sap": 1540,
+    "total_sharepoint": 8935878185,
+    "total_sap": 8935878185,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2025-08",
+    "lineas_sharepoint": 1589,
+    "lineas_sap": 1589,
+    "total_sharepoint": 8752721084,
+    "total_sap": 8752721084,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2025-09",
+    "lineas_sharepoint": 1540,
+    "lineas_sap": 1540,
+    "total_sharepoint": 9358769637,
+    "total_sap": 9358769637,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2025-10",
+    "lineas_sharepoint": 1478,
+    "lineas_sap": 1478,
+    "total_sharepoint": 7493820901,
+    "total_sap": 7493820901,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2025-11",
+    "lineas_sharepoint": 1523,
+    "lineas_sap": 1523,
+    "total_sharepoint": 9139391850,
+    "total_sap": 9139391850,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2025-12",
+    "lineas_sharepoint": 1581,
+    "lineas_sap": 1581,
+    "total_sharepoint": 10140354160,
+    "total_sap": 10140354160,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2026-01",
+    "lineas_sharepoint": 1020,
+    "lineas_sap": 1020,
+    "total_sharepoint": 5735729487,
+    "total_sap": 5735729487,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2026-02",
+    "lineas_sharepoint": 1452,
+    "lineas_sap": 1452,
+    "total_sharepoint": 7880926418,
+    "total_sap": 7880926418,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2026-03",
+    "lineas_sharepoint": 1538,
+    "lineas_sap": 1538,
+    "total_sharepoint": 8013759257,
+    "total_sap": 8013759257,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2026-04",
+    "lineas_sharepoint": 1340,
+    "lineas_sap": 1340,
+    "total_sharepoint": 6664630726,
+    "total_sap": 6664630726,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2026-05",
+    "lineas_sharepoint": 1460,
+    "lineas_sap": 1460,
+    "total_sharepoint": 8066855659,
+    "total_sap": 8066855659,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2026-06",
+    "lineas_sharepoint": 1683,
+    "lineas_sap": 1683,
+    "total_sharepoint": 9353187733,
+    "total_sap": 9353187733,
+    "brecha": 0,
+    "completo_en_sharepoint": true
+   },
+   {
+    "mes": "2026-07",
+    "lineas_sharepoint": 1332,
+    "lineas_sap": 1536,
+    "total_sharepoint": 5481981294,
+    "total_sap": 7753837237,
+    "brecha": 2271855943,
+    "completo_en_sharepoint": false
+   },
+   {
+    "mes": "2026-08",
+    "lineas_sharepoint": 44,
+    "lineas_sap": 1864,
+    "total_sharepoint": -186880909,
+    "total_sap": 7880698896,
+    "brecha": 8067579805,
+    "completo_en_sharepoint": false
+   },
+   {
+    "mes": "2026-09",
+    "lineas_sharepoint": 22,
+    "lineas_sap": 1354,
+    "total_sharepoint": -40995740,
+    "total_sap": 5762947674,
+    "brecha": 5803943414,
+    "completo_en_sharepoint": false
+   }
+  ],
+  "productos_sin_stock_aprobado": 15
  },
- "resumen": "En octubre se espera vender entre $2,9 mil millones y $8,0 mil millones, lo más probable $7,0 mil millones: un 11 % menos que septiembre. Frente a octubre del año pasado sería un 7 % menos.",
+ "resumen": "En octubre se espera vender entre $5,9 mil millones y $8,3 mil millones, lo más probable $7,5 mil millones: un 20 % menos que septiembre. Sería prácticamente igual a octubre del año pasado.",
  "tarjetas": [
   {
    "id": "ventas",
    "titulo": "Ventas esperadas en octubre",
-   "valor": "$6.959.680.527",
-   "detalle": "Rango probable: $2,9 mil millones a $8,0 mil millones",
+   "valor": "$7.493.820.901",
+   "detalle": "Rango probable: $5,9 mil millones a $8,3 mil millones",
    "semaforo": "rojo",
-   "frase": "11 % menos que septiembre."
+   "frase": "20 % menos que septiembre."
   },
   {
    "id": "agotamiento",
    "titulo": "Productos en riesgo de agotarse",
-   "valor": "14",
-   "detalle": "8 urgentes (menos de 30 días de inventario)",
+   "valor": "28",
+   "detalle": "19 urgentes (menos de 30 días de inventario)",
    "semaforo": "rojo",
    "frase": "Revise las alertas para saber cuánto pedir."
   },
@@ -50,12 +242,24 @@
   {
    "id": "confiabilidad",
    "titulo": "Qué tan confiable es el pronóstico",
-   "valor": "Media",
-   "detalle": "En pruebas con meses pasados se equivocó en promedio un 15 %",
-   "semaforo": "amarillo",
-   "frase": "Úselo como guía; revise el rango probable."
+   "valor": "Alta",
+   "detalle": "En pruebas con meses pasados se equivocó en promedio un 10 % (WAPE)",
+   "semaforo": "verde",
+   "frase": "Puede usarlo para planear con tranquilidad."
   }
  ],
+ "mes_pasado": {
+  "mes": "2026-08",
+  "pronosticado": 8391293543,
+  "min": 7719990060,
+  "max": 9811840453,
+  "real": 7880698896,
+  "error": 0.065,
+  "dentro_del_rango": true,
+  "semaforo": "verde",
+  "frase": "En agosto pronosticamos $8,4 mil millones; se vendieron $7,9 mil millones: acertamos con un margen de 6 % (se vendió menos de lo esperado).",
+  "detalle": "El resultado real quedó dentro del rango probable que dimos."
+ },
  "ventas": {
   "historia": [
    {
@@ -132,93 +336,125 @@
    },
    {
     "mes": "2026-07",
-    "real": 5481981294
+    "real": 7753837237
+   },
+   {
+    "mes": "2026-08",
+    "real": 7880698896
    }
   ],
   "parciales": [
    {
-    "mes": "2026-08",
-    "registrado": -186880909
-   },
-   {
     "mes": "2026-09",
-    "registrado": -40995740
+    "registrado": 5762947674
    }
   ],
   "pronostico": [
    {
-    "mes": "2026-08",
-    "esperado": 7523201271,
-    "min": 4990407918,
-    "max": 8155933202
-   },
-   {
     "mes": "2026-09",
-    "esperado": 7794486426,
-    "min": 4083412722,
-    "max": 8721571468
+    "esperado": 9358769637,
+    "min": 7972219857,
+    "max": 10107471207
    },
    {
     "mes": "2026-10",
-    "esperado": 6959680527,
-    "min": 2901353795,
-    "max": 7973514881
+    "esperado": 7493820901,
+    "min": 5923693054,
+    "max": 8341649954
+   },
+   {
+    "mes": "2026-11",
+    "esperado": 9139391850,
+    "min": 6794112205,
+    "max": 10405783132
    }
   ],
-  "confiabilidad": "Media",
-  "error_medio": 0.147,
-  "modelo": "ses_0.3_est"
+  "confiabilidad": "Alta",
+  "error_medio": 0.103,
+  "modelo": "estacional_ingenuo",
+  "modelo_nombre": "mismo mes del año anterior (estacional-ingenuo)",
+  "comparacion": {
+   "wape": {
+    "promedio3": 0.114,
+    "ses_0.3": 0.105,
+    "ses_0.5": 0.125,
+    "ses_0.3_est": 0.107,
+    "ses_0.5_est": 0.114,
+    "holt_amort": 0.125,
+    "ingenuo": 0.181,
+    "estacional_ingenuo": 0.103
+   },
+   "wape_mejor_ets": 0.105,
+   "wape_mejor_ingenuo": 0.103,
+   "gana_ingenuo": true
+  },
+  "frase_modelo": "En las pruebas con meses pasados, un método sencillo —tomar lo vendido en el mismo mes del año anterior— acertó más (error promedio 10,3 %) que los modelos estadísticos (10,5 %), así que por ahora usamos ese."
  },
  "top_productos": [
   {
    "codigo": "PTPT0121",
    "nombre": "PIPERACILINA Y TAZOBACTAM 4.5g (10 UNID. X PLEGADIZA)",
-   "valor_12m": 14396056480,
-   "unidades_mes_esperadas": 167198,
-   "unidades_min": 123067,
-   "unidades_max": 239548,
-   "confiabilidad": "Media",
-   "frase": "Se esperan unas 167.198 unidades en octubre (entre 123.067 y 239.548)."
+   "valor_12m": 14728041450,
+   "unidades_mes_esperadas": 144700,
+   "unidades_min": 128329,
+   "unidades_max": 221772,
+   "confiabilidad": "Alta",
+   "metodo": "mismo mes del año anterior (estacional-ingenuo)",
+   "intermitente": false,
+   "frase_metodo": "Aquí el método más simple (repetir lo reciente) acertó más que los modelos, así que usamos ese.",
+   "frase": "Se esperan unas 144.700 unidades en octubre (entre 128.329 y 221.772)."
   },
   {
    "codigo": "PTSB0121",
    "nombre": "AMPICILINA Y SULBACTAM 1.5g (10 UNID. X PLEGADIZA)",
-   "valor_12m": 9457242480,
-   "unidades_mes_esperadas": 364495,
-   "unidades_min": 313989,
-   "unidades_max": 672849,
-   "confiabilidad": "Baja",
-   "frase": "Se esperan unas 364.495 unidades en octubre (entre 313.989 y 672.849)."
+   "valor_12m": 9672631970,
+   "unidades_mes_esperadas": 391764,
+   "unidades_min": 347441,
+   "unidades_max": 627100,
+   "confiabilidad": "Media",
+   "metodo": "suavizamiento exponencial con estacionalidad (ETS)",
+   "intermitente": false,
+   "frase_metodo": "Método: suavizamiento exponencial con estacionalidad (ETS).",
+   "frase": "Se esperan unas 391.764 unidades en octubre (entre 347.441 y 627.100)."
   },
   {
    "codigo": "PTMP0121",
    "nombre": "MEROPENEM 1g (10 UNID. X PLEGADIZA)",
-   "valor_12m": 7062083160,
-   "unidades_mes_esperadas": 70445,
-   "unidades_min": 12742,
-   "unidades_max": 97559,
+   "valor_12m": 6938086900,
+   "unidades_mes_esperadas": 74337,
+   "unidades_min": 37744,
+   "unidades_max": 105245,
    "confiabilidad": "Media",
-   "frase": "Se esperan unas 70.445 unidades en octubre (entre 12.742 y 97.559)."
+   "metodo": "suavizamiento exponencial (ETS)",
+   "intermitente": false,
+   "frase_metodo": "Método: suavizamiento exponencial (ETS).",
+   "frase": "Se esperan unas 74.337 unidades en octubre (entre 37.744 y 105.245)."
   },
   {
    "codigo": "PTCZ0121",
    "nombre": "CEFAZOLINA 1g (10 UNID. X PLEGADIZA)",
-   "valor_12m": 5547873920,
-   "unidades_mes_esperadas": 262078,
-   "unidades_min": 106878,
-   "unidades_max": 353162,
+   "valor_12m": 5622188660,
+   "unidades_mes_esperadas": 232380,
+   "unidades_min": 162462,
+   "unidades_max": 326215,
    "confiabilidad": "Media",
-   "frase": "Se esperan unas 262.078 unidades en octubre (entre 106.878 y 353.162)."
+   "metodo": "mismo mes del año anterior (estacional-ingenuo)",
+   "intermitente": false,
+   "frase_metodo": "Aquí el método más simple (repetir lo reciente) acertó más que los modelos, así que usamos ese.",
+   "frase": "Se esperan unas 232.380 unidades en octubre (entre 162.462 y 326.215)."
   },
   {
    "codigo": "PTAZ0121",
    "nombre": "AZTREONAM 1g (10 UNID. X PLEGADIZA)",
-   "valor_12m": 4246377690,
-   "unidades_mes_esperadas": 38830,
-   "unidades_min": 26134,
-   "unidades_max": 80986,
-   "confiabilidad": "Baja",
-   "frase": "Se esperan unas 38.830 unidades en octubre (entre 26.134 y 80.986)."
+   "valor_12m": 4327565750,
+   "unidades_mes_esperadas": 34302,
+   "unidades_min": 22988,
+   "unidades_max": 73161,
+   "confiabilidad": "Media",
+   "metodo": "suavizamiento exponencial con estacionalidad (ETS)",
+   "intermitente": false,
+   "frase_metodo": "Método: suavizamiento exponencial con estacionalidad (ETS).",
+   "frase": "Se esperan unas 34.302 unidades en octubre (entre 22.988 y 73.161)."
   }
  ],
  "inventario": [
@@ -227,220 +463,480 @@
    "nombre": "AZTREONAM 1g (10 UNID. X PLEGADIZA)",
    "stock": 230,
    "cuarentena": 0,
-   "venta_diaria": 1461.1,
+   "venta_diaria": 1595.1,
    "dias_cobertura": 0,
    "nivel": "rojo",
-   "sugerido_pedir": 131270,
-   "pedir_antes_de": "2026-09-24"
+   "sugerido_pedir": 143330,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": false
   },
   {
    "codigo": "PTPT0151P",
    "nombre": "PIPERACILINA 4.000mg Y TAZOBACTAM 500mg SALVADOR PISA (10 UNID. X PLEGADIZA)",
    "stock": 10,
    "cuarentena": 0,
-   "venta_diaria": 562.0,
+   "venta_diaria": 310.4,
    "dias_cobertura": 0,
    "nivel": "rojo",
-   "sugerido_pedir": 50580,
-   "pedir_antes_de": "2026-09-24"
+   "sugerido_pedir": 27930,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": true
+  },
+  {
+   "codigo": "PTBT0111",
+   "nombre": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (1 UNID. X PLEGADIZA)",
+   "stock": 3,
+   "cuarentena": 0,
+   "venta_diaria": 19.1,
+   "dias_cobertura": 0,
+   "nivel": "rojo",
+   "sugerido_pedir": 1720,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": true
+  },
+  {
+   "codigo": "PTMP0111EXP",
+   "nombre": "MEROPENEM 1g ECUADOR (10 UNID. X PLEGADIZA)",
+   "stock": 10,
+   "cuarentena": 0,
+   "venta_diaria": 37.6,
+   "dias_cobertura": 0,
+   "nivel": "rojo",
+   "sugerido_pedir": 3380,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": true
+  },
+  {
+   "codigo": "PTPT0150",
+   "nombre": "PIPERACILINA Y TAZOBACTAM 4.5g GUATEMALA (10 UNID. X PLEGADIZA)",
+   "stock": 10,
+   "cuarentena": 0,
+   "venta_diaria": 240.2,
+   "dias_cobertura": 0,
+   "nivel": "rojo",
+   "sugerido_pedir": 21610,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": true
+  },
+  {
+   "codigo": "PTCZ0151P",
+   "nombre": "CEFAZOLINA 1g SALVADOR PISA (10 UNID. X PLEGADIZA)",
+   "stock": 1580,
+   "cuarentena": 0,
+   "venta_diaria": 640.0,
+   "dias_cobertura": 2,
+   "nivel": "rojo",
+   "sugerido_pedir": 56030,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": true
+  },
+  {
+   "codigo": "PTIM0151P",
+   "nombre": "IMIPENEM Y CILASTATINA 500mg / 500mg SALVADOR PISA (10 UNID. X PLEGADIZA)",
+   "stock": 1000,
+   "cuarentena": 0,
+   "venta_diaria": 201.7,
+   "dias_cobertura": 5,
+   "nivel": "rojo",
+   "sugerido_pedir": 17160,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": true
   },
   {
    "codigo": "PTSB0121",
    "nombre": "AMPICILINA Y SULBACTAM 1.5g (10 UNID. X PLEGADIZA)",
    "stock": 116500,
    "cuarentena": 362000,
-   "venta_diaria": 15923.3,
+   "venta_diaria": 16665.0,
    "dias_cobertura": 7,
    "nivel": "rojo",
-   "sugerido_pedir": 954610,
-   "pedir_antes_de": "2026-09-24"
+   "sugerido_pedir": 1021360,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": false
   },
   {
    "codigo": "PTMP0121",
    "nombre": "MEROPENEM 1g (10 UNID. X PLEGADIZA)",
    "stock": 17400,
    "cuarentena": 0,
-   "venta_diaria": 2274.4,
-   "dias_cobertura": 8,
+   "venta_diaria": 2478.4,
+   "dias_cobertura": 7,
    "nivel": "rojo",
-   "sugerido_pedir": 187300,
-   "pedir_antes_de": "2026-09-24"
+   "sugerido_pedir": 205660,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": false
   },
   {
    "codigo": "PTCP0121",
    "nombre": "CEFEPIME 1g (10 UNID. X PLEGADIZA)",
    "stock": 22250,
    "cuarentena": 47890,
-   "venta_diaria": 2150.3,
-   "dias_cobertura": 10,
+   "venta_diaria": 2384.3,
+   "dias_cobertura": 9,
    "nivel": "rojo",
-   "sugerido_pedir": 123390,
-   "pedir_antes_de": "2026-09-24"
+   "sugerido_pedir": 144450,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": false
   },
   {
-   "codigo": "PTOX0151P",
-   "nombre": "OXACILINA 1g SALVADOR PISA (10 UNID. X PLEGADIZA)",
-   "stock": 7090,
+   "codigo": "PTPB0211",
+   "nombre": "P BENZATINICA 2.400.000 UI (10 UNID. X PLEGADIZA)",
+   "stock": 530,
    "cuarentena": 0,
-   "venta_diaria": 582.5,
+   "venta_diaria": 50.5,
+   "dias_cobertura": 10,
+   "nivel": "rojo",
+   "sugerido_pedir": 4020,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": true
+  },
+  {
+   "codigo": "PTAB0110",
+   "nombre": "AZBIOS (AZTREONAM 1G)(10 UND. X PLEGADIZA)",
+   "stock": 620,
+   "cuarentena": 0,
+   "venta_diaria": 52.1,
    "dias_cobertura": 12,
    "nivel": "rojo",
-   "sugerido_pedir": 45340,
-   "pedir_antes_de": "2026-09-24"
+   "sugerido_pedir": 4070,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": true
+  },
+  {
+   "codigo": "PTPB0111",
+   "nombre": "P BENZATINICA 1.200.000 UI (10 UNID. X PLEGADIZA)",
+   "stock": 490,
+   "cuarentena": 0,
+   "venta_diaria": 36.1,
+   "dias_cobertura": 14,
+   "nivel": "rojo",
+   "sugerido_pedir": 2760,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": true
   },
   {
    "codigo": "PTPT0121",
    "nombre": "PIPERACILINA Y TAZOBACTAM 4.5g (10 UNID. X PLEGADIZA)",
    "stock": 120660,
    "cuarentena": 77440,
-   "venta_diaria": 6590.3,
-   "dias_cobertura": 18,
+   "venta_diaria": 6962.4,
+   "dias_cobertura": 17,
    "nivel": "rojo",
-   "sugerido_pedir": 395040,
-   "pedir_antes_de": "2026-09-24"
+   "sugerido_pedir": 428520,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": false
+  },
+  {
+   "codigo": "PTCP0111",
+   "nombre": "CEFEPIME 1g (10 UNID. X PLEGADIZA)",
+   "stock": 3050,
+   "cuarentena": 0,
+   "venta_diaria": 156.4,
+   "dias_cobertura": 19,
+   "nivel": "rojo",
+   "sugerido_pedir": 11040,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": true
   },
   {
    "codigo": "PTAM0521",
    "nombre": "AMPICILINA 500 mg (10 UNID. X PLEGADIZA)",
    "stock": 12970,
    "cuarentena": 0,
-   "venta_diaria": 514.8,
-   "dias_cobertura": 25,
+   "venta_diaria": 601.5,
+   "dias_cobertura": 22,
    "nivel": "rojo",
-   "sugerido_pedir": 33370,
-   "pedir_antes_de": "2026-09-24"
+   "sugerido_pedir": 41170,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": false
+  },
+  {
+   "codigo": "PTOX0151P",
+   "nombre": "OXACILINA 1g SALVADOR PISA (10 UNID. X PLEGADIZA)",
+   "stock": 7090,
+   "cuarentena": 0,
+   "venta_diaria": 265.4,
+   "dias_cobertura": 27,
+   "nivel": "rojo",
+   "sugerido_pedir": 16800,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": false
   },
   {
    "codigo": "PTCZ0121",
    "nombre": "CEFAZOLINA 1g (10 UNID. X PLEGADIZA)",
    "stock": 277530,
    "cuarentena": 39890,
-   "venta_diaria": 8626.5,
-   "dias_cobertura": 32,
-   "nivel": "amarillo",
-   "sugerido_pedir": 458970,
-   "pedir_antes_de": "2026-09-26"
+   "venta_diaria": 9624.1,
+   "dias_cobertura": 29,
+   "nivel": "rojo",
+   "sugerido_pedir": 548750,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": false
   },
   {
    "codigo": "PTAM0121",
    "nombre": "AMPICILINA 1g (10 UNID. X PLEGADIZA)",
    "stock": 49490,
    "cuarentena": 0,
-   "venta_diaria": 1481.2,
-   "dias_cobertura": 33,
-   "nivel": "amarillo",
-   "sugerido_pedir": 83820,
-   "pedir_antes_de": "2026-09-27"
+   "venta_diaria": 1669.0,
+   "dias_cobertura": 30,
+   "nivel": "rojo",
+   "sugerido_pedir": 100720,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": false
   },
   {
    "codigo": "PTPS0521",
    "nombre": "PENICILINA SODICA 5.000.000 UI (10 UNID. X PLEGADIZA)",
    "stock": 17440,
    "cuarentena": 13880,
-   "venta_diaria": 511.5,
-   "dias_cobertura": 34,
+   "venta_diaria": 503.2,
+   "dias_cobertura": 35,
    "nivel": "amarillo",
-   "sugerido_pedir": 14720,
-   "pedir_antes_de": "2026-09-28"
+   "sugerido_pedir": 13970,
+   "pedir_antes_de": "2026-09-28",
+   "intermitente": false
   },
   {
    "codigo": "PTCF0121",
    "nombre": "CEFTRIAXONA 1g (10 UNID. X PLEGADIZA)",
    "stock": 33180,
    "cuarentena": 5090,
-   "venta_diaria": 790.2,
-   "dias_cobertura": 42,
+   "venta_diaria": 885.3,
+   "dias_cobertura": 37,
    "nivel": "amarillo",
-   "sugerido_pedir": 32850,
-   "pedir_antes_de": "2026-10-05"
+   "sugerido_pedir": 41410,
+   "pedir_antes_de": "2026-10-01",
+   "intermitente": false
   },
   {
-   "codigo": "PTCD0121",
-   "nombre": "CEFRADINA 1g (10 UNID. X PLEGADIZA)",
-   "stock": 82960,
+   "codigo": "PTBT0110",
+   "nombre": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA)",
+   "stock": 2770,
    "cuarentena": 0,
-   "venta_diaria": 1714.8,
-   "dias_cobertura": 48,
+   "venta_diaria": 72.3,
+   "dias_cobertura": 38,
    "nivel": "amarillo",
-   "sugerido_pedir": 71380,
-   "pedir_antes_de": "2026-10-12"
+   "sugerido_pedir": 3740,
+   "pedir_antes_de": "2026-10-02",
+   "intermitente": true
   },
   {
    "codigo": "PTMP0521",
    "nombre": "MEROPENEM 500 mg (10 UNID. X PLEGADIZA)",
    "stock": 7100,
    "cuarentena": 0,
-   "venta_diaria": 131.0,
-   "dias_cobertura": 54,
+   "venta_diaria": 153.2,
+   "dias_cobertura": 46,
    "nivel": "amarillo",
-   "sugerido_pedir": 4700,
-   "pedir_antes_de": "2026-10-18"
+   "sugerido_pedir": 6700,
+   "pedir_antes_de": "2026-10-10",
+   "intermitente": false
+  },
+  {
+   "codigo": "PTBS0110",
+   "nombre": "BIOSABACTAM (AMPICILINA Y SULBACTAM 1.5g) (10 UNID. X PLEGADIZA)",
+   "stock": 10620,
+   "cuarentena": 0,
+   "venta_diaria": 230.6,
+   "dias_cobertura": 46,
+   "nivel": "amarillo",
+   "sugerido_pedir": 10140,
+   "pedir_antes_de": "2026-10-10",
+   "intermitente": false
+  },
+  {
+   "codigo": "PTCD0121",
+   "nombre": "CEFRADINA 1g (10 UNID. X PLEGADIZA)",
+   "stock": 82960,
+   "cuarentena": 0,
+   "venta_diaria": 1696.4,
+   "dias_cobertura": 49,
+   "nivel": "amarillo",
+   "sugerido_pedir": 69720,
+   "pedir_antes_de": "2026-10-12",
+   "intermitente": false
+  },
+  {
+   "codigo": "PTPN0110",
+   "nombre": "PENIBECTAM 4.5g (PIPERACILINA Y TAZOBACTAM 4,5) (10 UNID. X PLEGADIZA)",
+   "stock": 32200,
+   "cuarentena": 0,
+   "venta_diaria": 626.5,
+   "dias_cobertura": 51,
+   "nivel": "amarillo",
+   "sugerido_pedir": 24190,
+   "pedir_antes_de": "2026-10-15",
+   "intermitente": true
   },
   {
    "codigo": "PTCL0121",
    "nombre": "CEFALOTINA 1g (10 UNID. X PLEGADIZA)",
    "stock": 81450,
    "cuarentena": 0,
-   "venta_diaria": 1331.1,
-   "dias_cobertura": 61,
-   "nivel": "verde",
-   "sugerido_pedir": 38350,
-   "pedir_antes_de": "2026-10-25"
+   "venta_diaria": 1523.8,
+   "dias_cobertura": 53,
+   "nivel": "amarillo",
+   "sugerido_pedir": 55700,
+   "pedir_antes_de": "2026-10-17",
+   "intermitente": false
   },
   {
    "codigo": "PTOX0121",
    "nombre": "OXACILINA 1g (10 UNID. X PLEGADIZA)",
    "stock": 97870,
    "cuarentena": 0,
-   "venta_diaria": 1517.8,
+   "venta_diaria": 1657.3,
+   "dias_cobertura": 59,
+   "nivel": "amarillo",
+   "sugerido_pedir": 51300,
+   "pedir_antes_de": "2026-10-23",
+   "intermitente": false
+  },
+  {
+   "codigo": "PTAM0111",
+   "nombre": "AMPICILINA 1g (10 UNID. X PLEGADIZA)",
+   "stock": 590,
+   "cuarentena": 0,
+   "venta_diaria": 9.5,
+   "dias_cobertura": 62,
+   "nivel": "verde",
+   "sugerido_pedir": 270,
+   "pedir_antes_de": "2026-10-26",
+   "intermitente": true
+  },
+  {
+   "codigo": "PTSB0111",
+   "nombre": "AMPICILINA Y SULBACTAM 1.5g (10 UNID. X PLEGADIZA)",
+   "stock": 5000,
+   "cuarentena": 0,
+   "venta_diaria": 78.3,
    "dias_cobertura": 64,
    "nivel": "verde",
-   "sugerido_pedir": 38730,
-   "pedir_antes_de": "2026-10-28"
+   "sugerido_pedir": 2050,
+   "pedir_antes_de": "2026-10-27",
+   "intermitente": true
   },
   {
    "codigo": "PTPS0121",
    "nombre": "PENICILINA SODICA 1.000.000 UI (10 UNID. X PLEGADIZA)",
    "stock": 81880,
    "cuarentena": 0,
-   "venta_diaria": 1115.6,
-   "dias_cobertura": 73,
+   "venta_diaria": 1019.5,
+   "dias_cobertura": 80,
    "nivel": "verde",
-   "sugerido_pedir": 18530,
-   "pedir_antes_de": "2026-11-06"
+   "sugerido_pedir": 9880,
+   "pedir_antes_de": "2026-11-13",
+   "intermitente": false
+  },
+  {
+   "codigo": "PTPS0157",
+   "nombre": "PENICILINA G SODICA 1.000.000 UI NICARAGUA (10 UNID. X PLEGADIZA)",
+   "stock": 19770,
+   "cuarentena": 0,
+   "venta_diaria": 220.3,
+   "dias_cobertura": 90,
+   "nivel": "verde",
+   "sugerido_pedir": 60,
+   "pedir_antes_de": "2026-11-22",
+   "intermitente": true
   },
   {
    "codigo": "PTPB0221",
    "nombre": "P BENZATINICA 2.400.000 UI (10 UNID. X PLEGADIZA)",
    "stock": 15090,
    "cuarentena": 0,
-   "venta_diaria": 141.1,
-   "dias_cobertura": 107,
+   "venta_diaria": 153.9,
+   "dias_cobertura": 98,
    "nivel": "verde",
    "sugerido_pedir": 0,
-   "pedir_antes_de": "2026-12-09"
+   "pedir_antes_de": "2026-12-01",
+   "intermitente": false
+  },
+  {
+   "codigo": "PTCF0111",
+   "nombre": "CEFTRIAXONA 1g (10 UNID. X PLEGADIZA)",
+   "stock": 24350,
+   "cuarentena": 0,
+   "venta_diaria": 223.9,
+   "dias_cobertura": 109,
+   "nivel": "verde",
+   "sugerido_pedir": 0,
+   "pedir_antes_de": "2026-12-11",
+   "intermitente": false
+  },
+  {
+   "codigo": "PTIM0111",
+   "nombre": "IMIPENEM & CILASTATINA 1g (10 UNID. X PLEGADIZA)",
+   "stock": 1040,
+   "cuarentena": 0,
+   "venta_diaria": 8.8,
+   "dias_cobertura": 118,
+   "nivel": "verde",
+   "sugerido_pedir": 0,
+   "pedir_antes_de": "2026-12-21",
+   "intermitente": true
+  },
+  {
+   "codigo": "PTCF0159P",
+   "nombre": "CEFTRIAXONA 1g CHILE PISA (10 UNID. X PLEGADIZA)",
+   "stock": 10000,
+   "cuarentena": 0,
+   "venta_diaria": 63.8,
+   "dias_cobertura": 157,
+   "nivel": "verde",
+   "sugerido_pedir": 0,
+   "pedir_antes_de": "2027-01-28",
+   "intermitente": true
   },
   {
    "codigo": "PTIM0121",
    "nombre": "IMIPENEM & CILASTATINA 1g (10 UNID. X PLEGADIZA)",
    "stock": 5360,
    "cuarentena": 0,
-   "venta_diaria": 29.5,
-   "dias_cobertura": 182,
+   "venta_diaria": 31.5,
+   "dias_cobertura": 170,
    "nivel": "verde",
    "sugerido_pedir": 0,
-   "pedir_antes_de": "2027-02-22"
+   "pedir_antes_de": "2027-02-11",
+   "intermitente": false
   },
   {
    "codigo": "PTPB0121",
    "nombre": "P BENZATINICA 1.200.000 UI (10 UNID. X PLEGADIZA)",
    "stock": 29540,
    "cuarentena": 0,
-   "venta_diaria": 149.6,
-   "dias_cobertura": 197,
+   "venta_diaria": 143.9,
+   "dias_cobertura": 205,
    "nivel": "verde",
    "sugerido_pedir": 0,
-   "pedir_antes_de": "2027-03-10"
+   "pedir_antes_de": "2027-03-18",
+   "intermitente": false
+  },
+  {
+   "codigo": "PTMP0550",
+   "nombre": "MEROPENEM 500 mg GUATEMALA (10 UNID. X PLEGADIZA)",
+   "stock": 18950,
+   "cuarentena": 17050,
+   "venta_diaria": 81.2,
+   "dias_cobertura": 233,
+   "nivel": "verde",
+   "sugerido_pedir": 0,
+   "pedir_antes_de": "2027-04-15",
+   "intermitente": true
+  },
+  {
+   "codigo": "PTIM0159P",
+   "nombre": "IMIPENEM & CILASTATINA 1g CHILE PISA (10 UNID. X PLEGADIZA)",
+   "stock": 8000,
+   "cuarentena": 0,
+   "venta_diaria": 33.3,
+   "dias_cobertura": 240,
+   "nivel": "verde",
+   "sugerido_pedir": 0,
+   "pedir_antes_de": "2027-04-22",
+   "intermitente": true
   }
  ],
  "lotes_riesgo": [
@@ -451,7 +947,7 @@
    "cantidad": 1480,
    "vence": "2026-09-26",
    "dias_para_vencer": 2,
-   "unidades_sin_vender": 1218,
+   "unidades_sin_vender": 1174,
    "nivel": "rojo"
   },
   {
@@ -470,62 +966,62 @@
    "prioridad": "alta",
    "tipo": "agotamiento",
    "titulo": "AZTREONAM 1g (10 UNID. X PLEGADIZA): el inventario alcanza para unos 0 días.",
-   "accion": "Pedir ~131.270 unidades cuanto antes (idealmente esta semana).",
+   "accion": "Pedir ~143.330 unidades cuanto antes (idealmente esta semana).",
    "codigo": "PTAZ0121"
   },
   {
    "prioridad": "alta",
    "tipo": "agotamiento",
-   "titulo": "PIPERACILINA 4.000mg Y TAZOBACTAM 500mg SALVADOR PISA (10 UNID. X PLEGADIZA): el inventario alcanza para unos 0 días.",
-   "accion": "Pedir ~50.580 unidades cuanto antes (idealmente esta semana).",
+   "titulo": "PIPERACILINA 4.000mg Y TAZOBACTAM 500mg SALVADOR PISA (10 UNID. X PLEGADIZA): el inventario alcanza para unos 0 días. (Se vende de forma intermitente: el cálculo es aproximado.)",
+   "accion": "Pedir ~27.930 unidades cuanto antes (idealmente esta semana).",
    "codigo": "PTPT0151P"
   },
   {
    "prioridad": "alta",
    "tipo": "agotamiento",
+   "titulo": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (1 UNID. X PLEGADIZA): el inventario alcanza para unos 0 días. (Se vende de forma intermitente: el cálculo es aproximado.)",
+   "accion": "Pedir ~1.720 unidades cuanto antes (idealmente esta semana).",
+   "codigo": "PTBT0111"
+  },
+  {
+   "prioridad": "alta",
+   "tipo": "agotamiento",
+   "titulo": "MEROPENEM 1g ECUADOR (10 UNID. X PLEGADIZA): el inventario alcanza para unos 0 días. (Se vende de forma intermitente: el cálculo es aproximado.)",
+   "accion": "Pedir ~3.380 unidades cuanto antes (idealmente esta semana).",
+   "codigo": "PTMP0111EXP"
+  },
+  {
+   "prioridad": "alta",
+   "tipo": "agotamiento",
+   "titulo": "PIPERACILINA Y TAZOBACTAM 4.5g GUATEMALA (10 UNID. X PLEGADIZA): el inventario alcanza para unos 0 días. (Se vende de forma intermitente: el cálculo es aproximado.)",
+   "accion": "Pedir ~21.610 unidades cuanto antes (idealmente esta semana).",
+   "codigo": "PTPT0150"
+  },
+  {
+   "prioridad": "alta",
+   "tipo": "agotamiento",
+   "titulo": "CEFAZOLINA 1g SALVADOR PISA (10 UNID. X PLEGADIZA): el inventario alcanza para unos 2 días. (Se vende de forma intermitente: el cálculo es aproximado.)",
+   "accion": "Pedir ~56.030 unidades cuanto antes (idealmente esta semana).",
+   "codigo": "PTCZ0151P"
+  },
+  {
+   "prioridad": "alta",
+   "tipo": "agotamiento",
+   "titulo": "IMIPENEM Y CILASTATINA 500mg / 500mg SALVADOR PISA (10 UNID. X PLEGADIZA): el inventario alcanza para unos 5 días. (Se vende de forma intermitente: el cálculo es aproximado.)",
+   "accion": "Pedir ~17.160 unidades cuanto antes (idealmente esta semana).",
+   "codigo": "PTIM0151P"
+  },
+  {
+   "prioridad": "alta",
+   "tipo": "agotamiento",
    "titulo": "AMPICILINA Y SULBACTAM 1.5g (10 UNID. X PLEGADIZA): el inventario alcanza para unos 7 días.",
-   "accion": "Pedir ~954.610 unidades cuanto antes (idealmente esta semana). Hay 362.000 en cuarentena que ayudarían si se liberan.",
+   "accion": "Pedir ~1.021.360 unidades cuanto antes (idealmente esta semana). Hay 362.000 en cuarentena que ayudarían si se liberan.",
    "codigo": "PTSB0121"
   },
   {
    "prioridad": "alta",
-   "tipo": "agotamiento",
-   "titulo": "MEROPENEM 1g (10 UNID. X PLEGADIZA): el inventario alcanza para unos 8 días.",
-   "accion": "Pedir ~187.300 unidades cuanto antes (idealmente esta semana).",
-   "codigo": "PTMP0121"
-  },
-  {
-   "prioridad": "alta",
-   "tipo": "agotamiento",
-   "titulo": "CEFEPIME 1g (10 UNID. X PLEGADIZA): el inventario alcanza para unos 10 días.",
-   "accion": "Pedir ~123.390 unidades cuanto antes (idealmente esta semana). Hay 47.890 en cuarentena que ayudarían si se liberan.",
-   "codigo": "PTCP0121"
-  },
-  {
-   "prioridad": "alta",
-   "tipo": "agotamiento",
-   "titulo": "OXACILINA 1g SALVADOR PISA (10 UNID. X PLEGADIZA): el inventario alcanza para unos 12 días.",
-   "accion": "Pedir ~45.340 unidades cuanto antes (idealmente esta semana).",
-   "codigo": "PTOX0151P"
-  },
-  {
-   "prioridad": "alta",
-   "tipo": "agotamiento",
-   "titulo": "PIPERACILINA Y TAZOBACTAM 4.5g (10 UNID. X PLEGADIZA): el inventario alcanza para unos 18 días.",
-   "accion": "Pedir ~395.040 unidades cuanto antes (idealmente esta semana). Hay 77.440 en cuarentena que ayudarían si se liberan.",
-   "codigo": "PTPT0121"
-  },
-  {
-   "prioridad": "alta",
-   "tipo": "agotamiento",
-   "titulo": "AMPICILINA 500 mg (10 UNID. X PLEGADIZA): el inventario alcanza para unos 25 días.",
-   "accion": "Pedir ~33.370 unidades cuanto antes (idealmente esta semana).",
-   "codigo": "PTAM0521"
-  },
-  {
-   "prioridad": "alta",
    "tipo": "vencimiento",
-   "titulo": "Lote 2101624 de MEROPENEM 500 mg (10 UNID. X PLEGADIZA) vence el 2026-09-26; al ritmo actual quedarían ~1.218 de 1.480 unidades sin vender.",
+   "titulo": "Lote 2101624 de MEROPENEM 500 mg (10 UNID. X PLEGADIZA) vence el 2026-09-26; al ritmo actual quedarían ~1.174 de 1.480 unidades sin vender.",
    "accion": "Priorizar su despacho (promoción, reasignación a clientes de mayor rotación).",
    "codigo": "PTMP0521"
   },
@@ -537,22 +1033,23 @@
    "codigo": "PTMP0521"
   },
   {
-   "prioridad": "baja",
+   "prioridad": "media",
    "tipo": "datos",
-   "titulo": "16 productos se venden con regularidad pero no tienen existencias en los almacenes aprobados (probablemente se fabrican bajo pedido o se guardan en otro almacén).",
-   "accion": "Confirmar con Planeación si requieren inventario de seguridad.",
+   "titulo": "La lista FAR - VENTAS de SharePoint está incompleta en julio 2026, agosto 2026, septiembre 2026: le faltan $16,1 mil millones frente a SAP (desde el 28 de julio de 2026 el cargue dejó de subir las facturas).",
+   "accion": "Estas cifras ya se tomaron directamente de SAP. Conviene revisar el cargue SAP → SharePoint para que la lista vuelva a quedar completa.",
    "codigo": null
   },
   {
    "prioridad": "baja",
    "tipo": "datos",
-   "titulo": "Las ventas de agosto 2026, septiembre 2026 aún no están completas en SharePoint.",
-   "accion": "Revisar el cargue SAP → SharePoint; el pronóstico usa hasta julio 2026.",
+   "titulo": "15 productos se venden con regularidad pero no tienen existencias en los almacenes aprobados (probablemente se fabrican bajo pedido o se guardan en otro almacén).",
+   "accion": "Confirmar con Planeación si requieren inventario de seguridad.",
    "codigo": null
   }
  ],
  "como_leer": [
-  "Las cifras de ventas son netas: facturas menos notas crédito, en pesos colombianos.",
+  "Las cifras de ventas son netas: facturas menos notas crédito, en pesos colombianos, tomadas de SAP.",
+  "Cuando un producto se vende de forma intermitente (hay meses sin venta), usamos un método especial para ese tipo de venta y lo indicamos con la etiqueta «Venta intermitente».",
   "La línea sólida es lo que realmente se vendió; la punteada es lo que esperamos vender.",
   "La franja sombreada es el rango probable: lo normal es que el resultado caiga ahí.",
   "Semáforo: 🟢 todo bien, 🟡 conviene revisarlo, 🔴 requiere acción pronto.",
