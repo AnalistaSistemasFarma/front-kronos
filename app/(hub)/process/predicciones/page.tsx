@@ -1,0 +1,377 @@
+'use client';
+
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSession } from 'next-auth/react';
+import Link from 'next/link';
+import {
+  Alert,
+  Anchor,
+  Badge,
+  Breadcrumbs,
+  Card,
+  Group,
+  List,
+  Loader,
+  SimpleGrid,
+  Stack,
+  Text,
+  ThemeIcon,
+  Title,
+} from '@mantine/core';
+import {
+  IconAlertTriangle,
+  IconBulb,
+  IconChartLine,
+  IconChevronRight,
+} from '@tabler/icons-react';
+import { Line } from 'react-chartjs-2';
+import '../../../../lib/charts/register';
+
+/**
+ * Predicciones — PILOTO Farmalógica.
+ *
+ * Toda la complejidad (limpieza, modelos, backtest) vive en
+ * analytics/predictivo/generar_farmalogica.py; esta página solo pinta el JSON
+ * con textos ya redactados. Objetivo de diseño: que se entienda en ~10 s.
+ *
+ * Acceso: subproceso '/process/predicciones' en Farmalógica
+ * (lib/predictivo/access.ts).
+ */
+
+type Semaforo = 'verde' | 'amarillo' | 'rojo';
+
+interface Tarjeta {
+  id: string;
+  titulo: string;
+  valor: string;
+  detalle: string;
+  semaforo: Semaforo;
+  frase: string;
+}
+
+interface Alerta {
+  prioridad: 'alta' | 'media' | 'baja';
+  tipo: string;
+  titulo: string;
+  accion: string;
+}
+
+interface Prediccion {
+  empresa: string;
+  generado: string;
+  fuente: { ventas_desde: string; ultimo_mes_completo: string };
+  resumen: string;
+  tarjetas: Tarjeta[];
+  ventas: {
+    historia: { mes: string; real: number }[];
+    parciales: { mes: string; registrado: number }[];
+    pronostico: { mes: string; esperado: number; min: number; max: number }[];
+  };
+  alertas: Alerta[];
+  como_leer: string[];
+}
+
+const SEMAFORO: Record<Semaforo, { color: string; emoji: string; texto: string }> = {
+  verde: { color: 'green', emoji: '🟢', texto: 'Bien' },
+  amarillo: { color: 'yellow', emoji: '🟡', texto: 'Revisar' },
+  rojo: { color: 'red', emoji: '🔴', texto: 'Actuar' },
+};
+
+const PRIORIDAD: Record<Alerta['prioridad'], { color: string; texto: string }> = {
+  alta: { color: 'red', texto: 'Urgente' },
+  media: { color: 'yellow', texto: 'Pronto' },
+  baja: { color: 'gray', texto: 'Informativo' },
+};
+
+const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+function etiquetaMes(ym: string): string {
+  const [y, m] = ym.split('-');
+  return `${MESES[Number(m) - 1]} ${y.slice(2)}`;
+}
+
+function millones(v: number): string {
+  return `$${new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(v / 1e6)} M`;
+}
+
+export default function PrediccionesPage() {
+  const { data: session } = useSession();
+  const [hasAccess, setHasAccess] = useState<boolean | null>(null);
+  const [data, setData] = useState<Prediccion | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!session) return;
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const accessRes = await fetch('/api/predictivo/access');
+        if (!accessRes.ok) throw new Error('No se pudo verificar el acceso al módulo');
+        const accessData = await accessRes.json();
+        setHasAccess(Boolean(accessData.canAccess));
+        if (!accessData.canAccess) return;
+
+        const res = await fetch('/api/predictivo');
+        if (!res.ok) throw new Error('No se pudieron cargar las predicciones');
+        const json = await res.json();
+        setData(json.data ?? null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Error inesperado');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [session]);
+
+  const chartData = useMemo(() => {
+    if (!data) return null;
+    const { historia, parciales, pronostico } = data.ventas;
+    const labels = [...historia.map((h) => h.mes), ...pronostico.map((p) => p.mes)];
+    const nHist = historia.length;
+    const ultimoReal = historia[nHist - 1]?.real ?? null;
+    const pad = (n: number) => Array<number | null>(n).fill(null);
+    const parcialPorMes = new Map(parciales.map((p) => [p.mes, p.registrado]));
+    return {
+      labels: labels.map(etiquetaMes),
+      datasets: [
+        {
+          label: 'Máximo probable',
+          data: [...pad(nHist - 1), ultimoReal, ...pronostico.map((p) => p.max)],
+          borderColor: 'transparent',
+          backgroundColor: 'rgba(28, 126, 214, 0.15)',
+          pointRadius: 0,
+          fill: '+1',
+        },
+        {
+          label: 'Mínimo probable',
+          data: [...pad(nHist - 1), ultimoReal, ...pronostico.map((p) => p.min)],
+          borderColor: 'transparent',
+          pointRadius: 0,
+          fill: false,
+        },
+        {
+          label: 'Vendido',
+          data: [...historia.map((h) => h.real), ...pad(pronostico.length)],
+          borderColor: '#1c7ed6',
+          backgroundColor: '#1c7ed6',
+          borderWidth: 3,
+          pointRadius: 2,
+          tension: 0.25,
+          fill: false,
+        },
+        {
+          label: 'Proyectado',
+          data: [...pad(nHist - 1), ultimoReal, ...pronostico.map((p) => p.esperado)],
+          borderColor: '#f76707',
+          backgroundColor: '#f76707',
+          borderDash: [6, 5],
+          borderWidth: 3,
+          pointRadius: 3,
+          tension: 0.25,
+          fill: false,
+        },
+        {
+          label: 'Registrado hasta hoy (incompleto)',
+          data: [...pad(nHist), ...pronostico.map((p) => parcialPorMes.get(p.mes) ?? null)],
+          borderColor: '#868e96',
+          backgroundColor: '#868e96',
+          showLine: false,
+          pointRadius: 4,
+          pointStyle: 'triangle' as const,
+        },
+      ],
+    };
+  }, [data]);
+
+  const breadcrumbItems = [
+    { title: 'Procesos', href: '/process' },
+    { title: 'Predicciones', href: '#' },
+  ].map((item, index) =>
+    item.href !== '#' ? (
+      <Link key={index} href={item.href} passHref>
+        <Anchor component="span" size="sm">
+          {item.title}
+        </Anchor>
+      </Link>
+    ) : (
+      <Text key={index} component="span" size="sm" c="dimmed">
+        {item.title}
+      </Text>
+    )
+  );
+
+  if (loading) {
+    return (
+      <Group justify="center" mt="xl">
+        <Loader />
+      </Group>
+    );
+  }
+
+  if (hasAccess === false) {
+    return (
+      <Alert color="red" title="Predicciones" mt="md">
+        No tiene acceso a este módulo.
+      </Alert>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <Alert color="red" title="Predicciones" mt="md" icon={<IconAlertTriangle size={18} />}>
+        {error ?? 'Todavía no hay predicciones generadas.'}
+      </Alert>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
+      <Stack className="max-w-7xl mx-auto py-6 px-3 sm:px-6 lg:px-8" gap="lg">
+        {/* 1. Encabezado con la frase resumen */}
+        <Card shadow="sm" p="lg" radius="md" withBorder>
+          <Breadcrumbs separator={<IconChevronRight size={16} />} mb="sm">
+            {breadcrumbItems}
+          </Breadcrumbs>
+          <Group gap="sm" wrap="nowrap" align="flex-start">
+            <ThemeIcon size={40} radius="md" variant="light">
+              <IconChartLine size={24} />
+            </ThemeIcon>
+            <div>
+              <Title order={2}>Predicciones · {data.empresa}</Title>
+              <Text size="lg" mt={6} fw={500}>
+                {data.resumen}
+              </Text>
+              <Text size="xs" c="dimmed" mt={6}>
+                Actualizado el {data.generado} · con ventas desde {data.fuente.ventas_desde} · piloto
+              </Text>
+            </div>
+          </Group>
+        </Card>
+
+        {/* 2. Tarjetas con semáforo */}
+        <SimpleGrid cols={{ base: 1, xs: 2, lg: 4 }} spacing="md">
+          {data.tarjetas.map((t) => {
+            const s = SEMAFORO[t.semaforo];
+            return (
+              <Card
+                key={t.id}
+                withBorder
+                radius="md"
+                p="md"
+                style={{ borderLeft: `6px solid var(--mantine-color-${s.color}-6)` }}
+              >
+                <Group justify="space-between" wrap="nowrap" align="flex-start">
+                  <Text size="sm" c="dimmed" fw={600}>
+                    {t.titulo}
+                  </Text>
+                  <Badge color={s.color} variant="light" size="sm">
+                    {s.emoji} {s.texto}
+                  </Badge>
+                </Group>
+                <Text fz={26} fw={700} mt={4}>
+                  {t.valor}
+                </Text>
+                <Text size="sm">{t.frase}</Text>
+                <Text size="xs" c="dimmed" mt={4}>
+                  {t.detalle}
+                </Text>
+              </Card>
+            );
+          })}
+        </SimpleGrid>
+
+        {/* 3. Gráfica real vs proyectado */}
+        {chartData && (
+          <Card withBorder radius="md" p="md">
+            <Title order={4}>Ventas netas por mes: lo vendido y lo que se espera</Title>
+            <Text size="sm" c="dimmed" mb="sm">
+              La franja azul clara es el rango probable del pronóstico.
+            </Text>
+            <div style={{ height: 320 }}>
+              <Line
+                data={chartData}
+                options={{
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  interaction: { mode: 'index', intersect: false },
+                  plugins: {
+                    legend: {
+                      position: 'bottom',
+                      labels: {
+                        filter: (item) =>
+                          item.text !== 'Máximo probable' && item.text !== 'Mínimo probable',
+                      },
+                    },
+                    tooltip: {
+                      callbacks: {
+                        label: (ctx) =>
+                          ctx.parsed.y == null
+                            ? ''
+                            : `${ctx.dataset.label}: ${millones(ctx.parsed.y)}`,
+                      },
+                    },
+                  },
+                  scales: {
+                    x: { ticks: { maxTicksLimit: 12 } },
+                    y: { beginAtZero: true, ticks: { callback: (v) => millones(Number(v)) } },
+                  },
+                }}
+              />
+            </div>
+          </Card>
+        )}
+
+        {/* 4. Alertas accionables */}
+        <Card withBorder radius="md" p="md">
+          <Title order={4} mb="sm">
+            Qué hacer ahora
+          </Title>
+          {data.alertas.length === 0 ? (
+            <Text c="dimmed">No hay alertas. 🟢</Text>
+          ) : (
+            <Stack gap="sm">
+              {data.alertas.map((a, i) => {
+                const p = PRIORIDAD[a.prioridad];
+                return (
+                  <Alert
+                    key={i}
+                    color={p.color}
+                    variant="light"
+                    radius="md"
+                    title={
+                      <Group gap="xs">
+                        <Badge color={p.color} size="sm">
+                          {p.texto}
+                        </Badge>
+                        <Text size="sm" fw={600} component="span">
+                          {a.titulo}
+                        </Text>
+                      </Group>
+                    }
+                  >
+                    <Text size="sm">👉 {a.accion}</Text>
+                  </Alert>
+                );
+              })}
+            </Stack>
+          )}
+        </Card>
+
+        {/* 5. Cómo leer esto */}
+        <Card withBorder radius="md" p="md">
+          <Group gap="xs" mb="xs">
+            <IconBulb size={20} />
+            <Title order={4}>¿Cómo leer esto?</Title>
+          </Group>
+          <List size="sm" spacing={4}>
+            {data.como_leer.map((t, i) => (
+              <List.Item key={i}>{t}</List.Item>
+            ))}
+          </List>
+        </Card>
+      </Stack>
+    </div>
+  );
+}
