@@ -7,6 +7,7 @@ import {
   parsePreferredCompanyId,
 } from '@/lib/valentine/access';
 import { createValentinePost, listValentinePosts } from '@/lib/valentine/db';
+import { publishValentineEvent } from '@/lib/valentine/realtime';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,6 +79,12 @@ export async function POST(req: NextRequest) {
         toName: body.toName ?? null,
       })
     );
+
+    publishValentineEvent({
+      type: 'post_created',
+      companyId: access.company.idCompany,
+      post,
+    });
 
     return NextResponse.json({ post, company: access.company }, { status: 201 });
   } catch (err) {

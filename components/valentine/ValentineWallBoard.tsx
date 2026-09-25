@@ -14,15 +14,17 @@ import {
   Button,
   Group,
   Loader,
-  Select,
+  Menu,
   Text,
   Textarea,
   TextInput,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import {
   IconArrowsMaximize,
   IconArrowsMinimize,
+  IconChevronDown,
   IconMinus,
   IconPlus,
   IconRefresh,
@@ -35,6 +37,7 @@ import {
   VALENTINE_REACTIONS,
   VALENTINE_TAGLINE,
   VALENTINE_TO_NAME_MAX,
+  resolveValentineCompanyLogoSrc,
   type ValentineCategoryId,
 } from '../../lib/valentine/constants';
 
@@ -54,8 +57,13 @@ type Props = {
   freshPostId?: number | null;
   canModerate?: boolean;
   companyName?: string;
+  companyLogo?: string | null;
   companyId?: number | null;
-  companies?: Array<{ idCompany: number; companyName: string }>;
+  companies?: Array<{
+    idCompany: number;
+    companyName: string;
+    companyLogo?: string | null;
+  }>;
   onCompanyChange?: (idCompany: number) => void;
   onClose: () => void;
   onSubmit: (payload: {
@@ -93,6 +101,40 @@ function noteLayout(id: number, index: number) {
   return { x, y, tilt, shade };
 }
 
+function CompanyLogoMark({
+  src,
+  name,
+  size = 'md',
+  fallback = 'name',
+}: {
+  src: string | null;
+  name: string;
+  size?: 'sm' | 'md' | 'option';
+  fallback?: 'name' | 'empty';
+}) {
+  const [broken, setBroken] = useState(false);
+  if (!src || broken) {
+    if (fallback === 'empty') {
+      return <span className='vw-company-logo-slot' aria-hidden />;
+    }
+    return (
+      <span className='vw-company-logo-fallback' title={name}>
+        {name || '—'}
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={name || 'Logo empresa'}
+      className={`vw-company-logo vw-company-logo--${size}`}
+      onError={() => setBroken(true)}
+      draggable={false}
+    />
+  );
+}
+
 export default function ValentineWallBoard({
   posts,
   loading,
@@ -100,6 +142,7 @@ export default function ValentineWallBoard({
   freshPostId = null,
   canModerate = false,
   companyName = '',
+  companyLogo = null,
   companyId = null,
   companies = [],
   onCompanyChange,
@@ -116,10 +159,34 @@ export default function ValentineWallBoard({
   const [reactingId, setReactingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(true);
-  const [composerOpen, setComposerOpen] = useState(true);
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 820px)').matches : false
+  );
+  const [composerOpen, setComposerOpen] = useState(() =>
+    typeof window !== 'undefined'
+      ? !window.matchMedia('(max-width: 820px)').matches
+      : true
+  );
   const [zoomLabel, setZoomLabel] = useState(65);
   const [dragging, setDragging] = useState(false);
   const [revealDone, setRevealDone] = useState(false);
+
+  // Móvil: solo tablero O solo escribir (nunca ambos a la vez).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 820px)');
+    const sync = () => {
+      const mobile = mq.matches;
+      setIsMobile(mobile);
+      if (mobile) setComposerOpen(false);
+    };
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  const showComposer = composerOpen;
+  const showBoard = !isMobile || !composerOpen;
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const planeRef = useRef<HTMLDivElement>(null);
@@ -198,6 +265,56 @@ export default function ValentineWallBoard({
   }, [scheduleTransform]);
 
   useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+
+    type PinchState = {
+      dist: number;
+      zoom: number;
+    };
+    let pinch: PinchState | null = null;
+
+    const touchDist = (a: Touch, b: Touch) =>
+      Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      e.preventDefault();
+      dragRef.current = null;
+      setDragging(false);
+      pinch = {
+        dist: Math.max(1, touchDist(e.touches[0], e.touches[1])),
+        zoom: zoomRef.current,
+      };
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !pinch) return;
+      e.preventDefault();
+      const d = Math.max(1, touchDist(e.touches[0], e.touches[1]));
+      const next = pinch.zoom * (d / pinch.dist);
+      zoomRef.current = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+      setZoomLabel(Math.round(zoomRef.current * 100));
+      scheduleTransform();
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinch = null;
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: false });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd);
+    el.addEventListener('touchcancel', onTouchEnd);
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [scheduleTransform]);
+
+  useEffect(() => {
     return () => {
       if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
     };
@@ -247,6 +364,8 @@ export default function ValentineWallBoard({
     'vw-board-shell--blush',
     'vw-board-shell--expanded',
     revealDone ? 'vw-board-shell--settled' : 'vw-board-shell--emerge',
+    isMobile && composerOpen ? 'vw-board-shell--writing' : '',
+    isMobile && !composerOpen ? 'vw-board-shell--board-only' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -266,31 +385,79 @@ export default function ValentineWallBoard({
 
       <header className='vw-board-header vw-cork-ui'>
         {companies.length > 1 && onCompanyChange ? (
-          <div className='vw-header-company vw-header-company--select'>
-            <Select
-              aria-label='Elegir tablero de empresa'
-              data={companies.map((c) => ({
-                value: String(c.idCompany),
-                label: c.companyName,
-              }))}
-              value={companyId != null ? String(companyId) : null}
-              onChange={(v) => {
-                const id = Number(v);
-                if (Number.isFinite(id) && id > 0) onCompanyChange(id);
-              }}
-              allowDeselect={false}
-              searchable={companies.length > 5}
-              size='sm'
+          <div className='vw-header-company vw-header-company--logo vw-header-company--switch'>
+            <Menu
+              withinPortal
+              zIndex={10050}
+              position='bottom'
+              shadow='md'
               radius='md'
-              comboboxProps={{ withinPortal: true, zIndex: 10050 }}
-            />
+              width={260}
+            >
+              <Menu.Target>
+                <UnstyledButton
+                  className='vw-company-switch-btn'
+                  aria-label={
+                    companyName
+                      ? `Cambiar tablero · ${companyName}`
+                      : 'Cambiar tablero de empresa'
+                  }
+                >
+                  <CompanyLogoMark
+                    key={companyLogo ?? companyName ?? 'none'}
+                    src={resolveValentineCompanyLogoSrc(
+                      companyLogo ??
+                        companies.find((c) => c.idCompany === companyId)
+                          ?.companyLogo
+                    )}
+                    name={companyName}
+                    size='md'
+                  />
+                  <IconChevronDown
+                    size={16}
+                    stroke={2}
+                    className='vw-company-switch-chevron'
+                    aria-hidden
+                  />
+                </UnstyledButton>
+              </Menu.Target>
+              <Menu.Dropdown className='vw-company-switch-menu'>
+                {companies.map((c) => {
+                  const active = c.idCompany === companyId;
+                  return (
+                    <Menu.Item
+                      key={c.idCompany}
+                      onClick={() => onCompanyChange(c.idCompany)}
+                      leftSection={
+                        <CompanyLogoMark
+                          src={resolveValentineCompanyLogoSrc(c.companyLogo)}
+                          name={c.companyName}
+                          size='option'
+                          fallback='empty'
+                        />
+                      }
+                      className={
+                        active ? 'vw-company-switch-item--active' : undefined
+                      }
+                    >
+                      {c.companyName}
+                    </Menu.Item>
+                  );
+                })}
+              </Menu.Dropdown>
+            </Menu>
           </div>
         ) : (
           <div
-            className='vw-header-company'
+            className='vw-header-company vw-header-company--logo'
             aria-label={companyName ? `Empresa ${companyName}` : 'Empresa'}
           >
-            {companyName || '—'}
+            <CompanyLogoMark
+              key={companyLogo ?? companyName ?? 'none'}
+              src={resolveValentineCompanyLogoSrc(companyLogo)}
+              name={companyName}
+              size='md'
+            />
           </div>
         )}
         <ActionIcon
@@ -306,8 +473,16 @@ export default function ValentineWallBoard({
         </ActionIcon>
       </header>
 
-      <div className={composerOpen ? 'vw-board-body' : 'vw-board-body vw-board-body--full'}>
-        {composerOpen ? (
+      <div
+        className={
+          showComposer && showBoard
+            ? 'vw-board-body'
+            : showComposer
+              ? 'vw-board-body vw-board-body--compose'
+              : 'vw-board-body vw-board-body--full'
+        }
+      >
+        {showComposer ? (
           <div className='vw-composer-col vw-cork-ui'>
             <div className='vw-board-heart vw-board-heart--title vw-board-heart--3d'>
               — DOSIS —
@@ -317,7 +492,9 @@ export default function ValentineWallBoard({
             <aside className='vw-composer vw-composer--3d'>
               <h3>Escribe tu dosis</h3>
               <Text size='xs' c='dimmed'>
-                Mensajes anónimos. Arrastra el muro · rueda para mover · Ctrl+rueda zoom.
+                {isMobile
+                  ? 'Mensajes anónimos. Al publicar vuelves al tablero.'
+                  : 'Mensajes anónimos. Arrastra el muro · rueda para mover · Ctrl+rueda zoom.'}
               </Text>
 
               <div className='vw-composer-cats'>
@@ -357,42 +534,56 @@ export default function ValentineWallBoard({
                 value={message}
                 onChange={(e) => setMessage(e.currentTarget.value)}
                 maxLength={VALENTINE_MESSAGE_MAX}
-                minRows={3}
+                minRows={isMobile ? 4 : 3}
                 autosize
                 size='sm'
               />
-              <Group justify='space-between'>
+              <Group justify='space-between' wrap='wrap' gap='sm'>
                 <Text size='xs' c='dimmed'>
                   {message.length}/{VALENTINE_MESSAGE_MAX}
                 </Text>
-                <Button
-                  color='grape'
-                  radius='xl'
-                  loading={posting}
-                  disabled={!canSend}
-                  onClick={() => {
-                    void (async () => {
-                      try {
-                        await onSubmit({
-                          message: message.trim(),
-                          categoryId,
-                          toName: toName.trim() || null,
-                        });
-                        setMessage('');
-                        setToName('');
-                      } catch {
-                        /* toast en el padre */
-                      }
-                    })();
-                  }}
-                >
-                  Pegar en el tablero ♥
-                </Button>
+                <Group gap='xs'>
+                  {isMobile ? (
+                    <Button
+                      variant='light'
+                      color='grape'
+                      radius='xl'
+                      onClick={() => setComposerOpen(false)}
+                    >
+                      Ver tablero
+                    </Button>
+                  ) : null}
+                  <Button
+                    color='grape'
+                    radius='xl'
+                    loading={posting}
+                    disabled={!canSend}
+                    onClick={() => {
+                      void (async () => {
+                        try {
+                          await onSubmit({
+                            message: message.trim(),
+                            categoryId,
+                            toName: toName.trim() || null,
+                          });
+                          setMessage('');
+                          setToName('');
+                          if (isMobile) setComposerOpen(false);
+                        } catch {
+                          /* toast en el padre */
+                        }
+                      })();
+                    }}
+                  >
+                    Pegar en el tablero ♥
+                  </Button>
+                </Group>
               </Group>
             </aside>
           </div>
         ) : null}
 
+        {showBoard ? (
         <div
           ref={viewportRef}
           className={
@@ -521,9 +712,10 @@ export default function ValentineWallBoard({
             )}
           </div>
         </div>
+        ) : null}
       </div>
 
-      {revealDone ? (
+      {revealDone && showBoard ? (
         <div
           className='vw-board-heart vw-board-heart--quote vw-board-heart--3d vw-quote-overlay vw-cork-ui'
           onPointerDown={(e) => e.stopPropagation()}
@@ -533,6 +725,7 @@ export default function ValentineWallBoard({
       ) : null}
 
       <footer className='vw-board-footer vw-cork-ui'>
+        {showBoard ? (
         <div className='vw-footer-left'>
           <Tooltip label={expanded ? 'Salir de pantalla completa' : 'Ampliar tablero'}>
             <ActionIcon
@@ -584,6 +777,9 @@ export default function ValentineWallBoard({
             </ActionIcon>
           </Tooltip>
         </div>
+        ) : (
+          <div className='vw-footer-left vw-footer-left--spacer' aria-hidden />
+        )}
 
         <div className='vw-footer-logo'>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -598,13 +794,19 @@ export default function ValentineWallBoard({
 
         <div className='vw-footer-right'>
           <Button
-            size='sm'
-            variant={composerOpen ? 'filled' : 'light'}
+            size={isMobile ? 'md' : 'sm'}
+            variant={composerOpen ? 'light' : 'filled'}
             color='grape'
             radius='xl'
+            fullWidth={isMobile}
+            className='vw-mode-toggle'
             onClick={() => setComposerOpen((v) => !v)}
           >
-            {composerOpen ? 'Ocultar escribir' : 'Escribir dosis'}
+            {composerOpen
+              ? isMobile
+                ? 'Ver tablero'
+                : 'Ocultar escribir'
+              : 'Escribir dosis'}
           </Button>
         </div>
       </footer>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Indicator, Tooltip } from '@mantine/core';
+import { useSession } from 'next-auth/react';
 import toast from 'react-hot-toast';
 import type { ValentineCategoryId } from '../../lib/valentine/constants';
 import ValentineEnvelope from './ValentineEnvelope';
@@ -14,7 +15,27 @@ type Phase = 'closed' | 'arriving' | 'envelope' | 'opening' | 'board';
 type WallCompany = {
   idCompany: number;
   companyName: string;
+  companyLogo?: string | null;
 };
+
+type RealtimeEvent =
+  | { type: 'connected'; companyId: number }
+  | {
+      type: 'post_created';
+      companyId: number;
+      post: ValentinePost;
+    }
+  | { type: 'post_deleted'; companyId: number; postId: number }
+  | {
+      type: 'reaction_changed';
+      companyId: number;
+      postId: number;
+      emoji: string;
+      added: boolean;
+      userId: string;
+    };
+
+const POLL_MS = 5000;
 
 function readSelectedCompanyId(): number | null {
   if (typeof window === 'undefined') return null;
@@ -32,7 +53,45 @@ function seenKey(companyId: number) {
   return `vw-seen-${companyId}-2026`;
 }
 
+function applyReactionChange(
+  posts: ValentinePost[],
+  event: Extract<RealtimeEvent, { type: 'reaction_changed' }>,
+  myUserId: string
+): ValentinePost[] {
+  return posts.map((p) => {
+    if (p.id !== event.postId) return p;
+    const reactions = [...p.reactions];
+    const idx = reactions.findIndex((r) => r.emoji === event.emoji);
+    const isMine = String(event.userId) === String(myUserId);
+
+    if (event.added) {
+      if (idx >= 0) {
+        reactions[idx] = {
+          ...reactions[idx],
+          count: reactions[idx].count + 1,
+          mine: reactions[idx].mine || isMine,
+        };
+      } else {
+        reactions.push({ emoji: event.emoji, count: 1, mine: isMine });
+      }
+    } else if (idx >= 0) {
+      const nextCount = reactions[idx].count - 1;
+      if (nextCount <= 0) reactions.splice(idx, 1);
+      else
+        reactions[idx] = {
+          ...reactions[idx],
+          count: nextCount,
+          mine: isMine ? false : reactions[idx].mine,
+        };
+    }
+    return { ...p, reactions };
+  });
+}
+
 export default function ValentineWallRoot() {
+  const { data: session } = useSession();
+  const myUserId = String(session?.user?.id || '').trim();
+
   const [canAccess, setCanAccess] = useState(false);
   const [canModerate, setCanModerate] = useState(false);
   const [company, setCompany] = useState<WallCompany | null>(null);
@@ -49,6 +108,9 @@ export default function ValentineWallRoot() {
   const bellRef = useRef<HTMLButtonElement | null>(null);
   const arriveTimer = useRef<number | null>(null);
   const openTimer = useRef<number | null>(null);
+  const freshTimer = useRef<number | null>(null);
+  const myUserIdRef = useRef(myUserId);
+  myUserIdRef.current = myUserId;
 
   useEffect(() => {
     let cancelled = false;
@@ -74,7 +136,6 @@ export default function ValentineWallRoot() {
         setCanAccess(Boolean(data.canAccess));
         setCanModerate(moderate);
         const list = Array.isArray(data.companies) ? data.companies : [];
-        // Solo admins pueden ver/cambiar entre varios tableros
         setCompanies(moderate ? list : []);
         const c = data.company ?? list[0] ?? null;
         setCompany(c);
@@ -103,28 +164,111 @@ export default function ValentineWallRoot() {
     return () => {
       if (arriveTimer.current) window.clearTimeout(arriveTimer.current);
       if (openTimer.current) window.clearTimeout(openTimer.current);
+      if (freshTimer.current) window.clearTimeout(freshTimer.current);
     };
   }, []);
 
-  const loadPostsForCompany = useCallback(async (idCompany: number) => {
-    setLoadingPosts(true);
-    try {
-      const res = await fetch(
-        `/api/valentine-wall?companyId=${encodeURIComponent(String(idCompany))}`
-      );
-      if (!res.ok) throw new Error('No se pudo cargar el muro');
-      const data = (await res.json()) as {
-        posts?: ValentinePost[];
-        company?: WallCompany;
-      };
-      setPosts(Array.isArray(data.posts) ? data.posts : []);
-      if (data.company) setCompany(data.company);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al cargar');
-    } finally {
-      setLoadingPosts(false);
-    }
+  const markFresh = useCallback((postId: number) => {
+    setFreshPostId(postId);
+    if (freshTimer.current) window.clearTimeout(freshTimer.current);
+    freshTimer.current = window.setTimeout(() => setFreshPostId(null), 1600);
   }, []);
+
+  const loadPostsForCompany = useCallback(
+    async (idCompany: number, opts?: { silent?: boolean }) => {
+      if (!opts?.silent) setLoadingPosts(true);
+      try {
+        const res = await fetch(
+          `/api/valentine-wall?companyId=${encodeURIComponent(String(idCompany))}`
+        );
+        if (!res.ok) throw new Error('No se pudo cargar el muro');
+        const data = (await res.json()) as {
+          posts?: ValentinePost[];
+          company?: WallCompany;
+        };
+        setPosts(Array.isArray(data.posts) ? data.posts : []);
+        if (data.company) setCompany(data.company);
+      } catch (err) {
+        if (!opts?.silent) {
+          toast.error(err instanceof Error ? err.message : 'Error al cargar');
+        }
+      } finally {
+        if (!opts?.silent) setLoadingPosts(false);
+      }
+    },
+    []
+  );
+
+  const applyRealtimeEvent = useCallback(
+    (event: RealtimeEvent) => {
+      if (event.type === 'connected') return;
+
+      if (event.type === 'post_created') {
+        setPosts((prev) => {
+          if (prev.some((p) => p.id === event.post.id)) return prev;
+          return [event.post, ...prev];
+        });
+        markFresh(event.post.id);
+        return;
+      }
+
+      if (event.type === 'post_deleted') {
+        setPosts((prev) => prev.filter((p) => p.id !== event.postId));
+        return;
+      }
+
+      if (event.type === 'reaction_changed') {
+        // La reacción propia ya se aplicó de forma optimista
+        if (
+          myUserIdRef.current &&
+          String(event.userId) === String(myUserIdRef.current)
+        ) {
+          return;
+        }
+        setPosts((prev) =>
+          applyReactionChange(prev, event, myUserIdRef.current)
+        );
+      }
+    },
+    [markFresh]
+  );
+
+  // SSE (inmediato) + polling de respaldo (multi-instancia / proxy)
+  useEffect(() => {
+    const boardOpen = phase === 'opening' || phase === 'board';
+    if (!boardOpen || !company) return;
+
+    const companyId = company.idCompany;
+    let cancelled = false;
+    let es: EventSource | null = null;
+
+    const pollTimer = window.setInterval(() => {
+      void loadPostsForCompany(companyId, { silent: true });
+    }, POLL_MS);
+
+    try {
+      es = new EventSource(
+        `/api/valentine-wall/stream?companyId=${encodeURIComponent(String(companyId))}`
+      );
+      es.onmessage = (msg) => {
+        if (cancelled) return;
+        try {
+          const data = JSON.parse(msg.data) as RealtimeEvent;
+          applyRealtimeEvent(data);
+        } catch {
+          /* ignore malformed */
+        }
+      };
+    } catch {
+      /* EventSource no disponible: el poll basta */
+    }
+
+    return () => {
+      cancelled = true;
+      if (es) es.close();
+      window.clearInterval(pollTimer);
+    };
+  }, [phase, company?.idCompany, loadPostsForCompany, applyRealtimeEvent]);
 
   const handleCompanyChange = useCallback(
     (idCompany: number) => {
@@ -190,9 +334,11 @@ export default function ValentineWallRoot() {
       const data = (await res.json()) as { post?: ValentinePost; error?: string };
       if (!res.ok) throw new Error(data.error || 'No se pudo publicar');
       if (data.post) {
-        setPosts((prev) => [data.post!, ...prev]);
-        setFreshPostId(data.post.id);
-        window.setTimeout(() => setFreshPostId(null), 1600);
+        setPosts((prev) => {
+          if (prev.some((p) => p.id === data.post!.id)) return prev;
+          return [data.post!, ...prev];
+        });
+        markFresh(data.post.id);
       }
       toast.success('¡Dosis pegada en el tablero!');
     } catch (err) {
@@ -230,35 +376,15 @@ export default function ValentineWallRoot() {
       if (!res.ok) {
         throw new Error(data.error || 'No se pudo reaccionar');
       }
-      const added = Boolean(data.added);
-      setPosts((prev) =>
-        prev.map((p) => {
-          if (p.id !== postId) return p;
-          const reactions = [...p.reactions];
-          const idx = reactions.findIndex((r) => r.emoji === emoji);
-          if (added) {
-            if (idx >= 0) {
-              reactions[idx] = {
-                ...reactions[idx],
-                count: reactions[idx].count + 1,
-                mine: true,
-              };
-            } else {
-              reactions.push({ emoji, count: 1, mine: true });
-            }
-          } else if (idx >= 0) {
-            const nextCount = reactions[idx].count - 1;
-            if (nextCount <= 0) reactions.splice(idx, 1);
-            else
-              reactions[idx] = {
-                ...reactions[idx],
-                count: nextCount,
-                mine: false,
-              };
-          }
-          return { ...p, reactions };
-        })
-      );
+      // El SSE / poll sincroniza; optimista local:
+      applyRealtimeEvent({
+        type: 'reaction_changed',
+        companyId: company.idCompany,
+        postId,
+        emoji,
+        added: Boolean(data.added),
+        userId: myUserIdRef.current,
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al reaccionar');
     }
@@ -349,6 +475,7 @@ export default function ValentineWallRoot() {
               freshPostId={freshPostId}
               canModerate={canModerate}
               companyName={company.companyName}
+              companyLogo={company.companyLogo}
               companyId={company.idCompany}
               companies={canModerate ? companies : []}
               onCompanyChange={canModerate ? handleCompanyChange : undefined}
