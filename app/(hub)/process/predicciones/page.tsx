@@ -56,13 +56,34 @@ interface Alerta {
   accion: string;
 }
 
+interface MesPasado {
+  mes: string;
+  pronosticado: number;
+  real: number;
+  error: number | null;
+  semaforo: Semaforo;
+  frase: string;
+  detalle: string;
+}
+
+interface Producto {
+  codigo: string;
+  nombre: string;
+  intermitente?: boolean;
+  frase: string;
+  frase_metodo?: string;
+}
+
 interface Prediccion {
   empresa: string;
   generado: string;
   fuente: { ventas_desde: string; ultimo_mes_completo: string };
   resumen: string;
   tarjetas: Tarjeta[];
+  mes_pasado?: MesPasado | null;
+  top_productos?: Producto[];
   ventas: {
+    frase_modelo?: string;
     historia: { mes: string; real: number }[];
     parciales: { mes: string; registrado: number }[];
     pronostico: { mes: string; esperado: number; min: number; max: number }[];
@@ -282,6 +303,32 @@ export default function PrediccionesPage() {
           })}
         </SimpleGrid>
 
+        {/* 2b. ¿Cómo le fue al pronóstico el mes pasado? */}
+        {data.mes_pasado && (
+          <Card
+            withBorder
+            radius="md"
+            p="md"
+            style={{
+              borderLeft: `6px solid var(--mantine-color-${SEMAFORO[data.mes_pasado.semaforo].color}-6)`,
+            }}
+          >
+            <Group justify="space-between" wrap="nowrap" align="flex-start">
+              <Title order={4}>¿Cómo le fue al pronóstico el mes pasado?</Title>
+              <Badge color={SEMAFORO[data.mes_pasado.semaforo].color} variant="light" size="sm">
+                {SEMAFORO[data.mes_pasado.semaforo].emoji} {SEMAFORO[data.mes_pasado.semaforo].texto}
+              </Badge>
+            </Group>
+            <Text size="md" mt={6} fw={500}>
+              {data.mes_pasado.frase}
+            </Text>
+            <Text size="xs" c="dimmed" mt={4}>
+              {data.mes_pasado.detalle}
+              {data.ventas.frase_modelo ? ` ${data.ventas.frase_modelo}` : ''}
+            </Text>
+          </Card>
+        )}
+
         {/* 3. Gráfica real vs proyectado */}
         {chartData && (
           <Card withBorder radius="md" p="md">
@@ -320,6 +367,37 @@ export default function PrediccionesPage() {
                 }}
               />
             </div>
+          </Card>
+        )}
+
+        {/* 3b. Productos principales (indica cuándo la venta es intermitente) */}
+        {data.top_productos && data.top_productos.length > 0 && (
+          <Card withBorder radius="md" p="md">
+            <Title order={4} mb="sm">
+              Productos que más venden: lo que se espera
+            </Title>
+            <Stack gap="xs">
+              {data.top_productos.map((p) => (
+                <div key={p.codigo}>
+                  <Group gap="xs" wrap="wrap">
+                    <Text size="sm" fw={600}>
+                      {p.nombre}
+                    </Text>
+                    {p.intermitente && (
+                      <Badge color="grape" variant="light" size="sm">
+                        Venta intermitente
+                      </Badge>
+                    )}
+                  </Group>
+                  <Text size="sm">{p.frase}</Text>
+                  {p.frase_metodo && (
+                    <Text size="xs" c="dimmed">
+                      {p.frase_metodo}
+                    </Text>
+                  )}
+                </div>
+              ))}
+            </Stack>
           </Card>
         )}
 
