@@ -417,6 +417,10 @@ export function mergeOrionSigners(
         signer.requireFingerprint != null
           ? signer.requireFingerprint
           : prev?.requireFingerprint,
+      signatureMarkId:
+        signer.signatureMarkId != null
+          ? signer.signatureMarkId
+          : prev?.signatureMarkId,
     };
     if (prev && isCompletedSignerStatus(prev.status) && !isCompletedSignerStatus(signer.status)) {
       return {

@@ -245,7 +245,13 @@ export function applyOrionVersionHistory(params: {
     if (versions.some((v) => v.id === id)) continue;
     const isFinal = String(merged.status || '').toUpperCase() === 'FIRMADO';
     const order = Number(signer.order);
-    const firmaN = Number.isFinite(order) && order > 0 ? order : signedCount;
+    const markRaw = Number(signer.signatureMarkId);
+    const firmaN =
+      Number.isFinite(markRaw) && markRaw > 0
+        ? Math.trunc(markRaw)
+        : Number.isFinite(order) && order > 0
+          ? order
+          : signedCount;
     versions.push({
       id,
       kind: isFinal ? 'final' : 'partial',
@@ -281,7 +287,7 @@ export function applyOrionVersionHistory(params: {
     versions.push({
       id: `validated-orion-${merged.signedAt ?? Date.now()}`,
       kind: 'validated',
-      label: 'DOCUMENTO VALIDADO',
+      label: 'SYNERLINK-VALIDO',
       url: workingUrl,
       createdAt: merged.signedAt ?? new Date().toISOString(),
     });
@@ -308,7 +314,10 @@ export function rebuildOrionVersionHistory(
       v.kind === 'validated' ||
       String(v.label || '')
         .toUpperCase()
-        .includes('DOCUMENTO VALIDADO')
+        .includes('DOCUMENTO VALIDADO') ||
+      String(v.label || '')
+        .toUpperCase()
+        .includes('SYNERLINK')
   );
   const base = ensureOriginalOrionVersion(
     {
@@ -335,7 +344,13 @@ export function rebuildOrionVersionHistory(
   completed.forEach((signer, index) => {
     const isLast = index === completed.length - 1 && fullySigned;
     const order = Number(signer.order);
-    const firmaN = Number.isFinite(order) && order > 0 ? order : index + 1;
+    const markRaw = Number(signer.signatureMarkId);
+    const firmaN =
+      Number.isFinite(markRaw) && markRaw > 0
+        ? Math.trunc(markRaw)
+        : Number.isFinite(order) && order > 0
+          ? order
+          : index + 1;
     versions.push({
       id: versionIdForSigner(signer),
       kind: isLast ? 'final' : 'partial',
@@ -359,16 +374,21 @@ export function rebuildOrionVersionHistory(
     });
   }
 
-  // DOCUMENTO VALIDADO queda al final, aparte de las firmas (misma URL; el proxy
-  // regenera con ?validated=1).
+  // SYNERLINK-VALIDO al final (misma URL base; el proxy Kronos estampa patrón + sello
+  // una sola vez — no pedir ?validated=1 a Orion para evitar doble capa).
   if (fullySigned && workingUrl) {
     versions.push(
       prevValidated
-        ? { ...prevValidated, url: workingUrl, kind: 'validated' as const }
+        ? {
+            ...prevValidated,
+            url: workingUrl,
+            kind: 'validated' as const,
+            label: 'SYNERLINK-VALIDO',
+          }
         : {
             id: `validated-orion-${base.signedAt ?? Date.now()}`,
             kind: 'validated' as const,
-            label: 'DOCUMENTO VALIDADO',
+            label: 'SYNERLINK-VALIDO',
             url: workingUrl,
             createdAt: base.signedAt ?? new Date().toISOString(),
           }

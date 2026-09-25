@@ -33,6 +33,8 @@ import {
 type Props = {
   defaultName?: string | null;
   currentUserEmail?: string | null;
+  /** Nombre del PDF que se está firmando (evita confusión con varios adjuntos). */
+  documentFileName?: string | null;
   confirming?: boolean;
   externalError?: string | null;
   onClearExternalError?: () => void;
@@ -55,6 +57,7 @@ type Props = {
 export default function SignerIdentityForm({
   defaultName,
   currentUserEmail,
+  documentFileName = null,
   confirming = false,
   externalError = null,
   onClearExternalError,
@@ -168,6 +171,17 @@ export default function SignerIdentityForm({
 
   return (
     <Stack gap='sm'>
+      {documentFileName ? (
+        <Alert color='teal' variant='light' title='Documento a firmar'>
+          <Text size='sm' fw={600} style={{ wordBreak: 'break-word' }}>
+            {documentFileName}
+          </Text>
+          <Text size='xs' c='dimmed' mt={4}>
+            Confirme que es el archivo correcto antes de aceptar.
+          </Text>
+        </Alert>
+      ) : null}
+
       <Text size='sm' c='dimmed'>
         Indique su nombre. Tipo y número de documento son opcionales (igual que en GSS Firma).
         Los datos no se guardan en este navegador.

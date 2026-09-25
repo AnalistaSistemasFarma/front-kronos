@@ -15,6 +15,8 @@ import {
 } from '@mantine/core';
 import { IconCheck, IconCopy, IconMail, IconRefresh } from '@tabler/icons-react';
 import { useCallback, useEffect, useState } from 'react';
+import { showEmailSentNotification } from '../../lib/notifications/showEmailSentNotification';
+import toast from 'react-hot-toast';
 
 type SignerRow = {
   email: string;
@@ -75,11 +77,12 @@ export default function OrionFirmantesInviteModal({
       const nextSources: Record<string, 'orion' | 'synerlink' | null> = {};
       for (const s of rows) {
         const u = String(s.shareUrl || s.inviteUrl || s.signUrl || '').trim();
-        if (u) {
+        // Solo mostrar URL Orion /sign/… (nunca /firma/externa).
+        if (u && /\/sign\/[^/?#]+/i.test(u) && !/\/firma\/externa\//i.test(u)) {
           nextUrls[s.email] = u;
           if (s.order != null) nextUrls[`${s.email}#${s.order}`] = u;
         }
-        nextSources[s.email] = s.shareSource ?? null;
+        nextSources[s.email] = s.shareSource === 'orion' ? 'orion' : null;
       }
       setUrls(nextUrls);
       setSources(nextSources);
@@ -113,9 +116,11 @@ export default function OrionFirmantesInviteModal({
       if (!res.ok) throw new Error(data.error || 'No se pudo obtener la URL');
       const next = String(data.shareUrl || data.signUrl || data.inviteUrl || '').trim();
       const key = order != null ? `${email}#${order}` : email;
-      if (next) setUrls((prev) => ({ ...prev, [email]: next, [key]: next }));
-      if (data.shareSource) {
-        setSources((prev) => ({ ...prev, [email]: data.shareSource }));
+      if (next && /\/sign\/[^/?#]+/i.test(next) && !/\/firma\/externa\//i.test(next)) {
+        setUrls((prev) => ({ ...prev, [email]: next, [key]: next }));
+      }
+      if (data.shareSource === 'orion') {
+        setSources((prev) => ({ ...prev, [email]: 'orion' }));
       }
       if (typeof data.orionSynced === 'boolean') setOrionSynced(data.orionSynced);
       if (data.orionError) setOrionError(String(data.orionError));
@@ -150,9 +155,19 @@ export default function OrionFirmantesInviteModal({
       if (data.shareSource) {
         setSources((prev) => ({ ...prev, [email]: data.shareSource }));
       }
+      showEmailSentNotification({
+        to: email,
+        fileName: fileName || null,
+        title: '¡Correo enviado!',
+        message: `La URL de firma se envió a ${email}.${
+          fileName ? ` Documento: ${fileName}.` : ''
+        }`,
+      });
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error');
+      const msg = e instanceof Error ? e.message : 'Error';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusyEmail(null);
     }
@@ -167,8 +182,8 @@ export default function OrionFirmantesInviteModal({
     >
       <Stack gap='md'>
         <Text size='sm' c='dimmed'>
-          El correo y la URL usan el enlace público de <strong>Orion</strong> (
-          <code>/sign/…</code>), no el de SynerLink.
+          La URL es el enlace público de <strong>Orion</strong> (<code>/sign/…</code>), el mismo
+          que genera GSS Firma. Tras asignar firmantes y enviar a firma, pulse renovar si está vacío.
         </Text>
 
         {orionSynced === true ? (
@@ -194,7 +209,7 @@ export default function OrionFirmantesInviteModal({
           </Alert>
         ) : null}
         {loading ? <Text size='sm'>Sincronizando con Orion…</Text> : null}
-        {!loading && signers.length === 0 ? (
+        {!loading && !error && signers.length === 0 ? (
           <Text size='sm' c='dimmed'>
             No hay firmantes asignados. Primero prepare el documento y asigne firmantes.
           </Text>
@@ -203,9 +218,15 @@ export default function OrionFirmantesInviteModal({
         {signers.map((s) => {
           const isExternal = String(s.type).toLowerCase() === 'external' || s.isExternal;
           const orderKey = s.order != null ? `${s.email}#${s.order}` : s.email;
-          const url =
+          const rawUrl =
             urls[orderKey] || urls[s.email] || s.shareUrl || s.inviteUrl || s.signUrl || '';
-          const source = sources[s.email] ?? s.shareSource ?? null;
+          const url =
+            rawUrl &&
+            /\/sign\/[^/?#]+/i.test(rawUrl) &&
+            !/\/firma\/externa\//i.test(rawUrl)
+              ? rawUrl
+              : '';
+          const source = url ? 'orion' : null;
           const busyKey = orderKey;
           return (
             <Stack
@@ -238,11 +259,11 @@ export default function OrionFirmantesInviteModal({
               </Group>
               <Group gap='xs' align='flex-end' wrap='nowrap'>
                 <TextInput
-                  label='URL de firma (Orion)'
+                  label='URL de firma (Orion /sign/…)'
                   value={url}
                   readOnly
                   style={{ flex: 1 }}
-                  placeholder='Sincronice con Orion o envíe el documento a firma'
+                  placeholder='URL Orion /sign/… — pulse renovar'
                 />
                 <Tooltip label='Sincronizar / renovar desde Orion'>
                   <ActionIcon

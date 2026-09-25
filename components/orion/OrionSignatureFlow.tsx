@@ -430,7 +430,7 @@ function FlowContent({
                   Documento validado
                 </Text>
                 <Text size='xs' c='dimmed'>
-                  Marca de agua “DOCUMENTO VALIDADO” en todas las hojas
+                  Marca de agua “SYNERLINK-VALIDO” en todas las hojas
                 </Text>
               </Box>
               <Text size='sm' fw={600} c='teal' style={{ whiteSpace: 'nowrap' }}>

@@ -27,21 +27,21 @@ export type OrionSignatureFieldPayload = {
   kind?: SignatureFieldKind;
 };
 
-export const DEFAULT_FIELD_WIDTH = 36;
-export const DEFAULT_FIELD_HEIGHT = 16;
+export const DEFAULT_FIELD_WIDTH = 24;
+export const DEFAULT_FIELD_HEIGHT = 12;
 export const DEFAULT_FIELD_X = 8;
 export const DEFAULT_FIELD_Y = 78;
 
-export const MIN_FIELD_WIDTH = 22;
+export const MIN_FIELD_WIDTH = 14;
 export const MAX_FIELD_WIDTH = 55;
-export const MIN_FIELD_HEIGHT = 12;
+export const MIN_FIELD_HEIGHT = 8;
 export const MAX_FIELD_HEIGHT = 36;
 
 /** Tamaño por defecto para firmas de validación (Elaboró / Revisó). */
-export const VALIDATION_FIELD_WIDTH = 16;
-export const VALIDATION_FIELD_HEIGHT = 8;
-export const FINGERPRINT_FIELD_WIDTH = 18;
-export const FINGERPRINT_FIELD_HEIGHT = 22;
+export const VALIDATION_FIELD_WIDTH = 10;
+export const VALIDATION_FIELD_HEIGHT = 5;
+export const FINGERPRINT_FIELD_WIDTH = 12;
+export const FINGERPRINT_FIELD_HEIGHT = 14;
 
 export function createFieldId(): string {
   return `sf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -82,8 +82,8 @@ export function sizeBoundsForKind(kind?: SignatureFieldKind | null): {
   maxH: number;
 } {
   const k = normalizeFieldKind(kind);
-  if (k === 'validation') return { minW: 10, maxW: 28, minH: 5, maxH: 14 };
-  if (k === 'fingerprint') return { minW: 12, maxW: 28, minH: 14, maxH: 32 };
+  if (k === 'validation') return { minW: 6, maxW: 28, minH: 3, maxH: 14 };
+  if (k === 'fingerprint') return { minW: 8, maxW: 28, minH: 10, maxH: 32 };
   return {
     minW: MIN_FIELD_WIDTH,
     maxW: MAX_FIELD_WIDTH,
