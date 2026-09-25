@@ -5,7 +5,9 @@
 #      incluye además `cartera`: cartera y flujo de caja, ver cartera_farmalogica.py, y
 #      `lotes_registros`: lotes con vencimiento real y registros sanitarios por renovar,
 #      ver lotes_registros_farmalogica.py),
-#   3) publica un snapshot por empresa en la base de PRUEBAS (KRONOSDB_PRUEBAS) vía pce0023.
+#   3) publica un snapshot por empresa en cada destino de PREDICTIVO_DESTINOS
+#      (por defecto "pruebas prod"): pruebas = KRONOSDB_PRUEBAS vía pce0023,
+#      prod = KRONOSDB vía serfarma05 (con --base=KRONOSDB explícito).
 # NO está programado: el plist de ejemplo (com.gss.predictivo.nightly.plist)
 # queda sin instalar hasta que Nicolás lo apruebe.
 # Uso: run_nightly.sh [empresa ...]   (por defecto todas; claves: farmalogica ryan olp abamia meditrack kelab)
@@ -14,8 +16,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 CACHE="${FAR_CACHE_DIR:-/Users/horus/.horus/cache}"
-SSH_HOST="${PREDICTIVO_SSH_HOST:-pce0023}"
-REMOTE_DIR='C:\Users\nicolas.rivera\projects\front-kronos-test'
+read -r -a DESTINOS <<< "${PREDICTIVO_DESTINOS:-pruebas prod}"
 PY="$DIR/.venv/bin/python3"; [ -x "$PY" ] || PY=python3
 # Python para las cachés de SharePoint: necesita `requests`. El python3 de Homebrew
 # (primero en el PATH) no lo trae; el del sistema sí (paquetes de usuario).
@@ -34,21 +35,34 @@ company_id() {
   esac
 }
 
-# el script va DENTRO de la carpeta del proyecto para que Node resuelva `mssql`
-REMOTE_REL="projects/front-kronos-test"
+# destino -> host SSH, carpeta del proyecto (Windows), ruta para scp y base esperada.
+# El script va DENTRO de la carpeta del proyecto para que Node resuelva `mssql`.
+destino() {
+  case "$1" in
+    pruebas) SSH_HOST="${PREDICTIVO_SSH_HOST:-pce0023}"; REMOTE_DIR='C:\Users\nicolas.rivera\projects\front-kronos-test'
+             REMOTE_REL="projects/front-kronos-test"; BASE=KRONOSDB_PRUEBAS ;;
+    prod) SSH_HOST="${PREDICTIVO_SSH_HOST_PROD:-serfarma05}"; REMOTE_DIR='C:\Users\administrador.DFARUNIADM\projects\front-kronos'
+          REMOTE_REL="C:/Users/administrador.DFARUNIADM/projects/front-kronos"; BASE=KRONOSDB ;;
+    *) echo "destino desconocido: $1" >&2; return 1 ;;
+  esac
+}
 # el SSH de pce0023 a veces corta la conexión al negociar: reintentar
 reintentar() { local i; for i in 1 2 3 4 5; do "$@" && return 0; sleep $((i * 3)); done; return 1; }
 TMPD="$(mktemp -d -t predictivo)"
 limpiar() {
-  ssh "$SSH_HOST" "del \"$REMOTE_DIR\\predictivo_publicar.js\" \"$REMOTE_DIR\\predictivo_snapshot.json\"" >/dev/null 2>&1 || true
+  for d in "${DESTINOS[@]}"; do
+    destino "$d" 2>/dev/null || continue
+    ssh "$SSH_HOST" "del \"$REMOTE_DIR\\predictivo_publicar.js\" \"$REMOTE_DIR\\predictivo_snapshot.json\"" >/dev/null 2>&1 || true
+  done
   rm -rf "$TMPD"
 }
 trap limpiar EXIT
 
-publicar() { # $1 = json, $2 = company_id
+publicar() { # $1 = json, $2 = company_id, $3 = destino
+  destino "$3" || return 1
   reintentar scp -q "$1" "$SSH_HOST:$REMOTE_REL/predictivo_snapshot.json"
   reintentar scp -q "$DIR/publicar_snapshot.js" "$SSH_HOST:$REMOTE_REL/predictivo_publicar.js"
-  reintentar ssh "$SSH_HOST" "cd /d \"$REMOTE_DIR\" && node predictivo_publicar.js predictivo_snapshot.json $2"
+  reintentar ssh "$SSH_HOST" "cd /d \"$REMOTE_DIR\" && node predictivo_publicar.js predictivo_snapshot.json $2 --base=$BASE"
 }
 
 FALLAS=0
@@ -71,8 +85,10 @@ for e in "${EMPRESAS[@]}"; do
   fi
   # una empresa que falle no detiene a las demás
   if "${gen[@]}"; then
-    echo "  3/3 publicando snapshot en KRONOSDB_PRUEBAS ($SSH_HOST)"
-    publicar "$out" "$cid" || { echo "  ERROR publicando $e"; FALLAS=$((FALLAS + 1)); }
+    for d in "${DESTINOS[@]}"; do
+      echo "  3/3 publicando snapshot en $d"
+      publicar "$out" "$cid" "$d" || { echo "  ERROR publicando $e en $d"; FALLAS=$((FALLAS + 1)); }
+    done
   else
     echo "  ERROR generando $e"; FALLAS=$((FALLAS + 1))
   fi
