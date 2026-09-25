@@ -16,6 +16,8 @@ const ADMIN_USERS_SUBPROCESS_URL = '/process/administration/users';
 export type ValentineWallCompanyScope = {
   idCompany: number;
   companyName: string;
+  /** URL o path del logo (company.company_logo), si existe. */
+  companyLogo?: string | null;
 };
 
 function isAdminRole(role?: string | null): boolean {
@@ -44,7 +46,7 @@ export async function listValentineWallCompaniesForUser(
       companyUser: {
         select: {
           id_company: true,
-          company: { select: { company: true } },
+          company: { select: { company: true, company_logo: true } },
         },
       },
     },
@@ -57,6 +59,7 @@ export async function listValentineWallCompaniesForUser(
     byId.set(idCompany, {
       idCompany,
       companyName: String(row.companyUser.company?.company || `Empresa ${idCompany}`).trim(),
+      companyLogo: row.companyUser.company?.company_logo ?? null,
     });
   }
   return Array.from(byId.values());
