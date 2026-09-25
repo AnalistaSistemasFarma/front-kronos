@@ -5,14 +5,18 @@
  * pce0023, desde la carpeta del proyecto (para resolver `mssql` y leer el .env
  * en tiempo de ejecución; las credenciales nunca salen del servidor).
  *
- * Uso (en el servidor):  node publicar_snapshot.js <archivo.json> <company_id>
+ * Uso (en el servidor):  node publicar_snapshot.js <archivo.json> <company_id> [--base=KRONOSDB]
  *
- * Salvaguarda: se niega a escribir si la base del DATABASE_URL no es
- * KRONOSDB_PRUEBAS. La tabla se crea de forma idempotente (IF NOT EXISTS).
+ * Salvaguarda: la base del DATABASE_URL debe coincidir con la base esperada
+ * (por defecto KRONOSDB_PRUEBAS). Para producción hay que pedirlo explícito con
+ * --base=KRONOSDB; solo se aceptan las bases de BASES_PERMITIDAS. La tabla se
+ * crea de forma idempotente (IF NOT EXISTS).
  */
 const fs = require('fs');
 const path = require('path');
 const sql = require('mssql');
+
+const BASES_PERMITIDAS = ['KRONOSDB_PRUEBAS', 'KRONOSDB'];
 
 function leerDatabaseUrl() {
   const env = fs.readFileSync(path.join(process.cwd(), '.env'), 'utf8');
@@ -41,13 +45,17 @@ function aConfig(url) {
 }
 
 (async () => {
-  const [archivo, companyArg] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const flagBase = args.find((a) => a.startsWith('--base='));
+  const [archivo, companyArg] = args.filter((a) => !a.startsWith('--'));
+  const baseEsperada = flagBase ? flagBase.slice('--base='.length) : 'KRONOSDB_PRUEBAS';
+  if (!BASES_PERMITIDAS.includes(baseEsperada)) throw new Error(`Base "${baseEsperada}" no está permitida.`);
   if (!archivo || !companyArg) throw new Error('Uso: node publicar_snapshot.js <archivo.json> <company_id>');
   const payload = fs.readFileSync(archivo, 'utf8');
   JSON.parse(payload); // valida
   const cfg = aConfig(leerDatabaseUrl());
-  if (cfg.database !== 'KRONOSDB_PRUEBAS') {
-    throw new Error(`Base "${cfg.database}" no es KRONOSDB_PRUEBAS: no se publica nada.`);
+  if (cfg.database !== baseEsperada) {
+    throw new Error(`Base "${cfg.database}" no es ${baseEsperada}: no se publica nada.`);
   }
   const pool = await sql.connect(cfg);
   await pool.request().query(`
