@@ -1,7 +1,8 @@
 #!/bin/bash
 # Corrida nocturna del motor predictivo (Farmalógica + resto de empresas).
 #   1) refresca las cachés SQLite de SharePoint (incrementales, solo Farmalógica),
-#   2) genera el JSON de cada empresa (ventas desde SAP en solo lectura),
+#   2) genera el JSON de cada empresa (ventas desde SAP en solo lectura; Farmalógica
+#      incluye además `cartera`: cartera y flujo de caja, ver cartera_farmalogica.py),
 #   3) publica un snapshot por empresa en la base de PRUEBAS (KRONOSDB_PRUEBAS) vía pce0023.
 # NO está programado: el plist de ejemplo (com.gss.predictivo.nightly.plist)
 # queda sin instalar hasta que Nicolás lo apruebe.
@@ -47,7 +48,7 @@ for e in "${EMPRESAS[@]}"; do
   echo "[$(date '+%F %T')] == $e (company $cid)"
   if [ "$e" = farmalogica ]; then
     echo "  1/3 cachés SharePoint"
-    for c in far_ventas far_inventario far_lotes far_registro_sanitario; do
+    for c in far_ventas far_inventario far_lotes far_registro_sanitario far_bancos_movimientos; do
       s="$CACHE/$c/${c}_export.py"
       if [ -f "$s" ]; then (cd "$CACHE/$c" && python3 "$s" >/dev/null) || echo "  aviso: falló la caché $c (se sigue con la anterior)"; fi
     done

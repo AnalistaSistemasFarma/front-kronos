@@ -390,6 +390,7 @@ def main():
     ap.add_argument("--hoy", help="Fecha de corte YYYY-MM-DD (por defecto hoy)")
     ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--sin-sap", action="store_true", help="No consultar SAP (solo caché SharePoint)")
+    ap.add_argument("--sin-cartera", action="store_true", help="No calcular la sección Cartera y caja")
     args = ap.parse_args()
     hoy = date.fromisoformat(args.hoy) if args.hoy else date.today()
 
@@ -747,6 +748,14 @@ def main():
             "El vencimiento de cada lote se calcula con su fecha de fabricación y la vida útil del registro sanitario.",
         ],
     }
+    # Cartera y flujo de caja (SAP + FAR - BANCOS MOVIMIENTOS); si falla, el resto del snapshot sigue igual
+    if not args.sin_sap and not args.sin_cartera:
+        try:
+            from cartera_farmalogica import generar as generar_cartera
+            salida["cartera"] = generar_cartera(hoy)
+            print("Cartera:", salida["cartera"]["resumen"])
+        except Exception as e:  # noqa: BLE001
+            print(f"aviso: no se pudo calcular la cartera ({e})")
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(salida, fh, ensure_ascii=False, indent=1)

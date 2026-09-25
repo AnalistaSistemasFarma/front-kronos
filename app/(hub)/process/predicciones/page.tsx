@@ -27,6 +27,7 @@ import {
 } from '@tabler/icons-react';
 import { Line } from 'react-chartjs-2';
 import '../../../../lib/charts/register';
+import CarteraCaja, { type Cartera } from './CarteraCaja';
 
 /**
  * Predicciones — una pestaña por empresa (Farmalógica, Ryan, OLP, Abamia,
@@ -93,6 +94,7 @@ interface Prediccion {
   };
   alertas: Alerta[];
   como_leer: string[];
+  cartera?: Cartera | null;
 }
 
 const SEMAFORO: Record<Semaforo, { color: string; emoji: string; texto: string }> = {
@@ -306,8 +308,7 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
     );
   }
 
-  return (
-    <div>
+  const ventasInventario = (
       <Stack className="py-6" gap="lg">
         {/* 1. Encabezado con la frase resumen */}
         <Card shadow="sm" p="lg" radius="md" withBorder>
@@ -514,6 +515,19 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
           </List>
         </Card>
       </Stack>
-    </div>
+  );
+
+  if (!data.cartera) return <div>{ventasInventario}</div>;
+  return (
+    <Tabs defaultValue="ventas" variant="pills" mt="md" keepMounted={false}>
+      <Tabs.List>
+        <Tabs.Tab value="ventas">Ventas e inventario</Tabs.Tab>
+        <Tabs.Tab value="cartera">Cartera y caja</Tabs.Tab>
+      </Tabs.List>
+      <Tabs.Panel value="ventas">{ventasInventario}</Tabs.Panel>
+      <Tabs.Panel value="cartera" pt="md">
+        <CarteraCaja data={data.cartera} />
+      </Tabs.Panel>
+    </Tabs>
   );
 }
