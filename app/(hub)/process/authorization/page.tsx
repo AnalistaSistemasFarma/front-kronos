@@ -56,6 +56,7 @@ import AuthorizationDetailModal from './AuthorizationDetailModal';
 import {
   isFirmaAuthorizationItem,
   parseOrionFileIdFromAuthResolution,
+  parseOrionFileNameFromResolution,
 } from '../../../../lib/orion/signerAuthMarkers';
 
 interface AuthorizationRequest {
@@ -642,6 +643,9 @@ function AuthorizationBoard() {
     const renderRow = (req: AuthorizationRequest, index: number) => {
         const isPending = req.status === 'pendiente';
         const isFirma = isFirmaAuthorizationRow(req);
+        const docName = isFirma
+            ? parseOrionFileNameFromResolution(req.resolution)
+            : null;
         return (
         <Table.Tr
             key={`auth-row-${req.id}-${req.id_request_general}-${index}`}
@@ -676,6 +680,14 @@ function AuthorizationBoard() {
             <Text size='sm' fw={500} lineClamp={2}>
                 {req.subject}
             </Text>
+            {docName ? (
+                <Group gap={4} wrap='nowrap' mt={4}>
+                    <IconFileText size={13} className='text-gray-400' style={{ flexShrink: 0 }} />
+                    <Text size='xs' c='violet' fw={600} lineClamp={1} title={docName}>
+                        {docName}
+                    </Text>
+                </Group>
+            ) : null}
             </Table.Td>
             <Table.Td>
             <Group gap={4} wrap='nowrap'>
@@ -784,6 +796,9 @@ function AuthorizationBoard() {
     const renderCard = (req: AuthorizationRequest, index: number) => {
         const isPending = req.status === 'pendiente';
         const isFirma = isFirmaAuthorizationRow(req);
+        const docName = isFirma
+            ? parseOrionFileNameFromResolution(req.resolution)
+            : null;
         return (
         <Card
             key={`auth-card-${req.id}-${req.id_request_general}-${index}`}
@@ -823,6 +838,15 @@ function AuthorizationBoard() {
             <Text size='sm' fw={500} lineClamp={2}>
                 {req.subject}
             </Text>
+
+            {docName ? (
+                <Group gap={6} wrap='nowrap'>
+                    <IconFileText size={14} className='text-gray-400' style={{ flexShrink: 0 }} />
+                    <Text size='sm' c='violet' fw={600} lineClamp={2} title={docName}>
+                        {docName}
+                    </Text>
+                </Group>
+            ) : null}
 
             <Group gap={6} wrap='nowrap'>
                 <IconBuilding size={14} className='text-gray-400' />

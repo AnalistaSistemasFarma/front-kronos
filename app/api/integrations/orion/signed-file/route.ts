@@ -18,6 +18,7 @@ import {
   userIsOrionFlowSignatureResponsible,
 } from '@/lib/orion/service';
 import { isOrionProtectedFileUrl, isAllowedServerPdfFetchUrl, orionDocumentHasSignedCopy } from '@/lib/orion/signedFileAccess';
+import { stampSynerlinkWatermark } from '@/lib/orion/stampSynerlinkWatermark';
 
 function normalizeEmail(email?: string | null): string {
   return String(email || '')
@@ -167,7 +168,7 @@ export async function GET(req: Request) {
       targetUrl = selectedVersion.url;
 
       if (selectedVersion.kind === 'validated') {
-        // Versión DOCUMENTO VALIDADO (marca de agua) — aparte del historial de firmas.
+        // Versión SYNERLINK-VALIDO (marca de agua) — aparte del historial de firmas.
         wantValidated = true;
         maxSignerOrder = null;
       } else if (selectedVersion.kind === 'partial' || selectedVersion.kind === 'final') {
@@ -188,7 +189,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Versión no encontrada' }, { status: 404 });
     } else {
       targetUrl = resolveOrionPdfUrl(state, state.originalFileUrl ?? null);
-      // Vista vigente sellada: preferir DOCUMENTO VALIDADO (watermark).
+      // Vista vigente sellada: preferir SYNERLINK-VALIDO (watermark).
       const statusUpperLive = String(state.status || '').toUpperCase();
       if (
         statusUpperLive === 'FIRMADO' ||
@@ -218,11 +219,25 @@ export async function GET(req: Request) {
       ? 'private, max-age=60'
       : 'private, no-store';
 
-    const serveBuffer = (buffer: ArrayBuffer | Uint8Array, contentType?: string | null) => {
-      const body =
+    const serveBuffer = async (
+      buffer: ArrayBuffer | Uint8Array,
+      contentType?: string | null,
+      applySynerlinkStamp = false
+    ) => {
+      let body: Buffer =
         buffer instanceof ArrayBuffer
           ? Buffer.from(buffer)
           : Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+
+      if (applySynerlinkStamp) {
+        try {
+          const stamped = await stampSynerlinkWatermark(body);
+          body = Buffer.from(stamped);
+        } catch (err) {
+          console.warn('[orion/signed-file] stamp Synerlink watermark failed:', err);
+        }
+      }
+
       return new NextResponse(body as unknown as BodyInit, {
         status: 200,
         headers: {
@@ -247,9 +262,17 @@ export async function GET(req: Request) {
         if (!loc || !isAllowedServerPdfFetchUrl(loc)) return null;
         const follow = await fetch(loc, { cache: 'no-store', redirect: 'error' });
         if (!follow.ok) return null;
-        return serveBuffer(await follow.arrayBuffer(), follow.headers.get('content-type'));
+        return serveBuffer(
+          await follow.arrayBuffer(),
+          follow.headers.get('content-type'),
+          wantValidated
+        );
       }
-      return serveBuffer(await publicRes.arrayBuffer(), publicRes.headers.get('content-type'));
+      return serveBuffer(
+        await publicRes.arrayBuffer(),
+        publicRes.headers.get('content-type'),
+        wantValidated
+      );
     };
 
     if (!isOrionProtectedFileUrl(targetUrl)) {
@@ -265,11 +288,19 @@ export async function GET(req: Request) {
         if (loc && isAllowedServerPdfFetchUrl(loc)) {
           const follow = await fetch(loc, { cache: 'no-store', redirect: 'error' });
           if (follow.ok) {
-            return serveBuffer(await follow.arrayBuffer(), follow.headers.get('content-type'));
+            return await serveBuffer(
+              await follow.arrayBuffer(),
+              follow.headers.get('content-type'),
+              wantValidated
+            );
           }
         }
       } else if (publicRes.ok) {
-        return serveBuffer(await publicRes.arrayBuffer(), publicRes.headers.get('content-type'));
+        return await serveBuffer(
+          await publicRes.arrayBuffer(),
+          publicRes.headers.get('content-type'),
+          wantValidated
+        );
       }
 
       // URL pública caída (p. ej. OneDrive liberado tras prepare antiguo).
@@ -280,7 +311,11 @@ export async function GET(req: Request) {
           versions: state.versions,
         });
         if (resolved.base64) {
-          return serveBuffer(Buffer.from(resolved.base64, 'base64'), 'application/pdf');
+          return await serveBuffer(
+            Buffer.from(resolved.base64, 'base64'),
+            'application/pdf',
+            false
+          );
         }
       }
       const fromDrive = await servePdfFromOneDrive(state);
@@ -298,7 +333,9 @@ export async function GET(req: Request) {
       orionDocumentId: state.orionDocumentId,
       signedFileUrl: targetUrl,
       maxSignerOrder,
-      validated: wantValidated,
+      // Nunca pedir watermark a Orion: Kronos estampa una sola vez en serveBuffer.
+      // Si validated=true aquí + stampSynerlinkWatermark → sello/patrón duplicados.
+      validated: false,
     });
     if (!upstream.ok || !upstream.buffer) {
       // 409: Orion aún no tiene PDF acumulado (borrador / sin firmas) → original OneDrive
@@ -328,7 +365,7 @@ export async function GET(req: Request) {
       );
     }
 
-    return serveBuffer(upstream.buffer, upstream.contentType);
+    return await serveBuffer(upstream.buffer, upstream.contentType, wantValidated);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Error interno';
     return NextResponse.json({ error: message }, { status: 500 });

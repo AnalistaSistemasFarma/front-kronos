@@ -27,6 +27,8 @@ export type OrionSignerState = {
   notifyByEmail?: boolean | null;
   /** Este firmante debe aportar huella (además de rúbrica). */
   requireFingerprint?: boolean | null;
+  /** ID visual de firma en el documento (editable; default = order). */
+  signatureMarkId?: number | null;
   /** Orion: accept-sign exigirá biometricConsent* (huella / caja fingerprint). */
   requiresBiometricConsent?: boolean | null;
 };

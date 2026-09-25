@@ -1202,6 +1202,7 @@ function UserManagement() {
                   ? `Buscando en todos los usuarios · ${pagination.total} resultado(s)`
                   : 'La búsqueda aplica a toda la base, no solo a esta página'
               }
+              inputWrapperOrder={['label', 'input', 'description', 'error']}
               leftSection={<IconSearch size={14} />}
               value={searchInput}
               onChange={(e) => setSearchInput(e.currentTarget.value)}

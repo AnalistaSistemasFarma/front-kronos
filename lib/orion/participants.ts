@@ -16,7 +16,23 @@ export type OrionParticipant = {
   notifyByEmail?: boolean;
   /** Exige huella dactilar para este firmante. */
   requireFingerprint?: boolean;
+  /**
+   * ID visual de la firma en el documento (editable).
+   * Por defecto coincide con `order`.
+   */
+  signatureMarkId?: number;
 };
+
+/** ID de marca visible en cajas / PDF (fallback a order). */
+export function resolveSignatureMarkId(person: {
+  order: number;
+  signatureMarkId?: number | null;
+}): number {
+  const n = Number(person.signatureMarkId);
+  if (Number.isFinite(n) && n >= 1) return Math.trunc(n);
+  const order = Number(person.order);
+  return Number.isFinite(order) && order >= 1 ? Math.trunc(order) : 1;
+}
 
 function normalizeEmail(email?: string | null): string {
   return String(email || '')
@@ -60,6 +76,7 @@ export function mergeParticipantSources(
     cardCode?: string | null;
     notifyByEmail?: boolean | null;
     requireFingerprint?: boolean | null;
+    signatureMarkId?: number | null;
   }> | null
 ): OrionParticipant[] {
   if (signers?.length) {
@@ -69,8 +86,10 @@ export function mergeParticipantSources(
       .map((s, i) => {
         const type: OrionParticipantType =
           String(s.type || '').toLowerCase() === 'external' ? 'external' : 'internal';
+        const order = s.order ?? i + 1;
+        const markRaw = Number(s.signatureMarkId);
         return {
-          order: s.order ?? i + 1,
+          order,
           email: normalizeEmail(s.email),
           name: s.name?.trim() || s.email || `Firmante ${i + 1}`,
           role: 'Firmante' as OrionParticipantRole,
@@ -79,10 +98,16 @@ export function mergeParticipantSources(
           notifyByEmail:
             s.notifyByEmail == null ? true : Boolean(s.notifyByEmail),
           requireFingerprint: Boolean(s.requireFingerprint),
+          signatureMarkId:
+            Number.isFinite(markRaw) && markRaw >= 1 ? Math.trunc(markRaw) : order,
         };
       });
   }
-  return suggested.map((p, i) => ({ ...p, order: i + 1 }));
+  return suggested.map((p, i) => ({
+    ...p,
+    order: i + 1,
+    signatureMarkId: resolveSignatureMarkId({ ...p, order: i + 1 }),
+  }));
 }
 
 export function emptySignerSlot(order: number): OrionParticipant {
@@ -95,6 +120,7 @@ export function emptySignerSlot(order: number): OrionParticipant {
     cardCode: null,
     notifyByEmail: true,
     requireFingerprint: false,
+    signatureMarkId: order,
   };
 }
 
@@ -107,5 +133,17 @@ export function resizeParticipantSlots(
   while (next.length < clamped) {
     next.push(emptySignerSlot(next.length + 1));
   }
-  return next.map((p, i) => ({ ...p, order: i + 1 }));
+  return next.map((p, i) => {
+    const order = i + 1;
+    const mark = resolveSignatureMarkId(p);
+    // Si el mark seguía al order anterior y no fue personalizado, realinear.
+    const prevOrder = Number(p.order);
+    const markFollowedOrder =
+      Number.isFinite(prevOrder) && prevOrder >= 1 && mark === Math.trunc(prevOrder);
+    return {
+      ...p,
+      order,
+      signatureMarkId: markFollowedOrder ? order : mark,
+    };
+  });
 }

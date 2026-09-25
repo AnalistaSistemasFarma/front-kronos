@@ -1977,6 +1977,14 @@ export async function finalizeSignerTurn(
     fingerprintDataUrl?: string | null;
     /** Identidad del firmante (nombre, CC/NIT, cargo) para el sello Orion. */
     identity?: SignerAcceptIdentity | null;
+    /**
+     * Consentimiento ya resuelto por el caller (evita un GET extra a Orion).
+     * Si no viene, se consulta en Orion como antes.
+     */
+    personConsent?: {
+      hasSigningLegalConsent: boolean;
+      hasBiometricConsent: boolean;
+    } | null;
   }
 ): Promise<{
   state: OrionSignatureState;
@@ -2150,16 +2158,20 @@ export async function finalizeSignerTurn(
       ? normalizeSignerIdentity(params.identity, turnSigner.name || params.userEmail)
       : null;
     // Consentimiento a nivel persona (Orion users.*): no exigir checkbox por documento.
-    let personHasSigning = false;
-    let personHasBiometric = false;
-    try {
-      const consentRes = await getOrionPersonConsent(params.userEmail);
-      if (consentRes.ok && consentRes.data) {
-        personHasSigning = Boolean(consentRes.data.hasSigningLegalConsent);
-        personHasBiometric = Boolean(consentRes.data.hasBiometricConsent);
+    let personHasSigning = Boolean(
+      params.personConsent?.hasSigningLegalConsent
+    );
+    let personHasBiometric = Boolean(params.personConsent?.hasBiometricConsent);
+    if (!params.personConsent) {
+      try {
+        const consentRes = await getOrionPersonConsent(params.userEmail);
+        if (consentRes.ok && consentRes.data) {
+          personHasSigning = Boolean(consentRes.data.hasSigningLegalConsent);
+          personHasBiometric = Boolean(consentRes.data.hasBiometricConsent);
+        }
+      } catch {
+        /* si falla, caer al flag del formulario */
       }
-    } catch {
-      /* si falla, caer al flag del formulario */
     }
     const termsOk = identity?.acceptedTerms === true || personHasSigning;
     if (!identity || !termsOk) {

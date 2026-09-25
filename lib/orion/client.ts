@@ -408,12 +408,14 @@ export async function getOrionSignatureEmbedUrl(
 
 /**
  * Pide a Orion la URL pública de firma (`/sign/{token}`).
- * No usar /firma/externa de SynerLink en correos.
+ * Contrato: POST `/api/integrations/synerlink/embed/sign-url`
+ * (`sendEmail: false` = solo URL; `true` = URL + correo Graph de Orion).
  */
 export async function fetchOrionSignerSignUrl(
   orionDocumentId: string,
   email: string,
-  signOrder?: number | null
+  signOrder?: number | null,
+  options?: { sendEmail?: boolean }
 ): Promise<{ ok: boolean; status: number; signUrl: string | null; error?: string }> {
   const docId = String(orionDocumentId || '').trim();
   const mail = String(email || '')
@@ -422,22 +424,43 @@ export async function fetchOrionSignerSignUrl(
   if (!docId || !mail) {
     return { ok: false, status: 400, signUrl: null, error: 'docId y email son obligatorios' };
   }
-  const qs = new URLSearchParams({ docId, email: mail });
-  const order = Number(signOrder);
-  if (Number.isFinite(order) && order > 0) qs.set('signOrder', String(order));
 
-  const res = await orionFetch<{ signUrl?: string; email?: string }>(
-    `/api/integrations/synerlink/embed/sign-url?${qs.toString()}`,
-    { method: 'GET' }
-  );
-  const raw = String(res.data?.signUrl || '').trim();
+  const order = Number(signOrder);
+  const body: Record<string, string | number | boolean> = {
+    docId,
+    email: mail,
+    // No reenviar correo al solo obtener/copiar la URL.
+    sendEmail: options?.sendEmail === true,
+  };
+  if (Number.isFinite(order) && order > 0) body.signOrder = order;
+
+  const res = await orionFetch<{
+    signUrl?: string;
+    url?: string;
+    sign_url?: string;
+    data?: { signUrl?: string; url?: string };
+    email?: string;
+    error?: string;
+  }>(`/api/integrations/synerlink/embed/sign-url`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  const payload = res.data;
+  const raw = String(
+    payload?.signUrl ||
+      payload?.url ||
+      payload?.sign_url ||
+      payload?.data?.signUrl ||
+      payload?.data?.url ||
+      ''
+  ).trim();
   const signUrl = resolveOrionAbsoluteUrl(raw) || raw || null;
   if (!res.ok || !signUrl) {
     return {
       ok: false,
       status: res.status,
       signUrl: null,
-      error: res.error || 'Orion no devolvió URL de firma',
+      error: res.error || payload?.error || 'Orion no devolvió URL de firma',
     };
   }
   return { ok: true, status: res.status, signUrl };
@@ -620,7 +643,7 @@ export async function fetchOrionSignedFileContent(params: {
   signedFileUrl?: string | null;
   /** Solo firmas con order <= maxOrder (versión histórica parcial). */
   maxSignerOrder?: number | null;
-  /** Marca de agua DOCUMENTO VALIDADO (versión aparte; no mezclar con historial de firmas). */
+  /** Marca de agua en Orion (?validated=1). Preferir false: Kronos estampa en el proxy. */
   validated?: boolean;
 }): Promise<{
   ok: boolean;
