@@ -8,6 +8,7 @@ import {
   userCanModerateValentineWall,
 } from '@/lib/valentine/access';
 import { softDeleteValentinePost } from '@/lib/valentine/db';
+import { publishValentineEvent } from '@/lib/valentine/realtime';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +52,12 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     if (!deleted) {
       return NextResponse.json({ error: 'Mensaje no encontrado' }, { status: 404 });
     }
+
+    publishValentineEvent({
+      type: 'post_deleted',
+      companyId: access.company.idCompany,
+      postId,
+    });
 
     return NextResponse.json({ ok: true });
   } catch (err) {

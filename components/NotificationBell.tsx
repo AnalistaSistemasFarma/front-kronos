@@ -44,7 +44,7 @@ interface Notification {
   created_at: string;
 }
 
-const POLL_INTERVAL_MS = 90_000;
+const POLL_INTERVAL_MS = 30_000;
 
 function formatRelative(date: string) {
   const diff = Date.now() - new Date(date).getTime();
