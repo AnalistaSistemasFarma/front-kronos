@@ -73,6 +73,7 @@ const ALLOWED_TYPES = [
   'image/png',
   'image/jpeg',
   'image/jpg',
+  'text/plain',
 ];
 
 const MAX_FILE_SIZE = Number.MAX_SAFE_INTEGER; // Sin límite de tamaño
@@ -109,7 +110,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
   const getFileIcon = (type: string) => {
     if (type.includes('pdf')) return <IconFileText size={20} />;
-    if (type.includes('word') || type.includes('document')) return <IconFileText size={20} />;
+    if (type.includes('word') || type.includes('document') || type.includes('text/plain'))
+      return <IconFileText size={20} />;
     if (type.includes('excel') || type.includes('spreadsheet'))
       return <IconFileSpreadsheet size={20} />;
     if (type.includes('image')) return <IconPhoto size={20} />;
@@ -126,7 +128,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
   const validateFile = (file: File): string | null => {
     if (!ALLOWED_TYPES.includes(file.type)) {
-      return `Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG`;
+      return `Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG, TXT`;
     }
     // Sin límite de tamaño de archivo
     return null;
@@ -413,7 +415,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
           ref={fileInputRef}
           type='file'
           multiple
-          accept='.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg'
+          accept='.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.txt'
           onChange={handleFileInputChange}
           style={{ display: 'none' }}
           disabled={disabled}
