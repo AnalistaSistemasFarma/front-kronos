@@ -1,6 +1,6 @@
 {
  "empresa": "Farmalógica S.A.",
- "generado": "2026-09-24 20:39",
+ "generado": "2026-09-24 20:49",
  "fecha_corte": "2026-09-24",
  "fuente": {
   "listas": [
@@ -213,15 +213,15 @@
   ],
   "productos_sin_stock_aprobado": 15
  },
- "resumen": "En octubre se espera vender entre $5,9 mil millones y $8,3 mil millones, lo más probable $7,5 mil millones: un 20 % menos que septiembre. Sería prácticamente igual a octubre del año pasado.",
+ "resumen": "En octubre se espera vender entre $5,9 mil millones y $8,3 mil millones, lo más probable $7,5 mil millones. Prácticamente igual a octubre del año pasado.",
  "tarjetas": [
   {
    "id": "ventas",
    "titulo": "Ventas esperadas en octubre",
    "valor": "$7.493.820.901",
    "detalle": "Rango probable: $5,9 mil millones a $8,3 mil millones",
-   "semaforo": "rojo",
-   "frase": "20 % menos que septiembre."
+   "semaforo": "verde",
+   "frase": "Prácticamente igual a octubre del año pasado."
   },
   {
    "id": "agotamiento",
@@ -471,18 +471,6 @@
    "intermitente": false
   },
   {
-   "codigo": "PTPT0151P",
-   "nombre": "PIPERACILINA 4.000mg Y TAZOBACTAM 500mg SALVADOR PISA (10 UNID. X PLEGADIZA)",
-   "stock": 10,
-   "cuarentena": 0,
-   "venta_diaria": 310.4,
-   "dias_cobertura": 0,
-   "nivel": "rojo",
-   "sugerido_pedir": 27930,
-   "pedir_antes_de": "2026-09-24",
-   "intermitente": true
-  },
-  {
    "codigo": "PTBT0111",
    "nombre": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (1 UNID. X PLEGADIZA)",
    "stock": 3,
@@ -491,6 +479,18 @@
    "dias_cobertura": 0,
    "nivel": "rojo",
    "sugerido_pedir": 1720,
+   "pedir_antes_de": "2026-09-24",
+   "intermitente": true
+  },
+  {
+   "codigo": "PTPT0151P",
+   "nombre": "PIPERACILINA 4.000mg Y TAZOBACTAM 500mg SALVADOR PISA (10 UNID. X PLEGADIZA)",
+   "stock": 10,
+   "cuarentena": 0,
+   "venta_diaria": 310.4,
+   "dias_cobertura": 0,
+   "nivel": "rojo",
+   "sugerido_pedir": 27930,
    "pedir_antes_de": "2026-09-24",
    "intermitente": true
   },
@@ -972,16 +972,16 @@
   {
    "prioridad": "alta",
    "tipo": "agotamiento",
-   "titulo": "PIPERACILINA 4.000mg Y TAZOBACTAM 500mg SALVADOR PISA (10 UNID. X PLEGADIZA): el inventario alcanza para unos 0 días. (Se vende de forma intermitente: el cálculo es aproximado.)",
-   "accion": "Pedir ~27.930 unidades cuanto antes (idealmente esta semana).",
-   "codigo": "PTPT0151P"
+   "titulo": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (1 UNID. X PLEGADIZA): el inventario alcanza para unos 0 días. (Se vende de forma intermitente: el cálculo es aproximado.)",
+   "accion": "Pedir ~1.720 unidades cuanto antes (idealmente esta semana).",
+   "codigo": "PTBT0111"
   },
   {
    "prioridad": "alta",
    "tipo": "agotamiento",
-   "titulo": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (1 UNID. X PLEGADIZA): el inventario alcanza para unos 0 días. (Se vende de forma intermitente: el cálculo es aproximado.)",
-   "accion": "Pedir ~1.720 unidades cuanto antes (idealmente esta semana).",
-   "codigo": "PTBT0111"
+   "titulo": "PIPERACILINA 4.000mg Y TAZOBACTAM 500mg SALVADOR PISA (10 UNID. X PLEGADIZA): el inventario alcanza para unos 0 días. (Se vende de forma intermitente: el cálculo es aproximado.)",
+   "accion": "Pedir ~27.930 unidades cuanto antes (idealmente esta semana).",
+   "codigo": "PTPT0151P"
   },
   {
    "prioridad": "alta",

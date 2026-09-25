@@ -647,13 +647,20 @@ def main():
     mes_txt = MESES_ES[ym_obj[1] - 1]
     sube = "más" if var >= 0 else "menos"
     comp_prev = MESES_ES[ym_prev[1] - 1]
+    # La comparación principal es contra el mismo mes del año pasado (dato real y cerrado);
+    # el mes anterior puede no haber cerrado todavía y compararía pronóstico contra pronóstico.
     resumen = (f"En {mes_txt} se espera vender entre {pesos_corto(obj['min'])} y {pesos_corto(obj['max'])}, "
-               f"lo más probable {pesos_corto(obj['esperado'])}: un {abs(var):.0f} % {sube} que {comp_prev}.")
+               f"lo más probable {pesos_corto(obj['esperado'])}.")
     if var_ano is not None:
         if abs(var_ano) < 1:
-            resumen += f" Sería prácticamente igual a {mes_txt} del año pasado."
+            frase_var = f"Prácticamente igual a {mes_txt} del año pasado."
         else:
-            resumen += f" Frente a {mes_txt} del año pasado sería un {abs(var_ano):.0f} % {'más' if var_ano >= 0 else 'menos'}."
+            frase_var = f"{abs(var_ano):.0f} % {'más' if var_ano >= 0 else 'menos'} que {mes_txt} del año pasado."
+        var_sem = var_ano
+    else:
+        frase_var = f"{abs(var):.0f} % {sube} que {comp_prev}."
+        var_sem = var
+    resumen += f" {frase_var}"
     mes_pasado = None
     if mp:
         ym_mp = tuple(int(x) for x in mp["mes"].split("-"))
@@ -681,8 +688,8 @@ def main():
     tarjetas = [
         {"id": "ventas", "titulo": f"Ventas esperadas en {mes_txt}", "valor": pesos(obj["esperado"]),
          "detalle": f"Rango probable: {pesos_corto(obj['min'])} a {pesos_corto(obj['max'])}",
-         "semaforo": sem_var(var),
-         "frase": f"{abs(var):.0f} % {sube} que {comp_prev}."},
+         "semaforo": sem_var(var_sem),
+         "frase": frase_var},
         {"id": "agotamiento", "titulo": "Productos en riesgo de agotarse", "valor": str(len(en_riesgo_quiebre)),
          "detalle": f"{n_rojo_q} urgentes (menos de {LEAD_TIME_DIAS} días de inventario)",
          "semaforo": "rojo" if n_rojo_q else "amarillo" if en_riesgo_quiebre else "verde",
