@@ -1,6 +1,6 @@
 {
  "empresa": "Farmalógica S.A.",
- "generado": "2026-09-24 20:49",
+ "generado": "2026-09-24 21:37",
  "fecha_corte": "2026-09-24",
  "fuente": {
   "listas": [
@@ -17,7 +17,8 @@
   "meses_incompletos": [
    "2026-09"
   ],
-  "lotes_con_vencimiento": 13,
+  "lotes_con_vencimiento": 71,
+  "lotes_origen": "SAP Business One",
   "ventas_origen": "SAP Business One (vista Farma_VentasB1SLQuery)",
   "error_sap": null,
   "conciliacion": [
@@ -234,8 +235,8 @@
   {
    "id": "vencimiento",
    "titulo": "Lotes en riesgo de vencer",
-   "valor": "2",
-   "detalle": "2 urgentes",
+   "valor": "7",
+   "detalle": "7 urgentes · ≈ $5 millones en riesgo",
    "semaforo": "rojo",
    "frase": "Lotes que vencerían antes de venderse al ritmo actual."
   },
@@ -941,24 +942,123 @@
  ],
  "lotes_riesgo": [
   {
-   "codigo": "PTMP0521",
-   "nombre": "MEROPENEM 500 mg (10 UNID. X PLEGADIZA)",
-   "lote": "2101624",
-   "cantidad": 1480,
-   "vence": "2026-09-26",
-   "dias_para_vencer": 2,
-   "unidades_sin_vender": 1174,
-   "nivel": "rojo"
+   "codigo": "PTAB0110",
+   "nombre": "AZBIOS (AZTREONAM 1G)(10 UND. X PLEGADIZA)",
+   "lote": "18112244",
+   "cantidad": 620,
+   "vence": "2026-08-31",
+   "dias_para_vencer": -24,
+   "unidades_sin_vender": 620,
+   "valor_en_riesgo": 4145459,
+   "venta_diaria": 52.1,
+   "almacenes": [
+    "BAPPT2"
+   ],
+   "nivel": "rojo",
+   "frase": "El lote 18112244 de AZBIOS (AZTREONAM 1G)(10 UND. X PLEGADIZA) venció el 31 de agosto de 2026 y aún figura con 620 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
   },
   {
-   "codigo": "PTMP0521",
-   "nombre": "MEROPENEM 500 mg (10 UNID. X PLEGADIZA)",
-   "lote": "2361624",
-   "cantidad": 40,
-   "vence": "2026-10-27",
-   "dias_para_vencer": 33,
-   "unidades_sin_vender": 0,
-   "nivel": "rojo"
+   "codigo": "PTBT0110",
+   "nombre": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA)",
+   "lote": "1435324-1",
+   "cantidad": 200,
+   "vence": "2026-07-31",
+   "dias_para_vencer": -55,
+   "unidades_sin_vender": 200,
+   "valor_en_riesgo": 347274,
+   "venta_diaria": 72.3,
+   "almacenes": [
+    "BAPPT2"
+   ],
+   "nivel": "rojo",
+   "frase": "El lote 1435324-1 de BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA) venció el 31 de julio de 2026 y aún figura con 200 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
+  },
+  {
+   "codigo": "PTBT0110",
+   "nombre": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA)",
+   "lote": "1745324",
+   "cantidad": 200,
+   "vence": "2026-08-31",
+   "dias_para_vencer": -24,
+   "unidades_sin_vender": 200,
+   "valor_en_riesgo": 347274,
+   "venta_diaria": 72.3,
+   "almacenes": [
+    "BAPPT2"
+   ],
+   "nivel": "rojo",
+   "frase": "El lote 1745324 de BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA) venció el 31 de agosto de 2026 y aún figura con 200 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
+  },
+  {
+   "codigo": "PTBT0110",
+   "nombre": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA)",
+   "lote": "1775324-1",
+   "cantidad": 200,
+   "vence": "2026-08-31",
+   "dias_para_vencer": -24,
+   "unidades_sin_vender": 200,
+   "valor_en_riesgo": 347274,
+   "venta_diaria": 72.3,
+   "almacenes": [
+    "BAPPT2"
+   ],
+   "nivel": "rojo",
+   "frase": "El lote 1775324-1 de BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA) venció el 31 de agosto de 2026 y aún figura con 200 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
+  },
+  {
+   "codigo": "PTZB0110A",
+   "nombre": "ZOLIBIOS (CEFAZOLINA 1g BIOSELECT)(10 UND. X PLEGADIZA)",
+   "lote": "1625424-2",
+   "cantidad": 20,
+   "vence": "2026-08-31",
+   "dias_para_vencer": -24,
+   "unidades_sin_vender": 20,
+   "valor_en_riesgo": 33772,
+   "venta_diaria": 187.4,
+   "almacenes": [
+    "BAPPT2"
+   ],
+   "nivel": "rojo",
+   "frase": "El lote 1625424-2 de ZOLIBIOS (CEFAZOLINA 1g BIOSELECT)(10 UND. X PLEGADIZA) venció el 31 de agosto de 2026 y aún figura con 20 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
+  },
+  {
+   "codigo": "PTBT0111",
+   "nombre": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (1 UNID. X PLEGADIZA)",
+   "lote": "1435324-1",
+   "cantidad": 3,
+   "vence": "2026-07-31",
+   "dias_para_vencer": -55,
+   "unidades_sin_vender": 3,
+   "valor_en_riesgo": 5796,
+   "venta_diaria": 19.1,
+   "almacenes": [
+    "BAPPT2"
+   ],
+   "nivel": "rojo",
+   "frase": "El lote 1435324-1 de BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (1 UNID. X PLEGADIZA) venció el 31 de julio de 2026 y aún figura con 3 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
+  },
+  {
+   "codigo": "PTCZ0152",
+   "nombre": "CEFAZOLINA 1g HONDURAS (10 UNID. X PLEGADIZA)",
+   "lote": "1275424-1",
+   "cantidad": 1000,
+   "vence": "2026-06-30",
+   "dias_para_vencer": -86,
+   "unidades_sin_vender": 1000,
+   "valor_en_riesgo": 0,
+   "venta_diaria": 0.0,
+   "almacenes": [
+    "BAPPT2"
+   ],
+   "nivel": "rojo",
+   "frase": "El lote 1275424-1 de CEFAZOLINA 1g HONDURAS (10 UNID. X PLEGADIZA) venció el 30 de junio de 2026 y aún figura con 1.000 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
   }
  ],
  "alertas": [
@@ -1021,16 +1121,44 @@
   {
    "prioridad": "alta",
    "tipo": "vencimiento",
-   "titulo": "Lote 2101624 de MEROPENEM 500 mg (10 UNID. X PLEGADIZA) vence el 2026-09-26; al ritmo actual quedarían ~1.174 de 1.480 unidades sin vender.",
-   "accion": "Priorizar su despacho (promoción, reasignación a clientes de mayor rotación).",
-   "codigo": "PTMP0521"
+   "titulo": "El lote 18112244 de AZBIOS (AZTREONAM 1G)(10 UND. X PLEGADIZA) venció el 31 de agosto de 2026 y aún figura con 620 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad.",
+   "codigo": "PTAB0110"
   },
   {
    "prioridad": "alta",
    "tipo": "vencimiento",
-   "titulo": "Lote 2361624 de MEROPENEM 500 mg (10 UNID. X PLEGADIZA) vence el 2026-10-27; al ritmo actual quedarían ~0 de 40 unidades sin vender.",
-   "accion": "Priorizar su despacho (promoción, reasignación a clientes de mayor rotación).",
-   "codigo": "PTMP0521"
+   "titulo": "El lote 1435324-1 de BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA) venció el 31 de julio de 2026 y aún figura con 200 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad.",
+   "codigo": "PTBT0110"
+  },
+  {
+   "prioridad": "alta",
+   "tipo": "vencimiento",
+   "titulo": "El lote 1745324 de BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA) venció el 31 de agosto de 2026 y aún figura con 200 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad.",
+   "codigo": "PTBT0110"
+  },
+  {
+   "prioridad": "alta",
+   "tipo": "vencimiento",
+   "titulo": "El lote 1775324-1 de BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA) venció el 31 de agosto de 2026 y aún figura con 200 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad.",
+   "codigo": "PTBT0110"
+  },
+  {
+   "prioridad": "alta",
+   "tipo": "vencimiento",
+   "titulo": "El lote 1625424-2 de ZOLIBIOS (CEFAZOLINA 1g BIOSELECT)(10 UND. X PLEGADIZA) venció el 31 de agosto de 2026 y aún figura con 20 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad.",
+   "codigo": "PTZB0110A"
+  },
+  {
+   "prioridad": "alta",
+   "tipo": "vencimiento",
+   "titulo": "El lote 1435324-1 de BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (1 UNID. X PLEGADIZA) venció el 31 de julio de 2026 y aún figura con 3 unidades en bodega aprobada.",
+   "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad.",
+   "codigo": "PTBT0111"
   },
   {
    "prioridad": "media",
@@ -1047,6 +1175,359 @@
    "codigo": null
   }
  ],
+ "lotes_registros": {
+  "resumen": "7 lotes podrían vencerse antes de venderse (2.243 unidades, ≈ $5 millones) y 11 registros sanitarios de productos con ventas vencen en los próximos 6 meses o ya figuran vencidos.",
+  "tarjetas": [
+   {
+    "id": "lotes",
+    "titulo": "Lotes en riesgo de vencer",
+    "valor": "7",
+    "detalle": "2.243 unidades ≈ $5 millones · 7 urgentes",
+    "semaforo": "rojo",
+    "frase": "Lotes que no alcanzarían a venderse antes de su fecha de vencimiento."
+   },
+   {
+    "id": "registros",
+    "titulo": "Registros sanitarios por renovar",
+    "valor": "11",
+    "detalle": "10 urgentes (vencidos o a menos de 3 meses) · 1 entre 3 y 6 meses · 2 entre 6 y 12 meses",
+    "semaforo": "rojo",
+    "frase": "Productos que venden $5,7 mil millones al año dependen de estas renovaciones."
+   }
+  ],
+  "lotes": {
+   "total_lotes": 71,
+   "en_riesgo": 7,
+   "urgentes": 7,
+   "unidades_en_riesgo": 2243,
+   "valor_en_riesgo": 5226849,
+   "lista": [
+    {
+     "codigo": "PTAB0110",
+     "nombre": "AZBIOS (AZTREONAM 1G)(10 UND. X PLEGADIZA)",
+     "lote": "18112244",
+     "cantidad": 620,
+     "vence": "2026-08-31",
+     "dias_para_vencer": -24,
+     "unidades_sin_vender": 620,
+     "valor_en_riesgo": 4145459,
+     "venta_diaria": 52.1,
+     "almacenes": [
+      "BAPPT2"
+     ],
+     "nivel": "rojo",
+     "frase": "El lote 18112244 de AZBIOS (AZTREONAM 1G)(10 UND. X PLEGADIZA) venció el 31 de agosto de 2026 y aún figura con 620 unidades en bodega aprobada.",
+     "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
+    },
+    {
+     "codigo": "PTBT0110",
+     "nombre": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA)",
+     "lote": "1435324-1",
+     "cantidad": 200,
+     "vence": "2026-07-31",
+     "dias_para_vencer": -55,
+     "unidades_sin_vender": 200,
+     "valor_en_riesgo": 347274,
+     "venta_diaria": 72.3,
+     "almacenes": [
+      "BAPPT2"
+     ],
+     "nivel": "rojo",
+     "frase": "El lote 1435324-1 de BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA) venció el 31 de julio de 2026 y aún figura con 200 unidades en bodega aprobada.",
+     "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
+    },
+    {
+     "codigo": "PTBT0110",
+     "nombre": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA)",
+     "lote": "1745324",
+     "cantidad": 200,
+     "vence": "2026-08-31",
+     "dias_para_vencer": -24,
+     "unidades_sin_vender": 200,
+     "valor_en_riesgo": 347274,
+     "venta_diaria": 72.3,
+     "almacenes": [
+      "BAPPT2"
+     ],
+     "nivel": "rojo",
+     "frase": "El lote 1745324 de BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA) venció el 31 de agosto de 2026 y aún figura con 200 unidades en bodega aprobada.",
+     "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
+    },
+    {
+     "codigo": "PTBT0110",
+     "nombre": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA)",
+     "lote": "1775324-1",
+     "cantidad": 200,
+     "vence": "2026-08-31",
+     "dias_para_vencer": -24,
+     "unidades_sin_vender": 200,
+     "valor_en_riesgo": 347274,
+     "venta_diaria": 72.3,
+     "almacenes": [
+      "BAPPT2"
+     ],
+     "nivel": "rojo",
+     "frase": "El lote 1775324-1 de BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (10 UNID. X PLEGADIZA) venció el 31 de agosto de 2026 y aún figura con 200 unidades en bodega aprobada.",
+     "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
+    },
+    {
+     "codigo": "PTZB0110A",
+     "nombre": "ZOLIBIOS (CEFAZOLINA 1g BIOSELECT)(10 UND. X PLEGADIZA)",
+     "lote": "1625424-2",
+     "cantidad": 20,
+     "vence": "2026-08-31",
+     "dias_para_vencer": -24,
+     "unidades_sin_vender": 20,
+     "valor_en_riesgo": 33772,
+     "venta_diaria": 187.4,
+     "almacenes": [
+      "BAPPT2"
+     ],
+     "nivel": "rojo",
+     "frase": "El lote 1625424-2 de ZOLIBIOS (CEFAZOLINA 1g BIOSELECT)(10 UND. X PLEGADIZA) venció el 31 de agosto de 2026 y aún figura con 20 unidades en bodega aprobada.",
+     "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
+    },
+    {
+     "codigo": "PTBT0111",
+     "nombre": "BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (1 UNID. X PLEGADIZA)",
+     "lote": "1435324-1",
+     "cantidad": 3,
+     "vence": "2026-07-31",
+     "dias_para_vencer": -55,
+     "unidades_sin_vender": 3,
+     "valor_en_riesgo": 5796,
+     "venta_diaria": 19.1,
+     "almacenes": [
+      "BAPPT2"
+     ],
+     "nivel": "rojo",
+     "frase": "El lote 1435324-1 de BIOTRAXONA 1g (CEFTRIAXONA 1g BIOSELECT) (1 UNID. X PLEGADIZA) venció el 31 de julio de 2026 y aún figura con 3 unidades en bodega aprobada.",
+     "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
+    },
+    {
+     "codigo": "PTCZ0152",
+     "nombre": "CEFAZOLINA 1g HONDURAS (10 UNID. X PLEGADIZA)",
+     "lote": "1275424-1",
+     "cantidad": 1000,
+     "vence": "2026-06-30",
+     "dias_para_vencer": -86,
+     "unidades_sin_vender": 1000,
+     "valor_en_riesgo": 0,
+     "venta_diaria": 0.0,
+     "almacenes": [
+      "BAPPT2"
+     ],
+     "nivel": "rojo",
+     "frase": "El lote 1275424-1 de CEFAZOLINA 1g HONDURAS (10 UNID. X PLEGADIZA) venció el 30 de junio de 2026 y aún figura con 1.000 unidades en bodega aprobada.",
+     "accion": "Verificar el físico y gestionar la baja o destrucción con Calidad."
+    }
+   ]
+  },
+  "registros": {
+   "rojo": 10,
+   "amarillo": 1,
+   "verde": 2,
+   "sin_fecha": 73,
+   "vencidos_sin_ventas": 1,
+   "lista": [
+    {
+     "registro": "215M2021 SSA IV",
+     "codigos": [
+      "PTCL0553C"
+     ],
+     "nombre": "CEFALOTINA 1g MEXICO (1 UNID. X PLEGADIZA) (C)",
+     "vence": "2026-10-19",
+     "dias_para_vencer": 25,
+     "ventas_12m": 4098447725,
+     "unidades_12m": 1853424,
+     "nivel": "rojo",
+     "frase": "El registro sanitario de CEFALOTINA 1g MEXICO (1 UNID. X PLEGADIZA) (C) vence el 19 de octubre de 2026; representa $4,1 mil millones de ventas al año.",
+     "accion": "Iniciar la renovación ante la autoridad sanitaria del país."
+    },
+    {
+     "registro": "PF-51295",
+     "codigos": [
+      "PTPT0150"
+     ],
+     "nombre": "PIPERACILINA Y TAZOBACTAM 4.5g GUATEMALA (10 UNID. X PLEGADIZA)",
+     "vence": "2025-04-27",
+     "dias_para_vencer": -515,
+     "ventas_12m": 769528365,
+     "unidades_12m": 264420,
+     "nivel": "rojo",
+     "frase": "El registro sanitario de PIPERACILINA Y TAZOBACTAM 4.5g GUATEMALA (10 UNID. X PLEGADIZA) (PF-51295) figura vencido desde el 27 de abril de 2025 y el producto vendió $770 millones en los últimos 12 meses.",
+     "accion": "Confirmar con Asuntos Regulatorios si la renovación ya está radicada ante la autoridad sanitaria del país y actualizar la fecha en SAP; si no, iniciarla de inmediato."
+    },
+    {
+     "registro": "PF-44301",
+     "codigos": [
+      "PTCP0150"
+     ],
+     "nombre": "CEFEPIME 1g GUATEMALA (10 UNID. X PLEGADIZA)",
+     "vence": "2025-03-09",
+     "dias_para_vencer": -564,
+     "ventas_12m": 158650182,
+     "unidades_12m": 51320,
+     "nivel": "rojo",
+     "frase": "El registro sanitario de CEFEPIME 1g GUATEMALA (10 UNID. X PLEGADIZA) (PF-44301) figura vencido desde el 9 de marzo de 2025 y el producto vendió $159 millones en los últimos 12 meses.",
+     "accion": "Confirmar con Asuntos Regulatorios si la renovación ya está radicada ante la autoridad sanitaria del país y actualizar la fecha en SAP; si no, iniciarla de inmediato."
+    },
+    {
+     "registro": "HN-M-1018-0159",
+     "codigos": [
+      "PTAM0152"
+     ],
+     "nombre": "AMPICILINA 1g HONDURAS (10 UNID. X PLEGADIZA)",
+     "vence": "2023-10-20",
+     "dias_para_vencer": -1070,
+     "ventas_12m": 66545300,
+     "unidades_12m": 51000,
+     "nivel": "rojo",
+     "frase": "El registro sanitario de AMPICILINA 1g HONDURAS (10 UNID. X PLEGADIZA) (HN-M-1018-0159) figura vencido desde el 20 de octubre de 2023 y el producto vendió $67 millones en los últimos 12 meses.",
+     "accion": "Confirmar con Asuntos Regulatorios si la renovación ya está radicada ante la autoridad sanitaria del país y actualizar la fecha en SAP; si no, iniciarla de inmediato."
+    },
+    {
+     "registro": "PF-44300",
+     "codigos": [
+      "PTIM0150"
+     ],
+     "nombre": "IMIPENEM & CILASTATINA 1 g GUATEMALA (10 UNID. X PLEGADIZA)",
+     "vence": "2025-03-09",
+     "dias_para_vencer": -564,
+     "ventas_12m": 29638477,
+     "unidades_12m": 3200,
+     "nivel": "rojo",
+     "frase": "El registro sanitario de IMIPENEM & CILASTATINA 1 g GUATEMALA (10 UNID. X PLEGADIZA) (PF-44300) figura vencido desde el 9 de marzo de 2025 y el producto vendió $30 millones en los últimos 12 meses.",
+     "accion": "Confirmar con Asuntos Regulatorios si la renovación ya está radicada ante la autoridad sanitaria del país y actualizar la fecha en SAP; si no, iniciarla de inmediato."
+    },
+    {
+     "registro": "EE-10348",
+     "codigos": [
+      "PTCF015501",
+      "PTCF015502"
+     ],
+     "nombre": "CEFTRIACOR (CEFTRIAXONA 1G) PERÚ (1 UNID X PLEGADIZA)",
+     "vence": "2026-10-29",
+     "dias_para_vencer": 35,
+     "ventas_12m": 18870777,
+     "unidades_12m": 10500,
+     "nivel": "rojo",
+     "frase": "El registro sanitario de CEFTRIACOR (CEFTRIAXONA 1G) PERÚ (1 UNID X PLEGADIZA) vence el 29 de octubre de 2026; representa $19 millones de ventas al año.",
+     "accion": "Iniciar la renovación ante la autoridad sanitaria del país."
+    },
+    {
+     "registro": "6871-MEE-1221",
+     "codigos": [
+      "PTAZ0111EXP"
+     ],
+     "nombre": "AZTREONAM 1g ECUADOR  (10 UNID. X PLEGADIZA)",
+     "vence": "2026-12-22",
+     "dias_para_vencer": 89,
+     "ventas_12m": 18147965,
+     "unidades_12m": 2000,
+     "nivel": "rojo",
+     "frase": "El registro sanitario de AZTREONAM 1g ECUADOR  (10 UNID. X PLEGADIZA) vence el 22 de diciembre de 2026; representa $18 millones de ventas al año.",
+     "accion": "Iniciar la renovación ante la autoridad sanitaria del país."
+    },
+    {
+     "registro": "INVIMA 2019M-002204-R3",
+     "codigos": [
+      "PTRY0010"
+     ],
+     "nombre": "CLORURO POTASIO 2mEq/mLX10mL CAJA X  200",
+     "vence": "2024-05-16",
+     "dias_para_vencer": -861,
+     "ventas_12m": 8500000,
+     "unidades_12m": 5000,
+     "nivel": "rojo",
+     "frase": "El registro sanitario de CLORURO POTASIO 2mEq/mLX10mL CAJA X  200 (INVIMA 2019M-002204-R3) figura vencido desde el 16 de mayo de 2024 y el producto vendió $8 millones en los últimos 12 meses.",
+     "accion": "Confirmar con Asuntos Regulatorios si la renovación ya está radicada ante el INVIMA y actualizar la fecha en SAP; si no, iniciarla de inmediato."
+    },
+    {
+     "registro": "PF-44159",
+     "codigos": [
+      "PTCF0150"
+     ],
+     "nombre": "CEFTRIAXONA 1g GUATEMALA (10 UNID. X PLEGADIZA)",
+     "vence": "2025-02-10",
+     "dias_para_vencer": -591,
+     "ventas_12m": 2272901,
+     "unidades_12m": 2000,
+     "nivel": "rojo",
+     "frase": "El registro sanitario de CEFTRIAXONA 1g GUATEMALA (10 UNID. X PLEGADIZA) (PF-44159) figura vencido desde el 10 de febrero de 2025 y el producto vendió $2 millones en los últimos 12 meses.",
+     "accion": "Confirmar con Asuntos Regulatorios si la renovación ya está radicada ante la autoridad sanitaria del país y actualizar la fecha en SAP; si no, iniciarla de inmediato."
+    },
+    {
+     "registro": "INVIMA 2018M-0002942-R2",
+     "codigos": [
+      "PTRY0021"
+     ],
+     "nombre": "ATROPINA SULFATO 1mg/mL",
+     "vence": "2023-12-31",
+     "dias_para_vencer": -998,
+     "ventas_12m": 1080000,
+     "unidades_12m": 1200,
+     "nivel": "rojo",
+     "frase": "El registro sanitario de ATROPINA SULFATO 1mg/mL (INVIMA 2018M-0002942-R2) figura vencido desde el 31 de diciembre de 2023 y el producto vendió $1 millones en los últimos 12 meses.",
+     "accion": "Confirmar con Asuntos Regulatorios si la renovación ya está radicada ante el INVIMA y actualizar la fecha en SAP; si no, iniciarla de inmediato."
+    },
+    {
+     "registro": "038M2022 SSA IV",
+     "codigos": [
+      "PTPT0153",
+      "PTPT0153C"
+     ],
+     "nombre": "PIPERACILINA Y TAZOBACTAM 4.5g MEXICO (1 UNID. X PLEGADIZA) (C)",
+     "vence": "2027-02-08",
+     "dias_para_vencer": 137,
+     "ventas_12m": 574575700,
+     "unidades_12m": 100000,
+     "nivel": "amarillo",
+     "frase": "El registro sanitario de PIPERACILINA Y TAZOBACTAM 4.5g MEXICO (1 UNID. X PLEGADIZA) (C) vence el 8 de febrero de 2027; representa $575 millones de ventas al año.",
+     "accion": "Iniciar la renovación ante la autoridad sanitaria del país."
+    },
+    {
+     "registro": "PF- 61873",
+     "codigos": [
+      "PTRY0084"
+     ],
+     "nombre": "CITAFE 20 mg/mL SOLUCION ESTERIL GUATEMALA  (CAJA X 10)",
+     "vence": "2027-08-04",
+     "dias_para_vencer": 314,
+     "ventas_12m": 81942037,
+     "unidades_12m": 2840,
+     "nivel": "verde",
+     "frase": "El registro sanitario de CITAFE 20 mg/mL SOLUCION ESTERIL GUATEMALA  (CAJA X 10) vence el 4 de agosto de 2027; representa $82 millones de ventas al año.",
+     "accion": "Programar la renovación ante la autoridad sanitaria del país."
+    },
+    {
+     "registro": "PF - 61541",
+     "codigos": [
+      "PTRY0087"
+     ],
+     "nombre": "TRIMETOPRIM 80 mg + SULFAMETOXAZOL 400 mg/5 mL GUATEMALA  (CAJA X 10)",
+     "vence": "2027-07-05",
+     "dias_para_vencer": 284,
+     "ventas_12m": 48216285,
+     "unidades_12m": 7520,
+     "nivel": "verde",
+     "frase": "El registro sanitario de TRIMETOPRIM 80 mg + SULFAMETOXAZOL 400 mg/5 mL GUATEMALA  (CAJA X 10) vence el 5 de julio de 2027; representa $48 millones de ventas al año.",
+     "accion": "Programar la renovación ante la autoridad sanitaria del país."
+    }
+   ]
+  },
+  "fuente": {
+   "lotes": "SAP Business One (vista Farma_LotesBodegaInsumosB1SLQuery, almacenes BAPPT, BAPPT2, BAPPT_YB)",
+   "registros": "SAP Business One (registros sanitarios, FAR_RegiSanitario)"
+  },
+  "como_leer": [
+   "Lotes: se toman las existencias reales por lote de SAP en las bodegas de producto terminado aprobado, con la fecha de vencimiento registrada en cada lote.",
+   "Suponemos que se despacha primero el lote que vence primero y que el producto se sigue vendiendo al ritmo proyectado; lo que no alcanza a venderse antes de la fecha de vencimiento queda en riesgo.",
+   "El valor en riesgo se calcula con el precio promedio de venta de los últimos 12 meses.",
+   "Registros sanitarios: 🔴 vencido o vence en menos de 3 meses, 🟡 entre 3 y 6 meses, 🟢 entre 6 y 12 meses. Solo se listan productos con ventas en los últimos 12 meses, ordenados por lo que venden.",
+   "73 registros activos no tienen fecha de vencimiento cargada en SAP y no se pueden evaluar."
+  ]
+ },
  "como_leer": [
   "Las cifras de ventas son netas: facturas menos notas crédito, en pesos colombianos, tomadas de SAP.",
   "Cuando un producto se vende de forma intermitente (hay meses sin venta), usamos un método especial para ese tipo de venta y lo indicamos con la etiqueta «Venta intermitente».",
@@ -1054,6 +1535,506 @@
   "La franja sombreada es el rango probable: lo normal es que el resultado caiga ahí.",
   "Semáforo: 🟢 todo bien, 🟡 conviene revisarlo, 🔴 requiere acción pronto.",
   "Los días de inventario suponen que reponer un producto toma unos 30 días.",
-  "El vencimiento de cada lote se calcula con su fecha de fabricación y la vida útil del registro sanitario."
- ]
+  "El vencimiento de cada lote es la fecha registrada en SAP para ese lote."
+ ],
+ "cartera": {
+  "generado": "2026-09-24 21:37",
+  "fuente": {
+   "sap": "Invoices + IncomingPayments (SAP B1 Farmalógica, solo lectura)",
+   "bancos": "FAR - BANCOS MOVIMIENTOS",
+   "bancos_hasta": "2026-09-24",
+   "pagos_hasta": "2026-09-24",
+   "historial_desde": "2024-01-01"
+  },
+  "resumen": "En las próximas 4 semanas se espera recaudar entre $4,4 mil millones y $7,3 mil millones, y en 13 semanas entre $20,2 mil millones y $24,3 mil millones.",
+  "tarjetas": [
+   {
+    "id": "cartera_total",
+    "titulo": "Cartera por cobrar hoy",
+    "valor": "$44,5 mil millones",
+    "detalle": "3.016 facturas abiertas en SAP",
+    "semaforo": "amarillo",
+    "frase": "El 50 % ya está vencido ($22,2 mil millones)."
+   },
+   {
+    "id": "recaudo_4",
+    "titulo": "Recaudo esperado · 4 semanas",
+    "valor": "$7,0 mil millones",
+    "detalle": "Rango probable: $4,4 mil millones a $7,3 mil millones",
+    "semaforo": "verde",
+    "frase": "Lo que se espera que paguen los clientes en el próximo mes."
+   },
+   {
+    "id": "riesgo",
+    "titulo": "Cartera en riesgo",
+    "valor": "$34,0 mil millones",
+    "detalle": "$14,0 mil millones vencidos hace más de 60 días y $20,0 mil millones de clientes que suelen pagar con más de 30 días de retraso (1.991 facturas)",
+    "semaforo": "rojo",
+    "frase": "Revise abajo con quién gestionar el cobro primero."
+   },
+   {
+    "id": "confiabilidad",
+    "titulo": "Qué tan confiable es el pronóstico",
+    "valor": "Media",
+    "detalle": "En pruebas con fechas pasadas se equivocó en promedio un 17 % a 4 semanas",
+    "semaforo": "amarillo",
+    "frase": "Úselo como guía; revise el rango probable."
+   },
+   {
+    "id": "flujo",
+    "titulo": "Flujo de caja · 13 semanas",
+    "valor": "-$1,7 mil millones",
+    "detalle": "Entradas $26,4 mil millones · salidas típicas $28,1 mil millones",
+    "semaforo": "amarillo",
+    "frase": "Diferencia esperada entre lo que entra y lo que sale."
+   }
+  ],
+  "cartera": {
+   "total": 44542045451,
+   "vencida": 22222348691,
+   "por_vencer": 22319696760,
+   "en_riesgo": 33989520304,
+   "en_riesgo_vencida_60": 14032559308,
+   "edades": [
+    {
+     "id": "por_vencer",
+     "tramo": "Por vencer",
+     "monto": 22319696760
+    },
+    {
+     "id": "1_30",
+     "tramo": "1 a 30 días",
+     "monto": 5462471456
+    },
+    {
+     "id": "31_60",
+     "tramo": "31 a 60 días",
+     "monto": 2727317926
+    },
+    {
+     "id": "61_90",
+     "tramo": "61 a 90 días",
+     "monto": 2287358568
+    },
+    {
+     "id": "91_180",
+     "tramo": "91 a 180 días",
+     "monto": 3304150972
+    },
+    {
+     "id": "181_365",
+     "tramo": "181 a 365 días",
+     "monto": 3525541696
+    },
+    {
+     "id": "mas_365",
+     "tramo": "Más de 1 año",
+     "monto": 4915508072
+    }
+   ]
+  },
+  "recaudo": {
+   "semanas_4": {
+    "esperado": 6996782768,
+    "min": 4414096074,
+    "max": 7346621907,
+    "error_medio": 0.172,
+    "pruebas": 10
+   },
+   "semanas_13": {
+    "esperado": 22678779967,
+    "min": 20163405940,
+    "max": 24257587842,
+    "error_medio": 0.076,
+    "pruebas": 10
+   },
+   "confiabilidad": "Media",
+   "error_medio": 0.172,
+   "historia": [
+    {
+     "mes": "2025-09",
+     "recaudo": 8606958305
+    },
+    {
+     "mes": "2025-10",
+     "recaudo": 7822931300
+    },
+    {
+     "mes": "2025-11",
+     "recaudo": 8589624534
+    },
+    {
+     "mes": "2025-12",
+     "recaudo": 10290529433
+    },
+    {
+     "mes": "2026-01",
+     "recaudo": 6986626337
+    },
+    {
+     "mes": "2026-02",
+     "recaudo": 9370878379
+    },
+    {
+     "mes": "2026-03",
+     "recaudo": 6819533598
+    },
+    {
+     "mes": "2026-04",
+     "recaudo": 8069592047
+    },
+    {
+     "mes": "2026-05",
+     "recaudo": 5240865379
+    },
+    {
+     "mes": "2026-06",
+     "recaudo": 7574749346
+    },
+    {
+     "mes": "2026-07",
+     "recaudo": 7341204489
+    },
+    {
+     "mes": "2026-08",
+     "recaudo": 8129650447
+    }
+   ]
+  },
+  "semanas": [
+   {
+    "semana": 1,
+    "desde": "2026-09-24",
+    "etiqueta": "Sem 1 (24/09)",
+    "entradas": 2119882985,
+    "de_cartera": 2119597985,
+    "de_ventas_nuevas": 285000,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": 248418854,
+    "acumulado": 248418854
+   },
+   {
+    "semana": 2,
+    "desde": "2026-10-01",
+    "etiqueta": "Sem 2 (01/10)",
+    "entradas": 1745274564,
+    "de_cartera": 1743598026,
+    "de_ventas_nuevas": 1676538,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": -126189567,
+    "acumulado": 122229287
+   },
+   {
+    "semana": 3,
+    "desde": "2026-10-08",
+    "etiqueta": "Sem 3 (08/10)",
+    "entradas": 1465255312,
+    "de_cartera": 1460919230,
+    "de_ventas_nuevas": 4336083,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": -406208819,
+    "acumulado": -283979532
+   },
+   {
+    "semana": 4,
+    "desde": "2026-10-15",
+    "etiqueta": "Sem 4 (15/10)",
+    "entradas": 1666369907,
+    "de_cartera": 1656510193,
+    "de_ventas_nuevas": 9859714,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": -205094225,
+    "acumulado": -489073757
+   },
+   {
+    "semana": 5,
+    "desde": "2026-10-22",
+    "etiqueta": "Sem 5 (22/10)",
+    "entradas": 1799226090,
+    "de_cartera": 1780409443,
+    "de_ventas_nuevas": 18816647,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": -72238042,
+    "acumulado": -561311799
+   },
+   {
+    "semana": 6,
+    "desde": "2026-10-29",
+    "etiqueta": "Sem 6 (29/10)",
+    "entradas": 1904065763,
+    "de_cartera": 1818365069,
+    "de_ventas_nuevas": 85700694,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": 32601631,
+    "acumulado": -528710168
+   },
+   {
+    "semana": 7,
+    "desde": "2026-11-05",
+    "etiqueta": "Sem 7 (05/11)",
+    "entradas": 1533475599,
+    "de_cartera": 1423019132,
+    "de_ventas_nuevas": 110456466,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": -337988533,
+    "acumulado": -866698700
+   },
+   {
+    "semana": 8,
+    "desde": "2026-11-12",
+    "etiqueta": "Sem 8 (12/11)",
+    "entradas": 1569755099,
+    "de_cartera": 1411754311,
+    "de_ventas_nuevas": 158000789,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": -301709032,
+    "acumulado": -1168407732
+   },
+   {
+    "semana": 9,
+    "desde": "2026-11-19",
+    "etiqueta": "Sem 9 (19/11)",
+    "entradas": 1641565338,
+    "de_cartera": 1487293285,
+    "de_ventas_nuevas": 154272053,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": -229898793,
+    "acumulado": -1398306525
+   },
+   {
+    "semana": 10,
+    "desde": "2026-11-26",
+    "etiqueta": "Sem 10 (26/11)",
+    "entradas": 1915170776,
+    "de_cartera": 1705384200,
+    "de_ventas_nuevas": 209786576,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": 43706644,
+    "acumulado": -1354599881
+   },
+   {
+    "semana": 11,
+    "desde": "2026-12-03",
+    "etiqueta": "Sem 11 (03/12)",
+    "entradas": 1722856692,
+    "de_cartera": 1494822572,
+    "de_ventas_nuevas": 228034120,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": -148607439,
+    "acumulado": -1503207321
+   },
+   {
+    "semana": 12,
+    "desde": "2026-12-10",
+    "etiqueta": "Sem 12 (10/12)",
+    "entradas": 1905335493,
+    "de_cartera": 1614278524,
+    "de_ventas_nuevas": 291056969,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": 33871362,
+    "acumulado": -1469335958
+   },
+   {
+    "semana": 13,
+    "desde": "2026-12-17",
+    "etiqueta": "Sem 13 (17/12)",
+    "entradas": 1690546350,
+    "de_cartera": 1390398061,
+    "de_ventas_nuevas": 300148289,
+    "otras_entradas": 289748473,
+    "salidas": 2161212605,
+    "neto": -180917781,
+    "acumulado": -1650253740
+   }
+  ],
+  "flujo": {
+   "semaforo": "amarillo",
+   "frase": "A partir de la semana 3 las salidas acumuladas superarían a las entradas esperadas; en el peor momento faltarían $1,7 mil millones que deben salir del saldo en bancos o de otras fuentes.",
+   "salidas_semanales": 2161212605,
+   "otras_entradas_semanales": 289748473,
+   "entradas_13": 26445510119,
+   "salidas_13": 28095763859,
+   "variacion_salidas": 0.116,
+   "meses_base": [
+    "2026-01",
+    "2026-02",
+    "2026-03",
+    "2026-04",
+    "2026-05",
+    "2026-06",
+    "2026-07",
+    "2026-08"
+   ],
+   "aviso": "La lista FAR - BANCOS MOVIMIENTOS registra movimientos pero no el saldo inicial de las cuentas, así que no se puede calcular un saldo confiable: se muestra la diferencia entre entradas y salidas esperadas (neto acumulado desde hoy). Las salidas son el promedio de 8 meses; no incluyen pagos extraordinarios que ya estén programados. «Otras entradas» son ingresos a bancos que no vienen de facturas (típicamente préstamos o reintegros), estimados con la mediana de esos meses."
+  },
+  "top_riesgo": [
+   {
+    "cliente": "Laboratorios Ryan de Colombia S.A.S.",
+    "monto_riesgo": 2159519497,
+    "vencido_60": 1709736862,
+    "saldo": 2159519497,
+    "grupo": true,
+    "frase": "Gestionar cobro con Laboratorios Ryan de Colombia S.A.S.: $1,7 mil millones vencidos hace más de 60 días. (Empresa del grupo: conviene cruzar cuentas.)",
+    "nota": "Casi no registra pagos en su historial."
+   },
+   {
+    "cliente": "Audifarma S.A.",
+    "monto_riesgo": 1957708913,
+    "vencido_60": 1954722121,
+    "saldo": 1957708913,
+    "grupo": false,
+    "frase": "Gestionar cobro con Audifarma S.A.: $2,0 mil millones vencidos hace más de 60 días.",
+    "nota": "Casi no registra pagos en su historial."
+   },
+   {
+    "cliente": "Gabame SA de CV",
+    "monto_riesgo": 1750403643,
+    "vencido_60": 643593958,
+    "saldo": 1750403643,
+    "grupo": false,
+    "frase": "Gestionar cobro con Gabame SA de CV: $644 millones vencidos hace más de 60 días.",
+    "nota": "Mora típica: 233 días."
+   },
+   {
+    "cliente": "Droguerias y Farmacias Cruz Verde SAS",
+    "monto_riesgo": 1287456786,
+    "vencido_60": 35281447,
+    "saldo": 1287456786,
+    "grupo": false,
+    "frase": "Gestionar cobro con Droguerias y Farmacias Cruz Verde SAS: $35 millones vencidos hace más de 60 días.",
+    "nota": "Mora típica: 41 días."
+   },
+   {
+    "cliente": "Farmaquirurgicos JM S.A.S.",
+    "monto_riesgo": 1265140911,
+    "vencido_60": 443219010,
+    "saldo": 1265140911,
+    "grupo": false,
+    "frase": "Gestionar cobro con Farmaquirurgicos JM S.A.S.: $443 millones vencidos hace más de 60 días.",
+    "nota": "Mora típica: 84 días."
+   },
+   {
+    "cliente": "Organizacion Clinica General del Norte S.A.S",
+    "monto_riesgo": 1120190275,
+    "vencido_60": 54821813,
+    "saldo": 1120190275,
+    "grupo": false,
+    "frase": "Gestionar cobro con Organizacion Clinica General del Norte S.A.S: $55 millones vencidos hace más de 60 días.",
+    "nota": "Mora típica: 174 días."
+   },
+   {
+    "cliente": "Corporacion Hospitalaria Juan Ciudad",
+    "monto_riesgo": 1117635027,
+    "vencido_60": 412342773,
+    "saldo": 1117635027,
+    "grupo": false,
+    "frase": "Gestionar cobro con Corporacion Hospitalaria Juan Ciudad: $412 millones vencidos hace más de 60 días.",
+    "nota": "Mora típica: 152 días."
+   },
+   {
+    "cliente": "Suministros y Dotaciones Colombia S.A. S y D Colombia S.A.",
+    "monto_riesgo": 1106714174,
+    "vencido_60": 0,
+    "saldo": 1106714174,
+    "grupo": false,
+    "frase": "Suministros y Dotaciones Colombia S.A. S y D Colombia S.A. suele pagar con unos 83 días de retraso: hacer seguimiento a $1,1 mil millones antes de que venzan.",
+    "nota": "Mora típica: 83 días."
+   },
+   {
+    "cliente": "Health & Life IPS S A S",
+    "monto_riesgo": 957741642,
+    "vencido_60": 413040342,
+    "saldo": 957741642,
+    "grupo": false,
+    "frase": "Gestionar cobro con Health & Life IPS S A S: $413 millones vencidos hace más de 60 días.",
+    "nota": "Mora típica: 70 días."
+   },
+   {
+    "cliente": "Avidanti S.A.S.",
+    "monto_riesgo": 909173047,
+    "vencido_60": 406409536,
+    "saldo": 909173047,
+    "grupo": false,
+    "frase": "Gestionar cobro con Avidanti S.A.S.: $406 millones vencidos hace más de 60 días.",
+    "nota": "Mora típica: 142 días."
+   }
+  ],
+  "mes_pasado": {
+   "mes": "2026-08",
+   "pronosticado": 7054489450,
+   "real": 8129650447,
+   "error": 0.152,
+   "semaforo": "amarillo",
+   "frase": "En agosto se esperaba recaudar $7,1 mil millones y entraron $8,1 mil millones: 15 % más de lo previsto.",
+   "detalle": "Pronóstico hecho con la información disponible al 1 de agosto; lo real son los pagos de clientes aplicados a facturas en SAP."
+  },
+  "alertas": [
+   {
+    "prioridad": "alta",
+    "tipo": "cobro",
+    "titulo": "Laboratorios Ryan de Colombia S.A.S. · $2,2 mil millones en riesgo",
+    "accion": "Gestionar cobro con Laboratorios Ryan de Colombia S.A.S.: $1,7 mil millones vencidos hace más de 60 días. (Empresa del grupo: conviene cruzar cuentas.)"
+   },
+   {
+    "prioridad": "alta",
+    "tipo": "cobro",
+    "titulo": "Audifarma S.A. · $2,0 mil millones en riesgo",
+    "accion": "Gestionar cobro con Audifarma S.A.: $2,0 mil millones vencidos hace más de 60 días."
+   },
+   {
+    "prioridad": "alta",
+    "tipo": "cobro",
+    "titulo": "Gabame SA de CV · $1,8 mil millones en riesgo",
+    "accion": "Gestionar cobro con Gabame SA de CV: $644 millones vencidos hace más de 60 días."
+   },
+   {
+    "prioridad": "alta",
+    "tipo": "cobro",
+    "titulo": "Droguerias y Farmacias Cruz Verde SAS · $1,3 mil millones en riesgo",
+    "accion": "Gestionar cobro con Droguerias y Farmacias Cruz Verde SAS: $35 millones vencidos hace más de 60 días."
+   },
+   {
+    "prioridad": "alta",
+    "tipo": "cobro",
+    "titulo": "Farmaquirurgicos JM S.A.S. · $1,3 mil millones en riesgo",
+    "accion": "Gestionar cobro con Farmaquirurgicos JM S.A.S.: $443 millones vencidos hace más de 60 días."
+   },
+   {
+    "prioridad": "media",
+    "tipo": "cartera_antigua",
+    "titulo": "$4,9 mil millones con más de un año vencidos",
+    "accion": "Revisar con Contabilidad si esa cartera ya está provisionada o si se debe depurar; el pronóstico casi no cuenta con recaudarla."
+   },
+   {
+    "prioridad": "media",
+    "tipo": "caja",
+    "titulo": "Posible estrechez de caja",
+    "accion": "A partir de la semana 3 las salidas acumuladas superarían a las entradas esperadas; en el peor momento faltarían $1,7 mil millones que deben salir del saldo en bancos o de otras fuentes."
+   }
+  ],
+  "eps": {
+   "titulo": "Riesgo EPS (próximamente)",
+   "frase": "Aquí se mostrará el contexto del sector salud (EPS intervenidas o con pagos atrasados) para ajustar la probabilidad de pago de los clientes expuestos. Aún no se incluye: no hay una fuente de datos confiable conectada."
+  },
+  "como_leer": [
+   "La cartera y los pagos salen directamente de SAP; las cifras están en pesos colombianos.",
+   "El recaudo esperado usa cómo ha pagado cada cliente desde 2024: si suele pagar 20 días tarde, se espera su pago unos 20 días después del vencimiento.",
+   "Incluye también lo que se cobrará de facturas que aún no se han emitido, según lo que suele pasar.",
+   "El rango probable sale de probar el método en fechas pasadas: lo normal es que el resultado caiga ahí.",
+   "«En riesgo» = facturas vencidas hace más de 60 días o de clientes cuya mora típica supera 30 días.",
+   "Semáforo: 🟢 todo bien, 🟡 conviene revisarlo, 🔴 requiere acción pronto."
+  ]
+ }
 }

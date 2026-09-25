@@ -2,7 +2,9 @@
 # Corrida nocturna del motor predictivo (Farmalógica + resto de empresas).
 #   1) refresca las cachés SQLite de SharePoint (incrementales, solo Farmalógica),
 #   2) genera el JSON de cada empresa (ventas desde SAP en solo lectura; Farmalógica
-#      incluye además `cartera`: cartera y flujo de caja, ver cartera_farmalogica.py),
+#      incluye además `cartera`: cartera y flujo de caja, ver cartera_farmalogica.py, y
+#      `lotes_registros`: lotes con vencimiento real y registros sanitarios por renovar,
+#      ver lotes_registros_farmalogica.py),
 #   3) publica un snapshot por empresa en la base de PRUEBAS (KRONOSDB_PRUEBAS) vía pce0023.
 # NO está programado: el plist de ejemplo (com.gss.predictivo.nightly.plist)
 # queda sin instalar hasta que Nicolás lo apruebe.
@@ -15,6 +17,14 @@ CACHE="${FAR_CACHE_DIR:-/Users/horus/.horus/cache}"
 SSH_HOST="${PREDICTIVO_SSH_HOST:-pce0023}"
 REMOTE_DIR='C:\Users\nicolas.rivera\projects\front-kronos-test'
 PY="$DIR/.venv/bin/python3"; [ -x "$PY" ] || PY=python3
+# Python para las cachés de SharePoint: necesita `requests`. El python3 de Homebrew
+# (primero en el PATH) no lo trae; el del sistema sí (paquetes de usuario).
+SP_PY="${SP_PY:-}"
+if [ -z "$SP_PY" ]; then
+  for c in "$DIR/.venv/bin/python3" /usr/bin/python3 python3; do
+    if "$c" -c 'import requests' >/dev/null 2>&1; then SP_PY="$c"; break; fi
+  done
+fi
 EMPRESAS=("$@"); [ ${#EMPRESAS[@]} -gt 0 ] || EMPRESAS=(farmalogica ryan olp abamia meditrack kelab)
 # company_id de la tabla `company` de KRONOSDB_PRUEBAS
 company_id() {
@@ -50,7 +60,8 @@ for e in "${EMPRESAS[@]}"; do
     echo "  1/3 cachés SharePoint"
     for c in far_ventas far_inventario far_lotes far_registro_sanitario far_bancos_movimientos; do
       s="$CACHE/$c/${c}_export.py"
-      if [ -f "$s" ]; then (cd "$CACHE/$c" && python3 "$s" >/dev/null) || echo "  aviso: falló la caché $c (se sigue con la anterior)"; fi
+      if [ -z "$SP_PY" ]; then echo "  aviso: no hay un Python con 'requests'; se usan las cachés anteriores"; break; fi
+      if [ -f "$s" ]; then (cd "$CACHE/$c" && "$SP_PY" "$s" >/dev/null) || echo "  aviso: falló la caché $c (se sigue con la anterior)"; fi
     done
     echo "  2/3 generando"
     gen=("$PY" "$DIR/generar_farmalogica.py" --out "$out")
