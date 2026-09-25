@@ -14,6 +14,7 @@ import {
   Loader,
   SimpleGrid,
   Stack,
+  Tabs,
   Text,
   ThemeIcon,
   Title,
@@ -28,13 +29,14 @@ import { Line } from 'react-chartjs-2';
 import '../../../../lib/charts/register';
 
 /**
- * Predicciones — PILOTO Farmalógica.
+ * Predicciones — una pestaña por empresa (Farmalógica, Ryan, OLP, Abamia,
+ * Meditrack, Kelab), solo las que el usuario tiene asignadas.
  *
  * Toda la complejidad (limpieza, modelos, backtest) vive en
- * analytics/predictivo/generar_farmalogica.py; esta página solo pinta el JSON
+ * analytics/predictivo/generar_farmalogica.py y generar_empresa.py; esta página solo pinta el JSON
  * con textos ya redactados. Objetivo de diseño: que se entienda en ~10 s.
  *
- * Acceso: subproceso '/process/predicciones' en Farmalógica
+ * Acceso: subproceso '/process/predicciones' asignado en cada empresa
  * (lib/predictivo/access.ts).
  */
 
@@ -77,6 +79,7 @@ interface Producto {
 interface Prediccion {
   empresa: string;
   generado: string;
+  aviso?: string | null;
   fuente: { ventas_desde: string; ultimo_mes_completo: string };
   resumen: string;
   tarjetas: Tarjeta[];
@@ -115,26 +118,90 @@ function millones(v: number): string {
   return `$${new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(v / 1e6)} M`;
 }
 
+interface Empresa {
+  id: number;
+  nombre: string;
+}
+
 export default function PrediccionesPage() {
   const { data: session } = useSession();
-  const [hasAccess, setHasAccess] = useState<boolean | null>(null);
-  const [data, setData] = useState<Prediccion | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [empresas, setEmpresas] = useState<Empresa[] | null>(null);
+  const [activa, setActiva] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session) return;
     (async () => {
       try {
-        setLoading(true);
         setError(null);
         const accessRes = await fetch('/api/predictivo/access');
         if (!accessRes.ok) throw new Error('No se pudo verificar el acceso al módulo');
         const accessData = await accessRes.json();
-        setHasAccess(Boolean(accessData.canAccess));
-        if (!accessData.canAccess) return;
+        const lista: Empresa[] = accessData.canAccess ? accessData.empresas ?? [] : [];
+        setEmpresas(lista);
+        if (lista.length > 0) setActiva(String(lista[0].id));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Error inesperado');
+      }
+    })();
+  }, [session]);
 
-        const res = await fetch('/api/predictivo');
+  if (error) {
+    return (
+      <Alert color="red" title="Predicciones" mt="md" icon={<IconAlertTriangle size={18} />}>
+        {error}
+      </Alert>
+    );
+  }
+
+  if (empresas === null) {
+    return (
+      <Group justify="center" mt="xl">
+        <Loader />
+      </Group>
+    );
+  }
+
+  if (empresas.length === 0) {
+    return (
+      <Alert color="red" title="Predicciones" mt="md">
+        No tiene acceso a este módulo.
+      </Alert>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
+      <Tabs value={activa} onChange={setActiva} keepMounted={false} className="max-w-7xl mx-auto pt-4 px-3 sm:px-6 lg:px-8">
+        <Tabs.List>
+          {empresas.map((e) => (
+            <Tabs.Tab key={e.id} value={String(e.id)}>
+              {e.nombre}
+            </Tabs.Tab>
+          ))}
+        </Tabs.List>
+        {empresas.map((e) => (
+          <Tabs.Panel key={e.id} value={String(e.id)}>
+            <PanelEmpresa companyId={e.id} />
+          </Tabs.Panel>
+        ))}
+      </Tabs>
+    </div>
+  );
+}
+
+function PanelEmpresa({ companyId }: { companyId: number }) {
+  const [data, setData] = useState<Prediccion | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await fetch(`/api/predictivo?companyId=${companyId}`);
+        if (res.status === 403) throw new Error('No tiene acceso a esta empresa.');
         if (!res.ok) throw new Error('No se pudieron cargar las predicciones');
         const json = await res.json();
         setData(json.data ?? null);
@@ -144,7 +211,7 @@ export default function PrediccionesPage() {
         setLoading(false);
       }
     })();
-  }, [session]);
+  }, [companyId]);
 
   const chartData = useMemo(() => {
     if (!data) return null;
@@ -231,25 +298,17 @@ export default function PrediccionesPage() {
     );
   }
 
-  if (hasAccess === false) {
-    return (
-      <Alert color="red" title="Predicciones" mt="md">
-        No tiene acceso a este módulo.
-      </Alert>
-    );
-  }
-
   if (error || !data) {
     return (
       <Alert color="red" title="Predicciones" mt="md" icon={<IconAlertTriangle size={18} />}>
-        {error ?? 'Todavía no hay predicciones generadas.'}
+        {error ?? 'Todavía no hay predicciones generadas para esta empresa.'}
       </Alert>
     );
   }
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <Stack className="max-w-7xl mx-auto py-6 px-3 sm:px-6 lg:px-8" gap="lg">
+    <div>
+      <Stack className="py-6" gap="lg">
         {/* 1. Encabezado con la frase resumen */}
         <Card shadow="sm" p="lg" radius="md" withBorder>
           <Breadcrumbs separator={<IconChevronRight size={16} />} mb="sm">
@@ -267,6 +326,11 @@ export default function PrediccionesPage() {
               <Text size="xs" c="dimmed" mt={6}>
                 Actualizado el {data.generado} · con ventas desde {data.fuente.ventas_desde} · piloto
               </Text>
+              {data.aviso && (
+                <Alert color="yellow" variant="light" radius="md" mt="sm" icon={<IconAlertTriangle size={18} />}>
+                  {data.aviso}
+                </Alert>
+              )}
             </div>
           </Group>
         </Card>
