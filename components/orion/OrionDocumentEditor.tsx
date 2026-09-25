@@ -42,6 +42,7 @@ import OrionSignersList from './OrionSignersList';
 import PdfInlineViewer from './PdfInlineViewer';
 import SignaturePlacementCanvas from './SignaturePlacementCanvas';
 import { usePdfBlobPreview } from './usePdfBlobPreview';
+import { showEmailSentNotification } from '../../lib/notifications/showEmailSentNotification';
 
 type EditorStep = 0 | 1 | 2;
 
@@ -558,13 +559,30 @@ export default function OrionDocumentEditor({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'No se pudo enviar a firma');
       if (data.state) onStateUpdate(data.state as OrionSignatureState);
+      const authCreated = Number(data.authorizationsCreated) || 0;
+      const signerCount = Array.isArray(data.state?.signers)
+        ? data.state.signers.length
+        : undefined;
+      showEmailSentNotification({
+        title: '¡Documento enviado a firma!',
+        fileName: fileName || null,
+        message: [
+          fileName ? `Documento: ${fileName}` : null,
+          signerCount != null ? `${signerCount} firmante(s) notificado(s)` : null,
+          authCreated > 0
+            ? 'Se creó la autorización y se enviaron avisos (campana / correo).'
+            : 'Se notificó a los firmantes (campana / correo).',
+        ]
+          .filter(Boolean)
+          .join('. '),
+      });
       onClose?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al enviar');
     } finally {
       setSaving(false);
     }
-  }, [allPlaced, assignSigners, fileId, onClose, onStateUpdate, persistFields, requestId]);
+  }, [allPlaced, assignSigners, fileId, fileName, onClose, onStateUpdate, persistFields, requestId]);
 
   const goNext = useCallback(async () => {
     if (editorStep === 1) {

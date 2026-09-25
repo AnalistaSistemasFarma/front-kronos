@@ -13,8 +13,12 @@ type Props = {
   active: number;
 };
 
+const CIRCLE = 30;
+const GAP = 6;
+
 /**
- * Stepper compacto estilo macOS/iOS: números en círculo + línea de progreso.
+ * Stepper a ancho completo: 3 columnas iguales, círculos centrados,
+ * línea de centro a centro. Segmento relleno solo si idx < active.
  */
 export default function OrionEditorSteps({ active }: Props) {
   return (
@@ -23,14 +27,15 @@ export default function OrionEditorSteps({ active }: Props) {
       aria-label='Pasos de preparación'
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: 0,
+        gridTemplateColumns: `repeat(${STEPS.length}, minmax(0, 1fr))`,
+        width: '100%',
         alignItems: 'start',
       }}
     >
       {STEPS.map((step, idx) => {
         const isActive = idx === active;
         const isDone = idx < active;
+        const isLast = idx === STEPS.length - 1;
         const tone = isActive || isDone ? 'var(--app-accent)' : 'var(--app-border)';
 
         return (
@@ -39,85 +44,79 @@ export default function OrionEditorSteps({ active }: Props) {
             role='listitem'
             aria-current={isActive ? 'step' : undefined}
             style={{
+              position: 'relative',
               display: 'flex',
               flexDirection: 'column',
-              alignItems: idx === 0 ? 'flex-start' : idx === STEPS.length - 1 ? 'flex-end' : 'center',
-              position: 'relative',
-              paddingTop: 2,
+              alignItems: 'center',
+              gap: 6,
+              minWidth: 0,
             }}
           >
-            {/* Línea conectora */}
-            {idx < STEPS.length - 1 ? (
+            {!isLast ? (
               <Box
                 aria-hidden
                 style={{
                   position: 'absolute',
-                  top: 15,
-                  left: idx === 0 ? 28 : '50%',
-                  right: idx === STEPS.length - 2 ? 28 : undefined,
-                  width: idx === STEPS.length - 2 ? undefined : '100%',
+                  top: CIRCLE / 2 - 1,
+                  left: `calc(50% + ${CIRCLE / 2 + GAP}px)`,
+                  right: `calc(-50% + ${CIRCLE / 2 + GAP}px)`,
                   height: 2,
-                  background: idx < active
-                    ? 'color-mix(in srgb, var(--app-accent) 70%, transparent)'
-                    : 'var(--app-border)',
+                  borderRadius: 1,
+                  background:
+                    idx < active
+                      ? 'color-mix(in srgb, var(--app-accent) 70%, transparent)'
+                      : 'var(--app-border)',
                   zIndex: 0,
                   transition: 'background 180ms ease',
+                  pointerEvents: 'none',
                 }}
               />
             ) : null}
 
-            <Box
+            <ThemeIcon
+              size={CIRCLE}
+              radius='xl'
+              variant={isActive || isDone ? 'filled' : 'outline'}
+              color={isActive || isDone ? undefined : 'gray'}
               style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 6,
+                position: 'relative',
                 zIndex: 1,
-                maxWidth: '100%',
+                background: isActive || isDone ? 'var(--app-accent)' : 'var(--app-surface)',
+                borderColor: tone,
+                color: isActive || isDone ? '#fff' : 'var(--app-text-muted, #6b7280)',
+                boxShadow: isActive
+                  ? '0 0 0 4px color-mix(in srgb, var(--app-accent) 18%, transparent)'
+                  : undefined,
+                transition: 'box-shadow 180ms ease, background 180ms ease',
               }}
             >
-              <ThemeIcon
-                size={30}
-                radius='xl'
-                variant={isActive || isDone ? 'filled' : 'outline'}
-                color={isActive || isDone ? undefined : 'gray'}
-                style={{
-                  background: isActive || isDone ? 'var(--app-accent)' : 'var(--app-surface)',
-                  borderColor: tone,
-                  color: isActive || isDone ? '#fff' : 'var(--app-text-muted, #6b7280)',
-                  boxShadow: isActive
-                    ? '0 0 0 4px color-mix(in srgb, var(--app-accent) 18%, transparent)'
-                    : undefined,
-                  transition: 'box-shadow 180ms ease, background 180ms ease',
-                }}
+              {isDone && !isActive ? (
+                <IconCheck size={16} stroke={2.5} />
+              ) : (
+                <Text size='xs' fw={700} c='inherit'>
+                  {idx + 1}
+                </Text>
+              )}
+            </ThemeIcon>
+
+            <Box ta='center' px={4} style={{ maxWidth: '100%' }}>
+              <Text
+                size='xs'
+                fw={isActive ? 700 : 600}
+                c={isActive ? undefined : 'dimmed'}
+                style={{ letterSpacing: '-0.01em' }}
               >
-                {isDone && !isActive ? (
-                  <IconCheck size={16} stroke={2.5} />
-                ) : (
-                  <Text size='xs' fw={700} c='inherit'>
-                    {idx + 1}
-                  </Text>
-                )}
-              </ThemeIcon>
-              <Box ta='center' style={{ maxWidth: 140 }}>
-                <Text
-                  size='xs'
-                  fw={isActive ? 700 : 600}
-                  c={isActive ? undefined : 'dimmed'}
-                  style={{ letterSpacing: '-0.01em' }}
-                >
-                  {step.label}
-                </Text>
-                <Text
-                  size='10px'
-                  c='dimmed'
-                  lineClamp={1}
-                  visibleFrom='sm'
-                  style={{ lineHeight: 1.3 }}
-                >
-                  {step.desc}
-                </Text>
-              </Box>
+                {step.label}
+              </Text>
+              <Text
+                size='10px'
+                c='dimmed'
+                lineClamp={2}
+                visibleFrom='sm'
+                style={{ lineHeight: 1.3 }}
+              >
+                {step.desc}
+              </Text>
             </Box>
           </Box>
         );

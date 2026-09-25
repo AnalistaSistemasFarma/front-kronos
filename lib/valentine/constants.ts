@@ -24,6 +24,23 @@ export function isValentineWallSubprocess(subprocess: {
 
 export const VALENTINE_MESSAGE_MAX = 160;
 
+/** Normaliza company_logo de BD a src usable en <img> (cliente y servidor). */
+export function resolveValentineCompanyLogoSrc(
+  raw?: string | null
+): string | null {
+  const v = String(raw || '').trim();
+  if (!v) return null;
+  if (
+    /^https?:\/\//i.test(v) ||
+    v.startsWith('data:') ||
+    v.startsWith('blob:') ||
+    v.startsWith('/')
+  ) {
+    return v;
+  }
+  return `/${v.replace(/^\.\//, '')}`;
+}
+
 export const VALENTINE_REACTIONS = ['❤️', '💕', '🥰', '😂', '✨', '👏', '🙌', '💪'] as const;
 export type ValentineReactionEmoji = (typeof VALENTINE_REACTIONS)[number];
 

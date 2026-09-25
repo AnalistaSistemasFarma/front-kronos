@@ -44,7 +44,7 @@ import {
 import axios from 'axios';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../lib/orion/fieldType';
-import { isFirmaAuthorizationItem } from '../../../../lib/orion/signerAuthMarkers';
+import { isFirmaAuthorizationItem, parseOrionFileNameFromResolution } from '../../../../lib/orion/signerAuthMarkers';
 import {
   TABLE_FIELD_TYPE,
   parseTableConfig,
@@ -346,6 +346,9 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
   }, [opened, idReqGen, isDocumentApproval, hideSensitiveFirmaContext]);
 
   const subject = detail?.subject_request || request?.subject || '';
+  const firmaDocName = isFirmaAuth
+    ? parseOrionFileNameFromResolution(request?.resolution)
+    : null;
 
   return (
     <Modal
@@ -389,6 +392,13 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                   {request.type_authorization}
                 </Badge>
               )}
+              {isFirmaAuth && firmaDocName ? (
+                <Alert color='violet' variant='light' mt='sm' title='Documento a firmar'>
+                  <Text size='sm' fw={600} style={{ wordBreak: 'break-word' }}>
+                    {firmaDocName}
+                  </Text>
+                </Alert>
+              ) : null}
             </div>
 
             {/* Detalle del documento (solo "Autorización de documento", Sprint 6): qué

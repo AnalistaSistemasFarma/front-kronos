@@ -15,6 +15,7 @@ type Phase = 'closed' | 'arriving' | 'envelope' | 'opening' | 'board';
 type WallCompany = {
   idCompany: number;
   companyName: string;
+  companyLogo?: string | null;
 };
 
 type RealtimeEvent =
@@ -474,6 +475,7 @@ export default function ValentineWallRoot() {
               freshPostId={freshPostId}
               canModerate={canModerate}
               companyName={company.companyName}
+              companyLogo={company.companyLogo}
               companyId={company.idCompany}
               companies={canModerate ? companies : []}
               onCompanyChange={canModerate ? handleCompanyChange : undefined}

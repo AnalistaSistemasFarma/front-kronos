@@ -15,6 +15,8 @@ import {
 } from '@mantine/core';
 import { IconCheck, IconCopy, IconMail, IconRefresh } from '@tabler/icons-react';
 import { useCallback, useEffect, useState } from 'react';
+import { showEmailSentNotification } from '../../lib/notifications/showEmailSentNotification';
+import toast from 'react-hot-toast';
 
 type SignerRow = {
   email: string;
@@ -153,9 +155,19 @@ export default function OrionFirmantesInviteModal({
       if (data.shareSource) {
         setSources((prev) => ({ ...prev, [email]: data.shareSource }));
       }
+      showEmailSentNotification({
+        to: email,
+        fileName: fileName || null,
+        title: '¡Correo enviado!',
+        message: `La URL de firma se envió a ${email}.${
+          fileName ? ` Documento: ${fileName}.` : ''
+        }`,
+      });
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error');
+      const msg = e instanceof Error ? e.message : 'Error';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusyEmail(null);
     }
@@ -197,7 +209,7 @@ export default function OrionFirmantesInviteModal({
           </Alert>
         ) : null}
         {loading ? <Text size='sm'>Sincronizando con Orion…</Text> : null}
-        {!loading && signers.length === 0 ? (
+        {!loading && !error && signers.length === 0 ? (
           <Text size='sm' c='dimmed'>
             No hay firmantes asignados. Primero prepare el documento y asigne firmantes.
           </Text>

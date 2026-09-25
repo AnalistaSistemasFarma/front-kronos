@@ -8,7 +8,7 @@ import {
   setOrionDocumentInBag,
 } from '@/lib/orion/formValue';
 import {
-  assertUserCanEditOrionPreparation,
+  assertUserIsOrionDocumentPreparer,
   getRequestOrionContext,
   loadOrionFormBag,
   upsertOrionFormBag,
@@ -53,21 +53,26 @@ function pickShareUrl(params: {
 
 /**
  * Resuelve la URL pública Orion `/sign/{token}` para un firmante.
- * 1) Bag (si ya es Orion)
- * 2) GET embed/sign-url de Orion (crea/reutiliza invitación pendiente)
+ * Orion es quien genera el token (POST /embed/sign-url). Kronos solo la muestra/envía.
+ * 1) Bag (si ya es Orion) — salvo forceRefresh
+ * 2) POST embed/sign-url en Orion (crea/reutiliza invitación pendiente)
  */
 async function resolveLiveOrionSignUrl(params: {
   orionDocumentId?: string | null;
   email: string;
   signOrder?: number | null;
   bagSignUrl?: string | null;
-  /** Si true, Orion también reenvía el correo (POST sendEmail). */
+  /** Si true, Orion también reenvía el correo Graph (POST sendEmail). */
   sendEmail?: boolean;
+  /** Si true, ignora el bag y pide URL fresca a Orion (usar al enviar correo). */
+  forceRefresh?: boolean;
 }): Promise<{ signUrl: string | null; error?: string }> {
-  const fromBag =
-    resolveOrionAbsoluteUrl(params.bagSignUrl) || String(params.bagSignUrl || '').trim();
-  if (fromBag && isOrionSignUrl(fromBag)) {
-    return { signUrl: fromBag };
+  if (!params.forceRefresh) {
+    const fromBag =
+      resolveOrionAbsoluteUrl(params.bagSignUrl) || String(params.bagSignUrl || '').trim();
+    if (fromBag && isOrionSignUrl(fromBag)) {
+      return { signUrl: fromBag };
+    }
   }
 
   const docId = String(params.orionDocumentId || '').trim();
@@ -171,12 +176,13 @@ export async function GET(req: Request) {
     const origin = resolvePublicAppOrigin(req.headers.get('origin'));
 
     const data = await withMssqlPool(async (pool) => {
-      await assertUserCanEditOrionPreparation(pool, {
+      // Invitar / URL: permitido aunque ya haya firmas (solo preparador).
+      // assertUserCanEditOrionPreparation bloquearía con 403 en ese caso.
+      await assertUserIsOrionDocumentPreparer(pool, {
         requestId,
         userId: String(session.user.id),
         userEmail: String(session.user.email || ''),
         isAdmin,
-        fileId,
       });
 
       const loaded = await loadOrionFormBag(pool, requestId);
@@ -288,12 +294,12 @@ export async function POST(req: Request) {
     }
 
     const outcome = await withMssqlPool(async (pool) => {
-      await assertUserCanEditOrionPreparation(pool, {
+      // Enviar/renovar URL: no exige “sin firmas” (flujo ya en curso).
+      await assertUserIsOrionDocumentPreparer(pool, {
         requestId,
         userId: String(session.user.id),
         userEmail: String(session.user.email || ''),
         isAdmin,
-        fileId,
       });
 
       const loaded = await loadOrionFormBag(pool, requestId);
@@ -340,13 +346,14 @@ export async function POST(req: Request) {
         throw Object.assign(new Error('Firmante no encontrado en este documento'), { status: 404 });
       }
 
-      // Pedir /sign/{token} por POST (Orion ya no lo expone en GET).
+      // Pedir /sign/{token} a Orion (POST). Al enviar correo, forzar URL fresca.
       const resolved = await resolveLiveOrionSignUrl({
         orionDocumentId: state.orionDocumentId,
         email,
         signOrder: signer.order,
         bagSignUrl: signer.signUrl,
         sendEmail: false,
+        forceRefresh: action === 'send' || action === 'url' || action === 'regenerate',
       });
       const orionSignUrl = resolved.signUrl;
       if (orionSignUrl) {
@@ -382,11 +389,18 @@ export async function POST(req: Request) {
         if (/localhost|127\.0\.0\.1/i.test(mailUrl) || /\/firma\/externa\//i.test(mailUrl)) {
           throw Object.assign(
             new Error(
-              'El enlace de firma no es el público de Orion. Configure ORION_PUBLIC_URL en Orion y sincronice de nuevo.'
+              'El enlace de firma no es el público de Orion. Configure ORION_PUBLIC_URL en Orion (túnel o dominio) y sincronice de nuevo.'
             ),
             { status: 422 }
           );
         }
+        if (!isOrionSignUrl(mailUrl)) {
+          throw Object.assign(
+            new Error('La URL de invitación no es un enlace Orion /sign/{token}.'),
+            { status: 422 }
+          );
+        }
+        // Correo Kronos (SAPSEND) con el enlace que generó Orion — no /firma/externa.
         await sendExternalSignerInviteEmail({
           to: email,
           signerName: signer.name,
@@ -394,6 +408,8 @@ export async function POST(req: Request) {
           requestSubject: ctx?.subject_request ?? null,
           inviteUrl: mailUrl,
           expiresAt: findInviteByEmail(state, email)?.expiresAt ?? null,
+          invitedByName: session.user?.name ?? null,
+          invitedByEmail: session.user?.email ?? null,
         });
         state = markInviteSent(state, email);
       }

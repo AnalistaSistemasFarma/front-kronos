@@ -408,8 +408,8 @@ export async function getOrionSignatureEmbedUrl(
 
 /**
  * Pide a Orion la URL pública de firma (`/sign/{token}`).
- * Orion deja de exponer el enlace en GET; hay que usar POST en el mismo path.
- * `sendEmail: false` evita reenviar correo al solo sincronizar/mostrar la URL.
+ * Contrato: POST `/api/integrations/synerlink/embed/sign-url`
+ * (`sendEmail: false` = solo URL; `true` = URL + correo Graph de Orion).
  */
 export async function fetchOrionSignerSignUrl(
   orionDocumentId: string,
@@ -643,7 +643,7 @@ export async function fetchOrionSignedFileContent(params: {
   signedFileUrl?: string | null;
   /** Solo firmas con order <= maxOrder (versión histórica parcial). */
   maxSignerOrder?: number | null;
-  /** Marca de agua DOCUMENTO VALIDADO (versión aparte; no mezclar con historial de firmas). */
+  /** Marca de agua en Orion (?validated=1). Preferir false: Kronos estampa en el proxy. */
   validated?: boolean;
 }): Promise<{
   ok: boolean;

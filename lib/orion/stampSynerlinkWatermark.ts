@@ -8,7 +8,6 @@ const PATTERN_COLOR = rgb(0.72, 0.65, 0.52);
 const SEAL_COLOR = rgb(0.42, 0.52, 0.42);
 
 function drawSeal(page: PDFPage, font: PDFFont, cx: number, cy: number, radius: number) {
-  // Anillo exterior
   page.drawCircle({
     x: cx,
     y: cy,
@@ -18,7 +17,6 @@ function drawSeal(page: PDFPage, font: PDFFont, cx: number, cy: number, radius: 
     borderOpacity: 0.9,
     opacity: 0,
   });
-  // Anillo interior
   page.drawCircle({
     x: cx,
     y: cy,
@@ -29,7 +27,6 @@ function drawSeal(page: PDFPage, font: PDFFont, cx: number, cy: number, radius: 
     opacity: 0,
   });
 
-  // Checkmark (dos segmentos)
   const checkScale = radius * 0.35;
   page.drawLine({
     start: { x: cx - checkScale * 0.55, y: cy + checkScale * 0.55 },
@@ -93,7 +90,8 @@ function drawPattern(page: PDFPage, font: PDFFont, width: number, height: number
 }
 
 /**
- * Estampa patrón diagonal + sello circular SYNERLINK / VALIDADO en todas las páginas.
+ * Estampa patrón diagonal SYNERLINK · VALIDADO en todas las páginas
+ * y el sello circular solo en la última hoja (inferior derecha).
  */
 export async function stampSynerlinkWatermark(
   pdfBytes: ArrayBuffer | Uint8Array | Buffer
@@ -112,11 +110,17 @@ export async function stampSynerlinkWatermark(
   for (const page of pages) {
     const { width, height } = page.getSize();
     drawPattern(page, font, width, height);
+  }
 
-    const radius = Math.min(width, height) * 0.11;
-    const cx = width * 0.5;
-    const cy = height * 0.48;
-    drawSeal(page, font, cx, cy, Math.max(42, radius));
+  const last = pages[pages.length - 1];
+  if (last) {
+    const { width, height } = last.getSize();
+    const radius = Math.max(36, Math.min(width, height) * 0.09);
+    const margin = radius * 1.4;
+    // pdf-lib: origen abajo-izquierda → inferior derecha
+    const cx = width - margin;
+    const cy = margin;
+    drawSeal(last, font, cx, cy, radius);
   }
 
   return pdf.save();

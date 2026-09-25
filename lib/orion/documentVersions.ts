@@ -374,8 +374,8 @@ export function rebuildOrionVersionHistory(
     });
   }
 
-  // DOCUMENTO / SYNERLINK-VALIDO queda al final, aparte de las firmas (misma URL; el proxy
-  // regenera con ?validated=1 y estampa el patrón Synerlink).
+  // SYNERLINK-VALIDO al final (misma URL base; el proxy Kronos estampa patrón + sello
+  // una sola vez — no pedir ?validated=1 a Orion para evitar doble capa).
   if (fullySigned && workingUrl) {
     versions.push(
       prevValidated

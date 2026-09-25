@@ -333,7 +333,9 @@ export async function GET(req: Request) {
       orionDocumentId: state.orionDocumentId,
       signedFileUrl: targetUrl,
       maxSignerOrder,
-      validated: wantValidated,
+      // Nunca pedir watermark a Orion: Kronos estampa una sola vez en serveBuffer.
+      // Si validated=true aquí + stampSynerlinkWatermark → sello/patrón duplicados.
+      validated: false,
     });
     if (!upstream.ok || !upstream.buffer) {
       // 409: Orion aún no tiene PDF acumulado (borrador / sin firmas) → original OneDrive

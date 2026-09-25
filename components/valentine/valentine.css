@@ -801,23 +801,126 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
-.vw-header-company--select {
-  padding: 0.25rem 0.35rem;
+.vw-header-company--logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.85rem;
   letter-spacing: normal;
   text-transform: none;
-  min-width: min(92%, 320px);
+  min-height: 2.75rem;
+}
+
+.vw-header-company--switch {
+  padding: 0.25rem 0.45rem 0.25rem 0.55rem;
+}
+
+.vw-company-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  max-width: min(300px, 72vw);
+  padding: 0.1rem 0.15rem;
+  border-radius: 999px;
+  color: #6b3d4f;
+  cursor: pointer;
+}
+
+.vw-company-switch-btn:focus-visible {
+  outline: 2px solid rgba(154, 79, 99, 0.45);
+  outline-offset: 2px;
+}
+
+.vw-company-switch-chevron {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.vw-company-switch-menu {
+  max-height: min(320px, 50vh);
+  overflow-y: auto;
+}
+
+.vw-company-switch-item--active {
+  background: rgba(154, 79, 99, 0.1);
+  font-weight: 600;
+}
+
+.vw-company-logo {
+  display: block;
+  object-fit: contain;
+  object-position: center;
+  max-width: 100%;
+  user-select: none;
+  pointer-events: none;
+}
+
+.vw-company-logo--md {
+  height: clamp(2.1rem, 5.5vw, 3rem);
+  width: auto;
+  max-width: min(280px, 70vw);
+}
+
+.vw-company-logo--sm {
+  height: 1.65rem;
+  width: auto;
+  max-width: 2.75rem;
+}
+
+.vw-company-logo--option {
+  height: 1.5rem;
+  width: auto;
+  max-width: 2.5rem;
+  flex-shrink: 0;
+}
+
+.vw-company-logo-slot {
+  display: inline-block;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  border-radius: 4px;
+  background: rgba(154, 79, 99, 0.12);
+}
+
+.vw-company-logo-fallback {
+  font-family: var(--vw-display);
+  font-weight: 700;
+  font-size: clamp(0.9rem, 2.4vw, 1.25rem);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6b3d4f;
+  line-height: 1.2;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vw-header-company--select {
+  padding: 0.2rem 0.35rem 0.2rem 0.2rem;
+  letter-spacing: normal;
+  text-transform: none;
+  min-width: min(92%, 300px);
 }
 
 .vw-header-company--select .mantine-Select-input {
   font-family: var(--vw-display);
   font-weight: 700;
-  font-size: clamp(0.95rem, 2.2vw, 1.2rem);
-  letter-spacing: 0.08em;
+  font-size: clamp(0.85rem, 2vw, 1.05rem);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #6b3d4f;
   border: none;
   background: transparent;
-  text-align: center;
+  text-align: left;
+  padding-left: 0.15rem;
+}
+
+.vw-header-company--select .mantine-Select-section[data-position='left'] {
+  width: 3.25rem;
+  justify-content: center;
 }
 
 .vw-board-close {
@@ -1042,9 +1145,19 @@
 
   .vw-header-company {
     letter-spacing: 0.08em;
-    padding: 0.35rem 0.75rem;
+    padding: 0.3rem 0.65rem;
     font-size: clamp(0.85rem, 3.5vw, 1.05rem);
     max-width: calc(100% - 3.5rem);
+  }
+
+  .vw-header-company--logo {
+    padding: 0.25rem 0.55rem;
+    min-height: 2.4rem;
+  }
+
+  .vw-company-logo--md {
+    height: clamp(1.75rem, 8vw, 2.4rem);
+    max-width: min(200px, 58vw);
   }
 
   .vw-quote-overlay {

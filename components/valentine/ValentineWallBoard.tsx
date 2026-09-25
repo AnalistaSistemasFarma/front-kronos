@@ -14,15 +14,17 @@ import {
   Button,
   Group,
   Loader,
-  Select,
+  Menu,
   Text,
   Textarea,
   TextInput,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import {
   IconArrowsMaximize,
   IconArrowsMinimize,
+  IconChevronDown,
   IconMinus,
   IconPlus,
   IconRefresh,
@@ -35,6 +37,7 @@ import {
   VALENTINE_REACTIONS,
   VALENTINE_TAGLINE,
   VALENTINE_TO_NAME_MAX,
+  resolveValentineCompanyLogoSrc,
   type ValentineCategoryId,
 } from '../../lib/valentine/constants';
 
@@ -54,8 +57,13 @@ type Props = {
   freshPostId?: number | null;
   canModerate?: boolean;
   companyName?: string;
+  companyLogo?: string | null;
   companyId?: number | null;
-  companies?: Array<{ idCompany: number; companyName: string }>;
+  companies?: Array<{
+    idCompany: number;
+    companyName: string;
+    companyLogo?: string | null;
+  }>;
   onCompanyChange?: (idCompany: number) => void;
   onClose: () => void;
   onSubmit: (payload: {
@@ -93,6 +101,40 @@ function noteLayout(id: number, index: number) {
   return { x, y, tilt, shade };
 }
 
+function CompanyLogoMark({
+  src,
+  name,
+  size = 'md',
+  fallback = 'name',
+}: {
+  src: string | null;
+  name: string;
+  size?: 'sm' | 'md' | 'option';
+  fallback?: 'name' | 'empty';
+}) {
+  const [broken, setBroken] = useState(false);
+  if (!src || broken) {
+    if (fallback === 'empty') {
+      return <span className='vw-company-logo-slot' aria-hidden />;
+    }
+    return (
+      <span className='vw-company-logo-fallback' title={name}>
+        {name || '—'}
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={name || 'Logo empresa'}
+      className={`vw-company-logo vw-company-logo--${size}`}
+      onError={() => setBroken(true)}
+      draggable={false}
+    />
+  );
+}
+
 export default function ValentineWallBoard({
   posts,
   loading,
@@ -100,6 +142,7 @@ export default function ValentineWallBoard({
   freshPostId = null,
   canModerate = false,
   companyName = '',
+  companyLogo = null,
   companyId = null,
   companies = [],
   onCompanyChange,
@@ -222,6 +265,56 @@ export default function ValentineWallBoard({
   }, [scheduleTransform]);
 
   useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+
+    type PinchState = {
+      dist: number;
+      zoom: number;
+    };
+    let pinch: PinchState | null = null;
+
+    const touchDist = (a: Touch, b: Touch) =>
+      Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      e.preventDefault();
+      dragRef.current = null;
+      setDragging(false);
+      pinch = {
+        dist: Math.max(1, touchDist(e.touches[0], e.touches[1])),
+        zoom: zoomRef.current,
+      };
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !pinch) return;
+      e.preventDefault();
+      const d = Math.max(1, touchDist(e.touches[0], e.touches[1]));
+      const next = pinch.zoom * (d / pinch.dist);
+      zoomRef.current = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+      setZoomLabel(Math.round(zoomRef.current * 100));
+      scheduleTransform();
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinch = null;
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: false });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd);
+    el.addEventListener('touchcancel', onTouchEnd);
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [scheduleTransform]);
+
+  useEffect(() => {
     return () => {
       if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
     };
@@ -292,31 +385,79 @@ export default function ValentineWallBoard({
 
       <header className='vw-board-header vw-cork-ui'>
         {companies.length > 1 && onCompanyChange ? (
-          <div className='vw-header-company vw-header-company--select'>
-            <Select
-              aria-label='Elegir tablero de empresa'
-              data={companies.map((c) => ({
-                value: String(c.idCompany),
-                label: c.companyName,
-              }))}
-              value={companyId != null ? String(companyId) : null}
-              onChange={(v) => {
-                const id = Number(v);
-                if (Number.isFinite(id) && id > 0) onCompanyChange(id);
-              }}
-              allowDeselect={false}
-              searchable={companies.length > 5}
-              size='sm'
+          <div className='vw-header-company vw-header-company--logo vw-header-company--switch'>
+            <Menu
+              withinPortal
+              zIndex={10050}
+              position='bottom'
+              shadow='md'
               radius='md'
-              comboboxProps={{ withinPortal: true, zIndex: 10050 }}
-            />
+              width={260}
+            >
+              <Menu.Target>
+                <UnstyledButton
+                  className='vw-company-switch-btn'
+                  aria-label={
+                    companyName
+                      ? `Cambiar tablero · ${companyName}`
+                      : 'Cambiar tablero de empresa'
+                  }
+                >
+                  <CompanyLogoMark
+                    key={companyLogo ?? companyName ?? 'none'}
+                    src={resolveValentineCompanyLogoSrc(
+                      companyLogo ??
+                        companies.find((c) => c.idCompany === companyId)
+                          ?.companyLogo
+                    )}
+                    name={companyName}
+                    size='md'
+                  />
+                  <IconChevronDown
+                    size={16}
+                    stroke={2}
+                    className='vw-company-switch-chevron'
+                    aria-hidden
+                  />
+                </UnstyledButton>
+              </Menu.Target>
+              <Menu.Dropdown className='vw-company-switch-menu'>
+                {companies.map((c) => {
+                  const active = c.idCompany === companyId;
+                  return (
+                    <Menu.Item
+                      key={c.idCompany}
+                      onClick={() => onCompanyChange(c.idCompany)}
+                      leftSection={
+                        <CompanyLogoMark
+                          src={resolveValentineCompanyLogoSrc(c.companyLogo)}
+                          name={c.companyName}
+                          size='option'
+                          fallback='empty'
+                        />
+                      }
+                      className={
+                        active ? 'vw-company-switch-item--active' : undefined
+                      }
+                    >
+                      {c.companyName}
+                    </Menu.Item>
+                  );
+                })}
+              </Menu.Dropdown>
+            </Menu>
           </div>
         ) : (
           <div
-            className='vw-header-company'
+            className='vw-header-company vw-header-company--logo'
             aria-label={companyName ? `Empresa ${companyName}` : 'Empresa'}
           >
-            {companyName || '—'}
+            <CompanyLogoMark
+              key={companyLogo ?? companyName ?? 'none'}
+              src={resolveValentineCompanyLogoSrc(companyLogo)}
+              name={companyName}
+              size='md'
+            />
           </div>
         )}
         <ActionIcon

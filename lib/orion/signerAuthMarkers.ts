@@ -29,6 +29,21 @@ export function buildOrionAuthResolution(params: {
   return `${marker}${ORION_AUTH_MARKER} Autorizar firma${name} (${params.signerEmail})`.trim();
 }
 
+/** Nombre del PDF embebido en resolution (`Autorizar firma: archivo.pdf (email)`). */
+export function parseOrionFileNameFromResolution(
+  resolution?: string | null
+): string | null {
+  const match =
+    /Autorizar firma:\s*(.+?)\s*\([^)]+@[^)]+\)\s*$/i.exec(
+      String(resolution || '').trim()
+    ) ||
+    /Autorizar firma:\s*(.+?)(?:\s*\(|$)/i.exec(String(resolution || '').trim());
+  const name = String(match?.[1] || '')
+    .trim()
+    .replace(/^\[orionAuth\]\s*/i, '');
+  return name || null;
+}
+
 export function isOrionSignerAuthResolution(resolution?: string | null): boolean {
   return String(resolution || '').includes(ORION_AUTH_MARKER);
 }

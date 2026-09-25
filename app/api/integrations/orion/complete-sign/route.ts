@@ -80,7 +80,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Primera aceptación: persistir en perfil para no pedir por cada documento.
+    // Primera aceptación: persistir en perfil sin bloquear accept-sign.
     if (
       (!personHasSigning && body.acceptedTerms === true) ||
       (!personHasBiometric &&
@@ -88,29 +88,27 @@ export async function POST(req: Request) {
         fingerprintDataUrl?.startsWith('data:image/'))
     ) {
       const now = new Date().toISOString();
-      try {
-        await saveOrionPersonConsent(email, {
-          ...(!personHasSigning && body.acceptedTerms === true
-            ? {
-                legalConsentAccepted: true,
-                legalConsentKind: 'ELECTRONIC' as const,
-                legalConsentVersion: SIGNING_LEGAL_CONSENT_VERSION,
-                legalConsentAcceptedAt: now,
-              }
-            : {}),
-          ...(!personHasBiometric &&
-          body.acceptedBiometric === true &&
-          fingerprintDataUrl?.startsWith('data:image/')
-            ? {
-                biometricConsentAccepted: true,
-                biometricConsentVersion: BIOMETRIC_CONSENT_VERSION,
-                biometricConsentAcceptedAt: now,
-              }
-            : {}),
-        });
-      } catch {
+      void saveOrionPersonConsent(email, {
+        ...(!personHasSigning && body.acceptedTerms === true
+          ? {
+              legalConsentAccepted: true,
+              legalConsentKind: 'ELECTRONIC' as const,
+              legalConsentVersion: SIGNING_LEGAL_CONSENT_VERSION,
+              legalConsentAcceptedAt: now,
+            }
+          : {}),
+        ...(!personHasBiometric &&
+        body.acceptedBiometric === true &&
+        fingerprintDataUrl?.startsWith('data:image/')
+          ? {
+              biometricConsentAccepted: true,
+              biometricConsentVersion: BIOMETRIC_CONSENT_VERSION,
+              biometricConsentAcceptedAt: now,
+            }
+          : {}),
+      }).catch(() => {
         /* no bloquear firma; el panel también intenta persistir */
-      }
+      });
     }
 
     const identity = normalizeSignerIdentity(
@@ -137,6 +135,10 @@ export async function POST(req: Request) {
         signatureDataUrl,
         fingerprintDataUrl,
         identity,
+        personConsent: {
+          hasSigningLegalConsent: personHasSigning || acceptedTerms,
+          hasBiometricConsent: personHasBiometric || acceptedBiometric,
+        },
       })
     );
 
