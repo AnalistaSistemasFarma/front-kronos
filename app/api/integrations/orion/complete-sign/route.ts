@@ -7,6 +7,7 @@ import {
   getOrionPersonConsent,
   saveOrionPersonConsent,
 } from '@/lib/orion/client';
+import { orionErrorResponse } from '@/lib/orion/httpError';
 import { finalizeSignerTurn } from '@/lib/orion/service';
 import { normalizeSignerIdentity } from '@/lib/orion/signerIdentity';
 import {
@@ -161,11 +162,6 @@ export async function POST(req: Request) {
       { status: 200 }
     );
   } catch (err) {
-    const status =
-      err && typeof err === 'object' && 'status' in err
-        ? Number((err as { status: number }).status) || 500
-        : 500;
-    const message = err instanceof Error ? err.message : 'Error interno';
-    return NextResponse.json({ error: message }, { status });
+    return orionErrorResponse(err);
   }
 }

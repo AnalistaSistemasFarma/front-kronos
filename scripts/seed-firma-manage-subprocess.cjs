@@ -3,6 +3,7 @@
  * - Preparar firma (/process/firma/prepare) — gestiona PDF / firmantes / enviar
  * - Firmar documento (/process/firma/sign) — obligatorio para poder firmar
  * - Registrar huella (/process/firma/fingerprint) — exigir/colocar/aportar huella
+ * - Documentos firmados (/process/orion-documents) — consulta por empresa (permiso por empresa)
  *
  * Migra el legacy /process/firma/manage (“Firma digital”) → Preparar firma.
  *
@@ -20,6 +21,8 @@ const SIGN_URL = '/process/firma/sign';
 const SIGN_NAME = 'Firmar documento';
 const FINGERPRINT_URL = '/process/firma/fingerprint';
 const FINGERPRINT_NAME = 'Registrar huella';
+const DOCUMENTS_URL = '/process/orion-documents';
+const DOCUMENTS_NAME = 'Documentos firmados';
 const LEGACY_MANAGE_URL = '/process/firma/manage';
 
 function loadEnv() {
@@ -40,6 +43,7 @@ function parseArgs() {
     email: emailArg ? emailArg.split('=').slice(1).join('=').trim() : null,
     alsoSign: process.argv.includes('--also-sign'),
     alsoFingerprint: process.argv.includes('--also-fingerprint'),
+    alsoDocuments: process.argv.includes('--also-documents'),
   };
 }
 
@@ -176,6 +180,7 @@ async function main() {
       FINGERPRINT_NAME,
       FINGERPRINT_URL
     );
+    const documentsId = await ensureSubprocess(prisma, processId, DOCUMENTS_NAME, DOCUMENTS_URL);
 
     if (email) {
       await grantToUser(prisma, prepareId, email);
@@ -188,6 +193,11 @@ async function main() {
         await grantToUser(prisma, fingerprintId, email);
       } else {
         console.log('Tip: añada --also-fingerprint para otorgar “Registrar huella”.');
+      }
+      if (alsoDocuments) {
+        await grantToUser(prisma, documentsId, email);
+      } else {
+        console.log('Tip: añada --also-documents para otorgar “Documentos firmados”.');
       }
     } else {
       console.log(
