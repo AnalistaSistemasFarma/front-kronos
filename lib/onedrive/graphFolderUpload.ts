@@ -143,6 +143,33 @@ export async function uploadFileToOneDriveFolder(
   return (await response.json()) as GraphItemResponse;
 }
 
+/** Reemplaza el contenido de un driveItem existente conservando su id. */
+export async function replaceOneDriveItemContent(
+  token: string,
+  itemId: string,
+  content: BodyInit,
+  contentType?: string
+): Promise<GraphItemResponse> {
+  const graph = graphBase();
+  const id = String(itemId || '').trim();
+  if (!id) throw new Error('itemId es obligatorio');
+
+  const response = await fetch(`${graph}items/${encodeURIComponent(id)}/content`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': contentType || 'application/octet-stream',
+    },
+    body: content,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Error al reemplazar el archivo en OneDrive (HTTP ${response.status})`);
+  }
+
+  return (await response.json()) as GraphItemResponse;
+}
+
 export type OneDriveItemMeta = {
   id: string;
   name: string;

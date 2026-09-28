@@ -55,6 +55,7 @@ import {
   IconChevronDown,
   IconEye,
   IconFileText,
+  IconGavel,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { getFileLabelError } from '../../../../../lib/onedriveName';
@@ -66,6 +67,7 @@ import {
   type TableColumn,
 } from '../../../../../lib/requests-general/tableField';
 import TableColumnsEditor from '../_components/TableColumnsEditor';
+import WorkflowValidatorsModal from '../../../../../components/request-general/WorkflowValidatorsModal';
 import toast from 'react-hot-toast';
 
 interface WorkFlow {
@@ -225,6 +227,8 @@ function ViewWorkFlowPage() {
   const [observers, setObservers] = useState<string[]>([]);
   const [preparersModalOpened, setPreparersModalOpened] = useState(false);
   const [preparers, setPreparers] = useState<string[]>([]);
+  const [validatorsModalOpened, setValidatorsModalOpened] = useState(false);
+  const [validatorsCount, setValidatorsCount] = useState(0);
   const [newTaskForm, setNewTaskForm] = useState({
     task: '',
     id_assigned_user: '',
@@ -269,28 +273,27 @@ function ViewWorkFlowPage() {
       fetchTasks(workflow.id);
       fetchFiles(workflow.id);
       fetchFields(workflow.id);
-      void (async () => {
+      const loadList = async (endpoint: string, key: string): Promise<string[] | null> => {
         try {
-          const [obsRes, prepRes] = await Promise.all([
-            fetch(
-              `/api/requests-general/assign-viewer?id_process_category=${workflow.id}`
-            ),
-            fetch(
-              `/api/requests-general/assign-preparer?id_process_category=${workflow.id}`
-            ),
-          ]);
-          if (obsRes.ok) {
-            const data = await obsRes.json();
-            setObservers(Array.isArray(data.observers) ? data.observers : []);
-          }
-          if (prepRes.ok) {
-            const data = await prepRes.json();
-            setPreparers(Array.isArray(data.preparers) ? data.preparers : []);
-          }
+          const res = await fetch(
+            `/api/requests-general/${endpoint}?id_process_category=${workflow.id}`
+          );
+          if (!res.ok) return null;
+          const data = await res.json();
+          return Array.isArray(data[key]) ? data[key].map(String) : [];
         } catch {
-          /* contadores opcionales */
+          return null;
         }
-      })();
+      };
+      void loadList('assign-viewer', 'observers').then((list) => {
+        if (list) setObservers(list);
+      });
+      void loadList('assign-preparer', 'preparers').then((list) => {
+        if (list) setPreparers(list);
+      });
+      void loadList('assign-validator', 'validators').then((list) => {
+        if (list) setValidatorsCount(list.length);
+      });
     }
   }, [workflow?.id]);
 
@@ -1445,6 +1448,15 @@ function ViewWorkFlowPage() {
               >
                 Preparadores documento
                 {preparers.length > 0 ? ` (${preparers.length})` : ''}
+              </Button>
+              <Button
+                variant='light'
+                color='violet'
+                leftSection={<IconGavel size={16} />}
+                onClick={() => setValidatorsModalOpened(true)}
+              >
+                Validadores documento
+                {validatorsCount > 0 ? ` (${validatorsCount})` : ''}
               </Button>
               <Badge color={getActiveColor(workflow.active)} size='lg' radius='sm' variant='light'>
                 {getActiveText(workflow.active)}
@@ -2761,6 +2773,14 @@ function ViewWorkFlowPage() {
             </Group>
           </Stack>
         </Modal>
+
+        <WorkflowValidatorsModal
+          opened={validatorsModalOpened}
+          onClose={() => setValidatorsModalOpened(false)}
+          processCategoryId={Number(workflow.id)}
+          users={users}
+          onSaved={setValidatorsCount}
+        />
 
         {/* Modal para agregar nueva tarea */}
         <Modal

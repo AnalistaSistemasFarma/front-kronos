@@ -559,6 +559,7 @@ export async function findOpenOrionSignTaskId(
         AND trg.id_assigned = @id_user
         AND trg.id_status NOT IN (2, 3)
         AND CHARINDEX(N'[orionAuth]', ISNULL(trg.resolution, N'')) = 0
+        AND CHARINDEX(N'[orionReview]', ISNULL(trg.resolution, N'')) = 0
         AND (
           @fileMarker IS NULL
           OR CHARINDEX(@fileMarker, ISNULL(trg.resolution, N'')) > 0

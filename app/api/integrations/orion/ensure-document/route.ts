@@ -28,6 +28,7 @@ import type { OrionSignatureState } from '@/lib/orion/types';
 import { resolveOrionPermissions } from '@/lib/orion/permissions';
 import { reconcileDuplicateOrionSignerAuths, userHasPendingOrionSignerAuthBatch } from '@/lib/orion/signerAuthorizations';
 import { getCurrentPendingSigner } from '@/lib/orion/signerStatus';
+import { assertOrionReviewApprovedForSigning, flowHasOrionValidators } from '@/lib/orion/review';
 
 function buildSignerFingerprintPrefs(state: OrionSignatureState): {
   byEmail: Record<string, boolean>;
@@ -532,6 +533,31 @@ export async function POST(req: Request) {
         }
       }
 
+      const newVersion = body.newVersion === true;
+      if (newVersion && (!pdfBase64 || !current?.orionDocumentId)) {
+        throw Object.assign(
+          new Error('Para crear una subversión adjunte el PDF corregido de un documento ya preparado'),
+          { status: 400 }
+        );
+      }
+      if (!current?.orionDocumentId || newVersion) {
+        const hasValidators = await flowHasOrionValidators(pool, requestId);
+        if (hasValidators && newVersion) {
+          throw Object.assign(
+            new Error(
+              'Este flujo tiene validadores: suba la versión corregida desde "Validación" para reiniciar la aprobación.'
+            ),
+            { status: 409 }
+          );
+        }
+        if (!current?.orionDocumentId) {
+          await assertOrionReviewApprovedForSigning(pool, {
+            requestId,
+            state: (current ?? {}) as OrionSignatureState,
+          });
+        }
+      }
+
       return ensureOrionDocumentForRequest(pool, {
         requestId,
         createdByEmail: String(body.createdByEmail || email),
@@ -540,6 +566,10 @@ export async function POST(req: Request) {
         refresh: Boolean(body.refresh),
         fileId,
         fileName: body.fileName ? String(body.fileName) : undefined,
+        newVersion,
+        versionReason:
+          typeof body.versionReason === 'string' ? body.versionReason.trim().slice(0, 500) : null,
+        actorName: session.user?.name ? String(session.user.name) : null,
       });
     });
 
@@ -547,6 +577,7 @@ export async function POST(req: Request) {
       {
         success: true,
         created: result.created,
+        newVersion: result.newVersion,
         formFieldId: result.formFieldId,
         state: result.state,
         documents: result.bag.documents,
@@ -561,6 +592,7 @@ export async function POST(req: Request) {
         ? Number((err as { status: number }).status) || 500
         : 500;
     const message = err instanceof Error ? err.message : 'Error interno';
+    if (status >= 500) console.warn('[orion/ensure-document POST]', status, message);
     return NextResponse.json({ error: message }, { status });
   }
 }

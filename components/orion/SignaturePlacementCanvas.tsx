@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Box, Loader, ScrollArea, Stack, Text } from '@mantine/core';
+import { IconCircleCheckFilled } from '@tabler/icons-react';
 import {
   clampFieldSize,
   createFieldId,
   defaultSizeForKind,
+  isValidatorPlacementOrder,
   normalizeFieldKind,
   pctFromClientPoint,
   sizeBoundsForKind,
@@ -28,6 +30,45 @@ type Props = {
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
+}
+
+const AUTO_MARGIN = 4;
+const AUTO_GAP = 1;
+
+function approvalLabel(name?: string | null) {
+  return `Validó · ${name || 'Validador'}`;
+}
+
+/** Cajas de validadores que faltan: fila en la esquina inferior derecha de la última página. */
+function autoPlaceApprovalFields(
+  fields: SignatureFieldPlacement[],
+  validators: Array<{ order: number; name?: string | null }>,
+  lastPage: number,
+  documentId: string
+): SignatureFieldPlacement[] | null {
+  const missing = validators.filter(
+    (v) => !fields.some((f) => f.signerOrder === v.order && normalizeFieldKind(f.kind) === 'approval')
+  );
+  if (missing.length === 0) return null;
+  const { width, height } = defaultSizeForKind('approval');
+  const perRow = Math.max(1, Math.floor((100 - AUTO_MARGIN * 2 + AUTO_GAP) / (width + AUTO_GAP)));
+  const added = missing.map((v, index) => {
+    const col = index % perRow;
+    const row = Math.floor(index / perRow);
+    return clampFieldSize({
+      id: createFieldId(),
+      documentId,
+      signerOrder: v.order,
+      page: lastPage,
+      x: 100 - AUTO_MARGIN - width - col * (width + AUTO_GAP),
+      y: 100 - AUTO_MARGIN - height - row * (height + AUTO_GAP),
+      width,
+      height,
+      label: approvalLabel(v.name),
+      kind: 'approval',
+    });
+  });
+  return [...fields, ...added];
 }
 
 type DragState = {
@@ -72,6 +113,16 @@ export default function SignaturePlacementCanvas({
   }, [onChange]);
 
   const activePerson = participants.find((p) => p.order === activeOrder);
+  const activeIsValidator = isValidatorPlacementOrder(activeOrder);
+
+  const lastPage = pages.length > 0 ? pages[pages.length - 1]!.page : 0;
+  useEffect(() => {
+    if (!lastPage) return;
+    const validators = participants.filter((p) => isValidatorPlacementOrder(p.order));
+    if (validators.length === 0) return;
+    const next = autoPlaceApprovalFields(fieldsRef.current, validators, lastPage, documentId);
+    if (next) onChangeRef.current(next);
+  }, [documentId, fields, lastPage, participants]);
 
   const getPageRect = useCallback((page: number): DOMRect | null => {
     const img = imgRefs.current[page];
@@ -93,7 +144,9 @@ export default function SignaturePlacementCanvas({
     (page: number, xPct: number, yPct: number) => {
       const currentFields = fieldsRef.current;
       const signer = participants.find((p) => p.order === activeOrder);
-      const kind = normalizeFieldKind(activeKind);
+      const kind = isValidatorPlacementOrder(activeOrder)
+        ? 'approval'
+        : normalizeFieldKind(activeKind);
       const defaults = defaultSizeForKind(kind);
       const bounds = sizeBoundsForKind(kind);
       const existing = currentFields.find(
@@ -106,7 +159,9 @@ export default function SignaturePlacementCanvas({
 
       const labelBase = signer?.name || existing?.label || `Firma ${activeOrder}`;
       const label =
-        kind === 'validation'
+        kind === 'approval'
+          ? approvalLabel(signer?.name)
+          : kind === 'validation'
           ? existing?.label || 'Elaboró'
           : kind === 'fingerprint'
             ? `Huella · ${signer?.name || activeOrder}`
@@ -300,7 +355,7 @@ export default function SignaturePlacementCanvas({
   }
 
   const interacting = Boolean(dragRef.current);
-  const kindBounds = sizeBoundsForKind(activeKind);
+  const kindBounds = sizeBoundsForKind(activeIsValidator ? 'approval' : activeKind);
 
   return (
     <Stack gap='sm' style={{ height: '100%', minHeight: 0 }}>
@@ -315,8 +370,16 @@ export default function SignaturePlacementCanvas({
         }}
       >
         <Text size='sm' fw={700} style={{ color: 'var(--app-accent)' }}>
-          Ubique la firma de {activePerson?.name ?? 'firmante'}
+          {activeIsValidator
+            ? `Ubique el visto bueno de ${activePerson?.name ?? 'validador'}`
+            : `Ubique la firma de ${activePerson?.name ?? 'firmante'}`}
         </Text>
+        {activeIsValidator ? (
+          <Text size='xs' c='dimmed' mt={2}>
+            Mientras se firma se ve un chulito; en la versión final se reemplaza por su firma
+            guardada, en pequeño.
+          </Text>
+        ) : null}
         <Text size='xs' c='dimmed' mt={4}>
           Clic para colocar · arrastre para mover · esquina inferior para redimensionar (
           {kindBounds.minW}–{kindBounds.maxW}% × {kindBounds.minH}–{kindBounds.maxH}%).
@@ -368,6 +431,7 @@ export default function SignaturePlacementCanvas({
                 .map((field) => {
                   const person = participants.find((p) => p.order === field.signerOrder);
                   const isActive = field.signerOrder === activeOrder;
+                  const isApproval = normalizeFieldKind(field.kind) === 'approval';
                   return (
                     <Box
                       key={field.id}
@@ -380,7 +444,9 @@ export default function SignaturePlacementCanvas({
                         height: `${field.height}%`,
                         border: isActive
                           ? '2px solid var(--mantine-color-blue-6)'
-                          : '2px dashed var(--mantine-color-green-6)',
+                          : isApproval
+                            ? '2px dashed var(--mantine-color-teal-6)'
+                            : '2px dashed var(--mantine-color-green-6)',
                         borderRadius: 6,
                         background: 'color-mix(in srgb, var(--app-surface) 88%, transparent)',
                         display: 'flex',
@@ -394,7 +460,12 @@ export default function SignaturePlacementCanvas({
                         touchAction: 'none',
                       }}
                     >
-                      {person?.signatureDataUrl ? (
+                      {isApproval ? (
+                        <IconCircleCheckFilled
+                          size={14}
+                          style={{ color: 'var(--mantine-color-teal-6)', flexShrink: 0, pointerEvents: 'none' }}
+                        />
+                      ) : person?.signatureDataUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={person.signatureDataUrl}

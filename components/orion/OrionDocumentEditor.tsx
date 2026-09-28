@@ -23,7 +23,7 @@ import {
   IconWriting,
 } from '@tabler/icons-react';
 import type { SignatureFieldPlacement, SignatureFieldKind } from '../../lib/orion/signatureFields';
-import { normalizeFieldKind } from '../../lib/orion/signatureFields';
+import { normalizeFieldKind, splitValidatorFields } from '../../lib/orion/signatureFields';
 import type { OrionDocumentSignatureKind, OrionSignatureState } from '../../lib/orion/types';
 import {
   emptySignerSlot,
@@ -148,7 +148,17 @@ export default function OrionDocumentEditor({
   const [sequential, setSequential] = useState(true);
   const [activeOrder, setActiveOrder] = useState(1);
   const [activeFieldKind, setActiveFieldKind] = useState<SignatureFieldKind>('signature');
-  const [fields, setFields] = useState<SignatureFieldPlacement[]>(initialFields);
+  const signerInitialFields = useMemo(
+    () => splitValidatorFields(initialFields).signerFields,
+    [initialFields]
+  );
+  const [fields, setFields] = useState<SignatureFieldPlacement[]>(signerInitialFields);
+  // Los validadores ya están en el PDF (SynerLink estampa su visto bueno, ubicado o
+  // automático): aquí solo se ubican firmantes y sus cajas se conservan al guardar.
+  const preservedValidatorFields = useMemo(
+    () => (state.validatorFields ?? []) as SignatureFieldPlacement[],
+    [state.validatorFields]
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signatureKind, setSignatureKind] = useState<OrionDocumentSignatureKind>(
@@ -173,11 +183,12 @@ export default function OrionDocumentEditor({
   );
 
   useEffect(() => {
-    setFields(initialFields);
-  }, [initialFields]);
+    setFields(signerInitialFields);
+  }, [signerInitialFields]);
 
   useEffect(() => {
-    if (orderedParticipants.length && !orderedParticipants.some((p) => p.order === activeOrder)) {
+    const known = orderedParticipants.some((p) => p.order === activeOrder);
+    if (orderedParticipants.length && !known) {
       setActiveOrder(orderedParticipants[0]!.order);
     }
   }, [activeOrder, orderedParticipants]);
@@ -218,11 +229,16 @@ export default function OrionDocumentEditor({
       );
     });
 
+  const placementParticipants = assignedParticipants;
+
+  const activeNeedsFingerprint =
+    canUseFingerprint &&
+    assignedParticipants.some((p) => p.order === activeOrder && p.requireFingerprint);
+
   useEffect(() => {
-    if (!canUseFingerprint && activeFieldKind === 'fingerprint') {
-      setActiveFieldKind('signature');
-    }
-  }, [activeFieldKind, canUseFingerprint]);
+    const allowed = activeFieldKind === 'signature' || (activeFieldKind === 'fingerprint' && activeNeedsFingerprint);
+    if (!allowed) setActiveFieldKind('signature');
+  }, [activeFieldKind, activeNeedsFingerprint]);
 
   const handleSignerCountChange = useCallback((count: number) => {
     setSignerCount(count);
@@ -428,7 +444,11 @@ export default function OrionDocumentEditor({
       fetch('/api/integrations/orion/signature-fields', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, fileId, signatureFields: fields }),
+        body: JSON.stringify({
+          requestId,
+          fileId,
+          signatureFields: [...fields, ...preservedValidatorFields],
+        }),
       });
 
     let res = await postFields();
@@ -466,9 +486,12 @@ export default function OrionDocumentEditor({
     if (data.state) {
       onStateUpdate(data.state as OrionSignatureState);
     } else {
-      onStateUpdate({ ...state, signatureFields: fields });
+      onStateUpdate({
+        ...state,
+        signatureFields: fields as OrionSignatureState['signatureFields'],
+      });
     }
-  }, [fields, fileId, fileName, onStateUpdate, requestId, state]);
+  }, [fields, fileId, fileName, onStateUpdate, preservedValidatorFields, requestId, state]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -485,7 +508,9 @@ export default function OrionDocumentEditor({
 
   const handleSend = useCallback(async () => {
     if (!allPlaced) {
-      setError('Ubique la firma de cada firmante en el documento antes de enviar.');
+      setError(
+        'Ubique la firma de cada firmante antes de enviar.'
+      );
       return;
     }
     setSaving(true);
@@ -816,25 +841,22 @@ export default function OrionDocumentEditor({
                   Orden de firma
                 </Text>
                 <Text size='xs' c='dimmed'>
-                  Seleccione un firmante y el tipo de caja; luego ubíquela en el PDF.
+                  Seleccione la persona y ubique su firma en el PDF. El visto bueno de los
+                  validadores ya queda en el documento.
                 </Text>
-                <SegmentedControl
-                  mt='sm'
-                  size='xs'
-                  fullWidth
-                  value={activeFieldKind}
-                  onChange={(v) => setActiveFieldKind(v as SignatureFieldKind)}
-                  data={[
-                    { label: 'Firma', value: 'signature' },
-                    ...(canUseFingerprint &&
-                    assignedParticipants.some(
-                      (p) => p.order === activeOrder && p.requireFingerprint
-                    )
-                      ? [{ label: 'Huella', value: 'fingerprint' as const }]
-                      : []),
-                    { label: 'Validación', value: 'validation' },
-                  ]}
-                />
+                {activeNeedsFingerprint ? (
+                  <SegmentedControl
+                    mt='sm'
+                    size='xs'
+                    fullWidth
+                    value={activeFieldKind}
+                    onChange={(v) => setActiveFieldKind(v as SignatureFieldKind)}
+                    data={[
+                      { label: 'Firma', value: 'signature' },
+                      { label: 'Huella', value: 'fingerprint' },
+                    ]}
+                  />
+                ) : null}
               </Box>
               <ScrollArea style={{ flex: 1 }} offsetScrollbars type='scroll' scrollbarSize={8}>
                 <Box p='md'>
@@ -867,7 +889,7 @@ export default function OrionDocumentEditor({
               <SignaturePlacementCanvas
                 pdfSrc={sharedPdfSrc}
                 documentId={documentId}
-                participants={assignedParticipants}
+                participants={placementParticipants}
                 activeOrder={activeOrder}
                 activeKind={activeFieldKind}
                 fields={fields}
@@ -886,7 +908,7 @@ export default function OrionDocumentEditor({
       >
         {editorStep === 2 ? (
           <Text size='sm' c='dimmed' fw={500}>
-            {fields.length} de {assignedParticipants.length} firma(s) ubicada(s)
+            {fields.length} de {placementParticipants.length} firma(s) ubicada(s)
           </Text>
         ) : (
           <Button variant='subtle' onClick={onClose} disabled={saving}>

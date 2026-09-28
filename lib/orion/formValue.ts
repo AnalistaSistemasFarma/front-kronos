@@ -1,5 +1,6 @@
 import { ORION_LEGACY_FILE_ID } from './config';
 import type {
+  OrionDeletedDocument,
   OrionSignatureBagBag,
   OrionSignatureIntent,
   OrionSignatureState,
@@ -7,6 +8,35 @@ import type {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseDeletedDocuments(raw: unknown): OrionDeletedDocument[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const list = raw
+    .filter(isPlainObject)
+    .map((row) => ({
+      fileId: String(row.fileId || '').trim(),
+      fileName: typeof row.fileName === 'string' ? row.fileName : null,
+      orionDocumentIds: Array.isArray(row.orionDocumentIds)
+        ? row.orionDocumentIds.map((id) => String(id || '').trim()).filter(Boolean)
+        : [],
+      deletedAt: String(row.deletedAt || ''),
+      deletedByEmail: typeof row.deletedByEmail === 'string' ? row.deletedByEmail : null,
+    }))
+    .filter((row) => row.fileId);
+  return list.length > 0 ? list : undefined;
+}
+
+/** ¿El documento (por fileId u orionDocumentId) fue eliminado con "Eliminar"? */
+export function isOrionDocumentDeleted(
+  bag: OrionSignatureBagBag,
+  params: { fileId?: string | null; orionDocumentId?: string | null }
+): boolean {
+  const fileId = String(params.fileId || '').trim();
+  const docId = String(params.orionDocumentId || '').trim();
+  return (bag.deletedDocuments ?? []).some(
+    (d) => (fileId && d.fileId === fileId) || (docId && d.orionDocumentIds.includes(docId))
+  );
 }
 
 function stripBagMeta(state: OrionSignatureState): OrionSignatureState {
@@ -209,9 +239,11 @@ export function parseOrionSignatureBagBag(raw: string | null | undefined): Orion
           fileId: String((value as OrionSignatureState).fileId || key),
         };
       }
+      const deletedDocuments = parseDeletedDocuments(parsed.deletedDocuments);
       return {
         documents,
         updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+        ...(deletedDocuments ? { deletedDocuments } : {}),
       };
     }
 
@@ -251,6 +283,7 @@ export function serializeOrionSignatureBagBag(bag: OrionSignatureBagBag): string
   return JSON.stringify({
     documents: bag.documents,
     updatedAt: new Date().toISOString(),
+    ...(bag.deletedDocuments?.length ? { deletedDocuments: bag.deletedDocuments } : {}),
   });
 }
 
@@ -341,6 +374,7 @@ export function setOrionDocumentInBag(
   const key = String(fileId || '').trim();
   if (!key) return bag;
   return {
+    ...bag,
     documents: {
       ...bag.documents,
       [key]: {
@@ -491,6 +525,7 @@ export function adoptLegacyOrionDocument(
 
   const { [ORION_LEGACY_FILE_ID]: _removed, ...rest } = bag.documents;
   return {
+    ...bag,
     documents: {
       ...rest,
       [key]: {

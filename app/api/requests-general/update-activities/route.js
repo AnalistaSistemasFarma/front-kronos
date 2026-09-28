@@ -65,6 +65,18 @@ export async function POST(req) {
         `);
       const prevRow = prevResult.recordset[0];
       const resolutionText = String(prevRow?.resolution || '');
+      // La validación de documento Orion avanza validadores y estampa aprobaciones:
+      // solo se decide vía /api/integrations/orion/review.
+      if (resolutionText.includes('[orionReview]') && [2, 3].includes(Number(id_status))) {
+        await transaction.rollback();
+        return new Response(
+          JSON.stringify({
+            error:
+              'Esta es una validación de documento: apruébela o devuélvala desde Autorizaciones o desde el documento en la solicitud.',
+          }),
+          { status: 409 }
+        );
+      }
       const typeAuth = String(prevRow?.type_authorization || '').toLowerCase();
       const taskName = String(prevRow?.task || '').toLowerCase();
       const isAuthorizationTask =

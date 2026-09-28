@@ -1,4 +1,4 @@
-export type OrionParticipantRole = 'Solicitante' | 'Asignado' | 'Firmante';
+export type OrionParticipantRole = 'Solicitante' | 'Asignado' | 'Firmante' | 'Validador';
 
 export type OrionParticipantType = 'internal' | 'external';
 

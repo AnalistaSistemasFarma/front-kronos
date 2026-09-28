@@ -275,7 +275,12 @@ function ViewRequestPage() {
   const id = searchParams.get('id');
   const from = searchParams.get('from') || searchParams.get('mode') || 'create-request';
   const orionFileIdParam = searchParams.get('orionFileId');
-  const orionActionParam = searchParams.get('orionAction') as 'sign' | 'manage' | 'view' | null;
+  const orionActionParam = searchParams.get('orionAction') as
+    | 'sign'
+    | 'manage'
+    | 'view'
+    | 'review'
+    | null;
   const RETURNED_STATUS_ID = 7;
   const OPEN_STATUS_ID = 1;
   const [request, setRequest] = useState<Request | null>(null);
@@ -1107,13 +1112,13 @@ function ViewRequestPage() {
   }, [request?.id]);
 
   const handleDeleteAttachment = useCallback(
-    async (fileId: string) => {
+    async (fileId: string, fileName?: string | null) => {
       if (!request?.id || !fileId) return;
       try {
         const res = await fetch('/api/requests-general/delete-attachment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId: request.id, fileId }),
+          body: JSON.stringify({ requestId: request.id, fileId, fileName: fileName ?? null }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -1128,12 +1133,22 @@ function ViewRequestPage() {
           delete next[fileId];
           return next;
         });
-        toast.success('Archivo eliminado');
+        toast.success('Documento eliminado');
+        if (data.orionStopped === false) {
+          toast.error(
+            'No se pudo detener la firma en GSS Firma. Recházela allí para que nadie siga firmando.',
+            { duration: 8000 }
+          );
+        }
         refreshAttachmentsAfterUpload();
+        void fetchFormValues(request.id);
+        void fetchTasksRG(request.id);
+        void fetchNotes(request.id);
       } catch {
         toast.error('Error de red al eliminar el archivo');
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [request?.id, refreshAttachmentsAfterUpload]
   );
 
@@ -2137,6 +2152,8 @@ function ViewRequestPage() {
       })
     : null;
   const deepLinkAction: 'sign' | 'manage' | 'view' | null = (() => {
+    // La validación la abre el panel de revisión del adjunto, no el asistente de firma.
+    if (orionActionParam === 'review') return null;
     const raw: 'sign' | 'manage' | 'view' | null =
       orionActionParam === 'sign' || orionActionParam === 'manage' || orionActionParam === 'view'
         ? orionActionParam
@@ -2158,6 +2175,9 @@ function ViewRequestPage() {
     }
     const st = String(doc.status || '').toUpperCase();
     if (st === 'FIRMADO' || st === 'RECHAZADO') return null;
+    // En validación (o aún sin enviar a firma) no hay nada que firmar: solo se ve la solicitud.
+    if (doc.review && doc.review.status !== 'APROBADO') return null;
+    if (!['PENDIENTE_FIRMA', 'EN_PROCESO'].includes(st)) return null;
     return raw;
   })();
 
@@ -2934,6 +2954,10 @@ function ViewRequestPage() {
                           fileSizeLabel={sizeLabel}
                           openUrl={orionLatest || openUrl}
                           previewUrl={file.webUrl ?? null}
+                          autoOpenReview={
+                            orionActionParam === 'review' &&
+                            String(orionFileIdParam || '') === fileId
+                          }
                           processName={request?.process || request?.category || null}
                           requesterName={request?.requester || null}
                           currentUserEmail={session?.user?.email}
@@ -2953,7 +2977,7 @@ function ViewRequestPage() {
                           }}
                           workflowLocked={orionWorkflowLocked}
                           onDocumentsUpdate={handleOrionDocumentsChange}
-                          canDeleteAttachment={canDeleteAttachments && !isRequestResolved()}
+                          canDeleteAttachment={canDeleteAttachments}
                           onDeleteAttachment={handleDeleteAttachment}
                           forceSignerUi={(() => {
                             const me = currentUserEmailNorm;
@@ -3067,14 +3091,18 @@ function ViewRequestPage() {
                                 >
                                   Abrir
                                 </UnstyledButton>
-                                {canDeleteAttachments && !isRequestResolved() ? (
+                                {canDeleteAttachments ? (
                                   <Tooltip label='Eliminar adjunto'>
                                     <ActionIcon
                                       variant='subtle'
                                       color='red'
                                       size='sm'
                                       aria-label={`Eliminar ${file.name}`}
-                                      onClick={() => void handleDeleteAttachment(fileId)}
+                                      onClick={() => {
+                                        if (window.confirm(`¿Eliminar “${file.name}”? Esta acción no se puede deshacer.`)) {
+                                          void handleDeleteAttachment(fileId, file.name);
+                                        }
+                                      }}
                                     >
                                       <IconTrash size={16} />
                                     </ActionIcon>
@@ -3109,13 +3137,17 @@ function ViewRequestPage() {
                               >
                                 <IconEye size={16} />
                               </ActionIcon>
-                              {canDeleteAttachments && !isRequestResolved() ? (
+                              {canDeleteAttachments ? (
                                 <ActionIcon
                                   variant='subtle'
                                   color='red'
                                   size='sm'
                                   aria-label={`Eliminar ${file.name}`}
-                                  onClick={() => void handleDeleteAttachment(fileId)}
+                                  onClick={() => {
+                                    if (window.confirm(`¿Eliminar “${file.name}”? Esta acción no se puede deshacer.`)) {
+                                      void handleDeleteAttachment(fileId, file.name);
+                                    }
+                                  }}
                                 >
                                   <IconTrash size={16} />
                                 </ActionIcon>

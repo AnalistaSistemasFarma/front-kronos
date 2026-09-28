@@ -29,6 +29,40 @@ export function buildOrionAuthResolution(params: {
   return `${marker}${ORION_AUTH_MARKER} Autorizar firma${name} (${params.signerEmail})`.trim();
 }
 
+/**
+ * Validación previa a firma. Marcador de archivo distinto a [orionFile:] para que
+ * la lógica de firmantes (turnos, autorizaciones, cierre de tareas) no la toque.
+ */
+export const ORION_REVIEW_MARKER = '[orionReview]';
+
+export function buildOrionReviewResolution(params: {
+  fileId: string;
+  fileName?: string | null;
+  versionLabel?: string | null;
+  step: number;
+  totalSteps: number;
+}): string {
+  const name = params.fileName ? `: ${params.fileName}` : '';
+  const version = params.versionLabel ? `${params.versionLabel} · ` : '';
+  return `${ORION_REVIEW_MARKER}[orionReviewFile:${params.fileId}] Validar documento${name} (${version}paso ${params.step}/${params.totalSteps})`;
+}
+
+export function isOrionReviewResolution(resolution?: string | null): boolean {
+  return String(resolution || '').includes(ORION_REVIEW_MARKER);
+}
+
+export function parseOrionReviewFileId(resolution?: string | null): string | null {
+  const match = /\[orionReviewFile:([^\]]+)\]/i.exec(String(resolution || ''));
+  return match?.[1]?.trim() || null;
+}
+
+export function parseOrionReviewFileName(resolution?: string | null): string | null {
+  const match = /Validar documento:\s*(.+?)\s*\((?:v\d+\.\d+\s*·\s*)?paso\s+\d+\/\d+\)/i.exec(
+    String(resolution || '')
+  );
+  return match?.[1]?.trim() || null;
+}
+
 export function isOrionSignerAuthResolution(resolution?: string | null): boolean {
   return String(resolution || '').includes(ORION_AUTH_MARKER);
 }
@@ -50,6 +84,7 @@ export function isFirmaAuthorizationItem(params: {
   typeAuthorization?: string | null;
   taskName?: string | null;
 }): boolean {
+  if (isOrionReviewResolution(params.resolution)) return false;
   if (isOrionSignerAuthResolution(params.resolution)) return true;
   if (parseOrionFileIdFromResolution(params.resolution)) return true;
 

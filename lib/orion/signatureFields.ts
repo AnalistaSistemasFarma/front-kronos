@@ -1,4 +1,4 @@
-export type SignatureFieldKind = 'signature' | 'fingerprint' | 'validation';
+export type SignatureFieldKind = 'signature' | 'fingerprint' | 'validation' | 'approval';
 
 export type SignatureFieldPlacement = {
   id: string;
@@ -10,9 +10,41 @@ export type SignatureFieldPlacement = {
   width: number;
   height: number;
   label?: string;
-  /** signature = rúbrica; fingerprint = huella; validation = Elaboró/Revisó (pequeña). */
+  /**
+   * signature = rúbrica; fingerprint = huella; validation = Elaboró/Revisó (pequeña);
+   * approval = validador del flujo (lo estampa SynerLink, no va a Orion).
+   */
   kind?: SignatureFieldKind;
+  /** Solo approval: validador dueño de la caja. */
+  validatorEmail?: string | null;
 };
+
+/**
+ * Las cajas de validadores comparten el editor con los firmantes: el validador n
+ * usa signerOrder = VALIDATOR_ORDER_BASE + n para no chocar con los órdenes de firma.
+ */
+export const VALIDATOR_ORDER_BASE = 900;
+
+export function validatorPlacementOrder(validatorOrder: number): number {
+  return VALIDATOR_ORDER_BASE + validatorOrder;
+}
+
+export function isValidatorPlacementOrder(order: number): boolean {
+  return order > VALIDATOR_ORDER_BASE;
+}
+
+export function splitValidatorFields<T extends { kind?: string | null }>(
+  fields: T[]
+): { signerFields: T[]; validatorFields: T[] } {
+  const signerFields: T[] = [];
+  const validatorFields: T[] = [];
+  for (const f of fields) {
+    (normalizeFieldKind(f.kind) === 'approval' ? validatorFields : signerFields).push(f);
+  }
+  return { signerFields, validatorFields };
+}
+
+export type OrionFieldKind = Exclude<SignatureFieldKind, 'approval'>;
 
 /** Payload enviado a Orion (sin documentId). */
 export type OrionSignatureFieldPayload = {
@@ -24,7 +56,7 @@ export type OrionSignatureFieldPayload = {
   width: number;
   height: number;
   label?: string;
-  kind?: SignatureFieldKind;
+  kind?: OrionFieldKind;
 };
 
 export const DEFAULT_FIELD_WIDTH = 36;
@@ -42,6 +74,8 @@ export const VALIDATION_FIELD_WIDTH = 16;
 export const VALIDATION_FIELD_HEIGHT = 8;
 export const FINGERPRINT_FIELD_WIDTH = 18;
 export const FINGERPRINT_FIELD_HEIGHT = 22;
+export const APPROVAL_FIELD_WIDTH = 14;
+export const APPROVAL_FIELD_HEIGHT = 5;
 
 export function createFieldId(): string {
   return `sf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -62,6 +96,7 @@ export function normalizeFieldKind(kind?: string | null): SignatureFieldKind {
     .toLowerCase();
   if (raw === 'fingerprint' || raw === 'huella') return 'fingerprint';
   if (raw === 'validation' || raw === 'validacion' || raw === 'validación') return 'validation';
+  if (raw === 'approval' || raw === 'validator' || raw === 'validador') return 'approval';
   return 'signature';
 }
 
@@ -71,6 +106,7 @@ export function defaultSizeForKind(kind?: SignatureFieldKind | null): {
 } {
   const k = normalizeFieldKind(kind);
   if (k === 'validation') return { width: VALIDATION_FIELD_WIDTH, height: VALIDATION_FIELD_HEIGHT };
+  if (k === 'approval') return { width: APPROVAL_FIELD_WIDTH, height: APPROVAL_FIELD_HEIGHT };
   if (k === 'fingerprint') return { width: FINGERPRINT_FIELD_WIDTH, height: FINGERPRINT_FIELD_HEIGHT };
   return { width: DEFAULT_FIELD_WIDTH, height: DEFAULT_FIELD_HEIGHT };
 }
@@ -83,6 +119,7 @@ export function sizeBoundsForKind(kind?: SignatureFieldKind | null): {
 } {
   const k = normalizeFieldKind(kind);
   if (k === 'validation') return { minW: 10, maxW: 28, minH: 5, maxH: 14 };
+  if (k === 'approval') return { minW: 8, maxW: 30, minH: 3, maxH: 14 };
   if (k === 'fingerprint') return { minW: 12, maxW: 28, minH: 14, maxH: 32 };
   return {
     minW: MIN_FIELD_WIDTH,
@@ -180,7 +217,35 @@ export function normalizeFieldsForStorage(
 export function toOrionSignatureFields(
   fields: SignatureFieldPlacement[]
 ): OrionSignatureFieldPayload[] {
-  return normalizeFieldsForStorage(fields, '').map(({ documentId: _d, ...rest }) => rest);
+  return normalizeFieldsForStorage(splitValidatorFields(fields).signerFields, '').map(
+    ({ documentId: _d, validatorEmail: _v, kind, ...rest }) => ({
+      ...rest,
+      kind: kind === 'approval' ? 'signature' : kind,
+    })
+  );
+}
+
+/**
+ * Cajas de validadores listas para guardar: una por validador del flujo (la última gana),
+ * con validatorEmail resuelto por orden y descartando órdenes que ya no existen.
+ */
+export function normalizeValidatorFields(
+  fields: SignatureFieldPlacement[],
+  validators: Array<{ order: number; email: string }>,
+  documentId: string
+): SignatureFieldPlacement[] {
+  const byOrder = new Map(validators.map((v) => [validatorPlacementOrder(v.order), v]));
+  const out = new Map<number, SignatureFieldPlacement>();
+  for (const field of normalizeFieldsForStorage(fields, documentId)) {
+    const validator = byOrder.get(field.signerOrder);
+    if (!validator) continue;
+    out.set(field.signerOrder, {
+      ...field,
+      kind: 'approval',
+      validatorEmail: validator.email.trim().toLowerCase(),
+    });
+  }
+  return [...out.values()];
 }
 
 export function parseEmbedTokenFromUrl(embedUrl: string | null | undefined): string | null {

@@ -101,10 +101,16 @@ export function buildOrionSignedFileApiUrl(orionDocumentId: string): string | nu
   );
 }
 
-async function orionFetch<T>(
-  path: string,
-  init?: RequestInit
-): Promise<{ ok: boolean; status: number; data: T | null; error?: string }> {
+export type OrionResult<T> = {
+  ok: boolean;
+  status: number;
+  data: T | null;
+  error?: string;
+  /** Código estable de Orion (p. ej. NOT_YOUR_TURN, DOCUMENT_CLOSED). */
+  code?: string;
+};
+
+async function orionFetch<T>(path: string, init?: RequestInit): Promise<OrionResult<T>> {
   const cfg = getOrionConfig();
   if (!cfg.apiBaseUrl || !cfg.integrationApiKey) {
     return {
@@ -148,7 +154,7 @@ async function orionFetch<T>(
   }
 
   if (!res.ok) {
-    const errBody = data as { error?: string; message?: string } | null;
+    const errBody = data as { error?: string; message?: string; code?: string } | null;
     const looksLikeHtml =
       /^\s*</.test(text) || /<!DOCTYPE|This page could not be found/i.test(text);
     const fallback =
@@ -162,6 +168,7 @@ async function orionFetch<T>(
       status: res.status,
       data,
       error: errBody?.error || errBody?.message || fallback,
+      code: typeof errBody?.code === 'string' ? errBody.code : undefined,
     };
   }
 
@@ -196,22 +203,55 @@ export async function getOrionDocument(
   );
 }
 
+/** 409 SIGNED_SIGNER_LOCKED si se quita o mueve a alguien que ya firmó. */
 export async function assignOrionSigners(
   orionDocumentId: string,
-  payload: OrionAssignSignersPayload
-): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+  payload: OrionAssignSignersPayload & { actorEmail?: string | null }
+): Promise<OrionResult<OrionDocumentResponse>> {
   return orionFetch<OrionDocumentResponse>(
     `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/signers`,
     { method: 'POST', body: JSON.stringify(payload) }
   );
 }
 
+export type OrionDocumentEventPayload = {
+  /** Id idempotente (`kronos-orion_document_event-{id}`): Orion no duplica reintentos. */
+  eventId?: string | null;
+  type: string;
+  label: string;
+  versionLabel?: string | null;
+  actorEmail?: string | null;
+  actorName?: string | null;
+  detail?: string | null;
+  synerlinkRequestId: number;
+  fileId: string;
+  occurredAt: string;
+};
+
+let orionEventsEndpointMissing = false;
+
+/** Hoja de vida en Orion. Si Orion aún no expone la ruta (404) se deja de intentar. */
+export async function postOrionDocumentEvent(
+  orionDocumentId: string,
+  event: OrionDocumentEventPayload
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (orionEventsEndpointMissing) return { ok: false, status: 404 };
+  const res = await orionFetch<unknown>(
+    `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/events`,
+    { method: 'POST', body: JSON.stringify(event) }
+  );
+  if (res.status === 404 && !res.data) orionEventsEndpointMissing = true;
+  return { ok: res.ok, status: res.status, error: res.error };
+}
+
 export async function sendOrionDocument(
-  orionDocumentId: string
-): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+  orionDocumentId: string,
+  options?: { actorEmail?: string | null }
+): Promise<OrionResult<OrionDocumentResponse>> {
+  const actorEmail = String(options?.actorEmail || '').trim().toLowerCase();
   return orionFetch<OrionDocumentResponse>(
     `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/send`,
-    { method: 'POST', body: JSON.stringify({}) }
+    { method: 'POST', body: JSON.stringify(actorEmail ? { actorEmail } : {}) }
   );
 }
 
@@ -248,7 +288,7 @@ export async function acceptOrionSignerTurn(
     biometricConsentVersion?: string | null;
     biometricConsentAcceptedAt?: string | null;
   }
-): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+): Promise<OrionResult<OrionDocumentResponse>> {
   const payload: Record<string, string | boolean | number> = {
     email: email.trim().toLowerCase(),
   };
@@ -384,7 +424,7 @@ export async function rebuildOrionSignedPdf(
 export async function returnOrionDocument(
   orionDocumentId: string,
   payload: { email: string; reason: string }
-): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+): Promise<OrionResult<OrionDocumentResponse>> {
   return orionFetch<OrionDocumentResponse>(
     `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/return`,
     {
@@ -394,6 +434,22 @@ export async function returnOrionDocument(
         reason: String(payload.reason || '').trim(),
       }),
     }
+  );
+}
+
+/** Rechazo definitivo (RECHAZADO). 409 DOCUMENT_CLOSED si ya estaba cerrado. */
+export async function rejectOrionDocument(
+  orionDocumentId: string,
+  payload: { email?: string | null; reason?: string | null }
+): Promise<OrionResult<OrionDocumentResponse>> {
+  const body: Record<string, string> = {};
+  const email = String(payload.email || '').trim().toLowerCase();
+  const reason = String(payload.reason || '').trim();
+  if (email) body.email = email;
+  if (reason) body.reason = reason;
+  return orionFetch<OrionDocumentResponse>(
+    `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/reject`,
+    { method: 'POST', body: JSON.stringify(body) }
   );
 }
 

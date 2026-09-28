@@ -18,6 +18,7 @@ import {
   userIsOrionFlowSignatureResponsible,
 } from '@/lib/orion/service';
 import { isOrionProtectedFileUrl, isAllowedServerPdfFetchUrl, orionDocumentHasSignedCopy } from '@/lib/orion/signedFileAccess';
+import { applyValidatorMarks } from '@/lib/orion/validatorMarks';
 
 function normalizeEmail(email?: string | null): string {
   return String(email || '')
@@ -101,7 +102,11 @@ export async function GET(req: Request) {
       if (!resolved.base64) return null;
       const fileName = stateLike?.fileName || 'documento.pdf';
       const disposition = forceDownload ? 'attachment' : 'inline';
-      return new NextResponse(Buffer.from(resolved.base64, 'base64'), {
+      let pdf: Uint8Array = Buffer.from(resolved.base64, 'base64');
+      if (validatorMode !== 'none') {
+        pdf = await applyValidatorMarks(pdf, state, { final: validatorMode === 'final' });
+      }
+      return new NextResponse(Buffer.from(pdf), {
         status: 200,
         headers: {
           'Content-Type': 'application/pdf',
@@ -125,6 +130,8 @@ export async function GET(req: Request) {
     }
 
     const { state, canViewVersions } = auth;
+    /** Visto bueno de validadores: none (original), check (en firma) o final (firmas guardadas). */
+    let validatorMode: 'none' | 'check' | 'final' = 'check';
 
     // Borrador / sin firmas: no usar este endpoint (es de Orion).
     if (!versionId && !orionDocumentHasSignedCopy(state)) {
@@ -142,6 +149,7 @@ export async function GET(req: Request) {
 
     // Historial / original: solicitante, preparador documento o admin.
     if (versionId === 'original') {
+      validatorMode = 'none';
       if (!canViewVersions) {
         return NextResponse.json(
           { error: 'Solo el solicitante o un preparador documento del flujo puede descargar el original' },
@@ -165,6 +173,12 @@ export async function GET(req: Request) {
 
       const signedOrdered = orderedVersions.filter((v) => v.kind !== 'original');
       targetUrl = selectedVersion.url;
+
+      if (selectedVersion.kind === 'final' || selectedVersion.kind === 'validated') {
+        validatorMode = 'final';
+      } else if (selectedVersion.kind === 'original') {
+        validatorMode = 'none';
+      }
 
       if (selectedVersion.kind === 'validated') {
         // Versión DOCUMENTO VALIDADO (marca de agua) — aparte del historial de firmas.
@@ -196,6 +210,7 @@ export async function GET(req: Request) {
         statusUpperLive === 'COMPLETED'
       ) {
         wantValidated = true;
+        validatorMode = 'final';
       }
     }
 
@@ -218,11 +233,19 @@ export async function GET(req: Request) {
       ? 'private, max-age=60'
       : 'private, no-store';
 
-    const serveBuffer = (buffer: ArrayBuffer | Uint8Array, contentType?: string | null) => {
-      const body =
+    const serveBuffer = async (buffer: ArrayBuffer | Uint8Array, contentType?: string | null) => {
+      let body: Buffer =
         buffer instanceof ArrayBuffer
           ? Buffer.from(buffer)
           : Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+
+      const isPdf = !contentType || /pdf/i.test(contentType);
+      if (isPdf && validatorMode !== 'none') {
+        body = Buffer.from(
+          await applyValidatorMarks(body, state, { final: validatorMode === 'final' })
+        );
+      }
+
       return new NextResponse(body as unknown as BodyInit, {
         status: 200,
         headers: {
@@ -274,6 +297,7 @@ export async function GET(req: Request) {
 
       // URL pública caída (p. ej. OneDrive liberado tras prepare antiguo).
       if (versionId === 'original') {
+        validatorMode = 'none';
         const resolved = await resolveOriginalPdfBase64({
           fileId,
           originalFileUrl: state.originalFileUrl ?? null,
