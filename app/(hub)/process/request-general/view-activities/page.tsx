@@ -113,6 +113,7 @@ import { OrionSignatureProvider } from '../../../../../components/orion/OrionSig
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
+import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
 
 interface Request {
   id: number;
@@ -1819,6 +1820,17 @@ function ViewRequestPage() {
                   {formatActivityDate(request.created_at, { offsetHours: 5 })}
                 </Text>
               </div>
+
+              {request?.process === 'Solicitud de Pago' && (
+                <div className='pb-2'>
+                  <Text size='sm' color='gray.6' fw={500}>
+                    Fecha Estimada de Pago
+                  </Text>
+                  <Text size='sm' tt='capitalize'>
+                    {formatEstimatedPaymentDate(request.company, request.created_at)}
+                  </Text>
+                </div>
+              )}
 
               {request?.start_date && (
                 <div className='pb-2'>
