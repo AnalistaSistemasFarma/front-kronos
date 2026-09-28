@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getOrionConfig, getOrionSignatureProfileUrl, buildOrionExternalRef } from '@/lib/orion/config';
-import { getOrionDocumentByRef } from '@/lib/orion/client';
+import { getOrionDocumentByRef, listOrionTenants } from '@/lib/orion/client';
+import { compareOrionTenantMaps, parseOrionTenantMap } from '@/lib/orion/tenantCheck';
 
 /** GET /api/integrations/orion/health — diagnóstico rápido */
 export async function GET() {
@@ -34,10 +35,49 @@ export async function GET() {
     orionError = e instanceof Error ? e.message : 'Error de red';
   }
 
+  let tenants: {
+    checked: boolean;
+    matches: boolean | null;
+    orionTenantMap: Record<number, string> | null;
+    /** ORION_TENANT_MAP dice un slug y Orion otro para la misma empresa. */
+    mismatches: ReturnType<typeof compareOrionTenantMaps>;
+    /** En ORION_TENANT_MAP pero aún no en Orion: se crean solas (sync_orion_tenants). */
+    pendingInOrion: number[];
+    error: string | null;
+  } = {
+    checked: false,
+    matches: null,
+    orionTenantMap: null,
+    mismatches: [],
+    pendingInOrion: [],
+    error: null,
+  };
+  try {
+    const res = await listOrionTenants();
+    if (res.ok) {
+      const orionTenantMap = parseOrionTenantMap(res.data);
+      const diff = compareOrionTenantMaps(cfg.tenantMap, orionTenantMap);
+      const mismatches = diff.filter((row) => row.kronos && row.orion);
+      tenants = {
+        checked: true,
+        matches: mismatches.length === 0,
+        orionTenantMap,
+        mismatches,
+        pendingInOrion: diff.filter((row) => row.kronos && !row.orion).map((row) => row.synerlinkCompanyId),
+        error: null,
+      };
+    } else {
+      tenants = { ...tenants, error: res.error || `HTTP ${res.status}` };
+    }
+  } catch (e) {
+    tenants = { ...tenants, error: e instanceof Error ? e.message : 'Error de red' };
+  }
+
   return NextResponse.json({
-    ok: orionReachable,
+    ok: orionReachable && tenants.matches !== false,
     orionReachable,
     orionError,
+    tenants,
     signatureProfileUrl: getOrionSignatureProfileUrl(),
     config: {
       apiBaseUrl: cfg.apiBaseUrl,

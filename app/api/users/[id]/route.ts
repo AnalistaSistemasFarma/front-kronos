@@ -2,6 +2,8 @@ import bcrypt from 'bcryptjs';
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { checkAdminPrivileges } from '../../../../lib/access-control';
+import { getPool } from '../../../../lib/mssqlPool';
+import { syncUserToOrionInBackground } from '../../../../lib/orion/userSync';
 import { prisma } from '../../../../lib/prisma';
 import { authOptions } from '../../auth/[...nextauth]/route';
 
@@ -101,6 +103,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         details: changes.length > 0 ? `Updated: ${changes.join(', ')}` : 'No changes detected',
       },
     });
+
+    if (user.role !== 'supplier') {
+      void getPool()
+        .then((pool) => syncUserToOrionInBackground(pool, user.id))
+        .catch(() => undefined);
+    }
 
     return NextResponse.json({ user });
   } catch (error) {
