@@ -41,7 +41,7 @@ import {
 } from './documentEvents';
 import { replaceOneDriveItemContent } from '../onedrive/graphFolderUpload';
 import { indexOrionDocumentsInBackground } from './documentIndex';
-import { acceptOrionSignerTurn, assignOrionSigners, buildOrionSignedFileApiUrl, createOrionDocument, getOrionDocument, getOrionDocumentByRef, getOrionPersonConsent, rebuildOrionSignedPdf, resolveOrionAbsoluteUrl, returnOrionDocument, saveOrionSignatureFields } from './client';
+import { acceptOrionSignerTurn, assignOrionSigners, buildOrionSignedFileApiUrl, createOrionDocument, getOrionDocument, getOrionDocumentByRef, getOrionFingerprintProfileUrl, getOrionPersonConsent, rebuildOrionSignedPdf, resolveOrionAbsoluteUrl, returnOrionDocument, saveOrionSignatureFields } from './client';
 import { isAllowedServerPdfFetchUrl } from './signedFileAccess';
 import { deleteOneDriveItem } from '../onedrive/graphFolderUpload';
 import { mapOrionFieldsToPlacements, normalizeFieldsForStorage, normalizeValidatorFields, parseEmbedTokenFromUrl, splitValidatorFields, toOrionSignatureFields, type SignatureFieldPlacement } from './signatureFields';
@@ -1876,41 +1876,58 @@ export async function userHasOrionFirmaManage(
   return userHasOrionPreparePermission(pool, userId, _isAdmin);
 }
 
+type OrionFirmaPermission = 'prepare' | 'sign' | 'fingerprint';
+
+const SUB_URL = `LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N''))))`;
+const SUB_NAME = `LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N''))))`;
+
+const ORION_FIRMA_PERMISSION_MATCH: Record<OrionFirmaPermission, string> = {
+  prepare: `${SUB_URL} IN (N'/process/firma/prepare', N'/process/firma/manage')
+    OR ${SUB_NAME} LIKE N'%preparar firma%'
+    OR ${SUB_NAME} LIKE N'%firma digital%'`,
+  sign: `${SUB_URL} = N'/process/firma/sign'
+    OR ${SUB_NAME} LIKE N'%firmar documento%'`,
+  fingerprint: `${SUB_URL} = N'/process/firma/fingerprint'
+    OR ${SUB_NAME} LIKE N'%registrar huella%'
+    OR ${SUB_NAME} LIKE N'%poner huella%'`,
+};
+
+/**
+ * Los permisos de firma se asignan por empresa. Con `requestId` solo vale el
+ * permiso de la empresa de esa solicitud: fuera de su empresa, nadie prepara
+ * ni firma sin el permiso de firmas en la empresa del documento.
+ */
+async function userHasOrionFirmaPermission(
+  pool: SqlPool,
+  userId: string,
+  permission: OrionFirmaPermission,
+  requestId?: number | null
+): Promise<boolean> {
+  if (!userId) return false;
+  const scoped = Number.isInteger(requestId) && Number(requestId) > 0;
+  const request = pool.request().input('id_user', sql.NVarChar(255), userId);
+  if (scoped) request.input('requestId', sql.Int, Number(requestId));
+  const permitted = await request.query(`
+    SELECT TOP 1 suc.id_subprocess_user_company AS id
+    FROM subprocess_user_company suc
+    INNER JOIN company_user cu ON cu.id_company_user = suc.id_company_user
+    INNER JOIN subprocess s ON s.id_subprocess = suc.id_subprocess
+    WHERE cu.id_user = @id_user
+      AND (${ORION_FIRMA_PERMISSION_MATCH[permission]})
+      ${scoped ? 'AND cu.id_company = (SELECT rg.id_company FROM requests_general rg WHERE rg.id = @requestId)' : ''}
+  `);
+  return Boolean(permitted.recordset[0]?.id);
+}
+
 /** Permiso Preparar firma (URL prepare o legacy manage). Sin bypass admin. */
 export async function userHasOrionPreparePermission(
   pool: SqlPool,
   userId: string,
-  _isAdmin = false
+  _isAdmin = false,
+  requestId?: number | null
 ): Promise<boolean> {
   void _isAdmin;
-  if (!userId) return false;
-
-  const {
-    ORION_FIRMA_PREPARE_URL,
-    ORION_FIRMA_MANAGE_URL,
-  } = await import('./access');
-  const permitted = await pool
-    .request()
-    .input('id_user', sql.NVarChar(255), userId)
-    .input('urlPrepare', sql.NVarChar(255), ORION_FIRMA_PREPARE_URL)
-    .input('urlManage', sql.NVarChar(255), ORION_FIRMA_MANAGE_URL)
-    .query(`
-      SELECT TOP 1 suc.id_subprocess_user_company AS id
-      FROM subprocess_user_company suc
-      INNER JOIN company_user cu
-        ON cu.id_company_user = suc.id_company_user
-      INNER JOIN subprocess s
-        ON s.id_subprocess = suc.id_subprocess
-      WHERE cu.id_user = @id_user
-        AND (
-          LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N'')))) = LOWER(LTRIM(RTRIM(@urlPrepare)))
-          OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N'')))) = LOWER(LTRIM(RTRIM(@urlManage)))
-          OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N'')))) LIKE N'%preparar firma%'
-          OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N'')))) LIKE N'%firma digital%'
-        )
-    `);
-
-  return Boolean(permitted.recordset[0]?.id);
+  return userHasOrionFirmaPermission(pool, userId, 'prepare', requestId);
 }
 
 /** Resuelve id Kronos desde sesión (id o email). */
@@ -1944,31 +1961,11 @@ export async function resolveOrionActorUserId(
 export async function userHasOrionSignPermission(
   pool: SqlPool,
   userId: string,
-  _isAdmin = false
+  _isAdmin = false,
+  requestId?: number | null
 ): Promise<boolean> {
   void _isAdmin;
-  if (!userId) return false;
-
-  const { ORION_FIRMA_SIGN_URL } = await import('./access');
-  const permitted = await pool
-    .request()
-    .input('id_user', sql.NVarChar(255), userId)
-    .input('urlSign', sql.NVarChar(255), ORION_FIRMA_SIGN_URL)
-    .query(`
-      SELECT TOP 1 suc.id_subprocess_user_company AS id
-      FROM subprocess_user_company suc
-      INNER JOIN company_user cu
-        ON cu.id_company_user = suc.id_company_user
-      INNER JOIN subprocess s
-        ON s.id_subprocess = suc.id_subprocess
-      WHERE cu.id_user = @id_user
-        AND (
-          LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N'')))) = LOWER(LTRIM(RTRIM(@urlSign)))
-          OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N'')))) LIKE N'%firmar documento%'
-        )
-    `);
-
-  return Boolean(permitted.recordset[0]?.id);
+  return userHasOrionFirmaPermission(pool, userId, 'sign', requestId);
 }
 
 /**
@@ -1978,32 +1975,11 @@ export async function userHasOrionSignPermission(
 export async function userHasOrionFingerprintPermission(
   pool: SqlPool,
   userId: string,
-  _isAdmin = false
+  _isAdmin = false,
+  requestId?: number | null
 ): Promise<boolean> {
   void _isAdmin;
-  if (!userId) return false;
-
-  const { ORION_FIRMA_FINGERPRINT_URL } = await import('./access');
-  const permitted = await pool
-    .request()
-    .input('id_user', sql.NVarChar(255), userId)
-    .input('urlFp', sql.NVarChar(255), ORION_FIRMA_FINGERPRINT_URL)
-    .query(`
-      SELECT TOP 1 suc.id_subprocess_user_company AS id
-      FROM subprocess_user_company suc
-      INNER JOIN company_user cu
-        ON cu.id_company_user = suc.id_company_user
-      INNER JOIN subprocess s
-        ON s.id_subprocess = suc.id_subprocess
-      WHERE cu.id_user = @id_user
-        AND (
-          LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N'')))) = LOWER(LTRIM(RTRIM(@urlFp)))
-          OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N'')))) LIKE N'%registrar huella%'
-          OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N'')))) LIKE N'%poner huella%'
-        )
-    `);
-
-  return Boolean(permitted.recordset[0]?.id);
+  return userHasOrionFirmaPermission(pool, userId, 'fingerprint', requestId);
 }
 
 /**
@@ -2015,10 +1991,9 @@ export async function userCanManageOrionRequest(
   userId: string,
   _isAdmin: boolean
 ): Promise<boolean> {
-  void requestId;
   void _isAdmin;
   if (!userId) return false;
-  return userHasOrionPreparePermission(pool, userId, false);
+  return userHasOrionPreparePermission(pool, userId, false, requestId);
 }
 
 /**
@@ -2310,10 +2285,10 @@ export async function finalizeSignerTurn(
     fileId?: string | null;
     /** Rúbrica opcional enviada en el mismo accept-sign (Orion la persiste si falta). */
     signatureDataUrl?: string | null;
-    /** Huella (obligatoria en Orion si el firmante tiene cajas kind=fingerprint). */
+    /** Huella nueva (reemplaza la de "Mi huella"). Sin imagen, Orion usa la registrada. */
     fingerprintDataUrl?: string | null;
-    /** Identidad del firmante (nombre, CC/NIT, cargo) para el sello Orion. */
-    identity?: SignerAcceptIdentity | null;
+    /** Consentimiento del turno. La identidad (nombre, cédula, cargo) sale de Orion. */
+    identity?: Partial<SignerAcceptIdentity> | null;
     /**
      * Consentimiento ya resuelto por el caller (evita un GET extra a Orion).
      * Si no viene, se consulta en Orion como antes.
@@ -2334,11 +2309,11 @@ export async function finalizeSignerTurn(
   signerTasksOpened: number;
   currentSignerEmail: string | null;
 }> {
-  const canSign = await userHasOrionSignPermission(pool, params.userId, false);
+  const canSign = await userHasOrionSignPermission(pool, params.userId, false, params.requestId);
   if (!canSign) {
     throw Object.assign(
       new Error(
-        'No tiene permiso “Firmar documento”. Sin ese permiso no puede firmar aunque esté asignado como firmante. Asígueselo en Administración → Usuarios.'
+        'No tiene permiso “Firmar documento” en la empresa de esta solicitud. Sin ese permiso no puede firmar aunque esté asignado como firmante. Asígueselo en Administración → Usuarios, en esa empresa.'
       ),
       { status: 403 }
     );
@@ -2491,8 +2466,10 @@ export async function finalizeSignerTurn(
 
   // Aplicar firma real en Orion (rúbrica guardada o signatureDataUrl)
   {
-    const identity = params.identity
-      ? normalizeSignerIdentity(params.identity, turnSigner.name || params.userEmail)
+    const consent = params.identity ?? null;
+    // Solo datos que el firmante completó porque faltaban en Orion.
+    const identity = consent?.fullName?.trim()
+      ? normalizeSignerIdentity(consent, turnSigner.name || params.userEmail)
       : null;
     // Consentimiento a nivel persona (Orion users.*): no exigir checkbox por documento.
     let personHasSigning = Boolean(
@@ -2510,8 +2487,8 @@ export async function finalizeSignerTurn(
         /* si falla, caer al flag del formulario */
       }
     }
-    const termsOk = identity?.acceptedTerms === true || personHasSigning;
-    if (!identity || !termsOk) {
+    const termsOk = consent?.acceptedTerms === true || personHasSigning;
+    if (!termsOk) {
       throw Object.assign(new Error(SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE), { status: 422 });
     }
     const needsFingerprint = turnSigner.requireFingerprint === true;
@@ -2519,7 +2496,8 @@ export async function finalizeSignerTurn(
       const canFingerprint = await userHasOrionFingerprintPermission(
         pool,
         params.userId,
-        false
+        false,
+        params.requestId
       );
       if (!canFingerprint) {
         throw Object.assign(
@@ -2530,19 +2508,11 @@ export async function finalizeSignerTurn(
         );
       }
     }
+    // Sin imagen, Orion usa la huella de "Mi huella" (FINGERPRINT_NOT_REGISTERED si no hay).
     const fingerprintDataUrl = needsFingerprint
       ? String(params.fingerprintDataUrl || '').trim()
       : '';
-    if (needsFingerprint && !fingerprintDataUrl.startsWith('data:image/')) {
-      throw Object.assign(
-        new Error(
-          'Este documento requiere huella dactilar. Capture o suba la imagen de huella antes de firmar.'
-        ),
-        { status: 422 }
-      );
-    }
-    const biometricOk =
-      identity.acceptedBiometric === true || personHasBiometric;
+    const biometricOk = consent?.acceptedBiometric === true || personHasBiometric;
     if (needsFingerprint && !biometricOk) {
       throw Object.assign(new Error(BIOMETRIC_CONSENT_REQUIRED_MESSAGE), { status: 422 });
     }
@@ -2551,9 +2521,10 @@ export async function finalizeSignerTurn(
     const acceptPayload = {
       signatureDataUrl: params.signatureDataUrl,
       // Nunca enviar huella en un turno que no la exige (evita 422 biométrico en Orion).
-      fingerprintDataUrl: needsFingerprint ? fingerprintDataUrl || null : null,
+      fingerprintDataUrl: fingerprintDataUrl.startsWith('data:image/') ? fingerprintDataUrl : null,
       requireFingerprint: needsFingerprint,
       signOrder: Number(turnSigner.order) || null,
+      signerId: String(turnSigner.signerId || turnSigner.id || '').trim() || null,
       legalConsentAccepted: true as const,
       legalConsentKind: 'ELECTRONIC' as const,
       ...(needsFingerprint
@@ -2563,12 +2534,12 @@ export async function finalizeSignerTurn(
             biometricConsentAcceptedAt: biometricAcceptedAt,
           }
         : {}),
+      // Orion solo usa estos datos si el campo está vacío en su perfil.
       ...(identity
         ? {
             fullName: identity.fullName,
             idDocumentType: identity.idDocumentType,
             idNumber: identity.idNumber,
-            companySlug: identity.companySlug,
             companyName: identity.companyName,
             companyNit: identity.companyNit,
             jobTitle: identity.jobTitle,
@@ -2621,9 +2592,10 @@ export async function finalizeSignerTurn(
 
     const alreadyDoneOnOrion =
       !accept.ok &&
-      /ya complet[oó]|already\s*complet|already\s*sign|firmante ya/i.test(
-        String(accept.error || '')
-      );
+      (accept.code === 'SIGNER_ALREADY_SIGNED' ||
+        /ya complet[oó]|already\s*complet|already\s*sign|firmante ya/i.test(
+          String(accept.error || '')
+        ));
 
     if (alreadyDoneOnOrion) {
       // Orion ya registró la firma (doble clic / reintento). Sincronizar y tratar como OK.
@@ -2656,14 +2628,30 @@ export async function finalizeSignerTurn(
     } else if (!accept.ok || !accept.data) {
       const status = accept.status || 502;
       const raw = String(accept.error || '').trim();
-      const message =
-        raw ||
-        (status === 422
-          ? 'No se pudo aplicar la firma. Verifique su rúbrica e intente de nuevo.'
-          : status === 409
-            ? 'Aún no es su turno para firmar.'
-            : 'No se pudo confirmar la firma en GSS Firma (Orion).');
-      throw Object.assign(new Error(message), { status: status === 404 ? 502 : status });
+      const code = isOrionErrorCode(accept.code)
+        ? accept.code
+        : looksLikeFingerprintNotRegistered(raw)
+          ? ('FINGERPRINT_NOT_REGISTERED' as const)
+          : undefined;
+      const message = code
+        ? orionErrorMessage(code)
+        : raw ||
+          (status === 422
+            ? 'No se pudo aplicar la firma. Verifique su rúbrica e intente de nuevo.'
+            : status === 409
+              ? 'Aún no es su turno para firmar.'
+              : 'No se pudo confirmar la firma en GSS Firma (Orion).');
+      const httpStatus = code === 'SIGNER_NOT_FOUND' ? 404 : status === 404 ? 502 : status;
+      throw Object.assign(new Error(message), {
+        status: httpStatus,
+        code,
+        ...(code === 'FINGERPRINT_NOT_REGISTERED'
+          ? { fingerprintProfileUrl: getOrionFingerprintProfileUrl() }
+          : {}),
+        ...(code === 'SIGNATURE_NOT_REGISTERED'
+          ? { signatureProfileUrl: getOrionSignatureProfileUrl() }
+          : {}),
+      });
     } else {
       liveState = mergeOrionSignatureState(
         liveState,

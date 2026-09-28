@@ -156,9 +156,11 @@ export async function GET(req: Request) {
           actorId
             ? userCanManageOrionRequest(pool, requestId, actorId, isAdmin)
             : Promise.resolve(false),
-          actorId ? userHasOrionSignPermission(pool, actorId, false) : Promise.resolve(false),
           actorId
-            ? userHasOrionFingerprintPermission(pool, actorId, false)
+            ? userHasOrionSignPermission(pool, actorId, false, requestId)
+            : Promise.resolve(false),
+          actorId
+            ? userHasOrionFingerprintPermission(pool, actorId, false, requestId)
             : Promise.resolve(false),
           actorId
             ? userIsOrionFlowSignatureResponsible(pool, requestId, actorId)
@@ -220,10 +222,10 @@ export async function GET(req: Request) {
         ? userCanManageOrionRequest(pool, requestId, actorId, isAdmin)
         : Promise.resolve(false);
       const canSignPromise = actorId
-        ? userHasOrionSignPermission(pool, actorId, false)
+        ? userHasOrionSignPermission(pool, actorId, false, requestId)
         : Promise.resolve(false);
       const canFingerprintPromise = actorId
-        ? userHasOrionFingerprintPermission(pool, actorId, false)
+        ? userHasOrionFingerprintPermission(pool, actorId, false, requestId)
         : Promise.resolve(false);
       const isFlowResponsiblePromise = actorId
         ? userIsOrionFlowSignatureResponsible(pool, requestId, actorId)

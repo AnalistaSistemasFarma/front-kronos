@@ -447,6 +447,8 @@ export function mergeOrionSigners(
       cardCode: signer.cardCode ?? prev?.cardCode ?? null,
       notifyByEmail:
         signer.notifyByEmail != null ? signer.notifyByEmail : prev?.notifyByEmail,
+      synerlinkNotify: signer.synerlinkNotify ?? prev?.synerlinkNotify ?? null,
+      synerlinkEmailedAt: signer.synerlinkEmailedAt ?? prev?.synerlinkEmailedAt ?? null,
       requireFingerprint:
         signer.requireFingerprint != null
           ? signer.requireFingerprint

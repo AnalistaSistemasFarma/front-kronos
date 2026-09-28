@@ -122,7 +122,7 @@ export function normalizeSignerIdentity(
     companySlug: isNit ? companyName : null,
     companyName: isNit ? companyName : null,
     companyNit: isNit && idNumber ? idNumber : null,
-    jobTitle: isNit ? jobTitle : null,
+    jobTitle,
     acceptedTerms: identity.acceptedTerms === true ? true : undefined,
     acceptedBiometric: identity.acceptedBiometric === true ? true : undefined,
   };

@@ -94,6 +94,21 @@ export function getOrionSignatureProfileUrl(): string | null {
   return embedOrigin ? `${embedOrigin}/dashboard/my-signature` : null;
 }
 
+export type OrionSignerEmailSender = 'orion' | 'synerlink' | 'both';
+
+/**
+ * Quién envía el correo de turno a los firmantes (ORION_SIGNER_EMAIL_SENDER):
+ * - orion (defecto): Orion por Graph a quien tenga notifyByEmail.
+ * - synerlink: Orion recibe notifyByEmail:false y SynerLink envía por SAPSEND.
+ * - both: ambos.
+ */
+export function getOrionSignerEmailSender(): OrionSignerEmailSender {
+  const raw = String(process.env.ORION_SIGNER_EMAIL_SENDER || '')
+    .trim()
+    .toLowerCase();
+  return raw === 'synerlink' || raw === 'both' ? raw : 'orion';
+}
+
 export function parseRequestIdFromExternalRef(externalRef: string | undefined): number | null {
   if (!externalRef?.trim()) return null;
   const match = /synerlink:\/\/request\/(\d+)/i.exec(externalRef.trim());

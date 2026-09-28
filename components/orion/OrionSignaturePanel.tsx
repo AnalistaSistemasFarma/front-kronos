@@ -30,11 +30,12 @@ import { allSlotsCompletedForEmail, getCurrentPendingSigner, isSignerCompleted }
 import { canViewOrionDocumentVersions, isOrionDocumentSigner } from '../../lib/orion/documentVersions';
 import { resolveOrionPermissions } from '../../lib/orion/permissions';
 import SignaturePad from './SignaturePad';
-import FingerprintCapture from './FingerprintCapture';
 import PdfInlineViewer from './PdfInlineViewer';
 import OrionDocumentEditor from './OrionDocumentEditor';
-import SignerIdentityForm from './SignerIdentityForm';
-import type { SignerAcceptIdentity } from '../../lib/orion/signerIdentity';
+import SignerTurnConfirm, {
+  type SignerTurnConfirmation,
+  type SignerTurnPreview,
+} from './SignerTurnConfirm';
 import {
   useOrionSignatureRegister,
   type OrionFileMeta,
@@ -73,36 +74,20 @@ function normalizeEmail(email?: string | null): string {
     .toLowerCase();
 }
 
-const FINGERPRINT_STORAGE_PREFIX = 'orion-fingerprint:';
+const LEGACY_FINGERPRINT_STORAGE_PREFIX = 'orion-fingerprint:';
 
-function fingerprintStorageKey(email?: string | null): string {
-  return `${FINGERPRINT_STORAGE_PREFIX}${normalizeEmail(email) || '_'}`;
-}
-
-function readStoredFingerprint(email?: string | null): string | null {
-  if (typeof localStorage === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(fingerprintStorageKey(email));
-    if (!raw) return null;
-    const data = JSON.parse(raw) as { dataUrl?: string };
-    const url = String(data.dataUrl || '').trim();
-    return url.startsWith('data:image/') ? url : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredFingerprint(email: string | null | undefined, dataUrl: string | null) {
+/** Dato biométrico (Ley 1581): la huella vive en Orion ("Mi huella"), nunca en el navegador. */
+function clearLegacyFingerprintStorage() {
   if (typeof localStorage === 'undefined') return;
   try {
-    const key = fingerprintStorageKey(email);
-    if (!dataUrl?.startsWith('data:image/')) {
-      localStorage.removeItem(key);
-      return;
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(LEGACY_FINGERPRINT_STORAGE_PREFIX)) keys.push(key);
     }
-    localStorage.setItem(key, JSON.stringify({ ts: Date.now(), dataUrl }));
+    keys.forEach((k) => localStorage.removeItem(k));
   } catch {
-    /* quota / private mode */
+    /* private mode */
   }
 }
 
@@ -226,8 +211,13 @@ export default function OrionSignaturePanel({
   const [identityModalOpen, setIdentityModalOpen] = useState(false);
   const [personHasSigningConsent, setPersonHasSigningConsent] = useState(false);
   const [personHasBiometricConsent, setPersonHasBiometricConsent] = useState(false);
-  const [fingerprintPreview, setFingerprintPreview] = useState<string | null>(null);
-  const [fingerprintFromSaved, setFingerprintFromSaved] = useState(false);
+  /** Vista previa de solo lectura desde Orion (rúbrica, nombre, cédula, cargo, huella). */
+  const [signerPreview, setSignerPreview] = useState<SignerTurnPreview | null>(null);
+  const [signerPreviewLoading, setSignerPreviewLoading] = useState(false);
+  /** Rúbrica dibujada en este turno: reemplaza la guardada en Orion. */
+  const [turnSignature, setTurnSignature] = useState<string | null>(null);
+  const [fingerprintHelpUrl, setFingerprintHelpUrl] = useState<string | null>(null);
+  const padForTurnRef = useRef(false);
   const [identityError, setIdentityError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const userRoleRef = useRef<'coordinator' | 'signer' | 'waiting' | 'viewer'>('viewer');
@@ -615,24 +605,58 @@ export default function OrionSignaturePanel({
     return state.signers.find((s) => normalizeEmail(s.email) === me) ?? null;
   }, [currentUserEmail, state.signers]);
 
-  // Reutilizar huella guardada entre documentos (no pedir subirla otra vez).
   useEffect(() => {
-    const stored = readStoredFingerprint(currentUserEmail);
-    if (stored) {
-      setFingerprintPreview(stored);
-      setFingerprintFromSaved(true);
-    }
-    setIdentityError(null);
-  }, [mySigner?.order, activeFile?.fileId, currentUserEmail]);
+    clearLegacyFingerprintStorage();
+  }, []);
 
-  const handleFingerprintChange = useCallback(
-    (dataUrl: string | null) => {
-      setFingerprintPreview(dataUrl);
-      setFingerprintFromSaved(false);
-      writeStoredFingerprint(currentUserEmail, dataUrl);
-    },
-    [currentUserEmail]
-  );
+  // Rúbrica, nombre, cédula, cargo, huella y consentimientos salen de Orion.
+  useEffect(() => {
+    if (!identityModalOpen || !currentUserEmail) return;
+    let cancelled = false;
+    setSignerPreviewLoading(true);
+    fetch('/api/integrations/orion/user-profile', { cache: 'no-store', credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setSignerPreview({
+          fullName: data.fullName ?? null,
+          idDocumentType: data.idDocumentType ?? null,
+          idNumber: data.idNumber ?? null,
+          jobTitle: data.jobTitle ?? null,
+          companyName: data.companyName ?? null,
+          hasSignature: data.hasSignature === true,
+          signatureDataUrl: data.signatureDataUrl ?? null,
+          hasFingerprint: data.hasFingerprint === true,
+          hasSigningLegalConsent: data.hasSigningLegalConsent === true,
+          hasBiometricConsent: data.hasBiometricConsent === true,
+          missingInOrion: Array.isArray(data.missingInOrion) ? data.missingInOrion : [],
+          suggested: {
+            fullName: data.suggested?.fullName ?? null,
+            idNumber: data.suggested?.idNumber ?? null,
+          },
+          signatureProfileUrl: data.signatureProfileUrl ?? null,
+          fingerprintProfileUrl: data.fingerprintProfileUrl ?? null,
+        });
+        if (data.hasSigningLegalConsent === true) setPersonHasSigningConsent(true);
+        if (data.hasBiometricConsent === true) setPersonHasBiometricConsent(true);
+        if (data.hasSignature === true) setHasSignature(true);
+      })
+      .catch(() => {
+        /* sin vista previa: Orion valida al firmar */
+      })
+      .finally(() => {
+        if (!cancelled) setSignerPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [identityModalOpen, currentUserEmail]);
+
+  useEffect(() => {
+    setIdentityError(null);
+    setTurnSignature(null);
+    setFingerprintHelpUrl(null);
+  }, [mySigner?.order, activeFile?.fileId, currentUserEmail]);
 
   const statusUpper = String(state.status || '').toUpperCase();
   const hasDocument = Boolean(state.orionDocumentId && state.embedUrl);
@@ -643,7 +667,7 @@ export default function OrionSignaturePanel({
     : false;
 
   const confirmSign = useCallback(
-    async (identity?: SignerAcceptIdentity | null) => {
+    async (confirmation?: SignerTurnConfirmation | null) => {
       const file = activeFile ?? activeFileRef.current;
       if (!file) {
         setIdentityError(
@@ -651,21 +675,15 @@ export default function OrionSignaturePanel({
         );
         return false;
       }
-      // Sin identidad del modal: abrir formulario (checkbox + datos). No bloquear por terms en API.
-      if (!identity) {
+      // Sin confirmación del modal: abrir la vista previa (datos de Orion + consentimientos).
+      if (!confirmation) {
         setIdentityError(null);
         setIdentityModalOpen(true);
         return false;
       }
-      // Solo el checkbox por slot (requireFingerprint). No usar requiresBiometricConsent
-      // ni cajas legacy: el mismo email puede firmar sin huella en otro turno.
+      // Solo el checkbox por slot (requireFingerprint): el mismo email puede firmar sin huella en otro turno.
       const needsFingerprint = mySigner?.requireFingerprint === true;
-      // Consentimiento a nivel persona: si ya lo tiene, no exigir checkbox por documento.
-      if (
-        !personHasSigningConsent &&
-        identity &&
-        identity.acceptedTerms !== true
-      ) {
+      if (!personHasSigningConsent && confirmation.acceptedTerms !== true) {
         setIdentityError('Debe leer y aceptar las condiciones de firma para continuar.');
         return false;
       }
@@ -676,19 +694,7 @@ export default function OrionSignaturePanel({
           );
           return false;
         }
-        if (!fingerprintPreview?.startsWith('data:image/')) {
-          setIdentityError(
-            'Este documento requiere huella dactilar. Suba la imagen de huella antes de confirmar.'
-          );
-          return false;
-        }
-        // Persistir para no pedirla de nuevo en el siguiente documento.
-        writeStoredFingerprint(currentUserEmail, fingerprintPreview);
-        if (
-          !personHasBiometricConsent &&
-          identity &&
-          identity.acceptedBiometric !== true
-        ) {
+        if (!personHasBiometricConsent && confirmation.acceptedBiometric !== true) {
           setIdentityError(
             'Debe autorizar el tratamiento de su huella dactilar para continuar.'
           );
@@ -697,25 +703,11 @@ export default function OrionSignaturePanel({
       }
       setAcceptLoading(true);
       setIdentityError(null);
+      setFingerprintHelpUrl(null);
       setError(null);
       try {
-        // Siempre mandar la rúbrica local si la tenemos. Antes se omitía cuando
-        // hasSignature=true (payload más liviano), pero Orion a veces no la
-        // resuelve en accept-sign → 422 "No hay rúbrica guardada" justo después
-        // de un POST signature-embed 200.
-        const localRubric = signaturePreview?.startsWith('data:image/')
-          ? signaturePreview
-          : null;
-        // Sin imagen en memoria no se puede sellar el acto (Orion prioriza inline
-        // sobre plantilla). Abrir pad aunque tenga firma guardada en perfil.
-        if (!localRubric) {
-          setIdentityModalOpen(false);
-          continueToSignAfterPadRef.current = true;
-          setSignatureModalOpen(true);
-          setIdentityError(null);
-          setError('Dibuje o confirme su firma antes de firmar el documento.');
-          return false;
-        }
+        const drawn = turnSignature?.startsWith('data:image/') ? turnSignature : null;
+        const supplement = confirmation.supplement;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 90_000);
         let res: Response;
@@ -728,29 +720,25 @@ export default function OrionSignaturePanel({
             body: JSON.stringify({
               requestId,
               fileId: file.fileId,
-              signatureDataUrl: localRubric,
-              ...(needsFingerprint && fingerprintPreview
-                ? { fingerprintDataUrl: fingerprintPreview }
-                : {}),
-              ...(identity
+              // Sin rúbrica dibujada, Orion usa la guardada en su perfil.
+              ...(drawn ? { signatureDataUrl: drawn } : {}),
+              // Orion usa la huella de "Mi huella"; no se envía imagen por turno.
+              requireFingerprint: needsFingerprint,
+              acceptedTerms: personHasSigningConsent || confirmation.acceptedTerms === true,
+              ...(needsFingerprint
                 ? {
-                    fullName: identity.fullName,
-                    idDocumentType: identity.idDocumentType,
-                    idNumber: identity.idNumber,
-                    companySlug: identity.companySlug,
-                    companyName: identity.companyName,
-                    companyNit: identity.companyNit,
-                    jobTitle: identity.jobTitle,
-                    // Consentimiento persona o checkbox de esta sesión.
-                    acceptedTerms:
-                      personHasSigningConsent || identity.acceptedTerms === true,
-                    ...(needsFingerprint
-                      ? {
-                          acceptedBiometric:
-                            personHasBiometricConsent ||
-                            identity.acceptedBiometric === true,
-                        }
-                      : {}),
+                    acceptedBiometric:
+                      personHasBiometricConsent || confirmation.acceptedBiometric === true,
+                  }
+                : {}),
+              // Solo completa campos vacíos en Orion; lo que Orion ya tiene no se pisa.
+              ...(supplement
+                ? {
+                    fullName:
+                      supplement.fullName || signerPreview?.fullName || currentUserName || '',
+                    idDocumentType: 'CC',
+                    idNumber: supplement.idNumber ?? '',
+                    jobTitle: supplement.jobTitle ?? null,
                   }
                 : {}),
             }),
@@ -760,9 +748,9 @@ export default function OrionSignaturePanel({
         }
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
+          const code = typeof data.code === 'string' ? data.code : '';
           const msg = String(data.error || `No se pudo confirmar la firma (${res.status})`);
-          // Orion a veces responde así tras un doble envío; ya quedó firmado.
-          if (/ya complet[oó]|already\s*complet|already\s*sign|firmante ya/i.test(msg)) {
+          if (code === 'SIGNER_ALREADY_SIGNED') {
             setIdentityModalOpen(false);
             setIdentityError(null);
             setSignSuccessMessage('Su firma ya estaba registrada. Continúe con el flujo.');
@@ -771,14 +759,30 @@ export default function OrionSignaturePanel({
             void refreshState(file.fileId, { soft: true });
             return true;
           }
-          // Sin rúbrica en Orion: reabrir el pad en vez de dejar al usuario atrapado.
-          if (/r[uú]brica|dibuje su firma|no hay.*firma/i.test(msg)) {
+          if (code === 'NOT_YOUR_TURN' || code === 'DOCUMENT_CLOSED' || code === 'SIGNER_NOT_FOUND') {
+            setIdentityModalOpen(false);
+            setIdentityError(null);
+            setDocumentModalOpen(false);
+            setSignerModalIntent('view');
+            setError(msg);
+            void refreshState(file.fileId, { soft: true });
+            return false;
+          }
+          if (code === 'SIGNATURE_NOT_REGISTERED') {
+            // Pad del turno: la rúbrica dibujada viaja en accept-sign y queda guardada en Orion.
             setIdentityModalOpen(false);
             setHasSignature(false);
-            continueToSignAfterPadRef.current = true;
+            padForTurnRef.current = true;
             setSignatureModalOpen(true);
-            setIdentityError(null);
-            setError(msg);
+            setIdentityError(msg);
+            return false;
+          }
+          if (code === 'FINGERPRINT_NOT_REGISTERED') {
+            setFingerprintHelpUrl(
+              String(data.fingerprintProfileUrl || signerPreview?.fingerprintProfileUrl || '') ||
+                null
+            );
+            setIdentityError(msg);
             return false;
           }
           setIdentityError(msg);
@@ -798,12 +802,13 @@ export default function OrionSignaturePanel({
           setSignSuccessMessage(data.message || 'Documento firmado correctamente.');
           setDocumentModalOpen(false);
           setSignerModalIntent('view');
+          setTurnSignature(null);
           const justAcceptedTerms =
-            !personHasSigningConsent && identity?.acceptedTerms === true;
+            !personHasSigningConsent && confirmation.acceptedTerms === true;
           const justAcceptedBiometric =
             needsFingerprint &&
             !personHasBiometricConsent &&
-            identity?.acceptedBiometric === true;
+            confirmation.acceptedBiometric === true;
           if (justAcceptedTerms || justAcceptedBiometric) {
             void fetch('/api/integrations/orion/signing-consent', {
               method: 'POST',
@@ -878,17 +883,16 @@ export default function OrionSignaturePanel({
       activeFile,
       applyFileState,
       canFingerprintPermission,
-      fingerprintPreview,
-      hasSignature,
-      mySigner?.order,
       mySigner?.requireFingerprint,
       notifyDocuments,
       personHasBiometricConsent,
       personHasSigningConsent,
       refreshState,
       requestId,
-      signaturePreview,
-      currentUserEmail,
+      currentUserName,
+      signerPreview?.fingerprintProfileUrl,
+      signerPreview?.fullName,
+      turnSignature,
     ]
   );
 
@@ -1763,16 +1767,33 @@ export default function OrionSignaturePanel({
 
       <Modal
         opened={signatureModalOpen}
-        onClose={() => setSignatureModalOpen(false)}
+        onClose={() => {
+          setSignatureModalOpen(false);
+          if (padForTurnRef.current) {
+            padForTurnRef.current = false;
+            setIdentityModalOpen(true);
+          }
+        }}
         title='Dibuje su firma'
         size='md'
         centered
-        zIndex={400}
+        zIndex={430}
         overlayProps={{ blur: 4 }}
       >
         <SignaturePad
-          initialImage={signaturePreview}
-          onSave={(dataUrl) => void saveSignature(dataUrl)}
+          initialImage={padForTurnRef.current ? turnSignature : signaturePreview}
+          onSave={(dataUrl) => {
+            if (padForTurnRef.current) {
+              // Se envía en accept-sign: reemplaza la rúbrica guardada en Orion.
+              padForTurnRef.current = false;
+              setTurnSignature(dataUrl);
+              setSignatureModalOpen(false);
+              setIdentityError(null);
+              setIdentityModalOpen(true);
+              return;
+            }
+            void saveSignature(dataUrl);
+          }}
           saving={signatureSaving}
         />
       </Modal>
@@ -1786,49 +1807,39 @@ export default function OrionSignaturePanel({
           }
         }}
         title={
-          activeFile?.fileName
-            ? `Confirmar identidad · ${activeFile.fileName}`
-            : 'Confirmar identidad'
+          activeFile?.fileName ? `Confirmar firma · ${activeFile.fileName}` : 'Confirmar firma'
         }
         size='md'
         centered
         zIndex={420}
         overlayProps={{ blur: 4 }}
       >
-        <SignerIdentityForm
-          defaultName={currentUserName || mySigner?.name || null}
-          currentUserEmail={currentUserEmail}
+        <SignerTurnConfirm
           documentFileName={activeFile?.fileName || null}
+          currentUserEmail={currentUserEmail}
+          preview={signerPreview}
+          previewLoading={signerPreviewLoading}
+          drawnSignature={turnSignature}
+          onDrawSignature={() => {
+            padForTurnRef.current = true;
+            setIdentityModalOpen(false);
+            setSignatureModalOpen(true);
+          }}
+          onDiscardDrawnSignature={() => setTurnSignature(null)}
+          requireFingerprint={mySigner?.requireFingerprint === true}
+          canFingerprint={canFingerprintPermission}
+          personHasSigningConsent={personHasSigningConsent}
+          personHasBiometricConsent={personHasBiometricConsent}
           confirming={acceptLoading}
           externalError={identityError}
-          onClearExternalError={() => setIdentityError(null)}
+          fingerprintHelpUrl={fingerprintHelpUrl}
           onCancel={() => {
             if (!acceptLoading) {
               setIdentityModalOpen(false);
               setIdentityError(null);
             }
           }}
-          onConfirm={(identity) => void confirmSign(identity)}
-          personHasSigningConsent={personHasSigningConsent}
-          personHasBiometricConsent={personHasBiometricConsent}
-          requireBiometricConsent={Boolean(mySigner?.requireFingerprint === true)}
-          fingerprintSlot={
-            mySigner?.requireFingerprint === true ? (
-              canFingerprintPermission ? (
-                <FingerprintCapture
-                  value={fingerprintPreview}
-                  onChange={handleFingerprintChange}
-                  disabled={acceptLoading}
-                  fromSaved={fingerprintFromSaved && Boolean(fingerprintPreview)}
-                />
-              ) : (
-                <Alert color='orange' variant='light'>
-                  Este documento requiere huella, pero no tiene permiso “Registrar huella”.
-                  Pídalo en Administración → Usuarios.
-                </Alert>
-              )
-            ) : null
-          }
+          onConfirm={(confirmation) => void confirmSign(confirmation)}
         />
       </Modal>
 
