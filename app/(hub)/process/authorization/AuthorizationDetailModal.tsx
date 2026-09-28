@@ -45,6 +45,7 @@ import {
   parseTableConfig,
   parseTableValue,
 } from '../../../../lib/requests-general/tableField';
+import { formatEstimatedPaymentDate } from '../../../../lib/treasury/estimatedPaymentDate';
 
 // Item mínimo que llega desde el panel de autorización (subconjunto de AuthorizationRequest).
 interface RequestSummary {
@@ -377,6 +378,20 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                 </Group>
                 <Text size='sm' fw={600}>{formatDateCO(detail?.created_at || request?.created_at)}</Text>
               </Grid.Col>
+              {detail?.process === 'Solicitud de Pago' && (
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <Group gap={6} wrap='nowrap'>
+                    <IconCalendarEvent size={16} className='text-gray-400' />
+                    <Text size='xs' c='dimmed' fw={500}>Fecha estimada de pago</Text>
+                  </Group>
+                  <Text size='sm' fw={600} tt='capitalize'>
+                    {formatEstimatedPaymentDate(
+                      detail?.company || request?.company,
+                      detail?.created_at || request?.created_at
+                    )}
+                  </Text>
+                </Grid.Col>
+              )}
             </Grid>
 
             {detail?.description && (

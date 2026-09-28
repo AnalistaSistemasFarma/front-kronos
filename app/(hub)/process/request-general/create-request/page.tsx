@@ -96,6 +96,7 @@ function readSelectedCompanyId(): string | null {
 }
 import SapOptionSelect from './SapOptionSelect';
 import TableFieldInput from './TableFieldInput';
+import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
 import toast from 'react-hot-toast';
 
 interface RequestTask {
@@ -1988,6 +1989,30 @@ function RequestBoard() {
                 />
               </Grid.Col>
             </Grid>
+
+            {(() => {
+              const processName = (
+                filteredProcesses.find((p) => p.value === formData.process)?.label || ''
+              ).split(' - ')[0];
+              if (processName !== 'Solicitud de Pago') return null;
+              const companyName =
+                companies.find((c) => c.value === formData.company)?.label || '';
+              return (
+                <Alert
+                  icon={<IconCalendarEvent size={20} />}
+                  color='blue'
+                  variant='light'
+                  title='Fecha estimada de pago'
+                >
+                  <Text size='sm' tt='capitalize'>
+                    {formatEstimatedPaymentDate(companyName, new Date())}
+                  </Text>
+                  <Text size='xs' c='dimmed' mt={4}>
+                    Estimación según la fecha de creación; puede variar.
+                  </Text>
+                </Alert>
+              );
+            })()}
 
             <Textarea
               label={parseInt(formData.process) == 4 ? 'Conocimientos - Experiencia' : 'Descripción Detallada'}
