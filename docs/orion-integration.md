@@ -22,7 +22,52 @@ ORION_TENANT_MAP={"1":"farmalogica","2":"ryan","3":"farmalogica-1","5":"unidosis
 
 # Opcional: URL directa al perfil de firma embebido (por defecto vía API embed/signature-url)
 ORION_SIGNATURE_PROFILE_URL=
+
+# Opcional: pantalla "Mi huella" de Orion (por defecto {ORION_EMBED_ORIGIN}/dashboard/my-fingerprint)
+ORION_FINGERPRINT_PROFILE_URL=
+
+# Quién envía el correo de turno a los firmantes: orion (defecto, Graph) | synerlink (SAPSEND) | both
+# Con "synerlink" Orion recibe notifyByEmail:false y Kronos envía el enlace del turno por SAPSEND.
+ORION_SIGNER_EMAIL_SENDER=orion
 ```
+
+Verificar el mapa contra Orion: `GET /api/integrations/orion/health` devuelve `tenants.mismatches`
+(mismo `id_company` con slug distinto) y `tenants.pendingInOrion` (empresas aún no creadas en Orion).
+
+### Empresas automáticas (Kronos → Orion)
+
+La fuente de verdad del mapa es Orion (`GET /tenants`, caché 5 min). `ORION_TENANT_MAP` queda solo
+como slug sugerido y respaldo si Orion no responde. Una empresa nueva en la tabla `company` se crea
+sola en Orion:
+
+- al crear el primer documento de firma de esa empresa (`ensureOrionTenantForCompany`);
+- al sincronizar usuarios (botón en Administración → Usuarios, job `sync_orion_users`);
+- con el job `sync_orion_tenants` cada 15 min (`node scripts/seed-firma-manage-subprocess.cjs --schedule-tenant-sync`);
+- a mano: `POST /api/integrations/orion/tenants/sync` (admin, body opcional `{ "companyIds": [3] }`).
+
+Slug propuesto: el de `ORION_TENANT_MAP` si existe; si no, el nombre en minúsculas sin tildes
+(`"ONE LATAM Pharma"` → `one-latam-pharma`), con `-{id}` si ya lo usa otra empresa.
+
+**Contrato que debe exponer Orion** (hoy responde 405; mientras tanto la empresa no se crea y el
+error lo indica):
+
+```http
+POST /api/integrations/synerlink/tenants/sync
+Authorization: Bearer <SYNERLINK_INTEGRATION_API_KEY>
+
+{ "companies": [ { "synerlinkCompanyId": 3, "name": "ONELATAMPHARMA", "slug": "farmalogica-1" } ] }
+```
+
+Por cada empresa, idempotente:
+
+1. Si ya hay un tenant vinculado a `synerlinkCompanyId` → actualizar `name` (sin tocar el slug).
+2. Si no, y `slug` ya existe → agregar `synerlinkCompanyId` a ese tenant.
+3. Si no → crear el tenant (`slug`, `name`, `storageCode` derivado) vinculado a `synerlinkCompanyId`.
+
+Respuesta `200`: la misma forma de `GET /tenants` con todos los tenants
+(`{ "tenants": [ { "orionTenantId", "slug", "name", "synerlinkCompanyIds": [...] } ] }`),
+opcionalmente `summary { created, linked, updated, unchanged, errors }`. El vínculo
+`synerlinkCompanyId → tenant` debe persistirse en BD (no solo en `SYNERLINK_TENANT_MAP`).
 
 En Orion debe existir:
 
@@ -118,6 +163,7 @@ Semilla: `node scripts/seed-firma-manage-subprocess.cjs` (migra legacy manage→
 | POST | `/api/integrations/orion/complete-sign` | Sesión | Cerrar turno del firmante (`fileId` opcional) |
 | GET | `/api/integrations/orion/signed-file?requestId=&fileId=` | Sesión | Proxy PDF firmado Orion (Bearer server-side) |
 | POST | `/api/integrations/orion/document-status` | Bearer API key | Webhook Orion |
+| POST | `/api/integrations/orion/tenants/sync` | Admin | Crear en Orion las empresas Kronos faltantes |
 
 ## Archivos clave
 
@@ -155,6 +201,7 @@ Aplicar manualmente en SQL Server los `.sql` de `prisma/seeds/` (en prod no se c
 
 | Item | Motivo |
 |------|--------|
+| `POST /tenants/sync` (alta de empresas) | Crear sola en Orion cada empresa nueva de Kronos (ver "Empresas automáticas") |
 | Webhook `EN_PROCESO` por cada firma parcial | Hoy el cierre de turno depende de `complete-sign` o polling |
 | `signUrl` para firmantes internos | Hoy se usa `embedUrl` genérico |
 | Campo `order` en `signers[]` | Kronos usa índice del array como respaldo |

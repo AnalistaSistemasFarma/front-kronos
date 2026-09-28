@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:clean": "node scripts/dev.mjs --clean",
+    "dev:turbo": "node scripts/dev.mjs --turbo",
     "build": "next build --turbopack",
     "start": "next start -p 3003",
     "lint": "eslint",

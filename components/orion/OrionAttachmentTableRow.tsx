@@ -18,6 +18,7 @@ import {
   IconPencil,
   IconSignature,
   IconSparkles,
+  IconTimeline,
   IconTrash,
   IconUsers,
 } from '@tabler/icons-react';
@@ -34,6 +35,9 @@ import {
   orionDocumentHasSignedCopy,
 } from '../../lib/orion/signedFileAccess';
 import OrionFirmantesInviteModal from './OrionFirmantesInviteModal';
+import OrionDocumentLifecycleModal from './OrionDocumentLifecycleModal';
+import OrionReviewPanel from './OrionReviewPanel';
+import { knownReadyForSigning } from '../../lib/orion/reviewState';
 
 type RowProps = OrionAttachmentSignActionsProps & {
   rowNumber?: number | string;
@@ -43,7 +47,9 @@ type RowProps = OrionAttachmentSignActionsProps & {
   previewUrl?: string | null;
   versionsSlot?: ReactNode;
   canDeleteAttachment?: boolean;
-  onDeleteAttachment?: (fileId: string) => void | Promise<void>;
+  onDeleteAttachment?: (fileId: string, fileName?: string | null) => void | Promise<void>;
+  /** Llegó desde Autorizaciones a validar este documento: abre el modal de validación. */
+  autoOpenReview?: boolean;
 };
 
 function ActionLink({
@@ -111,6 +117,7 @@ export default function OrionAttachmentTableRow({
   versionsSlot,
   canDeleteAttachment = false,
   onDeleteAttachment,
+  autoOpenReview = false,
   ...props
 }: RowProps) {
   void previewUrl; // OneDrive webUrl no se usa: Ver en línea va por proxy SynerLink.
@@ -119,6 +126,12 @@ export default function OrionAttachmentTableRow({
   const [renewLoading, setRenewLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [firmantesOpen, setFirmantesOpen] = useState(false);
+  const [lifecycleOpen, setLifecycleOpen] = useState(false);
+  // null = aún no se sabe si el flujo exige validación; hasta saberlo no se habilita preparar.
+  const [readyForSigning, setReadyForSigning] = useState<boolean | null>(() =>
+    knownReadyForSigning(d.state)
+  );
+  const validationComplete = readyForSigning === true;
 
   const applyDocs = (documents: Record<string, OrionSignatureState>) => {
     props.onDocumentsUpdate?.(documents);
@@ -235,18 +248,21 @@ export default function OrionAttachmentTableRow({
         icon={<IconTrash size={15} stroke={1.6} />}
         label={deleteLoading ? 'Eliminando…' : 'Eliminar'}
         danger
-        disabled={deleteLoading || isClosed}
+        disabled={deleteLoading}
         onClick={() => {
-          if (deleteLoading || isClosed) return;
+          if (deleteLoading) return;
           if (
             !window.confirm(
-              `¿Eliminar “${props.fileName}” de la solicitud? Esta acción no se puede deshacer.`
+              `¿Eliminar “${props.fileName}” por completo?\n\n` +
+                'Se borra el archivo, su flujo de firma y validación, versiones, tareas y hoja de vida en SynerLink, ' +
+                'aunque ya esté firmado. Si la firma sigue en curso se detiene en GSS Firma.\n\n' +
+                'Esta acción no se puede deshacer.'
             )
           ) {
             return;
           }
           setDeleteLoading(true);
-          void Promise.resolve(onDeleteAttachment(props.fileId)).finally(() => {
+          void Promise.resolve(onDeleteAttachment(props.fileId, props.fileName)).finally(() => {
             setDeleteLoading(false);
           });
         }}
@@ -432,7 +448,18 @@ export default function OrionAttachmentTableRow({
             <div className='doc-dossier__rail' />
             <Stack gap={4} className='doc-dossier__body'>
 
-            
+            {props.requestId && props.fileId && !isClosed ? (
+              <OrionReviewPanel
+                requestId={props.requestId}
+                fileId={props.fileId}
+                fileName={props.fileName}
+                state={d.state}
+                onDocumentsUpdate={applyDocs}
+                onReadyForSigningChange={setReadyForSigning}
+                previewUrl={viewOnlineHref}
+                autoOpenDecision={autoOpenReview}
+              />
+            ) : null}
 
             {d.hasOrionDoc && d.signers.length > 0 ? (
               <OrionSignatureFlow
@@ -487,7 +514,7 @@ export default function OrionAttachmentTableRow({
                 />
               ) : null}
 
-              {!isClosed && d.canEditDocument && d.api ? (
+              {!isClosed && d.canEditDocument && d.api && validationComplete ? (
                 <>
                   <ActionLink
                     icon={<IconPencil size={15} stroke={1.6} />}
@@ -504,6 +531,14 @@ export default function OrionAttachmentTableRow({
 
               {versionsSlot && d.api?.canViewVersions ? (
                 <div>{versionsSlot}</div>
+              ) : null}
+
+              {props.requestId && props.fileId ? (
+                <ActionLink
+                  icon={<IconTimeline size={15} stroke={1.6} />}
+                  label='Ver flujo'
+                  onClick={() => setLifecycleOpen(true)}
+                />
               ) : null}
 
               {d.canSignNow ? (
@@ -539,7 +574,7 @@ export default function OrionAttachmentTableRow({
                 </Button>
               ) : null}
 
-              {!isClosed && d.canPrepareDocument && d.api ? (
+              {!isClosed && d.canPrepareDocument && d.api && validationComplete ? (
                 <ActionLink
                   icon={<IconPencil size={15} stroke={1.6} />}
                   label='Preparar documento'
@@ -553,13 +588,24 @@ export default function OrionAttachmentTableRow({
       </Table.Td>
     </Table.Tr>
     {props.requestId && props.fileId ? (
-      <OrionFirmantesInviteModal
-        opened={firmantesOpen}
-        onClose={() => setFirmantesOpen(false)}
-        requestId={props.requestId}
-        fileId={props.fileId}
-        fileName={props.fileName}
-      />
+      <>
+        <OrionFirmantesInviteModal
+          opened={firmantesOpen}
+          onClose={() => setFirmantesOpen(false)}
+          requestId={props.requestId}
+          fileId={props.fileId}
+          fileName={props.fileName}
+        />
+        <OrionDocumentLifecycleModal
+          opened={lifecycleOpen}
+          onClose={() => setLifecycleOpen(false)}
+          requestId={props.requestId}
+          fileId={props.fileId}
+          fileName={props.fileName}
+          versionLabel={d.state.versionLabel ?? null}
+          state={d.state}
+        />
+      </>
     ) : null}
     </>
   );

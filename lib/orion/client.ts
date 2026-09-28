@@ -100,10 +100,16 @@ export function buildOrionSignedFileApiUrl(orionDocumentId: string): string | nu
   );
 }
 
-async function orionFetch<T>(
-  path: string,
-  init?: RequestInit
-): Promise<{ ok: boolean; status: number; data: T | null; error?: string }> {
+export type OrionResult<T> = {
+  ok: boolean;
+  status: number;
+  data: T | null;
+  error?: string;
+  /** Código estable de Orion (p. ej. NOT_YOUR_TURN, DOCUMENT_CLOSED). */
+  code?: string;
+};
+
+async function orionFetch<T>(path: string, init?: RequestInit): Promise<OrionResult<T>> {
   const cfg = getOrionConfig();
   if (!cfg.apiBaseUrl || !cfg.integrationApiKey) {
     return {
@@ -147,7 +153,7 @@ async function orionFetch<T>(
   }
 
   if (!res.ok) {
-    const errBody = data as { error?: string; message?: string } | null;
+    const errBody = data as { error?: string; message?: string; code?: string } | null;
     const looksLikeHtml =
       /^\s*</.test(text) || /<!DOCTYPE|This page could not be found/i.test(text);
     const fallback =
@@ -161,6 +167,7 @@ async function orionFetch<T>(
       status: res.status,
       data,
       error: errBody?.error || errBody?.message || fallback,
+      code: typeof errBody?.code === 'string' ? errBody.code : undefined,
     };
   }
 
@@ -195,22 +202,55 @@ export async function getOrionDocument(
   );
 }
 
+/** 409 SIGNED_SIGNER_LOCKED si se quita o mueve a alguien que ya firmó. */
 export async function assignOrionSigners(
   orionDocumentId: string,
-  payload: OrionAssignSignersPayload
-): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+  payload: OrionAssignSignersPayload & { actorEmail?: string | null }
+): Promise<OrionResult<OrionDocumentResponse>> {
   return orionFetch<OrionDocumentResponse>(
     `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/signers`,
     { method: 'POST', body: JSON.stringify(payload) }
   );
 }
 
+export type OrionDocumentEventPayload = {
+  /** Id idempotente (`kronos-orion_document_event-{id}`): Orion no duplica reintentos. */
+  eventId?: string | null;
+  type: string;
+  label: string;
+  versionLabel?: string | null;
+  actorEmail?: string | null;
+  actorName?: string | null;
+  detail?: string | null;
+  synerlinkRequestId: number;
+  fileId: string;
+  occurredAt: string;
+};
+
+let orionEventsEndpointMissing = false;
+
+/** Hoja de vida en Orion. Si Orion aún no expone la ruta (404) se deja de intentar. */
+export async function postOrionDocumentEvent(
+  orionDocumentId: string,
+  event: OrionDocumentEventPayload
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (orionEventsEndpointMissing) return { ok: false, status: 404 };
+  const res = await orionFetch<unknown>(
+    `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/events`,
+    { method: 'POST', body: JSON.stringify(event) }
+  );
+  if (res.status === 404 && !res.data) orionEventsEndpointMissing = true;
+  return { ok: res.ok, status: res.status, error: res.error };
+}
+
 export async function sendOrionDocument(
-  orionDocumentId: string
-): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+  orionDocumentId: string,
+  options?: { actorEmail?: string | null }
+): Promise<OrionResult<OrionDocumentResponse>> {
+  const actorEmail = String(options?.actorEmail || '').trim().toLowerCase();
   return orionFetch<OrionDocumentResponse>(
     `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/send`,
-    { method: 'POST', body: JSON.stringify({}) }
+    { method: 'POST', body: JSON.stringify(actorEmail ? { actorEmail } : {}) }
   );
 }
 
@@ -242,12 +282,14 @@ export async function acceptOrionSignerTurn(
     requireFingerprint?: boolean | null;
     /** Slot de secuencia (mismo email puede firmar varias veces). */
     signOrder?: number | null;
+    /** Id del turno en Orion; tiene prioridad sobre signOrder. */
+    signerId?: string | null;
     /** Consentimiento biométrico Ley 1581 (obligatorio si hay huella). */
     biometricConsentAccepted?: boolean | null;
     biometricConsentVersion?: string | null;
     biometricConsentAcceptedAt?: string | null;
   }
-): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+): Promise<OrionResult<OrionDocumentResponse>> {
   const payload: Record<string, string | boolean | number> = {
     email: email.trim().toLowerCase(),
   };
@@ -258,10 +300,13 @@ export async function acceptOrionSignerTurn(
   if (Number.isFinite(signOrder) && signOrder > 0) {
     payload.signOrder = signOrder;
   }
+  const signerId = String(options?.signerId || '').trim();
+  if (signerId) payload.signerId = signerId;
   const dataUrl = String(options?.signatureDataUrl || '').trim();
   if (dataUrl.startsWith('data:image/')) {
     payload.signatureDataUrl = dataUrl;
   }
+  // Sin imagen, requireFingerprint:true hace que Orion use la huella de "Mi huella".
   const fingerprintDataUrl = String(options?.fingerprintDataUrl || '').trim();
   if (fingerprintDataUrl.startsWith('data:image/')) {
     payload.fingerprintDataUrl = fingerprintDataUrl;
@@ -359,6 +404,236 @@ export async function saveOrionPersonConsent(
   );
 }
 
+/** Vista previa del firmante (solo lectura): Orion es la fuente de rúbrica, nombre, cédula y cargo. */
+export type OrionSignerPreview = {
+  email: string;
+  hasSignature: boolean;
+  signatureDataUrl: string | null;
+  fullName: string | null;
+  idDocumentType: string | null;
+  idNumber: string | null;
+  jobTitle: string | null;
+  companyName: string | null;
+};
+
+function pickText(...values: unknown[]): string | null {
+  for (const v of values) {
+    const s = typeof v === 'string' ? v.trim() : '';
+    if (s) return s;
+  }
+  return null;
+}
+
+export async function getOrionSignerPreview(email: string): Promise<OrionResult<OrionSignerPreview>> {
+  const encoded = encodeURIComponent(email.trim().toLowerCase());
+  const res = await orionFetch<Record<string, unknown>>(
+    `/api/integrations/synerlink/user-signature?email=${encoded}`,
+    { method: 'GET' }
+  );
+  if (!res.ok || !res.data) return { ...res, data: null };
+  const d = res.data;
+  const profile = (d.profile && typeof d.profile === 'object' ? d.profile : {}) as Record<string, unknown>;
+  const dataUrl = pickText(d.dataUrl, d.signatureDataUrl);
+  return {
+    ...res,
+    data: {
+      email: email.trim().toLowerCase(),
+      hasSignature: d.hasSignature === true || Boolean(dataUrl),
+      signatureDataUrl: dataUrl,
+      fullName: pickText(d.fullName, d.name, d.displayName, profile.fullName, profile.name),
+      idDocumentType: pickText(d.idDocumentType, profile.idDocumentType),
+      idNumber: pickText(d.idNumber, profile.idNumber),
+      jobTitle: pickText(d.jobTitle, profile.jobTitle),
+      companyName: pickText(d.companyName, profile.companyName),
+    },
+  };
+}
+
+export async function getOrionUserFingerprint(
+  email: string
+): Promise<OrionResult<{ hasFingerprint: boolean; updatedAt?: string | null }>> {
+  const encoded = encodeURIComponent(email.trim().toLowerCase());
+  return orionFetch(`/api/integrations/synerlink/user-fingerprint?email=${encoded}`, {
+    method: 'GET',
+  });
+}
+
+/** URL de "Mi huella" en Orion (registro único de la huella con consentimiento). */
+export function getOrionFingerprintProfileUrl(): string | null {
+  const custom = process.env.ORION_FINGERPRINT_PROFILE_URL?.trim();
+  if (custom) return custom.replace(/\/$/, '');
+  const base = getOrionPublicBaseUrl() || getOrionConfig().embedOrigin;
+  return base ? `${base}/dashboard/my-fingerprint` : null;
+}
+
+/** Usuario SynerLink para `POST /users/sync` (Orion solo completa campos vacíos). */
+export type OrionSyncUser = {
+  email: string;
+  name: string;
+  synerlinkUserId: string;
+  synerlinkCompanyId: number;
+  additionalCompanyIds?: number[];
+  departmentName?: string | null;
+  jobTitle?: string | null;
+  idDocumentType?: string | null;
+  idNumber?: string | null;
+  canSign: boolean;
+};
+
+export type OrionUsersSyncResult = {
+  summary?: { total: number; created: number; updated: number; unchanged: number; errors: number };
+  users?: Array<{
+    email: string;
+    action?: 'created' | 'updated' | 'unchanged' | 'error' | string;
+    error?: string;
+    warnings?: string[];
+    tenantSlug?: string;
+    companyAccess?: string[];
+  }>;
+};
+
+export async function syncOrionUsers(
+  users: OrionSyncUser[],
+  synerlinkCompanyId?: number | null
+): Promise<OrionResult<OrionUsersSyncResult>> {
+  return orionFetch<OrionUsersSyncResult>('/api/integrations/synerlink/users/sync', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...(synerlinkCompanyId ? { synerlinkCompanyId } : {}),
+      // Empresa predefinida + empresas con permiso de firmas: Orion quita las demás.
+      replaceCompanyAccess: true,
+      users,
+    }),
+  });
+}
+
+/** Mapa id_company → empresa en Orion, para comparar con ORION_TENANT_MAP. */
+export async function listOrionTenants(): Promise<OrionResult<unknown>> {
+  return orionFetch<unknown>('/api/integrations/synerlink/tenants', { method: 'GET' });
+}
+
+export type OrionTenantSyncCompany = {
+  synerlinkCompanyId: number;
+  name: string;
+  /** Slug sugerido; Orion lo respeta si está libre o si ya es de esa empresa. */
+  slug: string;
+};
+
+/**
+ * Alta/actualización idempotente de empresas en Orion por synerlinkCompanyId.
+ * Respuesta esperada: la misma forma de GET /tenants (+ summary/results).
+ */
+export async function syncOrionTenants(
+  companies: OrionTenantSyncCompany[]
+): Promise<OrionResult<unknown>> {
+  return orionFetch<unknown>('/api/integrations/synerlink/tenants/sync', {
+    method: 'POST',
+    body: JSON.stringify({ companies }),
+  });
+}
+
+export type OrionProvenance = {
+  tenantId?: string | null;
+  synerlinkRequestId?: number | null;
+  synerlinkCompanyId?: number | null;
+  companyName?: string | null;
+  synerlinkCategoryId?: number | null;
+  categoryName?: string | null;
+  synerlinkProcessId?: number | null;
+  processName?: string | null;
+  fileId?: string | null;
+  versionLabel?: string | null;
+  previousOrionDocumentId?: string | null;
+};
+
+export type OrionSearchDocument = {
+  orionDocumentId: string;
+  documentNumber?: string | number | null;
+  title?: string | null;
+  status?: string | null;
+  company?: { id?: string; name?: string | null; slug?: string | null } | string | null;
+  department?: { id?: string; name?: string | null } | string | null;
+  provenance?: OrionProvenance | null;
+  createdAt?: string | null;
+  signatures?: {
+    signed: number;
+    required: number;
+    signers?: Array<{ email?: string; name?: string; status?: string; signedAt?: string | null }>;
+  } | null;
+};
+
+export type OrionSearchResult = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  documents: OrionSearchDocument[];
+};
+
+export async function searchOrionDocuments(
+  params: Record<string, string | number | null | undefined>
+): Promise<OrionResult<OrionSearchResult>> {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value == null || value === '') continue;
+    qs.set(key, String(value));
+  }
+  return orionFetch<OrionSearchResult>(
+    `/api/integrations/synerlink/documents/search?${qs.toString()}`,
+    { method: 'GET' }
+  );
+}
+
+export type OrionTimelineEvent = {
+  id: string;
+  documentId?: string | null;
+  versionLabel?: string | null;
+  category?: string | null;
+  type: string;
+  label?: string | null;
+  source?: 'SYNERLINK' | 'ORION' | string | null;
+  actorName?: string | null;
+  actorEmail?: string | null;
+  detail?: string | null;
+  occurredAt: string;
+  recordedAt?: string | null;
+  ipAddress?: string | null;
+};
+
+export type OrionTimeline = {
+  synerlinkRequestId?: number | null;
+  fileId?: string | null;
+  versions: Array<{
+    orionDocumentId: string;
+    title?: string | null;
+    versionLabel?: string | null;
+    previousOrionDocumentId?: string | null;
+    fileId?: string | null;
+    status?: string | null;
+    statusLabel?: string | null;
+    createdAt?: string | null;
+    closedAt?: string | null;
+    deleted?: boolean;
+  }>;
+  events: OrionTimelineEvent[];
+};
+
+export async function getOrionDocumentTimeline(
+  params: { orionDocumentId: string } | { synerlinkRequestId: number; fileId: string }
+): Promise<OrionResult<OrionTimeline>> {
+  const qs = new URLSearchParams();
+  if ('orionDocumentId' in params) {
+    qs.set('orionDocumentId', params.orionDocumentId);
+  } else {
+    qs.set('synerlinkRequestId', String(params.synerlinkRequestId));
+    qs.set('fileId', params.fileId);
+  }
+  return orionFetch<OrionTimeline>(
+    `/api/integrations/synerlink/documents/timeline?${qs.toString()}`,
+    { method: 'GET' }
+  );
+}
+
 /** Regenera PDF acumulado en Orion (corrige documentos con solo la 1.ª firma). */
 export async function rebuildOrionSignedPdf(
   orionDocumentId: string,
@@ -383,7 +658,7 @@ export async function rebuildOrionSignedPdf(
 export async function returnOrionDocument(
   orionDocumentId: string,
   payload: { email: string; reason: string }
-): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+): Promise<OrionResult<OrionDocumentResponse>> {
   return orionFetch<OrionDocumentResponse>(
     `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/return`,
     {
@@ -393,6 +668,22 @@ export async function returnOrionDocument(
         reason: String(payload.reason || '').trim(),
       }),
     }
+  );
+}
+
+/** Rechazo definitivo (RECHAZADO). 409 DOCUMENT_CLOSED si ya estaba cerrado. */
+export async function rejectOrionDocument(
+  orionDocumentId: string,
+  payload: { email?: string | null; reason?: string | null }
+): Promise<OrionResult<OrionDocumentResponse>> {
+  const body: Record<string, string> = {};
+  const email = String(payload.email || '').trim().toLowerCase();
+  const reason = String(payload.reason || '').trim();
+  if (email) body.email = email;
+  if (reason) body.reason = reason;
+  return orionFetch<OrionDocumentResponse>(
+    `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/reject`,
+    { method: 'POST', body: JSON.stringify(body) }
   );
 }
 

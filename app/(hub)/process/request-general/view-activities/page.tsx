@@ -615,14 +615,14 @@ function ViewRequestPage() {
   }, [request?.id_request_general]);
 
   const handleDeleteAttachment = useCallback(
-    async (fileId: string) => {
+    async (fileId: string, fileName?: string | null) => {
       const requestId = request?.id_request_general;
       if (!requestId || !fileId) return;
       try {
         const res = await fetch('/api/requests-general/delete-attachment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId, fileId }),
+          body: JSON.stringify({ requestId, fileId, fileName: fileName ?? null }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -637,12 +637,22 @@ function ViewRequestPage() {
           delete next[fileId];
           return next;
         });
-        toast.success('Archivo eliminado');
+        toast.success('Documento eliminado');
+        if (data.orionStopped === false) {
+          toast.error(
+            'No se pudo detener la firma en GSS Firma. Recházela allí para que nadie siga firmando.',
+            { duration: 8000 }
+          );
+        }
         refreshAttachmentsAfterUpload();
+        void fetchFormValues(requestId);
+        void fetchTasksRG();
+        void fetchNotes();
       } catch {
         toast.error('Error de red al eliminar el archivo');
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [request?.id_request_general, refreshAttachmentsAfterUpload]
   );
 
@@ -2496,7 +2506,7 @@ function ViewRequestPage() {
                             ...orionDocuments,
                           }}
                           onDocumentsUpdate={handleOrionDocumentsChange}
-                          canDeleteAttachment={canDeleteAttachments && !isRequestCaseClosed()}
+                          canDeleteAttachment={canDeleteAttachments}
                           onDeleteAttachment={handleDeleteAttachment}
                           forceSignerUi={(() => {
                             const me = String(session?.user?.email || '')

@@ -50,6 +50,7 @@ import {
   IconUsers,
   IconShield,
   IconUsersGroup,
+  IconRefresh,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { notifySubprocessAssignmentsChanged } from '@/lib/process/subprocessAssignmentsEvents';
@@ -230,6 +231,7 @@ function UserManagement() {
     identification: '',
   });
   const [formLoading, setFormLoading] = useState(false);
+  const [orionSyncLoading, setOrionSyncLoading] = useState(false);
 
   // Department assignment states
   const [departmentOptions, setDepartmentOptions] = useState<{ value: string; label: string }[]>(
@@ -474,6 +476,50 @@ function UserManagement() {
       toast.error(errorMessage);
     } finally {
       setFormLoading(false);
+    }
+  };
+
+  const syncUsersWithOrion = async () => {
+    if (
+      !window.confirm(
+        '¿Sincronizar todos los usuarios activos con GSS Firma (Orion)? Recibirán los módulos Por firmar, Mi firma y Mi huella en cada empresa a la que tienen acceso.'
+      )
+    ) {
+      return;
+    }
+    setOrionSyncLoading(true);
+    try {
+      const res = await fetch('/api/integrations/orion/users/sync', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'No se pudo sincronizar con Orion');
+      const detail = [
+        `${data.total ?? 0} usuarios`,
+        `${data.created ?? 0} creados`,
+        `${data.updated ?? 0} actualizados`,
+        `${data.unchanged ?? 0} sin cambios`,
+        Number(data.skippedWithoutCompany) > 0
+          ? `${data.skippedWithoutCompany} sin empresa en Orion`
+          : null,
+        Number(data.tenants?.provisioned) > 0
+          ? `${data.tenants.provisioned} empresas creadas en Orion`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      if (Number(data.tenants?.failed) > 0) {
+        toast.error(
+          `${data.tenants.failed} empresas no se pudieron crear en Orion. ${data.tenants.error ?? ''}`.trim()
+        );
+      }
+      if (Number(data.failed) > 0) {
+        toast.error(`${detail} · ${data.failed} con error. ${data.errors?.[0]?.error ?? ''}`.trim());
+      } else {
+        toast.success(`Sincronizado con Orion: ${detail}`);
+      }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo sincronizar con Orion');
+    } finally {
+      setOrionSyncLoading(false);
     }
   };
 
@@ -1181,6 +1227,16 @@ function UserManagement() {
                 onClick={exportToCSV}
               >
                 Exportar CSV
+              </Button>
+              <Button
+                size='sm'
+                variant='light'
+                color='teal'
+                leftSection={<IconRefresh size={14} />}
+                loading={orionSyncLoading}
+                onClick={() => void syncUsersWithOrion()}
+              >
+                Sincronizar con Orion
               </Button>
             </Group>
           </Flex>

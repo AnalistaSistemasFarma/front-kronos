@@ -5,6 +5,7 @@ import {
   orderedSigners,
 } from './signerStatus';
 import type { OrionDocumentVersion, OrionSignatureState, OrionSignerState } from './types';
+import { resolveOrionVersionLabel } from './versionLabel';
 
 function normalizeEmail(email?: string | null): string {
   return String(email || '').trim().toLowerCase();
@@ -190,7 +191,7 @@ export function ensureOriginalOrionVersion(
     versions.unshift({
       id: 'original',
       kind: 'original',
-      label: 'Original (v1)',
+      label: `Original (${resolveOrionVersionLabel(state.versionLabel)})`,
       url,
       createdAt: resolveOriginalVersionCreatedAt(state),
     });

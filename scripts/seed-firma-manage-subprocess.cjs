@@ -3,6 +3,8 @@
  * - Preparar firma (/process/firma/prepare) — gestiona PDF / firmantes / enviar
  * - Firmar documento (/process/firma/sign) — obligatorio para poder firmar
  * - Registrar huella (/process/firma/fingerprint) — exigir/colocar/aportar huella
+ * - Documentos firmados (/process/orion-documents) — consulta por empresa (permiso por empresa)
+ * - Ver trazabilidad de documentos (/process/firma/trace) — búsqueda + hoja de vida en Orion (pocas personas)
  *
  * Migra el legacy /process/firma/manage (“Firma digital”) → Preparar firma.
  *
@@ -10,6 +12,9 @@
  *   node scripts/seed-firma-manage-subprocess.cjs
  *   node scripts/seed-firma-manage-subprocess.cjs --email=usuario@empresa.com
  *   node scripts/seed-firma-manage-subprocess.cjs --email=x@y.com --also-sign --also-fingerprint
+ *   node scripts/seed-firma-manage-subprocess.cjs --email=x@y.com --also-trace
+ *   node scripts/seed-firma-manage-subprocess.cjs --schedule-user-sync   (job diario users/sync 03:00)
+ *   node scripts/seed-firma-manage-subprocess.cjs --schedule-tenant-sync (job cada 15 min: empresas nuevas → Orion)
  */
 const fs = require('fs');
 const path = require('path');
@@ -20,7 +25,49 @@ const SIGN_URL = '/process/firma/sign';
 const SIGN_NAME = 'Firmar documento';
 const FINGERPRINT_URL = '/process/firma/fingerprint';
 const FINGERPRINT_NAME = 'Registrar huella';
+const DOCUMENTS_URL = '/process/orion-documents';
+const DOCUMENTS_NAME = 'Documentos firmados';
+const TRACE_URL = '/process/firma/trace';
+const TRACE_NAME = 'Ver trazabilidad de documentos';
 const LEGACY_MANAGE_URL = '/process/firma/manage';
+const USER_SYNC_JOB_TYPE = 'sync_orion_users';
+const TENANT_SYNC_JOB_TYPE = 'sync_orion_tenants';
+
+async function ensureTenantSyncJob(prisma) {
+  const existing = await prisma.$queryRawUnsafe(`
+    SELECT TOP 1 id FROM [scheduled_job] WHERE job_type = N'${TENANT_SYNC_JOB_TYPE}'
+  `);
+  if (existing[0]?.id) {
+    console.log(`Job de empresas Orion ya existe (id=${existing[0].id}).`);
+    return;
+  }
+  await prisma.$executeRawUnsafe(`
+    INSERT INTO [scheduled_job]
+      (name, job_type, payload, cron_expression, next_run_date, active, source_module)
+    VALUES
+      (N'Crear empresas nuevas en GSS Firma (Orion)', N'${TENANT_SYNC_JOB_TYPE}', N'{}',
+       N'0,15,30,45 * * * *', GETDATE(), 1, N'orion')
+  `);
+  console.log('Creado job "sync_orion_tenants" (cada 15 min).');
+}
+
+async function ensureUserSyncJob(prisma) {
+  const existing = await prisma.$queryRawUnsafe(`
+    SELECT TOP 1 id FROM [scheduled_job] WHERE job_type = N'${USER_SYNC_JOB_TYPE}'
+  `);
+  if (existing[0]?.id) {
+    console.log(`Job diario de usuarios Orion ya existe (id=${existing[0].id}).`);
+    return;
+  }
+  await prisma.$executeRawUnsafe(`
+    INSERT INTO [scheduled_job]
+      (name, job_type, payload, cron_expression, next_run_date, active, source_module)
+    VALUES
+      (N'Sincronizar usuarios con GSS Firma (Orion)', N'${USER_SYNC_JOB_TYPE}', N'{}', N'0 3 * * *',
+       DATEADD(HOUR, 3, CAST(CAST(DATEADD(DAY, 1, GETDATE()) AS DATE) AS DATETIME)), 1, N'orion')
+  `);
+  console.log('Creado job diario "sync_orion_users" (03:00).');
+}
 
 function loadEnv() {
   const envPath = path.resolve(__dirname, '..', '.env');
@@ -40,6 +87,10 @@ function parseArgs() {
     email: emailArg ? emailArg.split('=').slice(1).join('=').trim() : null,
     alsoSign: process.argv.includes('--also-sign'),
     alsoFingerprint: process.argv.includes('--also-fingerprint'),
+    alsoDocuments: process.argv.includes('--also-documents'),
+    alsoTrace: process.argv.includes('--also-trace'),
+    scheduleUserSync: process.argv.includes('--schedule-user-sync'),
+    scheduleTenantSync: process.argv.includes('--schedule-tenant-sync'),
   };
 }
 
@@ -113,7 +164,15 @@ async function grantToUser(prisma, subId, email) {
 
 async function main() {
   loadEnv();
-  const { email, alsoSign, alsoFingerprint } = parseArgs();
+  const {
+    email,
+    alsoSign,
+    alsoFingerprint,
+    alsoDocuments,
+    alsoTrace,
+    scheduleUserSync,
+    scheduleTenantSync,
+  } = parseArgs();
   const { PrismaClient } = require('../app/generated/prisma');
   const prisma = new PrismaClient();
 
@@ -176,6 +235,13 @@ async function main() {
       FINGERPRINT_NAME,
       FINGERPRINT_URL
     );
+    const documentsId = await ensureSubprocess(prisma, processId, DOCUMENTS_NAME, DOCUMENTS_URL);
+    const traceId = await ensureSubprocess(prisma, processId, TRACE_NAME, TRACE_URL);
+
+    if (scheduleUserSync) await ensureUserSyncJob(prisma);
+    if (scheduleTenantSync) await ensureTenantSyncJob(prisma);
+
+    if (email && alsoTrace) await grantToUser(prisma, traceId, email);
 
     if (email) {
       await grantToUser(prisma, prepareId, email);
@@ -188,6 +254,11 @@ async function main() {
         await grantToUser(prisma, fingerprintId, email);
       } else {
         console.log('Tip: añada --also-fingerprint para otorgar “Registrar huella”.');
+      }
+      if (alsoDocuments) {
+        await grantToUser(prisma, documentsId, email);
+      } else {
+        console.log('Tip: añada --also-documents para otorgar “Documentos firmados”.');
       }
     } else {
       console.log(

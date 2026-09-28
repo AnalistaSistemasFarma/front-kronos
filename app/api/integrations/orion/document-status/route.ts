@@ -8,6 +8,7 @@ import {
   getRequestOrionContext,
 } from '@/lib/orion/service';
 import type { OrionWebhookPayload } from '@/lib/orion/types';
+import { fireAndForgetSignerTurnEmail } from '@/lib/orion/signerEmail';
 
 const TAG = '[integrations/orion/document-status]';
 
@@ -66,8 +67,10 @@ export async function POST(req: NextRequest) {
             body.returnReason ? `Motivo: ${body.returnReason}` : null,
           ]
             .filter(Boolean)
-            .join('. ')
-        : null;
+            .join('. ') || null
+        : statusUpper === 'RECHAZADO' && body.rejectReason
+          ? `Rechazado. Motivo: ${body.rejectReason}`
+          : null;
 
     const outcome = await withMssqlPool(async (pool) => {
       const ctx = await getRequestOrionContext(pool, requestId);
@@ -87,8 +90,19 @@ export async function POST(req: NextRequest) {
           signedAt: body.signedAt ?? null,
           signers: body.signers,
           auditSummary: body.auditSummary || returnNote || null,
+          ...(statusUpper === 'DEVUELTO'
+            ? { returnReason: body.returnReason ?? null, returnedBy: body.returnedBy ?? null }
+            : {}),
         },
       });
+
+      if (statusUpper === 'EN_PROCESO' || statusUpper === 'PENDIENTE_FIRMA') {
+        fireAndForgetSignerTurnEmail(pool, {
+          requestId,
+          fileId: currentState.fileId ?? fileId,
+          invitedByEmail: ctx.requester_email,
+        });
+      }
 
       return { notFound: false as const, ...currentState };
     });

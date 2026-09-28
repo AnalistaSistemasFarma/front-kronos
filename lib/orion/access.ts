@@ -21,6 +21,14 @@ export const ORION_FIRMA_SIGN_NAME = 'Firmar documento';
 export const ORION_FIRMA_FINGERPRINT_URL = '/process/firma/fingerprint';
 export const ORION_FIRMA_FINGERPRINT_NAME = 'Registrar huella';
 
+/** Listado de documentos con firma (tarjeta visible del hub, por empresa). */
+export const ORION_DOCUMENTS_URL = '/process/orion-documents';
+export const ORION_DOCUMENTS_NAME = 'Documentos firmados';
+
+/** Búsqueda + hoja de vida completa en Orion (tarjeta visible, pocas personas). */
+export const ORION_FIRMA_TRACE_URL = '/process/firma/trace';
+export const ORION_FIRMA_TRACE_NAME = 'Ver trazabilidad de documentos';
+
 /**
  * Categoría o proceso técnico legado de Orion (nombre exacto FIRMA / Firma digital).
  * No oculta el workflow de negocio «Solicitud de firma» (Jurídico).
