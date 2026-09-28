@@ -48,6 +48,7 @@ import {
   parseTableValue,
 } from '../../../../../lib/requests-general/tableField';
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
+import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
 
 interface RequestSummary {
   id_tarea: number;
@@ -434,6 +435,18 @@ export default function PaymentDetailModal({ opened, onClose, request }: Props) 
                       <Text size='xs' c='dimmed' fw={500}>Fecha solicitada de pago</Text>
                     </Group>
                     <Text size='sm' fw={600}>{formatDateCO(request.fecha_solicitada_pago)}</Text>
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, sm: 6 }}>
+                    <Group gap={6} wrap='nowrap'>
+                      <IconCalendarEvent size={16} className='text-gray-400' />
+                      <Text size='xs' c='dimmed' fw={500}>Fecha estimada de pago</Text>
+                    </Group>
+                    <Text size='sm' fw={600} tt='capitalize'>
+                      {formatEstimatedPaymentDate(
+                        detail?.company || request.empresa,
+                        detail?.created_at || request.fecha_creación_solicitud
+                      )}
+                    </Text>
                   </Grid.Col>
                   <Grid.Col span={{ base: 12, sm: 6 }}>
                     <Group gap={6} wrap='nowrap'>
