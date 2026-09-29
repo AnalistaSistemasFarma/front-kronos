@@ -61,6 +61,8 @@ export interface ChatMessagePayload {
   author: ChatAuthorPayload | null;
   /** El mensaje al que responde, o null. */
   replyTo: ChatReplyToPayload | null;
+  /** Evento de un mensaje de sistema ('nudge' = zumbido), o null. */
+  eventType: string | null;
 }
 
 /**
@@ -142,6 +144,11 @@ export interface ChatConversationPayload {
   } | null;
   /** Un estado POR AGENTE. En un hilo directo trae, como máximo, uno. */
   agentStatuses: ChatAgentStatusPayload[];
+  /**
+   * Solo en 'people': quien pregunta silenció los zumbidos de este hilo. Es
+   * SU preferencia; la otra persona no la ve (decisión D5).
+   */
+  nudgesMuted?: boolean;
 }
 
 /** Forma mínima de una fila de chat_message con sus adjuntos y su autor. */
@@ -152,6 +159,7 @@ type MessageRow = {
   created_at: Date;
   delivered_at: Date | null;
   read_at: Date | null;
+  event_type?: string | null;
   attachments?: {
     id: number;
     file_name: string;
@@ -223,6 +231,7 @@ export function serializeMessage(row: MessageRow): ChatMessagePayload {
     readAt: row.read_at ? row.read_at.toISOString() : null,
     attachments: (row.attachments ?? []).map(serializeAttachment),
     author,
+    eventType: row.event_type ?? null,
     replyTo: row.replyTo
       ? {
           idMessage: row.replyTo.id,
@@ -274,6 +283,7 @@ const conversationInclude = {
       id_user: true,
       id_agent: true,
       role: true,
+      nudges_muted: true,
       user: { select: { id: true, name: true, email: true, image: true } },
       agent: {
         select: { id_agent: true, display_name: true, handle: true, avatar_url: true },
@@ -314,6 +324,7 @@ type ConversationRow = {
     id_user: string | null;
     id_agent: number | null;
     role: string;
+    nudges_muted?: boolean;
     user: { id: string; name: string | null; email: string; image: string | null } | null;
     agent: {
       id_agent: number;
@@ -327,7 +338,9 @@ type ConversationRow = {
 
 export function serializeConversation(
   row: ConversationRow,
-  unreadCount: number
+  unreadCount: number,
+  /** Quién pregunta: hace falta para SU preferencia de zumbidos. */
+  miId?: string
 ): ChatConversationPayload {
   const last = row.messages[0];
   const esGrupo = row.kind === 'group';
@@ -406,6 +419,13 @@ export function serializeConversation(
           }
         : null,
     agentStatuses,
+    ...(row.kind === 'people'
+      ? {
+          nudgesMuted: Boolean(
+            miId && row.participants.find((p) => p.id_user === miId)?.nudges_muted
+          ),
+        }
+      : {}),
   };
 }
 
@@ -535,7 +555,7 @@ export async function listUserConversations(
     for (const [id, n] of conteos) noLeidos.set(id, n);
   }
 
-  return rows.map((row) => serializeConversation(row, noLeidos.get(row.id) ?? 0));
+  return rows.map((row) => serializeConversation(row, noLeidos.get(row.id) ?? 0, userId));
 }
 
 /**
@@ -577,5 +597,5 @@ export async function getConversationPayload(
     });
   }
 
-  return serializeConversation(row, unreadCount);
+  return serializeConversation(row, unreadCount, userId);
 }

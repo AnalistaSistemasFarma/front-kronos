@@ -4,6 +4,7 @@
 
   QUÉ ES: el DDL de las migraciones
     - 20260929120000_chat_people   (fase 1: hilos entre personas)
+    - 20260929130000_chat_nudges   (fase 2: zumbido)
   en un solo archivo, para correrlo A MANO en la base antes del pase (las
   migraciones no corren en los despliegues: la base de producción no está
   baselined, P3005). Ver la memoria "correr-sql-servidores-front-kronos":
@@ -80,6 +81,67 @@ THROW
 
 END CATCH
 
+/* ==================================================================== */
+/* FASE 2 — 20260929130000_chat_nudges                                   */
+/* ==================================================================== */
+BEGIN TRY
+
+BEGIN TRAN;
+
+IF NOT EXISTS (
+  SELECT 1 FROM sys.columns
+  WHERE object_id = OBJECT_ID(N'[dbo].[chat_message]') AND name = 'event_type'
+)
+BEGIN
+  ALTER TABLE [dbo].[chat_message] ADD [event_type] NVARCHAR(20) NULL;
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'chat_message_event_type_ck')
+BEGIN
+  EXEC(N'ALTER TABLE [dbo].[chat_message] WITH CHECK
+    ADD CONSTRAINT [chat_message_event_type_ck]
+    CHECK ([event_type] IS NULL OR [event_type] IN (''nudge''));');
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'chat_message_nudge_idx' AND object_id = OBJECT_ID(N'[dbo].[chat_message]'))
+BEGIN
+  EXEC(N'CREATE NONCLUSTERED INDEX [chat_message_nudge_idx]
+      ON [dbo].[chat_message] ([event_type], [id_user_author], [created_at])
+      INCLUDE ([id_conversation])
+      WHERE [event_type] IS NOT NULL;');
+END;
+
+IF NOT EXISTS (
+  SELECT 1 FROM sys.columns
+  WHERE object_id = OBJECT_ID(N'[dbo].[chat_participant]') AND name = 'last_nudge_at'
+)
+BEGIN
+  ALTER TABLE [dbo].[chat_participant] ADD [last_nudge_at] DATETIME2 NULL;
+END;
+
+IF NOT EXISTS (
+  SELECT 1 FROM sys.columns
+  WHERE object_id = OBJECT_ID(N'[dbo].[chat_participant]') AND name = 'nudges_muted'
+)
+BEGIN
+  ALTER TABLE [dbo].[chat_participant]
+    ADD [nudges_muted] BIT NOT NULL
+    CONSTRAINT [chat_participant_nudges_muted_df] DEFAULT 0;
+END;
+
+COMMIT TRAN;
+
+END TRY
+BEGIN CATCH
+
+IF @@TRANCOUNT > 0
+BEGIN
+    ROLLBACK TRAN;
+END;
+THROW
+
+END CATCH
+
 /* Estado DESPUÉS */
 SELECT 'despues' AS momento, name, definition FROM sys.check_constraints WHERE name = 'chat_conversation_kind_ck';
 SELECT 'despues' AS momento, OBJECT_NAME(object_id) AS tabla, name AS columna
@@ -88,3 +150,4 @@ WHERE object_id IN (OBJECT_ID(N'[dbo].[chat_conversation]'), OBJECT_ID(N'[dbo].[
   AND name IN ('dm_key', 'event_type', 'last_nudge_at', 'nudges_muted');
 SELECT 'despues' AS momento, name AS indice FROM sys.indexes
 WHERE name IN ('UX_chat_conversation_dm_key', 'chat_message_nudge_idx');
+SELECT 'despues' AS momento, name, definition FROM sys.check_constraints WHERE name = 'chat_message_event_type_ck';

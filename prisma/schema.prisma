@@ -816,6 +816,14 @@ model ChatParticipant {
   /// por leído para todos los demás. NULL = nunca ha abierto el grupo.
   last_read_message_id Int?
   added_at             DateTime @default(now())
+  /// Último zumbido que ESTA persona envió en este hilo. El límite de "uno cada
+  /// 30 s" es un UPDATE atómico sobre esta columna (lib/chat/nudge.ts): vale
+  /// igual con las dos instancias de producción, sin estado en memoria.
+  last_nudge_at        DateTime?
+  /// Esta persona silenció los zumbidos de ESTE hilo. El remitente no se
+  /// entera (decisión D5): su zumbido queda escrito, solo que aquí no suena,
+  /// no sacude y no manda push.
+  nudges_muted         Boolean  @default(false)
 
   conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
   user         User?            @relation(fields: [id_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -850,6 +858,13 @@ model ChatMessage {
   id_user_author  String? @db.NVarChar(1000)
   /// Autor AGENTE. NULL en los mensajes de personas y en los de sistema.
   id_agent_author Int?
+
+  /// Marca de EVENTO de un mensaje de sistema. NULL = mensaje normal (la
+  /// enorme mayoría). 'nudge' = zumbido entre personas (lib/chat/nudge.ts):
+  /// queda en el hilo y en la auditoría como cualquier mensaje, y el límite
+  /// anti-abuso se cuenta sobre estas filas (índice filtrado
+  /// chat_message_nudge_idx). CHECK en la base: solo NULL o 'nudge'.
+  event_type      String? @db.NVarChar(20)
 
   /// El mensaje AL QUE RESPONDE, cuando se citó uno. NULL = mensaje normal,
   /// que es la enorme mayoría. Normalizado y no con el texto copiado: el id

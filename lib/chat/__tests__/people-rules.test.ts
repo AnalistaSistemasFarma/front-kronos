@@ -6,6 +6,9 @@ import {
   empresasParaIniciar,
   puedeIniciar,
   puedenEscribirse,
+  segundosParaReintentar,
+  segundosPorTopeDeVentana,
+  textoDeZumbido,
   type PersonaParaAcceso,
 } from '../people-rules';
 
@@ -79,5 +82,32 @@ describe('puedeIniciar (D2)', () => {
   it('el piloto sin el Chat en esa empresa no cuenta', () => {
     expect(empresasParaIniciar(persona('a', [1], [8]))).toEqual([]);
     expect(empresasParaIniciar(persona('a', [1, 8], [8]))).toEqual([8]);
+  });
+});
+
+describe('zumbido: límites (D4)', () => {
+  const ahora = new Date('2026-09-29T12:00:00Z');
+  const hace = (s: number) => new Date(ahora.getTime() - s * 1000);
+
+  it('uno cada 30 s por hilo', () => {
+    expect(segundosParaReintentar(null, ahora)).toBe(0);
+    expect(segundosParaReintentar(hace(10), ahora)).toBe(20);
+    expect(segundosParaReintentar(hace(29.7), ahora)).toBe(1);
+    expect(segundosParaReintentar(hace(30), ahora)).toBe(0);
+  });
+
+  it('diez cada diez minutos por remitente', () => {
+    const nueve = Array.from({ length: 9 }, (_, i) => hace(60 * i + 5));
+    expect(segundosPorTopeDeVentana(nueve, ahora)).toBe(0);
+    const diez = [...nueve, hace(590)];
+    // El más viejo (hace 590 s) sale de la ventana en 10 s.
+    expect(segundosPorTopeDeVentana(diez, ahora)).toBe(10);
+    // Los que ya salieron de la ventana no cuentan.
+    expect(segundosPorTopeDeVentana([...nueve, hace(700)], ahora)).toBe(0);
+  });
+
+  it('el texto del zumbido lleva el nombre y nunca queda vacío', () => {
+    expect(textoDeZumbido('Ana')).toBe('📳 Ana envió un zumbido.');
+    expect(textoDeZumbido('  ')).toBe('📳 Alguien envió un zumbido.');
   });
 });

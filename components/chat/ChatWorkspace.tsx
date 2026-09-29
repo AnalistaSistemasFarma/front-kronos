@@ -41,6 +41,7 @@ import {
 import AgentAvatar from './AgentAvatar';
 import { EsqueletoPantallaChat } from './ChatSkeletons';
 import ChatThread from './ChatThread';
+import { ChatNudgeButton, ChatNudgeMenu } from './ChatNudgeControls';
 
 /*
  * Los tres cuadros (detalle de agente, mensaje masivo, grupo nuevo) quedan
@@ -1203,7 +1204,15 @@ export default function ChatWorkspace({
               </Text>
             </Box>
           </Group>
-          {botonesDelEncabezado}
+          <Group gap={4} wrap='nowrap'>
+            <ChatNudgeButton idConversation={selectedPersona.id} nombre={nombre} />
+            <ChatNudgeMenu
+              idConversation={selectedPersona.id}
+              silenciado={Boolean(selectedPersona.nudgesMuted)}
+              onCambio={overview.refresh}
+            />
+            {botonesDelEncabezado}
+          </Group>
         </Group>
 
         <ChatThread

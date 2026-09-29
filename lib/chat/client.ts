@@ -176,6 +176,8 @@ export interface ChatMessageDto {
   author?: ChatAuthorDto | null;
   /** El mensaje al que responde, o null. */
   replyTo?: ChatReplyToDto | null;
+  /** Evento de un mensaje de sistema: 'nudge' = zumbido. */
+  eventType?: string | null;
   /** Marca local: mensaje aún no confirmado por el servidor (envío optimista). */
   pending?: boolean;
   /** Marca local: el envío falló y el usuario puede reintentar. */
@@ -230,6 +232,8 @@ export interface ChatConversationDto {
   agentStatus: ChatStatusDto | null;
   /** Un estado por agente. En un hilo directo trae, como máximo, uno. */
   agentStatuses?: ChatAgentStatusDto[];
+  /** Solo entre personas: YO silencié los zumbidos de este hilo. */
+  nudgesMuted?: boolean;
 }
 
 /** ¿Es un grupo? Un hilo sin `kind` es de antes de los grupos: es directo. */
@@ -608,4 +612,20 @@ export const CHAT_REFRESH_EVENT = 'synerlink:chat-refresh';
 export function notifyChatRefresh(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(CHAT_REFRESH_EVENT));
+}
+
+/**
+ * "Hay algo nuevo en el hilo X: pregúntalo YA, sin esperar tu cadencia."
+ *
+ * Lo disparan el botón del zumbido (para ver el propio zumbido de una vez) y
+ * el pulso global (components/chat/ChatPulse.tsx) cuando la otra persona
+ * escribe. El hilo abierto lo escucha en useChatConversation y, si es el suyo,
+ * adelanta la siguiente vuelta del sondeo. Un evento de `window` y no un
+ * contexto por la misma razón que CHAT_REFRESH_EVENT.
+ */
+export const CHAT_THREAD_POKE_EVENT = 'synerlink:chat-thread-poke';
+
+export function pedirSondeoDelHilo(idConversation: number): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(CHAT_THREAD_POKE_EVENT, { detail: { idConversation } }));
 }
