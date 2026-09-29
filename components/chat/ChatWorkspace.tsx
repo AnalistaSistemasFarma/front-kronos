@@ -1216,7 +1216,11 @@ export default function ChatWorkspace({
         </Group>
 
         <ChatThread
-          person={{ idConversation: selectedPersona.id, name: nombre }}
+          person={{
+            idConversation: selectedPersona.id,
+            name: nombre,
+            nudgesMuted: Boolean(selectedPersona.nudgesMuted),
+          }}
           currentUserId={miId}
           active
         />

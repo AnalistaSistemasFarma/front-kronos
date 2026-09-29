@@ -38,6 +38,14 @@ import {
   type ChatParticipantDto,
 } from '../../lib/chat/client';
 import { formatBytes } from '../../lib/chat/attachments';
+import {
+  efectoZumbido,
+  marcarZumbidoMostrado,
+  prepararAudioZumbido,
+  registrarHiloVisible,
+  sacudirHilo,
+  zumbidoFresco,
+} from '../../lib/chat/nudge-fx';
 import type { ChatReplyToDto } from '../../lib/chat/client';
 
 /**
@@ -597,6 +605,8 @@ export default function ChatThread({
   person?: {
     idConversation: number;
     name: string;
+    /** Yo silencié los zumbidos de este hilo: llegan sin sacudida ni sonido. */
+    nudgesMuted?: boolean;
   };
   /** Quién soy. En un grupo es lo que distingue mis mensajes de los ajenos. */
   currentUserId?: string;
@@ -619,7 +629,35 @@ export default function ChatThread({
         ? { kind: 'agent', idAgent: agent.idAgent, idConversation: idConversacion ?? null }
         : null;
 
-  const thread = useChatConversation(target, active, { miId: currentUserId });
+  /*
+   * ZUMBIDO RECIBIDO con el hilo abierto: sacudida del contenedor + sonido +
+   * vibración. Todo por referencias y clases CSS, sin estado: ni el hilo ni
+   * las burbujas en `memo` se re-renderizan por un zumbido.
+   */
+  const raizRef = useRef<HTMLDivElement>(null);
+  const silenciadoRef = useRef(Boolean(person?.nudgesMuted));
+  silenciadoRef.current = Boolean(person?.nudgesMuted);
+  const alZumbido = useCallback((mensaje: ChatMessageDto) => {
+    // Una sola vez por zumbido (también llega por el pulso global), y solo si
+    // es reciente y no está silenciado.
+    if (!marcarZumbidoMostrado(mensaje.id)) return;
+    if (silenciadoRef.current || !zumbidoFresco(mensaje.createdAt)) return;
+    sacudirHilo(raizRef.current);
+    efectoZumbido();
+  }, []);
+
+  const idHiloPersonas = person?.idConversation ?? null;
+  useEffect(() => {
+    if (idHiloPersonas === null || !active) return;
+    prepararAudioZumbido();
+    registrarHiloVisible(idHiloPersonas);
+    return () => registrarHiloVisible(null);
+  }, [idHiloPersonas, active]);
+
+  const thread = useChatConversation(target, active, {
+    miId: currentUserId,
+    onZumbido: enPersonas ? alZumbido : undefined,
+  });
 
   /* ─────────────────────────── Citar y responder ───────────────────────── */
 
@@ -1002,6 +1040,7 @@ export default function ChatThread({
 
   return (
     <Box
+      ref={raizRef}
       className={`chat-thread${dragging ? ' chat-thread--dragging' : ''}`}
       style={height ? { height } : undefined}
       onDragEnter={onDragEnter}

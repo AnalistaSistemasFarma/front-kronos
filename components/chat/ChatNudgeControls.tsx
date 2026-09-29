@@ -2,8 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { ActionIcon, Menu, Text, Tooltip } from '@mantine/core';
-import { IconBell, IconBellOff, IconDotsVertical } from '@tabler/icons-react';
+import {
+  IconBell,
+  IconBellOff,
+  IconDotsVertical,
+  IconVolume,
+  IconVolumeOff,
+} from '@tabler/icons-react';
 import { chatFetch, pedirSondeoDelHilo } from '../../lib/chat/client';
+import { guardarSonidoZumbido, sonidoZumbidoActivado } from '../../lib/chat/nudge-fx';
 
 /**
  * Controles del ZUMBIDO 📳 en el encabezado de un hilo entre personas.
@@ -122,6 +129,16 @@ export function ChatNudgeMenu({
   const [local, setLocal] = useState(silenciado);
   useEffect(() => setLocal(silenciado), [silenciado, idConversation]);
 
+  // Sonido de los zumbidos EN ESTE EQUIPO (todas las conversaciones). Vive en
+  // localStorage: es una comodidad del equipo, no una preferencia de la persona.
+  const [conSonido, setConSonido] = useState(true);
+  useEffect(() => setConSonido(sonidoZumbidoActivado()), []);
+  const alternarSonido = () => {
+    const siguiente = !conSonido;
+    setConSonido(siguiente);
+    guardarSonidoZumbido(siguiente);
+  };
+
   const alternar = async () => {
     const siguiente = !local;
     setLocal(siguiente);
@@ -150,6 +167,14 @@ export function ChatNudgeMenu({
           onClick={() => void alternar()}
         >
           {local ? 'Volver a recibir zumbidos' : 'Silenciar los zumbidos de esta conversación'}
+        </Menu.Item>
+        <Menu.Item
+          leftSection={conSonido ? <IconVolumeOff size={16} /> : <IconVolume size={16} />}
+          onClick={alternarSonido}
+        >
+          {conSonido
+            ? 'Quitar el sonido de los zumbidos en este equipo'
+            : 'Activar el sonido de los zumbidos en este equipo'}
         </Menu.Item>
       </Menu.Dropdown>
     </Menu>
