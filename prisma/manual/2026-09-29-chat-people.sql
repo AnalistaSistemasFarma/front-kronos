@@ -20,7 +20,20 @@
 
   Se puede correr dos veces: cada bloque comprueba antes de escribir.
   Al final imprime el estado para comparar con el de antes.
+
+  🔒 BLOQUEOS (ALTER TABLE pide un bloqueo Sch-M sobre tablas del chat, que
+  está en uso): cada fase lleva `SET LOCK_TIMEOUT 5000` para que, si alguien
+  tiene tomada la tabla, el script se rinda a los 5 s en vez de quedarse
+  esperando y encolar detrás de él todas las lecturas del chat.
+    - Si falla con el error 1222 ("Lock request time out period exceeded"),
+      NO quedó nada a medias: XACT_ABORT ON + TRY/CATCH hacen ROLLBACK de la
+      fase completa. Simplemente vuelva a correrlo (es idempotente), de
+      preferencia en un momento de menos uso.
+    - Si una fase ya se aplicó en un intento anterior, en el reintento sus
+      bloques se saltan solos.
 */
+
+SET XACT_ABORT ON;
 
 /* Estado ANTES */
 SELECT 'antes' AS momento, name, definition FROM sys.check_constraints WHERE name = 'chat_conversation_kind_ck';
@@ -32,6 +45,8 @@ WHERE object_id IN (OBJECT_ID(N'[dbo].[chat_conversation]'), OBJECT_ID(N'[dbo].[
 /* ==================================================================== */
 /* FASE 1 — 20260929120000_chat_people                                   */
 /* ==================================================================== */
+SET LOCK_TIMEOUT 5000;
+
 BEGIN TRY
 
 BEGIN TRAN;
@@ -84,6 +99,8 @@ END CATCH
 /* ==================================================================== */
 /* FASE 2 — 20260929130000_chat_nudges                                   */
 /* ==================================================================== */
+SET LOCK_TIMEOUT 5000;
+
 BEGIN TRY
 
 BEGIN TRAN;
