@@ -478,7 +478,10 @@ export async function listUserConversations(
 
   if (rows.length === 0) return [];
 
-  const directos = rows.filter((r) => r.kind !== 'group').map((r) => r.id);
+  // Solo los DIRECTOS cuentan por `read_at`. Con `kind !== 'group'` cualquier
+  // clase nueva de conversación caería aquí por descarte y se contaría con la
+  // regla de los hilos con agente, que no le aplica.
+  const directos = rows.filter((r) => r.kind === 'direct').map((r) => r.id);
   const grupos = rows.filter((r) => r.kind === 'group');
 
   const noLeidos = new Map<number, number>();
