@@ -111,6 +111,7 @@ import { isSynerlinkWorkflowLocked } from '../../../../../lib/orion/workflowLock
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
 import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
@@ -610,20 +611,30 @@ function ViewRequestPage() {
     }, 5000);
   }, [request?.id_request_general]);
 
+  // Abre el modal de justificación; el borrado real va en handleDeleteAttachment.
+  const [pendingDelete, setPendingDelete] = useState<{
+    fileId: string;
+    fileName: string | null;
+  } | null>(null);
+  const requestDeleteAttachment = useCallback((fileId: string, fileName?: string | null) => {
+    if (!fileId) return;
+    setPendingDelete({ fileId, fileName: fileName ?? null });
+  }, []);
+
   const handleDeleteAttachment = useCallback(
-    async (fileId: string, fileName?: string | null) => {
+    async (fileId: string, fileName: string | null, justification: string): Promise<boolean> => {
       const requestId = request?.id_request_general;
-      if (!requestId || !fileId) return;
+      if (!requestId || !fileId) return false;
       try {
         const res = await fetch('/api/requests-general/delete-attachment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId, fileId, fileName: fileName ?? null }),
+          body: JSON.stringify({ requestId, fileId, fileName: fileName ?? null, justification }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           toast.error(typeof data.error === 'string' ? data.error : 'No se pudo eliminar');
-          return;
+          return false;
         }
         setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
         if (requestId) removeFromAttachmentCache(requestId, fileId);
@@ -634,18 +645,14 @@ function ViewRequestPage() {
           return next;
         });
         toast.success('Documento eliminado');
-        if (data.orionStopped === false) {
-          toast.error(
-            'No se pudo detener la firma en GSS Firma. Recházela allí para que nadie siga firmando.',
-            { duration: 8000 }
-          );
-        }
         refreshAttachmentsAfterUpload();
         void fetchFormValues(requestId);
         void fetchTasksRG();
         void fetchNotes();
+        return true;
       } catch {
         toast.error('Error de red al eliminar el archivo');
+        return false;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2458,7 +2465,7 @@ function ViewRequestPage() {
                           }}
                           onDocumentsUpdate={handleOrionDocumentsChange}
                           canDeleteAttachment={canDeleteAttachments}
-                          onDeleteAttachment={handleDeleteAttachment}
+                          onDeleteAttachment={requestDeleteAttachment}
                           forceSignerUi={(() => {
                             const me = String(session?.user?.email || '')
                               .trim()
@@ -2740,6 +2747,17 @@ function ViewRequestPage() {
             )}
           </Group>
         </Card>
+
+        <DeleteAttachmentModal
+          opened={pendingDelete != null}
+          fileName={pendingDelete?.fileName ?? null}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={(justification) =>
+            pendingDelete
+              ? handleDeleteAttachment(pendingDelete.fileId, pendingDelete.fileName, justification)
+              : Promise.resolve(false)
+          }
+        />
 
         <Modal
           opened={modalTasksOpened}

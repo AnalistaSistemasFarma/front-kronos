@@ -109,6 +109,7 @@ import { buildOrionParticipants } from '../../../../../lib/orion/participants';
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import TableFieldInput from '../create-request/TableFieldInput';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
@@ -1111,19 +1112,34 @@ function ViewRequestPage() {
     }, 5000);
   }, [request?.id]);
 
+  // Abre el modal de justificación; el borrado real va en handleDeleteAttachment.
+  const [pendingDelete, setPendingDelete] = useState<{
+    fileId: string;
+    fileName: string | null;
+  } | null>(null);
+  const requestDeleteAttachment = useCallback((fileId: string, fileName?: string | null) => {
+    if (!fileId) return;
+    setPendingDelete({ fileId, fileName: fileName ?? null });
+  }, []);
+
   const handleDeleteAttachment = useCallback(
-    async (fileId: string, fileName?: string | null) => {
-      if (!request?.id || !fileId) return;
+    async (fileId: string, fileName: string | null, justification: string): Promise<boolean> => {
+      if (!request?.id || !fileId) return false;
       try {
         const res = await fetch('/api/requests-general/delete-attachment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId: request.id, fileId, fileName: fileName ?? null }),
+          body: JSON.stringify({
+            requestId: request.id,
+            fileId,
+            fileName: fileName ?? null,
+            justification,
+          }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           toast.error(typeof data.error === 'string' ? data.error : 'No se pudo eliminar');
-          return;
+          return false;
         }
         setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
         removeFromAttachmentCache(request.id, fileId);
@@ -1134,18 +1150,14 @@ function ViewRequestPage() {
           return next;
         });
         toast.success('Documento eliminado');
-        if (data.orionStopped === false) {
-          toast.error(
-            'No se pudo detener la firma en GSS Firma. Recházela allí para que nadie siga firmando.',
-            { duration: 8000 }
-          );
-        }
         refreshAttachmentsAfterUpload();
         void fetchFormValues(request.id);
         void fetchTasksRG(request.id);
         void fetchNotes(request.id);
+        return true;
       } catch {
         toast.error('Error de red al eliminar el archivo');
+        return false;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2978,7 +2990,7 @@ function ViewRequestPage() {
                           workflowLocked={orionWorkflowLocked}
                           onDocumentsUpdate={handleOrionDocumentsChange}
                           canDeleteAttachment={canDeleteAttachments}
-                          onDeleteAttachment={handleDeleteAttachment}
+                          onDeleteAttachment={requestDeleteAttachment}
                           forceSignerUi={(() => {
                             const me = currentUserEmailNorm;
                             if (!me) return false;
@@ -3098,11 +3110,7 @@ function ViewRequestPage() {
                                       color='red'
                                       size='sm'
                                       aria-label={`Eliminar ${file.name}`}
-                                      onClick={() => {
-                                        if (window.confirm(`¿Eliminar “${file.name}”? Esta acción no se puede deshacer.`)) {
-                                          void handleDeleteAttachment(fileId, file.name);
-                                        }
-                                      }}
+                                      onClick={() => requestDeleteAttachment(fileId, file.name)}
                                     >
                                       <IconTrash size={16} />
                                     </ActionIcon>
@@ -3143,11 +3151,7 @@ function ViewRequestPage() {
                                   color='red'
                                   size='sm'
                                   aria-label={`Eliminar ${file.name}`}
-                                  onClick={() => {
-                                    if (window.confirm(`¿Eliminar “${file.name}”? Esta acción no se puede deshacer.`)) {
-                                      void handleDeleteAttachment(fileId, file.name);
-                                    }
-                                  }}
+                                  onClick={() => requestDeleteAttachment(fileId, file.name)}
                                 >
                                   <IconTrash size={16} />
                                 </ActionIcon>
@@ -3307,6 +3311,17 @@ function ViewRequestPage() {
             )}
           </Group>
         </Card>
+
+        <DeleteAttachmentModal
+          opened={pendingDelete != null}
+          fileName={pendingDelete?.fileName ?? null}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={(justification) =>
+            pendingDelete
+              ? handleDeleteAttachment(pendingDelete.fileId, pendingDelete.fileName, justification)
+              : Promise.resolve(false)
+          }
+        />
 
         <Modal
           opened={reopenModalOpened}
