@@ -118,7 +118,7 @@ const MessageBubble = memo(function MessageBubble({
   message,
   agent,
   currentUserId,
-  enGrupo = false,
+  porAutor = false,
   nueva = false,
   onCitar,
   onIrAlCitado,
@@ -128,7 +128,11 @@ const MessageBubble = memo(function MessageBubble({
   agent?: ChatAgentDto;
   /** Quién soy: en un grupo es lo que distingue mis mensajes de los ajenos. */
   currentUserId?: string;
-  enGrupo?: boolean;
+  /**
+   * "Lo mío" se decide por el AUTOR y no por el `role`. Verdadero en todo lo
+   * que no sea el hilo directo con un agente (grupos, y lo que venga).
+   */
+  porAutor?: boolean;
   /** Llegó DESPUÉS de abrir el hilo: solo esas se animan (ver ChatThread). */
   nueva?: boolean;
   /** Citar ESTE mensaje. Sin esto, los gestos quedan inertes. */
@@ -185,15 +189,17 @@ const MessageBubble = memo(function MessageBubble({
     setArrastre(0);
   };
 
-  // ⚠️ EN UN GRUPO, "mío" NO es lo mismo que role='user'. Con el criterio del
-  // hilo directo, los mensajes de las OTRAS personas del grupo se pintarían
-  // alineados a la derecha como si los hubiera escrito uno: el grupo quedaría
-  // ilegible. Aquí lo mío es lo que escribí yo, y eso solo lo dice el autor.
-  const isUser = enGrupo
-    ? message.author?.kind === 'user' &&
+  // ⚠️ FUERA DEL HILO DIRECTO, "mío" NO es lo mismo que role='user'. Con el
+  // criterio del hilo directo, los mensajes de las OTRAS personas se pintarían
+  // alineados a la derecha como si los hubiera escrito uno. Aquí lo mío es lo
+  // que escribí yo, y eso solo lo dice el autor. La pregunta es "¿es el hilo
+  // directo con un agente?" y no "¿es un grupo?": cualquier otra clase de
+  // conversación con varias personas necesita el criterio del autor.
+  const isUser = !porAutor
+    ? message.role === 'user'
+    : message.author?.kind === 'user' &&
       currentUserId !== undefined &&
-      String(message.author.id) === currentUserId
-    : message.role === 'user';
+      String(message.author.id) === currentUserId;
 
   // Nombre de quien escribió, para la etiqueta de la burbuja. En el hilo
   // directo es siempre el agente; en un grupo, quien sea (persona o agente).
@@ -538,6 +544,9 @@ export default function ChatThread({
   height?: string | number;
 }) {
   const enGrupo = Boolean(group);
+  // Hilo directo = una persona con UN agente. Es lo único donde `role='user'`
+  // significa "lo escribí yo".
+  const esHiloDirecto = !group && Boolean(agent);
 
   const target: ChatTarget | null = group
     ? { kind: 'group', idConversation: group.idConversation }
@@ -999,7 +1008,7 @@ export default function ChatThread({
               message={message}
               agent={agent}
               currentUserId={currentUserId}
-              enGrupo={enGrupo}
+              porAutor={!esHiloDirecto}
               nueva={yaEstaban.current ? !yaEstaban.current.has(message.id) : false}
               onCitar={citar}
               onIrAlCitado={irAlMensaje}

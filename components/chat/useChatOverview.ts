@@ -265,7 +265,10 @@ export function useChatOverview(opciones?: {
     // entraran aquí, sus no leídos se le sumarían al contador del avatar de
     // ese agente en la barra superior y abrir su chat directo no los bajaría
     // —quedaría un número pegado que nadie puede quitar—.
-    const directas = conversations.filter((c) => c.kind !== 'group');
+    // Un hilo sin `kind` es de antes de los grupos, o sea directo. Se pregunta
+    // por 'direct' y no por "no es grupo": una clase nueva de conversación no
+    // debe sumarse al contador de un agente por descarte.
+    const directas = conversations.filter((c) => (c.kind ?? 'direct') === 'direct');
     const groups = conversations.filter((c) => c.kind === 'group');
 
     for (const conversation of directas) {
