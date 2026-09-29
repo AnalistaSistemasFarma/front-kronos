@@ -10,6 +10,7 @@ const findUser = vi.hoisted(() => vi.fn());
 const findConversation = vi.hoisted(() => vi.fn());
 const ownership = vi.hoisted(() => vi.fn());
 const groupAccess = vi.hoisted(() => vi.fn());
+const peopleAccess = vi.hoisted(() => vi.fn());
 
 vi.mock('next-auth', () => ({ getServerSession: session }));
 vi.mock('../../../app/api/auth/[...nextauth]/route', () => ({ authOptions: {} }));
@@ -21,6 +22,7 @@ vi.mock('../../prisma', () => ({
 }));
 vi.mock('../access', () => ({ assertConversationOwnership: ownership }));
 vi.mock('../groups', () => ({ assertGroupAccess: groupAccess }));
+vi.mock('../people', () => ({ assertPeopleAccess: peopleAccess }));
 
 import { guardConversation } from '../http';
 
@@ -45,6 +47,23 @@ describe('guardConversation', () => {
     const guard = await guardConversation('9');
     expect(guard).toMatchObject({ kind: 'group', conversationId: 9, groupRole: 'member' });
     expect(ownership).not.toHaveBeenCalled();
+  });
+
+  it('un hilo entre personas pasa solo por su puerta', async () => {
+    findConversation.mockResolvedValue({ kind: 'people' });
+    peopleAccess.mockResolvedValue({ id: 11, otherUserId: 'u2', myParticipantId: 40 });
+    const guard = await guardConversation('11');
+    expect(guard).toMatchObject({ kind: 'people', conversationId: 11, otherUserId: 'u2' });
+    expect(peopleAccess).toHaveBeenCalledWith('u1', 11);
+    expect(ownership).not.toHaveBeenCalled();
+    expect(groupAccess).not.toHaveBeenCalled();
+  });
+
+  it('un hilo entre personas ajeno responde 404', async () => {
+    findConversation.mockResolvedValue({ kind: 'people' });
+    peopleAccess.mockResolvedValue(null);
+    const guard = await guardConversation('11');
+    expect('response' in guard && guard.response.status).toBe(404);
   });
 
   it('una clase desconocida responde 404 sin probar ninguna puerta', async () => {

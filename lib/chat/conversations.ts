@@ -9,6 +9,7 @@
  * prisma/schema.prisma):
  *   - 'direct' — una persona con un agente. El hilo original.
  *   - 'group'  — varias personas y varios agentes.
+ *   - 'people' — dos personas, sin agentes (lib/chat/people-rules.ts).
  * La forma que sale hacia el cliente es la misma; lo que cambia es qué campos
  * vienen con valor (`participants` y `agentStatuses` solo tienen sentido en un
  * grupo; `agentStatus`, en un hilo directo).
@@ -16,6 +17,7 @@
 import type { Prisma } from '../../app/generated/prisma';
 import { prisma } from '../prisma';
 import { getChatAccess } from './access';
+import { visiblePeopleConversationIds } from './people';
 import { toPreview } from './constants';
 import { parseAgentTasks, type AgentTaskDto } from './status-tasks';
 
@@ -101,7 +103,7 @@ export interface ChatAgentStatusPayload {
 export interface ChatConversationPayload {
   id: number;
   title: string | null;
-  /** 'direct' | 'group'. */
+  /** 'direct' | 'group' | 'people'. */
   kind: string;
   createdAt: string;
   updatedAt: string;
@@ -120,7 +122,7 @@ export interface ChatConversationPayload {
   };
   /** Empresa del grupo. null en los hilos directos. */
   company: { idCompany: number; companyName: string } | null;
-  /** Integrantes. null en los hilos directos (no aplica). */
+  /** Integrantes. null en los hilos directos (no aplica). En 'people', las dos personas. */
   participants: ChatParticipantPayload[] | null;
   lastMessage: { id: number; role: string; preview: string; createdAt: string } | null;
   unreadCount: number;
@@ -329,6 +331,8 @@ export function serializeConversation(
 ): ChatConversationPayload {
   const last = row.messages[0];
   const esGrupo = row.kind === 'group';
+  // Todo lo que no es el hilo directo con un agente se lee por participantes.
+  const conParticipantes = row.kind !== 'direct';
 
   const agentStatuses: ChatAgentStatusPayload[] = row.statuses.map((s) => ({
     idAgent: s.id_agent,
@@ -361,7 +365,7 @@ export function serializeConversation(
     company: row.company
       ? { idCompany: row.company.id_company, companyName: row.company.company }
       : null,
-    participants: esGrupo
+    participants: conParticipantes
       ? row.participants.map((p) =>
           p.agent
             ? {
@@ -391,7 +395,7 @@ export function serializeConversation(
         }
       : null,
     unreadCount,
-    agentStatus: esGrupo
+    agentStatus: esGrupo || row.kind === 'people'
       ? null
       : delAnfitrion
         ? {
@@ -444,6 +448,9 @@ export async function conversationScopeFor(
 
   const allowedAgentIds = access.agents.map((a) => a.idAgent);
   const empresasDelModulo = access.companies.map((c) => c.idCompany);
+  // Hilos entre personas: los que la regla D1 deja ver HOY (ver
+  // lib/chat/people.ts). Ya vienen filtrados por participante.
+  const hilosDePersonas = await visiblePeopleConversationIds(userId);
 
   return [
     // Hilos directos: suyos y con un agente que todavía puede usar.
@@ -459,6 +466,7 @@ export async function conversationScopeFor(
         ...(empresasDelModulo.length > 0 ? [{ id_company: { in: empresasDelModulo } }] : []),
       ],
     },
+    ...(hilosDePersonas.length > 0 ? [{ kind: 'people', id: { in: hilosDePersonas } }] : []),
   ];
 }
 
@@ -482,7 +490,9 @@ export async function listUserConversations(
   // clase nueva de conversación caería aquí por descarte y se contaría con la
   // regla de los hilos con agente, que no le aplica.
   const directos = rows.filter((r) => r.kind === 'direct').map((r) => r.id);
-  const grupos = rows.filter((r) => r.kind === 'group');
+  // Grupos y hilos entre personas se cuentan igual: por la marca de agua de
+  // cada participante.
+  const grupos = rows.filter((r) => r.kind === 'group' || r.kind === 'people');
 
   const noLeidos = new Map<number, number>();
 
@@ -546,7 +556,7 @@ export async function getConversationPayload(
   if (!row) return null;
 
   let unreadCount = 0;
-  if (row.kind === 'group') {
+  if (row.kind === 'group' || row.kind === 'people') {
     if (userId) {
       const mio = await prisma.chatParticipant.findFirst({
         where: { id_conversation: conversationId, id_user: userId },
