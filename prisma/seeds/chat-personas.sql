@@ -21,7 +21,16 @@
        donde ya tienen '/process/chat'. Solo inserta lo que falte.
 
   Ajuste @Emails antes de correr (separados por coma).
+
+  🔒 BLOQUEOS: lleva `SET LOCK_TIMEOUT 5000` para no quedarse esperando si
+  alguien tiene tomadas las tablas de permisos. Si falla con el error 1222
+  ("Lock request time out period exceeded"), vuelva a correrlo: cada paso
+  comprueba antes de insertar, así que el reintento solo completa lo que
+  falte. Con XACT_ABORT ON, cualquier error detiene el lote en ese punto.
 */
+
+SET XACT_ABORT ON;
+SET LOCK_TIMEOUT 5000;
 
 DECLARE @Emails     NVARCHAR(MAX) = N'nicolas.rivera@gsslatam.com';
 DECLARE @SubName    NVARCHAR(255) = N'Chat · Personas';
