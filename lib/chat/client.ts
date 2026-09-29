@@ -361,6 +361,31 @@ export const ESTADO_RANCIO_MS = 10 * 60 * 1000;
 /** Con sub-agentes en curso se es más paciente: son prueba de trabajo vivo. */
 export const ESTADO_RANCIO_CON_SUBAGENTES_MS = 20 * 60 * 1000;
 
+/**
+ * Sub-agentes que siguen EN CURSO según un estado, sin importar si el agente
+ * principal está trabajando o ya volvió a 'idle'.
+ *
+ * Pedido de Nicolás (2026-09-29): "que esa cajita sea fija hasta que el
+ * sub-agente termine". El agente principal suele contestar (y con eso su
+ * estado pasa a 'idle') mientras sus sub-agentes siguen corriendo en segundo
+ * plano; la lista de sub-agentes vive aparte en la columna `tasks` y el POST
+ * de la respuesta NO la toca. Atarla a `busy` la escondía justo en ese caso.
+ *
+ * El único tope es la frescura: una lista que no se refresca en
+ * ESTADO_RANCIO_CON_SUBAGENTES_MS se da por muerta (sesión del bot caída sin
+ * que su hook alcanzara a limpiarla), para no dejar una caja pegada para
+ * siempre.
+ */
+export function subagentesEnCurso(
+  status: Pick<ChatStatusDto, 'tasks' | 'updatedAt'> | null | undefined
+): AgentTaskDto[] {
+  const tareas = status?.tasks ?? [];
+  if (tareas.length === 0) return [];
+  const marca = Date.parse(status?.updatedAt ?? '');
+  if (!Number.isNaN(marca) && Date.now() - marca > ESTADO_RANCIO_CON_SUBAGENTES_MS) return [];
+  return tareas;
+}
+
 /** ¿Este estado dice "trabajando" pero lleva demasiado sin refrescarse? */
 export function estadoEstaRancio(status: ChatStatusDto | null): boolean {
   if (!status || status.state === 'idle') return false;

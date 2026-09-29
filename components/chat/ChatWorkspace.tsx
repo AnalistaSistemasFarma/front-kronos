@@ -101,11 +101,18 @@ function AgentCard({
   onSelect,
   onPrecargar,
   status,
+  previewPendiente = false,
 }: {
   agent: ChatAgentDto;
   unread: number;
   statusLabel: string;
   lastPreview: string | null;
+  /**
+   * Todavía no se sabe el último mensaje (la bandeja no ha llegado). Se deja
+   * el renglón reservado en blanco en vez de pintar la descripción y
+   * reemplazarla un instante después por la vista previa.
+   */
+  previewPendiente?: boolean;
   lastAt: string | null;
   selected: boolean;
   compact: boolean;
@@ -151,7 +158,7 @@ function AgentCard({
             )}
           </Group>
           <Text size='xs' lineClamp={compact ? 1 : 2} className='chat-text-muted'>
-            {lastPreview || agent.description || statusLabel}
+            {lastPreview || (previewPendiente ? '\u00a0' : agent.description || statusLabel)}
           </Text>
           {!compact && (
             <Group gap={6} mt={6}>
@@ -271,7 +278,7 @@ export default function ChatWorkspace({
   /** Grupo a abrir de entrada: es lo que usa /process/chat/grupo/[id]. */
   initialGroupId?: number;
 }) {
-  const overview = useChatOverview();
+  const overview = useChatOverview({ primeraCargaInmediata: true });
   const searchParams = useSearchParams();
   const { data: session } = useSession();
 
@@ -788,6 +795,7 @@ export default function ChatWorkspace({
                       : null
                   }
                   lastAt={conversation?.lastMessageAt ?? null}
+                  previewPendiente={!overview.conversationsReady}
                   onPrecargar={() => precargarHiloDeAgente(agent.idAgent, conversation)}
                   selected={selectedAgent?.idAgent === agent.idAgent}
                   compact={
@@ -979,7 +987,11 @@ export default function ChatWorkspace({
 
         {/* Sin `height`: el alto lo acota el contenedor, y dentro del hilo solo
             scrollea la lista de mensajes — el compositor queda fijo abajo. */}
-        <ChatThread agent={selectedAgent} active />
+        <ChatThread
+          agent={selectedAgent}
+          idConversacion={overview.conversationByAgent.get(selectedAgent.idAgent)?.id ?? null}
+          active
+        />
       </Box>
     ) : null;
 
