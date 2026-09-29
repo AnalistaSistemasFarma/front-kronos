@@ -1302,9 +1302,12 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   width: 100%;
 }
 
-/* Entrada suave del hilo al abrir el chat: un fundido corto en vez de que la
-   lista reemplace de golpe al esqueleto (ver claveContenido en ChatThread). */
-.chat-thread__contenido {
+/* Entrada suave del hilo SOLO cuando se alcanzó a ver el esqueleto: un
+   fundido corto en vez de que la lista lo reemplace de golpe. Va en un
+   modificador y no en la clase base a propósito (2026-09-29): en la base se
+   repetía en cada montaje de la lista y la conversación quedaba en blanco
+   150 ms al abrirla o al remontarse (ver `conFundido` en ChatThread). */
+.chat-thread__contenido--entra {
   animation: chat-contenido-entra 150ms ease-out;
 }
 @keyframes chat-contenido-entra {
@@ -1312,7 +1315,7 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   to { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat-thread__contenido { animation: none; }
+  .chat-thread__contenido--entra { animation: none; }
 }
 
 .chat-thread__scroll {

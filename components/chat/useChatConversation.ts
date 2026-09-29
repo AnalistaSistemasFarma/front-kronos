@@ -98,7 +98,17 @@ export function precargarHiloDeAgente(
  *   - `group`: un grupo que YA existe, identificado por su id de conversación.
  */
 export type ChatTarget =
-  | { kind: 'agent'; idAgent: number }
+  | {
+      kind: 'agent';
+      idAgent: number;
+      /**
+       * Id del hilo si la bandeja ya lo conoce. Con él, el histórico se pide EN
+       * PARALELO con el POST que abre el hilo y se pinta en cuanto llega, en
+       * vez de esperar los dos viajes en fila. NO entra en `targetKey`: que la
+       * bandeja lo descubra después no debe reabrir el hilo.
+       */
+      idConversation?: number | null;
+    }
   | { kind: 'group'; idConversation: number };
 
 export interface ChatThreadState {
@@ -229,12 +239,27 @@ export function useChatConversation(
     // deshabilitado. La recarga es silenciosa.
     setLoading(!enCache);
 
+    type Historial = {
+      messages: ChatMessageDto[];
+      hasMore: boolean;
+      nextCursor: number | null;
+    };
     const pedirHistorial = (idConversation: number) =>
-      chatGetJson<{
-        messages: ChatMessageDto[];
-        hasMore: boolean;
-        nextCursor: number | null;
-      }>(`/api/chat/conversations/${idConversation}/messages?limit=${MESSAGES_PAGE_DEFAULT}`);
+      chatGetJson<Historial>(
+        `/api/chat/conversations/${idConversation}/messages?limit=${MESSAGES_PAGE_DEFAULT}`
+      );
+
+    const aplicarHistorial = (history: Historial | null) => {
+      // El endpoint devuelve del más nuevo al más viejo; la vista los quiere
+      // en orden cronológico.
+      const ordered = [...(history?.messages ?? [])].sort((a, b) => a.id - b.id);
+      // Se conservan los optimistas que el usuario haya enviado mientras
+      // tanto (con caché el compositor ya estaba habilitado).
+      setMessages((prev) => [...ordered, ...prev.filter((m) => m.pending || m.failed)]);
+      setHasOlder(Boolean(history?.hasMore));
+      olderCursorRef.current = history?.nextCursor ?? null;
+      cursorRef.current = ordered.length > 0 ? ordered[ordered.length - 1].id : 0;
+    };
 
     void (async () => {
       try {
@@ -242,9 +267,29 @@ export function useChatConversation(
         // Si ya se conoce el id del hilo, el histórico se pide EN PARALELO con
         // la ficha, en vez de esperar a que vuelva el POST (dos viajes en fila
         // eran la mayor parte de la espera al abrir).
-        const historialAnticipado = enCache ? pedirHistorial(enCache.conversation.id) : null;
+        //
+        // Sin caché también se adelanta si la bandeja ya trae el id del hilo
+        // (2026-09-29): antes, la primera apertura de un hilo esperaba el POST
+        // y DESPUÉS pedía el histórico, y el área de mensajes quedaba en
+        // blanco los dos viajes. Ahora el histórico se pinta en cuanto llega,
+        // aunque el POST no haya vuelto (el compositor sí espera al POST).
+        const idConocido =
+          enCache?.conversation.id ??
+          (target.kind === 'agent' ? (target.idConversation ?? null) : null);
+        const historialAnticipado = idConocido !== null ? pedirHistorial(idConocido) : null;
         // Si el anticipado falla, no debe quedar como promesa rechazada suelta.
         historialAnticipado?.catch(() => null);
+        if (historialAnticipado && !enCache) {
+          void historialAnticipado
+            .then((history) => {
+              // Solo si el POST todavía no volvió: si ya volvió, él aplica el
+              // histórico (y confirma que el id era el correcto).
+              if (!cancelled && history && conversationIdRef.current === null) {
+                aplicarHistorial(history);
+              }
+            })
+            .catch(() => null);
+        }
 
         if (target.kind === 'agent') {
           // Idempotente: si ya existe el hilo con este agente, lo devuelve.
@@ -293,21 +338,13 @@ export function useChatConversation(
         setStatuses(data.conversation.agentStatuses ?? []);
 
         const history =
-          historialAnticipado && enCache?.conversation.id === data.conversation.id
+          historialAnticipado && idConocido === data.conversation.id
             ? await historialAnticipado
             : await pedirHistorial(data.conversation.id);
 
         if (cancelled) return;
 
-        // El endpoint devuelve del más nuevo al más viejo; la vista los quiere
-        // en orden cronológico.
-        const ordered = [...(history?.messages ?? [])].sort((a, b) => a.id - b.id);
-        // Se conservan los optimistas que el usuario haya enviado mientras
-        // tanto (con caché el compositor ya estaba habilitado).
-        setMessages((prev) => [...ordered, ...prev.filter((m) => m.pending || m.failed)]);
-        setHasOlder(Boolean(history?.hasMore));
-        olderCursorRef.current = history?.nextCursor ?? null;
-        cursorRef.current = ordered.length > 0 ? ordered[ordered.length - 1].id : 0;
+        aplicarHistorial(history);
       } catch (err) {
         if (!cancelled && !isAbortError(err)) {
           setError('No se pudo abrir la conversación.');
@@ -398,8 +435,12 @@ export function useChatConversation(
     pollRef.current = poll;
   }, [poll]);
 
+  // Por el ID del hilo y no por el objeto: el POST de apertura devuelve una
+  // ficha nueva (mismo hilo) y, con el objeto como dependencia, el sondeo se
+  // cancelaba y arrancaba de nuevo sin motivo.
+  const idConversacionAbierta = conversation?.id ?? null;
   useEffect(() => {
-    if (targetKey === null || conversation === null) return;
+    if (targetKey === null || idConversacionAbierta === null) return;
 
     void poll();
 
@@ -414,7 +455,7 @@ export function useChatConversation(
       abortRef.current?.abort();
     };
     // `poll` es estable (useCallback con dependencias estables).
-  }, [targetKey, conversation, poll, clearTimer]);
+  }, [targetKey, idConversacionAbierta, poll, clearTimer]);
 
   /* ─────────────────────────────── Acciones ───────────────────────────── */
 

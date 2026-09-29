@@ -464,9 +464,15 @@ export default function ChatThread({
   currentUserId,
   active = true,
   height,
+  idConversacion,
 }: {
   /** Hilo DIRECTO: el agente con el que se habla. */
   agent?: ChatAgentDto;
+  /**
+   * Id del hilo directo si la bandeja ya lo conoce: permite pedir el
+   * histórico en paralelo con la apertura (ver useChatConversation).
+   */
+  idConversacion?: number | null;
   /**
    * GRUPO: el hilo ya existe y se abre por su id. `agentes` son los asistentes
    * del grupo, para el autocompletado del `@`.
@@ -488,7 +494,7 @@ export default function ChatThread({
   const target: ChatTarget | null = group
     ? { kind: 'group', idConversation: group.idConversation }
     : agent
-      ? { kind: 'agent', idAgent: agent.idAgent }
+      ? { kind: 'agent', idAgent: agent.idAgent, idConversation: idConversacion ?? null }
       : null;
 
   const thread = useChatConversation(target, active);
@@ -606,8 +612,11 @@ export default function ChatThread({
   // un hilo heredaba el `stickToBottom = false` del anterior y quedaba subido.
   const hiloPrevioRef = useRef(claveHilo);
   const usuarioMovioRef = useRef(false);
+  // ¿Se alcanzó a pintar el esqueleto en este hilo? (ver `conFundido`).
+  const esqueletoVistoRef = useRef(false);
   if (hiloPrevioRef.current !== claveHilo) {
     hiloPrevioRef.current = claveHilo;
+    esqueletoVistoRef.current = false;
     yaEstaban.current = null;
     usuarioMovioRef.current = false;
     lastCountRef.current = 0;
@@ -670,12 +679,15 @@ export default function ChatThread({
    * No hay bucle: desplazarse no cambia el tamaño del contenido.
    */
   const contenidoRef = useRef<HTMLDivElement>(null);
-  // El contenido se REMONTA una sola vez por hilo: cuando pasa de vacío a
-  // tener mensajes. Así la lista entra con un fundido corto (ver
-  // .chat-thread__contenido en globals.css) en vez de reemplazar de golpe al
-  // esqueleto. Con caché los mensajes ya están desde el primer render y el
-  // fundido ocurre una sola vez, al abrir.
-  const claveContenido = `${claveHilo}:${thread.messages.length > 0 ? 'con' : 'sin'}`;
+  // LA LISTA YA NO SE REMONTA (2026-09-29, video de Nicolás en el iPhone: "al
+  // abrir el hilo se ve en blanco y, estando adentro, los mensajes desaparecen
+  // un instante y vuelven"). Antes la lista llevaba `key` con "¿hay mensajes?"
+  // y cada montaje repetía un fundido desde opacidad 0 de 150 ms: cualquier
+  // cosa que la remontara —abrir el hilo, volver a él desde la caché, el
+  // hilo pasando por vacío— dejaba la conversación en blanco ese rato
+  // mientras el encabezado y el compositor seguían quietos. Ahora el nodo es
+  // el mismo toda la vida del hilo y el fundido solo se usa cuando de verdad
+  // se alcanzó a ver el esqueleto (ver `conFundido` más abajo).
 
   // ESQUELETO CON RETRASO: si el hilo llega en menos de 300 ms no se pinta
   // nada intermedio. Mostrar un esqueleto medio segundo para reemplazarlo
@@ -690,6 +702,11 @@ export default function ChatThread({
     const reloj = window.setTimeout(() => setMostrarEsqueleto(true), 300);
     return () => window.clearTimeout(reloj);
   }, [esperandoPrimerLote]);
+  // El fundido de entrada solo tiene sentido si se vio el esqueleto: suaviza
+  // el cambio esqueleto → mensajes. Con caché, o si el hilo llegó antes de los
+  // 300 ms, los mensajes se pintan de una, sin pasar por opacidad 0.
+  if (mostrarEsqueleto) esqueletoVistoRef.current = true;
+  const conFundido = esqueletoVistoRef.current && thread.messages.length > 0;
 
   useEffect(() => {
     const contenido = contenidoRef.current;
@@ -712,7 +729,7 @@ export default function ChatThread({
     });
     observador.observe(contenido);
     return () => observador.disconnect();
-  }, [claveContenido]);
+  }, [claveHilo]);
 
   // ── Arrastrar y soltar archivos sobre la conversación ────────────────────
   // El área de soltar es TODO el hilo (mensajes + compositor), no solo la caja
@@ -838,7 +855,12 @@ export default function ChatThread({
         onPointerDown={marcarInteraccion}
         offsetScrollbars
       >
-        <Stack key={claveContenido} gap='sm' p='sm' ref={contenidoRef} className='chat-thread__contenido'>
+        <Stack
+          gap='sm'
+          p='sm'
+          ref={contenidoRef}
+          className={`chat-thread__contenido${conFundido ? ' chat-thread__contenido--entra' : ''}`}
+        >
           {thread.hasOlder && (
             <Center>
               <Button
