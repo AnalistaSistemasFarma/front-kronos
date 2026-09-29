@@ -89,12 +89,58 @@ function drawPattern(page: PDFPage, font: PDFFont, width: number, height: number
   }
 }
 
+/** Caja en % de la página, origen arriba-izquierda; `page` 0 = última página. */
+export type SealAvoidBox = { page: number; x: number; y: number; width: number; height: number };
+
+type Rect = { x0: number; y0: number; x1: number; y1: number };
+
+function overlapArea(a: Rect, b: Rect): number {
+  const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+  const h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/**
+ * Posición del sello en la última hoja sin tapar firmas ni validadores: prueba esquinas
+ * y bordes, achicando el sello si hace falta; si nada queda libre, la de menor choque.
+ */
+export function pickSealPlacement(
+  width: number,
+  height: number,
+  obstacles: Rect[]
+): { cx: number; cy: number; radius: number } {
+  const base = Math.max(30, Math.min(width, height) * 0.065);
+  const pad = 4;
+  let best: { cx: number; cy: number; radius: number; overlap: number } | null = null;
+
+  for (const radius of [base, base * 0.8, Math.max(24, base * 0.65)]) {
+    const m = radius + 18;
+    const candidates = [
+      [width - m, m],
+      [m, m],
+      [width / 2, m],
+      [width - m, height - m],
+      [m, height - m],
+      [width - m, height / 2],
+      [m, height / 2],
+    ];
+    for (const [cx, cy] of candidates) {
+      const seal = { x0: cx - radius - pad, y0: cy - radius - pad, x1: cx + radius + pad, y1: cy + radius + pad };
+      const overlap = obstacles.reduce((sum, o) => sum + overlapArea(seal, o), 0);
+      if (overlap === 0) return { cx, cy, radius };
+      if (!best || overlap < best.overlap) best = { cx, cy, radius, overlap };
+    }
+  }
+  return best!;
+}
+
 /**
  * Estampa patrón diagonal SYNERLINK · VALIDADO en todas las páginas
- * y el sello circular solo en la última hoja (inferior derecha).
+ * y el sello circular en la última hoja, en un hueco libre de `avoid`.
  */
 export async function stampSynerlinkWatermark(
-  pdfBytes: ArrayBuffer | Uint8Array | Buffer
+  pdfBytes: ArrayBuffer | Uint8Array | Buffer,
+  avoid: SealAvoidBox[] = []
 ): Promise<Uint8Array> {
   const input =
     pdfBytes instanceof Buffer
@@ -115,11 +161,16 @@ export async function stampSynerlinkWatermark(
   const last = pages[pages.length - 1];
   if (last) {
     const { width, height } = last.getSize();
-    const radius = Math.max(36, Math.min(width, height) * 0.09);
-    const margin = radius * 1.4;
-    // pdf-lib: origen abajo-izquierda → inferior derecha
-    const cx = width - margin;
-    const cy = margin;
+    // pdf-lib: origen abajo-izquierda; las cajas vienen en % desde arriba-izquierda.
+    const obstacles = avoid
+      .filter((b) => b.page <= 0 || b.page >= pages.length)
+      .map((b) => ({
+        x0: (b.x / 100) * width,
+        x1: ((b.x + b.width) / 100) * width,
+        y0: height - ((b.y + b.height) / 100) * height,
+        y1: height - (b.y / 100) * height,
+      }));
+    const { cx, cy, radius } = pickSealPlacement(width, height, obstacles);
     drawSeal(last, font, cx, cy, radius);
   }
 
