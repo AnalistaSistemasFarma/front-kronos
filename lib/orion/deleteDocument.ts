@@ -108,7 +108,7 @@ export async function deleteRequestDocumentCompletely(
 
   // 1) El archivo debe ser de esta solicitud antes de tocar nada.
   let token: string | null = null;
-  let oneDriveExists = false;
+  let deleteFromOneDrive = false;
   if (fileId !== ORION_LEGACY_FILE_ID) {
     token = await getMicrosoftToken();
     if (!token) throw httpError('No se pudo obtener token de OneDrive', 502);
@@ -121,11 +121,13 @@ export async function deleteRequestDocumentCompletely(
         inFolder = listed.some((f) => f.id === fileId);
       }
       if (!inFolder) throw httpError('El documento no pertenece a esta solicitud.', 404);
-      oneDriveExists = true;
     } else if (!inBag) {
-      // Ni está en OneDrive ni en el estado de firma de la solicitud.
+      // Ni se pudo leer en OneDrive ni está en el estado de firma de la solicitud.
       throw httpError('Documento no encontrado en esta solicitud.', 404);
     }
+    // Sin metadatos pero en el bag: el fileId es de esta solicitud; se intenta borrar
+    // igual (404 es idempotente y un error transitorio aborta en vez de dejar huérfano).
+    deleteFromOneDrive = true;
   } else if (!inBag) {
     throw httpError('Documento no encontrado en esta solicitud.', 404);
   }
@@ -163,7 +165,7 @@ export async function deleteRequestDocumentCompletely(
 
   // 3) Archivo en OneDrive.
   let oneDriveDeleted = false;
-  if (token && oneDriveExists) {
+  if (token && deleteFromOneDrive) {
     await deleteOneDriveItem(token, fileId);
     oneDriveDeleted = true;
   }
