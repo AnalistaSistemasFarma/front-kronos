@@ -1,72 +1,51 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 type Ghost = { id: number; char: string; leaving: boolean };
 
+/*
+ * Lo que se copia del textarea al espejo. Además de la tipografía básica van
+ * las propiedades que cambian el ANCHO de cada letra sin cambiar la letra
+ * (kerning, ligaduras, rasgos OpenType, ancho de fuente, render) y las que
+ * deciden dónde se parte el renglón: si alguna difiere, el texto dibujado se
+ * corre respecto al real y el cursor nativo —que es del textarea— queda
+ * "separado" o "metido" en la letra (Nicolás, 2026-09-29).
+ *
+ * Los BORDES ya no se copian: el espejo se coloca sobre la caja interior del
+ * textarea (ver `sincronizarCaja`), así que no lleva borde propio.
+ */
 const MIRROR_PROPS: (keyof CSSStyleDeclaration)[] = [
   'fontFamily',
   'fontSize',
   'fontWeight',
   'fontStyle',
+  'fontStretch',
+  'fontKerning',
+  'fontVariantLigatures',
+  'fontFeatureSettings',
+  'fontVariationSettings',
+  'fontOpticalSizing',
+  'textRendering',
   'lineHeight',
   'letterSpacing',
   'wordSpacing',
   'textAlign',
+  'textIndent',
+  'textTransform',
+  'tabSize',
+  'whiteSpace',
+  'overflowWrap',
+  'wordBreak',
   'paddingTop',
   'paddingRight',
   'paddingBottom',
   'paddingLeft',
-  'borderTopWidth',
-  'borderRightWidth',
-  'borderBottomWidth',
-  'borderLeftWidth',
-  'boxSizing',
 ];
 
 function splitToChars(text: string): string[] {
   // Array.from respeta pares subrogados (emoji) mejor que text.split('').
   return Array.from(text);
-}
-
-function isBreakable(char: string): boolean {
-  return char === ' ' || char === '\n' || char === '\t';
-}
-
-type RenderGroup = { kind: 'space'; ghost: Ghost } | { kind: 'word'; ghosts: Ghost[] };
-
-/**
- * Agrupa las letras en "palabras" (tramos sin espacio) para que el renglón
- * solo pueda partirse donde el textarea real lo haría — en un espacio/salto de
- * línea — y no entre dos letras cualesquiera. Cada carácter en `ghosts` es su
- * propia caja `inline-block` (para poder animarla), y una caja `inline-block`
- * es un punto de quiebre válido por sí sola: sin esta agrupación, el
- * navegador podía partir CUALQUIER palabra a mitad de camino con un patrón de
- * renglones distinto al del `<textarea>` real, dejando el cursor nativo (que
- * sí sigue el renglonado real) lejos del último carácter dibujado — reportado
- * por Nicolás, 2026-09-22. El CSS envuelve cada grupo `word` en
- * `white-space: nowrap` (`.chat-composer__letterfx-word`) para que sus letras
- * viajen juntas a la siguiente línea si no caben enteras.
- */
-function groupForWrap(ghosts: Ghost[]): RenderGroup[] {
-  const groups: RenderGroup[] = [];
-  let current: Ghost[] = [];
-  const flushWord = () => {
-    if (current.length > 0) {
-      groups.push({ kind: 'word', ghosts: current });
-      current = [];
-    }
-  };
-  for (const g of ghosts) {
-    if (isBreakable(g.char)) {
-      flushWord();
-      groups.push({ kind: 'space', ghost: g });
-    } else {
-      current.push(g);
-    }
-  }
-  flushWord();
-  return groups;
 }
 
 /**
@@ -100,23 +79,63 @@ export default function ComposerLetterFx({
     return chars.map((char, i) => ({ id: i, char, leaving: false }));
   });
 
-  // Copia en vivo la tipografía/espaciado real del textarea al overlay para
-  // que el espejo coincida pixel a pixel (mismo font, mismo padding, mismo
-  // ajuste de línea). Se lee del propio nodo en cada actualización — nunca se
-  // hardcodean valores — así que si el CSS del textarea cambia, el overlay lo
-  // sigue solo.
-  useLayoutEffect(() => {
+  /**
+   * Calca el espejo sobre el textarea: tipografía, relleno, CAJA y
+   * desplazamiento.
+   *
+   * La caja es la interior del textarea (`clientLeft/Top/Width/Height`), no la
+   * del contenedor: así el espejo excluye el borde y la barra de
+   * desplazamiento (que en escritorio le quita ancho al renglón real) y no
+   * depende de que el textarea llene exactamente el contenedor.
+   *
+   * El DESPLAZAMIENTO también se copia: pasado `maxRows` el textarea se
+   * desplaza por dentro y antes el espejo se quedaba quieto, mostrando otros
+   * renglones que los del cursor.
+   */
+  const sincronizarCaja = useCallback(() => {
     const ta = textareaRef.current;
     const ov = overlayRef.current;
-    if (!ta || !ov) return;
+    const padre = ov?.parentElement;
+    if (!ta || !ov || !padre) return;
     const cs = window.getComputedStyle(ta);
+    const estilo = ov.style as unknown as Record<string, string>;
     for (const prop of MIRROR_PROPS) {
       const v = cs[prop];
-      if (typeof v === 'string') {
-        (ov.style as unknown as Record<string, string>)[prop as string] = v;
-      }
+      if (typeof v === 'string') estilo[prop as string] = v;
     }
+    const rTa = ta.getBoundingClientRect();
+    const rPadre = padre.getBoundingClientRect();
+    ov.style.borderWidth = '0px';
+    ov.style.right = 'auto';
+    ov.style.bottom = 'auto';
+    ov.style.top = `${rTa.top - rPadre.top - padre.clientTop + ta.clientTop}px`;
+    ov.style.left = `${rTa.left - rPadre.left - padre.clientLeft + ta.clientLeft}px`;
+    ov.style.width = `${ta.clientWidth}px`;
+    ov.style.height = `${ta.clientHeight}px`;
+    ov.scrollTop = ta.scrollTop;
+  }, [textareaRef]);
+
+  // En cada actualización (cada tecla): el autosize del textarea pudo cambiar
+  // su alto y su desplazamiento en este mismo cuadro.
+  useLayoutEffect(() => {
+    sincronizarCaja();
   });
+
+  // Y fuera de las teclas: el textarea que se desplaza con el dedo o la rueda,
+  // y el que cambia de tamaño sin que cambie el texto (girar el celular,
+  // abrir el panel lateral).
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.addEventListener('scroll', sincronizarCaja, { passive: true });
+    const observador =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => sincronizarCaja()) : null;
+    observador?.observe(ta);
+    return () => {
+      ta.removeEventListener('scroll', sincronizarCaja);
+      observador?.disconnect();
+    };
+  }, [textareaRef, sincronizarCaja]);
 
   useEffect(() => {
     const prev = prevValueRef.current;
@@ -139,7 +158,7 @@ export default function ComposerLetterFx({
       // caracteres sobrantes se marcan "leaving" y se quitan solos cuando
       // termina su propia animación de salida (onAnimationEnd de cada span).
       // Los saltos de línea (`\n`) son la excepción: se renderizan como <br>
-      // (ver renderChar) para forzar un salto real en el flujo, y un <br> no
+      // (ver `Letra`) para forzar un salto real en el flujo, y un <br> no
       // dispara `onAnimationEnd` — se quitan de inmediato, sin animar salida.
       setGhosts((g) => {
         const activos = g.filter((x) => !x.leaving);
@@ -164,43 +183,48 @@ export default function ComposerLetterFx({
     setGhosts(chars.map((char, i) => ({ id: i, char, leaving: false })));
   }, [value]);
 
-  const renderChar = (g: Ghost) => {
-    if (g.char === '\n') {
-      // Un salto de línea real dentro de un <span inline-block> (con
-      // white-space:pre-wrap) solo rompe el flujo DENTRO de esa caja atómica,
-      // no en el flujo exterior del overlay — el navegador la trata como un
-      // único bloque más alto, sin encadenar el renglón siguiente. El
-      // resultado: el overlay no baja de línea donde el textarea real sí lo
-      // hace, y el cursor nativo (que sigue el renglonado real) termina muy
-      // lejos del último carácter dibujado (reportado por Nicolás,
-      // 2026-09-23). <br> sí fuerza el salto en el flujo exterior, igual que
-      // en el textarea real.
-      return <br key={g.id} />;
-    }
-    return (
-      <span
-        key={g.id}
-        className={`chat-composer__letterfx-char${g.leaving ? ' is-leaving' : ''}`}
-        onAnimationEnd={() => {
-          if (g.leaving) setGhosts((cur) => cur.filter((x) => x.id !== g.id));
-        }}
-      >
-        {g.char}
-      </span>
-    );
-  };
+  const quitarLetra = useCallback((id: number) => {
+    setGhosts((cur) => cur.filter((x) => x.id !== id));
+  }, []);
 
+  // Las letras van PLANAS, una detrás de otra, como `display: inline` (ver
+  // `.chat-composer__letterfx-char` en globals.css): el renglón se parte con
+  // las mismas reglas que el textarea real y ya no hace falta agruparlas por
+  // palabra.
   return (
     <div ref={overlayRef} className='chat-composer__letterfx' aria-hidden='true'>
-      {groupForWrap(ghosts).map((group) =>
-        group.kind === 'space' ? (
-          renderChar(group.ghost)
-        ) : (
-          <span key={`word-${group.ghosts[0].id}`} className='chat-composer__letterfx-word'>
-            {group.ghosts.map(renderChar)}
-          </span>
-        )
-      )}
+      {ghosts.map((g) => (
+        <Letra key={g.id} ghost={g} onSalida={quitarLetra} />
+      ))}
     </div>
   );
 }
+
+/**
+ * Una letra del espejo. En `memo`: al teclear solo se monta la letra nueva; las
+ * cientos que ya estaban no se vuelven a renderizar en cada tecla.
+ */
+const Letra = memo(function Letra({
+  ghost,
+  onSalida,
+}: {
+  ghost: Ghost;
+  onSalida: (id: number) => void;
+}) {
+  if (ghost.char === '\n') {
+    // El salto de línea se pinta como <br>: un <br> no dispara
+    // `onAnimationEnd`, por eso los `\n` se quitan sin animar su salida (ver
+    // el efecto de arriba).
+    return <br />;
+  }
+  return (
+    <span
+      className={`chat-composer__letterfx-char${ghost.leaving ? ' is-leaving' : ''}`}
+      onAnimationEnd={() => {
+        if (ghost.leaving) onSalida(ghost.id);
+      }}
+    >
+      {ghost.char}
+    </span>
+  );
+});
