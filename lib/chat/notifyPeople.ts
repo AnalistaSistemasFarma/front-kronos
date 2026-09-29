@@ -1,7 +1,9 @@
 /**
- * AVISOS de los hilos ENTRE PERSONAS (decisión D7): push por mensaje directo y
- * por zumbido, con un `tag` por conversación para que varios mensajes seguidos
- * reemplacen la notificación en vez de apilarse.
+ * AVISOS de los hilos ENTRE PERSONAS (decisión D7, OBLIGATORIA según Nicolás,
+ * 2026-09-29): push por CADA mensaje directo y por CADA zumbido, con un `tag`
+ * por conversación y por clase (`chat-dm-<id>`, `chat-nudge-<id>`): varios
+ * mensajes seguidos reemplazan la notificación en vez de apilarse, y un
+ * zumbido no pisa el aviso de un mensaje ni al revés.
  *
  * Mismo criterio que lib/chat/notifyAgentReply.ts: reutiliza la tubería de
  * avisos de SynerLink (campanita + push), el service worker omite el aviso si
@@ -51,7 +53,7 @@ export async function notifyPeopleMessage(input: {
       title: datos.nombre,
       body: summarizeReply(input.body, input.attachmentCount),
       url: urlDelHilo(input.idConversation),
-      tag: `chat-persona-${input.idConversation}`,
+      tag: `chat-dm-${input.idConversation}`,
       icon: datos.icono,
     });
   } catch (error) {
@@ -72,10 +74,10 @@ export async function notifyPeopleNudge(input: {
     const datos = await datosDeAviso(input.idConversation, input.idRemitente, input.idDestino);
     if (!datos.correo || datos.silenciado) return;
     await createAndSendNotifications([datos.correo], {
-      title: `📳 ${datos.nombre}`,
-      body: 'Le envió un zumbido.',
+      title: `📳 ${datos.nombre} le envió un zumbido`,
+      body: 'Toque para abrir la conversación.',
       url: urlDelHilo(input.idConversation),
-      tag: `chat-persona-${input.idConversation}`,
+      tag: `chat-nudge-${input.idConversation}`,
       icon: datos.icono,
       vibrate: NUDGE_VIBRATE_PATTERN,
     });
