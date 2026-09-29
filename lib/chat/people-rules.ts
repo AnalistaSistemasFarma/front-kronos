@@ -177,3 +177,32 @@ export function segundosPorTopeDeVentana(
   const libera = vigentes[vigentes.length - maximo] + ventana;
   return Math.max(1, Math.ceil((libera - ahora.getTime()) / 1000));
 }
+
+/* ==================================================================== */
+/* PULSO GLOBAL (decisión D9: long-poll respaldado en SQL, sin SSE)      */
+/* ==================================================================== */
+
+/** Segundos que el servidor sostiene cada vuelta del pulso. */
+export const PULSE_WAIT_SECONDS = 20;
+/** Cada cuánto revisa la base el pulso mientras espera. */
+export const PULSE_TICK_MS = 1_000;
+/** Tope de eventos por vuelta. */
+export const PULSE_MAX_EVENTS = 20;
+/**
+ * Un zumbido más viejo que esto ya no sacude ni suena: llega en la bandeja,
+ * pero hacer ruido por algo de hace diez minutos (p. ej. al volver a la
+ * pestaña) confunde más de lo que avisa.
+ */
+export const NUDGE_FRESH_MS = 2 * 60_000;
+
+/** Un evento del pulso: algo nuevo en un hilo entre personas. */
+export interface ChatPulseEvent {
+  type: 'message' | 'nudge';
+  idConversation: number;
+  idMessage: number;
+  /** Quién lo escribió o zumbó. */
+  authorName: string;
+  createdAt: string;
+  /** Solo en 'nudge': yo silencié los zumbidos de ese hilo. */
+  muted: boolean;
+}

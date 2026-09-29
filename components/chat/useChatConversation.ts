@@ -141,10 +141,18 @@ export function useChatConversation(
      * mergeMessages). Sin esto se usa solo el `role`, como en el hilo directo.
      */
     miId?: string;
+    /**
+     * Llega un ZUMBIDO de otra persona por el sondeo. Va en una referencia, no
+     * como dependencia: cambiarla no debe reabrir el hilo ni reprogramar el
+     * sondeo, y el efecto (la sacudida) no pasa por el estado de React.
+     */
+    onZumbido?: (mensaje: ChatMessageDto) => void;
   }
 ): ChatThreadState {
   const miIdRef = useRef(opciones?.miId);
   miIdRef.current = opciones?.miId;
+  const onZumbidoRef = useRef(opciones?.onZumbido);
+  onZumbidoRef.current = opciones?.onZumbido;
 
   // El objetivo se aplana a una cadena para poder usarlo como dependencia de
   // los efectos: un objeto nuevo en cada render reabriría el hilo sin parar.
@@ -446,6 +454,14 @@ export function useChatConversation(
       if (data.messages.length > 0) {
         mergeMessages(data.messages);
         cursorRef.current = data.cursor;
+        // Zumbidos de OTRA persona que llegan en esta vuelta (los del
+        // historial al abrir no pasan por aquí: no se sacude por lo viejo).
+        const yo = miIdRef.current;
+        for (const m of data.messages) {
+          if (m.eventType === 'nudge' && m.author && String(m.author.id) !== yo) {
+            onZumbidoRef.current?.(m);
+          }
+        }
         // La barra de la cabecera debe enterarse del mensaje nuevo.
         notifyChatRefresh();
       }
