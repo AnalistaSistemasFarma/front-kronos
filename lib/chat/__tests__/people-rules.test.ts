@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DM_PUSH_COOLDOWN_MS,
   MAX_DM_KEY_CHARS,
   buildDmKey,
+  debeNotificarDirecto,
   empresasCompartidas,
   empresasParaIniciar,
   puedeIniciar,
@@ -109,5 +111,38 @@ describe('zumbido: límites (D4)', () => {
   it('el texto del zumbido lleva el nombre y nunca queda vacío', () => {
     expect(textoDeZumbido('Ana')).toBe('📳 Ana envió un zumbido.');
     expect(textoDeZumbido('  ')).toBe('📳 Alguien envió un zumbido.');
+  });
+});
+
+describe('debeNotificarDirecto', () => {
+  const ahora = new Date('2026-09-29T15:00:00.000Z');
+  const hace = (ms: number) => new Date(ahora.getTime() - ms);
+
+  it('avisa si nunca hubo aviso de ese hilo a ese receptor', () => {
+    expect(debeNotificarDirecto(null, ahora)).toBe(true);
+  });
+
+  it('no avisa si hubo uno hace menos de 60 s', () => {
+    expect(debeNotificarDirecto(hace(0), ahora)).toBe(false);
+    expect(debeNotificarDirecto(hace(1_000), ahora)).toBe(false);
+    expect(debeNotificarDirecto(hace(DM_PUSH_COOLDOWN_MS - 1), ahora)).toBe(false);
+  });
+
+  it('vuelve a avisar al cumplirse los 60 s', () => {
+    expect(debeNotificarDirecto(hace(DM_PUSH_COOLDOWN_MS), ahora)).toBe(true);
+    expect(debeNotificarDirecto(hace(5 * 60_000), ahora)).toBe(true);
+  });
+
+  it('no avisa si el último aviso aparece en el futuro (mismo reloj: es de ahora)', () => {
+    expect(debeNotificarDirecto(new Date(ahora.getTime() + 500), ahora)).toBe(false);
+  });
+
+  it('una fecha inválida no bloquea el aviso', () => {
+    expect(debeNotificarDirecto(new Date('no-es-fecha'), ahora)).toBe(true);
+  });
+
+  it('respeta una espera distinta', () => {
+    expect(debeNotificarDirecto(hace(10_000), ahora, 5_000)).toBe(true);
+    expect(debeNotificarDirecto(hace(10_000), ahora, 20_000)).toBe(false);
   });
 });
