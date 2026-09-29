@@ -479,6 +479,174 @@ export function getOrionFingerprintProfileUrl(): string | null {
   return base ? `${base}/dashboard/my-fingerprint` : null;
 }
 
+/** Usuario SynerLink para `POST /users/sync` (Orion solo completa campos vacíos). */
+export type OrionSyncUser = {
+  email: string;
+  name: string;
+  synerlinkUserId: string;
+  synerlinkCompanyId: number;
+  additionalCompanyIds?: number[];
+  departmentName?: string | null;
+  jobTitle?: string | null;
+  idDocumentType?: string | null;
+  idNumber?: string | null;
+  canSign: boolean;
+};
+
+export type OrionUsersSyncResult = {
+  summary?: { total: number; created: number; updated: number; unchanged: number; errors: number };
+  users?: Array<{
+    email: string;
+    action?: 'created' | 'updated' | 'unchanged' | 'error' | string;
+    error?: string;
+    warnings?: string[];
+    tenantSlug?: string;
+    companyAccess?: string[];
+  }>;
+};
+
+export async function syncOrionUsers(
+  users: OrionSyncUser[],
+  synerlinkCompanyId?: number | null
+): Promise<OrionResult<OrionUsersSyncResult>> {
+  return orionFetch<OrionUsersSyncResult>('/api/integrations/synerlink/users/sync', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...(synerlinkCompanyId ? { synerlinkCompanyId } : {}),
+      // Empresa predefinida + empresas con permiso de firmas: Orion quita las demás.
+      replaceCompanyAccess: true,
+      users,
+    }),
+  });
+}
+
+/** Mapa id_company → empresa en Orion, para comparar con ORION_TENANT_MAP. */
+export async function listOrionTenants(): Promise<OrionResult<unknown>> {
+  return orionFetch<unknown>('/api/integrations/synerlink/tenants', { method: 'GET' });
+}
+
+export type OrionTenantSyncCompany = {
+  synerlinkCompanyId: number;
+  name: string;
+  /** Slug sugerido; Orion lo respeta si está libre o si ya es de esa empresa. */
+  slug: string;
+};
+
+/**
+ * Alta/actualización idempotente de empresas en Orion por synerlinkCompanyId.
+ * Respuesta esperada: la misma forma de GET /tenants (+ summary/results).
+ */
+export async function syncOrionTenants(
+  companies: OrionTenantSyncCompany[]
+): Promise<OrionResult<unknown>> {
+  return orionFetch<unknown>('/api/integrations/synerlink/tenants/sync', {
+    method: 'POST',
+    body: JSON.stringify({ companies }),
+  });
+}
+
+export type OrionProvenance = {
+  tenantId?: string | null;
+  synerlinkRequestId?: number | null;
+  synerlinkCompanyId?: number | null;
+  companyName?: string | null;
+  synerlinkCategoryId?: number | null;
+  categoryName?: string | null;
+  synerlinkProcessId?: number | null;
+  processName?: string | null;
+  fileId?: string | null;
+  versionLabel?: string | null;
+  previousOrionDocumentId?: string | null;
+};
+
+export type OrionSearchDocument = {
+  orionDocumentId: string;
+  documentNumber?: string | number | null;
+  title?: string | null;
+  status?: string | null;
+  company?: { id?: string; name?: string | null; slug?: string | null } | string | null;
+  department?: { id?: string; name?: string | null } | string | null;
+  provenance?: OrionProvenance | null;
+  createdAt?: string | null;
+  signatures?: {
+    signed: number;
+    required: number;
+    signers?: Array<{ email?: string; name?: string; status?: string; signedAt?: string | null }>;
+  } | null;
+};
+
+export type OrionSearchResult = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  documents: OrionSearchDocument[];
+};
+
+export async function searchOrionDocuments(
+  params: Record<string, string | number | null | undefined>
+): Promise<OrionResult<OrionSearchResult>> {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value == null || value === '') continue;
+    qs.set(key, String(value));
+  }
+  return orionFetch<OrionSearchResult>(
+    `/api/integrations/synerlink/documents/search?${qs.toString()}`,
+    { method: 'GET' }
+  );
+}
+
+export type OrionTimelineEvent = {
+  id: string;
+  documentId?: string | null;
+  versionLabel?: string | null;
+  category?: string | null;
+  type: string;
+  label?: string | null;
+  source?: 'SYNERLINK' | 'ORION' | string | null;
+  actorName?: string | null;
+  actorEmail?: string | null;
+  detail?: string | null;
+  occurredAt: string;
+  recordedAt?: string | null;
+  ipAddress?: string | null;
+};
+
+export type OrionTimeline = {
+  synerlinkRequestId?: number | null;
+  fileId?: string | null;
+  versions: Array<{
+    orionDocumentId: string;
+    title?: string | null;
+    versionLabel?: string | null;
+    previousOrionDocumentId?: string | null;
+    fileId?: string | null;
+    status?: string | null;
+    statusLabel?: string | null;
+    createdAt?: string | null;
+    closedAt?: string | null;
+    deleted?: boolean;
+  }>;
+  events: OrionTimelineEvent[];
+};
+
+export async function getOrionDocumentTimeline(
+  params: { orionDocumentId: string } | { synerlinkRequestId: number; fileId: string }
+): Promise<OrionResult<OrionTimeline>> {
+  const qs = new URLSearchParams();
+  if ('orionDocumentId' in params) {
+    qs.set('orionDocumentId', params.orionDocumentId);
+  } else {
+    qs.set('synerlinkRequestId', String(params.synerlinkRequestId));
+    qs.set('fileId', params.fileId);
+  }
+  return orionFetch<OrionTimeline>(
+    `/api/integrations/synerlink/documents/timeline?${qs.toString()}`,
+    { method: 'GET' }
+  );
+}
+
 /** Regenera PDF acumulado en Orion (corrige documentos con solo la 1.ª firma). */
 export async function rebuildOrionSignedPdf(
   orionDocumentId: string,

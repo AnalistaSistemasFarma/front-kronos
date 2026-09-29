@@ -26,8 +26,8 @@ import {
   getOrionDefaultCreatedByEmail,
   getOrionSignatureProfileUrl,
   parseFileIdFromExternalRef,
-  resolveOrionTenantId,
 } from './config';
+import { ensureOrionTenantForCompany, resolveOrionTenantIdLive } from './tenantRegistry';
 import {
   isOrionErrorCode,
   looksLikeFingerprintNotRegistered,
@@ -541,20 +541,13 @@ export async function ensureOrionDocumentForRequest(
   }
 
   if (!doc) {
-    const tenantId = resolveOrionTenantId(ctx.id_company);
-    if (!tenantId) {
-      throw Object.assign(
-        new Error(
-          `Empresa SynerLink id_company=${ctx.id_company} (${ctx.company_name || 'sin nombre'}) no está mapeada a un tenant Orion. Configure ORION_TENANT_MAP (p. ej. {"1":"gss"}).`
-        ),
-        { status: 422 }
-      );
-    }
-    const createdByEmail =
+    const tenantId = await ensureOrionTenantForCompany(pool, ctx.id_company, ctx.company_name);
+    const createdByEmail = (
       params.createdByEmail?.trim() ||
       ctx.requester_email?.trim() ||
       getOrionDefaultCreatedByEmail() ||
-      '';
+      ''
+    ).toLowerCase();
     if (!createdByEmail) {
       throw Object.assign(
         new Error(
@@ -2517,8 +2510,7 @@ export async function finalizeSignerTurn(
       throw Object.assign(new Error(BIOMETRIC_CONSENT_REQUIRED_MESSAGE), { status: 422 });
     }
     const signerCtx = await getRequestOrionContext(pool, params.requestId);
-    // Mapa estático ORION_TENANT_MAP; el PR de sincronización lo cambia por el registro vivo.
-    const companySlug = signerCtx ? resolveOrionTenantId(signerCtx.id_company) : null;
+    const companySlug = signerCtx ? await resolveOrionTenantIdLive(signerCtx.id_company) : null;
     // La rúbrica dibujada en el turno reemplaza la guardada en Orion; sin ella se usa la guardada.
     const biometricAcceptedAt = new Date().toISOString();
     const acceptPayload = {
