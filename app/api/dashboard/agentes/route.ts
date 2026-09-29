@@ -72,7 +72,9 @@ export async function GET(request: NextRequest) {
       ...(desde || hasta
         ? { created_at: { ...(desde ? { gte: desde } : {}), ...(hasta ? { lte: hasta } : {}) } }
         : {}),
-      ...(idAgent ? { conversation: { id_agent: idAgent } } : {}),
+      // Los hilos entre personas NO son uso de un agente (su `id_agent` es el
+      // centinela técnico): se dejan fuera de la analítica de la flota.
+      conversation: { kind: { not: 'people' }, ...(idAgent ? { id_agent: idAgent } : {}) },
     } as const;
 
     const rangoUsage = {

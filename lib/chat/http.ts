@@ -13,6 +13,7 @@ import { authOptions } from '../../app/api/auth/[...nextauth]/route';
 import { prisma } from '../prisma';
 import { assertConversationOwnership } from './access';
 import { assertGroupAccess, type AgenteMencionable, type ParticipantRole } from './groups';
+import { assertPeopleAccess } from './people';
 
 /** El chat nunca se cachea: es una bandeja en vivo. */
 export const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' } as const;
@@ -76,7 +77,10 @@ export async function resolveSessionUser(): Promise<ChatSessionUser | null> {
  *     todavía tiene permiso sobre el agente de ese hilo
  *     (assertConversationOwnership, lib/chat/access.ts);
  *   - GRUPO: el usuario es participante Y sigue teniendo el módulo habilitado
- *     en la empresa del grupo (assertGroupAccess, lib/chat/groups.ts).
+ *     en la empresa del grupo (assertGroupAccess, lib/chat/groups.ts);
+ *   - PERSONAS: el usuario es uno de los dos participantes Y la regla de
+ *     acceso entre los dos se sigue cumpliendo (assertPeopleAccess,
+ *     lib/chat/people.ts).
  *
  * Se lee primero la clase del hilo (`kind`) y se prueba SOLO la puerta que le
  * corresponde; además cada puerta está anclada a su `kind`, así que ninguna
@@ -107,6 +111,16 @@ export type ConversationGuard =
       groupRole: ParticipantRole;
       /** Agentes que están en el grupo (para resolver menciones). */
       groupAgents: AgenteMencionable[];
+    }
+  | {
+      user: ChatSessionUser;
+      conversationId: number;
+      /** Hilo privado entre DOS personas (lib/chat/people-rules.ts). */
+      kind: 'people';
+      /** La otra persona del hilo. */
+      otherUserId: string;
+      /** Mi fila en chat_participant. */
+      myParticipantId: number;
     };
 
 export async function guardConversation(rawId: string): Promise<ConversationGuard> {
@@ -143,6 +157,17 @@ export async function guardConversation(rawId: string): Promise<ConversationGuar
         kind: 'group',
         groupRole: grupo.role,
         groupAgents: grupo.agentes,
+      };
+    }
+  } else if (fila?.kind === 'people') {
+    const hilo = await assertPeopleAccess(user.id, conversationId);
+    if (hilo) {
+      return {
+        user,
+        conversationId: hilo.id,
+        kind: 'people',
+        otherUserId: hilo.otherUserId,
+        myParticipantId: hilo.myParticipantId,
       };
     }
   }

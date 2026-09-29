@@ -24,7 +24,7 @@ import {
  * leído nada ajeno.
  *
  * -------------------------------------------------------------------------
- * EN UN GRUPO NO SE TOCA `read_at`
+ * EN UN GRUPO (y en un hilo entre personas) NO SE TOCA `read_at`
  * -------------------------------------------------------------------------
  * `chat_message.read_at` es UNA columna por mensaje. En un grupo de cinco, el
  * primero que leyera lo daría por leído para los otros cuatro y a todos se les
@@ -56,7 +56,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       upTo = parsed;
     }
 
-    if (guard.kind === 'group') {
+    // Grupos y hilos entre personas: marca de agua por participante.
+    if (guard.kind === 'group' || guard.kind === 'people') {
       // Hasta dónde leyó: lo que pidió el cliente o, si no dijo nada, el
       // último mensaje del grupo.
       let hasta = upTo ?? 0;

@@ -876,10 +876,16 @@ model ChatConversation {
   id_user         String    @db.NVarChar(1000)
   id_agent        Int
   title           String?   @db.NVarChar(300)
-  /// 'direct' | 'group'. Texto y no enum porque el provider sqlserver de
-  /// Prisma no soporta enums nativos. Hay un CHECK en la base que solo admite
-  /// esos dos valores.
+  /// 'direct' | 'group' | 'people'. Texto y no enum porque el provider
+  /// sqlserver de Prisma no soporta enums nativos. Hay un CHECK en la base
+  /// que solo admite esos valores. 'people' = hilo privado entre DOS personas,
+  /// sin agentes (lib/chat/people-rules.ts).
   kind            String    @default("direct") @db.NVarChar(20)
+  /// Solo en 'people': clave única del PAR de personas (lib/chat/people-rules.ts,
+  /// buildDmKey). Un índice ÚNICO FILTRADO (WHERE dm_key IS NOT NULL) impide
+  /// dos hilos para el mismo par; no se declara @unique aquí por el mismo
+  /// motivo que User.nit (SQL Server solo admite un NULL en un único normal).
+  dm_key          String?   @db.NVarChar(120)
   /// Empresa del grupo. NULL en los hilos directos: allí la empresa la define
   /// el permiso sobre el agente, no el hilo.
   id_company      Int?
