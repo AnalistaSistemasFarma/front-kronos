@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  CHAT_THREAD_POKE_EVENT,
   chatFetch,
   chatGetJson,
   isAbortError,
@@ -479,8 +480,17 @@ export function useChatConversation(
     };
     document.addEventListener('visibilitychange', onVisibility);
 
+    // "Pregunta ya": lo manda el pulso global o el botón del zumbido cuando
+    // sabe que hay algo nuevo en ESTE hilo (ver pedirSondeoDelHilo).
+    const onPoke = (event: Event) => {
+      const id = (event as CustomEvent<{ idConversation?: number }>).detail?.idConversation;
+      if (id === idConversacionAbierta) void poll();
+    };
+    window.addEventListener(CHAT_THREAD_POKE_EVENT, onPoke);
+
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener(CHAT_THREAD_POKE_EVENT, onPoke);
       clearTimer();
       abortRef.current?.abort();
     };

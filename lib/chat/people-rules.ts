@@ -117,3 +117,63 @@ export function empresasParaIniciar(persona: PersonaParaAcceso): number[] {
   if (!esElegible(persona)) return [];
   return [...persona.empresasPersonas].filter((id) => persona.empresasChat.has(id)).sort((x, y) => x - y);
 }
+
+/* ==================================================================== */
+/* ZUMBIDO (fase 2) — decisiones D4, D5 y D6 de Nicolás, 2026-09-29      */
+/* ==================================================================== */
+
+/** Marca de evento del mensaje de sistema que ES un zumbido. */
+export const NUDGE_EVENT_TYPE = 'nudge';
+
+/** D4: uno cada 30 s por conversación y remitente. */
+export const NUDGE_COOLDOWN_MS = 30_000;
+
+/** D4: y como mucho diez cada diez minutos por remitente, en total. */
+export const NUDGE_WINDOW_MS = 10 * 60_000;
+export const NUDGE_MAX_PER_WINDOW = 10;
+
+/** Patrón de vibración del zumbido (Android; iOS no vibra desde la web). */
+export const NUDGE_VIBRATE_PATTERN = [200, 100, 200, 100, 400];
+
+/** Texto del mensaje de sistema que deja el zumbido en el hilo. */
+export function textoDeZumbido(nombreRemitente: string): string {
+  const nombre = nombreRemitente.trim() || 'Alguien';
+  return `📳 ${nombre} envió un zumbido.`;
+}
+
+/**
+ * Segundos que faltan para poder volver a zumbar en ESTE hilo, a partir del
+ * último zumbido propio. 0 = ya se puede. Redondea hacia arriba: decir "0 s"
+ * cuando faltan 300 ms haría que el reintento vuelva a chocar.
+ */
+export function segundosParaReintentar(
+  ultimoZumbido: Date | null,
+  ahora: Date,
+  espera: number = NUDGE_COOLDOWN_MS
+): number {
+  if (!ultimoZumbido) return 0;
+  const falta = ultimoZumbido.getTime() + espera - ahora.getTime();
+  return falta > 0 ? Math.ceil(falta / 1000) : 0;
+}
+
+/**
+ * Tope global por remitente: con los zumbidos que envió en la ventana (los
+ * más viejos primero), ¿cuántos segundos faltan para poder mandar otro? 0 = ya
+ * se puede.
+ */
+export function segundosPorTopeDeVentana(
+  enviadosEnVentana: Date[],
+  ahora: Date,
+  maximo: number = NUDGE_MAX_PER_WINDOW,
+  ventana: number = NUDGE_WINDOW_MS
+): number {
+  const desde = ahora.getTime() - ventana;
+  const vigentes = enviadosEnVentana
+    .map((d) => d.getTime())
+    .filter((t) => t > desde)
+    .sort((a, b) => a - b);
+  if (vigentes.length < maximo) return 0;
+  // Se libera un cupo cuando el más viejo de los que cuentan sale de la ventana.
+  const libera = vigentes[vigentes.length - maximo] + ventana;
+  return Math.max(1, Math.ceil((libera - ahora.getTime()) / 1000));
+}

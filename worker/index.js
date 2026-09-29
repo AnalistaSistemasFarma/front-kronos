@@ -69,7 +69,9 @@ self.addEventListener('push', (event) => {
         requireInteraction: false,
         tag: data.tag || 'synerlink',
         renotify: true,
-        vibrate: [120, 60, 120],
+        // El patrón puede venir en el payload (el zumbido 📳 del chat entre
+        // personas vibra más largo). Sin él, el de siempre.
+        vibrate: Array.isArray(data.vibrate) ? data.vibrate : [120, 60, 120],
       });
     })
   );
