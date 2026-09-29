@@ -28,7 +28,6 @@ import {
   parseFileIdFromExternalRef,
   resolveOrionTenantId,
 } from './config';
-import { ensureOrionTenantForCompany, resolveOrionTenantIdLive } from './tenantRegistry';
 import {
   isOrionErrorCode,
   looksLikeFingerprintNotRegistered,
@@ -42,7 +41,7 @@ import {
 } from './documentEvents';
 import { replaceOneDriveItemContent } from '../onedrive/graphFolderUpload';
 import { indexOrionDocumentsInBackground } from './documentIndex';
-import { acceptOrionSignerTurn, assignOrionSigners, buildOrionSignedFileApiUrl, createOrionDocument, getOrionDocument, getOrionDocumentByRef, getOrionFingerprintProfileUrl, getOrionPersonConsent, rebuildOrionSignedPdf, resolveOrionAbsoluteUrl, returnOrionDocument, saveOrionSignatureFields } from './client';
+import { acceptOrionSignerTurn, assignOrionSigners, buildOrionSignedFileApiUrl, createOrionDocument, getOrionDocument, getOrionDocumentByRef, getOrionPersonConsent, rebuildOrionSignedPdf, resolveOrionAbsoluteUrl, returnOrionDocument, saveOrionSignatureFields } from './client';
 import { isAllowedServerPdfFetchUrl } from './signedFileAccess';
 import { deleteOneDriveItem } from '../onedrive/graphFolderUpload';
 import { mapOrionFieldsToPlacements, normalizeFieldsForStorage, normalizeValidatorFields, parseEmbedTokenFromUrl, splitValidatorFields, toOrionSignatureFields, type SignatureFieldPlacement } from './signatureFields';

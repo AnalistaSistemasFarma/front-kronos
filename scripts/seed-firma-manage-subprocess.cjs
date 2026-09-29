@@ -117,7 +117,7 @@ async function grantToUser(prisma, subId, email) {
 
 async function main() {
   loadEnv();
-  const { email, alsoSign, alsoFingerprint } = parseArgs();
+  const { email, alsoSign, alsoFingerprint, alsoDocuments } = parseArgs();
   const { PrismaClient } = require('../app/generated/prisma');
   const prisma = new PrismaClient();
 
