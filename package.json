@@ -16,8 +16,6 @@
     "check:orion": "node scripts/test-orion-integration.mjs",
     "check:login": "node scripts/check-login.mjs",
     "test:db": "node scripts/test-db-connection.cjs",
-    "db:route": "powershell -ExecutionPolicy Bypass -File scripts/windows-sql-route.ps1",
-    "db:resolve": "node scripts/resolve-db-host.mjs",
     "reset:password": "node scripts/reset-password.mjs",
     "seed:organigrama": "node prisma/seeds/organigrama.mjs",
     "seed:dashboard-solicitudes": "node scripts/seed-dashboard-solicitante-solicitado.cjs"

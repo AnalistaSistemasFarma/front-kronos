@@ -2,7 +2,6 @@ import { spawn, execSync } from 'child_process';
 import { existsSync, rmSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { resolveDatabaseHost } from './resolve-db-host.mjs';
 
 const PORT = Number(process.env.PORT || 8080);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -161,6 +160,4 @@ if (process.argv.includes('--clean')) {
   rmSync(distDir, { recursive: true, force: true, maxRetries: 3 });
 }
 
-void resolveDatabaseHost({ tryRoute: true, quiet: false }).finally(() => {
-  startNextDev();
-});
+startNextDev();
