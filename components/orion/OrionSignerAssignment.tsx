@@ -5,6 +5,7 @@ import {
   Autocomplete,
   Badge,
   Box,
+  Button,
   Checkbox,
   Group,
   Loader,
@@ -13,6 +14,7 @@ import {
   SegmentedControl,
   Stack,
   Text,
+  TextInput,
   ThemeIcon,
   Tooltip,
 } from '@mantine/core';
@@ -76,7 +78,10 @@ type PartnerOption = {
   cardCode: string;
   cardName: string;
   email: string;
+  source: 'sap' | 'user';
 };
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 function PartnerSearch({
   companyId,
@@ -91,6 +96,9 @@ function PartnerSearch({
   const [options, setOptions] = useState<PartnerOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [sapWarning, setSapWarning] = useState<string | null>(null);
+  const [pending, setPending] = useState<PartnerOption | null>(null);
+  const [pendingEmail, setPendingEmail] = useState('');
 
   useEffect(() => {
     if (!companyId || q.trim().length < 2) {
@@ -116,25 +124,28 @@ function PartnerSearch({
             return;
           }
           const raw = Array.isArray(data.options) ? data.options : [];
-          // Valor único por CardCode (evita crash de Autocomplete con emails duplicados/vacíos).
+          // Valor único (evita crash de Autocomplete con valores duplicados/vacíos).
           const seen = new Set<string>();
           const next: PartnerOption[] = [];
           for (const row of raw as PartnerOption[]) {
             const cardCode = String(row?.cardCode || '').trim();
+            const value = String(row?.value || cardCode).trim();
             const email = String(row?.email || '')
               .trim()
               .toLowerCase();
-            if (!cardCode || !email || !email.includes('@') || seen.has(cardCode)) continue;
-            seen.add(cardCode);
+            if ((!cardCode && row.source !== 'user') || !value || seen.has(value)) continue;
+            seen.add(value);
             next.push({
-              value: cardCode,
+              value,
               label: String(row.label || `${row.cardName || cardCode} <${email}>`),
               cardCode,
               cardName: String(row.cardName || cardCode),
-              email,
+              email: email.includes('@') ? email : '',
+              source: row.source === 'user' ? 'user' : 'sap',
             });
           }
           setOptions(next);
+          setSapWarning(typeof data.sapError === 'string' ? data.sapError : null);
         })
         .catch(() => {
           if (!cancelled) {
@@ -152,6 +163,63 @@ function PartnerSearch({
     };
   }, [companyId, q]);
 
+  const confirmPending = () => {
+    const email = pendingEmail.trim().toLowerCase();
+    if (!pending || !EMAIL_RE.test(email)) {
+      setSearchError('Escriba un correo válido para este socio.');
+      return;
+    }
+    onPick({ ...pending, email });
+    setPending(null);
+    setPendingEmail('');
+    setSearchError(null);
+  };
+
+  if (pending) {
+    return (
+      <Stack gap={4}>
+        <Text size='xs'>
+          <b>{pending.cardName}</b> · {pending.cardCode} no tiene correo en SAP. Escriba el correo
+          donde recibirá la invitación a firmar:
+        </Text>
+        <Group gap='xs' wrap='nowrap'>
+          <TextInput
+            size='xs'
+            placeholder='correo@empresa.com'
+            aria-label='Correo del socio'
+            value={pendingEmail}
+            onChange={(e) => setPendingEmail(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') confirmPending();
+            }}
+            style={{ flex: 1 }}
+            autoFocus
+          />
+          <Button size='xs' onClick={confirmPending}>
+            Asignar
+          </Button>
+          <Button
+            size='xs'
+            variant='subtle'
+            color='gray'
+            onClick={() => {
+              setPending(null);
+              setPendingEmail('');
+              setSearchError(null);
+            }}
+          >
+            Cancelar
+          </Button>
+        </Group>
+        {searchError ? (
+          <Text size='xs' c='red'>
+            {searchError}
+          </Text>
+        ) : null}
+      </Stack>
+    );
+  }
+
   return (
     <Stack gap={4}>
       <Autocomplete
@@ -160,21 +228,23 @@ function PartnerSearch({
             ? 'Buscar socio por nombre, código o correo…'
             : 'Falta empresa de la solicitud para buscar socios'
         }
-        data={options.map((o) => ({ value: o.cardCode, label: o.label }))}
+        data={options.map((o) => ({ value: o.value, label: o.label }))}
         value={q}
         onChange={setQ}
         disabled={disabled || !companyId}
-        limit={12}
+        limit={25}
         rightSection={loading ? <Loader size={14} /> : null}
         onOptionSubmit={(value) => {
           try {
-            const match = options.find(
-              (o) => o.cardCode === value || o.email === value || o.value === value
-            );
-            if (!match?.email) return;
-            onPick(match);
+            const match = options.find((o) => o.value === value);
+            if (!match) return;
             setQ('');
             setOptions([]);
+            if (!match.email) {
+              setPending(match);
+              return;
+            }
+            onPick(match);
           } catch (err) {
             console.error('[orion] PartnerSearch onOptionSubmit', err);
             setSearchError('No se pudo asignar este socio. Intente de nuevo.');
@@ -186,9 +256,14 @@ function PartnerSearch({
           {searchError}
         </Text>
       ) : null}
+      {sapWarning && !searchError && q.trim().length >= 2 ? (
+        <Text size='xs' c='orange'>
+          {sapWarning}
+        </Text>
+      ) : null}
       {!loading && q.trim().length >= 2 && options.length === 0 && !searchError ? (
         <Text size='xs' c='dimmed'>
-          Sin resultados con correo válido en SAP.
+          Sin socios activos en SAP que coincidan.
         </Text>
       ) : null}
     </Stack>
@@ -367,10 +442,14 @@ export default function OrionSignerAssignment({
                             companyId={companyId}
                             disabled={readOnly}
                             onPick={(p) =>
-                              onAssign(person.order, p.email, p.cardName, {
-                                type: 'external',
-                                cardCode: p.cardCode,
-                              })
+                              onAssign(
+                                person.order,
+                                p.email,
+                                p.cardName,
+                                p.source === 'user'
+                                  ? { type: 'internal', cardCode: null }
+                                  : { type: 'external', cardCode: p.cardCode }
+                              )
                             }
                           />
                         ) : (

@@ -20,6 +20,7 @@ import {
 import { isOrionProtectedFileUrl, isAllowedServerPdfFetchUrl, orionDocumentHasSignedCopy } from '@/lib/orion/signedFileAccess';
 import { stampSynerlinkWatermark } from '@/lib/orion/stampSynerlinkWatermark';
 import { applyValidatorMarks } from '@/lib/orion/validatorMarks';
+import { buildValidatorMarks } from '@/lib/orion/validatorStamp';
 
 function normalizeEmail(email?: string | null): string {
   return String(email || '')
@@ -244,20 +245,26 @@ export async function GET(req: Request) {
           ? Buffer.from(buffer)
           : Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
+      if (applySynerlinkStamp) {
+        try {
+          const avoid = [
+            ...buildValidatorMarks(state).map((m) => m.field),
+            ...(state.signatureFields ?? []),
+            ...(state.validatorFields ?? []),
+          ];
+          const stamped = await stampSynerlinkWatermark(body, avoid);
+          body = Buffer.from(stamped);
+        } catch (err) {
+          console.warn('[orion/signed-file] stamp Synerlink watermark failed:', err);
+        }
+      }
+
+      // Después del sello, para que el visto bueno de los validadores quede encima.
       const isPdf = !contentType || /pdf/i.test(contentType);
       if (isPdf && validatorMode !== 'none') {
         body = Buffer.from(
           await applyValidatorMarks(body, state, { final: validatorMode === 'final' })
         );
-      }
-
-      if (applySynerlinkStamp) {
-        try {
-          const stamped = await stampSynerlinkWatermark(body);
-          body = Buffer.from(stamped);
-        } catch (err) {
-          console.warn('[orion/signed-file] stamp Synerlink watermark failed:', err);
-        }
       }
 
       return new NextResponse(body as unknown as BodyInit, {

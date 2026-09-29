@@ -1,4 +1,9 @@
-import { getOrionConfig } from './config';
+import {
+  activateOrionFallback,
+  getOrionConfig,
+  getOrionFallbackUrl,
+  isOrionFallbackActive,
+} from './config';
 import type {
   OrionAssignSignersPayload,
   OrionCreateDocumentPayload,
@@ -120,10 +125,8 @@ async function orionFetch<T>(path: string, init?: RequestInit): Promise<OrionRes
     };
   }
 
-  const url = `${cfg.apiBaseUrl}${path.startsWith('/') ? path : `/${path}`}`;
-  let res: Response;
-  try {
-    res = await fetch(url, {
+  const request = (baseUrl: string) =>
+    fetch(`${baseUrl}${path.startsWith('/') ? path : `/${path}`}`, {
       ...init,
       headers: {
         Authorization: `Bearer ${cfg.integrationApiKey}`,
@@ -132,7 +135,17 @@ async function orionFetch<T>(path: string, init?: RequestInit): Promise<OrionRes
       },
       cache: 'no-store',
     });
+
+  let res: Response;
+  try {
+    res = await request(cfg.apiBaseUrl);
   } catch (err) {
+    const fallback = isOrionFallbackActive() ? null : getOrionFallbackUrl();
+    if (fallback) {
+      console.warn(`[orion] ${cfg.apiBaseUrl} no responde; usando ${fallback}`);
+      activateOrionFallback();
+      return orionFetch<T>(path, init);
+    }
     const message = err instanceof Error ? err.message : String(err);
     return {
       ok: false,
@@ -916,6 +929,10 @@ export async function fetchOrionProtectedFile(url: string): Promise<{
     const message = e instanceof Error ? e.message : 'Error de red';
     const unreachable =
       /fetch failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT/i.test(message);
+    if (unreachable && !isOrionFallbackActive() && getOrionFallbackUrl()) {
+      activateOrionFallback();
+      return fetchOrionProtectedFile(url);
+    }
     return {
       ok: false,
       status: unreachable ? 503 : 502,
