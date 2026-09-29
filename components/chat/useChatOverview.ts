@@ -57,6 +57,8 @@ type CacheChat = {
   email: string;
   access: ChatAccessDto | null;
   conversations: ChatConversationDto[];
+  /** Ya llegó al menos una respuesta de /api/chat/conversations. */
+  conversationsLoaded?: boolean;
 };
 
 let cache: CacheChat | null = null;
@@ -94,10 +96,24 @@ export interface ChatOverview {
   totalUnread: number;
   /** No leídos de los GRUPOS, aparte. */
   groupUnread: number;
+  /**
+   * Ya se sabe cuál es el último mensaje de cada hilo. Mientras sea `false`,
+   * la lista no debe pintar la descripción del agente en el lugar de la vista
+   * previa: se vería la descripción y un instante después el último mensaje
+   * encima (el "salto" que Nicolás vio en el iPhone, 2026-09-29).
+   */
+  conversationsReady: boolean;
   refresh: () => void;
 }
 
-export function useChatOverview(): ChatOverview {
+export function useChatOverview(opciones?: {
+  /**
+   * Pedir la bandeja de una vez al montar, sin el retraso de 800 ms que usa la
+   * barra superior. Lo usa la página del chat, donde la bandeja ES la pantalla.
+   */
+  primeraCargaInmediata?: boolean;
+}): ChatOverview {
+  const primeraCargaInmediata = opciones?.primeraCargaInmediata ?? false;
   const { data: session, status } = useSession();
   const isAuthenticated = status === 'authenticated' && Boolean(session?.user?.email);
 
@@ -111,6 +127,9 @@ export function useChatOverview(): ChatOverview {
     inicial?.conversations ?? []
   );
   const [loading, setLoading] = useState(false);
+  const [conversationsReady, setConversationsReady] = useState(
+    inicial?.conversationsLoaded ?? false
+  );
 
   const accessAbort = useRef<AbortController | null>(null);
   const listAbort = useRef<AbortController | null>(null);
@@ -121,6 +140,12 @@ export function useChatOverview(): ChatOverview {
   // TODA la página de chat (barra de avatares, lista, no leídos) cada 30s
   // aunque no hubiera cambiado nada.
   const lastConversationsJson = useRef<string>(JSON.stringify(inicial?.conversations ?? []));
+  // Lo mismo con el catálogo de agentes (2026-09-29). /api/chat/access se pide
+  // otra vez con CADA `notifyChatRefresh()` —cada mensaje nuevo, cada envío,
+  // cada "leído"— y casi siempre trae lo mismo; reemplazarlo daba agentes
+  // nuevos (mismo contenido) a la página, y el hilo abierto re-renderizaba
+  // todas sus burbujas porque su `agent` "cambiaba".
+  const lastAccessJson = useRef<string>(JSON.stringify(inicial?.access ?? null));
 
   const fetchAccess = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -130,6 +155,9 @@ export function useChatOverview(): ChatOverview {
     try {
       const data = await chatGetJson<ChatAccessDto>('/api/chat/access', controller.signal);
       if (controller.signal.aborted || !data) return;
+      const accessJson = JSON.stringify(data);
+      if (accessJson === lastAccessJson.current) return;
+      lastAccessJson.current = accessJson;
       setAccess(data);
       escribirCache(email, { access: data });
     } catch (err) {
@@ -159,17 +187,25 @@ export function useChatOverview(): ChatOverview {
       if (controller.signal.aborted || !data) return;
       const lista = data.conversations ?? [];
       const listaJson = JSON.stringify(lista);
-      if (listaJson === lastConversationsJson.current) return;
+      if (listaJson === lastConversationsJson.current) {
+        escribirCache(email, { conversationsLoaded: true });
+        return;
+      }
       lastConversationsJson.current = listaJson;
       setConversations(lista);
-      escribirCache(email, { conversations: lista });
+      escribirCache(email, { conversations: lista, conversationsLoaded: true });
     } catch (err) {
       if (!isAbortError(err)) {
         /* ver arriba */
       }
     } finally {
       inFlight.current = false;
-      if (!controller.signal.aborted) setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+        // También si falló: con la API caída, mejor la descripción que un
+        // renglón en blanco para siempre.
+        setConversationsReady(true);
+      }
     }
   }, [isAuthenticated, email]);
 
@@ -185,7 +221,9 @@ export function useChatOverview(): ChatOverview {
       cache = null;
       setAccess(null);
       setConversations([]);
+      setConversationsReady(false);
       lastConversationsJson.current = JSON.stringify([]);
+      lastAccessJson.current = JSON.stringify(null);
       return;
     }
 
@@ -193,7 +231,10 @@ export function useChatOverview(): ChatOverview {
 
     // Pequeño retraso inicial: la cabecera se pinta primero (mismo truco que
     // NotificationBell para no competir con la carga de la página).
-    const first = window.setTimeout(() => void fetchConversations(), 800);
+    const first = window.setTimeout(
+      () => void fetchConversations(),
+      primeraCargaInmediata ? 0 : 800
+    );
     const interval = window.setInterval(() => void fetchConversations(), OVERVIEW_POLL_MS);
 
     const onVisibility = () => {
@@ -212,7 +253,7 @@ export function useChatOverview(): ChatOverview {
       accessAbort.current?.abort();
       listAbort.current?.abort();
     };
-  }, [isAuthenticated, fetchAccess, fetchConversations, refresh]);
+  }, [isAuthenticated, fetchAccess, fetchConversations, refresh, primeraCargaInmediata]);
 
   const derived = useMemo(() => {
     const unreadByAgent = new Map<number, number>();
@@ -254,6 +295,7 @@ export function useChatOverview(): ChatOverview {
     agents: access?.agents ?? [],
     conversations,
     ...derived,
+    conversationsReady,
     refresh,
   };
 }

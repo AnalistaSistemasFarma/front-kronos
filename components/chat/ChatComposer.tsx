@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useCallback, useId, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, memo, useCallback, useId, useImperativeHandle, useRef, useState } from 'react';
 import { useMediaQuery } from '@mantine/hooks';
 import {
   ActionIcon,
@@ -840,4 +840,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   );
 });
 
-export default ChatComposer;
+/*
+ * En `memo` (2026-09-29): el hilo se re-renderiza en cada vuelta del sondeo
+ * que trae un estado del agente (cada 1 s mientras trabaja) y arrastraba con
+ * él todo el compositor —Textarea de Mantine, menú, voz— aunque no hubiera
+ * cambiado nada de lo suyo. ChatThread le pasa props estables para que el
+ * `memo` sirva.
+ */
+export default memo(ChatComposer);

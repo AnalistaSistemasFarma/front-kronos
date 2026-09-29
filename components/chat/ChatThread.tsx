@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionIcon,
   Alert,
@@ -31,6 +31,7 @@ import {
   describeAgentStatus,
   formatChatTime,
   SIN_RESPUESTA_MS,
+  subagentesEnCurso,
   type ChatAgentDto,
   type ChatAgentStatusDto,
   type ChatMessageDto,
@@ -412,7 +413,6 @@ function GroupActivity({ statuses }: { statuses: ChatAgentStatusDto[] }) {
                 <b>{s.agentName ?? 'Asistente'}</b> · {view.label}
               </Text>
             </Group>
-            <AgentTaskTable tasks={s.tasks} />
           </Box>
         );
       })}
@@ -451,9 +451,57 @@ function AgentActivity({
           {view.label}
         </Text>
       </Group>
+    </Box>
+  );
+}
 
-      {/* Solo aparece cuando el agente reporta sub-agentes trabajando. */}
-      <AgentTaskTable tasks={status?.tasks} />
+/**
+ * La caja de SUB-AGENTES EN CURSO, anclada entre la conversación y el
+ * compositor.
+ *
+ * Pedido de Nicolás (2026-09-29): "quiero que esa cajita sea fija hasta que el
+ * sub-agente termine, que se quede anclada al chat". Antes vivía DENTRO de la
+ * lista de mensajes —se iba con el desplazamiento— y colgaba del indicador del
+ * agente principal: en cuanto este contestaba (su estado pasa a 'idle') la
+ * caja desaparecía aunque sus sub-agentes siguieran trabajando. Ahora queda
+ * fuera del área que se desplaza y depende SOLO de la lista de sub-agentes
+ * (ver subagentesEnCurso): se quita cuando esa lista queda vacía.
+ */
+function SubagentesAnclados({
+  enGrupo,
+  status,
+  statuses,
+}: {
+  enGrupo: boolean;
+  status: Parameters<typeof subagentesEnCurso>[0];
+  statuses: ChatAgentStatusDto[];
+}) {
+  if (!enGrupo) {
+    const tareas = subagentesEnCurso(status);
+    if (tareas.length === 0) return null;
+    return (
+      <Box className='chat-thread__subagentes'>
+        <AgentTaskTable tasks={tareas} />
+      </Box>
+    );
+  }
+
+  // En un grupo, una caja por agente que tenga sub-agentes, con su nombre:
+  // sin él no se sabe de quién es cada trabajo.
+  const conTareas = statuses
+    .map((s) => ({ s, tareas: subagentesEnCurso(s) }))
+    .filter((x) => x.tareas.length > 0);
+  if (conTareas.length === 0) return null;
+  return (
+    <Box className='chat-thread__subagentes'>
+      {conTareas.map(({ s, tareas }) => (
+        <Box key={s.idAgent}>
+          <Text size='xs' fw={600} className='chat-thread__subagentes-autor'>
+            {s.agentName ?? 'Asistente'}
+          </Text>
+          <AgentTaskTable tasks={tareas} />
+        </Box>
+      ))}
     </Box>
   );
 }
@@ -464,9 +512,15 @@ export default function ChatThread({
   currentUserId,
   active = true,
   height,
+  idConversacion,
 }: {
   /** Hilo DIRECTO: el agente con el que se habla. */
   agent?: ChatAgentDto;
+  /**
+   * Id del hilo directo si la bandeja ya lo conoce: permite pedir el
+   * histórico en paralelo con la apertura (ver useChatConversation).
+   */
+  idConversacion?: number | null;
   /**
    * GRUPO: el hilo ya existe y se abre por su id. `agentes` son los asistentes
    * del grupo, para el autocompletado del `@`.
@@ -488,7 +542,7 @@ export default function ChatThread({
   const target: ChatTarget | null = group
     ? { kind: 'group', idConversation: group.idConversation }
     : agent
-      ? { kind: 'agent', idAgent: agent.idAgent }
+      ? { kind: 'agent', idAgent: agent.idAgent, idConversation: idConversacion ?? null }
       : null;
 
   const thread = useChatConversation(target, active);
@@ -505,10 +559,16 @@ export default function ChatThread({
    * vuelve a resolverlo cuando devuelve el mensaje creado, y esa es la versión
    * que queda.
    */
+  // El nombre del agente se lee de una referencia: con `agent` como
+  // dependencia, cada ficha nueva del agente que trae la bandeja (misma
+  // persona, objeto nuevo) cambiaba `citar` y re-renderizaba TODAS las
+  // burbujas en `memo`.
+  const nombreAgenteRef = useRef(agent?.displayName);
+  nombreAgenteRef.current = agent?.displayName;
   const citar = useCallback((message: ChatMessageDto) => {
     const autor =
       message.author?.name ??
-      (message.role === 'agent' ? (agent?.displayName ?? 'Asistente') : 'Usted');
+      (message.role === 'agent' ? (nombreAgenteRef.current ?? 'Asistente') : 'Usted');
     const plano = message.body.replace(/\s+/g, ' ').trim();
     setCita({
       idMessage: message.id,
@@ -516,7 +576,7 @@ export default function ChatThread({
       preview: plano.length > 140 ? `${plano.slice(0, 139)}…` : plano || '(adjunto)',
     });
     composerRef.current?.focus();
-  }, [agent]);
+  }, []);
 
   /**
    * Salta al mensaje citado y lo resalta un momento.
@@ -541,11 +601,22 @@ export default function ChatThread({
   // a otro, y es lo que reinicia los efectos de desplazamiento.
   const claveHilo = group ? `grupo:${group.idConversation}` : `agente:${agent?.idAgent ?? 0}`;
 
-  const agentesMencionables = (
-    thread.conversation?.participants ??
-    group?.participants ??
-    []
-  ).filter((p) => p.kind === 'agent');
+  const participantes = thread.conversation?.participants ?? group?.participants;
+  // Memorizado: es prop del compositor (en `memo`) y un arreglo nuevo en cada
+  // render lo obligaría a re-renderizarse en cada vuelta del sondeo.
+  const menciones = useMemo(
+    () =>
+      (participantes ?? [])
+        .filter((p) => p.kind === 'agent')
+        .map((p) => ({
+          // Se sugiere el handle sin arroba cuando existe (es el nombre que
+          // el servidor reconoce sin ambigüedad) y el nombre visible si no.
+          valor: (p.handle ?? p.name).replace(/^@/, ''),
+          nombre: p.name,
+          avatarUrl: p.avatarUrl,
+        })),
+    [participantes]
+  );
 
   // Mantiene `--alto-visible` al día: es lo que permite que el compositor no
   // quede debajo del teclado en el celular (ver el propio hook).
@@ -606,8 +677,11 @@ export default function ChatThread({
   // un hilo heredaba el `stickToBottom = false` del anterior y quedaba subido.
   const hiloPrevioRef = useRef(claveHilo);
   const usuarioMovioRef = useRef(false);
+  // ¿Se alcanzó a pintar el esqueleto en este hilo? (ver `conFundido`).
+  const esqueletoVistoRef = useRef(false);
   if (hiloPrevioRef.current !== claveHilo) {
     hiloPrevioRef.current = claveHilo;
+    esqueletoVistoRef.current = false;
     yaEstaban.current = null;
     usuarioMovioRef.current = false;
     lastCountRef.current = 0;
@@ -647,6 +721,18 @@ export default function ChatThread({
     viewport.scrollTop = viewport.scrollHeight;
   }, [thread.loading, claveHilo, thread.conversation?.id]);
 
+  // La caja anclada de sub-agentes vive FUERA del área que se desplaza: al
+  // aparecer o crecer, encoge el área de mensajes y taparía los últimos. Si el
+  // usuario estaba abajo, se lo deja abajo en el mismo cuadro.
+  const firmaSubagentes = enGrupo
+    ? thread.statuses.map((s) => subagentesEnCurso(s).length).join(',')
+    : String(subagentesEnCurso(thread.status).length);
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !stickToBottomRef.current || usuarioInteractuando()) return;
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [firmaSubagentes]);
+
   /**
    * PEGADO AL FONDO de verdad, mientras el usuario esté abajo.
    *
@@ -670,12 +756,15 @@ export default function ChatThread({
    * No hay bucle: desplazarse no cambia el tamaño del contenido.
    */
   const contenidoRef = useRef<HTMLDivElement>(null);
-  // El contenido se REMONTA una sola vez por hilo: cuando pasa de vacío a
-  // tener mensajes. Así la lista entra con un fundido corto (ver
-  // .chat-thread__contenido en globals.css) en vez de reemplazar de golpe al
-  // esqueleto. Con caché los mensajes ya están desde el primer render y el
-  // fundido ocurre una sola vez, al abrir.
-  const claveContenido = `${claveHilo}:${thread.messages.length > 0 ? 'con' : 'sin'}`;
+  // LA LISTA YA NO SE REMONTA (2026-09-29, video de Nicolás en el iPhone: "al
+  // abrir el hilo se ve en blanco y, estando adentro, los mensajes desaparecen
+  // un instante y vuelven"). Antes la lista llevaba `key` con "¿hay mensajes?"
+  // y cada montaje repetía un fundido desde opacidad 0 de 150 ms: cualquier
+  // cosa que la remontara —abrir el hilo, volver a él desde la caché, el
+  // hilo pasando por vacío— dejaba la conversación en blanco ese rato
+  // mientras el encabezado y el compositor seguían quietos. Ahora el nodo es
+  // el mismo toda la vida del hilo y el fundido solo se usa cuando de verdad
+  // se alcanzó a ver el esqueleto (ver `conFundido` más abajo).
 
   // ESQUELETO CON RETRASO: si el hilo llega en menos de 300 ms no se pinta
   // nada intermedio. Mostrar un esqueleto medio segundo para reemplazarlo
@@ -690,6 +779,11 @@ export default function ChatThread({
     const reloj = window.setTimeout(() => setMostrarEsqueleto(true), 300);
     return () => window.clearTimeout(reloj);
   }, [esperandoPrimerLote]);
+  // El fundido de entrada solo tiene sentido si se vio el esqueleto: suaviza
+  // el cambio esqueleto → mensajes. Con caché, o si el hilo llegó antes de los
+  // 300 ms, los mensajes se pintan de una, sin pasar por opacidad 0.
+  if (mostrarEsqueleto) esqueletoVistoRef.current = true;
+  const conFundido = esqueletoVistoRef.current && thread.messages.length > 0;
 
   useEffect(() => {
     const contenido = contenidoRef.current;
@@ -712,7 +806,7 @@ export default function ChatThread({
     });
     observador.observe(contenido);
     return () => observador.disconnect();
-  }, [claveContenido]);
+  }, [claveHilo]);
 
   // ── Arrastrar y soltar archivos sobre la conversación ────────────────────
   // El área de soltar es TODO el hilo (mensajes + compositor), no solo la caja
@@ -726,6 +820,29 @@ export default function ChatThread({
   const dragDepth = useRef(0);
 
   const composerDisabled = thread.loading || thread.conversation === null;
+
+  // Props del compositor ESTABLES (va en `memo`): sin esto se recreaban en cada
+  // render del hilo, o sea en cada vuelta del sondeo.
+  const enviarHilo = thread.send;
+  const alEnviar = useCallback(
+    async (body: string, files: File[]) => {
+      // Al ENVIAR se vuelve al fondo aunque el usuario hubiera subido a
+      // leer: quiere ver lo que acaba de escribir y la respuesta. Se
+      // olvida la interacción previa para que el scroll animado hacia el
+      // mensaje optimista no vuelva a soltar el anclaje a mitad de camino.
+      usuarioMovioRef.current = false;
+      stickToBottomRef.current = true;
+      setStickToBottom(true);
+      const vp = viewportRef.current;
+      if (vp) vp.scrollTop = vp.scrollHeight;
+      const enviado = await enviarHilo(body, files, cita);
+      // La cita se limpia solo si el mensaje SALIÓ: si falló, el usuario
+      // reintenta y la cita tiene que seguir puesta.
+      if (enviado) setCita(null);
+    },
+    [enviarHilo, cita]
+  );
+  const quitarCita = useCallback(() => setCita(null), []);
 
   /** Solo reaccionamos si lo que se arrastra son ARCHIVOS (no texto ni enlaces). */
   const dragTraeArchivos = (event: React.DragEvent) =>
@@ -838,7 +955,12 @@ export default function ChatThread({
         onPointerDown={marcarInteraccion}
         offsetScrollbars
       >
-        <Stack key={claveContenido} gap='sm' p='sm' ref={contenidoRef} className='chat-thread__contenido'>
+        <Stack
+          gap='sm'
+          p='sm'
+          ref={contenidoRef}
+          className={`chat-thread__contenido${conFundido ? ' chat-thread__contenido--entra' : ''}`}
+        >
           {thread.hasOlder && (
             <Center>
               <Button
@@ -903,6 +1025,8 @@ export default function ChatThread({
         </Stack>
       </ScrollArea>
 
+      <SubagentesAnclados enGrupo={enGrupo} status={thread.status} statuses={thread.statuses} />
+
       {thread.error && (
         <Alert
           icon={<IconAlertCircle size={16} />}
@@ -920,23 +1044,9 @@ export default function ChatThread({
         <ChatComposer
           voiceConversationId={agent?.code === 'duo' ? thread.conversation?.id : undefined}
           ref={composerRef}
-          onSend={async (body, files) => {
-            // Al ENVIAR se vuelve al fondo aunque el usuario hubiera subido a
-            // leer: quiere ver lo que acaba de escribir y la respuesta. Se
-            // olvida la interacción previa para que el scroll animado hacia el
-            // mensaje optimista no vuelva a soltar el anclaje a mitad de camino.
-            usuarioMovioRef.current = false;
-            stickToBottomRef.current = true;
-            setStickToBottom(true);
-            const vp = viewportRef.current;
-            if (vp) vp.scrollTop = vp.scrollHeight;
-            const enviado = await thread.send(body, files, cita);
-            // La cita se limpia solo si el mensaje SALIÓ: si falló, el usuario
-            // reintenta y la cita tiene que seguir puesta.
-            if (enviado) setCita(null);
-          }}
+          onSend={alEnviar}
           cita={cita}
-          onQuitarCita={() => setCita(null)}
+          onQuitarCita={quitarCita}
           sending={thread.sending}
           disabled={composerDisabled}
           placeholder={
@@ -944,13 +1054,7 @@ export default function ChatThread({
               ? `Escriba en ${group?.title ?? 'el grupo'}…  (mencione con @)`
               : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
           }
-          menciones={agentesMencionables.map((p) => ({
-            // Se sugiere el handle sin arroba cuando existe (es el nombre que
-            // el servidor reconoce sin ambigüedad) y el nombre visible si no.
-            valor: (p.handle ?? p.name).replace(/^@/, ''),
-            nombre: p.name,
-            avatarUrl: p.avatarUrl,
-          }))}
+          menciones={menciones}
         />
       </Box>
     </Box>
