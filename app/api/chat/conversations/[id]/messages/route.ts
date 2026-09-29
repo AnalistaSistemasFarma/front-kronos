@@ -3,6 +3,7 @@ import { prisma } from '../../../../../../lib/prisma';
 import { messageInclude, serializeMessage } from '../../../../../../lib/chat/conversations';
 import { calcularEntregas } from '../../../../../../lib/chat/groups';
 import { readClientOrigin } from '../../../../../../lib/chat/client-origin';
+import { notifyPeopleMessage } from '../../../../../../lib/chat/notifyPeople';
 import {
   MAX_USER_MESSAGE_CHARS,
   MESSAGES_PAGE_DEFAULT,
@@ -250,6 +251,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
       return created;
     });
+
+    // Entre personas, push a la otra (decisión D7). Por detrás: no se espera.
+    if (guard.kind === 'people') {
+      void notifyPeopleMessage({
+        idConversation: guard.conversationId,
+        idRemitente: guard.user.id,
+        idDestino: guard.otherUserId,
+        body,
+        attachmentCount: uploaded.length,
+      });
+    }
 
     return jsonNoStore(
       {
