@@ -74,6 +74,7 @@ export async function POST(req: Request) {
       const res = await assignOrionSigners(current.orionDocumentId, {
         mode: payload.mode,
         signers: payload.signers,
+        actorEmail: session.user.email,
       });
 
       if (!res.ok || !res.data) {
