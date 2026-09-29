@@ -1343,6 +1343,27 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   border-radius: 0.5rem;
 }
 
+/* ── Zumbido 📳 recibido (chat entre personas) ──
+   500 ms de sacudida SOLO con `transform` (GPU, sin reflow), puesta y quitada
+   como clase desde lib/chat/nudge-fx.ts: el hilo no se re-renderiza. Con
+   "reducir movimiento" no hay sacudida: se resalta el borde un momento. */
+@media (prefers-reduced-motion: no-preference) {
+  .chat-thread--zumbido {
+    animation: chat-zumbido 500ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  }
+}
+@keyframes chat-zumbido {
+  10%, 90% { transform: translate3d(-1px, 0, 0); }
+  20%, 80% { transform: translate3d(3px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-6px, 0, 0); }
+  40%, 60% { transform: translate3d(6px, 0, 0); }
+}
+.chat-thread--zumbido-resalte {
+  outline: 2px solid var(--app-primary, #1a3c6e);
+  outline-offset: -3px;
+  border-radius: 0.5rem;
+}
+
 .chat-thread__dropzone {
   position: absolute;
   inset: 0;

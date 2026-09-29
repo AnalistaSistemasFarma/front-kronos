@@ -9,6 +9,7 @@
  * prisma/schema.prisma):
  *   - 'direct' — una persona con un agente. El hilo original.
  *   - 'group'  — varias personas y varios agentes.
+ *   - 'people' — dos personas, sin agentes (lib/chat/people-rules.ts).
  * La forma que sale hacia el cliente es la misma; lo que cambia es qué campos
  * vienen con valor (`participants` y `agentStatuses` solo tienen sentido en un
  * grupo; `agentStatus`, en un hilo directo).
@@ -16,6 +17,7 @@
 import type { Prisma } from '../../app/generated/prisma';
 import { prisma } from '../prisma';
 import { getChatAccess } from './access';
+import { visiblePeopleConversationIds } from './people';
 import { toPreview } from './constants';
 import { parseAgentTasks, type AgentTaskDto } from './status-tasks';
 
@@ -59,6 +61,8 @@ export interface ChatMessagePayload {
   author: ChatAuthorPayload | null;
   /** El mensaje al que responde, o null. */
   replyTo: ChatReplyToPayload | null;
+  /** Evento de un mensaje de sistema ('nudge' = zumbido), o null. */
+  eventType: string | null;
 }
 
 /**
@@ -101,7 +105,7 @@ export interface ChatAgentStatusPayload {
 export interface ChatConversationPayload {
   id: number;
   title: string | null;
-  /** 'direct' | 'group'. */
+  /** 'direct' | 'group' | 'people'. */
   kind: string;
   createdAt: string;
   updatedAt: string;
@@ -120,7 +124,7 @@ export interface ChatConversationPayload {
   };
   /** Empresa del grupo. null en los hilos directos. */
   company: { idCompany: number; companyName: string } | null;
-  /** Integrantes. null en los hilos directos (no aplica). */
+  /** Integrantes. null en los hilos directos (no aplica). En 'people', las dos personas. */
   participants: ChatParticipantPayload[] | null;
   lastMessage: { id: number; role: string; preview: string; createdAt: string } | null;
   unreadCount: number;
@@ -140,6 +144,11 @@ export interface ChatConversationPayload {
   } | null;
   /** Un estado POR AGENTE. En un hilo directo trae, como máximo, uno. */
   agentStatuses: ChatAgentStatusPayload[];
+  /**
+   * Solo en 'people': quien pregunta silenció los zumbidos de este hilo. Es
+   * SU preferencia; la otra persona no la ve (decisión D5).
+   */
+  nudgesMuted?: boolean;
 }
 
 /** Forma mínima de una fila de chat_message con sus adjuntos y su autor. */
@@ -150,6 +159,7 @@ type MessageRow = {
   created_at: Date;
   delivered_at: Date | null;
   read_at: Date | null;
+  event_type?: string | null;
   attachments?: {
     id: number;
     file_name: string;
@@ -221,6 +231,7 @@ export function serializeMessage(row: MessageRow): ChatMessagePayload {
     readAt: row.read_at ? row.read_at.toISOString() : null,
     attachments: (row.attachments ?? []).map(serializeAttachment),
     author,
+    eventType: row.event_type ?? null,
     replyTo: row.replyTo
       ? {
           idMessage: row.replyTo.id,
@@ -272,6 +283,7 @@ const conversationInclude = {
       id_user: true,
       id_agent: true,
       role: true,
+      nudges_muted: true,
       user: { select: { id: true, name: true, email: true, image: true } },
       agent: {
         select: { id_agent: true, display_name: true, handle: true, avatar_url: true },
@@ -312,6 +324,7 @@ type ConversationRow = {
     id_user: string | null;
     id_agent: number | null;
     role: string;
+    nudges_muted?: boolean;
     user: { id: string; name: string | null; email: string; image: string | null } | null;
     agent: {
       id_agent: number;
@@ -325,10 +338,14 @@ type ConversationRow = {
 
 export function serializeConversation(
   row: ConversationRow,
-  unreadCount: number
+  unreadCount: number,
+  /** Quién pregunta: hace falta para SU preferencia de zumbidos. */
+  miId?: string
 ): ChatConversationPayload {
   const last = row.messages[0];
   const esGrupo = row.kind === 'group';
+  // Todo lo que no es el hilo directo con un agente se lee por participantes.
+  const conParticipantes = row.kind !== 'direct';
 
   const agentStatuses: ChatAgentStatusPayload[] = row.statuses.map((s) => ({
     idAgent: s.id_agent,
@@ -361,7 +378,7 @@ export function serializeConversation(
     company: row.company
       ? { idCompany: row.company.id_company, companyName: row.company.company }
       : null,
-    participants: esGrupo
+    participants: conParticipantes
       ? row.participants.map((p) =>
           p.agent
             ? {
@@ -391,7 +408,7 @@ export function serializeConversation(
         }
       : null,
     unreadCount,
-    agentStatus: esGrupo
+    agentStatus: esGrupo || row.kind === 'people'
       ? null
       : delAnfitrion
         ? {
@@ -402,6 +419,13 @@ export function serializeConversation(
           }
         : null,
     agentStatuses,
+    ...(row.kind === 'people'
+      ? {
+          nudgesMuted: Boolean(
+            miId && row.participants.find((p) => p.id_user === miId)?.nudges_muted
+          ),
+        }
+      : {}),
   };
 }
 
@@ -444,6 +468,9 @@ export async function conversationScopeFor(
 
   const allowedAgentIds = access.agents.map((a) => a.idAgent);
   const empresasDelModulo = access.companies.map((c) => c.idCompany);
+  // Hilos entre personas: los que la regla D1 deja ver HOY (ver
+  // lib/chat/people.ts). Ya vienen filtrados por participante.
+  const hilosDePersonas = await visiblePeopleConversationIds(userId);
 
   return [
     // Hilos directos: suyos y con un agente que todavía puede usar.
@@ -459,6 +486,7 @@ export async function conversationScopeFor(
         ...(empresasDelModulo.length > 0 ? [{ id_company: { in: empresasDelModulo } }] : []),
       ],
     },
+    ...(hilosDePersonas.length > 0 ? [{ kind: 'people', id: { in: hilosDePersonas } }] : []),
   ];
 }
 
@@ -478,8 +506,13 @@ export async function listUserConversations(
 
   if (rows.length === 0) return [];
 
-  const directos = rows.filter((r) => r.kind !== 'group').map((r) => r.id);
-  const grupos = rows.filter((r) => r.kind === 'group');
+  // Solo los DIRECTOS cuentan por `read_at`. Con `kind !== 'group'` cualquier
+  // clase nueva de conversación caería aquí por descarte y se contaría con la
+  // regla de los hilos con agente, que no le aplica.
+  const directos = rows.filter((r) => r.kind === 'direct').map((r) => r.id);
+  // Grupos y hilos entre personas se cuentan igual: por la marca de agua de
+  // cada participante.
+  const grupos = rows.filter((r) => r.kind === 'group' || r.kind === 'people');
 
   const noLeidos = new Map<number, number>();
 
@@ -522,7 +555,7 @@ export async function listUserConversations(
     for (const [id, n] of conteos) noLeidos.set(id, n);
   }
 
-  return rows.map((row) => serializeConversation(row, noLeidos.get(row.id) ?? 0));
+  return rows.map((row) => serializeConversation(row, noLeidos.get(row.id) ?? 0, userId));
 }
 
 /**
@@ -543,7 +576,7 @@ export async function getConversationPayload(
   if (!row) return null;
 
   let unreadCount = 0;
-  if (row.kind === 'group') {
+  if (row.kind === 'group' || row.kind === 'people') {
     if (userId) {
       const mio = await prisma.chatParticipant.findFirst({
         where: { id_conversation: conversationId, id_user: userId },
@@ -564,5 +597,5 @@ export async function getConversationPayload(
     });
   }
 
-  return serializeConversation(row, unreadCount);
+  return serializeConversation(row, unreadCount, userId);
 }

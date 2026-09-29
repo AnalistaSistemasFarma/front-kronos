@@ -152,7 +152,7 @@ export async function GET(request: NextRequest) {
 
     if (ack && pending.length > 0) {
       const ahora = new Date();
-      const idsDirectos = pending.filter((m) => m.conversation.kind !== 'group').map((m) => m.id);
+      const idsDirectos = pending.filter((m) => m.conversation.kind === 'direct').map((m) => m.id);
       const idsGrupo = pending.filter((m) => m.conversation.kind === 'group').map((m) => m.id);
 
       await Promise.all([
