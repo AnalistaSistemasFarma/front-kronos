@@ -979,7 +979,11 @@ export default function ChatWorkspace({
 
         {/* Sin `height`: el alto lo acota el contenedor, y dentro del hilo solo
             scrollea la lista de mensajes — el compositor queda fijo abajo. */}
-        <ChatThread agent={selectedAgent} active />
+        <ChatThread
+          agent={selectedAgent}
+          idConversacion={overview.conversationByAgent.get(selectedAgent.idAgent)?.id ?? null}
+          active
+        />
       </Box>
     ) : null;
 
