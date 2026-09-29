@@ -22,6 +22,7 @@ import { fireAndForgetOrionDocumentEvent } from '@/lib/orion/documentEvents';
 import { resolveOrionVersionLabel } from '@/lib/orion/versionLabel';
 import { orionErrorMessage } from '@/lib/orion/errorCodes';
 import { orionErrorResponse } from '@/lib/orion/httpError';
+import { orionSendsSignerEmails } from '@/lib/orion/signerEmail';
 
 /** POST /api/integrations/orion/signers — asignar firmantes vía API Orion */
 export async function POST(req: Request) {
@@ -71,9 +72,12 @@ export async function POST(req: Request) {
         });
       }
 
+      const orionEmails = orionSendsSignerEmails();
       const res = await assignOrionSigners(current.orionDocumentId, {
         mode: payload.mode,
-        signers: payload.signers,
+        signers: orionEmails
+          ? payload.signers
+          : payload.signers.map((s) => ({ ...s, notifyByEmail: false })),
         actorEmail: session.user.email,
       });
 
@@ -120,6 +124,9 @@ export async function POST(req: Request) {
           notifyByEmail: notifyByOrder.has(key)
             ? notifyByOrder.get(key)
             : s.notifyByEmail,
+          synerlinkNotify: notifyByOrder.has(key)
+            ? notifyByOrder.get(key)
+            : s.synerlinkNotify ?? s.notifyByEmail,
           signatureMarkId: markByOrder.has(key)
             ? markByOrder.get(key)
             : s.signatureMarkId ?? key,
