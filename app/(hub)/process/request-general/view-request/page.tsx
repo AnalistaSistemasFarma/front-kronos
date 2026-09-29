@@ -110,6 +110,7 @@ import { buildOrionParticipants } from '../../../../../lib/orion/participants';
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import TableFieldInput from '../create-request/TableFieldInput';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
@@ -277,7 +278,12 @@ function ViewRequestPage() {
   const id = searchParams.get('id');
   const from = searchParams.get('from') || searchParams.get('mode') || 'create-request';
   const orionFileIdParam = searchParams.get('orionFileId');
-  const orionActionParam = searchParams.get('orionAction') as 'sign' | 'manage' | 'view' | null;
+  const orionActionParam = searchParams.get('orionAction') as
+    | 'sign'
+    | 'manage'
+    | 'view'
+    | 'review'
+    | null;
   const RETURNED_STATUS_ID = 7;
   const OPEN_STATUS_ID = 1;
   const [request, setRequest] = useState<Request | null>(null);
@@ -1124,19 +1130,34 @@ function ViewRequestPage() {
     }, 5000);
   }, [request?.id]);
 
+  // Abre el modal de justificación; el borrado real va en handleDeleteAttachment.
+  const [pendingDelete, setPendingDelete] = useState<{
+    fileId: string;
+    fileName: string | null;
+  } | null>(null);
+  const requestDeleteAttachment = useCallback((fileId: string, fileName?: string | null) => {
+    if (!fileId) return;
+    setPendingDelete({ fileId, fileName: fileName ?? null });
+  }, []);
+
   const handleDeleteAttachment = useCallback(
-    async (fileId: string) => {
-      if (!request?.id || !fileId) return;
+    async (fileId: string, fileName: string | null, justification: string): Promise<boolean> => {
+      if (!request?.id || !fileId) return false;
       try {
         const res = await fetch('/api/requests-general/delete-attachment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId: request.id, fileId }),
+          body: JSON.stringify({
+            requestId: request.id,
+            fileId,
+            fileName: fileName ?? null,
+            justification,
+          }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           toast.error(typeof data.error === 'string' ? data.error : 'No se pudo eliminar');
-          return;
+          return false;
         }
         setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
         removeFromAttachmentCache(request.id, fileId);
@@ -1146,12 +1167,18 @@ function ViewRequestPage() {
           delete next[fileId];
           return next;
         });
-        toast.success('Archivo eliminado');
+        toast.success('Documento eliminado');
         refreshAttachmentsAfterUpload();
+        void fetchFormValues(request.id);
+        void fetchTasksRG(request.id);
+        void fetchNotes(request.id);
+        return true;
       } catch {
         toast.error('Error de red al eliminar el archivo');
+        return false;
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [request?.id, refreshAttachmentsAfterUpload]
   );
 
@@ -2155,6 +2182,8 @@ function ViewRequestPage() {
       })
     : null;
   const deepLinkAction: 'sign' | 'manage' | 'view' | null = (() => {
+    // La validación la abre el panel de revisión del adjunto, no el asistente de firma.
+    if (orionActionParam === 'review') return null;
     const raw: 'sign' | 'manage' | 'view' | null =
       orionActionParam === 'sign' || orionActionParam === 'manage' || orionActionParam === 'view'
         ? orionActionParam
@@ -2176,6 +2205,9 @@ function ViewRequestPage() {
     }
     const st = String(doc.status || '').toUpperCase();
     if (st === 'FIRMADO' || st === 'RECHAZADO') return null;
+    // En validación (o aún sin enviar a firma) no hay nada que firmar: solo se ve la solicitud.
+    if (doc.review && doc.review.status !== 'APROBADO') return null;
+    if (!['PENDIENTE_FIRMA', 'EN_PROCESO'].includes(st)) return null;
     return raw;
   })();
 
@@ -2952,6 +2984,10 @@ function ViewRequestPage() {
                           fileSizeLabel={sizeLabel}
                           openUrl={orionLatest || openUrl}
                           previewUrl={file.webUrl ?? null}
+                          autoOpenReview={
+                            orionActionParam === 'review' &&
+                            String(orionFileIdParam || '') === fileId
+                          }
                           processName={request?.process || request?.category || null}
                           requesterName={request?.requester || null}
                           currentUserEmail={session?.user?.email}
@@ -2971,8 +3007,8 @@ function ViewRequestPage() {
                           }}
                           workflowLocked={orionWorkflowLocked}
                           onDocumentsUpdate={handleOrionDocumentsChange}
-                          canDeleteAttachment={canDeleteAttachments && !isRequestResolved()}
-                          onDeleteAttachment={handleDeleteAttachment}
+                          canDeleteAttachment={canDeleteAttachments}
+                          onDeleteAttachment={requestDeleteAttachment}
                           forceSignerUi={(() => {
                             const me = currentUserEmailNorm;
                             if (!me) return false;
@@ -3085,14 +3121,14 @@ function ViewRequestPage() {
                                 >
                                   Abrir
                                 </UnstyledButton>
-                                {canDeleteAttachments && !isRequestResolved() ? (
+                                {canDeleteAttachments ? (
                                   <Tooltip label='Eliminar adjunto'>
                                     <ActionIcon
                                       variant='subtle'
                                       color='red'
                                       size='sm'
                                       aria-label={`Eliminar ${file.name}`}
-                                      onClick={() => void handleDeleteAttachment(fileId)}
+                                      onClick={() => requestDeleteAttachment(fileId, file.name)}
                                     >
                                       <IconTrash size={16} />
                                     </ActionIcon>
@@ -3127,13 +3163,13 @@ function ViewRequestPage() {
                               >
                                 <IconEye size={16} />
                               </ActionIcon>
-                              {canDeleteAttachments && !isRequestResolved() ? (
+                              {canDeleteAttachments ? (
                                 <ActionIcon
                                   variant='subtle'
                                   color='red'
                                   size='sm'
                                   aria-label={`Eliminar ${file.name}`}
-                                  onClick={() => void handleDeleteAttachment(fileId)}
+                                  onClick={() => requestDeleteAttachment(fileId, file.name)}
                                 >
                                   <IconTrash size={16} />
                                 </ActionIcon>
@@ -3293,6 +3329,17 @@ function ViewRequestPage() {
             )}
           </Group>
         </Card>
+
+        <DeleteAttachmentModal
+          opened={pendingDelete != null}
+          fileName={pendingDelete?.fileName ?? null}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={(justification) =>
+            pendingDelete
+              ? handleDeleteAttachment(pendingDelete.fileId, pendingDelete.fileName, justification)
+              : Promise.resolve(false)
+          }
+        />
 
         <Modal
           opened={reopenModalOpened}

@@ -18,6 +18,10 @@ import {
 import { syncOrionSignerTasks } from '@/lib/orion/signerTasks';
 import { toOrionSignatureFields } from '@/lib/orion/signatureFields';
 import type { OrionAssignSignersPayload } from '@/lib/orion/types';
+import { fireAndForgetOrionDocumentEvent } from '@/lib/orion/documentEvents';
+import { resolveOrionVersionLabel } from '@/lib/orion/versionLabel';
+import { orionErrorMessage } from '@/lib/orion/errorCodes';
+import { orionErrorResponse } from '@/lib/orion/httpError';
 
 /** POST /api/integrations/orion/signers — asignar firmantes vía API Orion */
 export async function POST(req: Request) {
@@ -70,11 +74,19 @@ export async function POST(req: Request) {
       const res = await assignOrionSigners(current.orionDocumentId, {
         mode: payload.mode,
         signers: payload.signers,
+        actorEmail: session.user.email,
       });
 
       if (!res.ok || !res.data) {
+        if (res.code === 'SIGNED_SIGNER_LOCKED' || res.code === 'DOCUMENT_CLOSED') {
+          throw Object.assign(new Error(orionErrorMessage(res.code, res.error)), {
+            status: 409,
+            code: res.code,
+          });
+        }
         throw Object.assign(new Error(res.error || 'Error asignando firmantes en Orion'), {
           status: res.status >= 500 ? 503 : 502,
+          code: res.code,
         });
       }
 
@@ -121,6 +133,19 @@ export async function POST(req: Request) {
       };
       bag = setOrionDocumentInBag(bag, fileId, state);
       await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
+
+      fireAndForgetOrionDocumentEvent(pool, {
+        requestId,
+        fileId,
+        orionDocumentId: String(current.orionDocumentId),
+        versionLabel: resolveOrionVersionLabel(state.versionLabel),
+        eventType: 'FIRMANTES_ASIGNADOS',
+        actorEmail: session.user.email,
+        actorName: session.user.name ?? null,
+        detail: nextSigners
+          .map((s) => `${s.order ?? ''}. ${s.name || s.email}`.trim())
+          .join(' · ') || null,
+      });
 
       if (state.orionDocumentId) {
         try {
@@ -172,11 +197,6 @@ export async function POST(req: Request) {
       { status: 200 }
     );
   } catch (err) {
-    const status =
-      err && typeof err === 'object' && 'status' in err
-        ? Number((err as { status: number }).status) || 500
-        : 500;
-    const message = err instanceof Error ? err.message : 'Error interno';
-    return NextResponse.json({ error: message }, { status });
+    return orionErrorResponse(err);
   }
 }
