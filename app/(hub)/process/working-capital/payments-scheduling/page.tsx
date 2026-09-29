@@ -60,6 +60,7 @@ import { PDFDocument } from 'pdf-lib';
 import ExcelJS from 'exceljs';
 import { addDataSheet, downloadWorkbook } from '../../../../../lib/dashboard/excel/excelHelpers';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
+import { formatEstimatedPaymentDateShort } from '../../../../../lib/treasury/estimatedPaymentDate';
 
 function parseOrionFileIdFromAuthResolution(resolution?: string | null): string | null {
   const match = /\[orionFile:([^\]]+)\]/i.exec(String(resolution || ''));
@@ -565,6 +566,7 @@ function PaymentSchedulingBoard() {
             { header: 'Acreedor', key: 'acreedor', width: 30 },
             { header: 'Valor a Pagar', key: 'valor', width: 16 },
             { header: 'Fecha Solicitada de Pago', key: 'fecha', width: 20 },
+            { header: 'Fecha Estimada de Pago', key: 'fecha_estimada', width: 22 },
             { header: 'Solicitante', key: 'solicitante', width: 24 },
             { header: 'Estado', key: 'estado', width: 14 },
         ];
@@ -580,6 +582,10 @@ function PaymentSchedulingBoard() {
                 acreedor: a.name,
                 valor: Number.isFinite(valor) ? valor : '',
                 fecha: formatShortDate(r.fecha_solicitada_pago),
+                fecha_estimada: formatEstimatedPaymentDateShort(
+                    r.empresa,
+                    r.fecha_creación_solicitud
+                ),
                 solicitante: r.creador_solicitud ?? r.usuario_asignado ?? '',
                 estado: 'Programado',
             };
@@ -863,11 +869,18 @@ function PaymentSchedulingBoard() {
                 </Group>
             </Table.Td>
             <Table.Td>
-                <Group gap={6} wrap='nowrap'>
-                    <IconCalendarEvent size={16} className='text-gray-400' style={{ flexShrink: 0 }} />
-                    <Text size='sm' c='dimmed' style={{ whiteSpace: 'nowrap' }}>
-                    {formatShortDate(req.fecha_solicitada_pago)}
-                    </Text>
+                <Group gap={6} wrap='nowrap' align='flex-start'>
+                    <IconCalendarEvent size={16} className='text-gray-400' style={{ flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ minWidth: 0 }}>
+                        <Text size='xs' c='dimmed' fw={500}>Necesaria</Text>
+                        <Text size='sm' style={{ whiteSpace: 'nowrap' }}>
+                            {formatShortDate(req.fecha_solicitada_pago)}
+                        </Text>
+                        <Text size='xs' c='dimmed' fw={500} mt={4}>Estimada</Text>
+                        <Text size='sm' tt='capitalize' style={{ whiteSpace: 'nowrap' }}>
+                            {formatEstimatedPaymentDateShort(req.empresa, req.fecha_creación_solicitud) || '—'}
+                        </Text>
+                    </div>
                 </Group>
             </Table.Td>
             <Table.Td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -977,11 +990,17 @@ function PaymentSchedulingBoard() {
                 </div>
             </Group>
 
-            <Group gap={6} wrap='nowrap'>
-                <IconCalendarEvent size={14} className='text-gray-400' />
-                <Text size='xs' c='dimmed'>
-                {formatShortDate(req.fecha_solicitada_pago)}
-                </Text>
+            <Group gap={6} wrap='nowrap' align='flex-start'>
+                <IconCalendarEvent size={14} className='text-gray-400' style={{ marginTop: 2 }} />
+                <div style={{ minWidth: 0 }}>
+                    <Text size='xs' c='dimmed'>
+                        <Text span fw={500}>Necesaria:</Text> {formatShortDate(req.fecha_solicitada_pago)}
+                    </Text>
+                    <Text size='xs' c='dimmed' tt='capitalize'>
+                        <Text span fw={500} tt='none'>Estimada:</Text>{' '}
+                        {formatEstimatedPaymentDateShort(req.empresa, req.fecha_creación_solicitud) || '—'}
+                    </Text>
+                </div>
             </Group>
 
             <Group
@@ -1319,7 +1338,7 @@ function PaymentSchedulingBoard() {
                         <Table.Th>Tipo</Table.Th>
                         <Table.Th>Solicitante</Table.Th>
                         <Table.Th>Acreedor</Table.Th>
-                        <Table.Th>Fecha de pago</Table.Th>
+                        <Table.Th>Fechas de pago</Table.Th>
                         <Table.Th ta='right'>Valor</Table.Th>
                         <Table.Th>Estado</Table.Th>
                         <Table.Th ta='center'>Acciones</Table.Th>
