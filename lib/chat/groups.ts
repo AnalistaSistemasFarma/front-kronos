@@ -29,7 +29,7 @@ import { prisma } from '../prisma';
 import { CHAT_MODULE_URL } from './access';
 
 /** Clases de conversación. `kind` en la base. */
-export const CONVERSATION_KINDS = ['direct', 'group'] as const;
+export const CONVERSATION_KINDS = ['direct', 'group', 'people'] as const;
 export type ConversationKind = (typeof CONVERSATION_KINDS)[number];
 
 /** Papeles de un integrante dentro de un grupo. */

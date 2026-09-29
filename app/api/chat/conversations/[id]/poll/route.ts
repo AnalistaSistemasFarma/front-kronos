@@ -117,12 +117,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // haya un agente por contestar: si no mencionó a nadie, nadie va a
     // responder y sondear en vivo sería quemar consultas para siempre. Ahí el
     // criterio es que quede alguna mención sin recoger.
+    // Entre personas no hay agente que esperar: la otra persona contesta
+    // cuando contesta, y el pulso global (/api/chat/pulse) avisa al instante.
     const awaitingAgent =
       guard.kind === 'direct'
         ? lastRole === 'user'
-        : (await prisma.chatMessageDelivery.count({
-            where: { delivered_at: null, message: { id_conversation: guard.conversationId } },
-          })) > 0;
+        : guard.kind === 'people'
+          ? false
+          : (await prisma.chatMessageDelivery.count({
+              where: { delivered_at: null, message: { id_conversation: guard.conversationId } },
+            })) > 0;
 
     // Sub-agentes en curso con el agente principal ya en 'idle' (contestó y
     // dejó trabajo en segundo plano): se sondea como si estuviera trabajando,

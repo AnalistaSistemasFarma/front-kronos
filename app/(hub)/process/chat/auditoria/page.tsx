@@ -161,6 +161,11 @@ function FilaMensaje({ m }: { m: MensajeAuditoria }) {
             grupo
           </Badge>
         )}
+        {m.conversacion.kind === 'people' && (
+          <Badge size='xs' variant='light' color='teal' mt={4}>
+            entre personas
+          </Badge>
+        )}
       </Table.Td>
       <Table.Td style={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
         {m.clientIp ? (

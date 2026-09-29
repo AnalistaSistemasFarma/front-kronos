@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getChatAccess } from '../../../../lib/chat/access';
 import { checkAdminPrivileges } from '../../../../lib/access-control';
+import { prisma } from '../../../../lib/prisma';
+import { canStartPeopleChats } from '../../../../lib/chat/people';
 
 /**
  * Qué agentes puede ver el usuario de la sesión y en qué empresas.
@@ -33,7 +35,17 @@ export async function GET() {
       : false;
     const canBroadcast = esAdministrador;
     const canCreateGroups = esAdministrador;
-    return NextResponse.json({ ...access, canBroadcast, canCreateGroups }, {
+    // Piloto "Personas" (D2): solo pinta la sección con su buscador. La reja
+    // de verdad está en /api/chat/people/*.
+    let canMessagePeople = false;
+    if (access.canUseChat) {
+      const yo = await prisma.user.findUnique({
+        where: { email: session.user.email },
+        select: { id: true },
+      });
+      canMessagePeople = yo ? await canStartPeopleChats(yo.id) : false;
+    }
+    return NextResponse.json({ ...access, canBroadcast, canCreateGroups, canMessagePeople }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
