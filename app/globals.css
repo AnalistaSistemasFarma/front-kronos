@@ -2452,6 +2452,27 @@ body.chat-inmersivo .chat-page-thread--completa {
   max-width: 100%;
 }
 
+/* Anclada entre la conversación y el compositor (SubagentesAnclados en
+   ChatThread): no se desplaza con los mensajes. Con tope de alto para que
+   varios sub-agentes no se coman la conversación en el celular. */
+.chat-thread__subagentes {
+  flex: 0 0 auto;
+  max-height: 32vh;
+  overflow-y: auto;
+  padding: 4px 12px 6px;
+  border-top: 1px solid var(--app-border, #e2e8f0);
+  background-color: var(--app-surface, var(--surface));
+}
+
+.chat-thread__subagentes .chat-tasks {
+  margin: 0;
+}
+
+.chat-thread__subagentes-autor {
+  color: var(--app-text-muted, #64748b);
+  margin-top: 4px;
+}
+
 .chat-tasks__title {
   color: var(--app-text-muted, #64748b);
   margin-bottom: 4px;
