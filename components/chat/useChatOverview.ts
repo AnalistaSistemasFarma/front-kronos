@@ -84,11 +84,15 @@ export interface ChatOverview {
   canBroadcast: boolean;
   /** Si el usuario puede crear grupos (administradores). */
   canCreateGroups: boolean;
+  /** Piloto "Personas": puede INICIAR conversaciones con otras personas. */
+  canMessagePeople: boolean;
   agents: ChatAgentDto[];
   /** TODAS las conversaciones: hilos directos y grupos. */
   conversations: ChatConversationDto[];
   /** Solo los grupos, ya separados y ordenados por actividad. */
   groups: ChatConversationDto[];
+  /** Solo los hilos entre personas, ordenados por actividad. */
+  people: ChatConversationDto[];
   unreadByAgent: Map<number, number>;
   statusByAgent: Map<number, ChatStatusDto | null>;
   conversationByAgent: Map<number, ChatConversationDto>;
@@ -96,6 +100,8 @@ export interface ChatOverview {
   totalUnread: number;
   /** No leídos de los GRUPOS, aparte. */
   groupUnread: number;
+  /** No leídos de los hilos entre PERSONAS, aparte. */
+  peopleUnread: number;
   /**
    * Ya se sabe cuál es el último mensaje de cada hilo. Mientras sea `false`,
    * la lista no debe pintar la descripción del agente en el lugar de la vista
@@ -270,6 +276,7 @@ export function useChatOverview(opciones?: {
     // debe sumarse al contador de un agente por descarte.
     const directas = conversations.filter((c) => (c.kind ?? 'direct') === 'direct');
     const groups = conversations.filter((c) => c.kind === 'group');
+    const people = conversations.filter((c) => c.kind === 'people');
 
     for (const conversation of directas) {
       const id = conversation.agent.idAgent;
@@ -286,7 +293,19 @@ export function useChatOverview(opciones?: {
     let groupUnread = 0;
     for (const g of groups) groupUnread += g.unreadCount;
 
-    return { unreadByAgent, statusByAgent, conversationByAgent, totalUnread, groups, groupUnread };
+    let peopleUnread = 0;
+    for (const p of people) peopleUnread += p.unreadCount;
+
+    return {
+      unreadByAgent,
+      statusByAgent,
+      conversationByAgent,
+      totalUnread,
+      groups,
+      groupUnread,
+      people,
+      peopleUnread,
+    };
   }, [conversations]);
 
   return {
@@ -295,6 +314,7 @@ export function useChatOverview(opciones?: {
     canUseChat: access?.canUseChat ?? false,
     canBroadcast: access?.canBroadcast ?? false,
     canCreateGroups: access?.canCreateGroups ?? false,
+    canMessagePeople: access?.canMessagePeople ?? false,
     agents: access?.agents ?? [],
     conversations,
     ...derived,
