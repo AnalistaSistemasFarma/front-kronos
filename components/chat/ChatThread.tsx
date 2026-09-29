@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionIcon,
   Alert,
@@ -559,10 +559,16 @@ export default function ChatThread({
    * vuelve a resolverlo cuando devuelve el mensaje creado, y esa es la versión
    * que queda.
    */
+  // El nombre del agente se lee de una referencia: con `agent` como
+  // dependencia, cada ficha nueva del agente que trae la bandeja (misma
+  // persona, objeto nuevo) cambiaba `citar` y re-renderizaba TODAS las
+  // burbujas en `memo`.
+  const nombreAgenteRef = useRef(agent?.displayName);
+  nombreAgenteRef.current = agent?.displayName;
   const citar = useCallback((message: ChatMessageDto) => {
     const autor =
       message.author?.name ??
-      (message.role === 'agent' ? (agent?.displayName ?? 'Asistente') : 'Usted');
+      (message.role === 'agent' ? (nombreAgenteRef.current ?? 'Asistente') : 'Usted');
     const plano = message.body.replace(/\s+/g, ' ').trim();
     setCita({
       idMessage: message.id,
@@ -570,7 +576,7 @@ export default function ChatThread({
       preview: plano.length > 140 ? `${plano.slice(0, 139)}…` : plano || '(adjunto)',
     });
     composerRef.current?.focus();
-  }, [agent]);
+  }, []);
 
   /**
    * Salta al mensaje citado y lo resalta un momento.
@@ -595,11 +601,22 @@ export default function ChatThread({
   // a otro, y es lo que reinicia los efectos de desplazamiento.
   const claveHilo = group ? `grupo:${group.idConversation}` : `agente:${agent?.idAgent ?? 0}`;
 
-  const agentesMencionables = (
-    thread.conversation?.participants ??
-    group?.participants ??
-    []
-  ).filter((p) => p.kind === 'agent');
+  const participantes = thread.conversation?.participants ?? group?.participants;
+  // Memorizado: es prop del compositor (en `memo`) y un arreglo nuevo en cada
+  // render lo obligaría a re-renderizarse en cada vuelta del sondeo.
+  const menciones = useMemo(
+    () =>
+      (participantes ?? [])
+        .filter((p) => p.kind === 'agent')
+        .map((p) => ({
+          // Se sugiere el handle sin arroba cuando existe (es el nombre que
+          // el servidor reconoce sin ambigüedad) y el nombre visible si no.
+          valor: (p.handle ?? p.name).replace(/^@/, ''),
+          nombre: p.name,
+          avatarUrl: p.avatarUrl,
+        })),
+    [participantes]
+  );
 
   // Mantiene `--alto-visible` al día: es lo que permite que el compositor no
   // quede debajo del teclado en el celular (ver el propio hook).
@@ -804,6 +821,29 @@ export default function ChatThread({
 
   const composerDisabled = thread.loading || thread.conversation === null;
 
+  // Props del compositor ESTABLES (va en `memo`): sin esto se recreaban en cada
+  // render del hilo, o sea en cada vuelta del sondeo.
+  const enviarHilo = thread.send;
+  const alEnviar = useCallback(
+    async (body: string, files: File[]) => {
+      // Al ENVIAR se vuelve al fondo aunque el usuario hubiera subido a
+      // leer: quiere ver lo que acaba de escribir y la respuesta. Se
+      // olvida la interacción previa para que el scroll animado hacia el
+      // mensaje optimista no vuelva a soltar el anclaje a mitad de camino.
+      usuarioMovioRef.current = false;
+      stickToBottomRef.current = true;
+      setStickToBottom(true);
+      const vp = viewportRef.current;
+      if (vp) vp.scrollTop = vp.scrollHeight;
+      const enviado = await enviarHilo(body, files, cita);
+      // La cita se limpia solo si el mensaje SALIÓ: si falló, el usuario
+      // reintenta y la cita tiene que seguir puesta.
+      if (enviado) setCita(null);
+    },
+    [enviarHilo, cita]
+  );
+  const quitarCita = useCallback(() => setCita(null), []);
+
   /** Solo reaccionamos si lo que se arrastra son ARCHIVOS (no texto ni enlaces). */
   const dragTraeArchivos = (event: React.DragEvent) =>
     Array.from(event.dataTransfer?.types ?? []).includes('Files');
@@ -1004,23 +1044,9 @@ export default function ChatThread({
         <ChatComposer
           voiceConversationId={agent?.code === 'duo' ? thread.conversation?.id : undefined}
           ref={composerRef}
-          onSend={async (body, files) => {
-            // Al ENVIAR se vuelve al fondo aunque el usuario hubiera subido a
-            // leer: quiere ver lo que acaba de escribir y la respuesta. Se
-            // olvida la interacción previa para que el scroll animado hacia el
-            // mensaje optimista no vuelva a soltar el anclaje a mitad de camino.
-            usuarioMovioRef.current = false;
-            stickToBottomRef.current = true;
-            setStickToBottom(true);
-            const vp = viewportRef.current;
-            if (vp) vp.scrollTop = vp.scrollHeight;
-            const enviado = await thread.send(body, files, cita);
-            // La cita se limpia solo si el mensaje SALIÓ: si falló, el usuario
-            // reintenta y la cita tiene que seguir puesta.
-            if (enviado) setCita(null);
-          }}
+          onSend={alEnviar}
           cita={cita}
-          onQuitarCita={() => setCita(null)}
+          onQuitarCita={quitarCita}
           sending={thread.sending}
           disabled={composerDisabled}
           placeholder={
@@ -1028,13 +1054,7 @@ export default function ChatThread({
               ? `Escriba en ${group?.title ?? 'el grupo'}…  (mencione con @)`
               : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
           }
-          menciones={agentesMencionables.map((p) => ({
-            // Se sugiere el handle sin arroba cuando existe (es el nombre que
-            // el servidor reconoce sin ambigüedad) y el nombre visible si no.
-            valor: (p.handle ?? p.name).replace(/^@/, ''),
-            nombre: p.name,
-            avatarUrl: p.avatarUrl,
-          }))}
+          menciones={menciones}
         />
       </Box>
     </Box>

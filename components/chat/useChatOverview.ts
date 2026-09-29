@@ -140,6 +140,12 @@ export function useChatOverview(opciones?: {
   // TODA la página de chat (barra de avatares, lista, no leídos) cada 30s
   // aunque no hubiera cambiado nada.
   const lastConversationsJson = useRef<string>(JSON.stringify(inicial?.conversations ?? []));
+  // Lo mismo con el catálogo de agentes (2026-09-29). /api/chat/access se pide
+  // otra vez con CADA `notifyChatRefresh()` —cada mensaje nuevo, cada envío,
+  // cada "leído"— y casi siempre trae lo mismo; reemplazarlo daba agentes
+  // nuevos (mismo contenido) a la página, y el hilo abierto re-renderizaba
+  // todas sus burbujas porque su `agent` "cambiaba".
+  const lastAccessJson = useRef<string>(JSON.stringify(inicial?.access ?? null));
 
   const fetchAccess = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -149,6 +155,9 @@ export function useChatOverview(opciones?: {
     try {
       const data = await chatGetJson<ChatAccessDto>('/api/chat/access', controller.signal);
       if (controller.signal.aborted || !data) return;
+      const accessJson = JSON.stringify(data);
+      if (accessJson === lastAccessJson.current) return;
+      lastAccessJson.current = accessJson;
       setAccess(data);
       escribirCache(email, { access: data });
     } catch (err) {
@@ -214,6 +223,7 @@ export function useChatOverview(opciones?: {
       setConversations([]);
       setConversationsReady(false);
       lastConversationsJson.current = JSON.stringify([]);
+      lastAccessJson.current = JSON.stringify(null);
       return;
     }
 
