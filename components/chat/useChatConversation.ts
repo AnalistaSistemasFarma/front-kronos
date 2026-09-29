@@ -109,7 +109,9 @@ export type ChatTarget =
        */
       idConversation?: number | null;
     }
-  | { kind: 'group'; idConversation: number };
+  | { kind: 'group'; idConversation: number }
+  /** Hilo privado entre dos personas: ya existe y se abre por su id. */
+  | { kind: 'people'; idConversation: number };
 
 export interface ChatThreadState {
   conversation: ChatConversationDto | null;
@@ -130,8 +132,19 @@ export interface ChatThreadState {
 
 export function useChatConversation(
   target: ChatTarget | null,
-  active: boolean
+  active: boolean,
+  opciones?: {
+    /**
+     * Quién soy. Con varias personas en el hilo, un mensaje de OTRA persona
+     * con el mismo texto que mi optimista no debe reemplazarlo (ver
+     * mergeMessages). Sin esto se usa solo el `role`, como en el hilo directo.
+     */
+    miId?: string;
+  }
 ): ChatThreadState {
+  const miIdRef = useRef(opciones?.miId);
+  miIdRef.current = opciones?.miId;
+
   // El objetivo se aplana a una cadena para poder usarlo como dependencia de
   // los efectos: un objeto nuevo en cada render reabriría el hilo sin parar.
   const targetKey =
@@ -139,7 +152,7 @@ export function useChatConversation(
       ? null
       : target.kind === 'agent'
         ? `agent:${target.idAgent}`
-        : `group:${target.idConversation}`;
+        : `${target.kind}:${target.idConversation}`;
 
   // EL PRIMER RENDER YA SALE DE LA CACHÉ. Antes el estado arrancaba vacío y
   // con `loading = false`, y la caché se aplicaba en un efecto —después del
@@ -188,8 +201,19 @@ export function useChatConversation(
       if (fresh.length === 0) return prev;
 
       // Un mensaje propio que vuelve del servidor reemplaza a su optimista.
+      // "Propio" lo dice el AUTOR cuando se conoce: en un hilo con otra
+      // persona, que ella escriba "ok" justo cuando yo mando "ok" no puede
+      // borrarme el mío de la pantalla. Sin autor (respuesta vieja) o sin saber
+      // quién soy, se conserva el criterio de siempre.
+      const yo = miIdRef.current;
       const pendingBodies = new Set(
-        fresh.filter((m) => m.role === 'user').map((m) => m.body)
+        fresh
+          .filter(
+            (m) =>
+              m.role === 'user' &&
+              (!yo || !m.author || m.author.kind !== 'user' || String(m.author.id) === yo)
+          )
+          .map((m) => m.body)
       );
       const base = prev.filter(
         (m) => !(m.pending && m.role === 'user' && pendingBodies.has(m.body))
@@ -312,15 +336,21 @@ export function useChatConversation(
           const data = (await res.json()) as { conversation: ChatConversationDto };
           conversacion = data.conversation ?? null;
         } else {
-          // Un grupo ya existe: se lee su ficha. 404 = no es suyo o no está en
-          // él (el servidor no distingue las dos cosas a propósito).
+          // Un grupo (o un hilo entre personas) ya existe: se lee su ficha.
+          // 404 = no es suyo o no está en él (el servidor no distingue las dos
+          // cosas a propósito).
           const res = await chatFetch(`/api/chat/conversations/${target.idConversation}`);
           if (!res.ok) {
             if (cancelled) return;
+            const esPersonas = target.kind === 'people';
             setError(
               res.status === 404
-                ? 'Este grupo no existe o usted no forma parte de él.'
-                : 'No se pudo abrir el grupo.'
+                ? esPersonas
+                  ? 'Esta conversación no existe o ya no tiene acceso a ella.'
+                  : 'Este grupo no existe o usted no forma parte de él.'
+                : esPersonas
+                  ? 'No se pudo abrir la conversación.'
+                  : 'No se pudo abrir el grupo.'
             );
             setLoading(false);
             return;
@@ -586,9 +616,40 @@ export function useChatConversation(
     }
   }, []);
 
+  // Hasta qué mensaje ya se marcó leído un hilo entre personas (ver abajo).
+  const marcadoHastaRef = useRef(0);
+  useEffect(() => {
+    marcadoHastaRef.current = 0;
+  }, [targetKey]);
+
+  const esEntrePersonas = target?.kind === 'people';
+
   const markRead = useCallback(async () => {
     const conversationId = conversationIdRef.current;
     if (conversationId === null) return;
+
+    // ENTRE PERSONAS no hay mensajes de agente: lo que hay que leer es lo que
+    // escribió la otra persona, y el "leído" es la marca de agua de cada quien
+    // (chat_participant.last_read_message_id). Se manda hasta el último
+    // mensaje real que se ve, y una sola vez por mensaje nuevo.
+    if (esEntrePersonas) {
+      let ultimo = 0;
+      for (const m of messages) if (!m.pending && !m.failed && m.id > ultimo) ultimo = m.id;
+      if (ultimo === 0 || ultimo <= marcadoHastaRef.current) return;
+      marcadoHastaRef.current = ultimo;
+      try {
+        const res = await chatFetch(`/api/chat/conversations/${conversationId}/read`, {
+          method: 'POST',
+          body: JSON.stringify({ upToMessageId: ultimo }),
+        });
+        if (res.ok) notifyChatRefresh();
+      } catch {
+        // Se reintenta con el próximo mensaje: leer es cosmético.
+        marcadoHastaRef.current = 0;
+      }
+      return;
+    }
+
     if (!messages.some((m) => m.role === 'agent' && !m.readAt)) return;
 
     try {
@@ -605,7 +666,7 @@ export function useChatConversation(
     } catch {
       /* leer es cosmético: si falla, se reintenta en el próximo cambio */
     }
-  }, [messages]);
+  }, [messages, esEntrePersonas]);
 
   // Con el hilo a la vista, lo que llegue se marca leído solo.
   useEffect(() => {

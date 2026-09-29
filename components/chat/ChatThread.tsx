@@ -512,9 +512,63 @@ function SubagentesAnclados({
   );
 }
 
+/** Clave de localStorage: el aviso de privacidad ya se vio en este equipo. */
+const AVISO_PRIVACIDAD_KEY = 'chat-personas-aviso-privacidad-v1';
+
+/**
+ * AVISO DE PRIVACIDAD de los mensajes entre personas (decisión D3 de Nicolás,
+ * 2026-09-29): la auditoría del chat SÍ ve estos mensajes, así que hay que
+ * decirlo de frente la primera vez — Ley 1581 de 2012, tratamiento de datos —.
+ *
+ * Se recuerda por equipo en `localStorage` (con try/catch: en modo privado o
+ * con el almacenamiento bloqueado simplemente se vuelve a mostrar, que es el
+ * lado seguro del error).
+ */
+function AvisoPrivacidadPersonas() {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    try {
+      setVisible(localStorage.getItem(AVISO_PRIVACIDAD_KEY) !== '1');
+    } catch {
+      setVisible(true);
+    }
+  }, []);
+  if (!visible) return null;
+
+  const entendido = () => {
+    setVisible(false);
+    try {
+      localStorage.setItem(AVISO_PRIVACIDAD_KEY, '1');
+    } catch {}
+  };
+
+  return (
+    <Alert
+      color='blue'
+      radius='md'
+      mx='sm'
+      mt='xs'
+      py={8}
+      icon={<IconAlertCircle size={16} />}
+      role='note'
+    >
+      <Group gap='xs' wrap='nowrap' align='flex-start' justify='space-between'>
+        <Text size='xs'>
+          Los mensajes de SynerLink pueden ser revisados por el área de Sistemas conforme a la
+          política de tratamiento de datos.
+        </Text>
+        <Button size='compact-xs' variant='light' onClick={entendido} style={{ flexShrink: 0 }}>
+          Entendido
+        </Button>
+      </Group>
+    </Alert>
+  );
+}
+
 export default function ChatThread({
   agent,
   group,
+  person,
   currentUserId,
   active = true,
   height,
@@ -536,6 +590,14 @@ export default function ChatThread({
     title: string;
     participants?: ChatParticipantDto[] | null;
   };
+  /**
+   * HILO ENTRE PERSONAS: ya existe y se abre por su id. `name` es la otra
+   * persona, para el texto del compositor y del hilo vacío.
+   */
+  person?: {
+    idConversation: number;
+    name: string;
+  };
   /** Quién soy. En un grupo es lo que distingue mis mensajes de los ajenos. */
   currentUserId?: string;
   /** El hilo está a la vista (marca leído y arranca el sondeo). */
@@ -544,17 +606,20 @@ export default function ChatThread({
   height?: string | number;
 }) {
   const enGrupo = Boolean(group);
+  const enPersonas = !group && Boolean(person);
   // Hilo directo = una persona con UN agente. Es lo único donde `role='user'`
   // significa "lo escribí yo".
-  const esHiloDirecto = !group && Boolean(agent);
+  const esHiloDirecto = !group && !person && Boolean(agent);
 
   const target: ChatTarget | null = group
     ? { kind: 'group', idConversation: group.idConversation }
-    : agent
-      ? { kind: 'agent', idAgent: agent.idAgent, idConversation: idConversacion ?? null }
-      : null;
+    : person
+      ? { kind: 'people', idConversation: person.idConversation }
+      : agent
+        ? { kind: 'agent', idAgent: agent.idAgent, idConversation: idConversacion ?? null }
+        : null;
 
-  const thread = useChatConversation(target, active);
+  const thread = useChatConversation(target, active, { miId: currentUserId });
 
   /* ─────────────────────────── Citar y responder ───────────────────────── */
 
@@ -608,7 +673,11 @@ export default function ChatThread({
   // recargar la página.
   // Clave del hilo abierto: cambia al pasar de un agente a otro o de un grupo
   // a otro, y es lo que reinicia los efectos de desplazamiento.
-  const claveHilo = group ? `grupo:${group.idConversation}` : `agente:${agent?.idAgent ?? 0}`;
+  const claveHilo = group
+    ? `grupo:${group.idConversation}`
+    : person
+      ? `persona:${person.idConversation}`
+      : `agente:${agent?.idAgent ?? 0}`;
 
   const participantes = thread.conversation?.participants ?? group?.participants;
   // Memorizado: es prop del compositor (en `memo`) y un arreglo nuevo en cada
@@ -954,6 +1023,7 @@ export default function ChatThread({
           </Stack>
         </Box>
       )}
+      {enPersonas && <AvisoPrivacidadPersonas />}
       <ScrollArea
         className='chat-thread__scroll'
         viewportRef={viewportRef}
@@ -995,7 +1065,9 @@ export default function ChatThread({
                 <Text size='xs' ta='center' className='chat-text-muted' maw={320}>
                   {enGrupo
                     ? 'Escriba para empezar. Los asistentes de este grupo responden solo cuando se los menciona con @.'
-                    : agent?.description ||
+                    : enPersonas
+                      ? `Escríbale a ${person?.name ?? 'esta persona'}. Solo ustedes dos ven esta conversación, además de la auditoría del área de Sistemas.`
+                      : agent?.description ||
                       `Escríbale a ${agent?.displayName ?? 'el asistente'} para empezar la conversación.`}
                 </Text>
               </Stack>
@@ -1018,13 +1090,13 @@ export default function ChatThread({
           {enGrupo ? (
             <GroupActivity statuses={thread.statuses} />
           ) : (
-            agent && <AgentActivity agent={agent} status={thread.status} />
+            !enPersonas && agent && <AgentActivity agent={agent} status={thread.status} />
           )}
 
           {/* El aviso de "nadie ha contestado" NO va en los grupos: allí un
               mensaje sin menciones no espera respuesta de nadie, así que el
               aviso sería una falsa alarma en el caso más común. */}
-          {!enGrupo && agent && (
+          {esHiloDirecto && agent && (
             <SinRespuesta
               agent={agent}
               ultimoMensaje={thread.messages[thread.messages.length - 1]}
@@ -1034,7 +1106,9 @@ export default function ChatThread({
         </Stack>
       </ScrollArea>
 
-      <SubagentesAnclados enGrupo={enGrupo} status={thread.status} statuses={thread.statuses} />
+      {!enPersonas && (
+        <SubagentesAnclados enGrupo={enGrupo} status={thread.status} statuses={thread.statuses} />
+      )}
 
       {thread.error && (
         <Alert
@@ -1061,7 +1135,9 @@ export default function ChatThread({
           placeholder={
             enGrupo
               ? `Escriba en ${group?.title ?? 'el grupo'}…  (mencione con @)`
-              : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
+              : enPersonas
+                ? `Escríbale a ${person?.name ?? 'esta persona'}…`
+                : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
           }
           menciones={menciones}
         />
