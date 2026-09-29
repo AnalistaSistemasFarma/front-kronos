@@ -38,6 +38,7 @@ import OrionFirmantesInviteModal from './OrionFirmantesInviteModal';
 import OrionDocumentLifecycleModal from './OrionDocumentLifecycleModal';
 import OrionReviewPanel from './OrionReviewPanel';
 import { knownReadyForSigning } from '../../lib/orion/reviewState';
+import { esEstadoFinalOrion } from '../../lib/orion/deletePolicy';
 
 type RowProps = OrionAttachmentSignActionsProps & {
   rowNumber?: number | string;
@@ -242,8 +243,9 @@ export default function OrionAttachmentTableRow({
   // Historial/original: solo creador del flujo / admin.
   const canAccessOriginalFile = Boolean(d.api?.canViewVersions);
 
+  // Doble llave (admin + “Eliminar adjuntos”) viene en canDeleteAttachment; firmado nunca se elimina.
   const deleteAction =
-    canDeleteAttachment && onDeleteAttachment ? (
+    canDeleteAttachment && onDeleteAttachment && !esEstadoFinalOrion(d.state.status) ? (
       <ActionLink
         icon={<IconTrash size={15} stroke={1.6} />}
         label={deleteLoading ? 'Eliminando…' : 'Eliminar'}
@@ -251,16 +253,7 @@ export default function OrionAttachmentTableRow({
         disabled={deleteLoading}
         onClick={() => {
           if (deleteLoading) return;
-          if (
-            !window.confirm(
-              `¿Eliminar “${props.fileName}” por completo?\n\n` +
-                'Se borra el archivo, su flujo de firma y validación, versiones, tareas y hoja de vida en SynerLink, ' +
-                'aunque ya esté firmado. Si la firma sigue en curso se detiene en GSS Firma.\n\n' +
-                'Esta acción no se puede deshacer.'
-            )
-          ) {
-            return;
-          }
+          // La confirmación con justificación obligatoria la muestra la página (DeleteAttachmentModal).
           setDeleteLoading(true);
           void Promise.resolve(onDeleteAttachment(props.fileId, props.fileName)).finally(() => {
             setDeleteLoading(false);

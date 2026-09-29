@@ -11,6 +11,7 @@ export const ORION_DOCUMENT_EVENT_LABEL = {
   DEVUELTO_POR_FIRMANTE: 'Devuelto por firmante',
   RECHAZADO: 'Rechazado',
   FIRMADO: 'Documento firmado',
+  ELIMINADO: 'Documento eliminado',
 } as const;
 
 export type OrionDocumentEventType = keyof typeof ORION_DOCUMENT_EVENT_LABEL;

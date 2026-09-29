@@ -3,14 +3,23 @@ import { NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import { userHasDeleteAttachmentsPermission } from '@/lib/attachments/permissions';
+import { checkAdminPrivileges } from '@/lib/access-control';
 import { deleteRequestDocumentCompletely } from '@/lib/orion/deleteDocument';
+import {
+  motivoFaltaPermisoEliminar,
+  validarJustificacionEliminacion,
+} from '@/lib/orion/deletePolicy';
 
 /**
- * Elimina un adjunto de la solicitud y todo lo asociado (firma, versiones, tareas,
- * hoja de vida), sin importar el estado del documento ni de la solicitud.
- * Requiere el permiso “Eliminar adjuntos” (sin bypass de administrador).
+ * Elimina un adjunto de la solicitud (reglas en lib/orion/deletePolicy.ts):
+ * doble llave — administrador Y permiso “Eliminar adjuntos” (403 si falta alguna);
+ * un documento firmado no se elimina (409); si la firma sigue en curso se detiene
+ * primero en Orion y, si Orion no lo confirma, no se borra nada (502).
+ * La hoja de vida se conserva (evento ELIMINADO) y las tareas se cierran, no se borran.
  *
- * DELETE/POST JSON: { requestId, fileId, fileName? }
+ * La justificación es obligatoria (400 si falta o tiene menos de 10 caracteres).
+ *
+ * DELETE/POST JSON: { requestId, fileId, fileName?, justification }
  */
 async function handleDelete(req: Request) {
   const session = await getServerSession(authOptions);
@@ -30,18 +39,22 @@ async function handleDelete(req: Request) {
     );
   }
 
+  const justificacion = validarJustificacionEliminacion(body.justification);
+  if (!justificacion.ok) {
+    return NextResponse.json({ error: justificacion.error }, { status: 400 });
+  }
+
   const userId = session.user.id != null ? String(session.user.id) : '';
   if (!userId) {
     return NextResponse.json({ error: 'Usuario no identificado' }, { status: 401 });
   }
 
+  const esAdmin = await checkAdminPrivileges(String(session.user.email));
   const result = await withMssqlPool(async (pool) => {
-    const allowed = await userHasDeleteAttachmentsPermission(pool, userId);
-    if (!allowed) {
-      throw Object.assign(
-        new Error('No tiene permiso “Eliminar adjuntos”. Asígneselo en Administración → Usuarios.'),
-        { status: 403 }
-      );
+    const tienePermisoEliminarAdjuntos = await userHasDeleteAttachmentsPermission(pool, userId);
+    const faltaPermiso = motivoFaltaPermisoEliminar(esAdmin, tienePermisoEliminarAdjuntos);
+    if (faltaPermiso) {
+      throw Object.assign(new Error(faltaPermiso), { status: 403 });
     }
     return deleteRequestDocumentCompletely(pool, {
       requestId,
@@ -50,6 +63,9 @@ async function handleDelete(req: Request) {
       actorEmail: String(session.user.email),
       actorName: session.user.name ?? null,
       actorUserId: userId,
+      esAdmin,
+      tienePermisoEliminarAdjuntos,
+      justification: justificacion.valor,
     });
   });
 
