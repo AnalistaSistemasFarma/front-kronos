@@ -31,6 +31,7 @@ import {
   describeAgentStatus,
   formatChatTime,
   SIN_RESPUESTA_MS,
+  subagentesEnCurso,
   type ChatAgentDto,
   type ChatAgentStatusDto,
   type ChatMessageDto,
@@ -412,7 +413,6 @@ function GroupActivity({ statuses }: { statuses: ChatAgentStatusDto[] }) {
                 <b>{s.agentName ?? 'Asistente'}</b> · {view.label}
               </Text>
             </Group>
-            <AgentTaskTable tasks={s.tasks} />
           </Box>
         );
       })}
@@ -451,9 +451,57 @@ function AgentActivity({
           {view.label}
         </Text>
       </Group>
+    </Box>
+  );
+}
 
-      {/* Solo aparece cuando el agente reporta sub-agentes trabajando. */}
-      <AgentTaskTable tasks={status?.tasks} />
+/**
+ * La caja de SUB-AGENTES EN CURSO, anclada entre la conversación y el
+ * compositor.
+ *
+ * Pedido de Nicolás (2026-09-29): "quiero que esa cajita sea fija hasta que el
+ * sub-agente termine, que se quede anclada al chat". Antes vivía DENTRO de la
+ * lista de mensajes —se iba con el desplazamiento— y colgaba del indicador del
+ * agente principal: en cuanto este contestaba (su estado pasa a 'idle') la
+ * caja desaparecía aunque sus sub-agentes siguieran trabajando. Ahora queda
+ * fuera del área que se desplaza y depende SOLO de la lista de sub-agentes
+ * (ver subagentesEnCurso): se quita cuando esa lista queda vacía.
+ */
+function SubagentesAnclados({
+  enGrupo,
+  status,
+  statuses,
+}: {
+  enGrupo: boolean;
+  status: Parameters<typeof subagentesEnCurso>[0];
+  statuses: ChatAgentStatusDto[];
+}) {
+  if (!enGrupo) {
+    const tareas = subagentesEnCurso(status);
+    if (tareas.length === 0) return null;
+    return (
+      <Box className='chat-thread__subagentes'>
+        <AgentTaskTable tasks={tareas} />
+      </Box>
+    );
+  }
+
+  // En un grupo, una caja por agente que tenga sub-agentes, con su nombre:
+  // sin él no se sabe de quién es cada trabajo.
+  const conTareas = statuses
+    .map((s) => ({ s, tareas: subagentesEnCurso(s) }))
+    .filter((x) => x.tareas.length > 0);
+  if (conTareas.length === 0) return null;
+  return (
+    <Box className='chat-thread__subagentes'>
+      {conTareas.map(({ s, tareas }) => (
+        <Box key={s.idAgent}>
+          <Text size='xs' fw={600} className='chat-thread__subagentes-autor'>
+            {s.agentName ?? 'Asistente'}
+          </Text>
+          <AgentTaskTable tasks={tareas} />
+        </Box>
+      ))}
     </Box>
   );
 }
@@ -655,6 +703,18 @@ export default function ChatThread({
     if (!viewport || thread.loading) return;
     viewport.scrollTop = viewport.scrollHeight;
   }, [thread.loading, claveHilo, thread.conversation?.id]);
+
+  // La caja anclada de sub-agentes vive FUERA del área que se desplaza: al
+  // aparecer o crecer, encoge el área de mensajes y taparía los últimos. Si el
+  // usuario estaba abajo, se lo deja abajo en el mismo cuadro.
+  const firmaSubagentes = enGrupo
+    ? thread.statuses.map((s) => subagentesEnCurso(s).length).join(',')
+    : String(subagentesEnCurso(thread.status).length);
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !stickToBottomRef.current || usuarioInteractuando()) return;
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [firmaSubagentes]);
 
   /**
    * PEGADO AL FONDO de verdad, mientras el usuario esté abajo.
@@ -924,6 +984,8 @@ export default function ChatThread({
           )}
         </Stack>
       </ScrollArea>
+
+      <SubagentesAnclados enGrupo={enGrupo} status={thread.status} statuses={thread.statuses} />
 
       {thread.error && (
         <Alert
