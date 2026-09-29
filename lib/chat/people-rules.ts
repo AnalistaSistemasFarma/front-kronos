@@ -179,6 +179,34 @@ export function segundosPorTopeDeVentana(
 }
 
 /* ==================================================================== */
+/* PUSH DE MENSAJES DIRECTOS — ajuste previo al pase a producción        */
+/* ==================================================================== */
+
+/**
+ * Como mucho UN push de mensaje directo por conversación y receptor cada
+ * 60 s: una ráfaga de mensajes seguidos no puede convertirse en una ráfaga de
+ * pushes en el celular del otro. El zumbido NO pasa por aquí: tiene sus
+ * propios límites (D4).
+ */
+export const DM_PUSH_COOLDOWN_MS = 60_000;
+
+/**
+ * ¿Se manda el push de este mensaje directo? `ultimaNotifAt` es la última
+ * notificación de mensaje de ESE hilo para ESE receptor (null = ninguna) y
+ * `ahora` la hora del mismo reloj que la guardó.
+ */
+export function debeNotificarDirecto(
+  ultimaNotifAt: Date | null,
+  ahora: Date,
+  espera: number = DM_PUSH_COOLDOWN_MS
+): boolean {
+  if (!ultimaNotifAt) return true;
+  const ultima = ultimaNotifAt.getTime();
+  if (Number.isNaN(ultima)) return true;
+  return ahora.getTime() - ultima >= espera;
+}
+
+/* ==================================================================== */
 /* PULSO GLOBAL (decisión D9: long-poll respaldado en SQL, sin SSE)      */
 /* ==================================================================== */
 
