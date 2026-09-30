@@ -174,7 +174,7 @@ test.describe('Chat · barra lateral · escritorio', () => {
     await barra.getByRole('button', { name: 'Expandir la barra de chats' }).click();
 
     for (const titulo of ['Anclados', 'Agentes', 'Personas', 'Grupos']) {
-      await expect(barra.getByRole('heading', { name: new RegExp(titulo) })).toBeVisible();
+      await expect(barra.getByRole('heading', { name: titulo })).toBeVisible();
     }
     await expect(barra.getByText('Ya revisé los pagos programados de hoy.')).toBeVisible();
     await expect(barra.getByText('¿Revisamos el tablero a las 3?')).toBeVisible();

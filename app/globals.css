@@ -1481,8 +1481,11 @@ body.chat-inmersivo.con-chat-rail .app-page-shell {
   overscroll-behavior: contain;
 }
 
-.chat-rail__drawer-cabecera {
+/* El Drawer va con padding={0} (la lista llega a los bordes); la cabecera
+   con el título "Chats" sí necesita su margen. */
+.chat-rail--drawer .chat-rail__drawer-cabecera {
   background-color: inherit;
+  padding: 12px 12px 8px 16px;
 }
 
 @media (prefers-reduced-motion: reduce) {

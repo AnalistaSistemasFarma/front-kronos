@@ -65,3 +65,18 @@ END CATCH
 /* Estado DESPUÉS */
 SELECT 'despues' AS momento, OBJECT_ID(N'[dbo].[chat_pin]', N'U') AS chat_pin_object_id;
 SELECT 'despues' AS momento, name AS indice FROM sys.indexes WHERE object_id = OBJECT_ID(N'[dbo].[chat_pin]');
+
+/*
+  ESTADO POR AMBIENTE
+  - KRONOSDB_PRUEBAS: aplicado el 2026-09-30 (~20:25 UTC) y registrado en
+    _prisma_migrations (22:01 UTC). Corrido 2 veces, sin cambios la segunda.
+  - PRODUCCIÓN (KRONOSDB): PENDIENTE. Correr este archivo A MANO, antes de
+    promover el código a main y solo con autorización de Nicolás:
+      1. Script Node + mssql en serfarma05 (memoria
+         correr-sql-servidores-front-kronos), verificando DB_NAME() = KRONOSDB.
+      2. Revisar la salida "despues": object_id no nulo e índices
+         chat_pin_pkey y chat_pin_user_target_key.
+      3. Si hace falta, registrar la migración:
+         npx prisma migrate resolve --applied 20260930180000_chat_pins
+    Reversa: prisma/manual/2026-09-30-chat-pins-reversa.sql.
+*/
