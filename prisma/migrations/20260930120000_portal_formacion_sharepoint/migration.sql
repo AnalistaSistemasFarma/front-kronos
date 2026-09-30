@@ -54,3 +54,31 @@ IF COL_LENGTH(N'dbo.portal_certificate', N'file_name') IS NULL
   ALTER TABLE [dbo].[portal_certificate] ADD [file_name] NVARCHAR(255) NULL;
 IF COL_LENGTH(N'dbo.portal_certificate', N'file_size') IS NULL
   ALTER TABLE [dbo].[portal_certificate] ADD [file_size] BIGINT NULL;
+
+/*
+  REVERSA (manual, solo si hay que deshacer este cambio en una base de pruebas).
+  Quita únicamente las columnas que agrega esta migración; no toca datos
+  anteriores. Los archivos ya subidos a SharePoint NO se tocan.
+
+  IF COL_LENGTH(N'dbo.portal_certificate', N'file_size') IS NOT NULL
+    ALTER TABLE [dbo].[portal_certificate] DROP COLUMN [file_size];
+  IF COL_LENGTH(N'dbo.portal_certificate', N'file_name') IS NOT NULL
+    ALTER TABLE [dbo].[portal_certificate] DROP COLUMN [file_name];
+  IF COL_LENGTH(N'dbo.portal_certificate', N'sp_web_url') IS NOT NULL
+    ALTER TABLE [dbo].[portal_certificate] DROP COLUMN [sp_web_url];
+  IF COL_LENGTH(N'dbo.portal_certificate', N'sp_drive_item_id') IS NOT NULL
+    ALTER TABLE [dbo].[portal_certificate] DROP COLUMN [sp_drive_item_id];
+  IF COL_LENGTH(N'dbo.portal_course_material', N'eliminado_por') IS NOT NULL
+    ALTER TABLE [dbo].[portal_course_material] DROP COLUMN [eliminado_por];
+  IF COL_LENGTH(N'dbo.portal_course_material', N'eliminado_at') IS NOT NULL
+    ALTER TABLE [dbo].[portal_course_material] DROP COLUMN [eliminado_at];
+  IF COL_LENGTH(N'dbo.portal_course_material', N'file_size') IS NOT NULL
+    ALTER TABLE [dbo].[portal_course_material] DROP COLUMN [file_size];
+  IF COL_LENGTH(N'dbo.portal_course_material', N'sp_web_url') IS NOT NULL
+    ALTER TABLE [dbo].[portal_course_material] DROP COLUMN [sp_web_url];
+  IF COL_LENGTH(N'dbo.portal_course_material', N'sp_drive_item_id') IS NOT NULL
+    ALTER TABLE [dbo].[portal_course_material] DROP COLUMN [sp_drive_item_id];
+  IF COL_LENGTH(N'dbo.portal_course', N'sp_folder_name') IS NOT NULL
+    ALTER TABLE [dbo].[portal_course] DROP COLUMN [sp_folder_name];
+  DELETE FROM [dbo].[_prisma_migrations] WHERE migration_name = N'20260930120000_portal_formacion_sharepoint';
+*/
