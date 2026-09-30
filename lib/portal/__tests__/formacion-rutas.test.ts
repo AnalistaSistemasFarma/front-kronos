@@ -316,7 +316,7 @@ describe('edición de materiales', () => {
 
   it('PUT: si el anterior no se mueve, retira el nuevo y no toca la fila', async () => {
     db.portalCourseMaterial.findFirst.mockResolvedValue({ id: 99, sp_drive_item_id: 'VIEJO', file_name: 'v1.pdf' });
-    const base = graph.getMockImplementation()!;
+    const base = graph.getMockImplementation() as (u: string | URL | Request, i?: RequestInit) => Promise<Response>;
     graph.mockImplementation(async (url: string | URL | Request, init?: RequestInit) =>
       init?.method === 'PATCH' && String(url).includes('/drive/items/VIEJO') ? new Response(null, { status: 423 }) : base(url, init)
     );
