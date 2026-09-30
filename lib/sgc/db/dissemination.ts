@@ -396,13 +396,8 @@ export async function getDisseminationView(
       idAssignee: r.id_task_assignee,
       email: r.user_email,
       name: names(r.user_email),
-      sources: (() => {
-        try {
-          return JSON.parse(r.sources_json) as string[];
-        } catch {
-          return [];
-        }
-      })(),
+      // Lo escribe el propio SGC al asignar la lectura (JSON válido).
+      sources: JSON.parse(r.sources_json) as string[],
       status: r.status as SgcReadStatus,
       statusLabel: SGC_READ_STATUS_LABELS[r.status as SgcReadStatus] ?? r.status,
       assignedAt: r.assigned_at.toISOString(),

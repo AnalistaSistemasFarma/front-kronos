@@ -17,7 +17,8 @@ import { cancelRequest, closeDissemination, createRequest, excludeReader, getReq
 import { signTask, type SgcSignatureDeps } from '../../../lib/sgc/db/signatures';
 import { saveTraining, uploadTrainingResults } from '../../../lib/sgc/db/training';
 import { verifyVersionByCode } from '../../../lib/sgc/db/verify';
-import { colombiaToday } from '../../../lib/sgc/db/vigencia';
+import { annulUnpublishedVersion, colombiaToday, publishApprovedVersion } from '../../../lib/sgc/db/vigencia';
+import { signedContentInTx } from '../../../lib/sgc/db/signatureRecord';
 import { normalizeFlowDefinition } from '../../../lib/sgc/flows/definition';
 import { SGC_DOCUMENT_FLOW_V3 } from '../../../lib/sgc/flows/documentFlow';
 import type { SgcNotification, SgcNotifier } from '../../../lib/sgc/notifications';
@@ -449,4 +450,53 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     const r = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest }, include: { document: true } });
     expect(r.document).toMatchObject({ status: 'anulado', annul_reason: expect.stringContaining('antes de la vigencia') });
   });
+
+  it('[SGC-REQ-055][SGC-REQ-060][SGC-REQ-061][SGC-REQ-064] bordes: contenido firmado que no cuadra, vigencia sin PDF, pasos cerrados y datos inválidos se rechazan', async () => {
+    const t = await taskOf(reqA, 'divulgacion');
+    const cap = await taskOf(reqA, 'capacitacion');
+    const a1 = t.assignees.find((x) => x.user_email === E.l1)!;
+    const rA = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: reqA } });
+    const v2 = await prisma.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: rA.id_document_version! } });
+    const inTx = (kind: 'pdf_controlado' | 'resultados_capacitacion' | 'borrador_editor', ref: string, sha: string, idTask = t.id_task) =>
+      prisma.$transaction((tx) => signedContentInTx(tx, reqA, idTask, a1.id_task_assignee, { kind, ref, name: 'x', sha256: sha }));
+    await expect(inTx('pdf_controlado', 'version:0', v2.pdf_sha256)).rejects.toThrow(/ya no es el PDF controlado/);
+    await expect(inTx('pdf_controlado', `version:${v2.id_document_version}`, v2.pdf_sha256.trim())).rejects.toThrow(/no está pendiente/);
+    await expect(inTx('resultados_capacitacion', 'training_upload:0', 'a'.repeat(64), cap.id_task)).rejects.toThrow(/cambiaron/);
+    await expect(inTx('borrador_editor', 'revision:0', 'a'.repeat(64))).rejects.toThrow(/borrador cambió/);
+    await expect(prisma.$transaction((tx) => publishApprovedVersion(tx, { id_request: reqA, id_company: CO, id_document_version: null, controlled_pdf_status: null }, actor(E.cal), new Date()))).rejects.toThrow(/no tiene PDF controlado/);
+    await expect(prisma.$transaction((tx) => publishApprovedVersion(tx, rA, actor(E.cal), new Date()))).rejects.toThrow(/ya está vigente/);
+    expect(await prisma.$transaction((tx) => annulUnpublishedVersion(tx, { id_request: reqA, id_company: CO, id_document_version: null }, 'x', actor(E.cal), new Date()))).toBeNull();
+    expect(await prisma.$transaction((tx) => annulUnpublishedVersion(tx, rA, 'x', actor(E.cal), new Date()))).toBeNull();
+    // Pasos cerrados: nada de alcance, recordatorios ni capacitación sobre una solicitud completada.
+    const cal = await accessOf(E.cal);
+    await expect(addScopeEntry(prisma, notifier, cal, reqA, { entry: { kind: 'empresa' }, reason: 'Después de cerrar' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
+    await expect(sendReadingReminders(prisma, notifier, cal, reqA, actor(E.cal))).rejects.toMatchObject({ status: 409 });
+    await expect(saveTraining(prisma, cal, reqA, { mode: 'video', title: 'Tarde para capacitar', videoUrl: 'https://v.x/1', formsUrl: 'https://f.x/1', maxScore: 10 }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
+    await expect(uploadTrainingResults(prisma, upload, cal, reqA, { fileName: 'r.xlsx', bytes: await xlsx([HEAD]) }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
+    const otra = { ...cal, idCompany: 999 };
+    await expect(addScopeEntry(prisma, notifier, otra, reqA, { entry: { kind: 'empresa' }, reason: 'Otra empresa' }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
+    await expect(saveTraining(prisma, otra, reqA, { mode: 'video', title: 'Otra empresa', videoUrl: 'https://v.x/1', formsUrl: 'https://f.x/1', maxScore: 10 }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
+    await expect(sendReadingReminders(prisma, notifier, otra, reqA, actor(E.cal))).rejects.toMatchObject({ status: 404 });
+    await expect(addScopeEntry(prisma, notifier, cal, 99999999, { entry: { kind: 'empresa' }, reason: 'No existe' }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
+    expect(await recordReadingEvent(prisma, a1.id_task_assignee, { event: 'final' }, { email: E.l1 }, actor(E.l1))).toMatchObject({ status: 'leido' });
+    // Solicitud nueva antes de la divulgación: validación del alcance y lectura aún no disponible.
+    const reqD = await approvedRequest('Nueva versión para los bordes S4');
+    await expect(addScopeEntry(prisma, notifier, await accessOf(E.elab), reqD, { entry: { kind: 'cargo', idCargo: 99999999 }, reason: 'Cargo inexistente' }, actor(E.elab))).rejects.toThrow(/cargo no existe/);
+    await expect(addScopeEntry(prisma, notifier, await accessOf(E.elab), reqD, { entry: { kind: 'persona', email: 'nadie@x.co' }, reason: 'Persona inexistente' }, actor(E.elab))).rejects.toThrow(/no existe o está inactiva/);
+    await expect(removeScopeEntry(prisma, await accessOf(E.elab), reqD, 99999999, { reason: 'No existe' }, actor(E.elab))).rejects.toMatchObject({ status: 404 });
+    await expect(removeScopeEntry(prisma, await accessOf(E.rev), reqD, 1, { reason: 'Sin permiso' }, actor(E.rev))).rejects.toMatchObject({ status: 403 });
+    await expect(sendReadingReminders(prisma, notifier, cal, reqD, actor(E.cal))).rejects.toMatchObject({ status: 409 });
+    await cancelRequest(prisma, notifier, await accessOf(E.elab), reqD, { reason: 'Fin de la prueba de bordes' }, actor(E.elab));
+    await expect(removeScopeEntry(prisma, await accessOf(E.elab), reqD, 1, { reason: 'Cerrada' }, actor(E.elab))).rejects.toMatchObject({ status: 409 });
+    // Personas por cargo: datos inválidos y registro ajeno.
+    await expect(addCargoMember(prisma, CO, { idCargo: cargo, email: 'x', reason: 'Correo malo' }, actor(E.cal))).rejects.toThrow(/correo/);
+    await expect(addCargoMember(prisma, CO, { idCargo: cargo, email: E.l1, reason: 'no' }, actor(E.cal))).rejects.toThrow(/motivo/);
+    await expect(addCargoMember(prisma, CO, { idCargo: 99999999, email: E.l1, reason: 'Cargo inexistente' }, actor(E.cal))).rejects.toThrow(/no existe/);
+    await expect(deactivateCargoMember(prisma, CO, 99999999, { reason: 'No existe' }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
+    await expect(deactivateCargoMember(prisma, CO, 1, { reason: 'no' }, actor(E.cal))).rejects.toThrow(/motivo/);
+    // Una versión anulada se verifica como ANULADA.
+    const code = (await prisma.sgcDocument.findUniqueOrThrow({ where: { id_document: idDoc } })).code;
+    expect(await verifyVersionByCode(prisma, (await viewer(E.cal)).access, await getAccessSubject(prisma, E.cal), { idCompany: CO, code, versionNumber: 3 }, actor(E.cal))).toMatchObject({ verdict: 'anulada' });
+  });
 });
+
