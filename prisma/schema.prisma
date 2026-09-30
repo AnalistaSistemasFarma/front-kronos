@@ -821,7 +821,6 @@ model ChatPin {
 
   @@unique([id_user, target_key], map: "chat_pin_user_target_key")
   @@map("chat_pin")
-  @@schema("dbo")
 }
 
 /// Integrante de un grupo: una PERSONA o un AGENTE, nunca los dos.
