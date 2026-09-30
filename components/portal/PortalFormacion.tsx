@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { leerJson } from './PortalContenido';
 
 /**
@@ -59,17 +59,29 @@ const materialUrl = (cursoId: number, materialId: number) =>
   `/api/portal/courses/${cursoId}/materials/${materialId}/file`;
 const certificadoUrl = (code: string) => `/api/portal/certificates/${encodeURIComponent(code)}`;
 
-export default function PortalFormacion() {
+/**
+ * `onSinSesion`: se llama si el servidor responde 401 al pedir los cursos,
+ * para que la página de Formación (que vive aparte del portal desde
+ * 2026-09-30) pueda mandar a la persona a ingresar primero.
+ */
+export default function PortalFormacion({ onSinSesion }: { onSinSesion?: () => void } = {}) {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cursos, setCursos] = useState<CursoResumen[]>([]);
   const [esFormador, setEsFormador] = useState(false);
   const [vista, setVista] = useState<'estudiante' | 'formador'>('estudiante');
+  // En una ref: si se pasa como función en línea, no debe re-disparar la carga.
+  const onSinSesionRef = useRef(onSinSesion);
+  onSinSesionRef.current = onSinSesion;
 
   const cargarCursos = useCallback(async () => {
     setError(null);
     try {
       const res = await fetch('/api/portal/courses', { cache: 'no-store' });
+      if (res.status === 401 && onSinSesionRef.current) {
+        onSinSesionRef.current();
+        return;
+      }
       const data = await leerJson(res);
       if (!res.ok) throw new Error(String(data?.error ?? 'No se pudieron cargar los cursos.'));
       setCursos(Array.isArray(data.cursos) ? (data.cursos as CursoResumen[]) : []);
