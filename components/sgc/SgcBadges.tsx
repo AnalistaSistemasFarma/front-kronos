@@ -47,7 +47,7 @@ export function SgcDocumentCode({ code, versionNumber }: { code: string; version
       <Text fw={700} ff='monospace' size='sm' data-testid='sgc-codigo'>
         {code}
       </Text>
-      <Badge variant='filled' color='dark' size='xs' radius='sm'>
+      <Badge variant='filled' color='dark' size='xs' radius='sm' style={{ flexShrink: 0 }}>
         {versionNumber ? `V${versionNumber}` : 'sin versión'}
       </Badge>
     </Group>

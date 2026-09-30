@@ -21,6 +21,10 @@ import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
  * siempre visibles. Clic en la fila → ficha del documento.
  */
 
+// Código, fechas y distintivos no se parten ni se recortan (la tabla se desplaza).
+const NOWRAP = { whiteSpace: 'nowrap' } as const;
+const NO_SHRINK = { flexShrink: 0 } as const;
+
 const STATUS_OPTIONS = [
   { value: 'vigente', label: 'Vigentes' },
   { value: 'obsoleto', label: 'Obsoletos' },
@@ -140,7 +144,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
             : 'Aún no hay documentos cargados que usted pueda consultar.'}
         </Text>
       ) : (
-        <Table.ScrollContainer minWidth={900}>
+        <Table.ScrollContainer minWidth={1150}>
           <Table striped highlightOnHover verticalSpacing='sm' data-testid='sgc-listado'>
             <Table.Thead>
               <Table.Tr>
@@ -162,7 +166,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
                   onClick={() => router.push(sgcHref(`${SGC_BASE_URL}/documentos/${d.idDocument}`, company.idCompany))}
                   data-testid='sgc-fila-documento'
                 >
-                  <Table.Td>
+                  <Table.Td style={NOWRAP}>
                     <SgcDocumentCode code={d.code} versionNumber={d.versionNumber} />
                   </Table.Td>
                   <Table.Td>
@@ -175,23 +179,23 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
                   </Table.Td>
                   <Table.Td>
                     <Group gap={6} wrap='nowrap'>
-                      <Badge color={d.processType.color} variant='light' size='xs'>
+                      <Badge color={d.processType.color} variant='light' size='xs' style={NO_SHRINK}>
                         {d.processType.name}
                       </Badge>
                       <Text size='sm'>{d.process.name}</Text>
                     </Group>
                   </Table.Td>
-                  <Table.Td>
+                  <Table.Td style={NOWRAP}>
                     <Text size='sm'>{d.effectiveDate ?? '—'}</Text>
                   </Table.Td>
-                  <Table.Td>
+                  <Table.Td style={NOWRAP}>
                     <SgcReviewBadge reviewDueDate={d.reviewDueDate} alertMonths={d.documentType.alertMonths} />
                   </Table.Td>
-                  <Table.Td>
+                  <Table.Td style={NOWRAP}>
                     <SgcConfidentialityBadge value={d.confidentiality} />
                   </Table.Td>
                   {company.canQuality && (
-                    <Table.Td>
+                    <Table.Td style={NOWRAP}>
                       <SgcStatusBadge status={d.status} />
                     </Table.Td>
                   )}
