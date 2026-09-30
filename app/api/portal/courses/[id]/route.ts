@@ -37,7 +37,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const curso = await prisma.portalCourse.findUnique({
       where: { id },
-      include: { materials: { orderBy: { orden: 'asc' } } },
+      include: { materials: { where: { eliminado_at: null }, orderBy: { orden: 'asc' } } },
     });
     if (!curso) return NextResponse.json({ error: 'Curso no encontrado.' }, { status: 404 });
     if (!curso.active && !esFormador) {
@@ -119,6 +119,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
     if (typeof body?.descripcion === 'string') data.description = body.descripcion.trim() || null;
     if (typeof body?.activo === 'boolean') data.active = body.activo;
+
+    const existe = await prisma.portalCourse.findUnique({ where: { id }, select: { id: true } });
+    if (!existe) return NextResponse.json({ error: 'Curso no encontrado.' }, { status: 404 });
+    if (typeof body?.descripcion === 'string' && body.descripcion.length > 4000) {
+      return NextResponse.json({ error: 'La descripción es muy larga (máximo 4.000 caracteres).' }, { status: 400 });
+    }
 
     const curso = await prisma.portalCourse.update({ where: { id }, data });
     return NextResponse.json({ ok: true, curso: { id: curso.id, titulo: curso.title, activo: curso.active } });

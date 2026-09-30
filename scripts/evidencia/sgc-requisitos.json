@@ -21,5 +21,20 @@
   "SGC-REQ-019": { "sprint": "S1", "descripcion": "Cada consulta, descarga, impresión, intento denegado y cambio queda en la auditoría con quién, qué, cuándo y desde dónde (IP sin puerto)." },
   "SGC-REQ-020": { "sprint": "S1", "descripcion": "El registro de auditoría es inmodificable: la base rechaza UPDATE y DELETE." },
   "SGC-REQ-021": { "sprint": "S1", "descripcion": "Vencimiento: revisión cada 36 meses desde la vigencia y alerta 2 meses antes (cálculo; alertas programadas en S5)." },
-  "SGC-REQ-022": { "sprint": "S1", "descripcion": "Estados del documento: en elaboración, vigente, obsoleto y anulado; anular exige motivo y no borra nada." }
+  "SGC-REQ-022": { "sprint": "S1", "descripcion": "Estados del documento: en elaboración, vigente, obsoleto y anulado; anular exige motivo y no borra nada." },
+  "SGC-REQ-023": { "sprint": "S2", "descripcion": "Motor genérico de flujos validados: definiciones validadas (claves, órdenes, transiciones, cierre alcanzable) y condiciones de catálogo cerrado." },
+  "SGC-REQ-024": { "sprint": "S2", "descripcion": "Administración de flujos sin código: crear un flujo y editar su borrador desde el administrador; solo se editan borradores." },
+  "SGC-REQ-025": { "sprint": "S2", "descripcion": "Versionado de definiciones: publicar retira la anterior, una sola vigente por proceso, y una instancia en curso conserva la versión con la que arrancó." },
+  "SGC-REQ-026": { "sprint": "S2", "descripcion": "Registro de cambios de configuración (quién, cuándo, qué antes/después, motivo, referencia) e historial de interacciones de solo inserción." },
+  "SGC-REQ-027": { "sprint": "S2", "descripcion": "Flujo documental v1 de 6 pasos; divulgación y capacitación definidas y en espera hasta el Sprint 4; capacitación obligatoria." },
+  "SGC-REQ-028": { "sprint": "S2", "descripcion": "Solicitud documental (nuevo, nueva versión, modificación) con justificación y campos obligatorios; solo gestión o Calidad; un documento no tiene dos solicitudes en curso." },
+  "SGC-REQ-029": { "sprint": "S2", "descripcion": "Revisión y aprobación con varios firmantes, en orden o en paralelo elegido por documento; el paso no avanza hasta que firmen todos." },
+  "SGC-REQ-030": { "sprint": "S2", "descripcion": "El elaborador asigna y cambia revisores y aprobadores con registro de quién, cuándo y por qué; lo decidido no se retira; el elaborador no revisa ni aprueba lo suyo." },
+  "SGC-REQ-031": { "sprint": "S2", "descripcion": "Acciones devolver (observaciones obligatorias, nueva ronda con historial), reasignar (con motivo) y cancelar (con motivo)." },
+  "SGC-REQ-032": { "sprint": "S2", "descripcion": "Tareas documentales: bandeja y vista copiadas de SynerLink (paridad visual), con historial propio, adjuntos con SHA-256 que no se borran e información adicional." },
+  "SGC-REQ-033": { "sprint": "S2", "descripcion": "Autorizaciones SGC como módulo independiente: tipos y grupos propios, asignación directa o por grupo, bandeja y decisión con el mismo motor; sin usar tablas ni el tipo 8 de SynerLink." },
+  "SGC-REQ-034": { "sprint": "S2", "descripcion": "Matriz de responsables configurable por proceso × tipo documental, por persona o cargo, que solo sugiere." },
+  "SGC-REQ-035": { "sprint": "S2", "descripcion": "Notificaciones de tareas documentales con el mismo patrón de SynerLink (campana + push), sin notificar a quien actúa." },
+  "SGC-REQ-036": { "sprint": "S2", "descripcion": "Punto de firma preparado en cada paso (Elaboró, Revisó, Aprobó) en estado pendiente hasta la firma electrónica propia del Sprint 3." },
+  "SGC-REQ-037": { "sprint": "S2", "descripcion": "Permisos: solo involucrados o Calidad ven una solicitud (404 a los demás); la administración de flujos exige su permiso." }
 }
