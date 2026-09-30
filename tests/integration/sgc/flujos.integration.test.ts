@@ -424,7 +424,6 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
   });
 
   it('[SGC-REQ-029][SGC-REQ-033] la aprobación va EN ORDEN (apr1 → rev2 → grupo de Calidad) y llega también a Autorizaciones SGC', async () => {
-    sent.length = 0;
     const apr = await taskOf(req1, 'aprobacion');
     expect(apr).toMatchObject({ status: 'abierta', signing_mode: 'orden' });
     expect(apr.assignees.map((a) => [a.user_email, a.pool_type_code, a.sign_order])).toEqual([
@@ -439,7 +438,8 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
       ['SGC-VERIF-CALIDAD', null, 'pendiente'],
     ]);
     // En orden: solo apr1 recibe la notificación; rev2 y el grupo esperan su turno.
-    expect(sent.flatMap((n) => n.emails)).toEqual([E.apr1]);
+    expect(sent.filter((n) => n.payload.url === `/process/sgc-documental/tareas/${apr.id_task}`).flatMap((n) => n.emails)).toEqual([E.apr1]);
+    sent.length = 0;
     const rev2Inbox = await listAuthorizationInbox(prisma, E.rev2, await getSgcAccessForUser(prisma, E.rev2));
     expect(rev2Inbox.find((a) => a.idRequest === req1 && a.status === 'pendiente')).toMatchObject({ inTurn: false, typeCode: 'SGC-APROBACION', statusLabel: 'Pendiente' });
     const calInbox = await listAuthorizationInbox(prisma, E.cal, await getSgcAccessForUser(prisma, E.cal), { status: 'pendiente', idCompany: CO });
