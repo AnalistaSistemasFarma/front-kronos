@@ -59,6 +59,7 @@ const ChatGroupModal = dynamic(() => import('./ChatGroupModal'), { ssr: false })
 const ChatPeopleModal = dynamic(() => import('./ChatPeopleModal'), { ssr: false });
 import { useChatOverview } from './useChatOverview';
 import { precargarHiloDeAgente } from './useChatConversation';
+import { CHAT_RAIL_OPEN_EVENT, type ChatRailOpenDetail } from '../../lib/chat/rail';
 import {
   describeAgentStatus,
   findAgentByRouteKey,
@@ -625,6 +626,35 @@ export default function ChatWorkspace({
     setSeleccion({ tipo: 'persona', id });
     verEnLaUrl(`/process/chat/persona/${id}`);
   };
+
+  // La BARRA LATERAL del chat (ChatRail) abre chats aquí sin navegar: manda un
+  // evento y, si esta página lo atiende, lo cancela para que la barra no haga
+  // nada más. Pasa por las mismas funciones que la lista, así abrir desde la
+  // barra o desde la lista es exactamente lo mismo. Ref para no volver a
+  // suscribirse en cada render.
+  const abrirDesdeBarra = useRef<(detalle: ChatRailOpenDetail) => boolean>(() => false);
+  abrirDesdeBarra.current = (detalle) => {
+    if (detalle.tipo === 'grupo') {
+      selectGroup(detalle.id);
+      return true;
+    }
+    if (detalle.tipo === 'persona') {
+      selectPersona(detalle.id);
+      return true;
+    }
+    const agente = overview.agents.find((a) => a.code === detalle.code);
+    if (!agente) return false;
+    selectAgent(agente);
+    return true;
+  };
+  useEffect(() => {
+    const onAbrir = (evento: Event) => {
+      const detalle = (evento as CustomEvent<ChatRailOpenDetail>).detail;
+      if (detalle && abrirDesdeBarra.current(detalle)) evento.preventDefault();
+    };
+    window.addEventListener(CHAT_RAIL_OPEN_EVENT, onAbrir);
+    return () => window.removeEventListener(CHAT_RAIL_OPEN_EVENT, onAbrir);
+  }, []);
 
   // El hilo entre personas abierto, resuelto contra la bandeja (como el
   // grupo), con el recién abierto como respaldo mientras la bandeja lo trae.
