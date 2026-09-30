@@ -1250,24 +1250,247 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   color: var(--app-text-muted, #64748b) !important;
 }
 
-/* ── Barra de avatares en la cabecera ── */
-.chat-agent-bar {
-  margin-right: 2px;
+/* ── Barra lateral del chat (ChatRail, 2026-09-30) ──
+   Los selectores de botones y títulos van con `.chat-rail` delante: Mantine
+   (UnstyledButton, Text) pone `padding: 0` con la misma especificidad y su CSS
+   se importa DESPUÉS de este archivo, así que sin eso ganaría el empate.
+   Reemplaza a los avatares de la cabecera. Fija a la izquierda, debajo de la
+   cabecera; el contenido de la página se corre su ancho con `.con-chat-rail`
+   (lo pone y lo QUITA ChatRail). Sin transición de ancho a propósito: animar
+   el ancho obliga a rehacer el diseño de toda la página en cada cuadro. */
+:root {
+  --chat-rail-w: 64px;
+  --chat-rail-w-expandida: 288px;
 }
 
-.chat-agent-bar__item {
+.chat-rail {
+  background-color: var(--app-header, var(--app-surface));
+  color: var(--app-text);
+}
+
+.chat-rail--fija {
+  position: fixed;
+  top: var(--app-header-height);
+  left: 0;
+  bottom: 0;
+  z-index: 45;
+  width: var(--chat-rail-w);
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--app-border);
+  padding-left: env(safe-area-inset-left);
+}
+
+.chat-rail--fija.chat-rail--expandida {
+  width: var(--chat-rail-w-expandida);
+}
+
+body.con-chat-rail .app-page-shell {
+  padding-left: var(--chat-rail-w);
+}
+
+body.con-chat-rail.con-chat-rail--expandida .app-page-shell {
+  padding-left: var(--chat-rail-w-expandida);
+}
+
+/* Modo inmersivo del chat: sin cabecera tampoco hay barra (ver más abajo). */
+body.chat-inmersivo .chat-rail--fija {
+  display: none;
+}
+
+body.chat-inmersivo.con-chat-rail .app-page-shell {
+  padding-left: 0;
+}
+
+.chat-rail__cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px 6px;
+}
+
+.chat-rail--expandida .chat-rail__cabecera:first-child {
+  justify-content: space-between;
+}
+
+.chat-rail__cabecera--buscar {
+  padding-top: 0;
+}
+
+.chat-rail__nombre {
+  padding-left: 4px;
+}
+
+.chat-rail__scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-rail__seccion {
+  padding: 2px 0 6px;
+}
+
+.chat-rail .chat-rail__titulo {
+  margin: 0;
+  padding: 8px 16px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--app-text-muted);
+}
+
+.chat-rail__separador {
+  width: 28px;
+  margin: 4px auto 8px;
+  border: 0;
+  border-top: 1px solid var(--app-border);
+}
+
+.chat-rail__lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chat-rail__li {
+  display: flex;
+  justify-content: center;
+  padding: 3px 0;
+}
+
+.chat-rail .chat-rail__icono {
   display: inline-flex;
-  padding: 2px;
+  padding: 3px;
   border-radius: 999px;
   transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
-.chat-agent-bar__item:hover {
+.chat-rail__icono:hover {
   transform: translateY(-1px);
 }
 
-.chat-agent-bar__item--active {
-  box-shadow: 0 0 0 2px var(--app-accent, #2563eb);
+.chat-rail__icono:focus-visible,
+.chat-rail__fila-boton:focus-visible,
+.chat-rail__pie-enlace:focus-visible {
+  outline: 2px solid var(--app-accent, #113562);
+  outline-offset: 2px;
+}
+
+.chat-rail__icono--activo {
+  box-shadow: 0 0 0 2px var(--app-accent, #113562);
+}
+
+.chat-rail__fila {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 1px 8px;
+  border-radius: 10px;
+  transition: background-color 120ms ease;
+}
+
+.chat-rail__fila:hover,
+.chat-rail__fila:focus-within {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-rail__fila--activa {
+  background-color: color-mix(in srgb, var(--app-accent, #113562) 12%, transparent);
+}
+
+.chat-rail .chat-rail__fila-boton {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 10px;
+}
+
+.chat-rail__texto {
+  flex: 1;
+  min-width: 0;
+}
+
+/* El botón de anclar aparece al pasar el mouse o con el teclado; el que ya
+   está anclado se ve siempre, para que se sepa por qué está arriba. En
+   pantallas táctiles (sin hover) se ve siempre. */
+.chat-rail__ancla {
+  flex: 0 0 auto;
+  margin-right: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.chat-rail__fila:hover .chat-rail__ancla,
+.chat-rail__fila:focus-within .chat-rail__ancla,
+.chat-rail__ancla--puesta {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .chat-rail__ancla {
+    opacity: 1;
+  }
+}
+
+.chat-rail__pie {
+  border-top: 1px solid var(--app-border);
+  padding: 8px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  display: flex;
+  justify-content: center;
+}
+
+.chat-rail--expandida .chat-rail__pie,
+.chat-rail--drawer .chat-rail__pie {
+  justify-content: flex-start;
+}
+
+.chat-rail__pie-enlace {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  color: var(--app-text-muted);
+}
+
+.chat-rail__pie-enlace:hover {
+  color: var(--app-accent, #113562);
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-rail--drawer {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-rail--drawer .mantine-Drawer-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat-rail--drawer .chat-rail__nav {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-rail__drawer-cabecera {
+  background-color: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-rail__icono,
+  .chat-rail__fila,
+  .chat-rail__ancla {
+    transition: none;
+  }
 }
 
 .chat-list-row {
