@@ -37,3 +37,17 @@ export async function downloadVerifiedPdf(itemId: string, expectedSha256: string
   }
   return bytes;
 }
+
+/**
+ * Descarga un adjunto de una solicitud y VERIFICA su SHA-256 registrado al
+ * cargarlo (409 si no coincide: el archivo pudo alterarse fuera del sistema).
+ */
+export async function downloadVerifiedFile(itemId: string, expectedSha256: string): Promise<Uint8Array> {
+  const file = await downloadOneDriveItemContent(await token(), itemId);
+  if (!file) throw new SgcError('No se pudo obtener el archivo desde OneDrive.', 502);
+  const bytes = new Uint8Array(file.buffer);
+  if (sha256Hex(bytes) !== expectedSha256.trim().toLowerCase()) {
+    throw new SgcError('El archivo guardado no coincide con su huella registrada (SHA-256). Avise a Calidad.', 409);
+  }
+  return bytes;
+}

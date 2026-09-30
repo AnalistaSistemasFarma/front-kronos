@@ -42,10 +42,28 @@ export async function getSgcRequestContext(request: Request): Promise<SgcRequest
 export function companyAccess(
   ctx: SgcRequestContext,
   idCompany: number,
-  need: 'canRead' | 'canQuality' = 'canRead'
+  need: 'canRead' | 'canQuality' | 'canManage' | 'canAdminFlows' = 'canRead'
 ): SgcCompanyAccess | null {
   const entry = ctx.access.find((a) => a.idCompany === idCompany);
   return entry && entry[need] ? entry : null;
+}
+
+/** Acceso que permite configurar flujos, matriz y autorizaciones (administración de flujos o Calidad). */
+export function configAccess(ctx: SgcRequestContext, idCompany: number): SgcCompanyAccess | null {
+  const entry = ctx.access.find((a) => a.idCompany === idCompany);
+  return entry && (entry.canAdminFlows || entry.canQuality) ? entry : null;
+}
+
+/** Id numérico positivo de un segmento de la URL, o null. */
+export function parseId(raw: string | undefined): number | null {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** Cuerpo JSON como objeto (o null si no lo es). */
+export async function readJson(request: Request): Promise<Record<string, unknown> | null> {
+  const body = await request.json().catch(() => null);
+  return body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
 }
 
 /** Empresa pedida en la URL (?company=3). */
