@@ -83,6 +83,7 @@ model User {
   chatGroupsCreated       ChatConversation[]       @relation("ChatConversationCreator")
   chatParticipations      ChatParticipant[]
   chatMessagesAuthored    ChatMessage[]            @relation("ChatMessageUserAuthor")
+  chatPins                ChatPin[]
 
   @@map("user")
   @@schema("dbo")
@@ -741,6 +742,30 @@ model ChatConversation {
   @@index([id_agent])
   @@index([kind, archived, last_message_at(sort: Desc)])
   @@map("chat_conversation")
+  @@schema("dbo")
+}
+
+/// Chats ANCLADOS de la barra lateral del chat (2026-09-30). Una fila por
+/// persona y por chat anclado; es SU preferencia y nadie más la ve.
+///
+/// `target_key` dice QUÉ se ancló, con el mismo formato que usa la interfaz
+/// (lib/chat/rail.ts): 'agent:<id_agent>' para un asistente —se puede anclar
+/// aunque todavía no exista la conversación— y 'conv:<id>' para un grupo o un
+/// hilo entre personas. Texto y no dos llaves foráneas a propósito: un ancla
+/// que apunta a algo que ya no se ve simplemente no se pinta.
+///
+/// Tabla NUEVA y aparte: si el código sale antes que el DDL solo fallan las
+/// anclas (la ruta responde "sin anclas"), no el chat entero.
+model ChatPin {
+  id         Int      @id @default(autoincrement())
+  id_user    String   @db.NVarChar(1000)
+  target_key String   @db.NVarChar(60)
+  created_at DateTime @default(now())
+
+  user User @relation(fields: [id_user], references: [id], onDelete: Cascade)
+
+  @@unique([id_user, target_key], map: "chat_pin_user_target_key")
+  @@map("chat_pin")
   @@schema("dbo")
 }
 

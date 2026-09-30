@@ -19,7 +19,7 @@ import {
 import { useState, useEffect, useContext, useMemo } from 'react';
 import { useTheme } from './providers';
 import NotificationBell from './NotificationBell';
-import ChatAgentBar from './chat/ChatAgentBar';
+import ChatRail from './chat/ChatRail';
 import ChatPulse from './chat/ChatPulse';
 import ValentineWallRoot from './valentine/ValentineWallRoot';
 import {
@@ -314,12 +314,13 @@ export default function Header() {
             </nav>
 
             <div className='flex items-center space-x-2'>
-              {/* Avatares de los asistentes IA (módulo de chat de agentes).
-                  Se pinta solo si el usuario tiene el permiso; si no, no
-                  ocupa espacio. Único cambio de este archivo en la fase 2c:
-                  una línea AÑADIDA al grupo de acciones, sin tocar ni
-                  reordenar nada de lo que ya estaba. */}
-              <ChatAgentBar />
+              {/* Chats (asistentes, personas y grupos). Desde 2026-09-30 ya no
+                  van en la cabecera: viven en la barra lateral izquierda
+                  (ChatRail). En escritorio esto no pinta nada aquí —la barra
+                  se monta aparte, fija a la izquierda—; en el celular deja
+                  solo el botón que abre el menú deslizable de chats. Se pinta
+                  solo si el usuario tiene el permiso. */}
+              <ChatRail />
               {/* Pulso del chat entre personas (mensajes directos y zumbidos
                   📳 en cualquier pantalla). No pinta nada. */}
               <ChatPulse />

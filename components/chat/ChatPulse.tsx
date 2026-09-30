@@ -22,7 +22,7 @@ import {
 
 /**
  * PULSO GLOBAL del chat entre personas. No pinta nada: vive en la cabecera de
- * TODA la aplicación (components/Header.tsx, junto a ChatAgentBar) y mantiene
+ * TODA la aplicación (components/Header.tsx, junto a ChatRail) y mantiene
  * abierto un long-poll contra /api/chat/pulse para enterarse en ~1 s de un
  * mensaje directo o de un zumbido, esté la persona en la pantalla que esté.
  *
