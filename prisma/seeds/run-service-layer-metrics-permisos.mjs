@@ -9,7 +9,7 @@
  *   node prisma/seeds/run-service-layer-metrics-permisos.mjs
  *
  * Conecta con SAPSENDSQL_* del .env actual (mismo patrón que
- * run-dashboard-permisos.mjs / run-document-management-workflow.mjs, vía
+ * run-dashboard-permisos.mjs, vía
  * dbconfig.js/buildMssqlConfig()).
  */
 import 'dotenv/config';

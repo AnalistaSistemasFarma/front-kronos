@@ -30,8 +30,7 @@ export interface UploadedChatAttachment {
  * Sube los adjuntos de un mensaje a OneDrive y devuelve las filas listas para
  * crearse junto con el mensaje.
  *
- * ORDEN DELIBERADO (el mismo del SGD, lib/document-management/newVersion.ts):
- * primero OneDrive —que es una operación externa y NO transaccional— y solo si
+ * ORDEN DELIBERADO: primero OneDrive —que es una operación externa y NO transaccional— y solo si
  * todo salió bien se escribe en la base, dentro de una única transacción con el
  * mensaje. Si algo aquí falla, esta función lanza y la ruta responde error sin
  * haber creado el mensaje: `chat_attachment.id_message` es NOT NULL y no

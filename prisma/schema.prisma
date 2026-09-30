@@ -71,7 +71,6 @@ model User {
   userTypesAuthorizations UserTypesAuthorization[]
   sessions                Session[]
   auditLogs               UserAuditLog[]
-  documentsOwned          Document[]               @relation("DocumentOwner")
   // Modulo "Asistentes IA" (chat de agentes) — back-relations requeridas por Prisma.
   chatConversations       ChatConversation[]       @relation("ChatConversationUser")
   chatGroupsCreated       ChatConversation[]       @relation("ChatConversationCreator")
@@ -98,7 +97,6 @@ model Company {
   sap_endpoints   sap_endpoints[]
   cargoAliases    CargoAlias[]
   cargoJerarquias CargoJerarquia[]
-  documents       Document[]
   // Modulo "Asistentes IA" (chat de agentes) — back-relations requeridas por Prisma.
   agentCompanies  AgentCompany[]
   chatGroups      ChatConversation[]
@@ -483,222 +481,6 @@ model CatalogField {
 }
 
 // ===================================================================
-// Módulo Gestión Documental (Fase 1) — infraestructura para la carga
-// inicial histórica de documentos, directo en estado "Vigente" (sin pasar
-// por flujo de aprobación todavía). Los 14 estados del ciclo de vida
-// documental (En creación, ... Eliminado) y el flujo de tareas que los
-// mueve son Fase 2: se instanciaron como tareas del motor de workflow YA
-// existente en este repo, que vive en SQL CRUDO (tablas process_category /
-// task_process_category / requests_general / task_request_general, ver
-// app/api/requests-general y lib/workflow) y NO está modelado en este
-// schema — se referencia por Int suelto (ver DocumentVersion.id_request_general
-// más abajo, mismo patrón que Document.id_process). El grafo de qué acción
-// mueve de un estado a otro vive en código (lib/document-management/
-// workflowStates.ts), no en estas tablas: ver el comentario de ese archivo
-// para el porqué (el motor genérico solo avanza linealmente por
-// display_order y no soporta ramas decididas en vivo ni retrocesos).
-//
-// Decisión de modelado (documentada también en el PR): estas 3 tablas SÍ
-// van en Prisma, no en SQL crudo, por 3 razones:
-//   1. Es el único mecanismo de este repo con migraciones versionadas y
-//      aplicadas por CI/CD (ver .github/workflows, "prisma generate" en el
-//      pase a producción); las tablas del motor de solicitudes generales
-//      preexisten en la BD y no se crean desde ninguna migración de este
-//      repo, así que ese camino no es reproducible para tablas NUEVAS.
-//   2. Ya hay precedente de catálogos nuevos en Prisma que se integran con
-//      el motor SQL crudo por REFERENCIA BLANDA (un Int sin relation()):
-//      ver SavedView.id_process / CatalogSource.id_process arriba. Se repite
-//      el mismo patrón aquí con Document.id_process.
-//   3. Cuando llegue la Fase 2, basta con seguir enlazando por ese Int
-//      (id_process → process_category.id) desde código servidor con SQL
-//      crudo (mssqlPool), igual que ya hacen otros módulos Prisma de este
-//      repo (p.ej. lib/access-control.ts usa prisma.$queryRaw sobre [user]).
-//
-// Acceso multiempresa: NO se crea una tabla de roles documentales nueva
-// (autor/revisor/aprobador). Se reusa subprocess_user_company con dos
-// subprocesos dedicados (lectura / escritura), exactamente igual que el
-// módulo de Registros Sanitarios — ver lib/document-management/access.ts.
-// ===================================================================
-
-// Catálogo de tipos de documento. Es GLOBAL (no por empresa): la nomenclatura
-// de políticas/procedimientos aplica igual en todo el grupo.
-model DocumentType {
-  id_document_type Int        @id @default(autoincrement())
-  name             String     @db.NVarChar(150)
-  // Prefijo de nomenclatura usado al construir Document.code (p.ej. "POL", "PRO").
-  code_prefix      String     @db.NVarChar(20)
-  // Proceso GGC asociado (p.ej. "GGC-08-PT-012"). Texto libre: todavía no hay
-  // catálogo de procesos GGC modelado en este repo.
-  ggc_process      String?    @db.NVarChar(150)
-  is_active        Boolean    @default(true)
-  created_at       DateTime   @default(now())
-  documents        Document[]
-
-  @@unique([code_prefix])
-  @@map("document_type")
-}
-
-// ===================================================================
-// Sprint 9 — Catálogo de CATEGORÍAS DE PROCESO DOCUMENTAL (Auditorías y
-// Autoinspecciones / No Conformidades / Ingeniería Biomédica, con sus
-// sub-procesos). Resuelve el hallazgo documentado en el comentario de
-// Document.id_process más abajo y en app/api/document-management/generator/
-// route.ts: `id_process` es una referencia BLANDA al `process_category` del
-// motor de workflow SQL crudo (lib/document-management/workflowEngine.ts) —
-// identifica que un documento "pasó por el flujo de aprobación de 14
-// estados", NO a qué proceso de NEGOCIO pertenece. Todo documento que pasó
-// por ese flujo comparte el mismo id_process (el de "Gestión Documental —
-// Ciclo de vida del documento"); los de carga histórica (Fase 1) quedan en
-// NULL. Ninguno de los dos casos distingue Auditorías de No Conformidades de
-// Ingeniería Biomédica.
-//
-// Por eso este catálogo va en tablas NUEVAS y separadas de `id_process`,
-// con relación REAL (a diferencia de id_process/id_request_general, que son
-// blandas porque apuntan al motor SQL crudo preexistente): estas tablas SÍ
-// las crea/versiona este repo, así que no hay razón para no tener FK real.
-//
-// Diseño como DATO, no hardcode (pedido explícito de Nicolás — "esos
-// procesos deben tener su propia tableta para poder añadir más en el
-// futuro"): dos niveles, categoría → sub-procesos, cada uno con
-// display_order para el orden de siembra y is_active para poder retirar uno
-// sin borrar histórico. Agregar una categoría o sub-proceso nuevo en el
-// futuro es un INSERT, no un despliegue de código.
-//
-// Sembrado en prisma/seeds/document-management-process-categories.sql con
-// las 3 categorías y sub-procesos exactos que dio Nicolás para este sprint.
-// ===================================================================
-
-model DocumentProcessCategory {
-  id            Int                         @id @default(autoincrement())
-  name          String                      @db.NVarChar(200)
-  display_order Int                         @default(0)
-  is_active     Boolean                     @default(true)
-  created_at    DateTime                    @default(now())
-  subprocesses  DocumentProcessSubprocess[]
-
-  @@unique([name])
-  @@map("document_process_category")
-}
-
-model DocumentProcessSubprocess {
-  id                           Int      @id @default(autoincrement())
-  id_document_process_category Int
-  name                         String   @db.NVarChar(200)
-  display_order                Int      @default(0)
-  is_active                    Boolean  @default(true)
-  created_at                   DateTime @default(now())
-
-  category  DocumentProcessCategory @relation(fields: [id_document_process_category], references: [id], onDelete: Cascade)
-  documents Document[]
-
-  @@unique([id_document_process_category, name])
-  @@map("document_process_subprocess")
-}
-
-// Documento vigente (encabezado). Multiempresa vía id_company. La carga
-// inicial (Fase 1) crea el Document + su primera DocumentVersion ya en
-// estado "Vigente"; no hay todavía transición de estados.
-model Document {
-  id_document                    Int       @id @default(autoincrement())
-  code                           String    @db.NVarChar(50)
-  title                          String    @db.NVarChar(300)
-  id_document_type               Int
-  id_company                     Int
-  // Referencia BLANDA a process_category (motor SQL crudo, ver nota de
-  // módulo arriba). Sin relation(): esa tabla no está modelada en Prisma.
-  // Null = el documento aún no está ligado a un proceso de aprobación.
-  //
-  // OJO — NO es la categoría de negocio del documento (Auditorías, No
-  // Conformidades, Ingeniería Biomédica): ver el catálogo
-  // DocumentProcessCategory/DocumentProcessSubprocess y el campo
-  // id_document_process_subprocess más abajo, agregados en el Sprint 9
-  // precisamente porque este campo NO alcanzaba para eso (todo documento
-  // que pasa por el flujo de aprobación comparte el mismo id_process).
-  id_process                     Int?
-  // Sprint 9 — categoría de negocio real del documento (FK real, ver nota de
-  // módulo arriba de DocumentProcessCategory). Null = documento aún sin
-  // clasificar en el catálogo de procesos de negocio (p.ej. documentos
-  // fuera de Auditorías/No Conformidades/Ingeniería Biomédica, o pendientes
-  // de clasificar).
-  id_document_process_subprocess Int?
-  owner_user_id                  String    @db.NVarChar(1000)
-  due_review_date                DateTime?
-  is_restricted                  Boolean   @default(false)
-  current_status                 String    @default("Vigente") @db.NVarChar(30)
-  // Referencia BLANDA a DocumentVersion.id_document_version (sin relation()):
-  // declararla como relación real crearía una segunda ruta de FK entre
-  // Document y DocumentVersion además de la relación 1:N `versions`
-  // (cascade), lo que SQL Server rechaza como ciclo de FK. Se mantiene
-  // consistente desde la capa de aplicación (lib/document-management), justo
-  // después de insertar la versión.
-  current_version_id             Int?
-  created_at                     DateTime  @default(now())
-  updated_at                     DateTime  @updatedAt
-
-  documentType      DocumentType               @relation(fields: [id_document_type], references: [id_document_type], onDelete: NoAction, onUpdate: NoAction)
-  company           Company                    @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
-  owner             User                       @relation("DocumentOwner", fields: [owner_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  processSubprocess DocumentProcessSubprocess? @relation(fields: [id_document_process_subprocess], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  versions          DocumentVersion[]
-
-  @@unique([id_company, code])
-  @@index([id_company, current_status])
-  @@index([id_document_type])
-  @@index([id_document_process_subprocess])
-  @@map("document")
-}
-
-// Una fila por versión subida a OneDrive. La migración histórica desde el
-// SGD (Fase 1, paso posterior a esta infraestructura) solo trae la versión
-// VIGENTE de cada documento como version_number = 1; el historial completo
-// de versiones anteriores queda en el SGD y no se migra.
-model DocumentVersion {
-  id_document_version Int      @id @default(autoincrement())
-  id_document         Int
-  version_number      Int
-  status              String   @default("Vigente") @db.NVarChar(30)
-  // Id del item en Microsoft Graph (drive item), para poder descargarlo /
-  // reemplazarlo sin volver a resolver la ruta.
-  onedrive_item_id    String?  @db.NVarChar(300)
-  // Ruta completa dentro del drive:
-  // GESTION-DOCUMENTAL/<EMPRESA>/<TIPO>/<CODIGO>/v<version>/<archivo>
-  onedrive_path       String   @db.NVarChar(1000)
-  // Referencia BLANDA a User.id (sin relation() para no sumar una segunda FK
-  // Document/DocumentVersion → User en la misma migración manual; ver nota
-  // de owner_user_id arriba, que sí es relación real vía "DocumentOwner").
-  created_by          String   @db.NVarChar(1000)
-  created_at          DateTime @default(now())
-  comments            String?  @db.NVarChar(1000)
-  // Fase 2 — Referencia BLANDA a requests_general.id (motor SQL crudo de
-  // "solicitudes generales", ver nota de módulo arriba y lib/document-management/
-  // workflowEngine.ts). Null mientras la versión todavía no tiene flujo de
-  // aprobación arrancado (por ejemplo, versiones migradas directo a "Vigente"
-  // en la carga inicial de Fase 1). Sin relation(): esa tabla no está modelada
-  // en Prisma, igual criterio que Document.id_process.
-  id_request_general  Int?
-  // Sprint 8 — Editor de documentos (Tiptap). Contenido editable en HTML de
-  // esta versión, generado por el editor propio dentro de la plataforma (ver
-  // app/(hub)/process/document-management/generador/[id]/editar/page.tsx).
-  // NULL = todavía no se ha editado ninguna vez desde el editor (versión
-  // cargada por archivo, p.ej. Fase 1/Fase 2 clásicas, o carga directa del
-  // atajo regulatorio). Al guardar desde el editor, este HTML se persiste
-  // AQUÍ MISMO (se actualiza la versión vigente, no se crea una versión
-  // nueva ni se dispara de nuevo el flujo de 14 estados — ver decisión
-  // documentada en lib/document-management/editor.ts) y además se renderiza
-  // a PDF (Chrome headless vía Puppeteer) y se sube a OneDrive,
-  // reemplazando el archivo de esta misma versión (onedrive_item_id/
-  // onedrive_path se actualizan también). NVARCHAR(MAX) porque el HTML de
-  // un documento con tablas puede superar los 4000 caracteres de un
-  // NVARCHAR normal.
-  content_html        String?  @db.NVarChar(Max)
-
-  document Document @relation(fields: [id_document], references: [id_document], onDelete: Cascade)
-
-  @@unique([id_document, version_number])
-  @@map("document_version")
-}
-
-// ===================================================================
 // Métricas diarias del SAP Business One Service Layer (OLP) — 2026-09-03.
 // Reemplaza el Excel manual que se venía sacando a mano: cuenta líneas del
 // log del balanceador del Service Layer (puerto 50000, recibe todo el
@@ -712,8 +494,8 @@ model DocumentVersion {
 //
 // `company` es texto libre (SIN FK a la tabla `company`) a propósito: hoy
 // solo se llena "OLP", pero la idea es poder sumar otras empresas más
-// adelante sin tener que resolver primero su id_company real — ver mismo
-// criterio que Document.id_process (referencia blanda documentada arriba).
+// adelante sin tener que resolver primero su id_company real (referencia
+// blanda, sin relation()).
 // ===================================================================
 model ServiceLayerDailyMetric {
   id                Int      @id @default(autoincrement())
@@ -731,9 +513,8 @@ model ServiceLayerDailyMetric {
 // Módulo "Asistentes IA" — chat de agentes en SynerLink (Fase 2a: modelo de
 // datos y permisos). 2026-09-06.
 //
-// AISLAMIENTO: este módulo es independiente del de Gestión Documental (SGD).
-// No comparte ni modifica ninguna de sus tablas; lo único común son las
-// tablas de plataforma que ya existían (`user`, `company`, y el esquema de
+// AISLAMIENTO: este módulo no comparte ni modifica tablas de otros módulos;
+// lo único común son las tablas de plataforma que ya existían (`user`, `company`, y el esquema de
 // permisos process -> subprocess -> subprocess_user_company).
 //
 // -------------------------------------------------------------------
@@ -772,7 +553,7 @@ model ServiceLayerDailyMetric {
 // FK, renombrar el agente no mueve su permiso, y un subproceso no puede ser
 // el permiso de dos agentes (índice único filtrado UX_agent_id_subprocess).
 // Hay precedente de subprocesos que son solo marcadores de permiso y no
-// páginas reales (p.ej. /process/document-management/manage/regulatory).
+// páginas reales.
 //
 // `agent_company` es OTRA cosa: es la AGRUPACIÓN (las "carpetas" de la
 // interfaz), no el permiso. Dice a qué empresas pertenece un agente —
@@ -1131,8 +912,6 @@ model ChatMessage {
   /// MARKDOWN CRUDO. NUNCA HTML: el HTML se guarda tal cual y se renderiza
   /// en el cliente, así que almacenarlo abriría un XSS almacenado. El
   /// render a HTML es responsabilidad de la interfaz, sanitizando.
-  /// (Contraste deliberado con DocumentVersion.content_html, que sí es HTML
-  /// porque lo produce un editor propio y no un agente.)
   body            String @db.NVarChar(Max)
 
   /// Autor PERSONA. En un hilo directo es siempre el dueño y se puede deducir
@@ -1227,8 +1006,8 @@ model ChatMessageDelivery {
   @@map("chat_message_delivery")
 }
 
-/// Adjunto de un mensaje. El archivo vive en OneDrive (mismo criterio que
-/// DocumentVersion del SGD); aquí solo queda la referencia.
+/// Adjunto de un mensaje. El archivo vive en OneDrive; aquí solo queda la
+/// referencia.
 model ChatAttachment {
   id               Int      @id @default(autoincrement())
   id_message       Int
