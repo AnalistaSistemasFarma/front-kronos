@@ -330,7 +330,8 @@ describe.skipIf(!url)('SGC · Sprint 1 · integración con SQL Server', () => {
     const guide = (await getCatalogs(prisma, OLP)).codingGuide!;
     expect(guide).toMatchObject({ prefix: 'OLP', sequenceDigits: 4, updatedBy: CALIDAD });
     const r = await createInitialDocument(prisma, upload, { ...base(), title: 'Con guía de 4 dígitos' }, actor);
-    expect(r.code).toBe('OLP-GC-PR-0012');
+    // La serie sigue (001, 002, 010, 011, 012 ya existen): 013, ahora con 4 dígitos.
+    expect(r.code).toBe('OLP-GC-PR-0013');
     const cambios = await prisma.sgcAuditLog.count({ where: { action: { in: ['maestro.creado', 'maestro.editado', 'guia_codificacion.editada'] }, actor_email: CALIDAD } });
     expect(cambios).toBe(7);
   });

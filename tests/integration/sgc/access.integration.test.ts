@@ -92,10 +92,11 @@ describe.skipIf(!url)('SGC · integración con SQL Server', () => {
     expect(await getSgcAccessForUser(prisma, 'nadie@gsslatam.com')).toEqual([]);
   });
 
-  it('[SGC-REQ-009] las tablas del módulo documental retirado no existen', async () => {
+  it('[SGC-REQ-009] las tablas del módulo documental retirado no existen en dbo (las del SGC viven en `sgc`)', async () => {
     const rows = await prisma.$queryRaw<{ n: number }[]>`
       SELECT COUNT(*) AS n FROM sys.tables
-      WHERE name IN ('document', 'document_type', 'document_version', 'document_process_category', 'document_process_subprocess')`;
+      WHERE schema_id = SCHEMA_ID('dbo')
+        AND name IN ('document', 'document_type', 'document_version', 'document_process_category', 'document_process_subprocess')`;
     expect(Number(rows[0].n)).toBe(0);
   });
 });
