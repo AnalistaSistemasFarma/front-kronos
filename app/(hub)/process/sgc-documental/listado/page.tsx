@@ -23,7 +23,7 @@ import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
 
 // Código, fechas y distintivos no se parten ni se recortan (la tabla se desplaza).
 const NOWRAP = { whiteSpace: 'nowrap' } as const;
-const NO_SHRINK = { flexShrink: 0 } as const;
+const NO_SHRINK = { flexShrink: 0, minWidth: 'max-content' } as const;
 
 const STATUS_OPTIONS = [
   { value: 'vigente', label: 'Vigentes' },
