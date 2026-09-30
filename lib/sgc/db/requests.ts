@@ -25,8 +25,11 @@ import {
 } from '../flows/engine';
 import { SGC_NOTIFICATION_TITLES, recipients, requestUrl, taskUrl, type SgcNotification, type SgcNotifier } from '../notifications';
 import type { SgcCompanyAccess } from '../permissions';
-import { SGC_SIGNATURE_STUB_NOTICE, describeSignaturePoint, signaturePointFor } from '../signature/signaturePoint';
+import { getDraftForSubmitError, pickCurrentDraft } from '../draft/current';
+import { checklistFieldsFor, normalizeChecklist } from '../signature/checklist';
+import { SGC_SIGNATURE_NOTICE, SGC_SIGNATURE_STATUS_LABELS, describeSignaturePoint, signaturePointFor, type SgcSignatureStatus } from '../signature/signaturePoint';
 import { sha256Hex } from '../storage';
+import { currentDraftInTx, recordQualityCheck, recordSignature, type SgcSignatureRequest } from './signatureRecord';
 import { getPoolMembers, getPoolTypeCodes } from './authorizations';
 import type { SgcActor, SgcDb } from './catalogs';
 import type { SgcUploader } from './documents';
@@ -103,7 +106,7 @@ interface EngineCtx {
   subjectLabel: string;
 }
 
-async function addInteraction(
+export async function addInteraction(
   tx: Tx,
   idRequest: number,
   kind: string,
@@ -387,6 +390,13 @@ export interface SgcDecisionInput {
   comment?: unknown;
   /** Si llega desde Autorizaciones SGC: el cupo exacto que se decide. */
   idAssignee?: number | null;
+  /**
+   * Sprint 3: firma electrónica ya REAUTENTICADA (la arma lib/sgc/db/signatures.ts).
+   * Obligatoria para APROBAR (o enviar) un paso con firma; sin ella el motor lo rechaza.
+   */
+  signature?: SgcSignatureRequest | null;
+  /** Sprint 3: respuestas de la lista de chequeo de Calidad (cupo del grupo de verificación). */
+  checklist?: unknown;
 }
 
 function toAssigneeState(a: { id_task_assignee: number; user_email: string | null; pool_type_code: string | null; sign_order: number; status: string }): SgcAssigneeState {
@@ -394,8 +404,9 @@ function toAssigneeState(a: { id_task_assignee: number; user_email: string | nul
 }
 
 async function assertReadyToSubmit(tx: Tx, request: RequestRow, def: SgcFlowDefinition, taskKey: string) {
-  const drafts = await tx.sgcAttachment.count({ where: { id_request: request.id_request, purpose: 'borrador', withdrawn_at: null } });
-  if (drafts === 0) throw new SgcError('Cargue el borrador del documento (Word o PDF) antes de enviarlo.', 409);
+  // Sprint 3: el borrador puede ser un archivo (Word .docx o PDF) o el editado en la app.
+  const draftError = getDraftForSubmitError(await currentDraftInTx(tx, request.id_request));
+  if (draftError) throw new SgcError(draftError, 409);
   for (const t of def.tasks.filter((x) => x.assignment === 'firmantes' && x.isEnabled)) {
     const n = await tx.sgcRequestSigner.count({ where: { id_request: request.id_request, step_key: t.key, is_active: true } });
     if (n === 0) throw new SgcError(`Asigne los firmantes de «${t.name}» antes de enviar el documento.`, 409);
@@ -443,22 +454,63 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     const isSubmit = taskDef.assignment === 'elaborador' && decision === 'aprobar';
     if (isSubmit) await assertReadyToSubmit(tx, request, def, task.task_key);
 
-    const now = new Date();
+    const now = input.signature?.now ?? new Date();
     const assignee = task.assignees.find((a) => a.id_task_assignee === chosen.id)!;
+
+    // Sprint 3 — FIRMA ELECTRÓNICA PROPIA: aprobar (o enviar) un paso con firma exige firmar.
+    const needsSignature = decision === 'aprobar' && Boolean(assignee.signature_meaning);
+    if (needsSignature && !input.signature) {
+      throw new SgcError('Este paso se aprueba con firma electrónica: use «Firmar» (contraseña de SynerLink y motivo).', 409);
+    }
+    if (!needsSignature && input.signature) throw new SgcError('Esta decisión no lleva firma electrónica.', 409);
+    // Lista de chequeo de Calidad: la responde el cupo del GRUPO de verificación de la tarea.
+    // Se valida ANTES de firmar: con puntos que no cumplen no se aprueba (se devuelve).
+    const chkFields = checklistFieldsFor(def.formFields, task.task_key);
+    const isPoolSlot = !assignee.user_email && Boolean(assignee.pool_type_code);
+    const withChecklist = chkFields.length > 0 && isPoolSlot && (decision === 'aprobar' || input.checklist !== undefined);
+    if (withChecklist && decision === 'aprobar' && normalizeChecklist(chkFields, input.checklist).result !== 'conforme') {
+      throw new SgcError('La lista de chequeo tiene puntos que NO CUMPLEN: devuelva el documento a elaboración con sus observaciones.', 409);
+    }
+    const signed = needsSignature
+      ? await recordSignature(tx, { request, idTask, idTaskAssignee: chosen.id, expectedMeaning: assignee.signature_meaning, signature: input.signature!, actor })
+      : null;
+    let checklistResult: string | null = null;
+    if (withChecklist) {
+      const chk = await recordQualityCheck(tx, { request, idTask, idTaskAssignee: chosen.id, idSignature: signed?.idSignature ?? null, fields: chkFields, raw: input.checklist, actor, now });
+      checklistResult = chk.result;
+    }
+
     await tx.sgcTaskAssignee.update({
       where: { id_task_assignee: chosen.id },
-      data: { status: decision === 'aprobar' ? 'aprobado' : 'devuelto', decided_by: me, decided_at: now, comment: comment || null },
+      data: {
+        status: decision === 'aprobar' ? 'aprobado' : 'devuelto',
+        decided_by: me,
+        decided_at: now,
+        comment: comment || null,
+        ...(signed ? { signature_status: 'firmada', id_signature: signed.idSignature } : {}),
+      },
     });
     await tx.sgcAuthorization.updateMany({
       where: { id_task_assignee: chosen.id, status: 'pendiente' },
       data: { status: authorizationStatusFor(decision), decided_by: me, decided_at: now, decision_comment: comment || null },
     });
-    const signText = describeSignaturePoint(assignee.signature_meaning, assignee.signature_status);
+    const signText = describeSignaturePoint(assignee.signature_meaning, signed ? 'firmada' : assignee.signature_status);
     const verb = isSubmit ? 'Envió el documento' : decision === 'aprobar' ? 'Aprobó' : 'Devolvió a elaboración';
     const slotText = assignee.pool_type_code && !assignee.user_email ? ` como integrante del grupo ${assignee.pool_type_code}` : '';
-    await addInteraction(tx, request.id_request, decision === 'devolver' ? 'devolucion' : 'decision', me, `${verb} en «${task.name}»${slotText}.${comment ? `\n${decision === 'devolver' ? 'Observaciones' : 'Comentario'}: ${comment}` : ''}${signText ? `\nPunto de firma: ${signText}.` : ''}`, {
+    const signLines = signed
+      ? `\nFirma electrónica: ${signText}. Motivo: ${signed.payload.reason}\nContenido firmado: ${signed.payload.content.name} · SHA-256 ${signed.payload.content.sha256}`
+      : signText && decision === 'aprobar'
+        ? `\nPunto de firma: ${signText}.`
+        : '';
+    const chkLine = checklistResult ? `\nLista de chequeo de Calidad: ${checklistResult === 'conforme' ? 'conforme' : 'NO conforme'}.` : '';
+    await addInteraction(tx, request.id_request, decision === 'devolver' ? 'devolucion' : 'decision', me, `${verb} en «${task.name}»${slotText}.${comment ? `\n${decision === 'devolver' ? 'Observaciones' : 'Comentario'}: ${comment}` : ''}${signLines}${chkLine}`, {
       idTask,
-      meta: { decision, idAssignee: chosen.id, signature: { meaning: assignee.signature_meaning, status: assignee.signature_status } },
+      meta: {
+        decision,
+        idAssignee: chosen.id,
+        signature: signed ? { uid: signed.payload.uid, meaning: signed.payload.meaning, recordHash: signed.recordHash, contentSha256: signed.payload.content.sha256 } : { meaning: assignee.signature_meaning, status: assignee.signature_status },
+        checklist: checklistResult,
+      },
     });
 
     const after = task.assignees.map((a) => (a.id_task_assignee === chosen.id ? { ...toAssigneeState(a), status: (decision === 'aprobar' ? 'aprobado' : 'devuelto') as SgcAssigneeStatus } : toAssigneeState(a)));
@@ -505,12 +557,19 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
       entity: 'task',
       entityId: idTask,
       before: { status: 'abierta', assignee: chosen.id },
-      after: { decision, outcome, next, signature: assignee.signature_status },
+      after: { decision, outcome, next, signature: signed ? { status: 'firmada', uid: signed.payload.uid } : assignee.signature_status, checklist: checklistResult },
       detail: comment || null,
       ip: actor.ip,
       userAgent: actor.userAgent,
     });
-    return { outcome, next, idRequest: request.id_request };
+    return {
+      outcome,
+      next,
+      idRequest: request.id_request,
+      signatureUid: signed?.payload.uid ?? null,
+      // Paso resuelto y su firma: «aprobo» resuelto ⇒ se genera el PDF controlado (signatures.ts).
+      resolvedMeaning: outcome === 'resuelta' ? taskDef.signatureMeaning : null,
+    };
   }, TX_OPTS);
   await send(notifier, notifications);
   return result;
@@ -721,6 +780,10 @@ const detailInclude = {
   formValues: { include: { field: true } },
   interactions: { orderBy: { id_interaction: 'asc' } },
   attachments: { orderBy: { id_attachment: 'asc' } },
+  // Sprint 3: firmas, listas de chequeo de Calidad y revisiones del borrador (sin el HTML).
+  signatures: { orderBy: { id_signature: 'asc' } },
+  qualityChecks: { orderBy: { id_quality_check: 'asc' } },
+  draftRevisions: { orderBy: { revision_number: 'asc' }, select: { id_draft_revision: true, revision_number: true, origin: true, sha256: true, size_bytes: true, note: true, saved_by: true, saved_at: true } },
 } satisfies Prisma.SgcRequestInclude;
 
 type DetailRow = Prisma.SgcRequestGetPayload<{ include: typeof detailInclude }>;
@@ -767,6 +830,7 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
   row.tasks.forEach((t) => t.assignees.forEach((a) => { if (a.user_email) allEmails.add(a.user_email); if (a.decided_by) allEmails.add(a.decided_by); }));
   row.interactions.forEach((i) => allEmails.add(i.author_email));
   row.attachments.forEach((a) => allEmails.add(a.uploaded_by));
+  row.draftRevisions.forEach((r) => allEmails.add(r.saved_by));
   const names = await namesFor(db, allEmails);
   const nameOf = (e: string | null) => (e ? names.get(lower(e)) ?? e : null);
 
@@ -788,6 +852,11 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
     isQuality,
   };
 
+  const sigById = new Map(row.signatures.map((sg) => [sg.id_signature, sg]));
+  const signatureOf = (id: number | null) => {
+    const sg = id ? sigById.get(id) : null;
+    return sg ? { uid: sg.signature_uid.trim(), signedAt: sg.signed_at.toISOString(), reason: sg.reason, recordHash: sg.record_hash.trim(), contentSha256: sg.content_sha256.trim() } : null;
+  };
   const tasks = row.tasks.map((t) => {
     const tDef = defByKey.get(t.task_key);
     const states = t.assignees.map(toAssigneeState);
@@ -795,6 +864,8 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
     const mine = t.assignees.filter((a) => a.status === 'pendiente' && ((a.user_email && lower(a.user_email) === me) || (!a.user_email && a.pool_type_code && pools.includes(a.pool_type_code))));
     const myTurn = mine.find((a) => turn.has(a.id_task_assignee)) ?? null;
     const blockedBySoD = Boolean(myTurn && tDef && tDef.assignment !== 'elaborador' && tDef.assignment !== 'solicitante' && isElaborator);
+    const myPoolSlot = Boolean(myTurn && !myTurn.user_email && myTurn.pool_type_code);
+    const checklist = myPoolSlot ? checklistFieldsFor(def.formFields, t.task_key).map((f) => ({ key: f.key, label: f.label, required: f.required, helpText: f.helpText })) : [];
     const single = !t.taskDef.multi_assignee && t.taskDef.assignment !== 'calidad';
     const currentAssignee = t.assignees.find((a) => a.status === 'pendiente');
     return {
@@ -829,9 +900,20 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
         decidedAt: a.decided_at?.toISOString() ?? null,
         comment: a.comment,
         signatureStatus: a.signature_status,
+        signatureStatusLabel: SGC_SIGNATURE_STATUS_LABELS[a.signature_status as SgcSignatureStatus] ?? a.signature_status,
         signatureMeaning: a.signature_meaning,
+        signature: signatureOf(a.id_signature),
       })),
-      myAction: myTurn && !blockedBySoD ? { idAssignee: myTurn.id_task_assignee, kind: tDef?.assignment === 'elaborador' ? ('enviar' as const) : ('decidir' as const) } : null,
+      myAction:
+        myTurn && !blockedBySoD
+          ? {
+              idAssignee: myTurn.id_task_assignee,
+              kind: tDef?.assignment === 'elaborador' ? ('enviar' as const) : ('decidir' as const),
+              // Sprint 3: aprobar/enviar exige firma electrónica con este significado.
+              signatureMeaning: myTurn.signature_meaning,
+              checklist,
+            }
+          : null,
       myWaiting: !myTurn && mine.length > 0,
       canReassign: t.status === 'abierta' && single && isOpen && Boolean(currentAssignee) && (isRequester || isQuality || lower(currentAssignee?.user_email) === me),
       assignedLabel: t.assignees.filter((a) => a.status !== 'reemplazado' && a.status !== 'anulado').map((a) => (a.user_email ? nameOf(a.user_email) : `Grupo ${a.pool_type_code}`)).join(', '),
@@ -855,7 +937,7 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
 
   const valueOf = new Map(row.formValues.map((v) => [v.id_flow_form_field, v]));
   const fieldRows = await db.sgcFlowFormField.findMany({ where: { id_flow_version: row.id_flow_version }, orderBy: [{ sort_order: 'asc' }] });
-  const formFields = fieldRows.map((f) => {
+  const formFields = fieldRows.filter((f) => !f.quality_check).map((f) => {
     const d = def.formFields.find((x) => x.key === f.field_key && x.taskKey === f.task_key)!;
     const v = valueOf.get(f.id_flow_form_field);
     return { id: f.id_flow_form_field, key: f.field_key, taskKey: f.task_key, label: f.label, type: f.field_type, required: f.required, options: d?.options ?? [], helpText: f.help_text, value: v?.value_text ?? null, updatedBy: v ? nameOf(v.updated_by) : null };
@@ -905,7 +987,35 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       withdrawReason: a.withdraw_reason,
     })),
     permissions,
-    signatureNotice: SGC_SIGNATURE_STUB_NOTICE,
+    signatureNotice: SGC_SIGNATURE_NOTICE,
+    // Sprint 3: borrador vigente (lo que se firma), revisiones del editor, firmas, chequeos y PDF controlado.
+    currentDraft: (() => {
+      const d = pickCurrentDraft(row.attachments, row.draftRevisions);
+      return d ? { kind: d.kind, ref: d.ref, name: d.name, sha256: d.sha256, format: d.format, at: d.at.toISOString() } : null;
+    })(),
+    draftRevisions: row.draftRevisions.map((r) => ({ id: r.id_draft_revision, number: r.revision_number, origin: r.origin, sha256: r.sha256.trim(), sizeBytes: r.size_bytes, note: r.note, savedBy: nameOf(r.saved_by), savedAt: r.saved_at.toISOString() })),
+    signatures: row.signatures.map((sg) => ({
+      uid: sg.signature_uid.trim(),
+      idTask: sg.id_task,
+      meaning: sg.meaning,
+      meaningLabel: SGC_SIGNATURE_LABELS[sg.meaning as keyof typeof SGC_SIGNATURE_LABELS] ?? sg.meaning,
+      signerEmail: sg.signer_email,
+      signerName: sg.signer_name ?? nameOf(sg.signer_email),
+      signedAt: sg.signed_at.toISOString(),
+      reason: sg.reason,
+      contentName: sg.content_name,
+      contentSha256: sg.content_sha256.trim(),
+      recordHash: sg.record_hash.trim(),
+      evidencePath: isQuality ? sg.evidence_path : null,
+      ip: isQuality ? sg.ip : null,
+    })),
+    qualityChecks: row.qualityChecks.map((q) => ({ id: q.id_quality_check, idTask: q.id_task, result: q.result, checkedBy: nameOf(q.checked_by), checkedAt: q.checked_at.toISOString(), items: JSON.parse(q.items_json) as { key: string; label: string; answerLabel: string; observation: string | null }[] })),
+    controlledPdf: {
+      status: row.controlled_pdf_status,
+      error: isQuality ? row.controlled_pdf_error : null,
+      idDocumentVersion: row.id_document_version,
+      idDocument: row.id_document,
+    },
   };
 }
 
@@ -1040,7 +1150,7 @@ export async function listMyRequests(db: SgcDb, email: string, access: readonly 
 // Historial: notas, adjuntos e información adicional
 // ---------------------------------------------------------------------------
 
-async function assertCanView(db: SgcDb | Tx, idRequest: number, viewer: SgcViewer) {
+export async function assertCanView(db: SgcDb | Tx, idRequest: number, viewer: SgcViewer) {
   const row = await db.sgcRequest.findUnique({ where: { id_request: idRequest }, include: { signers: true, tasks: { include: { assignees: true, taskDef: true } } } });
   if (!row) throw new SgcError('Solicitud no encontrada.', 404);
   const access = viewer.access.find((a) => a.idCompany === row.id_company && a.canRead);
@@ -1144,7 +1254,8 @@ export async function saveFormValues(db: SgcDb, idRequest: number, input: { valu
   const def = await loadDefinition(db, row.id_flow_version);
   return db.$transaction(async (tx) => {
     const before = await tx.sgcFormValue.findMany({ where: { id_request: idRequest }, include: { field: true } });
-    const saved = await saveFieldValues(tx, idRequest, row.id_flow_version, def.formFields, values, me, true);
+    // La lista de chequeo de Calidad no es «información adicional»: la responde Calidad al firmar.
+    const saved = await saveFieldValues(tx, idRequest, row.id_flow_version, def.formFields.filter((f) => !f.qualityCheck), values, me, true);
     if (Object.keys(saved).length === 0) return { saved };
     await addInteraction(tx, idRequest, 'estado', me, `Actualizó la información adicional: ${Object.keys(saved).map((k) => def.formFields.find((f) => f.key === k)?.label ?? k).join(', ')}.`);
     await writeSgcAudit(tx, { idCompany: row.id_company, actorEmail: me, action: SGC_AUDIT_ACTIONS.solicitudFormulario, entity: 'request', entityId: idRequest, before: Object.fromEntries(before.map((b) => [b.field.field_key, b.value_text])), after: saved, ip: actor.ip, userAgent: actor.userAgent });

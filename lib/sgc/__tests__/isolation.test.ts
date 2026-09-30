@@ -62,4 +62,24 @@ describe('SGC · aislamiento del código validado', () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  it('[SGC-REQ-049] la firma electrónica del SGC es independiente de Orión: sin imports de lib/orion ni components/orion, sin ORION_*, sin el tenant farmalogica-1 ni tablas de Orión', () => {
+    const offenders: string[] = [];
+    const all = DIRS.flatMap(files);
+    const signatureFiles = all.filter((f) => /signature|pdf|draft/.test(f));
+    expect(signatureFiles.length).toBeGreaterThan(8);
+    for (const f of all) {
+      const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+      for (const m of src.matchAll(/from\s+['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)|require\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+        const spec = m[1] ?? m[2] ?? m[3];
+        if (/lib\/orion|components\/orion|integrations\/orion/i.test(spec)) offenders.push(`${f} → ${spec}`);
+      }
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+      for (const re of [/ORION_[A-Z_]+/, /farmalogica-1/i, /orion_document_event|orionDocumentEvent/i, /\/api\/integrations\/orion/i]) {
+        const hit = code.match(re);
+        if (hit) offenders.push(`${f} → ${hit[0]}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
 });

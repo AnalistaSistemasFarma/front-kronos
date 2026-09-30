@@ -41,6 +41,7 @@ import {
 } from '@tabler/icons-react';
 import { sendMessage } from '../../email/utils/sendMessage';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
+import type { SgcSignatureMeaning } from '../../../lib/sgc/flows/definition';
 import { sgcStatusColor } from '../../../lib/sgc/flows/engine';
 import type { SgcMatrixSuggestion } from '../../../lib/sgc/flows/matrix';
 import { sgcSend, useSgcFetch } from '../useSgcFetch';
@@ -50,6 +51,8 @@ import SgcAttachmentsCard from './SgcAttachmentsCard';
 import SgcInteractionHistory from './SgcInteractionHistory';
 import SgcSignersPanel from './SgcSignersPanel';
 import SgcTasksModal from './SgcTasksModal';
+import SgcSignModal from '../signature/SgcSignModal';
+import SgcSignaturesCard from '../signature/SgcSignaturesCard';
 
 /**
  * Vista interna de una solicitud documental y de una «Tarea documental».
@@ -97,6 +100,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
   const [saving, setSaving] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [signOpen, setSignOpen] = useState(false);
 
   const userOptions = useMemo(() => (users.data?.users ?? []).map((u) => ({ value: u.email, label: u.name ? `${u.name} (${u.email})` : u.email })), [users.data]);
 
@@ -180,6 +184,11 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
       setMessage({ type: 'error', text: 'Escriba las observaciones de la devolución (mínimo 5 caracteres).' });
       return;
     }
+    // Sprint 3: aprobar (o enviar) un paso con firma abre la FIRMA ELECTRÓNICA (reautenticación + motivo).
+    if (decision === 'aprobar' && myAction?.signatureMeaning) {
+      setSignOpen(true);
+      return;
+    }
     setSaving(true);
     const ok = await run(() => sgcSend(`/api/sgc/tasks/${focus.id}/decision`, 'POST', { decision, comment: resolution }), 'Tarea actualizada correctamente.');
     setSaving(false);
@@ -191,6 +200,11 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
   };
 
   const signatureLabel = focus?.signatureLabel;
+  const draftHref = data.currentDraft
+    ? data.currentDraft.kind === 'borrador_editor'
+      ? `/process/sgc-documental/solicitudes/${request.id}/borrador?empresa=${request.idCompany}`
+      : `/api/sgc/requests/${request.id}/attachments/${data.currentDraft.ref.split(':')[1]}`
+    : null;
 
   return (
     <div className='app-canvas'>
@@ -502,6 +516,13 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           }}
         />
 
+        <SgcSignaturesCard
+          data={data}
+          onRetryPdf={async () => {
+            await run(() => sgcSend(`/api/sgc/requests/${request.id}/controlled-pdf`, 'POST', {}), 'PDF controlado generado.');
+          }}
+        />
+
         <SgcAttachmentsCard
           requestId={request.id}
           attachments={data.attachments}
@@ -571,6 +592,29 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
             await run(() => sgcSend(`/api/sgc/tasks/${idTask}/reassign`, 'POST', { toEmail, reason }), 'Tarea reasignada.');
           }}
         />
+
+        {focus && myAction?.signatureMeaning && (
+          <SgcSignModal
+            opened={signOpen}
+            onClose={() => setSignOpen(false)}
+            title={`Firmar · ${focus.name} · Solicitud #${request.id}`}
+            meaning={myAction.signatureMeaning as SgcSignatureMeaning}
+            draft={data.currentDraft}
+            draftHref={draftHref}
+            checklist={myAction.checklist}
+            submitLabel={myAction.kind === 'enviar' ? 'Firmar y enviar a revisión' : undefined}
+            onSign={async (payload) => {
+              const res = await sgcSend<{ controlledPdf?: { status: string | null; error?: string } }>(`/api/sgc/tasks/${focus.id}/sign`, 'POST', { ...payload, comment: payload.comment || resolution, idAssignee: myAction.idAssignee });
+              setSignOpen(false);
+              setIsEditing(false);
+              setDecision(null);
+              setResolution('');
+              const pdf = res.controlledPdf?.status === 'generado' ? ' Se generó el PDF controlado.' : res.controlledPdf?.status === 'error' ? ` El PDF controlado quedó pendiente: ${res.controlledPdf.error ?? ''}` : '';
+              setMessage({ type: 'success', text: `Firma registrada. Tarea actualizada correctamente.${pdf}` });
+              reload();
+            }}
+          />
+        )}
 
         <Modal opened={cancelOpen} onClose={() => setCancelOpen(false)} title={`Cancelar la solicitud #${request.id}`} centered>
           <Stack>
