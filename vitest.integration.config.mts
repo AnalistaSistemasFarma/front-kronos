@@ -17,5 +17,19 @@ export default defineConfig({
     testTimeout: 60_000,
     hookTimeout: 120_000,
     fileParallelism: false,
+    // Cobertura de la capa de base de datos del SGC (solo se ejerce contra un
+    // SQL Server real). Mismo criterio "ratchet" que la unitaria: solo sube.
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'text-summary', 'json-summary', 'lcov'],
+      reportsDirectory: 'reports/integracion/coverage',
+      include: ['lib/sgc/db/**/*.ts', 'lib/sgc/access.ts'],
+      thresholds: {
+        lines: 85,
+        functions: 85,
+        statements: 85,
+        branches: 70,
+      },
+    },
   },
 });

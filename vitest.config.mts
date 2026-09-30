@@ -61,6 +61,14 @@ export default defineConfig({
         '**/*.tsx',
         'lib/charts/**',
         '**/index.ts',
+        // SGC: la capa de base de datos (lib/sgc/db/**) se mide con las
+        // pruebas de INTEGRACIÓN contra un SQL Server real (piso propio en
+        // vitest.integration.config.mts), que es la evidencia que vale para
+        // ella; simularla aquí con dobles no probaría nada.
+        'lib/sgc/db/**',
+        // Contexto de sesión de las rutas: se ejerce a través de las pruebas
+        // de rutas (app/api/sgc/__tests__) y no es una ruta en sí.
+        'app/api/sgc/_lib/**',
       ],
       // PISO (ratchet), fijado por debajo de la cobertura real medida.
       thresholds: {

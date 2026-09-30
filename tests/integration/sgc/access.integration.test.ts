@@ -21,9 +21,11 @@ describe.skipIf(!url)('SGC · integración con SQL Server', () => {
 
   beforeAll(async () => {
     // company.id_company es IDENTITY: se siembran los ids reales (1 y 3) con IDENTITY_INSERT.
+    // Idempotente: otras suites de integración (p. ej. la del Sprint 1) comparten la base.
     await prisma.$executeRawUnsafe(`
       SET IDENTITY_INSERT [dbo].[company] ON;
-      INSERT INTO [dbo].[company] (id_company, company) VALUES (${FARMA}, N'FARMALOGICA S.A.'), (${OLP}, N'ONELATAMPHARMA');
+      IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = ${FARMA}) INSERT INTO [dbo].[company] (id_company, company) VALUES (${FARMA}, N'FARMALOGICA S.A.');
+      IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = ${OLP}) INSERT INTO [dbo].[company] (id_company, company) VALUES (${OLP}, N'ONELATAMPHARMA');
       SET IDENTITY_INSERT [dbo].[company] OFF;`);
 
     const user = await prisma.user.create({ data: { email, name: 'Calidad IT' } });
@@ -49,12 +51,12 @@ describe.skipIf(!url)('SGC · integración con SQL Server', () => {
       ],
     });
 
-    await prisma.sgcCompanyConfig.createMany({
-      data: [
-        { id_company: OLP, is_active: true, storage_root: 'SGC/OLP', activated_by: 'ci', activated_at: new Date() },
-        { id_company: FARMA, is_active: false, storage_root: 'SGC/FARMALOGICA' },
-      ],
-    });
+    for (const cfg of [
+      { id_company: OLP, is_active: true, storage_root: 'SGC/OLP', activated_by: 'ci', activated_at: new Date() },
+      { id_company: FARMA, is_active: false, storage_root: 'SGC/FARMALOGICA' },
+    ]) {
+      await prisma.sgcCompanyConfig.upsert({ where: { id_company: cfg.id_company }, create: cfg, update: {} });
+    }
   });
 
   afterAll(async () => {
