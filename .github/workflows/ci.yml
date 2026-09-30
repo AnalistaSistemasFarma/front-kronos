@@ -229,15 +229,20 @@ jobs:
           DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
         run: npx prisma db push --skip-generate --accept-data-loss
 
-      - name: Aplicar migraciones del Sprint 0 (idempotencia)
+      - name: Aplicar migraciones del SGC (idempotencia)
+        # Sobre el esquema ya creado por db push: deben pasar sin error (cada
+        # bloque verifica si el objeto existe) y agregar lo que db push no crea
+        # (trigger de auditoría de solo inserción y restricciones CHECK del S1).
         env:
           DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
         run: |
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930100000_sgc_s0_retiro_gestion_documental/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930110000_sgc_esquema_base/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930150000_sgc_s1_repositorio/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930150000_sgc_s1_repositorio/migration.sql
 
-      - name: Pruebas de integración (vitest)
-        run: npm run test:integration -- --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
+      - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
+        run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
 
       - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
         if: always()

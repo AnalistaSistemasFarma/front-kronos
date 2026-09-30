@@ -77,11 +77,21 @@ for (const c of cases) {
   }
 }
 
+// Catálogo de requisitos (descripción y sprint). Los que no tienen prueba
+// en esta corrida también se listan, para que el hueco se vea.
+const catalogoPath = path.join(ROOT, 'scripts/evidencia/sgc-requisitos.json');
+const catalogo = fs.existsSync(catalogoPath) ? JSON.parse(fs.readFileSync(catalogoPath, 'utf8')) : {};
+for (const id of Object.keys(catalogo)) if (/^SGC-REQ-\d{3}$/.test(id) && !matriz.has(id)) matriz.set(id, []);
+
 const requisitos = [...matriz.entries()]
   .sort(([a], [b]) => a.localeCompare(b))
   .map(([id, pruebas]) => ({
     requisito: id,
-    resultado: pruebas.some((p) => p.result === 'fallida')
+    descripcion: catalogo[id]?.descripcion ?? null,
+    sprint: catalogo[id]?.sprint ?? null,
+    resultado: pruebas.length === 0
+      ? 'sin prueba en esta corrida'
+      : pruebas.some((p) => p.result === 'fallida')
       ? 'fallida'
       : pruebas.every((p) => p.result === 'omitida')
         ? 'omitida'
@@ -118,6 +128,14 @@ const md = [
   `- Generado (UTC): ${manifest.generado_utc}`,
   `- Corrida: ${manifest.corrida}`,
   `- Pruebas: ${manifest.totales.pruebas} (aprobadas ${manifest.totales.aprobadas}, fallidas ${manifest.totales.fallidas}, omitidas ${manifest.totales.omitidas})`,
+  '',
+  '## Resumen por requisito',
+  '',
+  '| Requisito | Sprint | Descripción | Resultado | Pruebas |',
+  '|---|---|---|---|---|',
+  ...requisitos.map((r) => `| ${r.requisito} | ${r.sprint ?? ''} | ${(r.descripcion ?? '').replace(/\|/g, '\\|')} | ${r.resultado} | ${r.pruebas.length} |`),
+  '',
+  '## Detalle',
   '',
   '| Requisito | Resultado | Prueba | Reporte |',
   '|---|---|---|---|',

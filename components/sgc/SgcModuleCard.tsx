@@ -1,11 +1,12 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 import { Badge, Card, Group, Text, ThemeIcon } from '@mantine/core';
 
 /**
- * Tarjeta del tablero de accesos del SGC documental. En el Sprint 0 todas
- * quedan como "próximamente" (sin enlace); cada sprint las va habilitando.
+ * Tarjeta del tablero de accesos del SGC documental. Con `href` es un acceso
+ * activo; sin él queda como "Próximamente · Sprint N" (sin enlace).
  */
 export interface SgcModuleCardProps {
   title: string;
@@ -13,26 +14,30 @@ export interface SgcModuleCardProps {
   icon: ReactNode;
   /** Sprint del plan en el que se habilita (se muestra mientras no esté lista). */
   sprint: string;
+  href?: string;
+  /** Distintivo opcional para accesos activos (p. ej. "Calidad"). */
+  badge?: string;
 }
 
-export default function SgcModuleCard({ title, description, icon, sprint }: SgcModuleCardProps) {
-  return (
-    <Card
-      withBorder
-      radius='md'
-      p='lg'
-      shadow='xs'
-      aria-disabled='true'
-      data-testid='sgc-module-card'
-      style={{ opacity: 0.85 }}
-    >
+export default function SgcModuleCard({ title, description, icon, sprint, href, badge }: SgcModuleCardProps) {
+  const enabled = !!href;
+  const body = (
+    <>
       <Group justify='space-between' align='flex-start' mb='sm' wrap='nowrap'>
-        <ThemeIcon size={44} radius='md' variant='light'>
+        <ThemeIcon size={44} radius='md' variant='light' color={enabled ? undefined : 'gray'}>
           {icon}
         </ThemeIcon>
-        <Badge variant='light' color='gray' size='sm'>
-          Próximamente · {sprint}
-        </Badge>
+        {enabled ? (
+          badge ? (
+            <Badge variant='light' size='sm'>
+              {badge}
+            </Badge>
+          ) : null
+        ) : (
+          <Badge variant='light' color='gray' size='sm'>
+            Próximamente · {sprint}
+          </Badge>
+        )}
       </Group>
       <Text fw={600} size='md' mb={4}>
         {title}
@@ -40,6 +45,30 @@ export default function SgcModuleCard({ title, description, icon, sprint }: SgcM
       <Text size='sm' c='dimmed'>
         {description}
       </Text>
+    </>
+  );
+
+  if (enabled) {
+    return (
+      <Card
+        withBorder
+        radius='md'
+        p='lg'
+        shadow='xs'
+        component={Link}
+        href={href}
+        data-testid='sgc-module-card'
+        data-enabled='true'
+        className='transition-shadow hover:shadow-md'
+      >
+        {body}
+      </Card>
+    );
+  }
+
+  return (
+    <Card withBorder radius='md' p='lg' shadow='xs' aria-disabled='true' data-testid='sgc-module-card' data-enabled='false' style={{ opacity: 0.85 }}>
+      {body}
     </Card>
   );
 }

@@ -1,0 +1,113 @@
+name: SGC — e2e con sesión en PRUEBAS
+
+# Pruebas de extremo a extremo del SGC documental CON SESIÓN contra el entorno
+# de PRUEBAS ya desplegado (el código que corre ahí es el de `testing`), con el
+# usuario de pruebas qa.sgc (solo existe en KRONOSDB_PRUEBAS). Se dispara con
+# cada push a `testing` y ESPERA a que termine bien el despliegue a pruebas de
+# ese mismo commit (así prueba el código nuevo, no el anterior). No usa
+# workflow_run porque ese evento solo funciona con workflows que ya están en la
+# rama por defecto (main).
+#
+# Seguridad de la evidencia: el inicio de sesión corre en el proyecto `setup`
+# de Playwright con traza y capturas APAGADAS (la traza guarda en claro lo que
+# se escribe); el resto usa la sesión guardada. Un paso final verifica que la
+# contraseña no aparezca en ningún artefacto antes de archivarlos, y la sesión
+# guardada (cookies) nunca se archiva.
+
+on:
+  push:
+    branches: [testing]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: sgc-e2e-pruebas
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: SGC — e2e con sesión (pruebas)
+    runs-on: ubuntu-latest
+    env:
+      E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+      E2E_USER_EMAIL: ${{ secrets.E2E_SGC_USER }}
+      E2E_USER_PASSWORD: ${{ secrets.E2E_SGC_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Esperar el despliegue a pruebas de este commit
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 60); do
+            read -r status conclusion <<<"$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy-testing.yml --commit "$GITHUB_SHA" --limit 1 --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"' 2>/dev/null || echo 'none none')"
+            echo "[$i] despliegue: $status $conclusion"
+            if [ "$status" = "completed" ]; then
+              if [ "$conclusion" = "success" ]; then exit 0; fi
+              echo "::error::El despliegue a pruebas de este commit no terminó bien ($conclusion)."; exit 1
+            fi
+            sleep 30
+          done
+          echo "::error::El despliegue a pruebas no terminó en 30 minutos."; exit 1
+
+      - name: Configurar Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci || npm install
+
+      - name: Instalar navegador (Playwright)
+        run: npx playwright install --with-deps chromium
+
+      - name: Verificar que pruebas responde
+        run: |
+          if [ -z "$E2E_BASE_URL" ]; then echo "Falta el secreto E2E_BASE_URL"; exit 1; fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$E2E_BASE_URL/login" || true)
+          echo "GET /login -> $code"
+          if [ "$code" != "200" ]; then echo "::error::Pruebas no responde en E2E_BASE_URL (¿cambió la URL del túnel?)"; exit 1; fi
+
+      - name: Pruebas e2e (sin sesión y con sesión)
+        run: npx playwright test
+
+      - name: Borrar la sesión guardada (no se archiva)
+        if: always()
+        run: rm -rf reports/playwright/.auth
+
+      - name: Verificar que la contraseña no quedó en los reportes
+        if: always()
+        run: |
+          if [ -n "$E2E_USER_PASSWORD" ] && grep -rIl --fixed-strings -- "$E2E_USER_PASSWORD" reports/ 2>/dev/null; then
+            echo "::error::La contraseña aparece en un reporte: no se archiva la evidencia."
+            rm -rf reports/
+            exit 1
+          fi
+          # Las trazas son .zip: se revisan descomprimidas.
+          for z in $(find reports -name '*.zip' 2>/dev/null); do
+            if unzip -p "$z" | grep -a -q --fixed-strings -- "$E2E_USER_PASSWORD"; then
+              echo "::error::La contraseña aparece en la traza $z: no se archiva la evidencia."
+              rm -rf reports/
+              exit 1
+            fi
+          done
+          echo "OK: la contraseña no aparece en los reportes."
+
+      - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
+        if: always()
+        run: node scripts/evidencia/sgc-evidencia.mjs
+
+      - name: Archivar evidencia e2e (SGC documental)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencia-sgc-e2e-pruebas-${{ github.run_number }}-${{ github.sha }}
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 90

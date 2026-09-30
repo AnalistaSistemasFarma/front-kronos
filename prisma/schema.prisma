@@ -199,6 +199,10 @@ model Department {
   department      String           @unique
   cases           Case[]
   departmentUsers DepartmentUser[]
+  // SGC documental (esquema `sgc`) — back-relations requeridas por Prisma; no cambian dbo.department.
+  sgcProcesses        SgcProcessMap[]
+  sgcOwnedDocuments   SgcDocument[]
+  sgcDocumentAccesses SgcDocumentAccess[]
 
   @@map("department")
   @@schema("dbo")
@@ -1258,6 +1262,222 @@ model SgcCompanyConfig {
 
   company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
+  // Sprint 1: maestros y repositorio de la empresa.
+  codingGuide   SgcCodingGuide?
+  processTypes  SgcProcessType[]
+  processes     SgcProcessMap[]
+  documentTypes SgcDocumentType[]
+  documents     SgcDocument[]
+
   @@map("company_config")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 1: repositorio y listado maestro (esquema `sgc`).
+// Todo cuelga de sgc.company_config (solo una empresa ACTIVADA tiene maestros).
+// Nada se borra: los maestros se desactivan (is_active) y los documentos se
+// anulan; cada cambio queda en sgc.audit_log (solo inserción).
+// ---------------------------------------------------------------------------
+
+// Guía de codificación de la empresa (una por empresa). El patrón admite las
+// marcas {PREFIJO}, {TIPO_PROCESO}, {PROCESO}, {TIPO} y {CONSECUTIVO}
+// (obligatoria); ver lib/sgc/coding.ts.
+model SgcCodingGuide {
+  id_company      Int      @id
+  prefix          String   @db.NVarChar(10)
+  pattern         String   @db.NVarChar(200)
+  sequence_digits Int      @default(3)
+  updated_by      String?  @db.NVarChar(255)
+  change_reason   String?  @db.NVarChar(1000)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("coding_guide")
+  @@schema("sgc")
+}
+
+// Tipo de proceso (estratégico, misional, soporte, funciones y responsabilidades…).
+model SgcProcessType {
+  id_process_type Int      @id @default(autoincrement())
+  id_company      Int
+  code            String   @db.NVarChar(10)
+  name            String   @db.NVarChar(150)
+  color           String   @default("blue") @db.NVarChar(20)
+  sort_order      Int      @default(0)
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  processes     SgcProcessMap[]
+
+  @@unique([id_company, code])
+  @@map("process_type")
+  @@schema("sgc")
+}
+
+// Proceso del mapa de procesos (con su área/departamento dueño).
+model SgcProcessMap {
+  id_process_map  Int      @id @default(autoincrement())
+  id_company      Int
+  id_process_type Int
+  code            String   @db.NVarChar(10)
+  name            String   @db.NVarChar(200)
+  id_department   Int?
+  sort_order      Int      @default(0)
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  processType   SgcProcessType   @relation(fields: [id_process_type], references: [id_process_type], onDelete: NoAction, onUpdate: NoAction)
+  department    Department?      @relation(fields: [id_department], references: [id_department], onDelete: NoAction, onUpdate: NoAction)
+  documents     SgcDocument[]
+
+  @@unique([id_company, code])
+  @@map("process_map")
+  @@schema("sgc")
+}
+
+// Tipo documental (manual, procedimiento, instructivo, formato…).
+model SgcDocumentType {
+  id_document_type  Int      @id @default(autoincrement())
+  id_company        Int
+  code              String   @db.NVarChar(10)
+  name              String   @db.NVarChar(100)
+  plural_name       String   @db.NVarChar(100)
+  // Decisión de Nicolás (2026-09-30): la capacitación es obligatoria para todos los tipos.
+  requires_training Boolean  @default(true)
+  review_months     Int      @default(36)
+  alert_months      Int      @default(2)
+  sort_order        Int      @default(0)
+  is_active         Boolean  @default(true)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  documents     SgcDocument[]
+
+  @@unique([id_company, code])
+  @@map("document_type")
+  @@schema("sgc")
+}
+
+// Documento controlado. current_version_id apunta a la versión VIGENTE (sin
+// FK para no crear un ciclo documento↔versión; lo mantiene lib/sgc).
+model SgcDocument {
+  id_document         Int       @id @default(autoincrement())
+  id_company          Int
+  code                String    @db.NVarChar(60)
+  title               String    @db.NVarChar(300)
+  id_document_type    Int
+  id_process_map      Int
+  id_owner_department Int?
+  // publica (toda la empresa) | departamento | confidencial
+  confidentiality     String    @default("publica") @db.NVarChar(20)
+  // borrador | vigente | obsoleto | anulado
+  status              String    @default("borrador") @db.NVarChar(20)
+  sequence_number     Int?
+  current_version_id  Int?
+  next_review_date    DateTime? @db.Date
+  created_by          String    @db.NVarChar(255)
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+  annulled_by         String?   @db.NVarChar(255)
+  annulled_at         DateTime?
+  annul_reason        String?   @db.NVarChar(1000)
+
+  companyConfig   SgcCompanyConfig    @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  documentType    SgcDocumentType     @relation(fields: [id_document_type], references: [id_document_type], onDelete: NoAction, onUpdate: NoAction)
+  process         SgcProcessMap       @relation(fields: [id_process_map], references: [id_process_map], onDelete: NoAction, onUpdate: NoAction)
+  ownerDepartment Department?         @relation(fields: [id_owner_department], references: [id_department], onDelete: NoAction, onUpdate: NoAction)
+  versions        SgcDocumentVersion[]
+  accesses        SgcDocumentAccess[]
+
+  @@unique([id_company, code])
+  @@index([id_company, status])
+  @@map("document")
+  @@schema("sgc")
+}
+
+// Versión de un documento: archivo PDF controlado (y fuente Word opcional) en
+// la carpeta propia de la empresa, SGC/<EMPRESA>/<TIPO>/<CODIGO>/v<n>/.
+model SgcDocumentVersion {
+  id_document_version Int       @id @default(autoincrement())
+  id_document         Int
+  version_number      Int
+  // borrador | vigente | obsoleto | anulado
+  status              String    @db.NVarChar(20)
+  pdf_item_id         String    @db.NVarChar(200)
+  pdf_path            String    @db.NVarChar(600)
+  pdf_file_name       String    @db.NVarChar(260)
+  pdf_sha256          String    @db.Char(64)
+  pdf_size            Int
+  source_item_id      String?   @db.NVarChar(200)
+  source_path         String?   @db.NVarChar(600)
+  source_file_name    String?   @db.NVarChar(260)
+  change_description  String?   @db.NVarChar(2000)
+  effective_date      DateTime? @db.Date
+  review_due_date     DateTime? @db.Date
+  obsolete_date       DateTime? @db.Date
+  created_by          String    @db.NVarChar(255)
+  created_at          DateTime  @default(now())
+
+  document SgcDocument @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_document, version_number])
+  @@map("document_version")
+  @@schema("sgc")
+}
+
+// Acceso a un documento por departamento o por persona. Consulta (can_view) y
+// permisos EXCEPCIONALES de descarga/impresión, con vencimiento. No se borra:
+// se revoca (revoked_at).
+model SgcDocumentAccess {
+  id_document_access Int       @id @default(autoincrement())
+  id_document        Int
+  id_department      Int?
+  user_email         String?   @db.NVarChar(255)
+  can_view           Boolean   @default(true)
+  can_download       Boolean   @default(false)
+  can_print          Boolean   @default(false)
+  expires_at         DateTime?
+  reason             String    @db.NVarChar(1000)
+  granted_by         String    @db.NVarChar(255)
+  created_at         DateTime  @default(now())
+  revoked_at         DateTime?
+  revoked_by         String?   @db.NVarChar(255)
+
+  document   SgcDocument @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  department Department? @relation(fields: [id_department], references: [id_department], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_document])
+  @@map("document_access")
+  @@schema("sgc")
+}
+
+// Registro de auditoría del SGC: SOLO INSERCIÓN. Un trigger INSTEAD OF
+// UPDATE, DELETE (migración 20260930150000_sgc_s1_repositorio) rechaza
+// cualquier cambio o borrado, sin importar el usuario de base de datos.
+model SgcAuditLog {
+  id_audit_log  BigInt   @id @default(autoincrement())
+  id_company    Int?
+  occurred_at   DateTime @default(now())
+  actor_email   String?  @db.NVarChar(255)
+  action        String   @db.NVarChar(80)
+  entity        String   @db.NVarChar(60)
+  entity_id     String?  @db.NVarChar(60)
+  ip            String?  @db.NVarChar(64)
+  user_agent    String?  @db.NVarChar(400)
+  before_json   String?  @db.NVarChar(Max)
+  after_json    String?  @db.NVarChar(Max)
+  detail        String?  @db.NVarChar(1000)
+
+  @@index([entity, entity_id])
+  @@index([id_company, occurred_at])
+  @@map("audit_log")
   @@schema("sgc")
 }
