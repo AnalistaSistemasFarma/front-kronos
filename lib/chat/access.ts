@@ -3,8 +3,7 @@ import { prisma } from '../prisma';
 /**
  * Resolución de permisos del módulo "Asistentes IA" (chat de agentes).
  *
- * Mismo patrón que lib/document-management/access.ts y lib/health-records/
- * access.ts: se reusa el esquema existente
+ * Mismo patrón que lib/health-records/access.ts: se reusa el esquema existente
  * (process -> subprocess -> subprocess_user_company -> company_user) en vez
  * de crear una tabla de permisos propia.
  *
