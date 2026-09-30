@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import PortalFormacion from './PortalFormacion';
+import { urlFormacion as urlPaginaFormacion, type OrigenPortal } from '../../lib/portal/formacion-navegacion';
 import PortalNavegacion, { useSeccionActiva, type SeccionNav } from './PortalNavegacion';
 
 /** Cada cuánto rota sola la imagen principal del carrusel de anuncios. */
@@ -10,8 +10,9 @@ const ROTACION_CARRUSEL_MS = 6000;
 /** ids estables de sección, para el panel de navegación y el scroll-spy. */
 const ID_SECCION_ANUNCIOS = 'portal-th-anuncios';
 const ID_SECCION_POLITICAS = 'portal-th-politicas';
-/** Sección nueva "tipo Moodle" — cursos, materiales, progreso y certificado.
- *  Pedido de Cristian (2026-09-18). Va al final, después de Políticas. */
+/** Acceso a FORMACIÓN. Desde 2026-09-30 (pedido de Cristian) Formación
+ *  tiene su propia página (`/portal/formacion`) que se abre en una pestaña
+ *  nueva; aquí solo queda este acceso. */
 const ID_SECCION_FORMACION = 'portal-th-formacion';
 /** No es una sección con scroll: es un botón del panel que abre su propia
  *  ventana de vista previa (ver `irASeccion`), igual que un documento. */
@@ -145,13 +146,17 @@ export default function PortalContenido({
   banners,
   puedeEditar = false,
   onCambioEnBanners,
+  origen = 'abierto',
 }: {
   documentos: Documento[];
   banners: Banner[];
   /** Solo Talento Humano administra la cartelera. */
   puedeEditar?: boolean;
   onCambioEnBanners?: () => void | Promise<void>;
+  /** Por qué portal se entró: decide a dónde vuelve la página de Formación. */
+  origen?: OrigenPortal;
 }) {
+  const urlFormacion = urlPaginaFormacion(origen);
   const [subiendo, setSubiendo] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
@@ -360,6 +365,11 @@ export default function PortalContenido({
       setContactosAbierto(true);
       return;
     }
+    if (id === ID_SECCION_FORMACION) {
+      // Igual que la tarjeta: pestaña nueva, sin `opener`.
+      window.open(urlFormacion, '_blank', 'noopener,noreferrer');
+      return;
+    }
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
@@ -494,13 +504,23 @@ export default function PortalContenido({
             )}
           </section>
 
-          {/* FORMACIÓN — sección nueva "tipo Moodle" al final de la página
-              (pedido de Cristian, 2026-09-18): cursos, materiales, progreso y
-              certificado. Vive en su propio componente porque hace sus
-              propios fetch — ver `PortalFormacion.tsx`. */}
+          {/* FORMACIÓN — solo el ACCESO. Los cursos viven en su propia página,
+              que se abre en una pestaña nueva (Cristian, 2026-09-30). */}
           <section id={ID_SECCION_FORMACION} className='portal-th__seccion'>
-            <h2>Formación</h2>
-            <PortalFormacion />
+            <a
+              className='portal-th__acceso-formacion'
+              href={urlFormacion}
+              target='_blank'
+              rel='noopener noreferrer'
+            >
+              <span className='portal-th__acceso-formacion-titulo'>Formación</span>
+              <span className='portal-th__acceso-formacion-texto'>
+                Cursos, materiales, progreso y certificados. Se abre en una pestaña nueva.
+              </span>
+              <span className='portal-th__acceso-formacion-flecha' aria-hidden='true'>
+                ↗
+              </span>
+            </a>
           </section>
         </div>
       </div>

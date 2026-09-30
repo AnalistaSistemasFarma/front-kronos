@@ -9,6 +9,15 @@
  */
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../prisma';
+import { generarCertificadoPdf } from './certificado-pdf';
+import { MATERIAL_MIMES_PERMITIDOS, MAX_MATERIAL_BYTES } from './config';
+import {
+  carpetaDeCurso,
+  leerConfigFormacion,
+  moverMaterialAEliminados,
+  subirArchivoFormacion,
+  type ArchivoEnSharePoint,
+} from './formacion-storage';
 
 /** Un material tal como lo necesita el cálculo de progreso. */
 interface MaterialParaProgreso {
@@ -82,6 +91,13 @@ export async function emitirCertificadoSiCorresponde(params: {
         },
         select: { code: true, issued_at: true },
       });
+      // Archiva el PDF en SharePoint (FORMACION/<curso>/certificados). Si
+      // falla, el certificado YA está emitido y se puede descargar igual (se
+      // genera al vuelo): el reintento ocurre la próxima vez que alguien lo
+      // abra — ver `GET /api/portal/certificates/[code]`.
+      await archivarCertificadoEnSharePoint(creado.code).catch((e) =>
+        console.error('[portal] No se pudo archivar el certificado en SharePoint', creado.code, e)
+      );
       return { code: creado.code, issuedAt: creado.issued_at };
     } catch (error) {
       const mensaje = (error as { code?: string })?.code;
@@ -115,4 +131,131 @@ export async function resolverNombreEstudiante(correo: string): Promise<string> 
   const usuario = await prisma.user.findUnique({ where: { email: correo }, select: { name: true } });
   const nombre = usuario?.name?.trim();
   return nombre || nombreDesdeCorreo(correo);
+}
+
+/**
+ * La carpeta del curso dentro de FORMACION (`<slug>-<id>`).
+ *
+ * Se calcula con el título en la PRIMERA subida y se guarda en
+ * `portal_course.sp_folder_name`: si después se renombra el curso, sus
+ * archivos siguen yendo a la misma carpeta en vez de repartirse en dos.
+ */
+export async function carpetaSharePointDelCurso(cursoId: number): Promise<string> {
+  const curso = await prisma.portalCourse.findUnique({
+    where: { id: cursoId },
+    select: { title: true, sp_folder_name: true },
+  });
+  if (!curso) throw new Error(`Curso ${cursoId} no encontrado.`);
+  if (curso.sp_folder_name) return curso.sp_folder_name;
+
+  const carpeta = carpetaDeCurso(curso.title, cursoId);
+  // `updateMany` con la condición de nulo: si dos subidas llegan a la vez, la
+  // segunda no pisa lo que fijó la primera.
+  await prisma.portalCourse.updateMany({
+    where: { id: cursoId, sp_folder_name: null },
+    data: { sp_folder_name: carpeta },
+  });
+  const releido = await prisma.portalCourse.findUnique({ where: { id: cursoId }, select: { sp_folder_name: true } });
+  return releido?.sp_folder_name ?? carpeta;
+}
+
+/**
+ * Genera el PDF de un certificado y lo sube a
+ * `FORMACION/<curso>/certificados/<codigo>.pdf`, guardando la referencia.
+ * Si ya estaba archivado, no hace nada. Lanza si SharePoint no está
+ * configurado o falla — quien llama decide si eso es fatal.
+ */
+export async function archivarCertificadoEnSharePoint(code: string): Promise<ArchivoEnSharePoint | null> {
+  const cert = await prisma.portalCertificate.findUnique({ where: { code } });
+  if (!cert) return null;
+  if (cert.sp_drive_item_id) return null;
+
+  const pdf = await generarCertificadoPdf({
+    code: cert.code,
+    studentName: cert.student_name,
+    courseTitle: cert.course_title,
+    issuedAt: cert.issued_at,
+  });
+  const carpetaCurso = await carpetaSharePointDelCurso(cert.course_id);
+  const archivo = await subirArchivoFormacion({
+    carpetaCurso,
+    subcarpeta: 'certificados',
+    nombreArchivo: `${cert.code}.pdf`,
+    contenido: pdf,
+    mime: 'application/pdf',
+  });
+  await prisma.portalCertificate.update({
+    where: { code },
+    data: {
+      sp_drive_item_id: archivo.driveItemId,
+      sp_web_url: archivo.webUrl,
+      file_name: archivo.nombre || `${cert.code}.pdf`,
+      file_size: BigInt(archivo.tamano),
+    },
+  });
+  return archivo;
+}
+
+/**
+ * Valida el archivo de un material (mismas reglas al agregarlo y al
+ * reemplazarlo). Devuelve el mensaje de error, o `null` si pasa.
+ */
+export function validarArchivoMaterial(archivo: unknown): string | null {
+  if (!(archivo instanceof File)) return 'Falta el archivo del documento.';
+  const mime = (archivo.type || '').toLowerCase();
+  if (!MATERIAL_MIMES_PERMITIDOS.includes(mime)) return `Formato no admitido (${mime || 'desconocido'}).`;
+  if (archivo.size === 0) return 'El archivo llegó vacío.';
+  if (archivo.size > MAX_MATERIAL_BYTES) return 'El archivo es muy grande. El tope es 25 MB.';
+  return null;
+}
+
+/** Columnas de referencia de un material ya subido a SharePoint. */
+export interface ReferenciaMaterial {
+  file_name: string;
+  mime: string;
+  sp_drive_item_id: string;
+  sp_web_url: string | null;
+  file_size: bigint;
+}
+
+/**
+ * Sube el archivo (ya validado) de un material a
+ * FORMACION/<curso>/materiales y devuelve las columnas a guardar. Lanza
+ * `FormacionStorageNoConfigurado` ANTES de leer el archivo si falta la
+ * configuración.
+ */
+export async function subirArchivoDeMaterial(courseId: number, archivo: File): Promise<ReferenciaMaterial> {
+  leerConfigFormacion();
+  const mime = (archivo.type || '').toLowerCase();
+  const carpetaCurso = await carpetaSharePointDelCurso(courseId);
+  const subido = await subirArchivoFormacion({
+    carpetaCurso,
+    subcarpeta: 'materiales',
+    nombreArchivo: archivo.name,
+    contenido: new Uint8Array(await archivo.arrayBuffer()),
+    mime,
+  });
+  return {
+    file_name: (subido.nombre || archivo.name).slice(0, 255) || 'material',
+    mime,
+    sp_drive_item_id: subido.driveItemId,
+    sp_web_url: subido.webUrl,
+    file_size: BigInt(subido.tamano),
+  };
+}
+
+/**
+ * Mueve a FORMACION/ELIMINADOS/<curso>/materiales el archivo de un material
+ * (al quitarlo o al reemplazarlo). Nada se borra de SharePoint.
+ */
+export async function moverArchivoDeMaterialAEliminados(
+  courseId: number,
+  driveItemId: string,
+  nombreArchivo: string | null
+): Promise<ArchivoEnSharePoint> {
+  return moverMaterialAEliminados({
+    driveItemId,
+    carpetaCurso: await carpetaSharePointDelCurso(courseId),
+    nombreArchivo: nombreArchivo ?? 'material',
+  });
 }

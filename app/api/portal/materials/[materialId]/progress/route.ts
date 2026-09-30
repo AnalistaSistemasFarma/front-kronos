@@ -24,14 +24,14 @@ function idDesdeParametro(valor: string): number | null {
  * que la interfaz tenga que pedir dos veces.
  */
 async function recalcular(materialId: number, correo: string) {
-  const material = await prisma.portalCourseMaterial.findUnique({
-    where: { id: materialId },
+  const material = await prisma.portalCourseMaterial.findFirst({
+    where: { id: materialId, eliminado_at: null },
     select: { course_id: true, course: { select: { title: true, active: true } } },
   });
   if (!material) return null;
 
   const materiales = await prisma.portalCourseMaterial.findMany({
-    where: { course_id: material.course_id },
+    where: { course_id: material.course_id, eliminado_at: null },
     select: { id: true, required: true },
   });
   const completados = await prisma.portalMaterialProgress.findMany({
@@ -97,14 +97,14 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       where: { material_id: materialId, student_email: quien.correo },
     });
 
-    const material = await prisma.portalCourseMaterial.findUnique({
-      where: { id: materialId },
+    const material = await prisma.portalCourseMaterial.findFirst({
+      where: { id: materialId, eliminado_at: null },
       select: { course_id: true },
     });
     if (!material) return NextResponse.json({ error: 'Material no encontrado.' }, { status: 404 });
 
     const materiales = await prisma.portalCourseMaterial.findMany({
-      where: { course_id: material.course_id },
+      where: { course_id: material.course_id, eliminado_at: null },
       select: { id: true, required: true },
     });
     const completados = await prisma.portalMaterialProgress.findMany({
