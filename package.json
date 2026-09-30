@@ -10,6 +10,8 @@
     "start": "next start -p 3003",
     "lint": "eslint",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
+    "test:e2e": "playwright test",
     "verify:deploy": "node scripts/verify-deployment-changes.cjs",
     "test:orion": "node scripts/test-orion-integration.mjs",
     "seed:orion": "node scripts/seed-orion-workflow.mjs",
@@ -71,6 +73,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/file-saver": "^2.0.7",
     "@types/mssql": "^9.1.9",

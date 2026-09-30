@@ -9,16 +9,14 @@ import { Box, Text, Badge, Group } from '@mantine/core';
  *
  * Sirve para CUALQUIER proceso de "Solicitudes Generales": con solo `tasks`
  * (secuencia por `display_order`, tal cual las devuelve
- * /api/requests-general/workflow-tasks o /api/document-management/workflow-tasks)
+ * /api/requests-general/workflow-tasks)
  * dibuja una fila lineal con flechas sólidas — igual a como avanza
  * lib/workflow/advanceSequentialTask.js para cualquier proceso genérico.
  *
- * Cuando además se le pasa `transitions` + `mainSequenceStates` (hoy solo
- * Gestión Documental los tiene — ver lib/document-management/workflowStates.ts:
- * DOCUMENT_WORKFLOW_TRANSITIONS / MAIN_SEQUENCE_STATES), agrega debajo las
- * ramas de excepción (reasignar, reelaborar, rechazar, anular, eliminar,
- * obsoleto) con flechas punteadas coloreadas por tipo. Esos datos SIEMPRE se
- * importan desde la constante compartida — nunca se redefine aquí ninguna
+ * Cuando además se le pasa `transitions` + `mainSequenceStates` (el flujo que
+ * los necesite debe declararlos en su propia constante compartida), agrega
+ * debajo las ramas de excepción (reasignar, devolver, rechazar, anular...)
+ * con flechas punteadas coloreadas por tipo. Nunca se redefine aquí ninguna
  * regla de qué tarea puede pasar a cuál.
  */
 

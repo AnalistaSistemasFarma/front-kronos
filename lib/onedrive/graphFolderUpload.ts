@@ -5,9 +5,8 @@
  * Antes esta lógica vivía solo dentro de components/ui/FileUpload.tsx, atada
  * a una carpeta plana bajo `SAPSEND/TEC/<storagePath>/<entityType>-<id>`. Se
  * generaliza aquí para aceptar una ruta de segmentos ARBITRARIA, de forma
- * que otros módulos (p.ej. Gestión Documental:
- * `GESTION-DOCUMENTAL/<EMPRESA>/<TIPO>/<CODIGO>/v<version>`) puedan reusarla
- * sin duplicar las llamadas a Graph.
+ * que otros módulos (p.ej. el chat o el SGC documental) puedan reusarla sin
+ * duplicar las llamadas a Graph.
  *
  * Isomórfico a propósito: funciona igual llamado desde un componente cliente
  * (FileUpload, con un token obtenido vía el server action

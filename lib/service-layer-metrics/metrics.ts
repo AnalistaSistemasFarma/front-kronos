@@ -76,7 +76,7 @@ export interface GetServiceLayerMetricsParams {
  * filtro opcional de rango de fechas. Recibe el cliente Prisma como
  * parámetro (en vez de importar el singleton directo) para que el endpoint
  * y las pruebas puedan pasar un mock -- mismo criterio que el resto del
- * repo (ver lib/document-management/documents.test.ts, vi.mock('../../prisma')).
+ * repo (inyección del cliente en vez de vi.mock('../../prisma')).
  */
 export async function getServiceLayerMetrics(
   prisma: Pick<PrismaClient, 'serviceLayerDailyMetric'>,

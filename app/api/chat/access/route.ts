@@ -8,7 +8,7 @@ import { canStartPeopleChats } from '../../../../lib/chat/people';
 
 /**
  * Qué agentes puede ver el usuario de la sesión y en qué empresas.
- * Mismo patrón que /api/document-management/access.
+ * Mismo patrón que /api/organigrama/access.
  *
  * Seguridad: valida sesión con getServerSession(authOptions) y resuelve TODO
  * a partir del correo de la sesión — el cliente no manda ningún identificador

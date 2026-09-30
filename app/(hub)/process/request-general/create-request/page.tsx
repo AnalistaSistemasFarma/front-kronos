@@ -38,7 +38,6 @@ import {
   Progress,
   RingProgress,
   Loader,
-  FileInput,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -64,7 +63,6 @@ import {
   IconDownload,
   IconLink,
   IconTrash,
-  IconUpload,
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
@@ -74,7 +72,6 @@ import {
   uploadFileToOneDriveFolder,
 } from '../../../../../lib/onedrive/graphFolderUpload';
 import { isSapField } from '../../../../../lib/requests-general/sapSources';
-import { DOCUMENT_WORKFLOW_PROCESS_NAME } from '../../../../../lib/document-management/workflowStates';
 import {
   TABLE_FIELD_TYPE,
   parseTableConfig,
@@ -212,7 +209,6 @@ function RequestBoard() {
       id_category_request: number;
       email?: string;
       description?: string;
-      isDocumentManagement?: boolean;
     }[]
   >([]);
   const [processSearch, setProcessSearch] = useState('');
@@ -272,30 +268,6 @@ function RequestBoard() {
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-
-  // Gestión Documental (parametrizado): al seleccionar ese proceso, el formulario
-  // reemplaza "Asunto"/"Descripción" (reusados como Título/Comentario del documento —
-  // son campos UNIVERSALES de toda solicitud, no específicos de este proceso) y
-  // mantiene un campo de archivo propio (el contenido versionado del documento, con su
-  // propia ruta de OneDrive — no un adjunto genérico). El resto de los campos
-  // específicos del documento (tipo de documento, código, próxima fecha de revisión,
-  // restringido) YA NO son estado aparte: se leen y validan igual que cualquier otro
-  // campo de proceso, vía el bloque genérico "Información adicional" más abajo
-  // (visibleFields/fieldValues), sembrados en process_form_field para
-  // id_process_category=86 — ver prisma/seeds/document-management-generic-fields.sql y
-  // app/api/document-management/create-request/route.ts.
-  const [docTitle, setDocTitle] = useState('');
-  const [docComments, setDocComments] = useState('');
-  const [docFile, setDocFile] = useState<File | null>(null);
-
-  const isDocumentManagementProcess =
-    processCategories.find((p) => p.value === formData.process)?.isDocumentManagement ?? false;
-
-  const resetDocumentFields = () => {
-    setDocTitle('');
-    setDocComments('');
-    setDocFile(null);
-  };
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -739,7 +711,6 @@ function RequestBoard() {
               id_category_request: p.id_category_request,
               email: p.email,
               description: p.description,
-              isDocumentManagement: p.process === DOCUMENT_WORKFLOW_PROCESS_NAME,
             }))
         );
         if (data.assignedUsers) {
@@ -828,9 +799,7 @@ function RequestBoard() {
   };
 
   // Validación genérica de los campos dinámicos de proceso (process_form_field). Es la
-  // MISMA para cualquier proceso, incluida Gestión Documental (id_process_category=86,
-  // que aquí valida "Tipo de documento"/"Código del documento"/etc. sin saber nada
-  // específico de ellos — son campos genéricos como cualquier otro).
+  // MISMA para cualquier proceso: no sabe nada específico de ningún campo.
   const collectVisibleFieldErrors = (): Record<string, string> => {
     const errors: Record<string, string> = {};
     for (const field of visibleFields) {
@@ -875,31 +844,20 @@ function RequestBoard() {
       errors.process = 'El proceso es obligatorio';
     }
 
-    if (isDocumentManagementProcess) {
-      // Gestión Documental: "Asunto"/"Descripción" quedan reusados como Título/Comentario
-      // del documento (ver JSX) — son campos universales de toda solicitud, se validan
-      // como tales. El archivo también es propio (contenido versionado del documento).
-      // El resto (tipo de documento, código, fecha, restringido) son campos genéricos
-      // sembrados en process_form_field — misma validación que cualquier otro proceso.
-      if (!docTitle.trim()) errors.docTitle = 'El título del documento es obligatorio';
-      if (!docFile) errors.docFile = 'Adjunte el archivo del documento';
-      Object.assign(errors, collectVisibleFieldErrors());
-    } else {
-      if (!formData.subject.trim()) {
-        errors.subject = 'El asunto es obligatorio';
-      }
-      if (!formData.descripcion.trim()) {
-        errors.descripcion = 'La descripción es obligatoria';
-      } else if (formData.descripcion.trim().length < 10) {
-        errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
-      }
+    if (!formData.subject.trim()) {
+      errors.subject = 'El asunto es obligatorio';
+    }
+    if (!formData.descripcion.trim()) {
+      errors.descripcion = 'La descripción es obligatoria';
+    } else if (formData.descripcion.trim().length < 10) {
+      errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
+    }
 
-      Object.assign(errors, collectVisibleFieldErrors());
+    Object.assign(errors, collectVisibleFieldErrors());
 
-      for (const doc of visibleRequiredFiles) {
-        if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
-          errors[`file_${doc.id}`] = `Debe adjuntar el documento: ${doc.file_label}`;
-        }
+    for (const doc of visibleRequiredFiles) {
+      if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
+        errors[`file_${doc.id}`] = `Debe adjuntar el documento: ${doc.file_label}`;
       }
     }
 
@@ -909,10 +867,7 @@ function RequestBoard() {
 
   // Serializa las respuestas de los campos dinámicos de proceso al formato que espera
   // el motor genérico ([{ id_field, id_option? | value_text? }] -- ver
-  // createGeneralRequest.js y, para Gestión Documental,
-  // lib/document-management/genericFields.ts). Compartido entre el camino genérico
-  // (handleCreateTicket) y el de Gestión Documental
-  // (handleCreateDocumentManagementRequest) para no duplicar esta lógica.
+  // createGeneralRequest.js).
   const buildFormValuesPayload = () =>
     visibleFields
       .filter((f) => {
@@ -941,77 +896,7 @@ function RequestBoard() {
   const handleCreateTicketWithValidation = async () => {
     if (isSubmittingRef.current) return;
     if (!validateForm()) return;
-    if (isDocumentManagementProcess) {
-      await handleCreateDocumentManagementRequest();
-    } else {
-      await handleCreateTicket();
-    }
-  };
-
-  const handleCreateDocumentManagementRequest = async () => {
-    if (isSubmittingRef.current) return;
-    isSubmittingRef.current = true;
-
-    try {
-      setCreateLoading(true);
-      setError(null);
-
-      const fd = new FormData();
-      fd.append('companyId', formData.company);
-      fd.append('title', docTitle.trim());
-      if (docComments.trim()) fd.append('comments', docComments.trim());
-      fd.append('formValues', JSON.stringify(buildFormValuesPayload()));
-      if (docFile) fd.append('file', docFile);
-
-      let response: Response;
-      try {
-        response = await fetch('/api/document-management/create-request', {
-          method: 'POST',
-          body: fd,
-        });
-      } catch (networkErr) {
-        console.error('Error de red al crear la solicitud de documento:', networkErr);
-        setError('No se pudo crear la solicitud. Intente de nuevo.');
-        toast.error('No se pudo crear la solicitud. Intente de nuevo.');
-        return;
-      }
-
-      if (!response.ok) {
-        let detail = '';
-        try {
-          const errorData = await response.json();
-          detail = errorData.error || '';
-        } catch {
-        }
-        console.error('Fallo al crear la solicitud de documento:', detail);
-        setError(detail || 'No se pudo crear la solicitud. Intente de nuevo.');
-        toast.error(detail || 'No se pudo crear la solicitud. Intente de nuevo.');
-        return;
-      }
-
-      const created = await response.json();
-      const createdCode = created?.document?.code || docTitle.trim();
-      toast.success(
-        `Solicitud de documento "${createdCode}" creada correctamente. Quedó en estado "En creación".`
-      );
-      console.log('Documento/solicitud creados:', created);
-
-      resetDocumentFields();
-      setFormData({
-        company: '',
-        subject: '',
-        category: '',
-        process: '',
-        descripcion: '',
-        url: '',
-      });
-
-      fetchTickets();
-      setModalOpened(false);
-    } finally {
-      setCreateLoading(false);
-      isSubmittingRef.current = false;
-    }
+    await handleCreateTicket();
   };
 
   const handleCreateTicket = async () => {
@@ -1912,7 +1797,6 @@ function RequestBoard() {
             setSearchResults([]);
             setShowActivitySearch(false);
             setError(null);
-            resetDocumentFields();
             setFormData({
               company: '',
               subject: '',
@@ -1977,31 +1861,16 @@ function RequestBoard() {
 
               <Grid.Col span={{ base: 12, md: 12 }}>
                 <TextInput
-                  label={
-                    isDocumentManagementProcess
-                      ? 'Título del documento'
-                      : parseInt(formData.process) == 4
-                        ? 'Cargo'
-                        : 'Asunto'
-                  }
-                  placeholder={
-                    isDocumentManagementProcess
-                      ? 'Ingrese el título del documento'
-                      : 'Ingrese el asunto de la solicitud'
-                  }
-                  value={isDocumentManagementProcess ? docTitle : formData.subject}
+                  label={parseInt(formData.process) == 4 ? 'Cargo' : 'Asunto'}
+                  placeholder='Ingrese el asunto de la solicitud'
+                  value={formData.subject}
                   onChange={(e) => {
-                    if (isDocumentManagementProcess) {
-                      setDocTitle(e.target.value);
-                      if (formErrors.docTitle) setFormErrors({ ...formErrors, docTitle: '' });
-                    } else {
-                      setFormData({ ...formData, subject: e.target.value });
-                      if (formErrors.subject) {
-                        setFormErrors({ ...formErrors, subject: '' });
-                      }
+                    setFormData({ ...formData, subject: e.target.value });
+                    if (formErrors.subject) {
+                      setFormErrors({ ...formErrors, subject: '' });
                     }
                   }}
-                  error={isDocumentManagementProcess ? formErrors.docTitle : formErrors.subject}
+                  error={formErrors.subject}
                   required
                   maxLength={254}
                   leftSection={<IconFileDescription size={16} />}
@@ -2138,26 +2007,6 @@ function RequestBoard() {
               </Grid.Col>
             </Grid>
 
-            {/* Gestión Documental: el archivo sigue siendo un campo propio (contenido
-                versionado del documento, con su propia ruta de OneDrive -- no un adjunto
-                genérico). "Tipo de documento", "Código del documento", "Próxima fecha de
-                revisión" y "Documento restringido" YA NO están aquí: se leen/validan como
-                cualquier otro campo de proceso en el bloque genérico "Información
-                adicional" más abajo (visibleFields), sembrados en process_form_field para
-                este proceso -- ver prisma/seeds/document-management-generic-fields.sql. */}
-            {isDocumentManagementProcess && (
-              <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
-                <FileInput
-                  label='Archivo (primera versión)'
-                  placeholder='Seleccione el archivo'
-                  required
-                  value={docFile}
-                  onChange={setDocFile}
-                  leftSection={<IconUpload size={16} />}
-                  error={formErrors.docFile}
-                />
-              </Card>
-            )}
             {(() => {
               const processName = (
                 filteredProcesses.find((p) => p.value === formData.process)?.label || ''
@@ -2183,34 +2032,20 @@ function RequestBoard() {
             })()}
 
             <Textarea
-              label={
-                isDocumentManagementProcess
-                  ? 'Comentario (opcional, queda en la versión)'
-                  : parseInt(formData.process) == 4
-                    ? 'Conocimientos - Experiencia'
-                    : 'Descripción Detallada'
-              }
-              placeholder={
-                isDocumentManagementProcess
-                  ? 'Comentario opcional sobre esta versión del documento.'
-                  : 'Describa detalladamente la solicitud. Incluya toda la información relevante para una mejor atención.'
-              }
-              value={isDocumentManagementProcess ? docComments : formData.descripcion}
+              label={parseInt(formData.process) == 4 ? 'Conocimientos - Experiencia' : 'Descripción Detallada'}
+              placeholder='Describa detalladamente la solicitud. Incluya toda la información relevante para una mejor atención.'
+              value={formData.descripcion}
               onChange={(e) => {
-                if (isDocumentManagementProcess) {
-                  setDocComments(e.target.value);
-                } else {
-                  setFormData({ ...formData, descripcion: e.target.value });
-                  if (formErrors.descripcion) {
-                    setFormErrors({ ...formErrors, descripcion: '' });
-                  }
+                setFormData({ ...formData, descripcion: e.target.value });
+                if (formErrors.descripcion) {
+                  setFormErrors({ ...formErrors, descripcion: '' });
                 }
               }}
-              error={isDocumentManagementProcess ? undefined : formErrors.descripcion}
-              required={!isDocumentManagementProcess}
-              minRows={isDocumentManagementProcess ? 2 : 5}
+              error={formErrors.descripcion}
+              required
+              minRows={5}
               maxLength={1000}
-              description={isDocumentManagementProcess ? undefined : 'Mínimo 10 caracteres, máximo 1000 caracteres'}
+              description='Mínimo 10 caracteres, máximo 1000 caracteres'
               autosize
             />
 
@@ -2471,23 +2306,18 @@ function RequestBoard() {
               </Stack>
             )}
 
-            {/* Subida libre: siempre disponible para adjuntar documentos adicionales.
-                Se oculta en Gestión Documental: ese proceso ya tiene su propio campo
-                de archivo arriba (la primera versión del documento) y no debe
-                confundirse con un adjunto genérico de la solicitud. */}
-            {!isDocumentManagementProcess && (
-              <div>
-                <Text fw={600} mb='xs'>
-                  {requiredFiles.length > 0 ? 'Archivos adicionales (Opcional)' : 'Archivos Adjuntos (Opcional)'}
-                </Text>
-                <FileUpload
-                  ticketId={0}
-                  onFilesChange={setAttachedFiles}
-                  autoUpload={false}
-                  disabled={formDataLoading}
-                />
-              </div>
-            )}
+            {/* Subida libre: siempre disponible para adjuntar documentos adicionales */}
+            <div>
+              <Text fw={600} mb='xs'>
+                {requiredFiles.length > 0 ? 'Archivos adicionales (Opcional)' : 'Archivos Adjuntos (Opcional)'}
+              </Text>
+              <FileUpload
+                ticketId={0}
+                onFilesChange={setAttachedFiles}
+                autoUpload={false}
+                disabled={formDataLoading}
+              />
+            </div>
 
             <Divider />
 
@@ -2502,7 +2332,6 @@ function RequestBoard() {
                   setSearchResults([]);
                   setShowActivitySearch(false);
                   setError(null);
-                  resetDocumentFields();
                 }}
                 size='md'
               >
