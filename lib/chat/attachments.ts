@@ -5,11 +5,9 @@
  * DÓNDE VIVE EL ARCHIVO
  * -------------------------------------------------------------------------
  * El binario NO se guarda en SQL Server: vive en OneDrive y en la base solo
- * queda la referencia (`chat_attachment.onedrive_item_id`). Es exactamente el
- * mismo criterio de almacenamiento que ya usa el SGD para
- * `DocumentVersion.onedrive_item_id` (ver lib/document-management/newVersion.ts
- * y lib/document-management/storagePath.ts), y se reusa el mismo helper de
- * Graph (lib/onedrive/graphFolderUpload.ts) en vez de duplicar las llamadas.
+ * queda la referencia (`chat_attachment.onedrive_item_id`), y se reusa el
+ * helper de Graph compartido (lib/onedrive/graphFolderUpload.ts) en vez de
+ * duplicar las llamadas.
  *
  * -------------------------------------------------------------------------
  * QUÉ PROTEGE ESTE MÓDULO
@@ -54,7 +52,7 @@ export const MAX_CHAT_ATTACHMENTS_PER_MESSAGE = 5;
 /** Tope de longitud del nombre guardado (la columna es NVARCHAR(400)). */
 export const MAX_CHAT_ATTACHMENT_NAME_CHARS = 200;
 
-/** Raíz en OneDrive, al estilo de DOCUMENT_MANAGEMENT_ROOT del SGD. */
+/** Raíz en OneDrive de los adjuntos del chat. */
 export const CHAT_ATTACHMENTS_ROOT = 'CHAT-AGENTES';
 
 /**

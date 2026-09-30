@@ -54,7 +54,7 @@ export async function POST(req) {
                  rg.subject_request,
                  tpc.task, tpc.is_sequential, tpc.display_order, tpc.id_process_category,
                  tpc.is_authorization, taut.type_authorization,
-                 pc.process, pc.process AS process_name, cr.category
+                 pc.process, cr.category
           FROM task_request_general trg
           INNER JOIN requests_general rg ON rg.id = trg.id_request_general
           LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task

@@ -229,7 +229,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
   // Ruta base histórica de este componente (tickets de SAPSEND). La lógica de
   // "obtener o crear carpeta anidada + subir archivo" ahora vive en
   // lib/onedrive/graphFolderUpload.ts (genérica, por segmentos de ruta), para
-  // que otros módulos (p.ej. Gestión Documental) puedan reusarla sin duplicar
+  // que otros módulos (p.ej. el chat o el SGC documental) puedan reusarla sin duplicar
   // las llamadas a Graph. El comportamiento para este componente no cambia:
   // sigue subiendo a SAPSEND/TEC/<storagePath>/<folderName>.
   const CheckOrCreateFolderAndUpload = async (
