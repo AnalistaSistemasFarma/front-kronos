@@ -16,6 +16,10 @@ import type { SgcActor, SgcDb } from './catalogs';
 import { getVersionForViewer, type SgcUploader } from './documents';
 import { addInteraction, decideTask, requestOfTask } from './requests';
 import { currentDraftInTx } from './signatureRecord';
+import { getReadSignError, type SgcReadStatus } from '../dissemination/scope';
+import type { SgcSignedContent } from '../signature/record';
+import { buildVerifyUrl } from '../pdf/qr';
+import { latestTrainingUpload, trainingNeedsJustification, uploadSummary } from './training';
 
 /**
  * FIRMA ELECTRÓNICA PROPIA del SGC y PDF CONTROLADO (Sprint 3).
@@ -129,9 +133,16 @@ export async function signTask(db: SgcDb, deps: SgcSignatureDeps, idTask: number
   }
 
   await ensureConsent(db, idCompany, actor, now);
-  const { draft } = await loadVerifiedDraft(db, deps, idRequest);
-  if ((raw.draftRef !== undefined && raw.draftRef !== draft.ref) || (raw.draftSha256 !== undefined && raw.draftSha256 !== draft.sha256)) {
-    throw new SgcError('El borrador cambió desde que abrió la tarea: revíselo de nuevo antes de firmar.', 409);
+  // Sprint 4: «Leyó» se firma sobre el PDF controlado que se divulga y «Capacitó» sobre el Excel de resultados.
+  const content: SgcSignedContent =
+    input.meaning === 'leyo'
+      ? await loadReadingContent(db, deps, idRequest, raw.idAssignee, email)
+      : input.meaning === 'capacito'
+        ? await loadTrainingContent(db, deps, idTask, raw.comment)
+        : (await loadVerifiedDraft(db, deps, idRequest)).draft;
+  const draft = content;
+  if ((raw.draftRef !== undefined && raw.draftRef !== null && raw.draftRef !== draft.ref) || (raw.draftSha256 !== undefined && raw.draftSha256 !== null && raw.draftSha256 !== draft.sha256)) {
+    throw new SgcError(input.meaning === 'leyo' ? 'El documento cambió desde que lo abrió: léalo de nuevo antes de firmar.' : input.meaning === 'capacito' ? 'Los resultados cambiaron desde que abrió la tarea: revíselos de nuevo antes de firmar.' : 'El borrador cambió desde que abrió la tarea: revíselo de nuevo antes de firmar.', 409);
   }
   const user = await db.user.findFirst({ where: { email: { equals: email } }, select: { name: true } });
   const idAssignee = Number(raw.idAssignee);
@@ -168,6 +179,43 @@ export async function signTask(db: SgcDb, deps: SgcSignatureDeps, idTask: number
   return { ...result, controlledPdf };
 }
 
+/**
+ * Sprint 4 — contenido de la firma «Leyó»: el PDF CONTROLADO de la versión
+ * que se divulga, descargado y VERIFICADO contra su SHA-256. La persona debe
+ * tener su lectura pendiente y haber llegado al final del documento.
+ */
+async function loadReadingContent(db: SgcDb, deps: SgcSignatureDeps, idRequest: number, rawAssignee: unknown, email: string): Promise<SgcSignedContent> {
+  const idAssignee = Number(rawAssignee);
+  const rec = Number.isInteger(idAssignee) && idAssignee > 0 ? await db.sgcReadRecord.findUnique({ where: { id_task_assignee: idAssignee } }) : null;
+  const mine = rec && rec.id_request === idRequest && lower(rec.user_email) === email ? rec : null;
+  const error = getReadSignError(mine ? { status: mine.status as SgcReadStatus, openedAt: mine.first_opened_at, reachedEndAt: mine.reached_end_at, signedAt: mine.signed_at } : null);
+  if (error) throw new SgcError(error, 409);
+  const request = await db.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest }, select: { id_document_version: true, controlled_pdf_status: true } });
+  if (!request.id_document_version || request.controlled_pdf_status !== 'generado') throw new SgcError('El PDF controlado aún no está disponible.', 409);
+  const version = await db.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: request.id_document_version } });
+  const bytes = await deps.download(version.pdf_item_id);
+  if (sha256HexOf(bytes) !== version.pdf_sha256.trim()) throw new SgcError('El PDF controlado no coincide con su huella registrada (SHA-256): no se firma. Avise a Calidad.', 409);
+  return { kind: 'pdf_controlado', ref: `version:${version.id_document_version}`, name: version.pdf_file_name, sha256: version.pdf_sha256.trim() };
+}
+
+/**
+ * Sprint 4 — contenido de la firma «Capacitó»: la última carga del Excel de
+ * resultados, VERIFICADA contra su SHA-256. Si hay personas del alcance que
+ * reprobaron o no presentaron, el cierre exige justificación (comentario).
+ */
+async function loadTrainingContent(db: SgcDb, deps: SgcSignatureDeps, idTask: number, rawComment: unknown): Promise<SgcSignedContent> {
+  const latest = await latestTrainingUpload(db, idTask);
+  if (!latest) throw new SgcError('Registre la capacitación y cargue el Excel de resultados de Forms antes de cerrarla.', 409);
+  const summary = uploadSummary(latest.upload);
+  const comment = typeof rawComment === 'string' ? rawComment.trim() : '';
+  if (trainingNeedsJustification(summary) && comment.length < 10) {
+    throw new SgcError(`Hay ${summary.failed} persona(s) que reprobaron y ${summary.missing.length} sin resultado: escriba la justificación del cierre (mínimo 10 caracteres) en la resolución.`, 409);
+  }
+  const bytes = await deps.download(latest.upload.item_id);
+  if (sha256HexOf(bytes) !== latest.upload.sha256.trim()) throw new SgcError('El Excel de resultados no coincide con su huella registrada (SHA-256): no se firma. Avise a Calidad.', 409);
+  return { kind: 'resultados_capacitacion', ref: `training_upload:${latest.upload.id_training_upload}`, name: latest.upload.file_name, sha256: latest.upload.sha256.trim() };
+}
+
 // ---------------------------------------------------------------------------
 // PDF controlado
 // ---------------------------------------------------------------------------
@@ -175,7 +223,8 @@ export async function signTask(db: SgcDb, deps: SgcSignatureDeps, idTask: number
 async function finalSignatures(db: SgcDb, idRequest: number) {
   const tasks = await db.sgcTask.findMany({ where: { id_request: idRequest, status: 'resuelta' }, include: { taskDef: true }, orderBy: { id_task: 'asc' } });
   const lastByKey = new Map<string, number>();
-  for (const t of tasks) if (t.taskDef.signature_meaning) lastByKey.set(t.task_key, t.id_task);
+  // Solo las firmas de elaboración, revisión y aprobación van en el PDF controlado (no las de lectura ni capacitación).
+  for (const t of tasks) if (t.taskDef.signature_meaning && ['elaboro', 'reviso', 'aprobo'].includes(t.taskDef.signature_meaning)) lastByKey.set(t.task_key, t.id_task);
   const ids = [...lastByKey.values()];
   if (ids.length === 0) return [];
   return db.sgcSignature.findMany({ where: { id_request: idRequest, id_task: { in: ids } }, orderBy: [{ signed_at: 'asc' }, { id_signature: 'asc' }] });
@@ -291,7 +340,8 @@ export async function generateControlledVersion(db: SgcDb, deps: SgcSignatureDep
         contentSha256: s.content_sha256.trim(),
         recordHash: s.record_hash.trim(),
       })),
-      verifyUrl: `${deps.appUrl.replace(/\/+$/, '')}/process/sgc-documental/listado?empresa=${request.id_company}&q=${encodeURIComponent(code)}`,
+      // Sprint 4: el QR de la portada abre esta verificación de vigencia de la versión.
+      verifyUrl: buildVerifyUrl(deps.appUrl, request.id_company, code, versionNumber),
     };
     const masterIds = [...new Set(signatures.map((s) => s.id_signature_master).filter((x): x is number => !!x))];
     const masters = masterIds.length ? await db.sgcSignatureMaster.findMany({ where: { id_signature_master: { in: masterIds } } }) : [];

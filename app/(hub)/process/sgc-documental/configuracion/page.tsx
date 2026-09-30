@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Alert, Badge, Button, Card, Checkbox, Group, Loader, Modal, NumberInput, Select, Stack, Table, Tabs, Text, TextInput, Textarea } from '@mantine/core';
 import { IconAlertTriangle, IconCheck, IconEdit, IconPlus } from '@tabler/icons-react';
+import SgcCargoMembers from '../../../../../components/sgc/SgcCargoMembers';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
 import { SGC_CODING_TOKENS, buildDocumentCode, validateCodingGuide } from '../../../../../lib/sgc/coding';
@@ -108,6 +109,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
           <Tabs.Tab value='tipos-proceso'>Tipos de proceso</Tabs.Tab>
           <Tabs.Tab value='procesos'>Procesos</Tabs.Tab>
           <Tabs.Tab value='tipos-documentales'>Tipos documentales</Tabs.Tab>
+          <Tabs.Tab value='cargos'>Personas por cargo</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value='guia'>
@@ -278,6 +280,10 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
               </Table>
             </Table.ScrollContainer>
           </Card>
+        </Tabs.Panel>
+
+        <Tabs.Panel value='cargos'>
+          <SgcCargoMembers idCompany={company.idCompany} />
         </Tabs.Panel>
       </Tabs>
 

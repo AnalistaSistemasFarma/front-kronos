@@ -49,6 +49,43 @@ export async function currentDraftInTx(tx: Tx, idRequest: number): Promise<SgcCu
   return pickCurrentDraft(attachments, revisions);
 }
 
+/**
+ * Contenido que se firma, releído DENTRO de la transacción (no pudo cambiar
+ * mientras la persona firmaba):
+ *   - borrador (Elaboró / Revisó / Aprobó): el borrador vigente de la solicitud;
+ *   - pdf_controlado (Leyó, Sprint 4): el PDF controlado de la versión que se
+ *     divulga, y la lectura de la persona debe estar pendiente y haber
+ *     llegado al final del documento;
+ *   - resultados_capacitacion (Capacitó, Sprint 4): la última carga del Excel
+ *     de resultados de la capacitación de esa tarea.
+ */
+export async function signedContentInTx(tx: Tx, idRequest: number, idTask: number, idTaskAssignee: number, expected: SgcSignedContent): Promise<SgcSignedContent> {
+  if (expected.kind === 'pdf_controlado') {
+    const req = await tx.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest }, select: { id_document_version: true, controlled_pdf_status: true } });
+    const version = req.id_document_version ? await tx.sgcDocumentVersion.findUnique({ where: { id_document_version: req.id_document_version } }) : null;
+    if (!version || req.controlled_pdf_status !== 'generado' || expected.ref !== `version:${version.id_document_version}` || expected.sha256 !== version.pdf_sha256.trim()) {
+      throw new SgcError('El documento que leyó ya no es el PDF controlado de la solicitud: ábralo de nuevo antes de firmar.', 409);
+    }
+    const rec = await tx.sgcReadRecord.findUnique({ where: { id_task_assignee: idTaskAssignee } });
+    if (!rec || rec.status !== 'pendiente') throw new SgcError('Su lectura no está pendiente: no se firma de nuevo.', 409);
+    if (!rec.reached_end_at) throw new SgcError('Aún no llega al final del documento: «Leído» se habilita al terminar de leerlo.', 409);
+    return { kind: 'pdf_controlado', ref: expected.ref, name: version.pdf_file_name, sha256: version.pdf_sha256.trim() };
+  }
+  if (expected.kind === 'resultados_capacitacion') {
+    const training = await tx.sgcTraining.findUnique({ where: { id_task: idTask } });
+    const up = training ? await tx.sgcTrainingUpload.findFirst({ where: { id_training: training.id_training }, orderBy: { id_training_upload: 'desc' } }) : null;
+    if (!up || expected.ref !== `training_upload:${up.id_training_upload}` || expected.sha256 !== up.sha256.trim()) {
+      throw new SgcError('Los resultados de la capacitación cambiaron mientras firmaba: revíselos de nuevo antes de firmar.', 409);
+    }
+    return { kind: 'resultados_capacitacion', ref: expected.ref, name: up.file_name, sha256: up.sha256.trim() };
+  }
+  const current = await currentDraftInTx(tx, idRequest);
+  if (!current || current.ref !== expected.ref || current.sha256 !== expected.sha256) {
+    throw new SgcError('El borrador cambió mientras firmaba: vuelva a abrir la tarea y revise el contenido antes de firmar.', 409);
+  }
+  return { kind: current.kind, ref: current.ref, name: current.name, sha256: current.sha256 };
+}
+
 /** Último hash de la cadena de firmas de la empresa, BLOQUEANDO la cola (dos firmas no bifurcan la cadena). */
 async function lastRecordHash(tx: Tx, idCompany: number): Promise<string | null> {
   const rows = await tx.$queryRaw<{ record_hash: string }[]>`
@@ -90,10 +127,7 @@ export async function recordSignature(
 ): Promise<SgcRecordedSignature> {
   const s = p.signature;
   if (!p.expectedMeaning || s.meaning !== p.expectedMeaning) throw new SgcError('El significado de la firma no corresponde a esta tarea.', 409);
-  const current = await currentDraftInTx(tx, p.request.id_request);
-  if (!current || current.ref !== s.verifiedDraft.ref || current.sha256 !== s.verifiedDraft.sha256) {
-    throw new SgcError('El borrador cambió mientras firmaba: vuelva a abrir la tarea y revise el contenido antes de firmar.', 409);
-  }
+  const current = await signedContentInTx(tx, p.request.id_request, p.idTask, p.idTaskAssignee, s.verifiedDraft);
   const email = p.actor.email.trim().toLowerCase();
   const master = await activeMaster(tx, p.request.id_company, email);
   const payload = buildSignaturePayload({

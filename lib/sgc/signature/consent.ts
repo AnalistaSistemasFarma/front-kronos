@@ -38,8 +38,8 @@ export const SGC_SIGNATURE_REASONS: Record<SgcSignatureMeaning, string[]> = {
   elaboro: ['Soy el autor del documento y lo envío a revisión.', 'Elaboré los cambios de esta versión y los envío a revisión.'],
   reviso: ['Revisé el contenido y es técnicamente correcto.', 'Revisé el documento y no tengo observaciones.'],
   aprobo: ['Apruebo el documento para su emisión.', 'Verifiqué la estructura documental y apruebo su emisión.'],
-  leyo: ['Leí y entendí el documento.'],
-  capacito: ['Realicé la capacitación del documento.'],
+  leyo: ['Leí el documento completo y entiendo su contenido.', 'Leí y entendí el documento.'],
+  capacito: ['Realicé la capacitación del documento y verifiqué los resultados de la evaluación.', 'Realicé la capacitación del documento.'],
 };
 
 export const SGC_CHECK_ANSWERS = ['cumple', 'no_cumple', 'no_aplica'] as const;

@@ -688,3 +688,16 @@ export async function revokeDocumentAccess(
     return saved;
   });
 }
+
+/**
+ * Sprint 4: ¿la persona puede CONSULTAR el documento? (misma regla del
+ * listado y la ficha). Para la verificación por QR: sin permiso sobre el
+ * documento se informa solo el estado de la versión, no su título.
+ */
+export async function canViewDocument(db: SgcDb, accessByCompany: readonly SgcCompanyAccess[], subject: SgcAccessSubject, idDocument: number, now: Date = new Date()): Promise<boolean> {
+  const doc = await loadDocument(db, idDocument);
+  if (!doc) return false;
+  const access = accessByCompany.find((a) => a.idCompany === doc.id_company);
+  if (!access) return false;
+  return permissionsFor(access, subject, doc, now).canView;
+}

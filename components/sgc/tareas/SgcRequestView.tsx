@@ -53,6 +53,9 @@ import SgcSignersPanel from './SgcSignersPanel';
 import SgcTasksModal from './SgcTasksModal';
 import SgcSignModal from '../signature/SgcSignModal';
 import SgcSignaturesCard from '../signature/SgcSignaturesCard';
+import SgcDisseminationCard from './SgcDisseminationCard';
+import SgcReadingPanel from './SgcReadingPanel';
+import SgcTrainingCard from './SgcTrainingCard';
 
 /**
  * Vista interna de una solicitud documental y de una «Tarea documental».
@@ -170,10 +173,12 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
   const decisionOptions =
     myAction?.kind === 'enviar'
       ? [{ value: 'aprobar', label: 'Resuelto — enviar a revisión' }]
-      : [
-          { value: 'aprobar', label: focus?.isAuthorization ? 'Resuelto — autorizar (aprobar)' : 'Resuelto — aprobar' },
-          { value: 'devolver', label: 'Devuelto — devolver a elaboración' },
-        ];
+      : focus?.role === 'capacitacion'
+        ? [{ value: 'aprobar', label: 'Resuelto — cerrar la capacitación' }]
+        : [
+            { value: 'aprobar', label: focus?.isAuthorization ? 'Resuelto — autorizar (aprobar)' : 'Resuelto — aprobar' },
+            ...(focus?.canReturn === false ? [] : [{ value: 'devolver', label: 'Devuelto — devolver a elaboración' }]),
+          ];
 
   const saveDecision = async () => {
     if (!focus || !decision) {
@@ -200,6 +205,14 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
   };
 
   const signatureLabel = focus?.signatureLabel;
+  // Sprint 4: «Capacitó» se firma sobre el Excel de resultados cargado (no sobre el borrador).
+  const signContent =
+    myAction?.signatureMeaning === 'capacito'
+      ? data.training?.upload
+        ? { ref: `training_upload:${data.training.upload.id}`, name: data.training.upload.fileName, sha256: data.training.upload.sha256 }
+        : null
+      : data.currentDraft;
+  const onDisseminationAction = (body: Record<string, unknown>, ok: string) => run(() => sgcSend(`/api/sgc/requests/${request.id}/dissemination`, 'POST', body), ok);
   const draftHref = data.currentDraft
     ? data.currentDraft.kind === 'borrador_editor'
       ? `/process/sgc-documental/solicitudes/${request.id}/borrador?empresa=${request.idCompany}`
@@ -239,8 +252,22 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           )}
         </Card>
 
+        {mode === 'tarea' && focus && data.reading && (
+          <SgcReadingPanel
+            idTask={focus.id}
+            requestId={request.id}
+            reading={data.reading}
+            canSign={myAction?.kind === 'leer'}
+            onDone={(text) => {
+              setMessage({ type: 'success', text });
+              reload();
+            }}
+          />
+        )}
+
         <div className='flex flex-col lg:flex-row gap-6'>
           <div className={`flex-1 order-2 lg:order-1 min-w-0 space-y-5${mode === 'tarea' ? ' lg:sticky lg:top-6 self-start' : ''}`}>
+            {!data.readerOnly && (
             <SgcInteractionHistory
               variant={mode}
               items={data.interactions}
@@ -261,6 +288,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                 }
               }}
             />
+            )}
           </div>
 
           <div className='w-full lg:w-150 order-1 lg:order-2'>
@@ -466,13 +494,18 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                       )}
                       {focus.status === 'en_espera' && (
                         <Alert color='yellow' icon={<IconLock size={16} />} mb='md'>
-                          Este paso está definido en el flujo, pero el sistema lo habilita en el Sprint 4 (divulgación y capacitación).
+                          Este paso quedó en espera: la solicitud usa una versión del flujo anterior a la que habilitó la divulgación y la capacitación. Calidad puede cancelarla y pedirla de nuevo con el flujo vigente.
+                        </Alert>
+                      )}
+                      {myAction?.kind === 'leer' && (
+                        <Alert color='blue' icon={<IconLock size={16} />} mb='md'>
+                          Esta es una lectura obligatoria: lea el documento arriba hasta el final y use «Leído».
                         </Alert>
                       )}
                       <Group justify='space-between'>
                         <Group>
                           {!isEditing ? (
-                            <Button color='blue' onClick={() => setIsEditing(true)} leftSection={<IconTicket size={16} />} disabled={!myAction} data-testid='sgc-editar-tarea'>
+                            <Button color='blue' onClick={() => setIsEditing(true)} leftSection={<IconTicket size={16} />} disabled={!myAction || myAction.kind === 'leer'} data-testid='sgc-editar-tarea'>
                               Editar Tarea
                             </Button>
                           ) : (
@@ -498,6 +531,28 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           </div>
         </div>
 
+        {data.dissemination && (
+          <SgcDisseminationCard idCompany={request.idCompany} view={data.dissemination} users={userOptions} onAction={onDisseminationAction} />
+        )}
+
+        {data.training && (
+          <SgcTrainingCard
+            view={data.training}
+            onSave={(body) => run(() => sgcSend(`/api/sgc/requests/${request.id}/training`, 'POST', body), 'Capacitación registrada.')}
+            onUpload={(file) =>
+              run(async () => {
+                const form = new FormData();
+                form.append('file', file);
+                const res = await fetch(`/api/sgc/requests/${request.id}/training/results`, { method: 'POST', body: form });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error((body as { error?: string }).error || `Error ${res.status}`);
+              }, 'Resultados de la capacitación cargados.')
+            }
+          />
+        )}
+
+        {!data.readerOnly && (
+        <>
         <SgcSignersPanel
           steps={data.steps}
           canEdit={permissions.canChangeSigners}
@@ -543,6 +598,8 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
             await run(() => sgcSend(`/api/sgc/requests/${request.id}/attachments/${idAttachment}/withdraw`, 'POST', { reason }), 'Adjunto retirado.');
           }}
         />
+        </>
+        )}
 
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           <Group justify='space-between'>
@@ -599,18 +656,19 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
             onClose={() => setSignOpen(false)}
             title={`Firmar · ${focus.name} · Solicitud #${request.id}`}
             meaning={myAction.signatureMeaning as SgcSignatureMeaning}
-            draft={data.currentDraft}
-            draftHref={draftHref}
+            draft={signContent}
+            draftHref={myAction.signatureMeaning === 'capacito' ? null : draftHref}
             checklist={myAction.checklist}
-            submitLabel={myAction.kind === 'enviar' ? 'Firmar y enviar a revisión' : undefined}
+            submitLabel={myAction.kind === 'enviar' ? 'Firmar y enviar a revisión' : myAction.signatureMeaning === 'capacito' ? 'Firmar «Capacitó» y cerrar' : undefined}
             onSign={async (payload) => {
-              const res = await sgcSend<{ controlledPdf?: { status: string | null; error?: string } }>(`/api/sgc/tasks/${focus.id}/sign`, 'POST', { ...payload, comment: payload.comment || resolution, idAssignee: myAction.idAssignee });
+              const res = await sgcSend<{ controlledPdf?: { status: string | null; error?: string }; published?: { code: string; versionNumber: number; obsolete: { versionNumber: number } | null } | null }>(`/api/sgc/tasks/${focus.id}/sign`, 'POST', { ...payload, comment: payload.comment || resolution, idAssignee: myAction.idAssignee });
               setSignOpen(false);
               setIsEditing(false);
               setDecision(null);
               setResolution('');
               const pdf = res.controlledPdf?.status === 'generado' ? ' Se generó el PDF controlado.' : res.controlledPdf?.status === 'error' ? ` El PDF controlado quedó pendiente: ${res.controlledPdf.error ?? ''}` : '';
-              setMessage({ type: 'success', text: `Firma registrada. Tarea actualizada correctamente.${pdf}` });
+              const vig = res.published ? ` ${res.published.code} V${res.published.versionNumber} quedó VIGENTE${res.published.obsolete ? ` y la V${res.published.obsolete.versionNumber} OBSOLETA` : ''}.` : '';
+              setMessage({ type: 'success', text: `Firma registrada. Tarea actualizada correctamente.${pdf}${vig}` });
               reload();
             }}
           />
