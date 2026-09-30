@@ -51,3 +51,13 @@ export async function downloadVerifiedFile(itemId: string, expectedSha256: strin
   }
   return bytes;
 }
+
+/**
+ * Sprint 3: descarga SIN verificar (quien llama compara la huella y reporta
+ * la diferencia, p. ej. la verificación del PDF controlado).
+ */
+export async function downloadSgcFile(itemId: string): Promise<Uint8Array> {
+  const file = await downloadOneDriveItemContent(await token(), itemId);
+  if (!file) throw new SgcError('No se pudo obtener el archivo desde OneDrive.', 502);
+  return new Uint8Array(file.buffer);
+}

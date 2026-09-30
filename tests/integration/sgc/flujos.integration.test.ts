@@ -55,6 +55,7 @@ import { normalizeFlowDefinition } from '../../../lib/sgc/flows/definition';
 import { SGC_DOCUMENT_FLOW_V1 } from '../../../lib/sgc/flows/documentFlow';
 import type { SgcNotification, SgcNotifier } from '../../../lib/sgc/notifications';
 import type { SgcCompanyAccess } from '../../../lib/sgc/permissions';
+import { currentDraftInTx } from '../../../lib/sgc/db/signatureRecord';
 
 /**
  * Sprint 2 contra un SQL Server REAL (efímero en CI): motor de flujos
@@ -97,6 +98,12 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
   const accessOf = async (email: string): Promise<SgcCompanyAccess> => (await getSgcAccessForUser(prisma, email)).find((a) => a.idCompany === CO)!;
   const viewer = async (email: string) => ({ email, access: await getSgcAccessForUser(prisma, email) });
   const seed = (file: string) => fs.readFileSync(path.join(process.cwd(), 'prisma/manual', file), 'utf8').replace('DECLARE @IdCompany INT = 3;', `DECLARE @IdCompany INT = ${CO};`);
+  // Sprint 3: aprobar un paso con firma exige la firma electrónica (ya reautenticada; aquí se prueba el motor).
+  const sig = async (idTask: number) => {
+    const t = await prisma.sgcTask.findUniqueOrThrow({ where: { id_task: idTask }, include: { taskDef: true } });
+    const d = (await currentDraftInTx(prisma as never, t.id_request))!;
+    return { meaning: t.taskDef.signature_meaning as 'elaboro', reason: 'Firma de la prueba de integración', signerName: null, verifiedDraft: { kind: d.kind, ref: d.ref, name: d.name, sha256: d.sha256 }, uploadEvidence: upload, now: new Date() };
+  };
   const taskOf = async (idRequest: number, key: string) => prisma.sgcTask.findFirstOrThrow({ where: { id_request: idRequest, task_key: key }, orderBy: { id_task: 'desc' }, include: { assignees: { orderBy: { sign_order: 'asc' } } } });
 
   let procGC = 0;
@@ -395,16 +402,17 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(decideTask(prisma, notifier, elab.id_task, { decision: 'otra' }, actor(E.elab))).rejects.toThrow(/Decisión inválida/);
     await expect(decideTask(prisma, notifier, 999999, { decision: 'aprobar' }, actor(E.elab))).rejects.toMatchObject({ status: 404 });
     await expect(decideTask(prisma, notifier, elab.id_task, { decision: 'devolver', comment: 'no aplica aquí' }, actor(E.elab))).rejects.toThrow(/no se puede devolver/);
-    const sub = await decideTask(prisma, notifier, elab.id_task, { decision: 'aprobar', comment: 'Listo para revisión' }, actor(E.elab));
+    await expect(decideTask(prisma, notifier, elab.id_task, { decision: 'aprobar', comment: 'Listo para revisión' }, actor(E.elab))).rejects.toThrow(/firma electrónica/);
+    const sub = await decideTask(prisma, notifier, elab.id_task, { decision: 'aprobar', comment: 'Listo para revisión', signature: await sig(elab.id_task) }, actor(E.elab));
     expect(sub).toMatchObject({ outcome: 'resuelta', next: 'revision' });
     const elabAfter = await taskOf(req1, 'elaboracion');
-    expect(elabAfter.assignees[0]).toMatchObject({ status: 'aprobado', signature_status: 'pendiente_s3', signature_meaning: 'elaboro', decided_by: E.elab });
+    expect(elabAfter.assignees[0]).toMatchObject({ status: 'aprobado', signature_status: 'firmada', signature_meaning: 'elaboro', decided_by: E.elab });
 
     const rev = await taskOf(req1, 'revision');
     expect(rev).toMatchObject({ status: 'abierta', signing_mode: 'paralelo', round: 1 });
     expect(rev.assignees.map((a) => [a.user_email, a.sign_order, a.status, a.signature_status])).toEqual([
-      [E.rev1, 1, 'pendiente', 'pendiente_s3'],
-      [E.rev2, 2, 'pendiente', 'pendiente_s3'],
+      [E.rev1, 1, 'pendiente', 'pendiente'],
+      [E.rev2, 2, 'pendiente', 'pendiente'],
     ]);
     expect(sent.find((n) => n.payload.url === `/process/sgc-documental/tareas/${rev.id_task}`)!.emails.sort()).toEqual([E.rev1, E.rev2].sort());
     expect(sent.every((n) => !n.emails.includes(E.elab))).toBe(true);
@@ -413,14 +421,14 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     expect(inbox1.find((t) => t.idTask === rev.id_task)).toMatchObject({ status: 'abierta', statusLabel: 'Abierto', task: 'Revisión', idRequest: req1 });
     expect(await requestOfTask(prisma, rev.id_task)).toEqual({ idRequest: req1, idCompany: CO });
 
-    const partial = await decideTask(prisma, notifier, rev.id_task, { decision: 'aprobar', comment: 'Sin observaciones' }, actor(E.rev2));
+    const partial = await decideTask(prisma, notifier, rev.id_task, { decision: 'aprobar', comment: 'Sin observaciones', signature: await sig(rev.id_task) }, actor(E.rev2));
     expect(partial).toMatchObject({ outcome: 'abierta', next: 'revision' });
     await expect(decideTask(prisma, notifier, rev.id_task, { decision: 'aprobar' }, actor(E.rev2))).rejects.toMatchObject({ status: 403 });
-    const done = await decideTask(prisma, notifier, rev.id_task, { decision: 'aprobar' }, actor(E.rev1));
+    const done = await decideTask(prisma, notifier, rev.id_task, { decision: 'aprobar', signature: await sig(rev.id_task) }, actor(E.rev1));
     expect(done).toMatchObject({ outcome: 'resuelta', next: 'aprobacion' });
     const hist = await prisma.sgcInteraction.findMany({ where: { id_request: req1, kind: 'decision' }, orderBy: { id_interaction: 'asc' } });
     expect(hist.map((h) => h.author_email)).toEqual([E.elab, E.rev2, E.rev1]);
-    expect(hist[1].body).toContain('Punto de firma: Revisó (firma electrónica pendiente — Sprint 3)');
+    expect(hist[1].body).toContain('Firma electrónica: Revisó (firmado electrónicamente)');
   });
 
   it('[SGC-REQ-029][SGC-REQ-033] la aprobación va EN ORDEN (apr1 → rev2 → grupo de Calidad) y llega también a Autorizaciones SGC', async () => {
@@ -450,7 +458,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     const aprAuth = await taskOfAuthorization(prisma, auths[0].id_authorization);
     await expect(decideTask(prisma, notifier, aprAuth.idTask, { decision: 'aprobar', idAssignee: apr.assignees[1].id_task_assignee }, actor(E.apr1))).rejects.toMatchObject({ status: 409 });
     await expect(taskOfAuthorization(prisma, 999999)).rejects.toMatchObject({ status: 404 });
-    await decideTask(prisma, notifier, aprAuth.idTask, { decision: 'aprobar', comment: 'Aprobado por el área', idAssignee: aprAuth.idAssignee }, actor(E.apr1));
+    await decideTask(prisma, notifier, aprAuth.idTask, { decision: 'aprobar', comment: 'Aprobado por el área', idAssignee: aprAuth.idAssignee, signature: await sig(aprAuth.idTask) }, actor(E.apr1));
     expect((await prisma.sgcAuthorization.findUniqueOrThrow({ where: { id_authorization: auths[0].id_authorization } }))).toMatchObject({ status: 'autorizada', decided_by: E.apr1, decision_comment: 'Aprobado por el área' });
     expect(sent.at(-1)!.emails).toEqual([E.rev2]);
   });
@@ -483,11 +491,11 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
   it('[SGC-REQ-029][SGC-REQ-033][SGC-REQ-027] con la verificación de Calidad (grupo) la aprobación termina y la solicitud queda en espera de divulgación (S4)', async () => {
     const apr = await taskOf(req1, 'aprobacion');
     await expect(decideTask(prisma, notifier, apr.id_task, { decision: 'aprobar' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
-    await decideTask(prisma, notifier, apr.id_task, { decision: 'aprobar' }, actor(E.rev1));
+    await decideTask(prisma, notifier, apr.id_task, { decision: 'aprobar', signature: await sig(apr.id_task) }, actor(E.rev1));
     const detailCal = await getTaskDetail(prisma, apr.id_task, await viewer(E.cal));
-    expect(detailCal.tasks.find((t) => t.id === apr.id_task)!.myAction).toEqual({ idAssignee: expect.any(Number), kind: 'decidir' });
+    expect(detailCal.tasks.find((t) => t.id === apr.id_task)!.myAction).toEqual({ idAssignee: expect.any(Number), kind: 'decidir', signatureMeaning: 'aprobo', checklist: [] });
     await expect(decideTask(prisma, notifier, apr.id_task, { decision: 'aprobar' }, actor(E.elab))).rejects.toMatchObject({ status: 403 });
-    const fin = await decideTask(prisma, notifier, apr.id_task, { decision: 'aprobar', comment: 'Estructura conforme a la guía' }, actor(E.cal));
+    const fin = await decideTask(prisma, notifier, apr.id_task, { decision: 'aprobar', comment: 'Estructura conforme a la guía', signature: await sig(apr.id_task) }, actor(E.cal));
     expect(fin).toMatchObject({ outcome: 'resuelta', next: 'divulgacion' });
     const r = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: req1 } });
     expect(r).toMatchObject({ status: 'en_espera', current_task_key: 'divulgacion' });
@@ -495,7 +503,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     expect(div.status).toBe('en_espera');
     expect(div.assignees).toHaveLength(0);
     const pool = (await taskOf(req1, 'aprobacion')).assignees.find((a) => a.pool_type_code)!;
-    expect(pool).toMatchObject({ status: 'aprobado', decided_by: E.cal, signature_status: 'pendiente_s3', signature_meaning: 'aprobo' });
+    expect(pool).toMatchObject({ status: 'aprobado', decided_by: E.cal, signature_status: 'firmada', signature_meaning: 'aprobo' });
     await expect(decideTask(prisma, notifier, div.id_task, { decision: 'aprobar' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
     const calHist = await prisma.sgcInteraction.findFirstOrThrow({ where: { id_request: req1, author_email: E.cal, kind: 'decision' } });
     expect(calHist.body).toContain('grupo SGC-VERIF-CALIDAD');
@@ -564,7 +572,8 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(saveFormValues(prisma, idRequest, { values: { urgencia: 'Otra' } }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/opción no permitida/);
     await expect(saveFormValues(prisma, idRequest, { values: { urgencia: 'Alta' } }, await viewer(E.cal), actor(E.cal))).rejects.toMatchObject({ status: 403 });
     expect(await saveFormValues(prisma, idRequest, { values: 'x' }, await viewer(E.elab), actor(E.elab))).toEqual({ saved: {} });
-    await decideTask(prisma, notifier, (await taskOf(idRequest, 'elaboracion')).id_task, { decision: 'aprobar' }, actor(E.elab));
+    const elabT = (await taskOf(idRequest, 'elaboracion')).id_task;
+    await decideTask(prisma, notifier, elabT, { decision: 'aprobar', signature: await sig(elabT) }, actor(E.elab));
 
     sent.length = 0;
     const rev = await taskOf(idRequest, 'revision');
@@ -641,7 +650,8 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await setSigners(prisma, notifier, old.idRequest, { stepKey: 'revision', signers: [E.rev1] }, actor(E.elab));
     await setSigners(prisma, notifier, old.idRequest, { stepKey: 'aprobacion', signers: [E.apr1] }, actor(E.elab));
     await uploadAttachment(prisma, upload, old.idRequest, { purpose: 'borrador', ...word('instructivo') }, await viewer(E.elab), actor(E.elab));
-    await decideTask(prisma, notifier, (await taskOf(old.idRequest, 'elaboracion')).id_task, { decision: 'aprobar' }, actor(E.elab));
+    const elabOld = (await taskOf(old.idRequest, 'elaboracion')).id_task;
+    await decideTask(prisma, notifier, elabOld, { decision: 'aprobar', signature: await sig(elabOld) }, actor(E.elab));
     const revOld = await prisma.sgcTask.findFirstOrThrow({ where: { id_request: old.idRequest, task_key: 'revision' }, include: { taskDef: true } });
     expect(revOld.taskDef).toMatchObject({ id_flow_version: oldReq.id_flow_version, target_days: 5 });
     const detailOld = await getRequestDetail(prisma, old.idRequest, await viewer(E.elab));

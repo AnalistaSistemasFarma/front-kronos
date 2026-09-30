@@ -1320,6 +1320,10 @@ model SgcCompanyConfig {
   requests           SgcRequest[]
   authorizationTypes SgcAuthorizationType[]
 
+  // Sprint 3: firma electrónica propia (consentimientos y maestro de firmas).
+  signatureConsents SgcSignatureConsent[]
+  signatureMasters  SgcSignatureMaster[]
+
   @@map("company_config")
   @@schema("sgc")
 }
@@ -1484,6 +1488,10 @@ model SgcDocumentVersion {
   obsolete_date       DateTime? @db.Date
   created_by          String    @db.NVarChar(255)
   created_at          DateTime  @default(now())
+  // Sprint 3: versión generada por el flujo (PDF controlado con manifiesto de firmas).
+  id_request            Int?
+  signed_content_sha256 String?   @db.Char(64)
+  manifest_json         String?   @db.NVarChar(Max)
 
   document SgcDocument @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1672,6 +1680,8 @@ model SgcFlowFormField {
   options_json       String? @db.NVarChar(Max)
   help_text          String? @db.NVarChar(500)
   sort_order         Int     @default(0)
+  // Sprint 3: el campo es un punto de la lista de chequeo de estructura de Calidad (lo responde el cupo del grupo).
+  quality_check      Boolean @default(false)
 
   version    SgcFlowVersion @relation(fields: [id_flow_version], references: [id_flow_version], onDelete: NoAction, onUpdate: NoAction)
   formValues SgcFormValue[]
@@ -1761,6 +1771,11 @@ model SgcRequest {
   closed_at          DateTime?
   created_at         DateTime  @default(now())
   updated_at         DateTime  @updatedAt
+  // Sprint 3: versión del documento que produjo la aprobación (PDF controlado).
+  id_document_version   Int?
+  // pendiente | generado | error
+  controlled_pdf_status String?   @db.NVarChar(20)
+  controlled_pdf_error  String?   @db.NVarChar(1000)
 
   companyConfig  SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   process        SgcFlowProcess     @relation(fields: [id_flow_process], references: [id_flow_process], onDelete: NoAction, onUpdate: NoAction)
@@ -1774,6 +1789,9 @@ model SgcRequest {
   interactions   SgcInteraction[]
   attachments    SgcAttachment[]
   authorizations SgcAuthorization[]
+  signatures     SgcSignature[]
+  draftRevisions SgcDraftRevision[]
+  qualityChecks  SgcQualityCheck[]
 
   @@index([id_company, status])
   @@index([requester_email])
@@ -1845,14 +1863,18 @@ model SgcTaskAssignee {
   decided_by        String?   @db.NVarChar(255)
   decided_at        DateTime?
   comment           String?   @db.NVarChar(2000)
-  // no_aplica | pendiente_s3 | firmada
+  // no_aplica | pendiente | firmada | sin_firma_s2 (decidido en el S2, antes de la firma propia)
   signature_status  String    @default("no_aplica") @db.NVarChar(20)
   signature_meaning String?   @db.NVarChar(20)
   notified_at       DateTime?
   created_at        DateTime  @default(now())
+  // Sprint 3: firma electrónica con la que se decidió el cupo (sgc.signature).
+  id_signature      Int?
 
   task           SgcTask            @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
   authorizations SgcAuthorization[]
+  signatures     SgcSignature[]
+  qualityChecks  SgcQualityCheck[]
 
   @@index([id_task])
   @@index([user_email, status])
@@ -1990,5 +2012,144 @@ model SgcAuthorization {
   @@index([id_company, status])
   @@index([assigned_email, status])
   @@map("authorization")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC · Sprint 3 — firma electrónica PROPIA (copia aislada de GSS Firma/Orión,
+// sin llamarla), lista de chequeo de Calidad y edición en la app del borrador.
+// ---------------------------------------------------------------------------
+
+/// Firma electrónica del SGC. SOLO INSERCIÓN (trigger): reautenticación con la
+/// contraseña de SynerLink (nunca se guarda), significado, motivo, sello de
+/// tiempo del servidor, hash del contenido firmado, evidencia en el espacio
+/// propio de la empresa y encadenamiento de registros (record_hash).
+model SgcSignature {
+  id_signature        Int      @id @default(autoincrement())
+  signature_uid       String   @unique @db.Char(36)
+  id_company          Int
+  id_request          Int
+  id_task             Int
+  id_task_assignee    Int
+  signer_email        String   @db.NVarChar(255)
+  signer_name         String?  @db.NVarChar(255)
+  // elaboro | reviso | aprobo | leyo | capacito
+  meaning             String   @db.NVarChar(20)
+  reason              String   @db.NVarChar(1000)
+  // Sello de tiempo del servidor (UTC).
+  signed_at           DateTime
+  // borrador_adjunto | borrador_editor
+  content_kind        String   @db.NVarChar(30)
+  content_ref         String   @db.NVarChar(60)
+  content_name        String   @db.NVarChar(260)
+  content_sha256      String   @db.Char(64)
+  // contrasena_synerlink
+  auth_method         String   @db.NVarChar(40)
+  consent_version     String   @db.NVarChar(60)
+  id_signature_master Int?
+  master_sha256       String?  @db.Char(64)
+  ip                  String?  @db.NVarChar(64)
+  user_agent          String?  @db.NVarChar(400)
+  evidence_item_id    String   @db.NVarChar(200)
+  evidence_path       String   @db.NVarChar(600)
+  evidence_sha256     String   @db.Char(64)
+  prev_record_hash    String?  @db.Char(64)
+  record_hash         String   @unique @db.Char(64)
+  created_at          DateTime @default(now())
+
+  request  SgcRequest      @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+  assignee SgcTaskAssignee @relation(fields: [id_task_assignee], references: [id_task_assignee], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_company, id_signature])
+  @@index([id_request])
+  @@index([signer_email])
+  @@map("signature")
+  @@schema("sgc")
+}
+
+/// Aceptación del consentimiento legal de firma por persona y versión del texto. SOLO INSERCIÓN.
+model SgcSignatureConsent {
+  id_signature_consent Int      @id @default(autoincrement())
+  id_company           Int
+  user_email           String   @db.NVarChar(255)
+  consent_version      String   @db.NVarChar(60)
+  text_sha256          String   @db.Char(64)
+  accepted_at          DateTime
+  ip                   String?  @db.NVarChar(64)
+  user_agent           String?  @db.NVarChar(400)
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, user_email, consent_version])
+  @@map("signature_consent")
+  @@schema("sgc")
+}
+
+/// Maestro de firmas (trazo registrado por Calidad en la inducción), versionado.
+/// No se borra (trigger): se revoca con motivo.
+model SgcSignatureMaster {
+  id_signature_master Int       @id @default(autoincrement())
+  id_company          Int
+  user_email          String    @db.NVarChar(255)
+  version_number      Int
+  // Imagen PNG como data URL (base64).
+  image_png           String    @db.NVarChar(Max)
+  image_sha256        String    @db.Char(64)
+  registered_by       String    @db.NVarChar(255)
+  registered_at       DateTime
+  reason              String    @db.NVarChar(1000)
+  revoked_at          DateTime?
+  revoked_by          String?   @db.NVarChar(255)
+  revoke_reason       String?   @db.NVarChar(1000)
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, user_email, version_number])
+  @@map("signature_master")
+  @@schema("sgc")
+}
+
+/// Revisiones del borrador editado en la app (Tiptap). SOLO INSERCIÓN: cada
+/// guardado es una revisión nueva (control de versiones del borrador).
+model SgcDraftRevision {
+  id_draft_revision Int      @id @default(autoincrement())
+  id_request        Int
+  revision_number   Int
+  // blanco | vigente | word | revision
+  origin            String   @db.NVarChar(20)
+  origin_ref        String?  @db.NVarChar(200)
+  content_html      String   @db.NVarChar(Max)
+  sha256            String   @db.Char(64)
+  size_bytes        Int
+  note              String?  @db.NVarChar(500)
+  saved_by          String   @db.NVarChar(255)
+  saved_at          DateTime
+
+  request SgcRequest @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_request, revision_number])
+  @@map("draft_revision")
+  @@schema("sgc")
+}
+
+/// Lista de chequeo de estructura documental de Calidad dentro de la
+/// aprobación (respuestas de cada verificación). SOLO INSERCIÓN.
+model SgcQualityCheck {
+  id_quality_check Int      @id @default(autoincrement())
+  id_request       Int
+  id_task          Int
+  id_task_assignee Int
+  id_signature     Int?
+  items_json       String   @db.NVarChar(Max)
+  // conforme | no_conforme
+  result           String   @db.NVarChar(20)
+  checked_by       String   @db.NVarChar(255)
+  checked_at       DateTime
+
+  request  SgcRequest      @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+  assignee SgcTaskAssignee @relation(fields: [id_task_assignee], references: [id_task_assignee], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_request])
+  @@map("quality_check")
   @@schema("sgc")
 }
