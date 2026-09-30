@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { identificar } from '../../../../../../lib/portal/acceso';
-import {
-  MATERIAL_MIMES_PERMITIDOS,
-  MAX_MATERIAL_BYTES,
-  formadoresDePortal,
-} from '../../../../../../lib/portal/config';
-import { carpetaSharePointDelCurso } from '../../../../../../lib/portal/formacion';
+import { formadoresDePortal } from '../../../../../../lib/portal/config';
+import { subirArchivoDeMaterial, validarArchivoMaterial } from '../../../../../../lib/portal/formacion';
 import {
   FormacionStorageNoConfigurado,
   MENSAJE_NO_CONFIGURADO,
-  leerConfigFormacion,
-  subirArchivoFormacion,
 } from '../../../../../../lib/portal/formacion-storage';
 
 function idDesdeParametro(valor: string): number | null {
@@ -63,7 +57,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const ultimoOrden = await prisma.portalCourseMaterial.aggregate({
-      where: { course_id: courseId },
+      where: { course_id: courseId, eliminado_at: null },
       _max: { orden: true },
     });
     const orden = (ultimoOrden._max.orden ?? -1) + 1;
@@ -82,30 +76,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const archivo = form.get('file');
-    if (!(archivo instanceof File)) {
-      return NextResponse.json({ error: 'Falta el archivo del documento.' }, { status: 400 });
-    }
-    const mime = (archivo.type || '').toLowerCase();
-    if (!MATERIAL_MIMES_PERMITIDOS.includes(mime)) {
-      return NextResponse.json({ error: `Formato no admitido (${mime || 'desconocido'}).` }, { status: 400 });
-    }
-    if (archivo.size === 0) return NextResponse.json({ error: 'El archivo llegó vacío.' }, { status: 400 });
-    if (archivo.size > MAX_MATERIAL_BYTES) {
-      return NextResponse.json({ error: 'El archivo es muy grande. El tope es 25 MB.' }, { status: 400 });
-    }
+    const invalido = validarArchivoMaterial(archivo);
+    if (invalido) return NextResponse.json({ error: invalido }, { status: 400 });
 
-    // Antes de leer el archivo y tocar nada: si falta la configuración, el
-    // formador se entera de una vez.
-    leerConfigFormacion();
-
-    const carpetaCurso = await carpetaSharePointDelCurso(courseId);
-    const subido = await subirArchivoFormacion({
-      carpetaCurso,
-      subcarpeta: 'materiales',
-      nombreArchivo: archivo.name,
-      contenido: new Uint8Array(await archivo.arrayBuffer()),
-      mime,
-    });
+    // Si falta la configuración, lanza antes de leer el archivo o tocar nada.
+    const referencia = await subirArchivoDeMaterial(courseId, archivo as File);
 
     const material = await prisma.portalCourseMaterial.create({
       data: {
@@ -114,11 +89,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         title: titulo,
         orden,
         required: obligatorio,
-        file_name: (subido.nombre || archivo.name).slice(0, 255) || 'material',
-        mime,
-        sp_drive_item_id: subido.driveItemId,
-        sp_web_url: subido.webUrl,
-        file_size: BigInt(subido.tamano),
+        ...referencia,
       },
     });
     return NextResponse.json({ ok: true, material: { id: material.id } });

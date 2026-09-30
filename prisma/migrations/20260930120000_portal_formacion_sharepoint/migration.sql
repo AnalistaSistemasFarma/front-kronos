@@ -36,6 +36,15 @@ IF COL_LENGTH(N'dbo.portal_course_material', N'sp_web_url') IS NULL
 IF COL_LENGTH(N'dbo.portal_course_material', N'file_size') IS NULL
   ALTER TABLE [dbo].[portal_course_material] ADD [file_size] BIGINT NULL;
 
+-- Material quitado del curso: borrado LÓGICO. Cristian (2026-09-30): el
+-- archivo NO se borra de SharePoint, se MUEVE a
+-- FORMACION/ELIMINADOS/<slug-curso>-<id>/materiales/. La fila queda para
+-- trazabilidad (quién y cuándo) con la referencia ya actualizada.
+IF COL_LENGTH(N'dbo.portal_course_material', N'eliminado_at') IS NULL
+  ALTER TABLE [dbo].[portal_course_material] ADD [eliminado_at] DATETIME2 NULL;
+IF COL_LENGTH(N'dbo.portal_course_material', N'eliminado_por') IS NULL
+  ALTER TABLE [dbo].[portal_course_material] ADD [eliminado_por] NVARCHAR(255) NULL;
+
 -- Certificado: el PDF emitido queda archivado en SharePoint.
 IF COL_LENGTH(N'dbo.portal_certificate', N'sp_drive_item_id') IS NULL
   ALTER TABLE [dbo].[portal_certificate] ADD [sp_drive_item_id] NVARCHAR(200) NULL;

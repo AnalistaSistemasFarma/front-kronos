@@ -26,6 +26,11 @@
  *
  *   FORMACION/<slug-curso>-<id>/materiales/<archivo>
  *   FORMACION/<slug-curso>-<id>/certificados/<codigo>.pdf
+ *   FORMACION/ELIMINADOS/<slug-curso>-<id>/materiales/<archivo>   (quitados)
+ *
+ * Nada se BORRA de SharePoint: un material quitado del curso se MUEVE a
+ * ELIMINADOS (pedido de Cristian, 2026-09-30). Este módulo no tiene ninguna
+ * función de borrado a propósito.
  */
 import 'server-only';
 
@@ -172,6 +177,21 @@ export function rutaDentroDeFormacion(
     if (!esSegmentoValido(s)) throw new Error(`Segmento de ruta no válido: "${s}"`);
   }
   return segmentos.join('/');
+}
+
+/** Carpeta (dentro de la base) a donde van los materiales quitados. */
+export const CARPETA_ELIMINADOS = 'ELIMINADOS';
+
+/**
+ * Segmentos de `FORMACION/ELIMINADOS/<curso>/materiales`, validados uno a
+ * uno. Solo materiales: los certificados emitidos nunca se mueven.
+ */
+export function segmentosCarpetaEliminados(carpetaBase: string, carpetaCurso: string): string[] {
+  const segmentos = [carpetaBase, CARPETA_ELIMINADOS, carpetaCurso, 'materiales'];
+  for (const s of segmentos) {
+    if (!esSegmentoValido(s)) throw new Error(`Segmento de ruta no válido: "${s}"`);
+  }
+  return segmentos;
 }
 
 /** La ruta codificada para `/drive/root:/<ruta>:`. */
@@ -347,4 +367,76 @@ export async function descargarArchivoFormacion(
     tamano: Number.isFinite(largo) && largo > 0 ? largo : null,
     mime: res.headers.get('content-type'),
   };
+}
+
+/**
+ * Garantiza que exista la carpeta `segmentos.join('/')` (creando los niveles
+ * que falten) y devuelve su driveItemId.
+ */
+async function asegurarCarpeta(cfg: ConfigFormacionSharePoint, token: string, f: Fetch, segmentos: string[]): Promise<string> {
+  const drive = `${GRAPH}/sites/${encodeURIComponent(cfg.siteId)}/drive`;
+  const auth = { Authorization: `Bearer ${token}` };
+  let idPadre: string | null = null;
+  for (let i = 0; i < segmentos.length; i++) {
+    const ruta = segmentos.slice(0, i + 1).join('/');
+    const existente = await f(`${drive}/root:/${codificarRuta(ruta)}`, { headers: auth });
+    if (existente.ok) {
+      idPadre = ((await existente.json()) as DriveItemGraph).id ?? null;
+      if (!idPadre) throw new FormacionStorageError(`Graph no devolvió el id de la carpeta ${ruta}.`);
+      continue;
+    }
+    if (existente.status !== 404) {
+      throw new FormacionStorageError(`No se pudo consultar la carpeta ${ruta} (${existente.status}).`, existente.status);
+    }
+    const hijos: string = idPadre ? `${drive}/items/${encodeURIComponent(idPadre)}/children` : `${drive}/root/children`;
+    const creada: Response = await f(hijos, {
+      method: 'POST',
+      headers: { ...auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: segmentos[i], folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }),
+    });
+    if (creada.ok) {
+      idPadre = ((await creada.json()) as DriveItemGraph).id ?? null;
+    } else if (creada.status === 409) {
+      // Otra petición la creó al mismo tiempo: se relee.
+      const releida = await f(`${drive}/root:/${codificarRuta(ruta)}`, { headers: auth });
+      idPadre = releida.ok ? (((await releida.json()) as DriveItemGraph).id ?? null) : null;
+    } else {
+      throw new FormacionStorageError(`No se pudo crear la carpeta ${ruta} (${creada.status}).`, creada.status);
+    }
+    if (!idPadre) throw new FormacionStorageError(`No se pudo obtener la carpeta ${ruta}.`);
+  }
+  return idPadre!;
+}
+
+/**
+ * Mueve un material quitado del curso a
+ * `FORMACION/ELIMINADOS/<curso>/materiales/<archivo>` (PATCH del driveItem
+ * con `parentReference` + `name`, `conflictBehavior=rename`). Crea la carpeta
+ * si no existe. Lanza si algo falla: quien llama NO debe marcar el material
+ * como quitado si el archivo no se movió.
+ */
+export async function moverMaterialAEliminados(
+  params: { driveItemId: string; carpetaCurso: string; nombreArchivo: string },
+  deps: { config?: ConfigFormacionSharePoint; fetch?: Fetch } = {}
+): Promise<ArchivoEnSharePoint> {
+  if (!/^[A-Za-z0-9!._-]{1,200}$/.test(params.driveItemId)) throw new FormacionStorageError('Id de archivo no válido.');
+  const cfg = deps.config ?? leerConfigFormacion();
+  const f = deps.fetch ?? fetch;
+  const segmentos = segmentosCarpetaEliminados(cfg.carpetaBase, params.carpetaCurso);
+  const nombre = nombreArchivoSeguro(params.nombreArchivo);
+  const token = await obtenerToken(cfg, f);
+  const idCarpeta = await asegurarCarpeta(cfg, token, f, segmentos);
+
+  const res = await f(
+    `${GRAPH}/sites/${encodeURIComponent(cfg.siteId)}/drive/items/${encodeURIComponent(params.driveItemId)}` +
+      '?@microsoft.graph.conflictBehavior=rename',
+    {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parentReference: { id: idCarpeta }, name: nombre }),
+    }
+  );
+  if (!res.ok) throw new FormacionStorageError(`Graph no movió el archivo a ELIMINADOS (${res.status}).`, res.status);
+  const item = (await res.json()) as DriveItemGraph;
+  return aReferencia({ ...item, id: item.id ?? params.driveItemId }, item.file?.mimeType ?? '', item.size ?? 0);
 }

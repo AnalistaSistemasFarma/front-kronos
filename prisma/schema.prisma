@@ -1069,6 +1069,11 @@ model PortalCourseMaterial {
   sp_drive_item_id String? @db.NVarChar(200)
   sp_web_url       String? @db.NVarChar(1000)
   file_size        BigInt?
+  /// Quitado del curso por el formador (borrado LÓGICO): el archivo se movió
+  /// a FORMACION/ELIMINADOS/<curso>/materiales en SharePoint. Pedido de
+  /// Cristian (2026-09-30): nada se borra de SharePoint.
+  eliminado_at     DateTime?
+  eliminado_por    String? @db.NVarChar(255)
   /// EN DESUSO desde 2026-09-30 (migración 20260930120000): ya no se escribe.
   /// Solo se lee para servir materiales subidos antes del cambio a
   /// SharePoint. Pendiente de retiro en un PR posterior.

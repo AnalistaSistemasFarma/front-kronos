@@ -10,7 +10,14 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../prisma';
 import { generarCertificadoPdf } from './certificado-pdf';
-import { carpetaDeCurso, subirArchivoFormacion, type ArchivoEnSharePoint } from './formacion-storage';
+import { MATERIAL_MIMES_PERMITIDOS, MAX_MATERIAL_BYTES } from './config';
+import {
+  carpetaDeCurso,
+  leerConfigFormacion,
+  moverMaterialAEliminados,
+  subirArchivoFormacion,
+  type ArchivoEnSharePoint,
+} from './formacion-storage';
 
 /** Un material tal como lo necesita el cálculo de progreso. */
 interface MaterialParaProgreso {
@@ -187,4 +194,68 @@ export async function archivarCertificadoEnSharePoint(code: string): Promise<Arc
     },
   });
   return archivo;
+}
+
+/**
+ * Valida el archivo de un material (mismas reglas al agregarlo y al
+ * reemplazarlo). Devuelve el mensaje de error, o `null` si pasa.
+ */
+export function validarArchivoMaterial(archivo: unknown): string | null {
+  if (!(archivo instanceof File)) return 'Falta el archivo del documento.';
+  const mime = (archivo.type || '').toLowerCase();
+  if (!MATERIAL_MIMES_PERMITIDOS.includes(mime)) return `Formato no admitido (${mime || 'desconocido'}).`;
+  if (archivo.size === 0) return 'El archivo llegó vacío.';
+  if (archivo.size > MAX_MATERIAL_BYTES) return 'El archivo es muy grande. El tope es 25 MB.';
+  return null;
+}
+
+/** Columnas de referencia de un material ya subido a SharePoint. */
+export interface ReferenciaMaterial {
+  file_name: string;
+  mime: string;
+  sp_drive_item_id: string;
+  sp_web_url: string | null;
+  file_size: bigint;
+}
+
+/**
+ * Sube el archivo (ya validado) de un material a
+ * FORMACION/<curso>/materiales y devuelve las columnas a guardar. Lanza
+ * `FormacionStorageNoConfigurado` ANTES de leer el archivo si falta la
+ * configuración.
+ */
+export async function subirArchivoDeMaterial(courseId: number, archivo: File): Promise<ReferenciaMaterial> {
+  leerConfigFormacion();
+  const mime = (archivo.type || '').toLowerCase();
+  const carpetaCurso = await carpetaSharePointDelCurso(courseId);
+  const subido = await subirArchivoFormacion({
+    carpetaCurso,
+    subcarpeta: 'materiales',
+    nombreArchivo: archivo.name,
+    contenido: new Uint8Array(await archivo.arrayBuffer()),
+    mime,
+  });
+  return {
+    file_name: (subido.nombre || archivo.name).slice(0, 255) || 'material',
+    mime,
+    sp_drive_item_id: subido.driveItemId,
+    sp_web_url: subido.webUrl,
+    file_size: BigInt(subido.tamano),
+  };
+}
+
+/**
+ * Mueve a FORMACION/ELIMINADOS/<curso>/materiales el archivo de un material
+ * (al quitarlo o al reemplazarlo). Nada se borra de SharePoint.
+ */
+export async function moverArchivoDeMaterialAEliminados(
+  courseId: number,
+  driveItemId: string,
+  nombreArchivo: string | null
+): Promise<ArchivoEnSharePoint> {
+  return moverMaterialAEliminados({
+    driveItemId,
+    carpetaCurso: await carpetaSharePointDelCurso(courseId),
+    nombreArchivo: nombreArchivo ?? 'material',
+  });
 }

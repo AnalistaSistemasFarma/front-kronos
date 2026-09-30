@@ -206,3 +206,59 @@ describe('descargarArchivoFormacion', () => {
     await expect(descargarArchivoFormacion('../x', { config: CFG, fetch: vi.fn() as unknown as typeof fetch })).rejects.toThrow();
   });
 });
+
+describe('moverMaterialAEliminados', () => {
+  it('crea FORMACION/ELIMINADOS/<curso>/materiales si falta y hace PATCH con parentReference + name + rename', async () => {
+    const { moverMaterialAEliminados } = await import('../formacion-storage');
+    const creadas: string[] = [];
+    const f = fetchFalso((url, init) => {
+      if (init.method === 'PATCH') {
+        return respuesta(200, { id: 'ITEM1', name: 'guia 1.pdf', webUrl: 'https://sp/ELIMINADOS/guia 1.pdf', size: 3 });
+      }
+      if (init.method === 'POST') {
+        const nombre = JSON.parse(String(init.body)).name;
+        creadas.push(nombre);
+        return respuesta(201, { id: `DIR-${nombre}` });
+      }
+      // GET por ruta: FORMACION existe; lo demás no.
+      if (url.endsWith('/root:/FORMACION')) return respuesta(200, { id: 'DIR-FORMACION' });
+      return respuesta(404);
+    });
+    const r = await moverMaterialAEliminados(
+      { driveItemId: 'ITEM1', carpetaCurso: 'sst-1', nombreArchivo: 'guia.pdf' },
+      { config: CFG, fetch: f as unknown as typeof fetch }
+    );
+    expect(creadas).toEqual(['ELIMINADOS', 'sst-1', 'materiales']);
+    const patch = f.mock.calls.find(([, i]) => (i as RequestInit | undefined)?.method === 'PATCH') as [string, RequestInit];
+    expect(patch[0]).toContain('/drive/items/ITEM1?@microsoft.graph.conflictBehavior=rename');
+    expect(JSON.parse(String(patch[1].body))).toEqual({ parentReference: { id: 'DIR-materiales' }, name: 'guia.pdf' });
+    expect(r.driveItemId).toBe('ITEM1');
+    expect(r.nombre).toBe('guia 1.pdf');
+  });
+
+  it('si Graph rechaza el movimiento, lanza', async () => {
+    const { moverMaterialAEliminados } = await import('../formacion-storage');
+    const f = fetchFalso((url, init) => (init.method === 'PATCH' ? respuesta(423) : respuesta(200, { id: 'DIR' })));
+    await expect(
+      moverMaterialAEliminados(
+        { driveItemId: 'ITEM1', carpetaCurso: 'sst-1', nombreArchivo: 'a.pdf' },
+        { config: CFG, fetch: f as unknown as typeof fetch }
+      )
+    ).rejects.toThrow(/ELIMINADOS/);
+  });
+
+  it('la ruta de ELIMINADOS queda dentro de la carpeta base y valida el curso', async () => {
+    const { segmentosCarpetaEliminados, moverMaterialAEliminados } = await import('../formacion-storage');
+    expect(segmentosCarpetaEliminados('FORMACION', 'sst-1')).toEqual(['FORMACION', 'ELIMINADOS', 'sst-1', 'materiales']);
+    expect(() => segmentosCarpetaEliminados('FORMACION', '../otro')).toThrow();
+    expect(() => segmentosCarpetaEliminados('FORMACION', '..')).toThrow();
+    const f = vi.fn();
+    await expect(
+      moverMaterialAEliminados(
+        { driveItemId: 'ITEM1', carpetaCurso: 'a/b', nombreArchivo: 'a.pdf' },
+        { config: CFG, fetch: f as unknown as typeof fetch }
+      )
+    ).rejects.toThrow();
+    expect(f).not.toHaveBeenCalled();
+  });
+});

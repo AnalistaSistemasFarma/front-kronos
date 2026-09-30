@@ -3578,6 +3578,102 @@ body.chat-inmersivo .chat-page-thread--completa {
   color: var(--pth-tinta-2);
 }
 
+.portal-th__formacion-crear textarea {
+  flex: 1 1 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 8px;
+  font: inherit;
+  resize: vertical;
+}
+
+/* ── Formación: edición en línea (vista formador) ── */
+.portal-th__formacion-titulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.portal-th__formacion-descripcion {
+  margin: 4px 0 12px;
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__formacion-editar input:not([type]) {
+  flex: 1 1 220px;
+}
+
+.portal-th__formacion-editar .portal-th__aviso {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.portal-th__formacion-editar-acciones {
+  display: flex;
+  gap: 8px;
+}
+
+.portal-th__formacion-crear .portal-th__boton-secundario {
+  border: 1px solid var(--pth-linea);
+  background: #fff;
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__formacion-archivo {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__material-item--editando {
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.portal-th__material-item--editando .portal-th__formacion-crear {
+  flex: 1;
+  margin: 0;
+}
+
+.portal-th__material-acciones {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.portal-th__icono-boton {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--pth-linea);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--pth-tinta-2);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.portal-th__icono-boton:hover:not(:disabled) {
+  border-color: var(--pth-azul);
+  color: var(--pth-azul);
+}
+
+.portal-th__icono-boton:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.portal-th__error--accion {
+  margin-bottom: 12px;
+}
+
 .portal-th__roster-tabla td {
   vertical-align: middle;
 }
