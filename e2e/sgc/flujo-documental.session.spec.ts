@@ -25,18 +25,18 @@ test.describe('SGC documental · Sprint 2 · administración de flujos validados
     await expect(page.getByTestId('sgc-flujos-mensaje')).toContainText('Flujo creado');
     await expect(page.getByTestId('sgc-version-estado')).toHaveText('borrador');
     await page.getByTestId('sgc-flujo-tarea-nombre').nth(1).fill('Ejecución editada en e2e');
-    await page.getByTestId('sgc-flujo-motivo').fill('Cambio de nombre de la tarea (e2e).');
+    await page.getByTestId('sgc-flujo-motivo').fill(`Cambio de nombre de la tarea (e2e ${code}).`);
     await page.getByTestId('sgc-flujo-guardar').click();
     await expect(page.getByTestId('sgc-flujos-mensaje')).toContainText('Borrador guardado');
     await page.getByTestId('sgc-flujo-publicar').click();
-    await page.getByTestId('sgc-modal-motivo').fill('Publicación de prueba (e2e).');
+    await page.getByTestId('sgc-modal-motivo').fill(`Publicación de prueba (e2e ${code}).`);
     await page.getByTestId('sgc-modal-confirmar').click();
     await expect(page.getByTestId('sgc-flujos-mensaje')).toContainText('Versión publicada');
     await expect(page.getByTestId('sgc-version-estado')).toHaveText('vigente');
     await expect(page.getByTestId('sgc-flujo-tarea-nombre').nth(1)).toBeDisabled();
     await page.getByRole('tab', { name: 'Registro de cambios' }).click();
-    await expect(page.getByTestId('sgc-cambio').filter({ hasText: 'Publicación de prueba (e2e).' })).toBeVisible();
-    await expect(page.getByTestId('sgc-cambio').filter({ hasText: 'Cambio de nombre de la tarea (e2e).' })).toBeVisible();
+    await expect(page.getByTestId('sgc-cambio').filter({ hasText: `Publicación de prueba (e2e ${code}).` })).toBeVisible();
+    await expect(page.getByTestId('sgc-cambio').filter({ hasText: `Cambio de nombre de la tarea (e2e ${code}).` })).toBeVisible();
   });
 });
 
