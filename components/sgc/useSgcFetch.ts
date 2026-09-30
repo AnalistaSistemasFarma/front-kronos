@@ -33,7 +33,7 @@ export function useSgcFetch<T>(url: string | null) {
 }
 
 /** POST/PATCH JSON; devuelve el cuerpo o lanza con el mensaje de la API. */
-export async function sgcSend<T = unknown>(url: string, method: 'POST' | 'PATCH', body: unknown): Promise<T> {
+export async function sgcSend<T = unknown>(url: string, method: 'POST' | 'PATCH' | 'PUT', body: unknown): Promise<T> {
   const res = await fetch(url, {
     method,
     headers: { 'Content-Type': 'application/json' },

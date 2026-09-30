@@ -20,6 +20,21 @@ export const SGC_AUDIT_ACTIONS = {
   maestroEditado: 'maestro.editado',
   guiaCodificacionEditada: 'guia_codificacion.editada',
   accesoDenegado: 'acceso.denegado',
+  // Sprint 2: flujos validados, Tareas documentales y Autorizaciones SGC.
+  flujoConfigurado: 'flujo.configurado',
+  flujoPublicado: 'flujo.publicado',
+  matrizEditada: 'matriz.editada',
+  autorizacionConfigurada: 'autorizacion.configurada',
+  solicitudCreada: 'solicitud.creada',
+  solicitudCancelada: 'solicitud.cancelada',
+  solicitudFormulario: 'solicitud.formulario',
+  tareaDecision: 'tarea.decision',
+  tareaReasignada: 'tarea.reasignada',
+  firmantesCambiados: 'solicitud.firmantes',
+  notaAgregada: 'solicitud.nota',
+  adjuntoCargado: 'solicitud.adjunto',
+  adjuntoRetirado: 'solicitud.adjunto_retirado',
+  adjuntoDescarga: 'solicitud.adjunto_descarga',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];

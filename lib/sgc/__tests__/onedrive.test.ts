@@ -42,3 +42,16 @@ describe('SGC · OneDrive (utilidad compartida, carpeta propia)', () => {
     await expect(downloadVerifiedPdf('item-1', 'x')).rejects.toMatchObject({ status: 502 });
   });
 });
+
+describe('SGC · OneDrive · adjuntos de solicitudes (Sprint 2)', () => {
+  it('[SGC-REQ-032] entrega un adjunto solo si su SHA-256 coincide; sin archivo responde 502', async () => {
+    const { downloadVerifiedFile } = await import('../onedrive');
+    getToken.mockResolvedValue('token');
+    downloadOneDriveItemContent.mockResolvedValueOnce({ buffer: Buffer.from(bytes), contentType: 'application/pdf', fileName: 'x.docx' });
+    await expect(downloadVerifiedFile('item-1', sha256Hex(bytes))).resolves.toEqual(bytes);
+    downloadOneDriveItemContent.mockResolvedValueOnce({ buffer: Buffer.from(bytes), contentType: 'application/pdf', fileName: 'x.docx' });
+    await expect(downloadVerifiedFile('item-1', 'a'.repeat(64))).rejects.toMatchObject({ status: 409 });
+    downloadOneDriveItemContent.mockResolvedValueOnce(null);
+    await expect(downloadVerifiedFile('item-1', 'x')).rejects.toMatchObject({ status: 502 });
+  });
+});
