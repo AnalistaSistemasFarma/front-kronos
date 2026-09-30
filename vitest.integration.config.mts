@@ -24,11 +24,13 @@ export default defineConfig({
       reporter: ['text', 'text-summary', 'json-summary', 'lcov'],
       reportsDirectory: 'reports/integracion/coverage',
       include: ['lib/sgc/db/**/*.ts', 'lib/sgc/access.ts'],
+      // Medido en CI el 2026-09-30 (S1): líneas 98,48 %, sentencias 98,18 %,
+      // funciones 96,36 %, ramas 88,67 %. Piso un poco por debajo.
       thresholds: {
-        lines: 85,
-        functions: 85,
-        statements: 85,
-        branches: 70,
+        lines: 95,
+        functions: 92,
+        statements: 95,
+        branches: 85,
       },
     },
   },
