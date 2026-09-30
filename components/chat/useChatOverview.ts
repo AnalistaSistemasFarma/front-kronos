@@ -57,6 +57,8 @@ type CacheChat = {
   email: string;
   access: ChatAccessDto | null;
   conversations: ChatConversationDto[];
+  /** Ya llegó al menos una respuesta de /api/chat/conversations. */
+  conversationsLoaded?: boolean;
 };
 
 let cache: CacheChat | null = null;
@@ -82,11 +84,15 @@ export interface ChatOverview {
   canBroadcast: boolean;
   /** Si el usuario puede crear grupos (administradores). */
   canCreateGroups: boolean;
+  /** Piloto "Personas": puede INICIAR conversaciones con otras personas. */
+  canMessagePeople: boolean;
   agents: ChatAgentDto[];
   /** TODAS las conversaciones: hilos directos y grupos. */
   conversations: ChatConversationDto[];
   /** Solo los grupos, ya separados y ordenados por actividad. */
   groups: ChatConversationDto[];
+  /** Solo los hilos entre personas, ordenados por actividad. */
+  people: ChatConversationDto[];
   unreadByAgent: Map<number, number>;
   statusByAgent: Map<number, ChatStatusDto | null>;
   conversationByAgent: Map<number, ChatConversationDto>;
@@ -94,10 +100,26 @@ export interface ChatOverview {
   totalUnread: number;
   /** No leídos de los GRUPOS, aparte. */
   groupUnread: number;
+  /** No leídos de los hilos entre PERSONAS, aparte. */
+  peopleUnread: number;
+  /**
+   * Ya se sabe cuál es el último mensaje de cada hilo. Mientras sea `false`,
+   * la lista no debe pintar la descripción del agente en el lugar de la vista
+   * previa: se vería la descripción y un instante después el último mensaje
+   * encima (el "salto" que Nicolás vio en el iPhone, 2026-09-29).
+   */
+  conversationsReady: boolean;
   refresh: () => void;
 }
 
-export function useChatOverview(): ChatOverview {
+export function useChatOverview(opciones?: {
+  /**
+   * Pedir la bandeja de una vez al montar, sin el retraso de 800 ms que usa la
+   * barra superior. Lo usa la página del chat, donde la bandeja ES la pantalla.
+   */
+  primeraCargaInmediata?: boolean;
+}): ChatOverview {
+  const primeraCargaInmediata = opciones?.primeraCargaInmediata ?? false;
   const { data: session, status } = useSession();
   const isAuthenticated = status === 'authenticated' && Boolean(session?.user?.email);
 
@@ -111,6 +133,9 @@ export function useChatOverview(): ChatOverview {
     inicial?.conversations ?? []
   );
   const [loading, setLoading] = useState(false);
+  const [conversationsReady, setConversationsReady] = useState(
+    inicial?.conversationsLoaded ?? false
+  );
 
   const accessAbort = useRef<AbortController | null>(null);
   const listAbort = useRef<AbortController | null>(null);
@@ -121,6 +146,12 @@ export function useChatOverview(): ChatOverview {
   // TODA la página de chat (barra de avatares, lista, no leídos) cada 30s
   // aunque no hubiera cambiado nada.
   const lastConversationsJson = useRef<string>(JSON.stringify(inicial?.conversations ?? []));
+  // Lo mismo con el catálogo de agentes (2026-09-29). /api/chat/access se pide
+  // otra vez con CADA `notifyChatRefresh()` —cada mensaje nuevo, cada envío,
+  // cada "leído"— y casi siempre trae lo mismo; reemplazarlo daba agentes
+  // nuevos (mismo contenido) a la página, y el hilo abierto re-renderizaba
+  // todas sus burbujas porque su `agent` "cambiaba".
+  const lastAccessJson = useRef<string>(JSON.stringify(inicial?.access ?? null));
 
   const fetchAccess = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -130,6 +161,9 @@ export function useChatOverview(): ChatOverview {
     try {
       const data = await chatGetJson<ChatAccessDto>('/api/chat/access', controller.signal);
       if (controller.signal.aborted || !data) return;
+      const accessJson = JSON.stringify(data);
+      if (accessJson === lastAccessJson.current) return;
+      lastAccessJson.current = accessJson;
       setAccess(data);
       escribirCache(email, { access: data });
     } catch (err) {
@@ -159,17 +193,25 @@ export function useChatOverview(): ChatOverview {
       if (controller.signal.aborted || !data) return;
       const lista = data.conversations ?? [];
       const listaJson = JSON.stringify(lista);
-      if (listaJson === lastConversationsJson.current) return;
+      if (listaJson === lastConversationsJson.current) {
+        escribirCache(email, { conversationsLoaded: true });
+        return;
+      }
       lastConversationsJson.current = listaJson;
       setConversations(lista);
-      escribirCache(email, { conversations: lista });
+      escribirCache(email, { conversations: lista, conversationsLoaded: true });
     } catch (err) {
       if (!isAbortError(err)) {
         /* ver arriba */
       }
     } finally {
       inFlight.current = false;
-      if (!controller.signal.aborted) setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+        // También si falló: con la API caída, mejor la descripción que un
+        // renglón en blanco para siempre.
+        setConversationsReady(true);
+      }
     }
   }, [isAuthenticated, email]);
 
@@ -185,7 +227,9 @@ export function useChatOverview(): ChatOverview {
       cache = null;
       setAccess(null);
       setConversations([]);
+      setConversationsReady(false);
       lastConversationsJson.current = JSON.stringify([]);
+      lastAccessJson.current = JSON.stringify(null);
       return;
     }
 
@@ -193,7 +237,10 @@ export function useChatOverview(): ChatOverview {
 
     // Pequeño retraso inicial: la cabecera se pinta primero (mismo truco que
     // NotificationBell para no competir con la carga de la página).
-    const first = window.setTimeout(() => void fetchConversations(), 800);
+    const first = window.setTimeout(
+      () => void fetchConversations(),
+      primeraCargaInmediata ? 0 : 800
+    );
     const interval = window.setInterval(() => void fetchConversations(), OVERVIEW_POLL_MS);
 
     const onVisibility = () => {
@@ -212,7 +259,7 @@ export function useChatOverview(): ChatOverview {
       accessAbort.current?.abort();
       listAbort.current?.abort();
     };
-  }, [isAuthenticated, fetchAccess, fetchConversations, refresh]);
+  }, [isAuthenticated, fetchAccess, fetchConversations, refresh, primeraCargaInmediata]);
 
   const derived = useMemo(() => {
     const unreadByAgent = new Map<number, number>();
@@ -224,8 +271,12 @@ export function useChatOverview(): ChatOverview {
     // entraran aquí, sus no leídos se le sumarían al contador del avatar de
     // ese agente en la barra superior y abrir su chat directo no los bajaría
     // —quedaría un número pegado que nadie puede quitar—.
-    const directas = conversations.filter((c) => c.kind !== 'group');
+    // Un hilo sin `kind` es de antes de los grupos, o sea directo. Se pregunta
+    // por 'direct' y no por "no es grupo": una clase nueva de conversación no
+    // debe sumarse al contador de un agente por descarte.
+    const directas = conversations.filter((c) => (c.kind ?? 'direct') === 'direct');
     const groups = conversations.filter((c) => c.kind === 'group');
+    const people = conversations.filter((c) => c.kind === 'people');
 
     for (const conversation of directas) {
       const id = conversation.agent.idAgent;
@@ -242,7 +293,19 @@ export function useChatOverview(): ChatOverview {
     let groupUnread = 0;
     for (const g of groups) groupUnread += g.unreadCount;
 
-    return { unreadByAgent, statusByAgent, conversationByAgent, totalUnread, groups, groupUnread };
+    let peopleUnread = 0;
+    for (const p of people) peopleUnread += p.unreadCount;
+
+    return {
+      unreadByAgent,
+      statusByAgent,
+      conversationByAgent,
+      totalUnread,
+      groups,
+      groupUnread,
+      people,
+      peopleUnread,
+    };
   }, [conversations]);
 
   return {
@@ -251,9 +314,11 @@ export function useChatOverview(): ChatOverview {
     canUseChat: access?.canUseChat ?? false,
     canBroadcast: access?.canBroadcast ?? false,
     canCreateGroups: access?.canCreateGroups ?? false,
+    canMessagePeople: access?.canMessagePeople ?? false,
     agents: access?.agents ?? [],
     conversations,
     ...derived,
+    conversationsReady,
     refresh,
   };
 }

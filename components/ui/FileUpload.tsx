@@ -27,6 +27,7 @@ import {
 import { useGetMicrosoftToken as getMicrosoftToken } from '../microsoft-365/useGetMicrosoftToken';
 import { sanitizeOneDriveName } from '../../lib/onedriveName';
 import { ensureOneDriveFolderPath, uploadFileToOneDriveFolder } from '../../lib/onedrive/graphFolderUpload';
+import toast from 'react-hot-toast';
 
 export interface UploadedFile {
   id: string;
@@ -72,6 +73,7 @@ const ALLOWED_TYPES = [
   'image/png',
   'image/jpeg',
   'image/jpg',
+  'text/plain',
 ];
 
 const MAX_FILE_SIZE = Number.MAX_SAFE_INTEGER; // Sin límite de tamaño
@@ -108,7 +110,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
   const getFileIcon = (type: string) => {
     if (type.includes('pdf')) return <IconFileText size={20} />;
-    if (type.includes('word') || type.includes('document')) return <IconFileText size={20} />;
+    if (type.includes('word') || type.includes('document') || type.includes('text/plain'))
+      return <IconFileText size={20} />;
     if (type.includes('excel') || type.includes('spreadsheet'))
       return <IconFileSpreadsheet size={20} />;
     if (type.includes('image')) return <IconPhoto size={20} />;
@@ -125,7 +128,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
   const validateFile = (file: File): string | null => {
     if (!ALLOWED_TYPES.includes(file.type)) {
-      return `Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG`;
+      return `Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG, TXT`;
     }
     // Sin límite de tamaño de archivo
     return null;
@@ -196,6 +199,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       };
       queueMicrotask(() => {
         onUploadCompleteRef.current?.(completed);
+        toast.success(`Documento adjunto: ${file.name}`);
         // Limpiar de la cola de subida tras éxito: la tabla de adjuntos es la fuente de verdad.
         window.setTimeout(() => {
           setFiles((prev) => prev.filter((f) => f.id !== fileId || f.status !== 'success'));
@@ -203,14 +207,16 @@ const FileUpload: React.FC<FileUploadProps> = ({
       });
     } catch (error) {
       console.error('Error uploading file:', error);
+      const message =
+        error instanceof Error ? error.message : 'Error desconocido al subir el archivo';
+      toast.error(message);
       setFiles((prev) =>
         prev.map((f) =>
           f.id === fileId
             ? {
                 ...f,
                 status: 'error',
-                error:
-                  error instanceof Error ? error.message : 'Error desconocido al subir el archivo',
+                error: message,
               }
             : f
         )
@@ -409,7 +415,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
           ref={fileInputRef}
           type='file'
           multiple
-          accept='.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg'
+          accept='.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.txt'
           onChange={handleFileInputChange}
           style={{ display: 'none' }}
           disabled={disabled}

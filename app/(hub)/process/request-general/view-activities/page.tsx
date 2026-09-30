@@ -42,6 +42,7 @@ import {
   Table,
   UnstyledButton,
   Tooltip,
+  Progress,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -68,6 +69,7 @@ import {
   IconPhoto,
   IconEye,
   IconLock,
+  IconPencil,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
@@ -78,6 +80,14 @@ import {
   rememberPendingAttachment,
   removeFromAttachmentCache,
 } from '../../../../../lib/attachments/pendingOptimistic';
+import {
+  TABLE_FIELD_TYPE,
+  parseTableConfig,
+  parseTableValue,
+  serializeTableValue,
+  type TableRow,
+} from '../../../../../lib/requests-general/tableField';
+import TableFieldInput from '../create-request/TableFieldInput';
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../../lib/orion/fieldType';
 import { allSlotsCompletedForEmail, getCurrentPendingSigner, isSignerCompleted } from '../../../../../lib/orion/signerStatus';
 import {
@@ -103,8 +113,11 @@ import { isSynerlinkWorkflowLocked } from '../../../../../lib/orion/workflowLock
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
+import { partitionTasksForDisplay } from '@/lib/orion/taskProgress';
+import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
 
 interface Request {
   id: number;
@@ -276,11 +289,18 @@ function ViewRequestPage() {
       id_form_field?: number;
       field_label: string;
       field_type?: string | null;
+      editable?: boolean;
       config_json?: string | null;
+      id_option?: number | null;
       option_label: string | null;
       value_text: string | null;
+      options?: { id: number; option_label: string }[];
     }[]
   >([]);
+  const [editingFieldId, setEditingFieldId] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState<string>('');
+  const [editingTableRows, setEditingTableRows] = useState<TableRow[]>([]);
+  const [savingFieldValue, setSavingFieldValue] = useState(false);
   const lastOrionFormFetchKeyRef = useRef('');
   const [orionDocuments, setOrionDocuments] = useState<Record<string, OrionSignatureState>>({});
 
@@ -596,20 +616,30 @@ function ViewRequestPage() {
     }, 5000);
   }, [request?.id_request_general]);
 
+  // Abre el modal de justificación; el borrado real va en handleDeleteAttachment.
+  const [pendingDelete, setPendingDelete] = useState<{
+    fileId: string;
+    fileName: string | null;
+  } | null>(null);
+  const requestDeleteAttachment = useCallback((fileId: string, fileName?: string | null) => {
+    if (!fileId) return;
+    setPendingDelete({ fileId, fileName: fileName ?? null });
+  }, []);
+
   const handleDeleteAttachment = useCallback(
-    async (fileId: string) => {
+    async (fileId: string, fileName: string | null, justification: string): Promise<boolean> => {
       const requestId = request?.id_request_general;
-      if (!requestId || !fileId) return;
+      if (!requestId || !fileId) return false;
       try {
         const res = await fetch('/api/requests-general/delete-attachment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId, fileId }),
+          body: JSON.stringify({ requestId, fileId, fileName: fileName ?? null, justification }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           toast.error(typeof data.error === 'string' ? data.error : 'No se pudo eliminar');
-          return;
+          return false;
         }
         setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
         if (requestId) removeFromAttachmentCache(requestId, fileId);
@@ -619,12 +649,18 @@ function ViewRequestPage() {
           delete next[fileId];
           return next;
         });
-        toast.success('Archivo eliminado');
+        toast.success('Documento eliminado');
         refreshAttachmentsAfterUpload();
+        void fetchFormValues(requestId);
+        void fetchTasksRG();
+        void fetchNotes();
+        return true;
       } catch {
         toast.error('Error de red al eliminar el archivo');
+        return false;
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [request?.id_request_general, refreshAttachmentsAfterUpload]
   );
 
@@ -718,6 +754,82 @@ function ViewRequestPage() {
       if (err instanceof Error && err.name === 'AbortError') return;
       console.error('Error fetching form values:', err);
       if (!signal?.aborted) setRequestFormValues([]);
+    }
+  };
+
+  const startEditingField = (fv: (typeof requestFormValues)[number]) => {
+    if (fv.id_form_field == null) return;
+    setEditingFieldId(fv.id_form_field);
+    if (fv.field_type === TABLE_FIELD_TYPE) {
+      setEditingTableRows(parseTableValue(fv.value_text).rows);
+      setEditingValue('');
+    } else if (fv.field_type === 'select') {
+      setEditingValue(fv.id_option != null ? String(fv.id_option) : '');
+      setEditingTableRows([]);
+    } else {
+      setEditingValue(fv.value_text ?? '');
+      setEditingTableRows([]);
+    }
+  };
+
+  const cancelEditingField = () => {
+    setEditingFieldId(null);
+    setEditingValue('');
+    setEditingTableRows([]);
+  };
+
+  const saveFieldValue = async (fv: (typeof requestFormValues)[number]) => {
+    if (!request?.id_request_general || fv.id_form_field == null) return;
+
+    try {
+      setSavingFieldValue(true);
+
+      let value: { id_field: number; id_option?: number | null; value_text?: string | null };
+      let previousDisplay: string;
+      let newDisplay: string;
+      if (fv.field_type === TABLE_FIELD_TYPE) {
+        value = {
+          id_field: fv.id_form_field,
+          value_text: serializeTableValue(editingTableRows),
+        };
+        previousDisplay = `${parseTableValue(fv.value_text).rows.length} fila(s)`;
+        newDisplay = `${editingTableRows.length} fila(s)`;
+      } else if (fv.field_type === 'select') {
+        value = {
+          id_field: fv.id_form_field,
+          id_option: editingValue ? parseInt(editingValue, 10) : null,
+        };
+        previousDisplay = fv.option_label || '—';
+        newDisplay =
+          (fv.options || []).find((o) => String(o.id) === editingValue)?.option_label || '—';
+      } else {
+        value = { id_field: fv.id_form_field, value_text: editingValue };
+        previousDisplay = fv.value_text || '—';
+        newDisplay = editingValue || '—';
+      }
+
+      const response = await fetch('/api/requests-general/update-form-values', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_request: request.id_request_general, values: [value] }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Error al actualizar el campo');
+      }
+
+      toast.success('Campo actualizado correctamente.');
+      await addSystemNote(
+        `Se modificó el campo adicional "${fv.field_label}": de "${previousDisplay}" a "${newDisplay}".`
+      );
+      cancelEditingField();
+      fetchFormValues(request.id_request_general);
+    } catch (err) {
+      console.error('Error al actualizar el campo:', err);
+      toast.error(err instanceof Error ? err.message : 'Error al actualizar el campo');
+    } finally {
+      setSavingFieldValue(false);
     }
   };
 
@@ -865,6 +977,22 @@ function ViewRequestPage() {
       session?.user?.email,
       taskRQ,
     ]
+  );
+
+  const { businessTasks: modalBusinessTasks, orionByFile: modalOrionByFile } = useMemo(
+    () => partitionTasksForDisplay(taskRQ),
+    [taskRQ]
+  );
+
+  const modalTimelineTasks = useMemo(
+    () =>
+      [...modalBusinessTasks].sort((a, b) => {
+        const da = a.display_order ?? 0;
+        const db = b.display_order ?? 0;
+        if (da !== db) return da - db;
+        return a.id_task - b.id_task;
+      }),
+    [modalBusinessTasks]
   );
 
   async function CheckOrCreateFolderAndUpload(
@@ -1371,7 +1499,7 @@ function ViewRequestPage() {
 
   if (loading) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <div className='text-center'>
           <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4'></div>
           <Text size='lg'>Cargando detalles de la tarea...</Text>
@@ -1382,7 +1510,7 @@ function ViewRequestPage() {
 
   if (error) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <Card shadow='sm' p='xl' radius='md' withBorder className='max-w-md'>
           <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' mb='md'>
             {error}
@@ -1401,7 +1529,7 @@ function ViewRequestPage() {
 
   if (!request) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <Card shadow='sm' p='xl' radius='md' withBorder className='max-w-md'>
           <Text size='lg' fw={500} mb='md' className='text-center'>
             Tarea no encontrada
@@ -1512,9 +1640,9 @@ function ViewRequestPage() {
 
   return (
     <OrionSignatureProvider>
-    <div className='min-h-screen bg-gray-50'>
+    <div className='app-canvas'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -1552,7 +1680,7 @@ function ViewRequestPage() {
               p='xl'
               radius='md'
               withBorder
-              className='bg-white flex flex-col'
+              className='flex flex-col'
             >
               <Title order={3} mb='md' className='flex items-center gap-2'>
                 <IconNote size={20} />
@@ -1725,6 +1853,7 @@ function ViewRequestPage() {
                 participants={orionParticipants}
                 availableUsers={availableUsers}
                 currentUserName={session?.user?.name ?? undefined}
+                companyId={request?.id_company ?? null}
                 onDocumentsChange={handleOrionDocumentsChange}
                 workflowLocked={orionWorkflowLocked}
                 autoOpenFileId={deepLinkFileId}
@@ -1739,7 +1868,7 @@ function ViewRequestPage() {
           </div>
 
           <div className='w-full lg:w-150 order-1 lg:order-2'>
-            <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white'>
+            <Card shadow='sm' p='xl' radius='md' withBorder>
               <Title order={4} mb='md' className='flex items-center gap-2'>
                 <IconFileDescription size={18} />
                 Detalles de la Tarea
@@ -1753,6 +1882,17 @@ function ViewRequestPage() {
                   {formatActivityDate(request.created_at, { offsetHours: 5 })}
                 </Text>
               </div>
+
+              {request?.process === 'Solicitud de Pago' && (
+                <div className='pb-2'>
+                  <Text size='sm' color='gray.6' fw={500}>
+                    Fecha Estimada de Pago
+                  </Text>
+                  <Text size='sm' tt='capitalize'>
+                    {formatEstimatedPaymentDate(request.company, request.created_at)}
+                  </Text>
+                </div>
+              )}
 
               {request?.start_date && (
                 <div className='pb-2'>
@@ -1785,7 +1925,7 @@ function ViewRequestPage() {
                   <Text size='sm' color='gray.6' fw={500}>
                     Compañia
                   </Text>
-                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
+                  <Card withBorder radius='md' p='md' mt='xs'>
                     <Group>
                       <IconBuilding size={16} />
                       <Text size='sm'>
@@ -1800,7 +1940,7 @@ function ViewRequestPage() {
                     Asunto
                   </Text>
 
-                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
+                  <Card withBorder radius='md' p='md' mt='xs'>
                     <Group>
                       <IconFileDescription size={16} />
                       <Text size='sm'>{request?.subject_request}</Text>
@@ -1813,7 +1953,7 @@ function ViewRequestPage() {
                     Descripción
                   </Text>
 
-                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
+                  <Card withBorder radius='md' p='md' mt='xs'>
                     <Text size='sm' className='whitespace-pre-line text-gray-700'>
                       {request?.description}
                     </Text>
@@ -1893,7 +2033,7 @@ function ViewRequestPage() {
                   </Text>
                   <Grid>
                     <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Card withBorder radius='md' p='md' bg='gray.0'>
+                      <Card withBorder radius='md' p='md'>
                         <Group>
                           <IconTag size={16} />
                           <div>
@@ -1908,7 +2048,7 @@ function ViewRequestPage() {
                       </Card>
                     </Grid.Col>
                     <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Card withBorder radius='md' p='md' bg='gray.0'>
+                      <Card withBorder radius='md' p='md'>
                         <Group>
                           <IconProgress size={16} />
                           <div>
@@ -1962,7 +2102,7 @@ function ViewRequestPage() {
                       />
                     </Stack>
                   ) : (
-                    <Card withBorder radius='md' p='md' bg='gray.0'>
+                    <Card withBorder radius='md' p='md'>
                       <Group>
                         <IconProgress size={16} />
                         <div>
@@ -2099,7 +2239,169 @@ function ViewRequestPage() {
           </div>
         </div>
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+        {requestFormValues.filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE).length > 0 && (
+          <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
+            <Title order={3} mb='md' className='flex items-center gap-2'>
+              <IconTag size={20} />
+              Información adicional
+            </Title>
+            <Grid>
+              {requestFormValues
+                .filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE)
+                .map((fv, fvIndex) => {
+                const canEditField = Boolean(fv.editable) && !isRequestResolved();
+                const isEditingThis = editingFieldId === fv.id_form_field;
+                const editButton = canEditField && !isEditingThis && (
+                  <ActionIcon
+                    variant='subtle'
+                    color='blue'
+                    onClick={() => startEditingField(fv)}
+                    title='Editar campo'
+                  >
+                    <IconPencil size={16} />
+                  </ActionIcon>
+                );
+                const editActions = (
+                  <Group justify='flex-end' gap='xs'>
+                    <Button
+                      variant='outline'
+                      size='xs'
+                      onClick={cancelEditingField}
+                      disabled={savingFieldValue}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      size='xs'
+                      leftSection={<IconCheck size={14} />}
+                      loading={savingFieldValue}
+                      onClick={() => saveFieldValue(fv)}
+                    >
+                      Guardar
+                    </Button>
+                  </Group>
+                );
+
+                if (fv.field_type === TABLE_FIELD_TYPE) {
+                  const columns = parseTableConfig(fv.config_json).columns;
+                  const rows = parseTableValue(fv.value_text).rows;
+                  const renderCellValue = (value: unknown) => {
+                    if (value === true) return 'Sí';
+                    if (value === false) return 'No';
+                    if (value === undefined || value === null || value === '') return '—';
+                    return String(value);
+                  };
+                  return (
+                    <Grid.Col
+                      span={12}
+                      key={`rfv-${fvIndex}-${fv.id ?? 'x'}-${fv.id_form_field ?? 'y'}`}
+                    >
+                      <Card withBorder radius='md' p='md'>
+                        <Group justify='space-between' mb='xs'>
+                          <Text size='xs' c='dimmed' fw={500} className='uppercase'>
+                            {fv.field_label}
+                          </Text>
+                          {editButton}
+                        </Group>
+                        {isEditingThis ? (
+                          <Stack gap='sm'>
+                            <TableFieldInput
+                              label={fv.field_label}
+                              required={false}
+                              columns={columns}
+                              rows={editingTableRows}
+                              onChange={setEditingTableRows}
+                              companyId={request?.id_company}
+                            />
+                            {editActions}
+                          </Stack>
+                        ) : columns.length === 0 || rows.length === 0 ? (
+                          <Text size='sm' c='dimmed'>
+                            Sin datos.
+                          </Text>
+                        ) : (
+                          <ScrollArea>
+                            <Table withTableBorder withColumnBorders striped>
+                              <Table.Thead>
+                                <Table.Tr>
+                                  {columns.map((col) => (
+                                    <Table.Th key={col.key}>{col.label}</Table.Th>
+                                  ))}
+                                </Table.Tr>
+                              </Table.Thead>
+                              <Table.Tbody>
+                                {rows.map((row, ri) => (
+                                  <Table.Tr key={ri}>
+                                    {columns.map((col) => (
+                                      <Table.Td key={col.key}>
+                                        {renderCellValue(row[col.key])}
+                                      </Table.Td>
+                                    ))}
+                                  </Table.Tr>
+                                ))}
+                              </Table.Tbody>
+                            </Table>
+                          </ScrollArea>
+                        )}
+                      </Card>
+                    </Grid.Col>
+                  );
+                }
+                return (
+                  <Grid.Col
+                    span={{ base: 12, md: 6 }}
+                    key={`rfv-sm-${fvIndex}-${fv.id ?? 'x'}-${fv.id_form_field ?? 'y'}`}
+                  >
+                    <Card withBorder radius='md' p='md'>
+                      <Group justify='space-between'>
+                        <Text size='xs' c='dimmed' fw={500} className='uppercase'>
+                          {fv.field_label}
+                        </Text>
+                        {editButton}
+                      </Group>
+                      {isEditingThis ? (
+                        <Stack gap='xs' mt={4}>
+                          {fv.field_type === 'select' ? (
+                            <Select
+                              data={(fv.options || []).map((o) => ({
+                                value: String(o.id),
+                                label: o.option_label,
+                              }))}
+                              value={editingValue || null}
+                              onChange={(v) => setEditingValue(v || '')}
+                              searchable
+                              clearable
+                              placeholder='Seleccione una opción'
+                            />
+                          ) : (
+                            <TextInput
+                              type={
+                                fv.field_type === 'number'
+                                  ? 'number'
+                                  : fv.field_type === 'date'
+                                    ? 'date'
+                                    : 'text'
+                              }
+                              value={editingValue}
+                              onChange={(e) => setEditingValue(e.target.value)}
+                            />
+                          )}
+                          {editActions}
+                        </Stack>
+                      ) : (
+                        <Text size='md' fw={600} mt={4}>
+                          {fv.option_label || fv.value_text || '—'}
+                        </Text>
+                      )}
+                    </Card>
+                  </Grid.Col>
+                );
+              })}
+            </Grid>
+          </Card>
+        )}
+
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           <Group justify='space-between' align='center' mb='md' wrap='wrap'>
             <Title order={3} className='flex items-center gap-2'>
               <IconEye size={20} />
@@ -2223,8 +2525,8 @@ function ViewRequestPage() {
                             ...orionDocuments,
                           }}
                           onDocumentsUpdate={handleOrionDocumentsChange}
-                          canDeleteAttachment={canDeleteAttachments && !isRequestCaseClosed()}
-                          onDeleteAttachment={handleDeleteAttachment}
+                          canDeleteAttachment={canDeleteAttachments}
+                          onDeleteAttachment={requestDeleteAttachment}
                           forceSignerUi={(() => {
                             const me = String(session?.user?.email || '')
                               .trim()
@@ -2381,6 +2683,7 @@ function ViewRequestPage() {
             ticketId={request.id_request_general}
             onFilesChange={setAttachedFiles}
             onUploadComplete={(uploaded) => {
+              void addSystemNote('Se cargaron archivos a la solicitud.');
               if (uploaded.graphItem?.id && request?.id_request_general) {
                 const optimistic = {
                   id: uploaded.graphItem.id,
@@ -2402,6 +2705,8 @@ function ViewRequestPage() {
                   return [...prev, optimistic];
                 });
               }
+              const fileName = uploaded.graphItem?.name || uploaded.file.name;
+              void addSystemNote(`Documento adjunto: ${fileName}`);
               refreshAttachmentsAfterUpload();
             }}
             disabled={isRequestCaseClosed()}
@@ -2410,7 +2715,7 @@ function ViewRequestPage() {
           />
         </Card>
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           {updateMessage && (
             <Alert
               color={updateMessage.type === 'success' ? 'green' : 'red'}
@@ -2504,6 +2809,17 @@ function ViewRequestPage() {
           </Group>
         </Card>
 
+        <DeleteAttachmentModal
+          opened={pendingDelete != null}
+          fileName={pendingDelete?.fileName ?? null}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={(justification) =>
+            pendingDelete
+              ? handleDeleteAttachment(pendingDelete.fileId, pendingDelete.fileName, justification)
+              : Promise.resolve(false)
+          }
+        />
+
         <Modal
           opened={modalTasksOpened}
           onClose={() => setModalTasksOpened(false)}
@@ -2522,15 +2838,48 @@ function ViewRequestPage() {
             </div>
           ) : taskRQ.length > 0 ? (
 <ScrollArea.Autosize mah="65vh" offsetScrollbars>
+              <Stack gap="md">
+              {modalOrionByFile.length > 0 ? (
+                <Stack gap="sm">
+                  <Text size="sm" fw={600}>
+                    Firmas por documento
+                  </Text>
+                  {modalOrionByFile.map((group) => (
+                    <Paper key={group.fileId} withBorder p="sm" radius="md">
+                      <Group justify="space-between" align="flex-start" wrap="nowrap" mb={8}>
+                        <Box style={{ flex: 1, minWidth: 0 }}>
+                          <Text fw={600} lineClamp={1}>
+                            Firma · {group.label}
+                          </Text>
+                          <Text size="xs" c="dimmed" mt={2}>
+                            {group.completedSignTasks}/{group.totalSignTasks} firmas
+                            {group.totalAuthTasks > 0
+                              ? ` · ${group.completedAuthTasks}/${group.totalAuthTasks} autorizaciones`
+                              : ''}
+                          </Text>
+                        </Box>
+                        <Badge
+                          color={group.allDone ? 'green' : 'blue'}
+                          variant="light"
+                          size="sm"
+                        >
+                          {group.allDone ? 'Resuelto' : `${group.percent}%`}
+                        </Badge>
+                      </Group>
+                      <Progress
+                        value={group.percent}
+                        color={group.allDone ? 'green' : 'blue'}
+                        size="sm"
+                        radius="xl"
+                      />
+                    </Paper>
+                  ))}
+                </Stack>
+              ) : null}
+
+              {modalTimelineTasks.length > 0 ? (
               <Stack gap={0}>
-              {[...taskRQ]
-                .sort((a, b) => {
-                  const da = a.display_order ?? 0;
-                  const db = b.display_order ?? 0;
-                  if (da !== db) return da - db;
-                  return a.id_task - b.id_task;
-                })
-                .map((task, index, arr) => {
+              {modalTimelineTasks.map((task, index, arr) => {
                   const isLast = index === arr.length - 1;
                   const statusLower = task.status?.toLowerCase();
                   const isResolved = task.id_status === 2 || statusLower === 'resuelto';
@@ -2659,6 +3008,8 @@ function ViewRequestPage() {
                     </Flex>
                   );
                 })}
+              </Stack>
+              ) : null}
               </Stack>
             </ScrollArea.Autosize>
           ) : (

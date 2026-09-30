@@ -6,7 +6,7 @@ import type { SignatureFieldPlacement } from '@/lib/orion/signatureFields';
 import { persistOrionSignatureFields, assertUserCanEditOrionPreparation } from '@/lib/orion/service';
 
 /**
- * Guarda ubicaciones de firma en Orion (embed API) y en el bag local.
+ * Guarda ubicaciones de firma en Orion (Bearer de integración; fallback embed) y en el bag local.
  * POST /api/integrations/orion/signature-fields
  */
 export async function POST(req: Request) {

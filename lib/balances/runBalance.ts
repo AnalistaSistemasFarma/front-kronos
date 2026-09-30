@@ -76,7 +76,9 @@ export async function executeCompanyBalance(
       const started = Date.now();
       try {
         const text = readBalanceSql(fileName);
-        await pool.request().query(text);
+        // Los SQL traen fechas 'yyyy/dd/mm' y el job los corre en Español; se
+        // fija el idioma para no depender del idioma por defecto del login.
+        await pool.request().query(`SET LANGUAGE Español;\n${text}`);
         result[kind] = { ok: true, durationMs: Date.now() - started };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

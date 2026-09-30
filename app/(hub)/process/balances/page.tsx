@@ -18,14 +18,20 @@ import { IconAlertTriangle, IconPlayerPlay } from '@tabler/icons-react';
 /**
  * Balances — Sprint 2.
  *
- * Solo Farmalogica está habilitada para la salida inicial. OLP y GSS se
- * conservan bloqueadas en el servidor hasta completar su activación propia.
+ * Habilitadas: Farmalogica, OLP y GSS (ver lib/balances/companies.ts).
  * Cada botón dispara /api/balances/submit-run y la corrida continúa en
  * background. El historial se consulta cada 2 segundos mientras hay una
  * corrida activa, para reflejar running/success/failed sin bloquear el request.
  */
 
-const COMPANIES = [{ idCompany: 1, displayName: 'Farmalogica' }] as const;
+const COMPANIES = [
+  { idCompany: 1, displayName: 'Farmalogica' },
+  { idCompany: 3, displayName: 'One Latam Pharma' },
+  { idCompany: 8, displayName: 'GSS' },
+  { idCompany: 6, displayName: 'Meditrack' },
+  { idCompany: 7, displayName: 'Abamia' },
+  { idCompany: 9, displayName: 'Kelab' },
+] as const;
 
 interface RunRow {
   id: number;
@@ -121,7 +127,7 @@ export default function BalancesPage() {
         </Alert>
       )}
 
-      <SimpleGrid cols={{ base: 1, sm: 3 }}>
+      <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
         {COMPANIES.map((c) => {
           const blockedByOther = globallyRunning !== null && globallyRunning.id_company !== c.idCompany;
           return (

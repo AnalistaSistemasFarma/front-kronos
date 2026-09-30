@@ -36,7 +36,6 @@ export async function GET(req) {
       LEFT JOIN [user] up ON up.id = upcrg.id_user
       INNER JOIN status_case sc ON sc.id_status_case = rg.status_req
 	    LEFT JOIN [user] uex ON uex.id = rg.id_executor_final
-	    LEFT JOIN viewers_process_category vpc ON vpc.id_process_category = pc.id
       WHERE 1=1
     `;
 
@@ -47,7 +46,16 @@ export async function GET(req) {
     else if (!status) query += ` AND sc.id_status_case = 1`;
 
     if (idUser) {
-      query += ` AND vpc.id_viewer = @idUser`;
+      query += ` AND (
+        EXISTS (
+          SELECT 1 FROM viewers_process_category vpc
+          WHERE vpc.id_process_category = pc.id AND vpc.id_viewer = @idUser
+        )
+        OR EXISTS (
+          SELECT 1 FROM preparers_process_category ppc
+          WHERE ppc.id_process_category = pc.id AND ppc.id_preparer = @idUser
+        )
+      )`;
     }
 
     if (company) {

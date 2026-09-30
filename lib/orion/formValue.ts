@@ -1,5 +1,7 @@
+import { normalizeAttachmentStem } from './attachmentList';
 import { ORION_LEGACY_FILE_ID } from './config';
 import type {
+  OrionDeletedDocument,
   OrionSignatureBagBag,
   OrionSignatureIntent,
   OrionSignatureState,
@@ -7,6 +9,35 @@ import type {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseDeletedDocuments(raw: unknown): OrionDeletedDocument[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const list = raw
+    .filter(isPlainObject)
+    .map((row) => ({
+      fileId: String(row.fileId || '').trim(),
+      fileName: typeof row.fileName === 'string' ? row.fileName : null,
+      orionDocumentIds: Array.isArray(row.orionDocumentIds)
+        ? row.orionDocumentIds.map((id) => String(id || '').trim()).filter(Boolean)
+        : [],
+      deletedAt: String(row.deletedAt || ''),
+      deletedByEmail: typeof row.deletedByEmail === 'string' ? row.deletedByEmail : null,
+    }))
+    .filter((row) => row.fileId);
+  return list.length > 0 ? list : undefined;
+}
+
+/** ¿El documento (por fileId u orionDocumentId) fue eliminado con "Eliminar"? */
+export function isOrionDocumentDeleted(
+  bag: OrionSignatureBagBag,
+  params: { fileId?: string | null; orionDocumentId?: string | null }
+): boolean {
+  const fileId = String(params.fileId || '').trim();
+  const docId = String(params.orionDocumentId || '').trim();
+  return (bag.deletedDocuments ?? []).some(
+    (d) => (fileId && d.fileId === fileId) || (docId && d.orionDocumentIds.includes(docId))
+  );
 }
 
 function stripBagMeta(state: OrionSignatureState): OrionSignatureState {
@@ -25,6 +56,129 @@ function isLegacyFlatState(parsed: Record<string, unknown>): boolean {
       parsed.signedFileUrl ||
       parsed.signers
   );
+}
+
+/**
+ * ¿Este firmante debe aportar huella?
+ * Fuente de verdad: flag por persona (preparación). No el flag del documento ni cajas sueltas.
+ */
+export function signerRequiresFingerprint(
+  signer?: { requireFingerprint?: boolean | null } | null
+): boolean {
+  return signer?.requireFingerprint === true;
+}
+
+/**
+ * Alinea documentos ya preparados (legacy “huella para todos”):
+ * - Bags sin `fingerprintPolicy: per-signer` se migran una vez: apagan huella global
+ *   (flags de firmante, flag de documento y cajas fingerprint).
+ * - Con política per-signer: solo conservan caja fingerprint quienes tengan
+ *   requireFingerprint === true.
+ * Así los firmantes actuales dejan de ver “Subir huella” si no les corresponde.
+ */
+export function normalizeOrionFingerprintRequirements(
+  state: OrionSignatureState
+): OrionSignatureState {
+  const signers = state.signers ?? [];
+  const prevFields = state.signatureFields ?? [];
+  const hasFpFields = prevFields.some(
+    (f) => String(f.kind || '').toLowerCase() === 'fingerprint'
+  );
+  const alreadyPerSigner = state.fingerprintPolicy === 'per-signer';
+
+  let nextSigners = signers;
+  let migrated = false;
+
+  // Una sola migración: checkbox/cajas globales antiguas → sin huella obligatoria.
+  // Si ya hay marcas selectivas (algunos sí / algunos no), solo se etiqueta la política.
+  if (!alreadyPerSigner) {
+    const markedCount = signers.filter((s) => s.requireFingerprint === true).length;
+    const selective = markedCount > 0 && markedCount < signers.length;
+    const hadDocFlag = Boolean(state.requireFingerprint);
+    if (selective) {
+      migrated = true;
+    } else if (markedCount > 0 || hadDocFlag || hasFpFields) {
+      nextSigners = signers.map((s) =>
+        s.requireFingerprint ? { ...s, requireFingerprint: false } : s
+      );
+      migrated = true;
+    } else {
+      migrated = true;
+    }
+  }
+
+  const allowedOrders = new Set(
+    nextSigners
+      .filter((s) => s.requireFingerprint === true)
+      .map((s) => Number(s.order))
+      .filter((n) => Number.isFinite(n) && n > 0)
+  );
+  const anyMarked = allowedOrders.size > 0;
+
+  const nextFields = anyMarked
+    ? prevFields.filter((f) => {
+        if (String(f.kind || '').toLowerCase() !== 'fingerprint') return true;
+        return allowedOrders.has(Number(f.signerOrder));
+      })
+    : prevFields.filter((f) => String(f.kind || '').toLowerCase() !== 'fingerprint');
+
+  const fieldsChanged =
+    nextFields.length !== prevFields.length ||
+    nextFields.some((f, i) => f.id !== prevFields[i]?.id || f.kind !== prevFields[i]?.kind);
+
+  const nextRequireDoc = anyMarked;
+  const docFlagChanged = Boolean(state.requireFingerprint) !== nextRequireDoc;
+  const signersChanged =
+    migrated &&
+    nextSigners.some(
+      (s, i) => Boolean(s.requireFingerprint) !== Boolean(signers[i]?.requireFingerprint)
+    );
+  const policyChanged = state.fingerprintPolicy !== 'per-signer';
+
+  if (!fieldsChanged && !docFlagChanged && !signersChanged && !policyChanged) {
+    return state;
+  }
+
+  return {
+    ...state,
+    signers: nextSigners,
+    requireFingerprint: nextRequireDoc,
+    fingerprintPolicy: 'per-signer',
+    signatureFields: nextFields,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Tras un GET de Orion, no reponer huella legacy si Kronos ya migró a per-signer.
+ * Las preferencias de huella viven en el bag SynerLink (checkbox por persona).
+ */
+export function preserveOrionFingerprintPrefs(
+  before: OrionSignatureState,
+  after: OrionSignatureState
+): OrionSignatureState {
+  const beforeSigners = before.signers ?? [];
+  const hasSlotPrefs = beforeSigners.some(
+    (s) => typeof s.requireFingerprint === 'boolean'
+  );
+  // El bag Kronos guarda huella por orden; Orion legacy por email pisa slots del mismo correo.
+  if (!hasSlotPrefs && before.fingerprintPolicy !== 'per-signer') return after;
+  const byOrder = new Map(
+    (before.signers ?? []).map((s) => [Number(s.order), s.requireFingerprint === true] as const)
+  );
+  const nextSigners = (after.signers ?? []).map((s, index) => {
+    const order = Number(s.order);
+    const key = Number.isFinite(order) && order > 0 ? order : index + 1;
+    if (!byOrder.has(key)) return s;
+    return { ...s, requireFingerprint: byOrder.get(key) === true };
+  });
+  const anyMarked = nextSigners.some((s) => s.requireFingerprint === true);
+  return {
+    ...after,
+    signers: nextSigners,
+    requireFingerprint: anyMarked,
+    fingerprintPolicy: 'per-signer',
+  };
 }
 
 export function emptyOrionFormBag(): OrionSignatureBagBag {
@@ -86,9 +240,11 @@ export function parseOrionSignatureBagBag(raw: string | null | undefined): Orion
           fileId: String((value as OrionSignatureState).fileId || key),
         };
       }
+      const deletedDocuments = parseDeletedDocuments(parsed.deletedDocuments);
       return {
         documents,
         updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+        ...(deletedDocuments ? { deletedDocuments } : {}),
       };
     }
 
@@ -128,6 +284,7 @@ export function serializeOrionSignatureBagBag(bag: OrionSignatureBagBag): string
   return JSON.stringify({
     documents: bag.documents,
     updatedAt: new Date().toISOString(),
+    ...(bag.deletedDocuments?.length ? { deletedDocuments: bag.deletedDocuments } : {}),
   });
 }
 
@@ -207,6 +364,33 @@ export function resolveOrionDocumentForAttachment(params: {
     }
   }
 
+  // Copia de versión (X-firmado.pdf) tras liberar el original: mismo stem → mismo doc Orion.
+  // Solo si hay exactamente un candidato (no cruzar PDFs distintos).
+  const lookupStem = normalizeAttachmentStem(params.fileName);
+  const isVersionCopy = /-(firmado|original|parcial)(\s*\(\d+\))?\.pdf$/i.test(
+    String(params.fileName || '').trim()
+  );
+  if (lookupStem && isVersionCopy) {
+    const stemMatches = entries.filter(([, doc]) => {
+      if (!doc) return false;
+      if (
+        !(
+          doc.orionDocumentId ||
+          (doc.signers?.length ?? 0) > 0 ||
+          doc.status ||
+          doc.signatureIntent
+        )
+      ) {
+        return false;
+      }
+      return normalizeAttachmentStem(doc.fileName) === lookupStem;
+    });
+    if (stemMatches.length === 1) {
+      const [, doc] = stemMatches[0];
+      return { ...doc, fileId: fileId || doc.fileId };
+    }
+  }
+
   return byId ? { ...byId, fileId } : {};
 }
 
@@ -218,6 +402,7 @@ export function setOrionDocumentInBag(
   const key = String(fileId || '').trim();
   if (!key) return bag;
   return {
+    ...bag,
     documents: {
       ...bag.documents,
       [key]: {
@@ -251,19 +436,34 @@ export function mergeOrionSigners(
     byOrder.set(key, signer);
   });
 
-  const merged = patch.map((signer, index) => {
+  const merged: NonNullable<OrionSignatureState['signers']> = patch.map((signer, index) => {
     const order = Number(signer.order);
     const key = Number.isFinite(order) && order > 0 ? order : index + 1;
     const prev = byOrder.get(key);
+    const base: NonNullable<OrionSignatureState['signers']>[number] = {
+      ...signer,
+      order: Number.isFinite(order) && order > 0 ? order : key,
+      type: signer.type || prev?.type,
+      cardCode: signer.cardCode ?? prev?.cardCode ?? null,
+      notifyByEmail:
+        signer.notifyByEmail != null ? signer.notifyByEmail : prev?.notifyByEmail,
+      requireFingerprint:
+        signer.requireFingerprint != null
+          ? signer.requireFingerprint
+          : prev?.requireFingerprint,
+      signatureMarkId:
+        signer.signatureMarkId != null
+          ? signer.signatureMarkId
+          : prev?.signatureMarkId,
+    };
     if (prev && isCompletedSignerStatus(prev.status) && !isCompletedSignerStatus(signer.status)) {
       return {
-        ...signer,
-        order: key,
+        ...base,
         status: prev.status,
         signedAt: prev.signedAt ?? signer.signedAt,
       };
     }
-    return { ...signer, order: Number.isFinite(order) && order > 0 ? order : key };
+    return base;
   });
 
   const patchOrders = new Set(
@@ -293,22 +493,51 @@ function mergeOrionVersions(
   return [...byId.values()];
 }
 
+function mergeOrionSignerInvites(
+  current?: OrionSignatureState['signerInvites'],
+  patch?: OrionSignatureState['signerInvites']
+): OrionSignatureState['signerInvites'] {
+  if (patch == null) return current;
+  if (current == null || current.length === 0) return patch;
+  const byEmail = new Map<string, NonNullable<OrionSignatureState['signerInvites']>[number]>();
+  for (const i of current) {
+    byEmail.set(String(i.email || '').trim().toLowerCase(), i);
+  }
+  for (const i of patch) {
+    byEmail.set(String(i.email || '').trim().toLowerCase(), i);
+  }
+  return [...byEmail.values()];
+}
+
 export function mergeOrionSignatureState(
   current: OrionSignatureState,
   patch: Partial<OrionSignatureState>
 ): OrionSignatureState {
+  const signers = mergeOrionSigners(current.signers, patch.signers);
+  const anyFingerprint = (signers ?? []).some((s) => Boolean(s.requireFingerprint));
   return {
     ...current,
     ...patch,
-    signers: mergeOrionSigners(current.signers, patch.signers),
+    signers,
     signatureFields: patch.signatureFields ?? current.signatureFields,
     versions: mergeOrionVersions(current.versions, patch.versions),
+    signerInvites: mergeOrionSignerInvites(current.signerInvites, patch.signerInvites),
     // No degradar URL firmada si el patch no trae una nueva
     signedFileUrl:
       patch.signedFileUrl !== undefined && patch.signedFileUrl !== null && patch.signedFileUrl !== ''
         ? patch.signedFileUrl
         : (current.signedFileUrl ?? patch.signedFileUrl ?? null),
     originalFileUrl: patch.originalFileUrl ?? current.originalFileUrl,
+    requireFingerprint:
+      patch.requireFingerprint != null
+        ? patch.requireFingerprint
+        : anyFingerprint
+          ? true
+          : current.requireFingerprint,
+    fingerprintPolicy:
+      patch.fingerprintPolicy === 'per-signer' || current.fingerprintPolicy === 'per-signer'
+        ? 'per-signer'
+        : (patch.fingerprintPolicy ?? current.fingerprintPolicy ?? null),
     updatedAt: new Date().toISOString(),
   };
 }
@@ -328,6 +557,7 @@ export function adoptLegacyOrionDocument(
 
   const { [ORION_LEGACY_FILE_ID]: _removed, ...rest } = bag.documents;
   return {
+    ...bag,
     documents: {
       ...rest,
       [key]: {

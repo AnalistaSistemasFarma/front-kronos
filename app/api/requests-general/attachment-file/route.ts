@@ -8,11 +8,33 @@ import {
   isOneDriveItemInFolder,
   listOneDriveFolderFiles,
 } from '@/lib/onedrive/graphFolderUpload';
+import { withMssqlPool } from '@/lib/mssqlPool';
+import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
+import { loadOrionFormBag } from '@/lib/orion/service';
+import { applyValidatorMarks } from '@/lib/orion/validatorMarks';
 
 function safePathSegment(value: string, fallback: string): string {
   const v = String(value || '').trim();
   if (/^[A-Za-z0-9._-]{1,64}$/.test(v)) return v;
   return fallback;
+}
+
+/** Ya enviado a firma: el adjunto se ve con el visto bueno de los validadores. */
+async function withValidatorMarks(
+  requestId: number,
+  fileId: string,
+  pdf: Uint8Array
+): Promise<Uint8Array> {
+  try {
+    const loaded = await withMssqlPool((pool) => loadOrionFormBag(pool, requestId));
+    if (!loaded) return pdf;
+    const state = getOrionDocumentFromBag(loaded.bag, fileId);
+    const status = String(state.status || '').toUpperCase();
+    if (!['PENDIENTE_FIRMA', 'EN_PROCESO', 'FIRMADO'].includes(status)) return pdf;
+    return await applyValidatorMarks(pdf, state, { final: status === 'FIRMADO' });
+  } catch {
+    return pdf;
+  }
 }
 
 function contentDisposition(fileName: string, download: boolean): string {
@@ -73,7 +95,12 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'No se pudo leer el archivo en OneDrive' }, { status: 404 });
     }
 
-    return new NextResponse(downloaded.buffer as unknown as BodyInit, {
+    let body: Uint8Array = downloaded.buffer;
+    if (/pdf/i.test(downloaded.contentType || '') || /\.pdf$/i.test(downloaded.fileName || '')) {
+      body = await withValidatorMarks(requestId, fileId, body);
+    }
+
+    return new NextResponse(body as unknown as BodyInit, {
       status: 200,
       headers: {
         'Content-Type': downloaded.contentType || 'application/octet-stream',

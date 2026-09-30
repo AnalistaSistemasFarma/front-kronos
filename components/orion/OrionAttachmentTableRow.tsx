@@ -18,6 +18,7 @@ import {
   IconPencil,
   IconSignature,
   IconSparkles,
+  IconTimeline,
   IconTrash,
   IconUsers,
 } from '@tabler/icons-react';
@@ -33,6 +34,11 @@ import {
   buildOrionSignedFileProxyUrl,
   orionDocumentHasSignedCopy,
 } from '../../lib/orion/signedFileAccess';
+import OrionFirmantesInviteModal from './OrionFirmantesInviteModal';
+import OrionDocumentLifecycleModal from './OrionDocumentLifecycleModal';
+import OrionReviewPanel from './OrionReviewPanel';
+import { knownReadyForSigning } from '../../lib/orion/reviewState';
+import { esEstadoFinalOrion } from '../../lib/orion/deletePolicy';
 
 type RowProps = OrionAttachmentSignActionsProps & {
   rowNumber?: number | string;
@@ -42,7 +48,9 @@ type RowProps = OrionAttachmentSignActionsProps & {
   previewUrl?: string | null;
   versionsSlot?: ReactNode;
   canDeleteAttachment?: boolean;
-  onDeleteAttachment?: (fileId: string) => void | Promise<void>;
+  onDeleteAttachment?: (fileId: string, fileName?: string | null) => void | Promise<void>;
+  /** Llegó desde Autorizaciones a validar este documento: abre el modal de validación. */
+  autoOpenReview?: boolean;
 };
 
 function ActionLink({
@@ -110,6 +118,7 @@ export default function OrionAttachmentTableRow({
   versionsSlot,
   canDeleteAttachment = false,
   onDeleteAttachment,
+  autoOpenReview = false,
   ...props
 }: RowProps) {
   void previewUrl; // OneDrive webUrl no se usa: Ver en línea va por proxy SynerLink.
@@ -117,6 +126,13 @@ export default function OrionAttachmentTableRow({
   const [extensionLoading, setExtensionLoading] = useState(false);
   const [renewLoading, setRenewLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [firmantesOpen, setFirmantesOpen] = useState(false);
+  const [lifecycleOpen, setLifecycleOpen] = useState(false);
+  // null = aún no se sabe si el flujo exige validación; hasta saberlo no se habilita preparar.
+  const [readyForSigning, setReadyForSigning] = useState<boolean | null>(() =>
+    knownReadyForSigning(d.state)
+  );
+  const validationComplete = readyForSigning === true;
 
   const applyDocs = (documents: Record<string, OrionSignatureState>) => {
     props.onDocumentsUpdate?.(documents);
@@ -227,24 +243,19 @@ export default function OrionAttachmentTableRow({
   // Historial/original: solo creador del flujo / admin.
   const canAccessOriginalFile = Boolean(d.api?.canViewVersions);
 
+  // Doble llave (admin + “Eliminar adjuntos”) viene en canDeleteAttachment; firmado nunca se elimina.
   const deleteAction =
-    canDeleteAttachment && onDeleteAttachment ? (
+    canDeleteAttachment && onDeleteAttachment && !esEstadoFinalOrion(d.state.status) ? (
       <ActionLink
         icon={<IconTrash size={15} stroke={1.6} />}
         label={deleteLoading ? 'Eliminando…' : 'Eliminar'}
         danger
-        disabled={deleteLoading || isClosed}
+        disabled={deleteLoading}
         onClick={() => {
-          if (deleteLoading || isClosed) return;
-          if (
-            !window.confirm(
-              `¿Eliminar “${props.fileName}” de la solicitud? Esta acción no se puede deshacer.`
-            )
-          ) {
-            return;
-          }
+          if (deleteLoading) return;
+          // La confirmación con justificación obligatoria la muestra la página (DeleteAttachmentModal).
           setDeleteLoading(true);
-          void Promise.resolve(onDeleteAttachment(props.fileId)).finally(() => {
+          void Promise.resolve(onDeleteAttachment(props.fileId, props.fileName)).finally(() => {
             setDeleteLoading(false);
           });
         }}
@@ -252,6 +263,7 @@ export default function OrionAttachmentTableRow({
     ) : null;
 
   return (
+    <>
     <Table.Tr className={isClosed ? 'doc-row doc-row--closed' : 'doc-row'}>
       <Table.Td data-label='N.º' className='doc-cell doc-cell--mono doc-col--secondary' style={{ width: 56, whiteSpace: 'nowrap' }}>
         <Text size='sm' c='dimmed'>
@@ -339,7 +351,12 @@ export default function OrionAttachmentTableRow({
             </Tooltip>
           ) : d.enabled ? (
             <Tooltip
-              label='Solo ver · OneDrive SynerLink'
+              label={
+                d.intentLockedReason ||
+                'Solo ver · OneDrive SynerLink'
+              }
+              multiline
+              maw={280}
               withArrow
             >
               <Badge
@@ -388,13 +405,6 @@ export default function OrionAttachmentTableRow({
           <div className='doc-dossier'>
             <div className='doc-dossier__rail' />
             <Stack gap={4} className='doc-dossier__body'>
-              {viewOnlineHref ? (
-                <ActionLink
-                  icon={<IconEye size={15} stroke={1.6} />}
-                  label='Ver en línea'
-                  href={viewOnlineHref}
-                />
-              ) : null}
               <ActionLink
                 icon={<IconFile size={15} stroke={1.6} />}
                 label='Abrir / descargar'
@@ -417,13 +427,6 @@ export default function OrionAttachmentTableRow({
               >
                 Solo ver
               </Text>
-              {viewOnlineHref ? (
-                <ActionLink
-                  icon={<IconEye size={15} stroke={1.6} />}
-                  label='Ver en línea'
-                  href={viewOnlineHref}
-                />
-              ) : null}
               <ActionLink
                 icon={<IconFile size={15} stroke={1.6} />}
                 label='Descargar'
@@ -437,21 +440,18 @@ export default function OrionAttachmentTableRow({
           <div className={isClosed ? 'doc-dossier doc-dossier--closed' : 'doc-dossier'}>
             <div className='doc-dossier__rail' />
             <Stack gap={4} className='doc-dossier__body'>
-            <Text
-              size='10px'
-              c='dimmed'
-              tt='uppercase'
-              fw={700}
-              style={{ letterSpacing: 0.6 }}
-            >
-              Para firmar · Orion
-            </Text>
-            {!d.hasOrionDoc ? (
-              <Text size='xs' c='dimmed' className='doc-dossier__hint'>
-                Pulse “Preparar documento” para enviarlo a Orion. Mientras no se prepare, puede
-                volver a Solo ver (OneDrive SynerLink). Tras preparar o firmar, el destino queda
-                fijado en Orion.
-              </Text>
+
+            {props.requestId && props.fileId && !isClosed ? (
+              <OrionReviewPanel
+                requestId={props.requestId}
+                fileId={props.fileId}
+                fileName={props.fileName}
+                state={d.state}
+                onDocumentsUpdate={applyDocs}
+                onReadyForSigningChange={setReadyForSigning}
+                previewUrl={viewOnlineHref}
+                autoOpenDecision={autoOpenReview}
+              />
             ) : null}
 
             {d.hasOrionDoc && d.signers.length > 0 ? (
@@ -480,15 +480,7 @@ export default function OrionAttachmentTableRow({
             ) : null}
 
             <Stack gap={2} mt={2}>
-              {viewOnlineHref ? (
-                <ActionLink
-                  icon={<IconEye size={15} stroke={1.6} />}
-                  label='Ver en línea'
-                  href={viewOnlineHref}
-                />
-              ) : null}
-
-              {/* Descargar = binario; Ver en línea = visor (arriba). */}
+              {/* Descargar = binario; ojito en nombre = visor en línea. */}
               {downloadHref ? (
                 <ActionLink
                   icon={<IconFile size={15} stroke={1.6} />}
@@ -507,13 +499,16 @@ export default function OrionAttachmentTableRow({
                 />
               ) : null}
 
-              {!isClosed && d.canEditDocument && d.api ? (
+              {d.hasOrionDoc && d.signers.length > 0 ? (
+                <ActionLink
+                  icon={<IconUsers size={15} stroke={1.6} />}
+                  label='Invitar / URL de firma'
+                  onClick={() => setFirmantesOpen(true)}
+                />
+              ) : null}
+
+              {!isClosed && d.canEditDocument && d.api && validationComplete ? (
                 <>
-                  <ActionLink
-                    icon={<IconUsers size={15} stroke={1.6} />}
-                    label='Firmantes'
-                    onClick={() => openEditor(1)}
-                  />
                   <ActionLink
                     icon={<IconPencil size={15} stroke={1.6} />}
                     label='Colocar firmas'
@@ -529,6 +524,14 @@ export default function OrionAttachmentTableRow({
 
               {versionsSlot && d.api?.canViewVersions ? (
                 <div>{versionsSlot}</div>
+              ) : null}
+
+              {props.requestId && props.fileId ? (
+                <ActionLink
+                  icon={<IconTimeline size={15} stroke={1.6} />}
+                  label='Ver flujo'
+                  onClick={() => setLifecycleOpen(true)}
+                />
               ) : null}
 
               {d.canSignNow ? (
@@ -564,7 +567,7 @@ export default function OrionAttachmentTableRow({
                 </Button>
               ) : null}
 
-              {!isClosed && d.canPrepareDocument && d.api ? (
+              {!isClosed && d.canPrepareDocument && d.api && validationComplete ? (
                 <ActionLink
                   icon={<IconPencil size={15} stroke={1.6} />}
                   label='Preparar documento'
@@ -577,5 +580,26 @@ export default function OrionAttachmentTableRow({
         )}
       </Table.Td>
     </Table.Tr>
+    {props.requestId && props.fileId ? (
+      <>
+        <OrionFirmantesInviteModal
+          opened={firmantesOpen}
+          onClose={() => setFirmantesOpen(false)}
+          requestId={props.requestId}
+          fileId={props.fileId}
+          fileName={props.fileName}
+        />
+        <OrionDocumentLifecycleModal
+          opened={lifecycleOpen}
+          onClose={() => setLifecycleOpen(false)}
+          requestId={props.requestId}
+          fileId={props.fileId}
+          fileName={props.fileName}
+          versionLabel={d.state.versionLabel ?? null}
+          state={d.state}
+        />
+      </>
+    ) : null}
+    </>
   );
 }

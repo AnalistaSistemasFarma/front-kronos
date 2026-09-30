@@ -93,9 +93,17 @@ No hay tarjetas hub de firma: el host Orion es invisible y solo registra accione
 |-------|-----------------|
 | Subproceso **Preparar firma** (`/process/firma/prepare`; legacy `/process/firma/manage`) | **Preparar / Gestionar** por PDF (marcar, firmantes, ubicar, enviar). El creador o `admin` **no** omiten este permiso. El historial de **versiones** lo ve el **creador de la solicitud** (o admin), no cualquier gestora ni firmantes. |
 | Subproceso **Firmar documento** (`/process/firma/sign`) **y** ser firmante en turno | **Autorizar** → **Firmar**. Sin el subproceso no puede firmar aunque esté en la lista. |
+| Subproceso **Registrar huella** (`/process/firma/fingerprint`) | Activar “Requiere huella”, colocar cajas `kind=fingerprint` y aportar `fingerprintDataUrl` al firmar. Sin este permiso no se exige ni se estampa huella. |
 | Cualquier usuario | Dibujar/guardar firma personal (rúbrica) |
 
-Semilla: `node scripts/seed-firma-manage-subprocess.cjs` (migra legacy manage→prepare y crea sign). Opcional `--email=usuario@empresa.com` y `--also-sign` para otorgar ambos.
+Semilla: `node scripts/seed-firma-manage-subprocess.cjs` (migra legacy manage→prepare y crea sign + fingerprint). Opcional `--email=usuario@empresa.com`, `--also-sign`, `--also-fingerprint`.
+
+### Huella (SynerLink ↔ Orion)
+
+1. **SynerLink (permiso)**: solo quien tiene “Registrar huella” puede marcar el documento y colocar cajas.
+2. **SynerLink (firma)**: en el modal de identidad, el firmante sube la imagen; se envía en `complete-sign` como `fingerprintDataUrl`.
+3. **Orion**: si el firmante tiene cajas `kind=fingerprint` (o el doc lo exige), `accept-sign` rechaza sin `fingerprintDataUrl` y estampa la imagen en esas cajas del PDF firmado.
+4. Firmantes **externos** (`/firma/externa/[token]`): aportan huella vía token (sin subproceso SynerLink); Orion aplica la misma regla de cajas.
 
 ## Endpoints en Kronos
 

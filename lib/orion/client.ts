@@ -5,14 +5,90 @@ import type {
   OrionDocumentResponse,
 } from './types';
 
-/** Convierte rutas relativas de Orion en URL absoluta usando ORION_API_BASE_URL. */
+function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.endsWith('.localhost');
+}
+
+function isLoopbackUrl(url: string): boolean {
+  try {
+    return isLoopbackHost(new URL(url).hostname);
+  } catch {
+    return /localhost|127\.0\.0\.1/i.test(url);
+  }
+}
+
+/**
+ * Base pública de Orion para links que salen por correo (nunca localhost).
+ * Orden: ORION_PUBLIC_URL → ORION_EMBED_ORIGIN → ORION_API_BASE_URL.
+ */
+export function getOrionPublicBaseUrl(): string | null {
+  const candidates = [
+    process.env.ORION_PUBLIC_URL,
+    process.env.ORION_EMBED_ORIGIN,
+    process.env.ORION_API_BASE_URL,
+    getOrionConfig().embedOrigin,
+    getOrionConfig().apiBaseUrl,
+  ];
+  for (const raw of candidates) {
+    const base = String(raw || '')
+      .trim()
+      .replace(/\/$/, '');
+    if (base && /^https?:\/\//i.test(base) && !isLoopbackUrl(base)) return base;
+  }
+  return null;
+}
+
+/**
+ * Origen público de SynerLink para respaldos /firma/externa (nunca localhost de Origin).
+ */
+export function resolvePublicAppOrigin(requestOrigin?: string | null): string | null {
+  const candidates = [
+    process.env.NEXTAUTH_URL,
+    process.env.APP_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    requestOrigin,
+  ];
+  let loopbackFallback: string | null = null;
+  for (const raw of candidates) {
+    const base = String(raw || '')
+      .trim()
+      .replace(/\/$/, '');
+    if (!base || !/^https?:\/\//i.test(base)) continue;
+    if (isLoopbackUrl(base)) {
+      if (!loopbackFallback) loopbackFallback = base;
+      continue;
+    }
+    return base;
+  }
+  return loopbackFallback;
+}
+
+/**
+ * Convierte rutas/URLs de Orion en URL absoluta pública.
+ * Si Orion devolvió localhost (dev), reescribe al host público configurado.
+ */
 export function resolveOrionAbsoluteUrl(urlOrPath: string | null | undefined): string | null {
   const value = String(urlOrPath || '').trim();
   if (!value) return null;
-  if (/^https?:\/\//i.test(value)) return value;
+
+  const publicBase = getOrionPublicBaseUrl();
   const { apiBaseUrl } = getOrionConfig();
-  if (!apiBaseUrl) return null;
-  return `${apiBaseUrl}${value.startsWith('/') ? value : `/${value}`}`;
+  const rewriteBase = publicBase || apiBaseUrl;
+
+  if (/^https?:\/\//i.test(value)) {
+    if (!isLoopbackUrl(value)) return value;
+    // localhost → host público (correo / links externos).
+    if (!rewriteBase) return value;
+    try {
+      const parsed = new URL(value);
+      return `${rewriteBase}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch {
+      return value;
+    }
+  }
+  if (!rewriteBase) return null;
+  return `${rewriteBase}${value.startsWith('/') ? value : `/${value}`}`;
 }
 
 /** URL canónica del PDF firmado en Orion (preferida sobre signedFileUrl almacenado). */
@@ -24,10 +100,16 @@ export function buildOrionSignedFileApiUrl(orionDocumentId: string): string | nu
   );
 }
 
-async function orionFetch<T>(
-  path: string,
-  init?: RequestInit
-): Promise<{ ok: boolean; status: number; data: T | null; error?: string }> {
+export type OrionResult<T> = {
+  ok: boolean;
+  status: number;
+  data: T | null;
+  error?: string;
+  /** Código estable de Orion (p. ej. NOT_YOUR_TURN, DOCUMENT_CLOSED). */
+  code?: string;
+};
+
+async function orionFetch<T>(path: string, init?: RequestInit): Promise<OrionResult<T>> {
   const cfg = getOrionConfig();
   if (!cfg.apiBaseUrl || !cfg.integrationApiKey) {
     return {
@@ -71,7 +153,7 @@ async function orionFetch<T>(
   }
 
   if (!res.ok) {
-    const errBody = data as { error?: string; message?: string } | null;
+    const errBody = data as { error?: string; message?: string; code?: string } | null;
     const looksLikeHtml =
       /^\s*</.test(text) || /<!DOCTYPE|This page could not be found/i.test(text);
     const fallback =
@@ -85,6 +167,7 @@ async function orionFetch<T>(
       status: res.status,
       data,
       error: errBody?.error || errBody?.message || fallback,
+      code: typeof errBody?.code === 'string' ? errBody.code : undefined,
     };
   }
 
@@ -119,24 +202,63 @@ export async function getOrionDocument(
   );
 }
 
+/** 409 SIGNED_SIGNER_LOCKED si se quita o mueve a alguien que ya firmó. */
 export async function assignOrionSigners(
   orionDocumentId: string,
-  payload: OrionAssignSignersPayload
-): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+  payload: OrionAssignSignersPayload & { actorEmail?: string | null }
+): Promise<OrionResult<OrionDocumentResponse>> {
   return orionFetch<OrionDocumentResponse>(
     `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/signers`,
     { method: 'POST', body: JSON.stringify(payload) }
   );
 }
 
+export type OrionDocumentEventPayload = {
+  /** Id idempotente (`kronos-orion_document_event-{id}`): Orion no duplica reintentos. */
+  eventId?: string | null;
+  type: string;
+  label: string;
+  versionLabel?: string | null;
+  actorEmail?: string | null;
+  actorName?: string | null;
+  detail?: string | null;
+  synerlinkRequestId: number;
+  fileId: string;
+  occurredAt: string;
+};
+
+let orionEventsEndpointMissing = false;
+
+/** Hoja de vida en Orion. Si Orion aún no expone la ruta (404) se deja de intentar. */
+export async function postOrionDocumentEvent(
+  orionDocumentId: string,
+  event: OrionDocumentEventPayload
+): Promise<{ ok: boolean; status: number; error?: string }> {
+  if (orionEventsEndpointMissing) return { ok: false, status: 404 };
+  const res = await orionFetch<unknown>(
+    `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/events`,
+    { method: 'POST', body: JSON.stringify(event) }
+  );
+  if (res.status === 404 && !res.data) orionEventsEndpointMissing = true;
+  return { ok: res.ok, status: res.status, error: res.error };
+}
+
 export async function sendOrionDocument(
-  orionDocumentId: string
-): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+  orionDocumentId: string,
+  options?: { actorEmail?: string | null }
+): Promise<OrionResult<OrionDocumentResponse>> {
+  const actorEmail = String(options?.actorEmail || '').trim().toLowerCase();
   return orionFetch<OrionDocumentResponse>(
     `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/send`,
-    { method: 'POST', body: JSON.stringify({}) }
+    { method: 'POST', body: JSON.stringify(actorEmail ? { actorEmail } : {}) }
   );
 }
+
+/** Consentimiento legal que exige Orion accept-sign (UI vive en SynerLink). */
+export const ORION_SIGNING_LEGAL_CONSENT_VERSION = 'co-ley527-d2364-v1';
+
+/** Consentimiento biométrico (huella) — Orion `co-ley1581-art6-huella-v1`. */
+export const ORION_BIOMETRIC_CONSENT_VERSION = 'co-ley1581-art6-huella-v1';
 
 /** Firmante interno acepta y aplica su rúbrica guardada (sin embed de gestión). */
 export async function acceptOrionSignerTurn(
@@ -144,6 +266,7 @@ export async function acceptOrionSignerTurn(
   email: string,
   options?: {
     signatureDataUrl?: string | null;
+    fingerprintDataUrl?: string | null;
     originalPdfBase64?: string | null;
     fullName?: string | null;
     idDocumentType?: string | null;
@@ -152,14 +275,36 @@ export async function acceptOrionSignerTurn(
     companyName?: string | null;
     companyNit?: string | null;
     jobTitle?: string | null;
+    /** Si false, no se envía consentimiento (Orion rechazará). Default: true. */
+    legalConsentAccepted?: boolean | null;
+    legalConsentKind?: 'ELECTRONIC' | 'DIGITAL' | null;
+    /** Preferencia Kronos: este turno exige huella. */
+    requireFingerprint?: boolean | null;
+    /** Slot de secuencia (mismo email puede firmar varias veces). */
+    signOrder?: number | null;
+    /** Consentimiento biométrico Ley 1581 (obligatorio si hay huella). */
+    biometricConsentAccepted?: boolean | null;
+    biometricConsentVersion?: string | null;
+    biometricConsentAcceptedAt?: string | null;
   }
-): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
-  const payload: Record<string, string> = {
+): Promise<OrionResult<OrionDocumentResponse>> {
+  const payload: Record<string, string | boolean | number> = {
     email: email.trim().toLowerCase(),
   };
+  if (typeof options?.requireFingerprint === 'boolean') {
+    payload.requireFingerprint = options.requireFingerprint;
+  }
+  const signOrder = Number(options?.signOrder);
+  if (Number.isFinite(signOrder) && signOrder > 0) {
+    payload.signOrder = signOrder;
+  }
   const dataUrl = String(options?.signatureDataUrl || '').trim();
   if (dataUrl.startsWith('data:image/')) {
     payload.signatureDataUrl = dataUrl;
+  }
+  const fingerprintDataUrl = String(options?.fingerprintDataUrl || '').trim();
+  if (fingerprintDataUrl.startsWith('data:image/')) {
+    payload.fingerprintDataUrl = fingerprintDataUrl;
   }
   const originalPdfBase64 = String(options?.originalPdfBase64 || '')
     .trim()
@@ -182,12 +327,75 @@ export async function acceptOrionSignerTurn(
   const jobTitle = String(options?.jobTitle || '').trim();
   if (jobTitle) payload.jobTitle = jobTitle;
 
+  // Orion exige legalConsent* (no acceptedTerms). SynerLink ya validó el checkbox.
+  if (options?.legalConsentAccepted !== false) {
+    payload.legalConsentAccepted = true;
+    payload.legalConsentKind =
+      options?.legalConsentKind === 'DIGITAL' ? 'DIGITAL' : 'ELECTRONIC';
+    payload.legalConsentVersion = ORION_SIGNING_LEGAL_CONSENT_VERSION;
+    payload.legalConsentAcceptedAt = new Date().toISOString();
+  }
+
+  // Huella → consentimiento biométrico Ley 1581 (Orion 422 si falta).
+  if (options?.biometricConsentAccepted === true) {
+    payload.biometricConsentAccepted = true;
+    payload.biometricConsentVersion =
+      String(options.biometricConsentVersion || '').trim() ||
+      ORION_BIOMETRIC_CONSENT_VERSION;
+    payload.biometricConsentAcceptedAt =
+      String(options.biometricConsentAcceptedAt || '').trim() ||
+      new Date().toISOString();
+  }
+
   return orionFetch<OrionDocumentResponse>(
     `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/accept-sign`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
     }
+  );
+}
+
+export type OrionPersonConsentStatus = {
+  email: string;
+  displayName?: string;
+  hasSigningLegalConsent: boolean;
+  signingLegalConsentVersion?: string | null;
+  signingLegalConsentKind?: string | null;
+  signingLegalConsentAcceptedAt?: string | null;
+  hasBiometricConsent: boolean;
+  biometricConsentVersion?: string | null;
+  biometricConsentAcceptedAt?: string | null;
+  currentSigningLegalVersion: string;
+  currentBiometricVersion: string;
+};
+
+/** GET consentimiento a nivel persona en Orion. */
+export async function getOrionPersonConsent(email: string) {
+  const encoded = encodeURIComponent(email.trim().toLowerCase());
+  return orionFetch<OrionPersonConsentStatus>(
+    `/api/integrations/synerlink/user-consent?email=${encoded}`,
+    { method: 'GET' }
+  );
+}
+
+/** POST guarda consentimiento general (firma y/o huella) en el perfil Orion. */
+export async function saveOrionPersonConsent(
+  email: string,
+  body: {
+    legalConsentAccepted?: boolean;
+    legalConsentKind?: 'ELECTRONIC' | 'DIGITAL';
+    legalConsentVersion?: string;
+    legalConsentAcceptedAt?: string;
+    biometricConsentAccepted?: boolean;
+    biometricConsentVersion?: string;
+    biometricConsentAcceptedAt?: string;
+  }
+) {
+  const encoded = encodeURIComponent(email.trim().toLowerCase());
+  return orionFetch<OrionPersonConsentStatus & { ok?: boolean }>(
+    `/api/integrations/synerlink/user-consent?email=${encoded}`,
+    { method: 'POST', body: JSON.stringify(body) }
   );
 }
 
@@ -215,7 +423,7 @@ export async function rebuildOrionSignedPdf(
 export async function returnOrionDocument(
   orionDocumentId: string,
   payload: { email: string; reason: string }
-): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+): Promise<OrionResult<OrionDocumentResponse>> {
   return orionFetch<OrionDocumentResponse>(
     `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/return`,
     {
@@ -228,6 +436,22 @@ export async function returnOrionDocument(
   );
 }
 
+/** Rechazo definitivo (RECHAZADO). 409 DOCUMENT_CLOSED si ya estaba cerrado. */
+export async function rejectOrionDocument(
+  orionDocumentId: string,
+  payload: { email?: string | null; reason?: string | null }
+): Promise<OrionResult<OrionDocumentResponse>> {
+  const body: Record<string, string> = {};
+  const email = String(payload.email || '').trim().toLowerCase();
+  const reason = String(payload.reason || '').trim();
+  if (email) body.email = email;
+  if (reason) body.reason = reason;
+  return orionFetch<OrionDocumentResponse>(
+    `/api/integrations/synerlink/documents/${encodeURIComponent(orionDocumentId)}/reject`,
+    { method: 'POST', body: JSON.stringify(body) }
+  );
+}
+
 export async function getOrionSignatureEmbedUrl(
   email: string
 ): Promise<{ ok: boolean; status: number; data: { embedUrl: string; email: string } | null; error?: string }> {
@@ -236,6 +460,66 @@ export async function getOrionSignatureEmbedUrl(
     `/api/integrations/synerlink/embed/signature-url?email=${encoded}`,
     { method: 'GET' }
   );
+}
+
+/**
+ * Pide a Orion la URL pública de firma (`/sign/{token}`).
+ * Contrato: POST `/api/integrations/synerlink/embed/sign-url`
+ * (`sendEmail: false` = solo URL; `true` = URL + correo Graph de Orion).
+ */
+export async function fetchOrionSignerSignUrl(
+  orionDocumentId: string,
+  email: string,
+  signOrder?: number | null,
+  options?: { sendEmail?: boolean }
+): Promise<{ ok: boolean; status: number; signUrl: string | null; error?: string }> {
+  const docId = String(orionDocumentId || '').trim();
+  const mail = String(email || '')
+    .trim()
+    .toLowerCase();
+  if (!docId || !mail) {
+    return { ok: false, status: 400, signUrl: null, error: 'docId y email son obligatorios' };
+  }
+
+  const order = Number(signOrder);
+  const body: Record<string, string | number | boolean> = {
+    docId,
+    email: mail,
+    // No reenviar correo al solo obtener/copiar la URL.
+    sendEmail: options?.sendEmail === true,
+  };
+  if (Number.isFinite(order) && order > 0) body.signOrder = order;
+
+  const res = await orionFetch<{
+    signUrl?: string;
+    url?: string;
+    sign_url?: string;
+    data?: { signUrl?: string; url?: string };
+    email?: string;
+    error?: string;
+  }>(`/api/integrations/synerlink/embed/sign-url`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  const payload = res.data;
+  const raw = String(
+    payload?.signUrl ||
+      payload?.url ||
+      payload?.sign_url ||
+      payload?.data?.signUrl ||
+      payload?.data?.url ||
+      ''
+  ).trim();
+  const signUrl = resolveOrionAbsoluteUrl(raw) || raw || null;
+  if (!res.ok || !signUrl) {
+    return {
+      ok: false,
+      status: res.status,
+      signUrl: null,
+      error: res.error || payload?.error || 'Orion no devolvió URL de firma',
+    };
+  }
+  return { ok: true, status: res.status, signUrl };
 }
 
 export async function loadOrionUserSignature(email: string) {
@@ -283,17 +567,53 @@ type OrionSignatureFieldInput = {
   width: number;
   height: number;
   label?: string;
+  kind?: 'signature' | 'fingerprint' | 'validation';
 };
 
-/** Persiste recuadros de firma en Orion (embed API + token). */
+/**
+ * Persiste recuadros de firma en Orion.
+ * Preferido: POST /documents/{id}/signature-fields con Bearer de integración.
+ * Fallback: embed API + token (bags viejos / Orion sin la ruta nueva).
+ */
 export async function saveOrionSignatureFields(params: {
   orionDocumentId: string;
-  embedToken: string;
+  embedToken?: string | null;
   signatureFields: OrionSignatureFieldInput[];
+  /** Legacy email→huella (ambiguo si el mismo email firma 2 veces). */
+  signerRequireFingerprint?: Record<string, boolean>;
+  /** signOrder→huella (fuente de verdad con emails repetidos). */
+  signerRequireFingerprintByOrder?: Record<string, boolean>;
 }): Promise<{ ok: boolean; status: number; data: OrionDocumentResponse | null; error?: string }> {
+  const id = encodeURIComponent(params.orionDocumentId);
+  const body: {
+    signatureFields: OrionSignatureFieldInput[];
+    signerRequireFingerprint?: Record<string, boolean>;
+    signerRequireFingerprintByOrder?: Record<string, boolean>;
+  } = {
+    signatureFields: params.signatureFields,
+  };
+  if (params.signerRequireFingerprint) {
+    body.signerRequireFingerprint = params.signerRequireFingerprint;
+  }
+  if (params.signerRequireFingerprintByOrder) {
+    body.signerRequireFingerprintByOrder = params.signerRequireFingerprintByOrder;
+  }
+  const viaKey = await orionFetch<OrionDocumentResponse>(
+    `/api/integrations/synerlink/documents/${id}/signature-fields`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }
+  );
+  if (viaKey.ok) return viaKey;
+
+  // 404/405: Orion aún no expone la ruta → fallback embed.
+  const embedToken = String(params.embedToken || '').trim();
+  if (!embedToken) return viaKey;
+
   const qs = new URLSearchParams({
     docId: params.orionDocumentId,
-    token: params.embedToken,
+    token: embedToken,
     action: 'signatureFields',
   });
   return orionFetch<OrionDocumentResponse>(
@@ -379,6 +699,8 @@ export async function fetchOrionSignedFileContent(params: {
   signedFileUrl?: string | null;
   /** Solo firmas con order <= maxOrder (versión histórica parcial). */
   maxSignerOrder?: number | null;
+  /** Marca de agua en Orion (?validated=1). Preferir false: Kronos estampa en el proxy. */
+  validated?: boolean;
 }): Promise<{
   ok: boolean;
   status: number;
@@ -386,12 +708,14 @@ export async function fetchOrionSignedFileContent(params: {
   contentType: string | null;
   error?: string;
 }> {
-  const withMaxOrder = (url: string): string => {
-    if (params.maxSignerOrder == null || !Number.isFinite(params.maxSignerOrder)) {
-      return url;
-    }
+  const withQuery = (url: string): string => {
     const u = new URL(url);
-    u.searchParams.set('maxOrder', String(params.maxSignerOrder));
+    if (params.maxSignerOrder != null && Number.isFinite(params.maxSignerOrder)) {
+      u.searchParams.set('maxOrder', String(params.maxSignerOrder));
+    }
+    if (params.validated) {
+      u.searchParams.set('validated', '1');
+    }
     return u.toString();
   };
 
@@ -400,7 +724,7 @@ export async function fetchOrionSignedFileContent(params: {
     resolveOrionAbsoluteUrl(params.signedFileUrl),
   ]
     .filter((url, index, list): url is string => Boolean(url) && list.indexOf(url) === index)
-    .map(withMaxOrder);
+    .map(withQuery);
 
   if (candidates.length === 0) {
     return {

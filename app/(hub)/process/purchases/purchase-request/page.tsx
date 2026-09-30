@@ -246,7 +246,7 @@ export default function PurchaseRequestPage() {
       </div>
 
       {/* Table */}
-      <div className='bg-white rounded-lg shadow overflow-hidden'>
+      <div className='rounded-lg shadow overflow-hidden'>
         <Table>
           <Table.Thead>
             <Table.Tr>

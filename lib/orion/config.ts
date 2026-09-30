@@ -63,15 +63,6 @@ export function resolveOrionTenantId(synerlinkCompanyId: number): string | null 
   return tenantMap[synerlinkCompanyId] ?? null;
 }
 
-/**
- * Tenant hub de respaldo si el slug del mapa no existe en la BD de Orion
- * (p.ej. mapa dice "farmalogica" pero en ORIONDB solo está "gss").
- */
-export function getOrionTenantFallback(): string | null {
-  const raw = process.env.ORION_TENANT_FALLBACK?.trim();
-  return raw || 'gss';
-}
-
 /** Clave interna para JSON legacy (1 doc por solicitud sin fileId). */
 export const ORION_LEGACY_FILE_ID = '_legacy';
 
@@ -79,12 +70,21 @@ export const ORION_LEGACY_FILE_ID = '_legacy';
  * externalRef Orion:
  * - legacy: synerlink://request/{id}
  * - por archivo: synerlink://request/{id}/file/{fileId}
+ * - subversión: synerlink://request/{id}/file/{fileId}/v/{v1.1}
+ * La v1.0 conserva el ref sin sufijo para no romper documentos ya creados.
  */
-export function buildOrionExternalRef(requestId: number, fileId?: string | null): string {
+export function buildOrionExternalRef(
+  requestId: number,
+  fileId?: string | null,
+  versionLabel?: string | null
+): string {
   const base = `synerlink://request/${requestId}`;
   const fid = String(fileId || '').trim();
   if (!fid || fid === ORION_LEGACY_FILE_ID) return base;
-  return `${base}/file/${encodeURIComponent(fid)}`;
+  const fileRef = `${base}/file/${encodeURIComponent(fid)}`;
+  const label = String(versionLabel || '').trim();
+  if (!label || label === 'v1.0') return fileRef;
+  return `${fileRef}/v/${encodeURIComponent(label)}`;
 }
 
 export function getOrionSignatureProfileUrl(): string | null {

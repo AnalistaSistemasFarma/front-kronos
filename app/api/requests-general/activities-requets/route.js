@@ -16,6 +16,7 @@ export async function GET(req) {
           tpc.task,
           trg.id_status,
           sc.status as status_task,
+          trg.resolution,
           u.name as assigned
         FROM task_request_general trg
           INNER JOIN task_process_category tpc ON tpc.id = trg.id_task

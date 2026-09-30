@@ -17,6 +17,8 @@ import {
   REQUESTER_NAME_SQL,
   REQUESTER_SEARCH_FILTER_SQL,
   TECHNICIAN_PERSON_FILTER_SQL,
+  TECHNICIAN_UNASSIGNED_FILTER_SQL,
+  TECHNICIAN_UNASSIGNED_VALUE,
 } from '../../../../lib/help-desk/requesterSql';
 
 export const dynamic = 'force-dynamic';
@@ -109,8 +111,8 @@ export async function GET(req) {
     if (status && status !== '0') query += ` AND sc.id_status_case = @status`;
     else if (!status && !id && !hasRequesterFilter) query += ` AND sc.id_status_case = 1`;
     if (assigned_user) query += ` AND u.name LIKE '%' + @assigned_user + '%'`;
-    if (technician === 'unassigned') {
-      query += ` AND (c.id_technical IS NULL OR c.id_technical = 0)`;
+    if (technician === TECHNICIAN_UNASSIGNED_VALUE) {
+      query += ` AND ${TECHNICIAN_UNASSIGNED_FILTER_SQL}`;
     } else if (technician) {
       query += ` AND ${TECHNICIAN_PERSON_FILTER_SQL}`;
     }
@@ -128,7 +130,7 @@ export async function GET(req) {
     if (status) request.input('status', sql.Int, status);
     if (company) request.input('company', sql.Int, company);
     if (assigned_user) request.input('assigned_user', sql.NVarChar, assigned_user);
-    if (technician && technician !== 'unassigned') {
+    if (technician && technician !== TECHNICIAN_UNASSIGNED_VALUE) {
       request.input('technician', sql.Int, Number(technician));
     }
     if (date_from && date_to) {

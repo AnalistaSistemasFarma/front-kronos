@@ -17,6 +17,8 @@ import sql from 'mssql';
  *   BALANCES_SQL_USER     (reutiliza el login 'adminDesarrollo' ya existente
  *                          en el 10.7, o uno dedicado si Nicolás prefiere)
  *   BALANCES_SQL_PASS
+ *   Si BALANCES_SQL_USER viene como `DOMINIO\usuario` se usa autenticación
+ *   de Windows (NTLM) en vez de login SQL.
  */
 
 declare global {
@@ -59,11 +61,16 @@ function buildConfig(): sql.config {
     throw new Error(configurationError);
   }
 
+  // Usuario de Windows (`DOMINIO\usuario`) → autenticación NTLM; si no, login SQL.
+  const [domain, userName] = user!.includes('\\') ? user!.split('\\', 2) : [null, user!];
+  const credentials: Pick<sql.config, 'user' | 'password' | 'authentication'> = domain
+    ? { authentication: { type: 'ntlm', options: { domain, userName, password: password! } } }
+    : { user: userName, password: password! };
+
   return {
     server: server!,
     database: database!,
-    user: user!,
-    password: password!,
+    ...credentials,
     options: { encrypt: false, trustServerCertificate: true },
     requestTimeout: 120_000, // los balances acumulados son consultas pesadas
     pool: { max: 3, min: 0, idleTimeoutMillis: 30_000 },

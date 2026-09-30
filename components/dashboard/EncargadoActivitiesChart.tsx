@@ -599,7 +599,7 @@ export default function EncargadoActivitiesChart({
             </Group>
 
             {detailRows.length === 0 && (
-              <Paper p='md' radius='md' mb='lg' withBorder bg='gray.0'>
+              <Paper p='md' radius='md' mb='lg' withBorder>
                 <Text size='sm' c='dimmed' ta='center'>
                   Este líder no tiene actividades en el periodo ({periodLabel}). Cambie las fechas o
                   vuelva a la lista de líderes.

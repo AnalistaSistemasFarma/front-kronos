@@ -1,0 +1,5591 @@
+{
+ "generatedAt": "2026-09-24",
+ "skills": [
+  {
+   "name": "3-statements",
+   "summary": "Diligencia plantillas de modelos financieros de tres estados (estado de resultados, balance general y flujo de caja), enlazando la información entre ellas.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "ab-test",
+   "summary": "Analiza pruebas A/B con validación estadística de significancia y tamaño de muestra, entregando una recomendación sobre si conviene implementar el cambio.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "abogado-del-diablo",
+   "summary": "Somete una idea, plan o proyecto a una crítica exhaustiva desde ocho ángulos distintos, asumiendo que fallará, para identificar y priorizar los puntos débiles a corregir.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "access",
+   "summary": "Administra el acceso al canal de Telegram: aprueba solicitudes de vinculación, edita las listas de usuarios permitidos y define las políticas de mensajes directos o de grupo.",
+   "category": "Flota/Infra",
+   "agents": [
+    {
+     "agent": "andreabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "cali",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "carter",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "gilbert",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "hiper",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "indi",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "jorgebot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "josebot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "laurabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "lisa",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "mark",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "mechita",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "ofi",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "plan",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "play",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "sawblaze",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "troy",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "zoe",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "account-maintenance",
+   "summary": "Gestiona solicitudes de mantenimiento de cuentas financieras, como cambios de datos de contacto, beneficiarios o retenciones legales.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "account-opening-compliance",
+   "summary": "Incorpora controles de cumplimiento normativo en los procesos de apertura de cuentas financieras, como verificación de identidad y prevención de lavado de activos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "account-opening-workflow",
+   "summary": "Diseña y opera los procesos de apertura de cuentas financieras, desde la solicitud hasta la activación, incluyendo la reducción de rechazos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "account-research",
+   "summary": "Investiga una empresa o persona para obtener información útil de cara a una gestión comercial o de ventas.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "account-transfers",
+   "summary": "Gestiona el traslado de cuentas o activos entre entidades financieras, incluyendo transferencias y traspasos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "advertising-compliance",
+   "summary": "Verifica que el material publicitario y de mercadeo de servicios financieros cumpla con la normativa vigente sobre presentación de resultados y testimonios.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "advice-standards",
+   "summary": "Determina cuándo una comunicación o producto financiero se considera asesoría de inversión sujeta a regulación, y cuándo es simplemente educativo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "advisor-dashboards",
+   "summary": "Diseña y optimiza tableros de indicadores para la gestión de firmas de asesoría financiera, con seguimiento de activos, ingresos y productividad.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "algorithmic-art",
+   "summary": "Crea arte generativo mediante código, con aleatoriedad controlada y exploración interactiva de parámetros visuales.",
+   "category": "Diseño",
+   "agents": [
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "alternatives",
+   "summary": "Analiza inversiones alternativas como fondos de cobertura, capital privado y capital de riesgo, incluyendo métricas de desempeño y estructuras de comisiones.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "analisis-compras-sapsend",
+   "summary": "Analiza los tiempos y demoras del proceso de compras registrado en SAP Business One a través de SAPSEND, midiendo demoras por etapa, por persona y la tasa de rechazo.",
+   "category": "SAP",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "analisis-reuniones",
+   "summary": "Analiza y documenta las reuniones de Nicolás: genera un resumen con los puntos principales, identifica pendientes y los registra para hacerles seguimiento posterior.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "analisis-tesoreria-olp",
+   "summary": "Genera reportes ejecutivos en PDF sobre las solicitudes de tesorería de One Latam Pharma, incluyendo un panorama general, un análisis de solicitudes demoradas y recomendaciones.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "anti-money-laundering",
+   "summary": "Orienta el diseño y la operación de programas de prevención de lavado de activos y financiación del terrorismo para entidades financieras.",
+   "category": "Seguridad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "asset-allocation",
+   "summary": "Define cómo distribuir el capital entre distintas clases de activos, utilizando modelos de asignación estratégica y táctica de portafolio.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "bank-sync",
+   "summary": "Conecta cuentas bancarias para importar transacciones de forma automática.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "bet-sizing",
+   "summary": "Determina cuánto capital asignar a cada posición dentro de un portafolio de inversión, considerando el nivel de riesgo y convicción.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "board-meeting-prep",
+   "summary": "Prepara material para reuniones de junta directiva: presentaciones, resúmenes ejecutivos, agendas y puntos de conversación para los directores.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "books-and-records",
+   "summary": "Orienta el diseño de programas de conservación de documentos y registros para entidades financieras, según los tiempos y formatos exigidos por la norma.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "bot-temperatures",
+   "summary": "Guía la calibración del parámetro de \"temperatura\" de los bots de la organización según el tipo de asistente (soporte, auditoría, atención al cliente, creativo), con un protocolo de ajuste y diagnóstico de síntomas.",
+   "category": "Flota/Infra",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "brainstorming",
+   "summary": "Explora la intención, los requisitos y el diseño de una idea antes de construir cualquier funcionalidad nueva.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "brand-guidelines",
+   "summary": "Aplica los colores y la tipografía oficiales de una marca a cualquier pieza visual que lo requiera.",
+   "category": "Diseño",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "brand-voice-enforcement",
+   "summary": "Aplica los lineamientos de voz de marca a la creación de contenido, como correos, propuestas, presentaciones o publicaciones.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "break-even-calc",
+   "summary": "Calcula el punto de equilibrio de un negocio separando los costos fijos de los variables.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "browser-automation",
+   "summary": "Automatiza la navegación y el control de páginas web mediante un navegador, incluyendo flujos de varios pasos, inicio de sesión y manejo de pestañas.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Lisa"
+    },
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "business-case-builder",
+   "summary": "Construye casos de negocio con análisis de costo-beneficio, cálculo de retorno de inversión, evaluación de riesgos y cronograma de implementación.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "buyer-list",
+   "summary": "La descripción no aporta detalle; a juzgar por el nombre, parece apoyar la construcción o gestión de una lista de posibles compradores.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "call-prep",
+   "summary": "Prepara una llamada comercial con contexto de la cuenta, investigación de los asistentes y una agenda sugerida.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "cambiar-auth-token",
+   "summary": "Migra un bot de la flota de sesión interactiva a un token de autenticación de larga duración, para evitar que se venza por inactividad.",
+   "category": "Flota/Infra",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "campaign-planner",
+   "summary": "Planea campañas de mercadeo completas, desde la estrategia hasta la ejecución, incluyendo canales, cronograma, presupuesto y métricas.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "canned-responses",
+   "summary": "Genera respuestas plantilla para consultas legales frecuentes e identifica cuáles casos requieren atención individual.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "canvas",
+   "summary": "Presenta documentos o widgets en un panel conectado de computador y permite controlar su visibilidad o navegación.",
+   "category": "Flota/Infra",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Lisa"
+    },
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "canvas-design",
+   "summary": "Crea piezas visuales originales en formato PNG o PDF, como afiches o diseños artísticos, siguiendo una filosofía de diseño definida.",
+   "category": "Diseño",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "cargue-articulos-dtw",
+   "summary": "Prepara y valida archivos de cargue masivo de artículos para SAP (Data Transfer Workbench) a partir de una plantilla, aplicando las reglas de cada empresa antes de subirlos.",
+   "category": "SAP",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "cash-flow-forecast",
+   "summary": "Proyecta el flujo de caja futuro con base en tendencias históricas y patrones recurrentes.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "catalyst-calendar",
+   "summary": "La descripción no aporta detalle; a juzgar por el nombre, parece llevar un calendario de eventos que pueden afectar el valor de una inversión.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "caveman",
+   "summary": "Modo de comunicación ultra comprimido que reduce el consumo de mensajes manteniendo la precisión técnica de la respuesta.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "change-management",
+   "summary": "Planea y ejecuta cambios organizacionales o técnicos, incluyendo la comunicación a las personas afectadas.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "changelog-generator",
+   "summary": "Genera automáticamente notas de cambios para los usuarios finales a partir del historial de modificaciones de un repositorio de código.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "charitable-giving",
+   "summary": "Lleva el registro de donaciones caritativas y estima su valor como deducción tributaria.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "check-model",
+   "summary": "La descripción no aporta detalle; a juzgar por el nombre, parece verificar o comparar el modelo de inteligencia artificial en uso.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "churn-analysis",
+   "summary": "Analiza los patrones de pérdida de clientes, identifica cuentas en riesgo y propone estrategias de retención.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "cierre-casos-synerlink",
+   "summary": "Cierra por completo un caso o solicitud de SynerLink: verifica que el trabajo esté hecho, marca la solicitud como resuelta y dispara la notificación por correo al solicitante y al responsable.",
+   "category": "SynerLink",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "cim-builder",
+   "summary": "La descripción no aporta detalle; a juzgar por el nombre, parece apoyar la construcción de un memorando de información confidencial para procesos de venta o inversión.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "ciso-character",
+   "summary": "Define la postura, el tono y las reglas de fidelidad para responder como oficial de seguridad de la información de una empresa con operación en Colombia.",
+   "category": "Seguridad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "ciso-frameworks",
+   "summary": "Sirve como referencia de los principales marcos técnicos de seguridad de la información (ISO 27001, NIST, CIS, OWASP, PCI-DSS, entre otros) para citar controles con exactitud.",
+   "category": "Seguridad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "ciso-normativa-colombia",
+   "summary": "Sirve como referencia de la normativa colombiana de protección de datos, delitos informáticos y ciberseguridad, para citar leyes y decretos con exactitud.",
+   "category": "Seguridad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "claude-api",
+   "summary": "Sirve como referencia para construir, depurar y optimizar aplicaciones que usan la API de Claude, incluyendo modelos, precios y buenas prácticas.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "client-disclosures",
+   "summary": "Orienta la elaboración y entrega de los documentos de divulgación obligatorios para clientes de servicios financieros.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "client-onboarding",
+   "summary": "Diseña el proceso completo de vinculación de clientes financieros, desde el contacto inicial hasta la cuenta activa, incluyendo verificación de identidad.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "client-profitability",
+   "summary": "Analiza los ingresos y costos por cliente para identificar las cuentas más rentables.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "client-report",
+   "summary": "La descripción no aporta detalle; a juzgar por el nombre, parece generar reportes dirigidos a clientes.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "client-reporting-delivery",
+   "summary": "Diseña, genera y entrega reportes de desempeño para clientes a través de distintos canales, incluyendo reportes trimestrales y tributarios.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "client-review",
+   "summary": "La descripción no aporta detalle; a juzgar por el nombre, parece apoyar la revisión periódica de clientes.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "client-review-prep",
+   "summary": "Prepara a los asesores para reuniones de revisión con clientes, con resúmenes de desempeño, análisis y agenda.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "code-review",
+   "summary": "Revisa código en busca de errores, vulnerabilidades de seguridad, problemas de desempeño y de mantenibilidad.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "commodities",
+   "summary": "Analiza los mercados de materias primas, incluyendo la dinámica de los futuros y los fundamentos de oferta y demanda.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "compensation-benchmarking",
+   "summary": "Investiga salarios de mercado, construye escalas salariales y analiza brechas de equidad para elaborar propuestas de compensación con datos.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "competitive-ads-extractor",
+   "summary": "Extrae y analiza los anuncios de la competencia en distintas plataformas para entender su mensaje y su enfoque creativo.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "competitive-analysis",
+   "summary": "Ofrece un marco para analizar el panorama competitivo de cualquier sector, útil para presentaciones de posicionamiento estratégico.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "competitive-intelligence",
+   "summary": "Investiga a los competidores y construye una ficha comparativa interactiva con sus fortalezas y novedades.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "compliance",
+   "summary": "Orienta el cumplimiento de normas de privacidad de datos, la revisión de acuerdos de tratamiento de información y la atención de solicitudes de los titulares.",
+   "category": "Seguridad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "compliance-tracking",
+   "summary": "Hace seguimiento a los requisitos de cumplimiento normativo y a la preparación para auditorías.",
+   "category": "Seguridad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "compose-outreach",
+   "summary": "Genera mensajes de acercamiento comercial personalizados para un contacto específico.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "configure",
+   "summary": "Configura el canal de Telegram guardando el token del bot y revisando la política de acceso.",
+   "category": "Flota/Infra",
+   "agents": [
+    {
+     "agent": "andreabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "cali",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "carter",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "gilbert",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "hiper",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "indi",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "jorgebot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "josebot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "laurabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "lisa",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "mark",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "mechita",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "ofi",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "plan",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "play",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "sawblaze",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "troy",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "zoe",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "conflicts-of-interest",
+   "summary": "Identifica, divulga y mitiga los conflictos de interés en las relaciones de asesoría o intermediación financiera.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "consulta-sharepoint-gss",
+   "summary": "Permite leer, contar, exportar y consultar de forma eficiente las listas y bibliotecas de SharePoint del grupo, con exportación a Excel.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "consultar-gss-tech",
+   "summary": "Consulta de solo lectura el tablero de proyectos y tareas de la organización, mostrando en qué se está trabajando y qué está pendiente.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "contact-research",
+   "summary": "Investiga a una persona específica para calificarla como contacto o prospecto comercial.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "content-research-writer",
+   "summary": "Apoya la escritura de contenido de calidad mediante investigación, citas, mejora de la introducción y retroalimentación en tiempo real.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "contract-negotiation",
+   "summary": "Prepara negociaciones de contratos con análisis de términos, alternativas y marcos de comparación.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "contract-review",
+   "summary": "Revisa contratos frente a las políticas de negociación de la organización, señalando desviaciones y sugiriendo ajustes.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "contractor-tracking",
+   "summary": "Hace seguimiento a los pagos realizados a contratistas independientes y alerta cuando se acerca a un umbral tributario.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "corporate-actions",
+   "summary": "Procesa eventos corporativos como dividendos, fraccionamientos de acciones, fusiones o escisiones, desde su anuncio hasta su liquidación.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "counterparty-risk",
+   "summary": "Orienta la medición y gestión del riesgo de contraparte en operaciones de tesorería y mercados financieros.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "create-an-asset",
+   "summary": "Genera piezas comerciales a la medida, como páginas de aterrizaje, presentaciones o material de una página, a partir del contexto de una negociación.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "creating-dbt-models",
+   "summary": "Crea modelos de datos en dbt siguiendo las convenciones del proyecto, descubriendo primero los estándares ya existentes.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "crm-client-lifecycle",
+   "summary": "Diseña y optimiza sistemas de gestión de clientes (CRM) y flujos del ciclo de vida del cliente para firmas de asesoría, incluyendo segmentación y retención.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "csv-data-summarizer",
+   "summary": "Analiza archivos CSV, genera estadísticas resumen y crea visualizaciones rápidas con Python.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "currencies-and-fx",
+   "summary": "Analiza los mercados cambiarios y la gestión del riesgo de tasa de cambio en portafolios internacionales.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "custom-report",
+   "summary": "Construye reportes financieros personalizados con rangos de fecha y categorías definidos por el usuario.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "customer-research",
+   "summary": "Investiga preguntas de clientes consultando documentación y fuentes conectadas, y entrega una respuesta con nivel de confianza.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "daily-briefing",
+   "summary": "Genera un resumen prioritario para iniciar el día, con reuniones y prioridades comerciales.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "data-context-extractor",
+   "summary": "Genera o mejora una habilidad de análisis de datos propia de una empresa, extrayendo el conocimiento tácito de los analistas sobre sus bases de datos.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "data-exploration",
+   "summary": "Explora y perfila conjuntos de datos para entender su estructura, calidad y patrones antes de analizarlos.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "data-quality",
+   "summary": "Diseña y opera programas de calidad de datos financieros, incluyendo reglas de validación, trazabilidad y gobierno de la información.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "data-validation",
+   "summary": "Revisa un análisis antes de compartirlo, verificando la metodología, la exactitud de los cálculos y posibles sesgos.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "data-visualization",
+   "summary": "Crea visualizaciones de datos efectivas con Python, aplicando principios de diseño como accesibilidad y uso adecuado del color.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "datapack-builder",
+   "summary": "Construye paquetes de datos financieros profesionales a partir de distintas fuentes, normalizando la información en libros de Excel listos para comité de inversión.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "dcf-model",
+   "summary": "Construye modelos de valoración por flujo de caja descontado, con proyecciones financieras, cálculo de la tasa de descuento y análisis de sensibilidad.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "dd-checklist",
+   "summary": "La descripción no aporta detalle; a juzgar por el nombre, parece ofrecer una lista de verificación para procesos de debida diligencia.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "dd-meeting-prep",
+   "summary": "La descripción no aporta detalle; a juzgar por el nombre, parece preparar reuniones de debida diligencia.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "ddd:software-architecture",
+   "summary": "Sirve como guía para el diseño de arquitectura de software con enfoque en calidad, útil al escribir código o analizar el diseño de un sistema.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "deal-screening",
+   "summary": "La descripción no aporta detalle; a juzgar por el nombre, parece apoyar la evaluación inicial de oportunidades de negocio o inversión.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "deal-sourcing",
+   "summary": "Ayuda a identificar y organizar oportunidades de inversión o adquisición (deal sourcing). No se contó con una descripción detallada; la función se dedujo del nombre.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "deal-tracker",
+   "summary": "Permite hacer seguimiento al estado de negociaciones o transacciones en curso. No se contó con una descripción detallada; la función se dedujo del nombre.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "debt-management",
+   "summary": "Ofrece marcos de referencia para gestionar y pagar deudas personales de forma efectiva, comparando estrategias como avalancha y bola de nieve, y evaluando refinanciación y consolidación.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "debt-payoff",
+   "summary": "Construye planes de pago de deudas con cronogramas de cuotas, usando los métodos de avalancha o bola de nieve.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "debugging-dbt-errors",
+   "summary": "Diagnostica y corrige errores en modelos de dbt de forma sistemática, revisando primero las dependencias anteriores y validando la corrección con una compilación completa.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "deep-research",
+   "summary": "Ejecuta investigaciones autónomas de varios pasos mediante un agente de investigación de Google, útil para análisis de mercado, panorama competitivo y revisiones de literatura técnica, con reportes citados.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "defuddle",
+   "summary": "Extrae el contenido limpio en formato markdown de páginas web, eliminando elementos de navegación y ruido visual, para leer artículos o documentación en línea de forma más eficiente.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "josebot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "laurabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "dei-strategy",
+   "summary": "Apoya la construcción de estrategias de diversidad, equidad e inclusión alineadas con los objetivos del negocio, incluyendo metas medibles, formación y mecanismos de seguimiento.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "depreciation-schedule",
+   "summary": "Calcula cronogramas de depreciación de activos usando métodos contables reconocidos y deducciones fiscales especiales.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "developer-growth-analysis",
+   "summary": "Analiza el historial reciente de conversaciones de desarrollo para identificar patrones de programación y áreas de mejora, y envía un reporte de crecimiento personalizado con recursos de aprendizaje.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "developing-incremental-models",
+   "summary": "Guía la creación y el ajuste de modelos incrementales en dbt, ayudando a elegir la estrategia de actualización adecuada y a resolver fallos comunes de este tipo de modelos.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "digital-assets",
+   "summary": "Analiza activos digitales como criptomonedas, mecánica de blockchain y protocolos financieros descentralizados, cubriendo temas como staking, préstamos y métricas de la cadena de bloques.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "discover-brand",
+   "summary": "Busca de forma automática materiales de marca (guías de estilo, lineamientos, documentos de identidad) dispersos en plataformas empresariales de la organización.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "diversification",
+   "summary": "Ayuda a construir portafolios de inversión diversificados mediante análisis de correlación y de riesgo entre distintos activos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "doc-coauthoring",
+   "summary": "Guía la redacción conjunta de documentación —propuestas, especificaciones técnicas, documentos de decisión— mediante un proceso estructurado de iteración y verificación con el lector.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "documentation",
+   "summary": "Apoya la redacción y el mantenimiento de documentación técnica, como manuales de referencia, documentos de arquitectura o guías operativas.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "documenting-dbt-models",
+   "summary": "Documenta modelos y columnas de dbt describiendo el contexto de negocio y el significado de los datos, siguiendo el estilo ya usado en el proyecto.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "docx",
+   "summary": "Permite crear, leer, editar y manipular documentos de Word (.docx), incluyendo tablas de contenido, encabezados, numeración de páginas, imágenes y control de cambios.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "domain-name-brainstormer",
+   "summary": "Genera ideas creativas de nombres de dominio para un proyecto y verifica su disponibilidad en distintas extensiones de internet.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "draft-outreach",
+   "summary": "Investiga a un contacto o empresa objetivo y redacta un mensaje de acercamiento comercial personalizado, apoyándose en investigación web y herramientas de enriquecimiento de datos.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "earnings-analysis",
+   "summary": "Genera reportes profesionales de análisis de resultados trimestrales para empresas que ya se siguen de cerca, comparando lo reportado contra lo esperado y actualizando las proyecciones financieras.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "earnings-preview",
+   "summary": "Prepara un adelanto de resultados financieros previo a la publicación de resultados trimestrales de una empresa. No se contó con una descripción detallada; la función se dedujo del nombre.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "earnings-preview-single",
+   "summary": "Genera un reporte breve de anticipo de resultados financieros para una sola empresa, analizando la última conferencia de resultados, la competencia y la valoración.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "eda",
+   "summary": "Realiza un análisis exploratorio completo de un conjunto de datos —distribuciones, valores nulos, correlaciones y valores atípicos— como paso previo a un análisis más profundo.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "email-marketing",
+   "summary": "Crea y optimiza campañas de correo electrónico —secuencias, boletines, campañas de goteo—, incluyendo estrategia de asuntos, segmentación de audiencia y pruebas A/B.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "emergency-fund",
+   "summary": "Ayuda a dimensionar y estructurar un fondo de emergencia según los ingresos y gastos de la persona, y recomienda dónde conservar esos ahorros.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "employee-engagement-survey",
+   "summary": "Diseña encuestas de compromiso laboral que miden la vinculación, el sentido de pertenencia y la satisfacción de los empleados, con planes de acción basados en los resultados.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "employee-handbook-builder",
+   "summary": "Construye manuales de empleado completos y ajustados a la normativa, cubriendo políticas de la compañía, cultura organizacional, beneficios y código de conducta.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "engram-memory",
+   "summary": "Mantiene activo el protocolo de memoria persistente del agente, guardando de forma proactiva decisiones, convenciones y hallazgos importantes para que se conserven entre sesiones.",
+   "category": "Flota/Infra",
+   "agents": [
+    {
+     "agent": "andreabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "cali",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "carter",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "hiper",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "indi",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "jorgebot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "josebot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "laurabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "lisa",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "mark",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "mechita",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "ofi",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "plan",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "play",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "sawblaze",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "troy",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "enrich-lead",
+   "summary": "Enriquece de forma instantánea la información de un contacto comercial a partir de su nombre, empresa, correo o perfil profesional, entregando datos de contacto e inteligencia de la empresa.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "equities",
+   "summary": "Analiza acciones, modelos de factores y construcción de portafolios de renta variable, incluyendo razones de valoración y métodos de construcción de índices.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "escalation",
+   "summary": "Estructura y documenta escalamientos de soporte hacia ingeniería, producto o gerencia, incluyendo el contexto completo, los pasos para reproducir el problema y su impacto en el negocio.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "estudio-credito",
+   "summary": "Genera un estudio de crédito profesional en PDF con la identidad de GSS LATAM, a partir de un informe comercial y los estados financieros del solicitante, sugiriendo cupo y plazo mediante un semáforo de riesgo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "carter",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "examination-readiness",
+   "summary": "Apoya la preparación y respuesta ante inspecciones de reguladores del mercado de valores, incluyendo cartas de notificación, listas de documentos requeridos y respuestas a hallazgos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "Excel / XLSX",
+   "summary": "Permite crear, revisar y editar libros de Excel (.xlsx, .xlsm, .xls, .csv) manteniendo fórmulas, formato y estructura confiables.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "exchange-connectivity",
+   "summary": "Orienta el diseño y la administración de la conectividad con plataformas de negociación bursátil y la infraestructura de datos de mercado, incluyendo el manejo de interrupciones de negociación.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "executive-communication",
+   "summary": "Apoya la redacción de comunicaciones ejecutivas de alto impacto —discursos, actualizaciones a inversionistas, comunicados de crisis— dirigidas a empleados, inversionistas, clientes o medios.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "expense-optimizer",
+   "summary": "Identifica gastos recurrentes y suscripciones susceptibles de reducir o cancelar, con el fin de optimizar el presupuesto personal.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "explain-sql",
+   "summary": "Explica consultas SQL complejas en lenguaje sencillo, con diagramas de flujo de datos, anotaciones de desempeño y detección de patrones problemáticos.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "farmalogica-advisor",
+   "summary": "Actúa como asesor estratégico especializado en un ecosistema de empresas farmacéuticas, apoyando análisis de portafolios, ventas, inventarios, competidores y registros sanitarios.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "feature-spec",
+   "summary": "Redacta especificaciones detalladas de funcionalidades de software, con requisitos funcionales, casos borde, modelos de datos, contratos de API y flujos de experiencia de usuario.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "fee-billing",
+   "summary": "Apoya la operación de cobro de comisiones de asesoría financiera, desde el diseño de la tarifa hasta el cálculo, el recaudo y el reconocimiento contable del ingreso.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "fee-disclosure",
+   "summary": "Orienta el cumplimiento en la divulgación de comisiones y costos en productos de asesoría, corretaje, fondos de inversión y planes de retiro, según la normativa aplicable.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "fiduciary-standards",
+   "summary": "Aplica los estándares del deber fiduciario en la asesoría de inversiones, incluyendo el deber de cuidado, el deber de lealtad y las normas aplicables a planes de pensiones.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "file-organizer",
+   "summary": "Organiza de forma inteligente archivos y carpetas del computador, identifica duplicados, sugiere mejores estructuras y automatiza tareas de limpieza.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "finance-psychology",
+   "summary": "Ayuda a reconocer y mitigar sesgos cognitivos que afectan las decisiones financieras, y orienta a las personas hacia una relación más sana con el dinero según sus valores.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "financial-goals",
+   "summary": "Establece metas de ahorro con plazos definidos y hace seguimiento mensual al avance hacia esas metas.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "financial-plan",
+   "summary": "Apoya la elaboración de un plan financiero personal o familiar. No se contó con una descripción detallada; la función se dedujo del nombre.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "financial-planning-integration",
+   "summary": "Integra motores de planeación financiera con la plataforma tecnológica del asesor, cubriendo simulaciones de escenarios, estrategias fiscales y la conexión entre el plan y el portafolio de inversión.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "financial-planning-workflow",
+   "summary": "Orquesta el proceso completo de elaboración de un plan financiero integral para un cliente, desde la recolección de información hasta las recomendaciones y el seguimiento continuo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "find-skills",
+   "summary": "Ayuda a descubrir e instalar nuevas habilidades del agente cuando el usuario pregunta cómo hacer algo o busca una funcionalidad que podría ya existir.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "finding-expensive-queries",
+   "summary": "Identifica y clasifica las consultas más costosas de una base de datos analítica por tiempo, costo o volumen de datos procesado, señalando oportunidades de optimización.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "fixed-income-corporate",
+   "summary": "Analiza bonos corporativos e instrumentos de crédito, incluyendo deuda de grado de inversión y de alto rendimiento, calificaciones crediticias y probabilidad de incumplimiento.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "fixed-income-municipal",
+   "summary": "Analiza bonos de gobiernos locales, calculando el rendimiento equivalente después de impuestos y evaluando su calidad crediticia.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "fixed-income-sovereign",
+   "summary": "Analiza bonos soberanos, curvas de rendimiento, duración, convexidad y títulos indexados a la inflación.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "fixed-income-structured",
+   "summary": "Analiza productos de renta fija estructurados, como títulos respaldados por hipotecas o por otros activos, incluyendo el riesgo de prepago y la estructura por tramos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "forward-risk",
+   "summary": "Estima posibles pérdidas futuras de un portafolio mediante métricas de riesgo, simulación de escenarios y pruebas de estrés.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "frontend-design",
+   "summary": "Crea interfaces web de alta calidad visual y distintivas —páginas, componentes, prototipos, tableros—, evitando la estética genérica típica de contenido generado por inteligencia artificial.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "fsi-comps-analysis",
+   "summary": "Construye análisis de empresas comparables de nivel institucional, con métricas operativas, múltiplos de valoración y comparación estadística frente a pares del sector.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "fsi-strip-profile",
+   "summary": "Genera perfiles de empresa para libros de presentación y materiales de operaciones financieras, en diapositivas densas en información con gráficos y tablas.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "fund-vehicles",
+   "summary": "Compara y ayuda a elegir vehículos de inversión —fondos mutuos, ETF, fondos indexados, cuentas administradas—, considerando costos y eficiencia fiscal.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "funding-digest",
+   "summary": "Genera una diapositiva ejecutiva con el resumen de rondas de financiación recientes y actividad relevante del mercado de capitales en los sectores o empresas que sigue el usuario.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "gasto-compania-kelab",
+   "summary": "Traslada, por cédula del empleado, el total de pagos de nómina y el gasto total de compañía del reporte general de gasto por empleado de KELAB hacia el archivo maestro mensual correspondiente.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "geo",
+   "summary": "Analiza y optimiza sitios web para buscadores impulsados por inteligencia artificial, además del SEO tradicional, incluyendo auditorías, puntaje de citabilidad y generación de reportes para clientes.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-audit",
+   "summary": "Realiza una auditoría completa de un sitio web que combina optimización para IA y SEO tradicional, y entrega un puntaje general con un plan de acción priorizado.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-brand-mentions",
+   "summary": "Analiza la presencia de una marca en las plataformas que usan los sistemas de inteligencia artificial para reconocer y citar entidades, y entrega un puntaje de autoridad de marca con recomendaciones.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-citability",
+   "summary": "Evalúa qué tan probable es que los sistemas de inteligencia artificial citen o reproduzcan el contenido de una página web, y sugiere reescrituras concretas para mejorar ese puntaje.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-compare",
+   "summary": "Compara dos auditorías de optimización para IA de un mismo cliente —una línea base y una actual— y genera un reporte mensual de avance con la mejora de puntajes.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-content",
+   "summary": "Evalúa la calidad del contenido de un sitio bajo criterios de experiencia, pericia, autoridad y confiabilidad, pensado para mejorar su citabilidad por sistemas de inteligencia artificial.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-crawlers",
+   "summary": "Revisa las reglas de acceso, etiquetas y encabezados de un sitio para determinar qué rastreadores de inteligencia artificial pueden acceder a él, y da recomendaciones de visibilidad.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-llmstxt",
+   "summary": "Analiza y genera el archivo llms.txt, un estándar emergente que ayuda a los sistemas de inteligencia artificial a entender la estructura y el contenido de un sitio web.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-platform-optimizer",
+   "summary": "Audita y optimiza un sitio web de forma específica para cada plataforma de búsqueda con inteligencia artificial.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-proposal",
+   "summary": "Genera de forma automática una propuesta comercial de servicios de optimización para IA a partir de los datos de una auditoría, con resumen ejecutivo, hallazgos, paquetes de servicio y precios.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-prospect",
+   "summary": "Funciona como un registro sencillo de clientes potenciales de servicios de optimización para IA a lo largo del embudo de ventas, desde el contacto inicial hasta el cierre.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-report",
+   "summary": "Genera un reporte profesional para clientes que combina los resultados de todas las auditorías de optimización para IA en un solo entregable, con puntajes, hallazgos y acciones priorizadas.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-report-pdf",
+   "summary": "Convierte un reporte de auditoría de optimización para IA en un PDF listo para entregar al cliente, con portada, tablas de puntaje y una hoja de ruta a 90 días.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-schema",
+   "summary": "Audita y genera datos estructurados en el sitio web para mejorar la posibilidad de que sea descubierto y citado por sistemas de inteligencia artificial.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-technical",
+   "summary": "Realiza una auditoría técnica de SEO con enfoque en optimización para IA, revisando rastreabilidad, indexación, seguridad y desempeño del sitio.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "geo-update",
+   "summary": "Descarga las actualizaciones más recientes del conjunto de herramientas de optimización para IA desde el repositorio de origen y actualiza los archivos instalados.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "gips-compliance",
+   "summary": "Verifica que una firma de inversión cumpla los estándares reconocidos internacionalmente para la construcción de composites, el cálculo de rentabilidades y la presentación de resultados.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "gss-design",
+   "summary": "Aplica el sistema de diseño de marca de Group Shared Services Latinoamérica y sus empresas afiliadas al crear artefactos visuales, documentos, presentaciones o interfaces, siguiendo colores, tipografía y componentes ya aprobados.",
+   "category": "Diseño",
+   "agents": [
+    {
+     "agent": "carter",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "gilbert",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "guideline-generation",
+   "summary": "Genera guías de voz e identidad de marca a partir de materiales existentes —documentos, transcripciones, grabaciones de reuniones—, consolidándolos en un manual de marca.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "historical-risk",
+   "summary": "Cuantifica el riesgo real de una inversión a partir de datos históricos, mediante estimadores de volatilidad y análisis de caídas máximas de valor.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "home-office-deduction",
+   "summary": "Calcula la deducción de impuestos por trabajo en casa, usando el método simplificado o el de gastos reales.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-analytics",
+   "summary": "Apoya el análisis de datos de talento humano, la construcción de tableros e indicadores, el análisis de rotación y el diseño de estrategias de gobierno de datos de personal.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-compensation-benefits",
+   "summary": "Apoya el diseño de programas de compensación y beneficios, incluyendo planes de bonificación, evaluación de cargos, filosofía salarial y estrategias de retención.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-compliance",
+   "summary": "Apoya el cumplimiento normativo en materia laboral, incluyendo manuales de empleado, políticas de seguridad ocupacional, licencias y auditorías de cumplimiento.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-conflict-resolution",
+   "summary": "Apoya la resolución de conflictos laborales, la mediación entre empleados, la facilitación de conversaciones difíciles y el diseño de políticas de manejo de conflictos.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-diversity-inclusion",
+   "summary": "Apoya iniciativas de diversidad, equidad e inclusión, incluyendo descripciones de cargo inclusivas, formación en sesgos inconscientes y medición de métricas de diversidad.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-employee-engagement",
+   "summary": "Apoya estrategias de compromiso laboral, programas de reconocimiento, encuestas de clima organizacional y acciones para reducir el desgaste de los empleados.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-employee-relations",
+   "summary": "Apoya la gestión de relaciones laborales: quejas, entrevistas de salida, investigaciones internas, políticas de trabajo remoto y manejo de ajustes razonables.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-leadership-development",
+   "summary": "Apoya el diseño de programas de desarrollo de liderazgo, evaluaciones de competencias, coaching ejecutivo y planes de sucesión de líderes.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-onboarding",
+   "summary": "Apoya el diseño de procesos de vinculación y desvinculación de personal, incluyendo planes de inducción, programas de acompañamiento y entrevistas de salida.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-performance-management",
+   "summary": "Apoya los procesos de gestión del desempeño: evaluaciones, planes de mejora, formatos de calificación, definición de metas y retroalimentación de varias fuentes.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-recruiting",
+   "summary": "Apoya el proceso completo de reclutamiento y selección de personal: descripciones de cargo, preguntas de entrevista, filtrado de hojas de vida, marca empleadora y cartas de oferta.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-technology",
+   "summary": "Apoya la estrategia e implementación de tecnología de Recursos Humanos, como sistemas de información de personal, selección de sistemas de reclutamiento y automatización de procesos de talento humano.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-training-development",
+   "summary": "Apoya el diseño de programas de formación y desarrollo, cursos de aprendizaje virtual, planes de coaching, análisis de necesidades y modelos de competencias.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-vietnam-context",
+   "summary": "Ofrece orientación de Recursos Humanos específica para Vietnam, incluyendo la normativa laboral local, permisos de trabajo para extranjeros y normas culturales de gestión de equipos.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "hr-workforce-planning",
+   "summary": "Apoya la planeación de la fuerza laboral: análisis de brechas de habilidades, planes de sucesión, modelos de dotación de personal y proyección de necesidades de contratación.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "humanizer",
+   "summary": "Revisa un texto para eliminar señales típicas de escritura generada por inteligencia artificial y que suene más natural, corrigiendo patrones como lenguaje promocional o atribuciones vagas.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "ic-memo",
+   "summary": "Apoya la elaboración de memorandos para comités de inversión. No se contó con una descripción detallada; la función se dedujo del nombre.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "idea-generation",
+   "summary": "Ayuda a generar y estructurar ideas nuevas. No se contó con una descripción detallada; la función se dedujo del nombre.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "import-transactions",
+   "summary": "Permite importar transacciones desde extractos bancarios en formato CSV, OFX o QIF y elimina automáticamente los registros duplicados.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "incident-postmortem",
+   "summary": "Redacta informes de postmortem de incidentes sin buscar culpables, con reconstrucción de la línea de tiempo, análisis de causa raíz, tareas pendientes y medidas preventivas.",
+   "category": "Seguridad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "incident-response",
+   "summary": "Guía de respuesta a incidentes de seguridad para empresas en Colombia, basada en el estándar NIST y ajustada a la normativa local (protección de datos, delitos informáticos). Se activa ante una sospecha de incidente, brecha de datos, ransomware, phishing o fraude interno.",
+   "category": "Seguridad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "indicadores-gss",
+   "summary": "Genera el informe consolidado de indicadores de GSS en Excel, cruzando casos de SynerLink/Kronos, tesorería y compras, con el fin de medir demoras y tiempos de resolución de solicitudes.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "informe-estadisticas-empresa",
+   "summary": "Genera un informe ejecutivo mensual de estadísticas para una empresa del grupo GSS a partir de SAP Business One, con indicadores clave como órdenes de compra, facturas, registros sanitarios y socios de negocio, en PDF o PowerPoint.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "jorgebot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "informe-forense-empresa",
+   "summary": "Genera un informe forense de demoras y patrones a partir de las notas y observaciones de los casos de SynerLink, tesorería y compras, identificando cuellos de botella y re-trabajo por empresa y período.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "informe-gerencial-gss",
+   "summary": "Genera el informe gerencial ejecutivo de proyectos de GSS, con cronogramas (Gantt), indicadores de la mesa de soporte y tablas por empresa, en formato PDF.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "informe-procesos-gss",
+   "summary": "Genera el informe de procesos de GSS, una presentación con el análisis de demoras por proceso cruzando SynerLink/Kronos, tesorería y compras, incluyendo carga de trabajo por persona y responsable.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "informe-resultados-farmalogica",
+   "summary": "Genera el informe mensual de resultados financieros de Farmalógica S.A., incluyendo estado de resultados, balance general, detalle de gastos y una presentación ejecutiva.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "initiating-coverage",
+   "summary": "Elabora informes de inicio de cobertura de acciones de nivel profesional mediante un flujo de cinco etapas: investigación de la empresa, modelo financiero, valoración, gráficas y ensamblaje del informe final.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "insurance-audit",
+   "summary": "Identifica pagos de seguros, calcula el total de primas anuales y los compara contra valores de referencia del mercado.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "integration-patterns",
+   "summary": "Ayuda a diseñar e implementar arquitecturas de integración entre sistemas financieros, incluyendo APIs, protocolos de mensajería, procesamiento por lotes y patrones de resiliencia.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "interactive-dashboard-builder",
+   "summary": "Construye tableros interactivos en HTML, con gráficas, filtros desplegables y estilo profesional, que funcionan sin necesidad de un servidor.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "internal-comms",
+   "summary": "Apoya la redacción de comunicaciones internas de la organización, como informes de estado, actualizaciones a la dirección, boletines internos y reportes de incidentes.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "interview-kit-builder",
+   "summary": "Construye kits completos para entrevistas de selección de personal, con preguntas por competencias, formatos de calificación, rúbricas y guías para los entrevistadores.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "inventory-forecasting",
+   "summary": "Proyecta las necesidades de inventario mediante análisis de demanda, cálculo de existencias de seguridad, punto de reorden y ajustes estacionales.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "investment-policy",
+   "summary": "Ayuda a construir declaraciones de política de inversión, incluyendo objetivos de rentabilidad, tolerancia al riesgo y restricciones del portafolio.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "investment-proposal",
+   "summary": "Herramienta orientada a la generación o gestión de propuestas de inversión; no se cuenta con una descripción detallada, así que su alcance exacto se deduce únicamente del nombre.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "investment-suitability",
+   "summary": "Evalúa la idoneidad de una inversión para un cliente conforme a reglas regulatorias, considerando el producto, el cliente y criterios cuantitativos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "invoice-aging",
+   "summary": "Hace seguimiento de facturas pendientes de pago clasificadas por antigüedad y señala los pagos vencidos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "invoice-organizer",
+   "summary": "Organiza automáticamente facturas y recibos para la preparación de impuestos, extrayendo la información clave, renombrándolos de forma consistente y clasificándolos en carpetas.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "job-description-writer",
+   "summary": "Redacta descripciones de cargo claras e incluyentes, con responsabilidades, requisitos, calificaciones y rangos salariales, para la publicación de vacantes.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "json-canvas",
+   "summary": "Permite crear y editar archivos Canvas (.canvas) de Obsidian con nodos, conexiones y agrupaciones, útil para mapas mentales y diagramas de flujo.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "josebot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "laurabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "kaizen:kaizen",
+   "summary": "Brinda técnicas para la implementación y refactorización de código, el diseño de sistemas y la mejora de procesos, evitando el sobrediseño y aplicando mejoras iterativas.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "know-your-customer",
+   "summary": "Guía la implementación de procesos de identificación y debida diligencia de clientes (conozca a su cliente), incluyendo verificación de identidad, beneficiarios finales y monitoreo continuo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "knowledge-management",
+   "summary": "Redacta y mantiene artículos de base de conocimiento a partir de casos de soporte ya resueltos, incluyendo guías paso a paso y preguntas frecuentes.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "knowledge-synthesis",
+   "summary": "Combina resultados de búsqueda de varias fuentes en respuestas coherentes y sin duplicados, citando el origen de cada dato y ponderando su confiabilidad.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "kpi-dashboard",
+   "summary": "Construye tableros ejecutivos para el seguimiento de indicadores clave (KPI) y la salud general de la organización, útil para la toma de decisiones basada en datos.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "langsmith-fetch",
+   "summary": "Permite depurar el comportamiento de agentes de inteligencia artificial revisando las trazas de ejecución registradas en una herramienta especializada de monitoreo.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "lbo-model",
+   "summary": "Completa plantillas en Excel de modelos de compra apalancada (LBO) para transacciones de capital privado, validando fórmulas y formatos profesionales.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "lead-research-assistant",
+   "summary": "Identifica clientes potenciales de alta calidad para un producto o servicio, analizando el negocio y sugiriendo estrategias de contacto.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "legal-risk-assessment",
+   "summary": "Evalúa y clasifica riesgos legales según su gravedad y probabilidad, ayudando a decidir si un asunto requiere revisión de un abogado senior o externo.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "lending",
+   "summary": "Analiza productos de crédito como hipotecas y préstamos personales, con tablas de amortización y comparación de tasas y condiciones.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "libro-mayor-bancos-farmalogica",
+   "summary": "Genera el libro mayor y el balance de comprobación de la cuenta de disponible (bancos) de Farmalógica S.A. a partir de SAP Business One, como insumo para el flujo de caja.",
+   "category": "SAP",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "libro-mayor-bancos-onelatam",
+   "summary": "Genera el libro mayor de la cuenta de disponible (bancos) de One Latam Pharma a partir de SAP Business One, como insumo para el flujo de caja.",
+   "category": "SAP",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "lifestyle-creep",
+   "summary": "Detecta aumentos progresivos en el gasto por categoría a lo largo de un período de seis a doce meses.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "liquidity-management",
+   "summary": "Apoya la planeación del flujo de caja para mantener liquidez adecuada minimizando el costo de mantener excedentes, incluyendo estrategias de escalonamiento de inversiones.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "ma-due-diligence",
+   "summary": "Apoya la evaluación de posibles adquisiciones, la debida diligencia, el análisis de sinergias y la planeación de la integración posterior a una fusión o compra de empresas.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "margin-operations",
+   "summary": "Guía las operaciones de préstamo con margen y llamadas de margen en cuentas de corretaje o asesoría, incluyendo el cálculo de requerimientos y liquidaciones forzosas.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "market-data",
+   "summary": "Ayuda a diseñar y gestionar la infraestructura de datos de mercado financiero, como fuentes en tiempo real, selección de proveedores y arquitectura de distribución.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "market-research",
+   "summary": "Realiza investigación de mercado integral, incluyendo análisis de competencia, perfiles de clientes, dimensionamiento del mercado y diseño de encuestas.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "mcp-builder",
+   "summary": "Guía la creación de servidores MCP (protocolo que permite a un asistente de inteligencia artificial conectarse con servicios externos) de alta calidad, en Python o Node/TypeScript.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "mcporter",
+   "summary": "Herramienta de línea de comandos para listar, configurar, autenticar y usar directamente servidores y herramientas MCP.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "meeting-briefing",
+   "summary": "Prepara resúmenes estructurados para reuniones con relevancia legal, como negociaciones de contratos o reuniones de junta, y hace seguimiento a los compromisos que resulten.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "meeting-insights-analyzer",
+   "summary": "Analiza transcripciones o grabaciones de reuniones para identificar patrones de comportamiento y comunicación, como evasión de conflictos, uso excesivo de muletillas o falta de escucha.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "memory-management",
+   "summary": "Sistema de memoria de dos niveles que ayuda al asistente a entender el lenguaje interno, siglas y apodos de una organización, como un colega más.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "merger-model",
+   "summary": "Herramienta relacionada con modelos financieros de fusiones y adquisiciones; no se cuenta con una descripción detallada, así que su alcance exacto se deduce únicamente del nombre.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "metric-calculator",
+   "summary": "Calcula métricas estándar de negocio como retención, valor de vida del cliente, costo de adquisición, tasa de cancelación y embudos de conversión, con plantillas en SQL y Python.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "metric-reconciler",
+   "summary": "Compara dos definiciones de una misma métrica que deberían coincidir y encuentra el punto exacto en el que difieren, útil cuando dos tableros muestran cifras distintas.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "migrar-agente-synerlink",
+   "summary": "Migra un asistente de la flota GSS al módulo de chat de SynerLink, dejándolo configurado como agente asignable con su conector, indicador de estado y avatar.",
+   "category": "SynerLink",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "migrating-sql-to-dbt",
+   "summary": "Convierte código SQL heredado (procedimientos almacenados, vistas, consultas) en modelos modulares de dbt, respetando las convenciones existentes del proyecto.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "mileage-tracker",
+   "summary": "Hace seguimiento del kilometraje recorrido por motivos de trabajo y calcula la deducción correspondiente según la tarifa estándar.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "model-update",
+   "summary": "Herramienta asociada a la actualización de un modelo, posiblemente financiero; no hay descripción disponible para precisar su alcance exacto.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "month-end-close",
+   "summary": "Ejecuta una lista de verificación para el cierre contable mensual, incluyendo las conciliaciones correspondientes.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "monthly-digest",
+   "summary": "Genera un resumen financiero mensual con métricas, tendencias y valores fuera de lo común (anomalías).",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "morning-note",
+   "summary": "Herramienta relacionada con la elaboración de una nota o resumen matutino; no hay descripción disponible que precise su contenido exacto.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "multi-entity",
+   "summary": "Permite gestionar las finanzas de varias empresas o entidades legales de forma conjunta.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "multi-search-engine",
+   "summary": "Integra múltiples motores de búsqueda (incluyendo motores chinos y globales) con operadores avanzados, filtros de tiempo y consultas de conocimiento, sin necesidad de llaves de acceso.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "nda-triage",
+   "summary": "Revisa acuerdos de confidencialidad (NDA) entrantes y los clasifica según su nivel de riesgo, indicando si requieren revisión legal completa.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "net-worth",
+   "summary": "Calcula el patrimonio neto a partir de activos y pasivos y genera un estado formal de patrimonio.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "next-best-action",
+   "summary": "Diseña motores de recomendación que sugieren a los asesores la siguiente mejor acción con un cliente, según eventos del portafolio, del mercado o de cumplimiento normativo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "obsidian-bases",
+   "summary": "Permite crear y editar archivos Bases de Obsidian, es decir, vistas tipo base de datos de las notas, con filtros, fórmulas y resúmenes.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "josebot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "laurabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "obsidian-cli",
+   "summary": "Permite interactuar con bóvedas de Obsidian desde la línea de comandos para leer, crear y buscar notas, tareas y propiedades, además de apoyar el desarrollo de plugins y temas.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "josebot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "laurabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "obsidian-markdown",
+   "summary": "Ayuda a crear y editar notas en el formato especial de Obsidian, con enlaces internos, callouts, propiedades y otras funciones propias de esta herramienta.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "josebot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "laurabot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "olp-design",
+   "summary": "Genera interfaces y piezas visuales con la identidad de marca de One Latam Pharma, incluyendo colores, tipografía, logo y componentes de interfaz oficiales.",
+   "category": "Diseño",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "jorgebot",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "play",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "onboarding-planner",
+   "summary": "Diseña planes de bienvenida e inducción para nuevos empleados, incluyendo actividades del primer día, la primera semana y planes a 30, 60 y 90 días.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "onboarding-playbook",
+   "summary": "Diseña guías de incorporación de clientes nuevos, con seguimiento de hitos, planes de capacitación y criterios de éxito.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "operational-risk",
+   "summary": "Guía la identificación, medición y gestión del riesgo operativo en operaciones de negociación y corretaje, incluyendo detección de errores e indicadores clave de riesgo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "optimizing-query-by-id",
+   "summary": "Optimiza el desempeño de una consulta en la plataforma de datos Snowflake a partir de su identificador de historial, identificando cuellos de botella.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "optimizing-query-text",
+   "summary": "Optimiza el desempeño de una consulta SQL en Snowflake a partir del texto de la consulta, revisando patrones que afectan el rendimiento.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "order-lifecycle",
+   "summary": "Guía el diseño de la gestión del ciclo de vida de órdenes en sistemas de negociación bursátil, incluyendo validaciones previas y tipos de orden.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "order-management-advisor",
+   "summary": "Gestiona el ciclo de vida de las órdenes de un asesor de inversiones, desde su ingreso hasta la liquidación, incluyendo negociación en bloque y cumplimiento normativo previo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "paypal-import",
+   "summary": "Importa reportes exportados de PayPal, manejando comisiones, reembolsos y distintas monedas.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "pdf",
+   "summary": "Permite trabajar con archivos PDF: leer y extraer texto o tablas, combinar o dividir documentos, rotar páginas, agregar marcas de agua, llenar formularios y aplicar reconocimiento de texto (OCR) a documentos escaneados.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "performance-attribution",
+   "summary": "Descompone la rentabilidad de un portafolio de inversión en sus componentes explicativos, para identificar dónde se generó o se perdió valor.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "performance-metrics",
+   "summary": "Evalúa el desempeño de una inversión ajustado por riesgo, usando indicadores estándar del sector como los ratios de Sharpe y Sortino.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "performance-reporting",
+   "summary": "Genera reportes claros y precisos del desempeño de portafolios de inversión, con comparación contra índices de referencia y tableros de riesgo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "performance-review-assistant",
+   "summary": "Apoya la elaboración de evaluaciones de desempeño, retroalimentación de jefes y compañeros, autoevaluaciones y planes de mejora.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "pitch-deck",
+   "summary": "Diligencia plantillas de presentaciones de banca de inversión con datos provenientes de archivos fuente como Excel o CSV.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "portfolio-management-systems",
+   "summary": "Ayuda a seleccionar, configurar y operar sistemas de gestión de portafolios para firmas de asesoría de inversión, incluyendo modelos de portafolio y rebalanceo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "portfolio-monitoring",
+   "summary": "Herramienta orientada al monitoreo de portafolios de inversión; no hay descripción disponible que detalle su alcance exacto.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "portfolio-rebalance",
+   "summary": "Herramienta relacionada con el rebalanceo de portafolios de inversión; no hay descripción disponible que precise su funcionamiento.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "post-trade-compliance",
+   "summary": "Guía el diseño de sistemas de vigilancia y cumplimiento posteriores a una negociación bursátil, detectando prácticas indebidas como manipulación de precios o uso de información privilegiada.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "postgres",
+   "summary": "Ejecuta consultas SQL de solo lectura contra bases de datos PostgreSQL, permitiendo explorar esquemas y tablas de forma segura, sin permitir operaciones de escritura.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "pptx",
+   "summary": "Permite crear, leer, editar y combinar presentaciones en formato PowerPoint (.pptx), incluyendo plantillas, diapositivas y notas del orador.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "prd-writer",
+   "summary": "Redacta documentos de requerimientos de producto completos, con historias de usuario, criterios de aceptación y marcos de priorización.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "pre-trade-compliance",
+   "summary": "Guía el diseño de sistemas automatizados de cumplimiento previo a la ejecución de órdenes bursátiles, validando límites y listas restringidas.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "pricing-optimizer",
+   "summary": "Analiza los precios frente a los costos y márgenes de un negocio para optimizar la rentabilidad.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "privacy-data-security",
+   "summary": "Ayuda a diseñar y operar programas de privacidad y seguridad de datos para firmas del sector financiero regulado, incluyendo planes de respuesta a filtraciones de información.",
+   "category": "Seguridad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "process-documents",
+   "summary": "Buenas prácticas para leer, extraer y resumir documentos extensos (PDF, Word, Excel, entre otros), evitando cargar archivos completos innecesariamente.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "global",
+     "host": "Mac mini de Pedro"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "process-letter",
+   "summary": "Herramienta relacionada con el procesamiento o generación de cartas o documentos; no hay descripción disponible que precise su alcance exacto.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "process-optimization",
+   "summary": "Analiza y mejora procesos de negocio, identificando cuellos de botella y pasos innecesarios en flujos de trabajo lentos o ineficientes.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "product-launch-playbook",
+   "summary": "Planea el lanzamiento integral de un producto, incluyendo la estrategia de salida al mercado, listas de verificación, comunicación con las partes interesadas y análisis posterior al lanzamiento.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "Productivity",
+   "summary": "Ayuda a planear y organizar el trabajo mediante gestión del tiempo, metas, proyectos, tareas y hábitos dentro de un marco de productividad personal.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "profit-loss",
+   "summary": "Genera un estado de resultados (pérdidas y ganancias) para cualquier rango de fechas.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "project-status-report",
+   "summary": "Genera reportes de estado de proyectos con semaforización, hitos, riesgos, bloqueos y resúmenes ejecutivos.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "proposal-generation",
+   "summary": "Genera propuestas de inversión completas para un cliente potencial, incluyendo perfil de riesgo, recomendación de portafolio, ilustración de comisiones y proyecciones.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "prospect",
+   "summary": "Construye listas dirigidas de empresas o contactos potenciales según criterios definidos, útil para prospección comercial.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "qbr-builder",
+   "summary": "Crea revisiones trimestrales de negocio (QBR) para cuentas de clientes, con puntajes de salud, análisis de retorno de inversión y oportunidades de expansión.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "qmd",
+   "summary": "Herramienta de búsqueda e indexación local de documentos, con capacidad de operar como servidor MCP.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "qualitative-valuation",
+   "summary": "Evalúa la calidad de un negocio, su posicionamiento competitivo y la sostenibilidad de la creación de valor, más allá de los modelos financieros.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "quantitative-valuation",
+   "summary": "Estima el valor intrínseco de una acción o empresa mediante modelos de flujo de caja descontado, dividendos y múltiplos comparables.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "quarterly-taxes",
+   "summary": "Calcula los pagos trimestrales estimados de impuestos a partir de los ingresos totales y las reglas de puerto seguro (safe harbor).",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "queue",
+   "summary": "Permite poner tareas en una cola de ejecución para Claude Code, crear plantillas de instrucciones y gestionar lotes de trabajos que se procesan automáticamente con reintentos.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "real-assets",
+   "summary": "Analiza inversiones en bienes raíces e infraestructura, como fondos inmobiliarios (REIT), valoración de propiedades y activos de infraestructura.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "rebalancing",
+   "summary": "Ayuda a mantener la composición de un portafolio de inversión en el tiempo mediante estrategias de rebalanceo por calendario, por umbrales o eficientes en impuestos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "reconciliation",
+   "summary": "Diseña y opera procesos de conciliación para garantizar la exactitud de los datos entre sistemas de administración de portafolios, custodios y compensación.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "refactoring-dbt-models",
+   "summary": "Reestructura modelos de dbt de forma segura, analizando primero el impacto en los procesos que dependen de ellos antes de aplicar cualquier cambio.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "reference-data",
+   "summary": "Diseña y administra sistemas de datos de referencia del sector financiero, como maestros de valores, clientes y cuentas, y el mapeo de identificadores entre sistemas.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "reg-bi",
+   "summary": "Analiza si las recomendaciones de un intermediario de valores cumplen con la norma estadounidense de mejor interés del cliente (Reg BI) en sus cuatro obligaciones.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "regulatory-reporting",
+   "summary": "Orienta sobre las obligaciones y plazos de reportes regulatorios para asesores de inversión e intermediarios bursátiles.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "rental-property",
+   "summary": "Hace seguimiento a los ingresos, gastos, retorno de inversión y tasa de capitalización de propiedades en arriendo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "report-generator",
+   "summary": "Genera reportes analíticos estructurados con métricas, tendencias y visualizaciones para revisiones de negocio, informes ejecutivos o análisis posteriores a un incidente.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "reporte-cartera-autorizada",
+   "summary": "Genera el reporte de cartera autorizada de SAPSEND, con los pedidos que pasaron por la autorización de cartera en un periodo y una empresa determinados.",
+   "category": "SAP",
+   "agents": [
+    {
+     "agent": "carter",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "reporte-compras-synerlink",
+   "summary": "Genera el reporte de compras de SynerLink, midiendo los tiempos de gestión de los flujos de elaboración y revisión de contratos y de solicitud de firma, con salida en Excel y PowerPoint.",
+   "category": "SynerLink",
+   "agents": [
+    {
+     "agent": "gilbert",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "reporte-ejecutivo",
+   "summary": "Genera reportes ejecutivos de seguridad de la información dirigidos a junta directiva, dirección o comité de riesgos de una empresa con operación en Colombia.",
+   "category": "Seguridad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "reporte-estadistica-olp",
+   "summary": "Genera un informe ejecutivo que compara la operación de One Latam Pharma entre dos trimestres y muestra la tendencia mensual, combinando indicadores de SAP Business One con datos de procesos.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "reporte-ventas-farmalogica",
+   "summary": "Genera el reporte de ventas de Farmalógica S.A. a partir de SAP Business One, con desglose por año, mes, cliente, producto, vendedor y devoluciones.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "resource-planning",
+   "summary": "Ayuda a planear y optimizar la asignación de personas, presupuesto y tiempo entre proyectos y equipos.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "response-drafting",
+   "summary": "Redacta respuestas profesionales y empáticas para la atención al cliente, adaptadas a la situación, la urgencia y el canal de comunicación.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "return-calculations",
+   "summary": "Calcula y compara métricas de retorno de inversión, como el rendimiento ponderado en el tiempo, la tasa interna de retorno y el crecimiento anual compuesto.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "returns-analysis",
+   "summary": "No se dispone de una descripción detallada; por el nombre, parece orientado al análisis de los retornos de una inversión o portafolio. Se recomienda confirmar su alcance exacto antes de usarlo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "revenue-concentration",
+   "summary": "Evalúa el riesgo de concentración de clientes de una empresa mediante la participación en los ingresos y el índice de Herfindahl.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "rfp-builder",
+   "summary": "Crea solicitudes de propuesta (RFP) con especificaciones de requisitos, criterios de evaluación, rúbricas de calificación, cronogramas y requisitos de cumplimiento.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "risk-assessment",
+   "summary": "Identifica, evalúa y ayuda a mitigar los riesgos operativos asociados a un proyecto, un proveedor, un proceso o una decisión.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "roadmap-builder",
+   "summary": "Construye hojas de ruta de producto con planeación trimestral, priorización de funcionalidades, mapeo de dependencias y alineación con las partes interesadas.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "runway-calculator",
+   "summary": "Calcula los meses de caja disponible (runway) de una empresa según su tasa actual de consumo de efectivo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "sales-practices",
+   "summary": "Identifica y ayuda a prevenir infracciones en las prácticas de venta de valores, según las normas de las autoridades reguladoras de Estados Unidos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "sales-tax-nexus",
+   "summary": "Determina las obligaciones de impuesto sobre ventas por estado, según los umbrales de vínculo económico (nexus) en Estados Unidos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "savings-goals",
+   "summary": "Ayuda a planear y hacer seguimiento del ahorro para metas específicas, como pensión, educación o compra de vivienda.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "scout-portafolios",
+   "summary": "Analiza portafolios de proveedores farmacéuticos, evalúa oportunidades de nuevas moléculas y genera reportes periódicos de candidatas de producto para una operación farmacéutica en Colombia.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "Scrape",
+   "summary": "Realiza extracción de datos de páginas web de forma responsable, respetando las restricciones del sitio, límites de velocidad y normas de protección de datos.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "search-strategy",
+   "summary": "Descompone preguntas en lenguaje natural en búsquedas dirigidas por cada fuente de información, traduce las consultas a la sintaxis propia de cada una y organiza los resultados por relevancia.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "seasonal-patterns",
+   "summary": "Detecta patrones estacionales de ingresos y gastos a lo largo de doce o más meses de datos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "sector-overview",
+   "summary": "No se dispone de una descripción detallada; por el nombre y su cercanía a otros temas financieros, parece orientado a elaborar un panorama de un sector económico o industrial. Se recomienda confirmar su alcance exacto antes de usarlo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "self-improvement",
+   "summary": "Registra aprendizajes, errores y correcciones del asistente para mejorar su desempeño de forma continua, por ejemplo cuando algo falla o el usuario corrige una respuesta.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "seo-content-optimizer",
+   "summary": "Optimiza el contenido de un sitio web para mejorar su visibilidad en buscadores, mediante investigación de palabras clave, meta descripciones y estrategias de enlaces internos.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "sequence-load",
+   "summary": "Busca prospectos comerciales que cumplan ciertos criterios y los agrega en bloque a una secuencia de prospección, incluyendo enriquecimiento de datos y eliminación de duplicados.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "settlement-clearing",
+   "summary": "Orienta el diseño y la gestión de los procesos de liquidación y compensación de operaciones bursátiles, incluido el cumplimiento de los plazos de liquidación.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "skill-creator",
+   "summary": "Crea, modifica y mejora las habilidades (skills) de los agentes de inteligencia artificial, y permite medir su desempeño mediante pruebas.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "skill-vetter",
+   "summary": "Audita la seguridad de una habilidad (skill) antes de instalarla, revisando señales de alerta, alcance de permisos y patrones sospechosos.",
+   "category": "Seguridad",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "slack-gif-creator",
+   "summary": "Provee herramientas y conocimientos para crear imágenes animadas (GIF) optimizadas para la plataforma Slack.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "slack-messaging",
+   "summary": "Da lineamientos para redactar mensajes de Slack bien formateados y efectivos, usando su sintaxis propia de formato.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "slack-search",
+   "summary": "Da lineamientos para buscar de forma efectiva mensajes, archivos, canales y personas dentro de Slack.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "smart-categorize",
+   "summary": "Categoriza automáticamente transacciones financieras sin clasificar, comparándolas con patrones conocidos de proveedores.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "smart-split",
+   "summary": "Divide una sola transacción financiera en varias categorías, con montos personalizados para cada una.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "social-media-strategy",
+   "summary": "Desarrolla estrategias integrales de redes sociales, con calendarios de contenido, tácticas de interacción y planeación de campañas pagas.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "sop-builder",
+   "summary": "Crea procedimientos operativos estándar (SOP) con flujos paso a paso, matrices de responsabilidades, mapas de proceso y control de versiones.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "source-management",
+   "summary": "Administra las fuentes de información conectadas para la búsqueda empresarial, detecta fuentes disponibles y gestiona su orden de prioridad.",
+   "category": "Flota/Infra",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "spending-review",
+   "summary": "Genera un desglose categorizado de los gastos, con su tendencia mes a mes.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "sprint-planning",
+   "summary": "Ayuda a planear sprints de trabajo con estimación de puntos de historia, planeación de capacidad, objetivos del sprint y retrospectivas.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "sql-optimizer",
+   "summary": "Analiza y optimiza consultas SQL lentas, identifica anti-patrones y recomienda índices o reescrituras de la consulta.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "sql-queries",
+   "summary": "Ayuda a escribir consultas SQL correctas y eficientes en distintos motores de bases de datos analíticas.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "square-import",
+   "summary": "Importa los exportes de ventas de la plataforma Square (CSV), incluyendo propinas, reembolsos y comisiones.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "state-tax-estimator",
+   "summary": "Estima el impuesto de renta estatal, en Estados Unidos, según los ingresos y el estado de residencia.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "statistical-analysis",
+   "summary": "Aplica métodos estadísticos como estadística descriptiva, análisis de tendencias, detección de valores atípicos y pruebas de hipótesis.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "statistics-fundamentals",
+   "summary": "Aplica métodos estadísticos a datos financieros, incluyendo regresión, matrices de covarianza y pruebas de hipótesis sobre los retornos de inversión.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "stp-automation",
+   "summary": "Diseña la automatización del procesamiento directo (straight-through processing) de operaciones de valores, identificando puntos de gestión manual que se pueden eliminar.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "strategic-planning",
+   "summary": "Apoya el desarrollo de la estrategia de largo plazo de una organización, con objetivos, análisis de fortalezas y debilidades, y planeación de iniciativas plurianuales.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "stripe-import",
+   "summary": "Importa los exportes de pagos de la plataforma Stripe (CSV), incluyendo cargos, comisiones y reembolsos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "subscription-audit",
+   "summary": "Identifica suscripciones recurrentes, calcula su costo total y señala las que no se están usando.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "supplier-scorecard",
+   "summary": "Construye tarjetas de calificación de desempeño de proveedores, con indicadores de calidad, entregas, costos y planes de mejora.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "system-design",
+   "summary": "Ayuda a diseñar sistemas, servicios y arquitecturas de software, incluyendo el diseño de interfaces (API), el modelado de datos y los límites entre servicios.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "systematic-debug",
+   "summary": "Aplica una depuración de errores estructurada en cuatro fases, con una regla de escalamiento después de tres intentos fallidos.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "tailored-resume-generator",
+   "summary": "Analiza descripciones de cargos y genera hojas de vida ajustadas que resaltan la experiencia, las habilidades y los logros más relevantes para esa vacante.",
+   "category": "Recursos Humanos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "task-management",
+   "summary": "Gestiona tareas de forma sencilla mediante un archivo compartido de tareas.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "tax-efficiency",
+   "summary": "Ayuda a maximizar el retorno después de impuestos, mediante la ubicación estratégica de activos, la cosecha de pérdidas fiscales y la secuenciación de retiros.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "tax-loss-harvesting",
+   "summary": "Ejecuta el proceso completo de cosecha de pérdidas fiscales de un portafolio, desde la identificación de candidatos hasta el monitoreo posterior.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "tax-penalty-calc",
+   "summary": "Estima las sanciones de la autoridad tributaria de Estados Unidos por pagos trimestrales de impuestos no realizados.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "tax-prep",
+   "summary": "Organiza los gastos de un negocio según las categorías fiscales correspondientes, para facilitar la declaración de renta.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "tear-sheet",
+   "summary": "Genera fichas técnicas profesionales de una empresa (perfil de una página) a partir de datos financieros de mercado.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "teaser",
+   "summary": "No se dispone de una descripción detallada; por el nombre, parece orientado a elaborar un documento breve de presentación comercial o de inversión. Se recomienda confirmar su alcance exacto antes de usarlo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "tech-debt",
+   "summary": "Identifica, clasifica y prioriza la deuda técnica de un proyecto de software.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "telegram-markdownv2",
+   "summary": "Recuerda usar siempre el formato markdownv2 al responder por Telegram, para que el mensaje se vea bien formateado y no como texto plano con símbolos sueltos.",
+   "category": "Flota/Infra",
+   "agents": [
+    {
+     "agent": "pedro",
+     "host": "Mac mini de Pedro"
+    }
+   ]
+  },
+  {
+   "name": "test-driven-development",
+   "summary": "Guía la práctica de desarrollo guiado por pruebas, es decir, escribir las pruebas antes de implementar cualquier funcionalidad o corrección.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "testing-dbt-models",
+   "summary": "Agrega pruebas de esquema y validaciones de calidad de datos a los modelos de dbt.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "testing-strategy",
+   "summary": "Ayuda a diseñar estrategias y planes de prueba de software, incluyendo cobertura y arquitectura de pruebas.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "theme-factory",
+   "summary": "Aplica o genera temas visuales, con colores y fuentes, para artefactos como presentaciones, documentos o páginas web, a partir de plantillas prediseñadas.",
+   "category": "Diseño",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "thesis-tracker",
+   "summary": "No se dispone de una descripción detallada; por el nombre, parece orientado a hacer seguimiento a la tesis de inversión de un activo o portafolio a lo largo del tiempo. Se recomienda confirmar su alcance exacto antes de usarlo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "ticket-triage",
+   "summary": "Clasifica los tickets de soporte entrantes, les asigna una prioridad y recomienda a qué equipo deben enrutarse.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "time-value-of-money",
+   "summary": "Calcula el valor presente, el valor futuro, el valor presente neto, la tasa interna de retorno, las cuotas de préstamos y las tablas de amortización.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "trade-execution",
+   "summary": "Orienta el diseño, la evaluación y el monitoreo de la calidad de ejecución de operaciones bursátiles y las prácticas de mejor ejecución.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "twitter-algorithm-optimizer",
+   "summary": "Analiza y ajusta publicaciones de la red social X (antes Twitter) para maximizar su alcance, según el funcionamiento del algoritmo de recomendación de la plataforma.",
+   "category": "Ventas y Marketing",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "unit-economics",
+   "summary": "No se dispone de una descripción detallada; por el nombre, parece orientado a analizar la rentabilidad por unidad o por cliente de un negocio. Se recomienda confirmar su alcance exacto antes de usarlo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "user-research-synthesizer",
+   "summary": "Sintetiza hallazgos de investigación de usuarios, provenientes de entrevistas, encuestas y datos de uso, en reportes de conclusiones y mapas de recorrido del cliente.",
+   "category": "Datos y Analítica",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "validar-registros-sanitarios-invima",
+   "summary": "Valida y completa la información de los registros sanitarios de artículos de One Latam Pharma consultando al INVIMA, y marca en rojo los registros vencidos.",
+   "category": "SAP",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "value-creation-plan",
+   "summary": "No se dispone de una descripción detallada; por el nombre, parece orientado a construir un plan de creación de valor para una empresa o inversión. Se recomienda confirmar su alcance exacto antes de usarlo.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "vendor-evaluation",
+   "summary": "Evalúa proveedores mediante matrices comparativas, análisis de costo total, evaluación de riesgo y estrategias de negociación.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "vendor-management",
+   "summary": "Evalúa, compara y gestiona relaciones con proveedores, útil para decisiones de compra o renovación de contratos.",
+   "category": "Otros",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "venmo-reconciler",
+   "summary": "Concilia las transacciones de la aplicación de pagos Venmo, separando los movimientos personales de los del negocio.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "voice-call",
+   "summary": "Inicia llamadas de voz mediante el complemento de llamadas de voz de OpenClaw.",
+   "category": "Flota/Infra",
+   "agents": [
+    {
+     "agent": "openclaw",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "volatility-modeling",
+   "summary": "Modela, pronostica e interpreta la volatilidad de activos financieros, usando modelos de series de tiempo y medidas basadas en opciones.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "voz-tiempo-real",
+   "summary": "Habilita la voz en tiempo real, es decir, llamadas de voz dentro del chat de SynerLink, para un agente de la flota de GSS, y ayuda a diagnosticar fallas de conexión.",
+   "category": "SynerLink",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac de Horus"
+    },
+    {
+     "agent": "horus",
+     "host": "Mac de Horus"
+    }
+   ]
+  },
+  {
+   "name": "web-artifacts-builder",
+   "summary": "Conjunto de herramientas para crear artefactos web elaborados y de varios componentes, usando tecnologías modernas de desarrollo frontend.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "webapp-testing",
+   "summary": "Provee herramientas para interactuar con aplicaciones web locales y probarlas de forma automatizada, incluyendo capturas de pantalla y registros del navegador.",
+   "category": "Desarrollo",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "weekly-prep-brief",
+   "summary": "Genera un informe semanal de preparación con todas las llamadas o reuniones externas de los próximos siete días.",
+   "category": "Productividad",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "weekly-report",
+   "summary": "Genera reportes analíticos periódicos, semanales o mensuales, con comparación entre periodos, detección de anomalías y resúmenes ejecutivos.",
+   "category": "Reportes",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "wise-import",
+   "summary": "Importa los exportes de la plataforma de pagos Wise (antes TransferWise) en CSV, con manejo de múltiples monedas.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "workflow-automation",
+   "summary": "Diseña e implementa la automatización de flujos de trabajo para operaciones de valores, con enrutamiento de tareas, cadenas de aprobación y monitoreo del cumplimiento de plazos.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "xlsx",
+   "summary": "Permite abrir, leer, editar, crear o convertir archivos de hoja de cálculo, incluyendo fórmulas, formato y gráficos.",
+   "category": "Documentos",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "year-end-summary",
+   "summary": "Genera un resumen financiero anual con totales, tendencias y aspectos destacados.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  },
+  {
+   "name": "zero-based-budget",
+   "summary": "Asigna cada unidad de ingreso a una categoría de gasto, siguiendo la metodología de presupuesto base cero.",
+   "category": "Finanzas",
+   "agents": [
+    {
+     "agent": "global",
+     "host": "Mac mini de Jorge"
+    },
+    {
+     "agent": "linabot",
+     "host": "Mac mini de Jorge"
+    }
+   ]
+  }
+ ]
+}

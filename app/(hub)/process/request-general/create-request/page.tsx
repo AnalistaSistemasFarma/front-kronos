@@ -99,7 +99,12 @@ function readSelectedCompanyId(): string | null {
 }
 import SapOptionSelect from './SapOptionSelect';
 import TableFieldInput from './TableFieldInput';
+import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
 import toast from 'react-hot-toast';
+import {
+  buildTaskDisplayBadges,
+  getSimplifiedTasksProgress,
+} from '@/lib/orion/taskProgress';
 
 interface RequestTask {
   id: number;
@@ -107,6 +112,7 @@ interface RequestTask {
   task: string;
   id_status: number;
   status_task: string;
+  resolution?: string | null;
 }
 
 interface Ticket {
@@ -1317,12 +1323,7 @@ function RequestBoard() {
     }
   };
 
-  const getTasksProgress = (tasks: RequestTask[]) => {
-    const total = tasks.length;
-    const done = tasks.filter((t) => t.status_task?.toLowerCase() === 'resuelto').length;
-    const percent = total === 0 ? 0 : Math.round((done / total) * 100);
-    return { total, done, percent };
-  };
+  const getTasksProgress = (tasks: RequestTask[]) => getSimplifiedTasksProgress(tasks);
 
   const getGlobalTasksProgress = () => {
     const allTasks = Object.values(tasksByRequest).flat();
@@ -1793,12 +1794,12 @@ function RequestBoard() {
                               );
                             })()}
                             <Group gap={6} wrap='wrap'>
-                              {tasksByRequest[ticket.id].map((task) => {
-                                const { color, Icon } = getTaskVisual(task.status_task);
+                              {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
+                                const { color, Icon } = getTaskVisual(badge.statusKey);
                                 return (
                                   <Tooltip
-                                    key={task.id}
-                                    label={`${task.task} · ${task.status_task}`}
+                                    key={badge.key}
+                                    label={`${badge.label} · ${badge.statusLabel}`}
                                     withArrow
                                   >
                                     <Badge
@@ -1807,12 +1808,19 @@ function RequestBoard() {
                                       size='sm'
                                       radius='sm'
                                       styles={{
-                                        root: { textTransform: 'none', fontWeight: 500, cursor: 'default' },
-                                        label: { overflow: 'hidden', textOverflow: 'ellipsis' },
+                                        root: {
+                                          textTransform: 'none',
+                                          fontWeight: 500,
+                                          cursor: 'default',
+                                        },
+                                        label: {
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                        },
                                       }}
                                       leftSection={<Icon size={13} />}
                                     >
-                                      {task.task}
+                                      {badge.label}
                                     </Badge>
                                   </Tooltip>
                                 );
@@ -2045,7 +2053,7 @@ function RequestBoard() {
                       p='xs'
                       radius='md'
                       withBorder
-                      className='bg-white max-h-64 overflow-y-auto'
+                      className='max-h-64 overflow-y-auto'
                     >
                       <Stack gap='xs'>
                         <Text size='xs' c='gray.5' fw={500}>
@@ -2150,6 +2158,29 @@ function RequestBoard() {
                 />
               </Card>
             )}
+            {(() => {
+              const processName = (
+                filteredProcesses.find((p) => p.value === formData.process)?.label || ''
+              ).split(' - ')[0];
+              if (processName !== 'Solicitud de Pago') return null;
+              const companyName =
+                companies.find((c) => c.value === formData.company)?.label || '';
+              return (
+                <Alert
+                  icon={<IconCalendarEvent size={20} />}
+                  color='blue'
+                  variant='light'
+                  title='Fecha estimada de pago'
+                >
+                  <Text size='sm' tt='capitalize'>
+                    {formatEstimatedPaymentDate(companyName, new Date())}
+                  </Text>
+                  <Text size='xs' c='dimmed' mt={4}>
+                    Estimación según la fecha de creación; puede variar.
+                  </Text>
+                </Alert>
+              );
+            })()}
 
             <Textarea
               label={

@@ -74,7 +74,7 @@ export function useTheme() {
 }
 
 function ThemeProvider({ children }: { children: ReactNode }) {
-  const { data: session } = useSession();
+  const { data: session, update: updateSession } = useSession();
   const pathname = usePathname();
   const isLanding = isPublicLandingPath(pathname);
   const [theme, setTheme] = useState<AppTheme>('light');
@@ -96,7 +96,7 @@ function ThemeProvider({ children }: { children: ReactNode }) {
     setMounted(true);
   }, []);
 
-  // Sincroniza con lo persistido en el perfil cuando llega la sesión
+  // El perfil (sesión) es la fuente de verdad para apariencia autenticada.
   const sessionPalette = session?.user?.themePalette;
   const sessionColorScheme = session?.user?.colorScheme;
   const sessionFont = session?.user?.uiFont;
@@ -145,13 +145,32 @@ function ThemeProvider({ children }: { children: ReactNode }) {
     applyFontToDocument(visualFont);
   }, [font, visualFont, mounted]);
 
+  /** Persiste claro/oscuro en el perfil para que no se pierda al navegar. */
+  const persistColorScheme = (mode: AppTheme) => {
+    if (!session?.user) return;
+    void (async () => {
+      try {
+        const body = new FormData();
+        body.append('colorScheme', mode);
+        const res = await fetch('/api/profile', { method: 'PUT', body });
+        if (res.ok) await updateSession();
+      } catch {
+        // Si falla la red, el DOM/localStorage ya quedaron; el perfil se reintenta al próximo cambio.
+      }
+    })();
+  };
+
   const setThemeMode = (mode: AppTheme) => {
     if (mode === theme) return;
     runThemeTransition(() => setTheme(mode));
   };
   const toggleTheme = () => {
     runThemeTransition(() => {
-      setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+      setTheme((prev) => {
+        const next: AppTheme = prev === 'light' ? 'dark' : 'light';
+        persistColorScheme(next);
+        return next;
+      });
     });
   };
   const setPalette = (key: string) => {

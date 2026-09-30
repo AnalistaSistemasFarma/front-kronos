@@ -19,6 +19,9 @@
 //    (Estos dos archivos ya se bifurcaron una vez y quedaron con
 //    comportamientos distintos en `notificationclick`.)
 //
+// Espejo de public/sw.js con SW_VERSION = '2026-09-29.1' (vibración del
+// zumbido del chat entre personas tomada del payload).
+//
 // Nota: aquí NO van `install`/`activate` con skipWaiting/clients.claim porque
 // de eso se encarga workbox en el service worker que genera next-pwa.
 // =============================================================================
@@ -69,7 +72,9 @@ self.addEventListener('push', (event) => {
         requireInteraction: false,
         tag: data.tag || 'synerlink',
         renotify: true,
-        vibrate: [120, 60, 120],
+        // El patrón puede venir en el payload (el zumbido 📳 del chat entre
+        // personas vibra más largo). Sin él, el de siempre.
+        vibrate: Array.isArray(data.vibrate) ? data.vibrate : [120, 60, 120],
       });
     })
   );

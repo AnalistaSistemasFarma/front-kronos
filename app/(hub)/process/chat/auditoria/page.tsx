@@ -161,6 +161,11 @@ function FilaMensaje({ m }: { m: MensajeAuditoria }) {
             grupo
           </Badge>
         )}
+        {m.conversacion.kind === 'people' && (
+          <Badge size='xs' variant='light' color='teal' mt={4}>
+            entre personas
+          </Badge>
+        )}
       </Table.Td>
       <Table.Td style={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
         {m.clientIp ? (
@@ -338,6 +343,12 @@ export default function AuditoriaAgentesPage() {
               <IconArrowLeft size={14} />
               <span>Volver a Chat</span>
             </Group>
+          </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link href='/process/chat/auditoria/skills' className='chat-text-muted' style={{ fontSize: 13 }}>
+            Ver skills de la flota
           </Link>
         </Group>
 

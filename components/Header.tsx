@@ -20,6 +20,8 @@ import { useState, useEffect, useContext, useMemo } from 'react';
 import { useTheme } from './providers';
 import NotificationBell from './NotificationBell';
 import ChatAgentBar from './chat/ChatAgentBar';
+import ChatPulse from './chat/ChatPulse';
+import ValentineWallRoot from './valentine/ValentineWallRoot';
 import {
   AppSectionContext,
   type AppSection,
@@ -318,6 +320,10 @@ export default function Header() {
                   una línea AÑADIDA al grupo de acciones, sin tocar ni
                   reordenar nada de lo que ya estaba. */}
               <ChatAgentBar />
+              {/* Pulso del chat entre personas (mensajes directos y zumbidos
+                  📳 en cualquier pantalla). No pinta nada. */}
+              <ChatPulse />
+              <ValentineWallRoot />
               <NotificationBell />
               <ActionIcon
                 variant='subtle'

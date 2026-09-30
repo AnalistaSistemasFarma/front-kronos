@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionIcon,
   Alert,
@@ -26,17 +26,26 @@ import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
 import { useChatConversation, type ChatTarget } from './useChatConversation';
-import { useAltoVisible } from './useAltoVisible';
+import { useAltoVisible, usuarioInteractuando } from './useAltoVisible';
 import {
   describeAgentStatus,
   formatChatTime,
   SIN_RESPUESTA_MS,
+  subagentesEnCurso,
   type ChatAgentDto,
   type ChatAgentStatusDto,
   type ChatMessageDto,
   type ChatParticipantDto,
 } from '../../lib/chat/client';
 import { formatBytes } from '../../lib/chat/attachments';
+import {
+  efectoZumbido,
+  marcarZumbidoMostrado,
+  prepararAudioZumbido,
+  registrarHiloVisible,
+  sacudirHilo,
+  zumbidoFresco,
+} from '../../lib/chat/nudge-fx';
 import type { ChatReplyToDto } from '../../lib/chat/client';
 
 /**
@@ -117,7 +126,7 @@ const MessageBubble = memo(function MessageBubble({
   message,
   agent,
   currentUserId,
-  enGrupo = false,
+  porAutor = false,
   nueva = false,
   onCitar,
   onIrAlCitado,
@@ -127,7 +136,11 @@ const MessageBubble = memo(function MessageBubble({
   agent?: ChatAgentDto;
   /** Quién soy: en un grupo es lo que distingue mis mensajes de los ajenos. */
   currentUserId?: string;
-  enGrupo?: boolean;
+  /**
+   * "Lo mío" se decide por el AUTOR y no por el `role`. Verdadero en todo lo
+   * que no sea el hilo directo con un agente (grupos, y lo que venga).
+   */
+  porAutor?: boolean;
   /** Llegó DESPUÉS de abrir el hilo: solo esas se animan (ver ChatThread). */
   nueva?: boolean;
   /** Citar ESTE mensaje. Sin esto, los gestos quedan inertes. */
@@ -184,15 +197,17 @@ const MessageBubble = memo(function MessageBubble({
     setArrastre(0);
   };
 
-  // ⚠️ EN UN GRUPO, "mío" NO es lo mismo que role='user'. Con el criterio del
-  // hilo directo, los mensajes de las OTRAS personas del grupo se pintarían
-  // alineados a la derecha como si los hubiera escrito uno: el grupo quedaría
-  // ilegible. Aquí lo mío es lo que escribí yo, y eso solo lo dice el autor.
-  const isUser = enGrupo
-    ? message.author?.kind === 'user' &&
+  // ⚠️ FUERA DEL HILO DIRECTO, "mío" NO es lo mismo que role='user'. Con el
+  // criterio del hilo directo, los mensajes de las OTRAS personas se pintarían
+  // alineados a la derecha como si los hubiera escrito uno. Aquí lo mío es lo
+  // que escribí yo, y eso solo lo dice el autor. La pregunta es "¿es el hilo
+  // directo con un agente?" y no "¿es un grupo?": cualquier otra clase de
+  // conversación con varias personas necesita el criterio del autor.
+  const isUser = !porAutor
+    ? message.role === 'user'
+    : message.author?.kind === 'user' &&
       currentUserId !== undefined &&
-      String(message.author.id) === currentUserId
-    : message.role === 'user';
+      String(message.author.id) === currentUserId;
 
   // Nombre de quien escribió, para la etiqueta de la burbuja. En el hilo
   // directo es siempre el agente; en un grupo, quien sea (persona o agente).
@@ -412,7 +427,6 @@ function GroupActivity({ statuses }: { statuses: ChatAgentStatusDto[] }) {
                 <b>{s.agentName ?? 'Asistente'}</b> · {view.label}
               </Text>
             </Group>
-            <AgentTaskTable tasks={s.tasks} />
           </Box>
         );
       })}
@@ -451,22 +465,130 @@ function AgentActivity({
           {view.label}
         </Text>
       </Group>
-
-      {/* Solo aparece cuando el agente reporta sub-agentes trabajando. */}
-      <AgentTaskTable tasks={status?.tasks} />
     </Box>
+  );
+}
+
+/**
+ * La caja de SUB-AGENTES EN CURSO, anclada entre la conversación y el
+ * compositor.
+ *
+ * Pedido de Nicolás (2026-09-29): "quiero que esa cajita sea fija hasta que el
+ * sub-agente termine, que se quede anclada al chat". Antes vivía DENTRO de la
+ * lista de mensajes —se iba con el desplazamiento— y colgaba del indicador del
+ * agente principal: en cuanto este contestaba (su estado pasa a 'idle') la
+ * caja desaparecía aunque sus sub-agentes siguieran trabajando. Ahora queda
+ * fuera del área que se desplaza y depende SOLO de la lista de sub-agentes
+ * (ver subagentesEnCurso): se quita cuando esa lista queda vacía.
+ */
+function SubagentesAnclados({
+  enGrupo,
+  status,
+  statuses,
+}: {
+  enGrupo: boolean;
+  status: Parameters<typeof subagentesEnCurso>[0];
+  statuses: ChatAgentStatusDto[];
+}) {
+  if (!enGrupo) {
+    const tareas = subagentesEnCurso(status);
+    if (tareas.length === 0) return null;
+    return (
+      <Box className='chat-thread__subagentes'>
+        <AgentTaskTable tasks={tareas} />
+      </Box>
+    );
+  }
+
+  // En un grupo, una caja por agente que tenga sub-agentes, con su nombre:
+  // sin él no se sabe de quién es cada trabajo.
+  const conTareas = statuses
+    .map((s) => ({ s, tareas: subagentesEnCurso(s) }))
+    .filter((x) => x.tareas.length > 0);
+  if (conTareas.length === 0) return null;
+  return (
+    <Box className='chat-thread__subagentes'>
+      {conTareas.map(({ s, tareas }) => (
+        <Box key={s.idAgent}>
+          <Text size='xs' fw={600} className='chat-thread__subagentes-autor'>
+            {s.agentName ?? 'Asistente'}
+          </Text>
+          <AgentTaskTable tasks={tareas} />
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+/** Clave de localStorage: el aviso de privacidad ya se vio en este equipo. */
+const AVISO_PRIVACIDAD_KEY = 'chat-personas-aviso-privacidad-v1';
+
+/**
+ * AVISO DE PRIVACIDAD de los mensajes entre personas (decisión D3 de Nicolás,
+ * 2026-09-29): la auditoría del chat SÍ ve estos mensajes, así que hay que
+ * decirlo de frente la primera vez — Ley 1581 de 2012, tratamiento de datos —.
+ *
+ * Se recuerda por equipo en `localStorage` (con try/catch: en modo privado o
+ * con el almacenamiento bloqueado simplemente se vuelve a mostrar, que es el
+ * lado seguro del error).
+ */
+function AvisoPrivacidadPersonas() {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    try {
+      setVisible(localStorage.getItem(AVISO_PRIVACIDAD_KEY) !== '1');
+    } catch {
+      setVisible(true);
+    }
+  }, []);
+  if (!visible) return null;
+
+  const entendido = () => {
+    setVisible(false);
+    try {
+      localStorage.setItem(AVISO_PRIVACIDAD_KEY, '1');
+    } catch {}
+  };
+
+  return (
+    <Alert
+      color='blue'
+      radius='md'
+      mx='sm'
+      mt='xs'
+      py={8}
+      icon={<IconAlertCircle size={16} />}
+      role='note'
+    >
+      <Group gap='xs' wrap='nowrap' align='flex-start' justify='space-between'>
+        <Text size='xs'>
+          Los mensajes de SynerLink pueden ser revisados por el área de Sistemas conforme a la
+          política de tratamiento de datos.
+        </Text>
+        <Button size='compact-xs' variant='light' onClick={entendido} style={{ flexShrink: 0 }}>
+          Entendido
+        </Button>
+      </Group>
+    </Alert>
   );
 }
 
 export default function ChatThread({
   agent,
   group,
+  person,
   currentUserId,
   active = true,
   height,
+  idConversacion,
 }: {
   /** Hilo DIRECTO: el agente con el que se habla. */
   agent?: ChatAgentDto;
+  /**
+   * Id del hilo directo si la bandeja ya lo conoce: permite pedir el
+   * histórico en paralelo con la apertura (ver useChatConversation).
+   */
+  idConversacion?: number | null;
   /**
    * GRUPO: el hilo ya existe y se abre por su id. `agentes` son los asistentes
    * del grupo, para el autocompletado del `@`.
@@ -476,6 +598,16 @@ export default function ChatThread({
     title: string;
     participants?: ChatParticipantDto[] | null;
   };
+  /**
+   * HILO ENTRE PERSONAS: ya existe y se abre por su id. `name` es la otra
+   * persona, para el texto del compositor y del hilo vacío.
+   */
+  person?: {
+    idConversation: number;
+    name: string;
+    /** Yo silencié los zumbidos de este hilo: llegan sin sacudida ni sonido. */
+    nudgesMuted?: boolean;
+  };
   /** Quién soy. En un grupo es lo que distingue mis mensajes de los ajenos. */
   currentUserId?: string;
   /** El hilo está a la vista (marca leído y arranca el sondeo). */
@@ -484,14 +616,48 @@ export default function ChatThread({
   height?: string | number;
 }) {
   const enGrupo = Boolean(group);
+  const enPersonas = !group && Boolean(person);
+  // Hilo directo = una persona con UN agente. Es lo único donde `role='user'`
+  // significa "lo escribí yo".
+  const esHiloDirecto = !group && !person && Boolean(agent);
 
   const target: ChatTarget | null = group
     ? { kind: 'group', idConversation: group.idConversation }
-    : agent
-      ? { kind: 'agent', idAgent: agent.idAgent }
-      : null;
+    : person
+      ? { kind: 'people', idConversation: person.idConversation }
+      : agent
+        ? { kind: 'agent', idAgent: agent.idAgent, idConversation: idConversacion ?? null }
+        : null;
 
-  const thread = useChatConversation(target, active);
+  /*
+   * ZUMBIDO RECIBIDO con el hilo abierto: sacudida del contenedor + sonido +
+   * vibración. Todo por referencias y clases CSS, sin estado: ni el hilo ni
+   * las burbujas en `memo` se re-renderizan por un zumbido.
+   */
+  const raizRef = useRef<HTMLDivElement>(null);
+  const silenciadoRef = useRef(Boolean(person?.nudgesMuted));
+  silenciadoRef.current = Boolean(person?.nudgesMuted);
+  const alZumbido = useCallback((mensaje: ChatMessageDto) => {
+    // Una sola vez por zumbido (también llega por el pulso global), y solo si
+    // es reciente y no está silenciado.
+    if (!marcarZumbidoMostrado(mensaje.id)) return;
+    if (silenciadoRef.current || !zumbidoFresco(mensaje.createdAt)) return;
+    sacudirHilo(raizRef.current);
+    efectoZumbido();
+  }, []);
+
+  const idHiloPersonas = person?.idConversation ?? null;
+  useEffect(() => {
+    if (idHiloPersonas === null || !active) return;
+    prepararAudioZumbido();
+    registrarHiloVisible(idHiloPersonas);
+    return () => registrarHiloVisible(null);
+  }, [idHiloPersonas, active]);
+
+  const thread = useChatConversation(target, active, {
+    miId: currentUserId,
+    onZumbido: enPersonas ? alZumbido : undefined,
+  });
 
   /* ─────────────────────────── Citar y responder ───────────────────────── */
 
@@ -505,10 +671,16 @@ export default function ChatThread({
    * vuelve a resolverlo cuando devuelve el mensaje creado, y esa es la versión
    * que queda.
    */
+  // El nombre del agente se lee de una referencia: con `agent` como
+  // dependencia, cada ficha nueva del agente que trae la bandeja (misma
+  // persona, objeto nuevo) cambiaba `citar` y re-renderizaba TODAS las
+  // burbujas en `memo`.
+  const nombreAgenteRef = useRef(agent?.displayName);
+  nombreAgenteRef.current = agent?.displayName;
   const citar = useCallback((message: ChatMessageDto) => {
     const autor =
       message.author?.name ??
-      (message.role === 'agent' ? (agent?.displayName ?? 'Asistente') : 'Usted');
+      (message.role === 'agent' ? (nombreAgenteRef.current ?? 'Asistente') : 'Usted');
     const plano = message.body.replace(/\s+/g, ' ').trim();
     setCita({
       idMessage: message.id,
@@ -516,7 +688,7 @@ export default function ChatThread({
       preview: plano.length > 140 ? `${plano.slice(0, 139)}…` : plano || '(adjunto)',
     });
     composerRef.current?.focus();
-  }, [agent]);
+  }, []);
 
   /**
    * Salta al mensaje citado y lo resalta un momento.
@@ -539,13 +711,28 @@ export default function ChatThread({
   // recargar la página.
   // Clave del hilo abierto: cambia al pasar de un agente a otro o de un grupo
   // a otro, y es lo que reinicia los efectos de desplazamiento.
-  const claveHilo = group ? `grupo:${group.idConversation}` : `agente:${agent?.idAgent ?? 0}`;
+  const claveHilo = group
+    ? `grupo:${group.idConversation}`
+    : person
+      ? `persona:${person.idConversation}`
+      : `agente:${agent?.idAgent ?? 0}`;
 
-  const agentesMencionables = (
-    thread.conversation?.participants ??
-    group?.participants ??
-    []
-  ).filter((p) => p.kind === 'agent');
+  const participantes = thread.conversation?.participants ?? group?.participants;
+  // Memorizado: es prop del compositor (en `memo`) y un arreglo nuevo en cada
+  // render lo obligaría a re-renderizarse en cada vuelta del sondeo.
+  const menciones = useMemo(
+    () =>
+      (participantes ?? [])
+        .filter((p) => p.kind === 'agent')
+        .map((p) => ({
+          // Se sugiere el handle sin arroba cuando existe (es el nombre que
+          // el servidor reconoce sin ambigüedad) y el nombre visible si no.
+          valor: (p.handle ?? p.name).replace(/^@/, ''),
+          nombre: p.name,
+          avatarUrl: p.avatarUrl,
+        })),
+    [participantes]
+  );
 
   // Mantiene `--alto-visible` al día: es lo que permite que el compositor no
   // quede debajo del teclado en el celular (ver el propio hook).
@@ -558,7 +745,7 @@ export default function ChatThread({
   useAltoVisible(
     useCallback(() => {
       const viewport = viewportRef.current;
-      if (!viewport || !stickToBottomRef.current) return;
+      if (!viewport || !stickToBottomRef.current || usuarioInteractuando()) return;
       // En el mismo cuadro el navegador todavía no reacomodó el layout con el
       // alto nuevo; se espera al siguiente. No encadenar animaciones smooth
       // mientras el teclado cambia el viewport en cada cuadro.
@@ -571,8 +758,18 @@ export default function ChatThread({
       // fondo real. Esperar un segundo cuadro le da tiempo al reflow de
       // asentarse antes de fijar la posición. Nicolás lo reportó como "la
       // conversación se sube más de lo que debía".
+      //
+      // SÍNCRONO PRIMERO (2026-09-23, "salto feo al abrir el teclado"): el
+      // doble rAF dejaba ver dos cuadros con el contenedor ya encogido y el
+      // scroll viejo — los últimos mensajes tapados y luego el brinco. El
+      // hook ya escribió `--alto-visible`; leer `scrollHeight` aquí fuerza el
+      // reflow con el alto nuevo, así que se fija el fondo en ESTE cuadro,
+      // antes de pintar. El doble rAF se conserva como red de seguridad para
+      // el caso de #374: si ya estaba en el fondo, no mueve nada.
+      viewport.scrollTop = viewport.scrollHeight;
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
+          if (!stickToBottomRef.current || usuarioInteractuando()) return;
           viewport.scrollTop = viewport.scrollHeight;
         });
       });
@@ -591,6 +788,22 @@ export default function ChatThread({
   // pantalla entera se sacudiría, que es justo lo contrario de lo que se
   // busca. Se llena una sola vez, con el primer lote que llega.
   const yaEstaban = useRef<Set<string | number> | null>(null);
+  // Al cambiar de hilo (el componente NO se remonta) todo vuelve a empezar:
+  // pegado al fondo, sin interacción del usuario y sin mensajes "vistos". Si no,
+  // un hilo heredaba el `stickToBottom = false` del anterior y quedaba subido.
+  const hiloPrevioRef = useRef(claveHilo);
+  const usuarioMovioRef = useRef(false);
+  // ¿Se alcanzó a pintar el esqueleto en este hilo? (ver `conFundido`).
+  const esqueletoVistoRef = useRef(false);
+  if (hiloPrevioRef.current !== claveHilo) {
+    hiloPrevioRef.current = claveHilo;
+    esqueletoVistoRef.current = false;
+    yaEstaban.current = null;
+    usuarioMovioRef.current = false;
+    lastCountRef.current = 0;
+    stickToBottomRef.current = true;
+    if (!stickToBottom) setStickToBottom(true);
+  }
   if (yaEstaban.current === null && thread.messages.length > 0) {
     yaEstaban.current = new Set(thread.messages.map((m) => m.id));
   }
@@ -600,9 +813,18 @@ export default function ChatThread({
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
+    const primerLote = lastCountRef.current === 0;
     const grew = thread.messages.length > lastCountRef.current;
     lastCountRef.current = thread.messages.length;
     if (!grew || !stickToBottom) return;
+    // El primer lote (abrir el hilo) va al fondo SIN animación: un `smooth`
+    // desde arriba emite eventos de scroll intermedios que apagaban el
+    // `stickToBottom`, y lo que crecía después (imágenes, Markdown, el
+    // indicador) dejaba la conversación subida.
+    if (primerLote) {
+      viewport.scrollTop = viewport.scrollHeight;
+      return;
+    }
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
   }, [thread.messages, stickToBottom]);
 
@@ -613,7 +835,19 @@ export default function ChatThread({
     const viewport = viewportRef.current;
     if (!viewport || thread.loading) return;
     viewport.scrollTop = viewport.scrollHeight;
-  }, [thread.loading, claveHilo]);
+  }, [thread.loading, claveHilo, thread.conversation?.id]);
+
+  // La caja anclada de sub-agentes vive FUERA del área que se desplaza: al
+  // aparecer o crecer, encoge el área de mensajes y taparía los últimos. Si el
+  // usuario estaba abajo, se lo deja abajo en el mismo cuadro.
+  const firmaSubagentes = enGrupo
+    ? thread.statuses.map((s) => subagentesEnCurso(s).length).join(',')
+    : String(subagentesEnCurso(thread.status).length);
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !stickToBottomRef.current || usuarioInteractuando()) return;
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [firmaSubagentes]);
 
   /**
    * PEGADO AL FONDO de verdad, mientras el usuario esté abajo.
@@ -638,18 +872,50 @@ export default function ChatThread({
    * No hay bucle: desplazarse no cambia el tamaño del contenido.
    */
   const contenidoRef = useRef<HTMLDivElement>(null);
+  // LA LISTA YA NO SE REMONTA (2026-09-29, video de Nicolás en el iPhone: "al
+  // abrir el hilo se ve en blanco y, estando adentro, los mensajes desaparecen
+  // un instante y vuelven"). Antes la lista llevaba `key` con "¿hay mensajes?"
+  // y cada montaje repetía un fundido desde opacidad 0 de 150 ms: cualquier
+  // cosa que la remontara —abrir el hilo, volver a él desde la caché, el
+  // hilo pasando por vacío— dejaba la conversación en blanco ese rato
+  // mientras el encabezado y el compositor seguían quietos. Ahora el nodo es
+  // el mismo toda la vida del hilo y el fundido solo se usa cuando de verdad
+  // se alcanzó a ver el esqueleto (ver `conFundido` más abajo).
+
+  // ESQUELETO CON RETRASO: si el hilo llega en menos de 300 ms no se pinta
+  // nada intermedio. Mostrar un esqueleto medio segundo para reemplazarlo
+  // enseguida es justo el "refresco feo" que se veía al abrir el chat.
+  const esperandoPrimerLote = thread.loading && thread.messages.length === 0;
+  const [mostrarEsqueleto, setMostrarEsqueleto] = useState(false);
+  useEffect(() => {
+    if (!esperandoPrimerLote) {
+      setMostrarEsqueleto(false);
+      return;
+    }
+    const reloj = window.setTimeout(() => setMostrarEsqueleto(true), 300);
+    return () => window.clearTimeout(reloj);
+  }, [esperandoPrimerLote]);
+  // El fundido de entrada solo tiene sentido si se vio el esqueleto: suaviza
+  // el cambio esqueleto → mensajes. Con caché, o si el hilo llegó antes de los
+  // 300 ms, los mensajes se pintan de una, sin pasar por opacidad 0.
+  if (mostrarEsqueleto) esqueletoVistoRef.current = true;
+  const conFundido = esqueletoVistoRef.current && thread.messages.length > 0;
+
   useEffect(() => {
     const contenido = contenidoRef.current;
     const viewport = viewportRef.current;
     if (!contenido || !viewport || typeof ResizeObserver === 'undefined') return;
 
     const observador = new ResizeObserver(() => {
-      if (!stickToBottomRef.current) return;
+      // Nunca re-anclar con el dedo puesto o en plena inercia: eso era lo que
+      // "subía" (o bajaba) el hilo en contra del gesto.
+      if (!stickToBottomRef.current || usuarioInteractuando()) return;
       // Mismo motivo del doble rAF de arriba: si el contenido crece justo
       // mientras el teclado todavía está animando el viewport, un solo
       // cuadro puede leer un `scrollHeight` que no es el final.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
+          if (!stickToBottomRef.current || usuarioInteractuando()) return;
           viewport.scrollTop = viewport.scrollHeight;
         });
       });
@@ -670,6 +936,29 @@ export default function ChatThread({
   const dragDepth = useRef(0);
 
   const composerDisabled = thread.loading || thread.conversation === null;
+
+  // Props del compositor ESTABLES (va en `memo`): sin esto se recreaban en cada
+  // render del hilo, o sea en cada vuelta del sondeo.
+  const enviarHilo = thread.send;
+  const alEnviar = useCallback(
+    async (body: string, files: File[]) => {
+      // Al ENVIAR se vuelve al fondo aunque el usuario hubiera subido a
+      // leer: quiere ver lo que acaba de escribir y la respuesta. Se
+      // olvida la interacción previa para que el scroll animado hacia el
+      // mensaje optimista no vuelva a soltar el anclaje a mitad de camino.
+      usuarioMovioRef.current = false;
+      stickToBottomRef.current = true;
+      setStickToBottom(true);
+      const vp = viewportRef.current;
+      if (vp) vp.scrollTop = vp.scrollHeight;
+      const enviado = await enviarHilo(body, files, cita);
+      // La cita se limpia solo si el mensaje SALIÓ: si falló, el usuario
+      // reintenta y la cita tiene que seguir puesta.
+      if (enviado) setCita(null);
+    },
+    [enviarHilo, cita]
+  );
+  const quitarCita = useCallback(() => setCita(null), []);
 
   /** Solo reaccionamos si lo que se arrastra son ARCHIVOS (no texto ni enlaces). */
   const dragTraeArchivos = (event: React.DragEvent) =>
@@ -738,11 +1027,20 @@ export default function ChatThread({
     const viewport = viewportRef.current;
     if (!viewport) return;
     const distanceToBottom = viewport.scrollHeight - viewport.clientHeight - y;
+    // Mientras el usuario no haya tocado el scroll de este hilo, se sigue
+    // pegado al fondo: los eventos de scroll que produce el propio reacomodo
+    // (contenido que crece, teclado, ajustes programáticos) no cuentan como
+    // "el usuario subió a leer".
+    if (!usuarioMovioRef.current && distanceToBottom >= 80) return;
     setStickToBottom(distanceToBottom < 80);
+  };
+  const marcarInteraccion = () => {
+    usuarioMovioRef.current = true;
   };
 
   return (
     <Box
+      ref={raizRef}
       className={`chat-thread${dragging ? ' chat-thread--dragging' : ''}`}
       style={height ? { height } : undefined}
       onDragEnter={onDragEnter}
@@ -764,13 +1062,23 @@ export default function ChatThread({
           </Stack>
         </Box>
       )}
+      {enPersonas && <AvisoPrivacidadPersonas />}
       <ScrollArea
         className='chat-thread__scroll'
         viewportRef={viewportRef}
         onScrollPositionChange={onScrollPositionChange}
+        onWheel={marcarInteraccion}
+        onTouchMove={marcarInteraccion}
+        onKeyDown={marcarInteraccion}
+        onPointerDown={marcarInteraccion}
         offsetScrollbars
       >
-        <Stack gap='sm' p='sm' ref={contenidoRef}>
+        <Stack
+          gap='sm'
+          p='sm'
+          ref={contenidoRef}
+          className={`chat-thread__contenido${conFundido ? ' chat-thread__contenido--entra' : ''}`}
+        >
           {thread.hasOlder && (
             <Center>
               <Button
@@ -784,7 +1092,7 @@ export default function ChatThread({
             </Center>
           )}
 
-          {thread.loading && thread.messages.length === 0 && <EsqueletoHilo />}
+          {esperandoPrimerLote && mostrarEsqueleto && <EsqueletoHilo />}
 
           {!thread.loading && thread.messages.length === 0 && !thread.error && (
             <Center py='xl'>
@@ -796,7 +1104,9 @@ export default function ChatThread({
                 <Text size='xs' ta='center' className='chat-text-muted' maw={320}>
                   {enGrupo
                     ? 'Escriba para empezar. Los asistentes de este grupo responden solo cuando se los menciona con @.'
-                    : agent?.description ||
+                    : enPersonas
+                      ? `Escríbale a ${person?.name ?? 'esta persona'}. Solo ustedes dos ven esta conversación, además de la auditoría del área de Sistemas.`
+                      : agent?.description ||
                       `Escríbale a ${agent?.displayName ?? 'el asistente'} para empezar la conversación.`}
                 </Text>
               </Stack>
@@ -809,7 +1119,7 @@ export default function ChatThread({
               message={message}
               agent={agent}
               currentUserId={currentUserId}
-              enGrupo={enGrupo}
+              porAutor={!esHiloDirecto}
               nueva={yaEstaban.current ? !yaEstaban.current.has(message.id) : false}
               onCitar={citar}
               onIrAlCitado={irAlMensaje}
@@ -819,13 +1129,13 @@ export default function ChatThread({
           {enGrupo ? (
             <GroupActivity statuses={thread.statuses} />
           ) : (
-            agent && <AgentActivity agent={agent} status={thread.status} />
+            !enPersonas && agent && <AgentActivity agent={agent} status={thread.status} />
           )}
 
           {/* El aviso de "nadie ha contestado" NO va en los grupos: allí un
               mensaje sin menciones no espera respuesta de nadie, así que el
               aviso sería una falsa alarma en el caso más común. */}
-          {!enGrupo && agent && (
+          {esHiloDirecto && agent && (
             <SinRespuesta
               agent={agent}
               ultimoMensaje={thread.messages[thread.messages.length - 1]}
@@ -834,6 +1144,10 @@ export default function ChatThread({
           )}
         </Stack>
       </ScrollArea>
+
+      {!enPersonas && (
+        <SubagentesAnclados enGrupo={enGrupo} status={thread.status} statuses={thread.statuses} />
+      )}
 
       {thread.error && (
         <Alert
@@ -852,28 +1166,19 @@ export default function ChatThread({
         <ChatComposer
           voiceConversationId={agent?.code === 'duo' ? thread.conversation?.id : undefined}
           ref={composerRef}
-          onSend={async (body, files) => {
-            const enviado = await thread.send(body, files, cita);
-            // La cita se limpia solo si el mensaje SALIÓ: si falló, el usuario
-            // reintenta y la cita tiene que seguir puesta.
-            if (enviado) setCita(null);
-          }}
+          onSend={alEnviar}
           cita={cita}
-          onQuitarCita={() => setCita(null)}
+          onQuitarCita={quitarCita}
           sending={thread.sending}
           disabled={composerDisabled}
           placeholder={
             enGrupo
               ? `Escriba en ${group?.title ?? 'el grupo'}…  (mencione con @)`
-              : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
+              : enPersonas
+                ? `Escríbale a ${person?.name ?? 'esta persona'}…`
+                : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
           }
-          menciones={agentesMencionables.map((p) => ({
-            // Se sugiere el handle sin arroba cuando existe (es el nombre que
-            // el servidor reconoce sin ambigüedad) y el nombre visible si no.
-            valor: (p.handle ?? p.name).replace(/^@/, ''),
-            nombre: p.name,
-            avatarUrl: p.avatarUrl,
-          }))}
+          menciones={menciones}
         />
       </Box>
     </Box>

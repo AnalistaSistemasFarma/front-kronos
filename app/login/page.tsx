@@ -178,6 +178,7 @@ function LoginForm() {
         <form onSubmit={handleSubmit}>
           <Stack gap='md'>
             <TextInput
+              size='md'
               label='Correo electrónico'
               placeholder='tu@email.com'
               type='email'
@@ -197,6 +198,7 @@ function LoginForm() {
               autoComplete='email'
             />
             <TextInput
+              size='md'
               label='Contraseña'
               placeholder='Tu contraseña'
               type={visible ? 'text' : 'password'}

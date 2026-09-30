@@ -1,8 +1,7 @@
 import { spawn, execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, rmSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { resolveDatabaseHost } from './resolve-db-host.mjs';
 
 const PORT = Number(process.env.PORT || 8080);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -129,7 +128,10 @@ function startNextDev() {
     process.exit(1);
   }
 
-  const child = spawn(process.execPath, [nextBin, 'dev', '-p', String(PORT), '--turbopack'], {
+  // Webpack por defecto: en Windows, con las rutas ya compiladas, responde ~3x más rápido
+  // que Turbopack en esta app (medido en ráfagas de 12 APIs). `--turbo` lo reactiva.
+  const bundlerArgs = process.argv.includes('--turbo') ? ['--turbopack'] : [];
+  const child = spawn(process.execPath, [nextBin, 'dev', '-p', String(PORT), ...bundlerArgs], {
     cwd: projectRoot,
     stdio: 'inherit',
     env: process.env,
@@ -152,6 +154,10 @@ function startNextDev() {
 
 ensurePortAvailable();
 
-void resolveDatabaseHost({ tryRoute: true, quiet: false }).finally(() => {
-  startNextDev();
-});
+if (process.argv.includes('--clean')) {
+  const distDir = path.join(projectRoot, '.next');
+  console.log('[dev] Borrando .next para arrancar con caché limpia...');
+  rmSync(distDir, { recursive: true, force: true, maxRetries: 3 });
+}
+
+startNextDev();

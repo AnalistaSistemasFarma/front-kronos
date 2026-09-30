@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:clean": "node scripts/dev.mjs --clean",
+    "dev:turbo": "node scripts/dev.mjs --turbo",
     "build": "next build --turbopack",
     "start": "next start -p 3003",
     "lint": "eslint",
@@ -14,8 +16,6 @@
     "check:orion": "node scripts/test-orion-integration.mjs",
     "check:login": "node scripts/check-login.mjs",
     "test:db": "node scripts/test-db-connection.cjs",
-    "db:route": "powershell -ExecutionPolicy Bypass -File scripts/windows-sql-route.ps1",
-    "db:resolve": "node scripts/resolve-db-host.mjs",
     "reset:password": "node scripts/reset-password.mjs",
     "seed:organigrama": "node prisma/seeds/organigrama.mjs",
     "seed:dashboard-solicitudes": "node scripts/seed-dashboard-solicitante-solicitado.cjs"
@@ -28,6 +28,7 @@
     "@monaco-editor/react": "^4.7.0",
     "@next-auth/prisma-adapter": "^1.0.7",
     "@prisma/client": "^6.17.1",
+    "@sentry/nextjs": "^10.75.3",
     "@tabler/icons-react": "^3.35.0",
     "@tiptap/extension-table": "^3.31.0",
     "@tiptap/extension-table-cell": "^3.31.0",

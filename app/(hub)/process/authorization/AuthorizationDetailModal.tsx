@@ -44,12 +44,20 @@ import {
 import axios from 'axios';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../components/microsoft-365/useGetMicrosoftToken';
 import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../lib/orion/fieldType';
-import { isFirmaAuthorizationItem } from '../../../../lib/orion/signerAuthMarkers';
+import {
+  isFirmaAuthorizationItem,
+  isOrionReviewResolution,
+  parseOrionFileNameFromResolution,
+  parseOrionReviewFileId,
+  parseOrionReviewFileName,
+} from '../../../../lib/orion/signerAuthMarkers';
+import { formatDbDateTime } from '../../../../lib/dbDate';
 import {
   TABLE_FIELD_TYPE,
   parseTableConfig,
   parseTableValue,
 } from '../../../../lib/requests-general/tableField';
+import { formatEstimatedPaymentDate } from '../../../../lib/treasury/estimatedPaymentDate';
 
 // Nombre EXACTO del tipo sembrado en `types_authorization` por
 // prisma/seeds/document-management-authorization-type.sql (Sprint 6) para la
@@ -158,20 +166,19 @@ const getStatusLabel = (status: string) => {
   }
 };
 
-// Fecha en hora Colombia (ajuste +5h, igual que view-request).
-const formatDateCO = (value?: string | null) => {
+// OneDrive entrega ISO en UTC real (a diferencia de las columnas de BD).
+const formatUtcDateCO = (value?: string | null) => {
   if (!value) return '—';
-  try {
-    return new Intl.DateTimeFormat('es-CO', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(new Date(new Date(value).getTime() + 5 * 60 * 60 * 1000));
-  } catch {
-    return String(value);
-  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Bogota',
+  }).format(date);
 };
 
 const formatFileSize = (bytes: number) => {
@@ -346,6 +353,16 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
   }, [opened, idReqGen, isDocumentApproval, hideSensitiveFirmaContext]);
 
   const subject = detail?.subject_request || request?.subject || '';
+  const firmaDocName = isFirmaAuth
+    ? parseOrionFileNameFromResolution(request?.resolution)
+    : null;
+  const isReview = isOrionReviewResolution(request?.resolution);
+  const reviewDocName = isReview ? parseOrionReviewFileName(request?.resolution) : null;
+  const reviewFileId = isReview ? parseOrionReviewFileId(request?.resolution) : null;
+  const reviewPdfUrl =
+    reviewFileId && idReqGen
+      ? `/api/requests-general/attachment-file?requestId=${idReqGen}&fileId=${encodeURIComponent(reviewFileId)}`
+      : null;
 
   return (
     <Modal
@@ -389,7 +406,63 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                   {request.type_authorization}
                 </Badge>
               )}
+              {isFirmaAuth && firmaDocName ? (
+                <Alert color='violet' variant='light' mt='sm' title='Documento a firmar'>
+                  <Text size='sm' fw={600} style={{ wordBreak: 'break-word' }}>
+                    {firmaDocName}
+                  </Text>
+                </Alert>
+              ) : null}
+              {isReview ? (
+                <Alert color='grape' variant='light' mt='sm' title='Documento a validar'>
+                  {reviewDocName ? (
+                    <Text size='sm' fw={600} style={{ wordBreak: 'break-word' }}>
+                      {reviewDocName}
+                    </Text>
+                  ) : null}
+                  <Text size='xs' c='dimmed' mt={4}>
+                    Vista previa de solo lectura. Use Autorizar en el listado para abrir la
+                    solicitud y validar o devolver el documento. La firma se habilita solo cuando
+                    valida el último validador.
+                  </Text>
+                </Alert>
+              ) : null}
             </div>
+
+            {reviewPdfUrl ? (
+              <Card withBorder radius='md' p={0} style={{ overflow: 'hidden' }}>
+                <Group justify='space-between' px='sm' py={6} wrap='nowrap'>
+                  <Group gap={6} wrap='nowrap' style={{ minWidth: 0 }}>
+                    <IconFileDescription size={16} className='text-gray-500' />
+                    <Text size='sm' fw={600} truncate>
+                      {reviewDocName || 'Documento'}
+                    </Text>
+                  </Group>
+                  <Button
+                    size='compact-xs'
+                    variant='subtle'
+                    leftSection={<IconExternalLink size={12} />}
+                    component='a'
+                    href={reviewPdfUrl}
+                    target='_blank'
+                    rel='noopener noreferrer'
+                  >
+                    Abrir en otra pestaña
+                  </Button>
+                </Group>
+                <iframe
+                  title={`Vista previa de ${reviewDocName || 'documento'}`}
+                  src={reviewPdfUrl}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    height: isMobile ? '70vh' : '60vh',
+                    border: 0,
+                    borderTop: '1px solid var(--mantine-color-default-border)',
+                  }}
+                />
+              </Card>
+            ) : null}
 
             {/* Detalle del documento (solo "Autorización de documento", Sprint 6): qué
                 documento es, qué versión, quién la elaboró y link para revisar el archivo
@@ -491,8 +564,22 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                   <IconCalendarEvent size={16} className='text-gray-400' />
                   <Text size='xs' c='dimmed' fw={500}>Fecha de creación</Text>
                 </Group>
-                <Text size='sm' fw={600}>{formatDateCO(detail?.created_at || request?.created_at)}</Text>
+                <Text size='sm' fw={600}>{formatDbDateTime(detail?.created_at || request?.created_at)}</Text>
               </Grid.Col>
+              {detail?.process === 'Solicitud de Pago' && (
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <Group gap={6} wrap='nowrap'>
+                    <IconCalendarEvent size={16} className='text-gray-400' />
+                    <Text size='xs' c='dimmed' fw={500}>Fecha estimada de pago</Text>
+                  </Group>
+                  <Text size='sm' fw={600} tt='capitalize'>
+                    {formatEstimatedPaymentDate(
+                      detail?.company || request?.company,
+                      detail?.created_at || request?.created_at
+                    )}
+                  </Text>
+                </Grid.Col>
+              )}
             </Grid>
 
             {detail?.description && (
@@ -584,7 +671,10 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
             {hideSensitiveFirmaContext ? (
               <Alert color='blue' variant='light' icon={<IconAlertCircle size={16} />}>
                 Por privacidad, en esta autorización no se muestran adjuntos, firmantes ni el
-                avance del proceso de firma. Abre la solicitud para firmar tu parte.
+                avance del proceso de firma.
+                {request?.status === 'pendiente'
+                  ? ' Autorice en el listado para poder firmar su parte.'
+                  : ' Abra la solicitud para firmar su parte.'}
               </Alert>
             ) : (
               <>
@@ -612,7 +702,7 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                               <div style={{ minWidth: 0 }}>
                                 <Text size='sm' fw={500} truncate>{file.name}</Text>
                                 <Text size='xs' c='dimmed'>
-                                  {formatFileSize(file.size)} · {formatDateCO(file.lastModifiedDateTime)}
+                                  {formatFileSize(file.size)} · {formatUtcDateCO(file.lastModifiedDateTime)}
                                 </Text>
                               </div>
                             </Group>
@@ -672,7 +762,7 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                           <Group gap={6} mt={4}>
                             <Text size='xs' c='dimmed'>{n.createdBy || 'Sistema'}</Text>
                             <Text size='xs' c='dimmed'>·</Text>
-                            <Text size='xs' c='dimmed'>{formatDateCO(n.creation_date)}</Text>
+                            <Text size='xs' c='dimmed'>{formatDbDateTime(n.creation_date)}</Text>
                           </Group>
                         </Card>
                       ))}

@@ -1,7 +1,7 @@
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../../auth/[...nextauth]/route';
-import { sendOrionDocument } from '@/lib/orion/client';
+import { resolveOrionAbsoluteUrl, sendOrionDocument, resolvePublicAppOrigin } from '@/lib/orion/client';
 import { getOrionConfig } from '@/lib/orion/config';
 import {
   getOrionDocumentFromBag,
@@ -24,6 +24,12 @@ import {
   notifyOrionSignerInvited,
 } from '@/lib/notificationEvents.js';
 import { getCurrentPendingSigner } from '@/lib/orion/signerStatus';
+import { ensureExternalSignerInvites } from '@/lib/orion/signerInvites';
+import { fireAndForgetOrionDocumentEvent } from '@/lib/orion/documentEvents';
+import { resolveOrionVersionLabel } from '@/lib/orion/versionLabel';
+import { assertOrionReviewApprovedForSigning } from '@/lib/orion/review';
+import { orionErrorMessage } from '@/lib/orion/errorCodes';
+import { orionErrorResponse } from '@/lib/orion/httpError';
 
 /** POST /api/integrations/orion/send — enviar documento a firma en Orion */
 export async function POST(req: Request) {
@@ -67,24 +73,73 @@ export async function POST(req: Request) {
           status: 422,
         });
       }
+      await assertOrionReviewApprovedForSigning(pool, { requestId, state: current });
 
-      const res = await sendOrionDocument(current.orionDocumentId);
+      const res = await sendOrionDocument(current.orionDocumentId, {
+        actorEmail: session.user.email,
+      });
       if (!res.ok) {
+        if (res.code === 'DOCUMENT_CLOSED') {
+          throw Object.assign(new Error(orionErrorMessage(res.code, res.error)), {
+            status: 409,
+            code: res.code,
+          });
+        }
         throw Object.assign(new Error(res.error || 'Error enviando documento a firma'), {
           status: res.status >= 500 ? 503 : 502,
+          code: res.code,
         });
       }
 
+      // Sync post-send: Orion ya generó /sign/{token} por firmante pendiente.
       const synced = await syncOrionDocumentState(pool, requestId, fileId);
       let nextState = synced?.state ?? current;
+      if (res.data?.signers?.length) {
+        nextState = {
+          ...nextState,
+          signers: res.data.signers.map((s) => ({
+            ...s,
+            signUrl:
+              resolveOrionAbsoluteUrl(s.signUrl) ||
+              String(s.signUrl || '').trim() ||
+              null,
+          })),
+        };
+      }
       nextState = {
         ...nextState,
         signers: applyPendingSignerTurnDeadline(nextState.signers),
       };
-      const bag = setOrionDocumentInBag(synced?.bag ?? loaded.bag, fileId, nextState);
+
+      const origin = resolvePublicAppOrigin(req.headers.get('origin'));
+      // Genera/renueva invites locales (URLs para copiar). El correo lo manda Orion
+      // solo a firmantes con invitedAt (notifyByEmail marcado en preparación).
+      const ensured = ensureExternalSignerInvites({
+        state: nextState,
+        requestId,
+        fileId,
+        origin,
+      });
+      nextState = ensured.state;
+
+      let bag = setOrionDocumentInBag(synced?.bag ?? loaded.bag, fileId, nextState);
       await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
 
       const ctx = await getRequestOrionContext(pool, requestId);
+
+      fireAndForgetOrionDocumentEvent(pool, {
+        requestId,
+        fileId,
+        orionDocumentId: String(current.orionDocumentId),
+        versionLabel: resolveOrionVersionLabel(nextState.versionLabel),
+        eventType: 'ENVIADO_A_FIRMA',
+        actorEmail: session.user.email,
+        actorName: session.user.name ?? null,
+        detail: (nextState.signers ?? [])
+          .map((s) => s.name || s.email)
+          .filter(Boolean)
+          .join(', ') || null,
+      });
 
       const authResult = await createOrionSignerAuthorizations(pool, {
         requestId,
@@ -124,6 +179,7 @@ export async function POST(req: Request) {
           signerEmails,
           currentSignerEmail: pending?.email ?? null,
           fileId,
+          fileName: nextState.fileName ?? current.fileName ?? null,
         })
       );
       fireAndForgetNotification(
@@ -164,11 +220,6 @@ export async function POST(req: Request) {
       { status: 200 }
     );
   } catch (err) {
-    const status =
-      err && typeof err === 'object' && 'status' in err
-        ? Number((err as { status: number }).status) || 500
-        : 500;
-    const message = err instanceof Error ? err.message : 'Error interno';
-    return NextResponse.json({ error: message }, { status });
+    return orionErrorResponse(err);
   }
 }

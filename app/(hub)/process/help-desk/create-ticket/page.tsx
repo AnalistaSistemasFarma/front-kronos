@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import ExcelJS from 'exceljs';
@@ -46,6 +46,10 @@ import {
 } from '../../../../../lib/help-desk/ticketsBoardStorage';
 import type { HelpDeskCaseListItem } from '../../../../../lib/help-desk/types';
 import { normalizeCaseListItem } from '../../../../../lib/help-desk/contactEmail';
+import {
+  isTechnicianUnassignedDisplay,
+  TECHNICIAN_UNASSIGNED_VALUE,
+} from '../../../../../lib/help-desk/requesterSql';
 import {
   IconAlertCircle,
   IconChevronRight,
@@ -193,13 +197,24 @@ function TicketsBoard() {
   useEffect(() => {
     if (!boardHydrated) return;
 
+    // No mezclar filtros nuevos con tickets viejos en sesión (causaba ver
+    // técnicos asignados con el filtro "Sin asignar" aún activo).
     saveTicketsBoardState({
       filters,
       filtersExpanded,
       scrollY: window.scrollY,
+    });
+  }, [boardHydrated, filters, filtersExpanded]);
+
+  useEffect(() => {
+    if (!boardHydrated) return;
+    saveTicketsBoardState({
+      filters: filtersRef.current,
+      filtersExpanded,
+      scrollY: window.scrollY,
       tickets,
     });
-  }, [boardHydrated, filters, filtersExpanded, tickets]);
+  }, [boardHydrated, tickets, filtersExpanded]);
 
   useEffect(() => {
     if (!boardHydrated) return;
@@ -490,6 +505,12 @@ function TicketsBoard() {
     setFilters({ ...DEFAULT_TICKETS_BOARD_FILTERS });
   };
 
+  /** Defensa UI: con "Sin asignar" no mostrar filas que ya tienen nombre de técnico. */
+  const displayedTickets = useMemo(() => {
+    if (filters.technician !== TECHNICIAN_UNASSIGNED_VALUE) return tickets;
+    return tickets.filter((t) => isTechnicianUnassignedDisplay(t.nombreTecnico));
+  }, [tickets, filters.technician]);
+
   const handleFormChange = (field: string, value: string) => {
     setFormData((prev) => ({
       ...prev,
@@ -668,10 +689,10 @@ function TicketsBoard() {
   }
 
   return (
-    <div className='min-h-screen bg-gray-50'>
+    <div className='app-canvas'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
         {/* Header Section */}
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -800,10 +821,10 @@ function TicketsBoard() {
           filtersExpanded={filtersExpanded}
           onToggleExpanded={() => setFiltersExpanded((v) => !v)}
           onClearAll={handleClearAllFilters}
-          resultCount={tickets.length}
+          resultCount={displayedTickets.length}
         />
 
-        <Card shadow='sm' radius='md' withBorder className='bg-white overflow-hidden' p='lg'>
+        <Card shadow='sm' radius='md' withBorder className='overflow-hidden' p='lg'>
           <LoadingOverlay visible={tableRefreshing} zIndex={50} overlayProps={{ blur: 1 }} />
 
           <Title order={3} mb='md' className='flex items-center gap-2'>
@@ -812,7 +833,7 @@ function TicketsBoard() {
           </Title>
 
           <HelpDeskCasesTable
-            tickets={tickets}
+            tickets={displayedTickets}
             showRequester
             emptyMessage={
               debouncedSearch || filters.technician
