@@ -8,9 +8,11 @@ import {
   IconFileCertificate,
   IconFilePlus,
   IconFileUpload,
+  IconGitBranch,
   IconHierarchy2,
   IconListDetails,
   IconSettings,
+  IconShieldCheck,
 } from '@tabler/icons-react';
 import SgcModuleCard, { type SgcModuleCardProps } from '../../../../components/sgc/SgcModuleCard';
 import SgcShell from '../../../../components/sgc/SgcShell';
@@ -84,16 +86,37 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
   cards.push(
     {
       title: 'Solicitudes documentales',
-      description: 'Nuevo documento, nueva versión, modificación o anulación.',
+      description: 'Nuevo documento, nueva versión o modificación de un vigente.',
       icon: <IconFilePlus size={24} />,
       sprint: 'Sprint 2',
+      href: sgcHref(`${SGC_BASE_URL}/solicitudes`, id),
     },
     {
       title: 'Tareas documentales',
       description: 'Elaboración, revisión y aprobación, igual que una tarea de SynerLink.',
       icon: <IconChecklist size={24} />,
       sprint: 'Sprint 2',
+      href: sgcHref(`${SGC_BASE_URL}/tareas`, id),
     },
+    {
+      title: 'Autorizaciones SGC',
+      description: 'Aprobaciones y verificación de Calidad, con su propio registro.',
+      icon: <IconShieldCheck size={24} />,
+      sprint: 'Sprint 2',
+      href: sgcHref(`${SGC_BASE_URL}/autorizaciones`, id),
+    },
+    ...(company.canAdminFlows || company.canQuality
+      ? [
+          {
+            title: 'Administración de flujos validados',
+            description: 'Flujos, versiones, matriz de responsables y registro de cambios.',
+            icon: <IconGitBranch size={24} />,
+            sprint: 'Sprint 2',
+            href: sgcHref(`${SGC_BASE_URL}/flujos`, id),
+            badge: company.canAdminFlows ? 'Flujos' : 'Calidad',
+          },
+        ]
+      : []),
     {
       title: 'Firma electrónica del SGC',
       description: 'Elaboró, revisó y aprobó con reautenticación, motivo y sello de tiempo.',

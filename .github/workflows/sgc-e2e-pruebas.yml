@@ -35,6 +35,11 @@ jobs:
       E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
       E2E_USER_EMAIL: ${{ secrets.E2E_SGC_USER }}
       E2E_USER_PASSWORD: ${{ secrets.E2E_SGC_PASSWORD }}
+      # Sprint 2: revisores/aprobadores del recorrido documental (solo pruebas).
+      E2E_USER_EMAIL2: ${{ secrets.E2E_SGC_USER2 }}
+      E2E_USER_PASSWORD2: ${{ secrets.E2E_SGC_PASSWORD2 }}
+      E2E_USER_EMAIL3: ${{ secrets.E2E_SGC_USER3 }}
+      E2E_USER_PASSWORD3: ${{ secrets.E2E_SGC_PASSWORD3 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -81,23 +86,26 @@ jobs:
         if: always()
         run: rm -rf reports/playwright/.auth
 
-      - name: Verificar que la contraseña no quedó en los reportes
+      - name: Verificar que las contraseñas no quedaron en los reportes
         if: always()
         run: |
-          if [ -n "$E2E_USER_PASSWORD" ] && grep -rIl --fixed-strings -- "$E2E_USER_PASSWORD" reports/ 2>/dev/null; then
-            echo "::error::La contraseña aparece en un reporte: no se archiva la evidencia."
-            rm -rf reports/
-            exit 1
-          fi
-          # Las trazas son .zip: se revisan descomprimidas.
-          for z in $(find reports -name '*.zip' 2>/dev/null); do
-            if unzip -p "$z" | grep -a -q --fixed-strings -- "$E2E_USER_PASSWORD"; then
-              echo "::error::La contraseña aparece en la traza $z: no se archiva la evidencia."
+          for PW in "$E2E_USER_PASSWORD" "$E2E_USER_PASSWORD2" "$E2E_USER_PASSWORD3"; do
+            [ -z "$PW" ] && continue
+            if grep -rIl --fixed-strings -- "$PW" reports/ 2>/dev/null; then
+              echo "::error::Una contraseña aparece en un reporte: no se archiva la evidencia."
               rm -rf reports/
               exit 1
             fi
+            # Las trazas son .zip: se revisan descomprimidas.
+            for z in $(find reports -name '*.zip' 2>/dev/null); do
+              if unzip -p "$z" | grep -a -q --fixed-strings -- "$PW"; then
+                echo "::error::Una contraseña aparece en la traza $z: no se archiva la evidencia."
+                rm -rf reports/
+                exit 1
+              fi
+            done
           done
-          echo "OK: la contraseña no aparece en los reportes."
+          echo "OK: las contraseñas no aparecen en los reportes."
 
       - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
         if: always()

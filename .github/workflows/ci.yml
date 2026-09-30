@@ -240,6 +240,8 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930110000_sgc_esquema_base/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930150000_sgc_s1_repositorio/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930150000_sgc_s1_repositorio/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930200000_sgc_s2_flujos_tareas_autorizaciones/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930200000_sgc_s2_flujos_tareas_autorizaciones/migration.sql
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
