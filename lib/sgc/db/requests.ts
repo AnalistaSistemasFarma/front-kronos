@@ -555,7 +555,9 @@ export async function setSigners(db: SgcDb, notifier: SgcNotifier, idRequest: nu
       active.map((s) => ({ email: lower(s.user_email), order: s.sign_order, decided: decidedEmails.has(lower(s.user_email)) })),
       desired
     );
-    if (plan.unchanged && newMode === currentMode) return { changed: false };
+    // El modo elegido en el documento se guarda explícitamente (trazabilidad), aunque coincida con el de la definición.
+    const modeRecorded = modes[stepKey] === newMode;
+    if (plan.unchanged && newMode === currentMode && (modeRecorded || !newMode)) return { changed: false };
     const now = new Date();
     for (const email of plan.remove) {
       await tx.sgcRequestSigner.updateMany({ where: { id_request: idRequest, step_key: stepKey, user_email: email, is_active: true }, data: { is_active: false, removed_by: me, removed_at: now, change_reason: reason } });
@@ -566,7 +568,7 @@ export async function setSigners(db: SgcDb, notifier: SgcNotifier, idRequest: nu
     for (const s of plan.reorder) {
       await tx.sgcRequestSigner.updateMany({ where: { id_request: idRequest, step_key: stepKey, user_email: s.email, is_active: true }, data: { sign_order: s.order, change_reason: reason } });
     }
-    if (newMode !== currentMode) {
+    if (newMode && !modeRecorded) {
       await tx.sgcRequest.update({ where: { id_request: idRequest }, data: { signing_modes_json: JSON.stringify({ ...modes, [stepKey]: newMode }) } });
     }
     // Si el paso está en curso, se ajustan sus cupos pendientes (lo decidido se conserva).
@@ -601,7 +603,7 @@ export async function setSigners(db: SgcDb, notifier: SgcNotifier, idRequest: nu
       ...plan.add.map((s) => `+ ${s.email} (orden ${s.order})`),
       ...plan.remove.map((e) => `− ${e}`),
       ...plan.reorder.map((s) => `↕ ${s.email} → orden ${s.order}`),
-      ...(newMode !== currentMode ? [`Modo de firma: ${newMode === 'orden' ? 'en orden' : 'en paralelo'}`] : []),
+      ...(newMode && (newMode !== currentMode || !modeRecorded) ? [`Modo de firma: ${newMode === 'orden' ? 'en orden' : 'en paralelo'}`] : []),
     ];
     await addInteraction(tx, idRequest, 'firmantes', me, `${everSet ? 'Cambió' : 'Asignó'} los firmantes de «${stepDef.name}».\n${lines.join('\n')}\nMotivo: ${reason}`, { meta: { stepKey, before, after } });
     await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: me, action: SGC_AUDIT_ACTIONS.firmantesCambiados, entity: 'request', entityId: idRequest, before, after: { stepKey, ...after }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });

@@ -141,6 +141,8 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
   });
 
   afterAll(async () => {
+    // La empresa de prueba no queda activa: otras suites verifican que solo OLP lo está.
+    await prisma.sgcCompanyConfig.update({ where: { id_company: CO }, data: { is_active: false } }).catch(() => undefined);
     await prisma.$disconnect();
   });
 
@@ -274,7 +276,8 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     const r1 = await addMatrixEntry(prisma, CO, { role: 'revisor', idProcess: procGC, idDocumentType: typePR, userEmail: E.rev1.toUpperCase(), sortOrder: 1, reason: 'Matriz de Calidad' }, who);
     await addMatrixEntry(prisma, CO, { role: 'revisor', idProcess: procGC, idDocumentType: typePR, userEmail: E.rev2, sortOrder: 2, reason: 'Matriz de Calidad' }, who);
     const s = await suggestForTarget(prisma, CO, { idProcess: procGC, idDocumentType: typePR });
-    expect(s.find((x) => x.role === 'revisor')).toMatchObject({ specificity: 3, people: [E.rev1, E.rev2], fromExample: false });
+    // Aplica también la fila de EJEMPLO por cargo que siembra el SQL para GC × PR.
+    expect(s.find((x) => x.role === 'revisor')).toMatchObject({ specificity: 3, people: [E.rev1, E.rev2], cargos: ['Coordinador(a) de Aseguramiento de Calidad'], fromExample: true });
     await deactivateMatrixEntry(prisma, CO, r1.id, { reason: 'Cambio de cargo' }, who);
     await expect(deactivateMatrixEntry(prisma, CO, r1.id, { reason: 'otra vez' }, who)).rejects.toMatchObject({ status: 409 });
     await expect(deactivateMatrixEntry(prisma, 3, r1.id, { reason: 'otra empresa' }, who)).rejects.toMatchObject({ status: 404 });
@@ -349,7 +352,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.apr1, E.rev2], mode: 'orden' }, actor(E.elab));
     await expect(setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.apr1] }, actor(E.elab))).rejects.toThrow(/motivo del cambio/);
     const r = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: req1 }, include: { signers: { orderBy: [{ step_key: 'asc' }, { sign_order: 'asc' }] } } });
-    expect(JSON.parse(r.signing_modes_json)).toEqual({ aprobacion: 'orden' });
+    expect(JSON.parse(r.signing_modes_json)).toEqual({ revision: 'paralelo', aprobacion: 'orden' });
     expect(r.signers.map((s) => [s.step_key, s.user_email, s.sign_order, s.added_by])).toEqual([
       ['aprobacion', E.apr1, 1, E.elab],
       ['aprobacion', E.rev2, 2, E.elab],
@@ -366,7 +369,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(uploadAttachment(prisma, upload, req1, { purpose: 'borrador', ...word() }, await viewer(E.rev1), actor(E.rev1))).rejects.toMatchObject({ status: 403 });
     await expect(uploadAttachment(prisma, upload, req1, { purpose: 'borrador', ...word(), fileName: 'x.exe' }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/Word/);
     await expect(uploadAttachment(prisma, upload, req1, { purpose: 'soporte', ...word(), bytes: new Uint8Array() }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/vacío/);
-    await expect(uploadAttachment(prisma, upload, req1, { purpose: 'soporte', ...word(), fileName: '///' }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/Nombre/);
+    await expect(uploadAttachment(prisma, upload, req1, { purpose: 'soporte', ...word(), fileName: '   ' }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/Nombre/);
     await expect(uploadAttachment(prisma, upload, req1, { purpose: 'soporte', ...word() }, await viewer(E.lector), actor(E.lector))).rejects.toMatchObject({ status: 404 });
     const wrong = await uploadAttachment(prisma, upload, req1, { purpose: 'borrador', ...word('versión equivocada') }, await viewer(E.elab), actor(E.elab));
     await withdrawAttachment(prisma, req1, wrong.id, { reason: 'Versión equivocada' }, await viewer(E.elab), actor(E.elab));
