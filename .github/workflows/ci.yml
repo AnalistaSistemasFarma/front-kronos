@@ -123,6 +123,9 @@ jobs:
 
       - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
         if: always()
+        env:
+          # En un PR, github.sha es el merge temporal: se sella con el commit real de la rama.
+          EVIDENCIA_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: node scripts/evidencia/sgc-evidencia.mjs
 
       - name: Publicar resumen de cobertura
@@ -162,7 +165,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: evidencia-sgc-front-${{ github.run_number }}-${{ github.sha }}
+          name: evidencia-sgc-front-${{ github.run_number }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             reports/
             coverage/
@@ -238,13 +241,16 @@ jobs:
 
       - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
         if: always()
+        env:
+          # En un PR, github.sha es el merge temporal: se sella con el commit real de la rama.
+          EVIDENCIA_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: node scripts/evidencia/sgc-evidencia.mjs
 
       - name: Archivar evidencia de integración (SGC documental)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: evidencia-sgc-integracion-${{ github.run_number }}-${{ github.sha }}
+          name: evidencia-sgc-integracion-${{ github.run_number }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: reports/
           if-no-files-found: ignore
           retention-days: 90

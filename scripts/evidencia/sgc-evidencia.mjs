@@ -93,7 +93,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 const manifest = {
   sistema: 'SynerLink — SGC documental',
   version: pkg.version,
-  commit: process.env.GITHUB_SHA || git('rev-parse HEAD', 'desconocido'),
+  commit: process.env.EVIDENCIA_COMMIT || process.env.GITHUB_SHA || git('rev-parse HEAD', 'desconocido'),
   rama: process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME || git('rev-parse --abbrev-ref HEAD', 'desconocida'),
   corrida: process.env.GITHUB_RUN_ID ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : 'local',
   generado_utc: new Date().toISOString(),
