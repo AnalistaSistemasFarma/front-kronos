@@ -3318,3 +3318,140 @@ body.chat-inmersivo .chat-page-thread--completa {
 .login-page input {
   font-size: 16px !important;
 }
+
+/* ─── Predicciones (/process/predicciones) ───
+   Colores de semáforo como variables del tema: en claro son los tonos GSS
+   (verde, ocre, rojo) y en oscuro se aclaran para mantener contraste AA sobre
+   las tarjetas navy. Las tarjetas y el texto usan los tokens --app-* de
+   siempre, así que siguen la paleta del perfil igual que el resto de la app. */
+:root {
+  --pred-ok: #1a6b43;
+  --pred-warn: #8a5a00;
+  --pred-danger: #b3261e;
+  --pred-neutral: #5c6370;
+  --pred-info: #1a3c6e;
+}
+
+.dark {
+  --pred-ok: #4ade80;
+  --pred-warn: #fbbf24;
+  --pred-danger: #ff8a80;
+  --pred-neutral: #aab4cf;
+  --pred-info: #7eb8f0;
+}
+
+.pred-tone--ok { --pred-tone: var(--pred-ok); }
+.pred-tone--warn { --pred-tone: var(--pred-warn); }
+.pred-tone--danger { --pred-tone: var(--pred-danger); }
+.pred-tone--neutral { --pred-tone: var(--pred-neutral); }
+.pred-tone--info { --pred-tone: var(--pred-info); }
+
+.pred-text--danger {
+  color: var(--pred-danger);
+}
+
+/* Pastilla de estado: punto relleno + texto (sin emoji, no se trunca) */
+.pred-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  color: var(--pred-tone);
+  background-color: color-mix(in srgb, var(--pred-tone) 12%, transparent);
+}
+
+.pred-pill__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background-color: var(--pred-tone);
+}
+
+/* Tarjeta con acento de estado a la izquierda (KPI, mes pasado, listas) */
+.pred-accent {
+  border-left: 4px solid var(--pred-tone) !important;
+}
+
+.pred-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 100%;
+}
+
+.pred-kpi__label {
+  color: var(--app-text-muted, var(--mantine-color-dimmed));
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.pred-kpi__value {
+  color: var(--app-text, var(--mantine-color-text));
+  font-size: clamp(1.375rem, 1.1rem + 0.9vw, 1.75rem);
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.pred-hero__title {
+  font-size: clamp(1.25rem, 1rem + 1.2vw, 1.75rem) !important;
+  line-height: 1.2 !important;
+}
+
+.pred-section__icon {
+  color: var(--pred-info);
+  flex-shrink: 0;
+}
+
+/* Alertas: fila neutra con acento de color; el texto va en el color normal
+   del tema (antes era texto rojo sobre fondo rojo, ilegible en oscuro). */
+.pred-alerta {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--app-border-subtle, var(--border-subtle));
+  border-left: 4px solid var(--pred-tone);
+  background-color: color-mix(in srgb, var(--pred-tone) 6%, var(--app-surface, #ffffff));
+}
+
+.pred-alerta__titulo {
+  color: var(--app-text, var(--mantine-color-text));
+}
+
+.pred-alerta__titulo .pred-pill {
+  margin-right: 8px;
+  vertical-align: 1px;
+}
+
+.pred-accion {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--app-text-muted, var(--mantine-color-dimmed));
+}
+
+.pred-accion svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--pred-tone, var(--pred-info));
+}
+
+/* Antigüedad de la cartera: celdas con fondo sutil */
+.pred-tramo {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: color-mix(in srgb, var(--pred-info) 5%, var(--app-surface, #ffffff));
+  border: 1px solid var(--app-border-subtle, var(--border-subtle));
+}
+
+.pred-chart {
+  position: relative;
+  width: 100%;
+}
