@@ -18,7 +18,7 @@ const azureConfigured =
 export const authOptions: AuthOptions = {
   adapter: PrismaAdapter(prisma),
   secret: process.env.NEXTAUTH_SECRET,
-  debug: process.env.NODE_ENV === 'development',
+  debug: process.env.NEXTAUTH_DEBUG === 'true',
   providers: [
     CredentialsProvider({
       name: 'credentials',
