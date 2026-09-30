@@ -428,7 +428,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     expect(done).toMatchObject({ outcome: 'resuelta', next: 'aprobacion' });
     const hist = await prisma.sgcInteraction.findMany({ where: { id_request: req1, kind: 'decision' }, orderBy: { id_interaction: 'asc' } });
     expect(hist.map((h) => h.author_email)).toEqual([E.elab, E.rev2, E.rev1]);
-    expect(hist[1].body).toContain('Punto de firma: Revisó (firma electrónica pendiente — Sprint 3)');
+    expect(hist[1].body).toContain('Firma electrónica: Revisó (firmado electrónicamente)');
   });
 
   it('[SGC-REQ-029][SGC-REQ-033] la aprobación va EN ORDEN (apr1 → rev2 → grupo de Calidad) y llega también a Autorizaciones SGC', async () => {

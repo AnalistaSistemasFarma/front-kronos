@@ -218,7 +218,7 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     expect(await prisma.sgcSignature.count({ where: { id_request: reqA } })).toBe(0);
     const fail = await prisma.sgcAuditLog.findFirstOrThrow({ where: { action: 'firma.reautenticacion_fallida', actor_email: E.elab }, orderBy: { id_audit_log: 'desc' } });
     expect(fail).toMatchObject({ entity: 'task', entity_id: String(elab.id_task), ip: '10.3.3.3' });
-    expect(JSON.stringify(fail)).not.toContain('errada');
+    expect(JSON.stringify({ ...fail, id_audit_log: String(fail.id_audit_log) })).not.toContain('errada');
     // Bloqueo: otra persona agota los intentos (la contraseña correcta tampoco pasa después).
     for (let i = 0; i < 5; i++) await expect(signTask(prisma, deps, elab.id_task, firma('elaboro', { password: `mala-${i}` }), actor(E.intruso))).rejects.toMatchObject({ status: 403 });
     await expect(signTask(prisma, deps, elab.id_task, firma('elaboro'), actor(E.intruso))).rejects.toMatchObject({ status: 429 });
