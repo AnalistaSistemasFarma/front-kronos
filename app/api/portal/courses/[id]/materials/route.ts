@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { identificar } from '../../../../../../lib/portal/acceso';
+import { formadoresDePortal } from '../../../../../../lib/portal/config';
+import { subirArchivoDeMaterial, validarArchivoMaterial } from '../../../../../../lib/portal/formacion';
 import {
-  MATERIAL_MIMES_PERMITIDOS,
-  MAX_MATERIAL_BYTES,
-  formadoresDePortal,
-} from '../../../../../../lib/portal/config';
+  FormacionStorageNoConfigurado,
+  MENSAJE_NO_CONFIGURADO,
+} from '../../../../../../lib/portal/formacion-storage';
 
 function idDesdeParametro(valor: string): number | null {
   const n = Number(valor);
@@ -22,6 +23,11 @@ function idDesdeParametro(valor: string): number | null {
  *
  * Siempre multipart, aunque un enlace no suba nada: así el formulario del
  * formador es uno solo y no dos caminos distintos según el tipo.
+ *
+ * El ARCHIVO de un DOCUMENT se guarda en SharePoint (TalentoHumano /
+ * FORMACION / <curso> / materiales) — pedido de Cristian, 2026-09-30. La base
+ * solo guarda la referencia. Si SharePoint no está configurado, se responde
+ * 503 con un mensaje claro: NUNCA se cae en silencio a guardar en la base.
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const quien = await identificar(request);
@@ -51,7 +57,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const ultimoOrden = await prisma.portalCourseMaterial.aggregate({
-      where: { course_id: courseId },
+      where: { course_id: courseId, eliminado_at: null },
       _max: { orden: true },
     });
     const orden = (ultimoOrden._max.orden ?? -1) + 1;
@@ -70,17 +76,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const archivo = form.get('file');
-    if (!(archivo instanceof File)) {
-      return NextResponse.json({ error: 'Falta el archivo del documento.' }, { status: 400 });
-    }
-    const mime = (archivo.type || '').toLowerCase();
-    if (!MATERIAL_MIMES_PERMITIDOS.includes(mime)) {
-      return NextResponse.json({ error: `Formato no admitido (${mime || 'desconocido'}).` }, { status: 400 });
-    }
-    if (archivo.size === 0) return NextResponse.json({ error: 'El archivo llegó vacío.' }, { status: 400 });
-    if (archivo.size > MAX_MATERIAL_BYTES) {
-      return NextResponse.json({ error: 'El archivo es muy grande. El tope es 25 MB.' }, { status: 400 });
-    }
+    const invalido = validarArchivoMaterial(archivo);
+    if (invalido) return NextResponse.json({ error: invalido }, { status: 400 });
+
+    // Si falta la configuración, lanza antes de leer el archivo o tocar nada.
+    const referencia = await subirArchivoDeMaterial(courseId, archivo as File);
 
     const material = await prisma.portalCourseMaterial.create({
       data: {
@@ -89,13 +89,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         title: titulo,
         orden,
         required: obligatorio,
-        file_name: archivo.name.slice(0, 255) || 'material',
-        mime,
-        contenido: Buffer.from(await archivo.arrayBuffer()),
+        ...referencia,
       },
     });
     return NextResponse.json({ ok: true, material: { id: material.id } });
   } catch (error) {
+    if (error instanceof FormacionStorageNoConfigurado) {
+      console.error('[portal] Formación sin SharePoint configurado:', error.detalle);
+      return NextResponse.json({ error: MENSAJE_NO_CONFIGURADO }, { status: 503 });
+    }
     console.error('[portal] POST /api/portal/courses/[id]/materials', error);
     return NextResponse.json({ error: 'No se pudo agregar el material.' }, { status: 500 });
   }
