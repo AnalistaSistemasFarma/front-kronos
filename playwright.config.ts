@@ -18,6 +18,8 @@ import { defineConfig, devices } from '@playwright/test';
  *                   reportes 90 días.
  *   - con-sesion  → pruebas *.session.spec.ts con esa sesión; nunca escriben
  *                   la contraseña, así que su traza no la contiene.
+ *   (S2) Con E2E_USER_EMAIL2/3 y E2E_USER_PASSWORD2/3, `setup` también deja
+ *   las sesiones 2 y 3 para el recorrido con varios revisores y aprobadores.
  * setup y con-sesion solo existen si hay E2E_USER_EMAIL y E2E_USER_PASSWORD.
  *
  * Reportes: reports/playwright/html (con capturas y trazas) y
@@ -26,6 +28,9 @@ import { defineConfig, devices } from '@playwright/test';
 const baseURL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3100';
 const hasUser = !!process.env.E2E_USER_EMAIL && !!process.env.E2E_USER_PASSWORD;
 export const STORAGE_STATE = 'reports/playwright/.auth/sesion.json';
+// Sprint 2: segundo y tercer usuario de pruebas (revisores/aprobadores del recorrido documental).
+export const STORAGE_STATE_2 = 'reports/playwright/.auth/sesion2.json';
+export const STORAGE_STATE_3 = 'reports/playwright/.auth/sesion3.json';
 
 export default defineConfig({
   testDir: './e2e',
