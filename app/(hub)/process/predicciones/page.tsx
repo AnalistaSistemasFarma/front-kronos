@@ -31,6 +31,7 @@ import '../../../../lib/charts/register';
 import CarteraCaja, { type Cartera } from './CarteraCaja';
 import LotesRegistros, { type LotesRegistrosData } from './LotesRegistros';
 import DecisionesArticulo, { MOSTRAR_DECISIONES_POR_ARTICULO } from './DecisionesArticulo';
+import { DECISIONES_EMPRESAS } from '../../../../lib/predictivo/decisiones';
 import {
   ComoLeer,
   KpiCard,
@@ -448,7 +449,7 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
       </Stack>
   );
 
-  const hayDecisiones = MOSTRAR_DECISIONES_POR_ARTICULO;
+  const hayDecisiones = MOSTRAR_DECISIONES_POR_ARTICULO && DECISIONES_EMPRESAS.includes(companyId);
   if (!data.cartera && !data.lotes_registros && !hayDecisiones) return <div>{ventasInventario}</div>;
   return (
     <Tabs defaultValue="ventas" variant="pills" mt="md" keepMounted={false}>
@@ -471,7 +472,7 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
       )}
       {hayDecisiones && (
         <Tabs.Panel value="decisiones" pt="md">
-          <DecisionesArticulo />
+          <DecisionesArticulo companyId={companyId} />
         </Tabs.Panel>
       )}
     </Tabs>
