@@ -4,6 +4,7 @@ import {
 } from '../orion/access';
 import { isDeleteAttachmentsSubprocess } from '../attachments/access';
 import { isValentineWallSubprocess } from '../valentine/constants';
+import { isSgcPermissionMarkerSubprocess } from '../sgc/constants';
 
 export const DASHBOARD_SOLICITANTE_URL = '/process/request-general/dashboard-solicitante';
 export const DASHBOARD_SOLICITADO_URL = '/process/request-general/dashboard-solicitado';
@@ -20,7 +21,8 @@ export function isHubHiddenRequestDashboardSubprocess(subprocess: {
     isOrionFirmaPrepareSubprocess(subprocess) ||
     isOrionFirmaSignSubprocess(subprocess) ||
     isDeleteAttachmentsSubprocess(subprocess) ||
-    isValentineWallSubprocess(subprocess)
+    isValentineWallSubprocess(subprocess) ||
+    isSgcPermissionMarkerSubprocess(subprocess)
   ) {
     return true;
   }

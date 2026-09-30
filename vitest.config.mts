@@ -15,7 +15,9 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['lib/**/*.test.ts'],
+    // `app/api/sgc/**`: pruebas de las rutas del SGC documental (con sesión y
+    // base simuladas); son evidencia de validación del módulo.
+    include: ['lib/**/*.test.ts', 'app/api/sgc/**/*.test.ts'],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
 
     // -----------------------------------------------------------------------
@@ -48,6 +50,9 @@ export default defineConfig({
         'lib/dashboard/viewTasksQuery.ts',
         'lib/help-desk/contactEmail.ts',
         'lib/help-desk/ticketDisplay.ts',
+        // SGC documental: reglas de negocio con umbral propio (ver abajo).
+        'lib/sgc/**/*.ts',
+        'app/api/sgc/**/route.ts',
       ],
       exclude: [
         '**/__tests__/**',
@@ -63,6 +68,14 @@ export default defineConfig({
         functions: 68,
         statements: 65,
         branches: 57,
+        // SGC documental (sistema validado ante el INVIMA): piso propio de
+        // 90 % en reglas de negocio. Mismo criterio "ratchet": solo sube.
+        'lib/sgc/**/*.ts': {
+          lines: 90,
+          functions: 90,
+          statements: 90,
+          branches: 90,
+        },
       },
     },
   },
