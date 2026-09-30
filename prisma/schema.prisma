@@ -1033,6 +1033,9 @@ model PortalCourse {
   created_by  String   @db.NVarChar(255)
   created_at  DateTime @default(now())
   updated_at  DateTime @default(now()) @updatedAt
+  /// Carpeta del curso dentro de FORMACION en SharePoint (`<slug>-<id>`).
+  /// Se fija en la primera subida y no cambia si el curso se renombra.
+  sp_folder_name String? @db.NVarChar(200)
 
   materials    PortalCourseMaterial[]
   enrollments  PortalCourseEnrollment[]
@@ -1059,9 +1062,16 @@ model PortalCourseMaterial {
   orden     Int          @default(0)
   /// Solo si type = 'LINK'.
   url       String?      @db.NVarChar(1000)
-  /// Solo si type = 'DOCUMENT' — mismos tres campos que `portal_banner`.
+  /// Solo si type = 'DOCUMENT'. El archivo vive en SharePoint
+  /// (TalentoHumano/FORMACION/<curso>/materiales) — aquí solo la referencia.
   file_name String?      @db.NVarChar(255)
   mime      String?      @db.NVarChar(100)
+  sp_drive_item_id String? @db.NVarChar(200)
+  sp_web_url       String? @db.NVarChar(1000)
+  file_size        BigInt?
+  /// EN DESUSO desde 2026-09-30 (migración 20260930120000): ya no se escribe.
+  /// Solo se lee para servir materiales subidos antes del cambio a
+  /// SharePoint. Pendiente de retiro en un PR posterior.
   contenido Bytes?       @db.VarBinary(Max)
   /// Si hace falta marcarlo como completado para que el curso llegue a 100%.
   required  Boolean      @default(true)
@@ -1116,6 +1126,11 @@ model PortalCertificate {
   student_name  String       @db.NVarChar(255)
   course_title  String       @db.NVarChar(255)
   issued_at     DateTime     @default(now())
+  /// PDF archivado en SharePoint (TalentoHumano/FORMACION/<curso>/certificados).
+  sp_drive_item_id String? @db.NVarChar(200)
+  sp_web_url       String? @db.NVarChar(1000)
+  file_name        String? @db.NVarChar(255)
+  file_size        BigInt?
 
   @@unique([course_id, student_email])
   @@index([student_email])

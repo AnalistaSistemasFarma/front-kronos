@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../../../../lib/prisma';
 import { identificar } from '../../../../../../../../lib/portal/acceso';
 import { formadoresDePortal } from '../../../../../../../../lib/portal/config';
+import {
+  FormacionStorageNoConfigurado,
+  MENSAJE_NO_CONFIGURADO,
+  descargarArchivoFormacion,
+} from '../../../../../../../../lib/portal/formacion-storage';
 
 function idDesdeParametro(valor: string): number | null {
   const n = Number(valor);
@@ -9,10 +14,12 @@ function idDesdeParametro(valor: string): number | null {
 }
 
 /**
- * Sirve el ARCHIVO de un material tipo DOCUMENT — mismo patrón que
- * `/api/portal/file`, pero leyendo `portal_course_material.contenido` en vez
- * de SharePoint (ver la migración: es el mismo mecanismo que `portal_banner`,
- * bytes en la base).
+ * Sirve el ARCHIVO de un material tipo DOCUMENT.
+ *
+ * Desde 2026-09-30 el archivo vive en SharePoint (FORMACION) y este endpoint
+ * hace de PROXY con la sesión del portal: el navegador nunca recibe una URL de
+ * SharePoint. Los materiales subidos ANTES del cambio (sin
+ * `sp_drive_item_id`) se siguen sirviendo desde `contenido`, en desuso.
  *
  *   GET /api/portal/courses/:id/materials/:materialId/file
  */
@@ -36,6 +43,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!material.course.active && !esFormador) {
       return NextResponse.json({ error: 'Este curso no está disponible.' }, { status: 404 });
     }
+    const disposicion = `inline; filename*=UTF-8''${encodeURIComponent(material.file_name ?? 'material')}`;
+
+    if (material.sp_drive_item_id) {
+      const archivo = await descargarArchivoFormacion(material.sp_drive_item_id);
+      const headers: Record<string, string> = {
+        'Content-Type': material.mime || archivo.mime || 'application/octet-stream',
+        'Content-Disposition': disposicion,
+        'Cache-Control': 'private, max-age=300',
+      };
+      if (archivo.tamano) headers['Content-Length'] = String(archivo.tamano);
+      return new NextResponse(archivo.cuerpo, { headers });
+    }
+
+    // Material anterior al cambio a SharePoint: bytes en la base (en desuso).
     if (!material.contenido || !material.mime) {
       return NextResponse.json({ error: 'Este material no tiene archivo.' }, { status: 404 });
     }
@@ -44,11 +65,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       headers: {
         'Content-Type': material.mime,
         'Content-Length': String(material.contenido.byteLength),
-        'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(material.file_name ?? 'material')}`,
+        'Content-Disposition': disposicion,
         'Cache-Control': 'private, max-age=300',
       },
     });
   } catch (error) {
+    if (error instanceof FormacionStorageNoConfigurado) {
+      console.error('[portal] Formación sin SharePoint configurado:', error.detalle);
+      return NextResponse.json({ error: MENSAJE_NO_CONFIGURADO }, { status: 503 });
+    }
     console.error('[portal] GET .../materials/[materialId]/file', error);
     return NextResponse.json({ error: 'No se pudo abrir el archivo.' }, { status: 502 });
   }

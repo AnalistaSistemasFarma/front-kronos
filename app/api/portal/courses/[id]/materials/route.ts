@@ -6,6 +6,13 @@ import {
   MAX_MATERIAL_BYTES,
   formadoresDePortal,
 } from '../../../../../../lib/portal/config';
+import { carpetaSharePointDelCurso } from '../../../../../../lib/portal/formacion';
+import {
+  FormacionStorageNoConfigurado,
+  MENSAJE_NO_CONFIGURADO,
+  leerConfigFormacion,
+  subirArchivoFormacion,
+} from '../../../../../../lib/portal/formacion-storage';
 
 function idDesdeParametro(valor: string): number | null {
   const n = Number(valor);
@@ -22,6 +29,11 @@ function idDesdeParametro(valor: string): number | null {
  *
  * Siempre multipart, aunque un enlace no suba nada: así el formulario del
  * formador es uno solo y no dos caminos distintos según el tipo.
+ *
+ * El ARCHIVO de un DOCUMENT se guarda en SharePoint (TalentoHumano /
+ * FORMACION / <curso> / materiales) — pedido de Cristian, 2026-09-30. La base
+ * solo guarda la referencia. Si SharePoint no está configurado, se responde
+ * 503 con un mensaje claro: NUNCA se cae en silencio a guardar en la base.
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const quien = await identificar(request);
@@ -82,6 +94,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'El archivo es muy grande. El tope es 25 MB.' }, { status: 400 });
     }
 
+    // Antes de leer el archivo y tocar nada: si falta la configuración, el
+    // formador se entera de una vez.
+    leerConfigFormacion();
+
+    const carpetaCurso = await carpetaSharePointDelCurso(courseId);
+    const subido = await subirArchivoFormacion({
+      carpetaCurso,
+      subcarpeta: 'materiales',
+      nombreArchivo: archivo.name,
+      contenido: new Uint8Array(await archivo.arrayBuffer()),
+      mime,
+    });
+
     const material = await prisma.portalCourseMaterial.create({
       data: {
         course_id: courseId,
@@ -89,13 +114,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         title: titulo,
         orden,
         required: obligatorio,
-        file_name: archivo.name.slice(0, 255) || 'material',
+        file_name: (subido.nombre || archivo.name).slice(0, 255) || 'material',
         mime,
-        contenido: Buffer.from(await archivo.arrayBuffer()),
+        sp_drive_item_id: subido.driveItemId,
+        sp_web_url: subido.webUrl,
+        file_size: BigInt(subido.tamano),
       },
     });
     return NextResponse.json({ ok: true, material: { id: material.id } });
   } catch (error) {
+    if (error instanceof FormacionStorageNoConfigurado) {
+      console.error('[portal] Formación sin SharePoint configurado:', error.detalle);
+      return NextResponse.json({ error: MENSAJE_NO_CONFIGURADO }, { status: 503 });
+    }
     console.error('[portal] POST /api/portal/courses/[id]/materials', error);
     return NextResponse.json({ error: 'No se pudo agregar el material.' }, { status: 500 });
   }

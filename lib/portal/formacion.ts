@@ -9,6 +9,8 @@
  */
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../prisma';
+import { generarCertificadoPdf } from './certificado-pdf';
+import { carpetaDeCurso, subirArchivoFormacion, type ArchivoEnSharePoint } from './formacion-storage';
 
 /** Un material tal como lo necesita el cálculo de progreso. */
 interface MaterialParaProgreso {
@@ -82,6 +84,13 @@ export async function emitirCertificadoSiCorresponde(params: {
         },
         select: { code: true, issued_at: true },
       });
+      // Archiva el PDF en SharePoint (FORMACION/<curso>/certificados). Si
+      // falla, el certificado YA está emitido y se puede descargar igual (se
+      // genera al vuelo): el reintento ocurre la próxima vez que alguien lo
+      // abra — ver `GET /api/portal/certificates/[code]`.
+      await archivarCertificadoEnSharePoint(creado.code).catch((e) =>
+        console.error('[portal] No se pudo archivar el certificado en SharePoint', creado.code, e)
+      );
       return { code: creado.code, issuedAt: creado.issued_at };
     } catch (error) {
       const mensaje = (error as { code?: string })?.code;
@@ -115,4 +124,67 @@ export async function resolverNombreEstudiante(correo: string): Promise<string> 
   const usuario = await prisma.user.findUnique({ where: { email: correo }, select: { name: true } });
   const nombre = usuario?.name?.trim();
   return nombre || nombreDesdeCorreo(correo);
+}
+
+/**
+ * La carpeta del curso dentro de FORMACION (`<slug>-<id>`).
+ *
+ * Se calcula con el título en la PRIMERA subida y se guarda en
+ * `portal_course.sp_folder_name`: si después se renombra el curso, sus
+ * archivos siguen yendo a la misma carpeta en vez de repartirse en dos.
+ */
+export async function carpetaSharePointDelCurso(cursoId: number): Promise<string> {
+  const curso = await prisma.portalCourse.findUnique({
+    where: { id: cursoId },
+    select: { title: true, sp_folder_name: true },
+  });
+  if (!curso) throw new Error(`Curso ${cursoId} no encontrado.`);
+  if (curso.sp_folder_name) return curso.sp_folder_name;
+
+  const carpeta = carpetaDeCurso(curso.title, cursoId);
+  // `updateMany` con la condición de nulo: si dos subidas llegan a la vez, la
+  // segunda no pisa lo que fijó la primera.
+  await prisma.portalCourse.updateMany({
+    where: { id: cursoId, sp_folder_name: null },
+    data: { sp_folder_name: carpeta },
+  });
+  const releido = await prisma.portalCourse.findUnique({ where: { id: cursoId }, select: { sp_folder_name: true } });
+  return releido?.sp_folder_name ?? carpeta;
+}
+
+/**
+ * Genera el PDF de un certificado y lo sube a
+ * `FORMACION/<curso>/certificados/<codigo>.pdf`, guardando la referencia.
+ * Si ya estaba archivado, no hace nada. Lanza si SharePoint no está
+ * configurado o falla — quien llama decide si eso es fatal.
+ */
+export async function archivarCertificadoEnSharePoint(code: string): Promise<ArchivoEnSharePoint | null> {
+  const cert = await prisma.portalCertificate.findUnique({ where: { code } });
+  if (!cert) return null;
+  if (cert.sp_drive_item_id) return null;
+
+  const pdf = await generarCertificadoPdf({
+    code: cert.code,
+    studentName: cert.student_name,
+    courseTitle: cert.course_title,
+    issuedAt: cert.issued_at,
+  });
+  const carpetaCurso = await carpetaSharePointDelCurso(cert.course_id);
+  const archivo = await subirArchivoFormacion({
+    carpetaCurso,
+    subcarpeta: 'certificados',
+    nombreArchivo: `${cert.code}.pdf`,
+    contenido: pdf,
+    mime: 'application/pdf',
+  });
+  await prisma.portalCertificate.update({
+    where: { code },
+    data: {
+      sp_drive_item_id: archivo.driveItemId,
+      sp_web_url: archivo.webUrl,
+      file_name: archivo.nombre || `${cert.code}.pdf`,
+      file_size: BigInt(archivo.tamano),
+    },
+  });
+  return archivo;
 }

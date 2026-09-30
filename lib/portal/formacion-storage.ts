@@ -1,0 +1,350 @@
+/**
+ * PORTAL DE TALENTO HUMANO — FORMACIÓN — almacenamiento en SharePoint.
+ *
+ * Pedido de Cristian Baldión (2026-09-30): "todo tipo de archivo que yo suba
+ * en la sección de Formación debe quedar en la carpeta FORMACION del sitio de
+ * SharePoint de Talento Humano". Hasta ahora los materiales vivían como
+ * VARBINARY en `portal_course_material.contenido` y los certificados se
+ * generaban al vuelo sin guardarse en ningún lado.
+ *
+ * ⚠️ USO EXCLUSIVO DE LA SECCIÓN FORMACIÓN DEL PORTAL TH. Este módulo y sus
+ * variables `PORTAL_TH_SP_*` NO se reutilizan desde ningún otro módulo de
+ * SynerLink (SGC, solicitudes, gestión documental, chat…): la credencial es
+ * una app dedicada (SynerLink-PortalTH-Formacion) con `Sites.Selected` y rol
+ * `write` SOLO sobre el sitio TalentoHumano, y el código solo sabe escribir
+ * DENTRO de la carpeta base (FORMACION). Hay una prueba que falla si alguien
+ * lo importa por fuera de `lib/portal/` o `app/api/portal/`
+ * (`__tests__/formacion-storage-aislamiento.test.ts`).
+ *
+ * POR QUÉ NO SE USA EL CONECTOR `mcp-sharepoint-gss` (como el resto del
+ * portal): ese conector es de SOLO LECTURA a propósito y su app de Entra ya
+ * tiene más permisos de los que debería. Darle escritura ampliaría todavía más
+ * una credencial sobreprivilegiada; una app nueva, acotada a UN sitio, es lo
+ * más seguro.
+ *
+ * Estructura en SharePoint (biblioteca "Documentos compartidos" del sitio):
+ *
+ *   FORMACION/<slug-curso>-<id>/materiales/<archivo>
+ *   FORMACION/<slug-curso>-<id>/certificados/<codigo>.pdf
+ */
+import 'server-only';
+
+/* ───────────────────────────── Configuración ───────────────────────────── */
+
+export interface ConfigFormacionSharePoint {
+  tenantId: string;
+  clientId: string;
+  clientSecret: string;
+  siteId: string;
+  /** Carpeta base dentro de la biblioteca. Un solo segmento, validado. */
+  carpetaBase: string;
+}
+
+/** Variables obligatorias. La carpeta base tiene valor por defecto. */
+const VARIABLES_OBLIGATORIAS = [
+  'PORTAL_TH_SP_TENANT_ID',
+  'PORTAL_TH_SP_CLIENT_ID',
+  'PORTAL_TH_SP_CLIENT_SECRET',
+  'PORTAL_TH_SP_SITE_ID',
+] as const;
+
+export const CARPETA_BASE_POR_DEFECTO = 'FORMACION';
+
+/** Mensaje que ve el formador cuando falta la configuración. */
+export const MENSAJE_NO_CONFIGURADO =
+  'No se puede guardar el archivo: la conexión del portal con SharePoint (carpeta FORMACION de Talento Humano) ' +
+  'no está configurada. Avise a Tecnología.';
+
+/**
+ * Falta (o está mal) la configuración de SharePoint. Las rutas lo traducen a
+ * un 503 con `MENSAJE_NO_CONFIGURADO` — NUNCA a un guardado silencioso en la
+ * base de datos.
+ */
+export class FormacionStorageNoConfigurado extends Error {
+  constructor(readonly detalle: string) {
+    super(`[portal-th/formacion-storage] ${detalle}`);
+    this.name = 'FormacionStorageNoConfigurado';
+  }
+}
+
+/** Graph respondió con error. */
+export class FormacionStorageError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message);
+    this.name = 'FormacionStorageError';
+  }
+}
+
+/** Lee y valida la configuración. Lanza `FormacionStorageNoConfigurado`. */
+export function leerConfigFormacion(env: NodeJS.ProcessEnv = process.env): ConfigFormacionSharePoint {
+  const faltantes = VARIABLES_OBLIGATORIAS.filter((v) => !(env[v] ?? '').trim());
+  if (faltantes.length) {
+    throw new FormacionStorageNoConfigurado(`Faltan variables de entorno: ${faltantes.join(', ')}`);
+  }
+  const carpeta = (env.PORTAL_TH_SP_FOLDER ?? '').trim() || CARPETA_BASE_POR_DEFECTO;
+  // La carpeta base es UN solo segmento: nada de "FORMACION/../OTRA" ni de
+  // "/" que permitan que un cambio de variable saque la escritura de ahí.
+  if (!esSegmentoValido(carpeta)) {
+    throw new FormacionStorageNoConfigurado(`PORTAL_TH_SP_FOLDER no es un nombre de carpeta válido: "${carpeta}"`);
+  }
+  return {
+    tenantId: env.PORTAL_TH_SP_TENANT_ID!.trim(),
+    clientId: env.PORTAL_TH_SP_CLIENT_ID!.trim(),
+    clientSecret: env.PORTAL_TH_SP_CLIENT_SECRET!.trim(),
+    siteId: env.PORTAL_TH_SP_SITE_ID!.trim(),
+    carpetaBase: carpeta,
+  };
+}
+
+/* ─────────────────────────── Rutas seguras ─────────────────────────────── */
+
+/** Caracteres que SharePoint/OneDrive no admiten en un nombre, más controles. */
+const CARACTERES_PROHIBIDOS = /["*:<>?/\\|\u0000-\u001f\u007f]/;
+const CARACTERES_PROHIBIDOS_G = /["*:<>?/\\|\u0000-\u001f\u007f]/g;
+const NOMBRES_RESERVADOS = /^(\.|\.\.|con|prn|aux|nul|com\d|lpt\d|desktop\.ini|_vti_.*)$/i;
+const LARGO_MAX_SEGMENTO = 120;
+
+/** Un segmento ya limpio: sin separadores, sin `..`, sin reservados. */
+export function esSegmentoValido(segmento: string): boolean {
+  if (!segmento || segmento.length > LARGO_MAX_SEGMENTO) return false;
+  if (segmento !== segmento.trim()) return false;
+  if (CARACTERES_PROHIBIDOS.test(segmento)) return false;
+  if (segmento.includes('..')) return false;
+  if (segmento.endsWith('.')) return false;
+  if (NOMBRES_RESERVADOS.test(segmento)) return false;
+  return true;
+}
+
+/**
+ * Convierte el nombre que trae el navegador en un nombre de archivo seguro:
+ * se queda solo con la última parte (sin rutas), quita lo que SharePoint no
+ * admite y cualquier `..`, y recorta el largo conservando la extensión.
+ */
+export function nombreArchivoSeguro(original: string, respaldo = 'archivo'): string {
+  const base = (original ?? '').normalize('NFC').split(/[\\/]/).pop() ?? '';
+  let limpio = base
+    .replace(CARACTERES_PROHIBIDOS_G, '_')
+    .replace(/\.{2,}/g, '.')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[.\s~]+/, '')
+    .replace(/[.\s]+$/, '');
+  if (limpio.length > LARGO_MAX_SEGMENTO) {
+    const punto = limpio.lastIndexOf('.');
+    const ext = punto > 0 && limpio.length - punto <= 10 ? limpio.slice(punto) : '';
+    limpio = limpio.slice(0, LARGO_MAX_SEGMENTO - ext.length).trim() + ext;
+  }
+  if (!limpio || NOMBRES_RESERVADOS.test(limpio) || !esSegmentoValido(limpio)) return respaldo;
+  return limpio;
+}
+
+/** `<slug-del-titulo>-<id>`: la carpeta de un curso. */
+export function carpetaDeCurso(titulo: string, cursoId: number): string {
+  if (!Number.isInteger(cursoId) || cursoId <= 0) throw new Error('Id de curso no válido.');
+  const slug = (titulo ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60)
+    .replace(/-+$/g, '');
+  return `${slug || 'curso'}-${cursoId}`;
+}
+
+export type SubcarpetaFormacion = 'materiales' | 'certificados';
+const SUBCARPETAS: readonly SubcarpetaFormacion[] = ['materiales', 'certificados'];
+
+/**
+ * Arma la ruta (relativa a la raíz de la biblioteca) SIEMPRE debajo de la
+ * carpeta base. Cada segmento se valida por separado; si alguno no pasa, se
+ * lanza — nunca se "arregla" en silencio una ruta que podría salirse.
+ */
+export function rutaDentroDeFormacion(
+  carpetaBase: string,
+  carpetaCurso: string,
+  subcarpeta: SubcarpetaFormacion,
+  nombreArchivo: string
+): string {
+  if (!SUBCARPETAS.includes(subcarpeta)) throw new Error(`Subcarpeta no permitida: ${subcarpeta}`);
+  const segmentos = [carpetaBase, carpetaCurso, subcarpeta, nombreArchivo];
+  for (const s of segmentos) {
+    if (!esSegmentoValido(s)) throw new Error(`Segmento de ruta no válido: "${s}"`);
+  }
+  return segmentos.join('/');
+}
+
+/** La ruta codificada para `/drive/root:/<ruta>:`. */
+function codificarRuta(ruta: string): string {
+  return ruta.split('/').map(encodeURIComponent).join('/');
+}
+
+/* ─────────────────────────── Cliente Graph ─────────────────────────────── */
+
+const GRAPH = 'https://graph.microsoft.com/v1.0';
+/** Por encima de esto, Graph exige upload session (el PUT simple tope 4 MB). */
+export const LIMITE_SUBIDA_SIMPLE = 4 * 1024 * 1024;
+/** Trozo de la upload session: múltiplo de 320 KiB, como exige Graph. */
+export const TAMANO_TROZO = 320 * 1024 * 16; // 5 MiB
+
+type Fetch = typeof fetch;
+
+export interface ArchivoEnSharePoint {
+  driveItemId: string;
+  webUrl: string | null;
+  nombre: string;
+  tamano: number;
+  mime: string;
+}
+
+interface TokenCache {
+  clave: string;
+  token: string;
+  vence: number;
+}
+let tokenCache: TokenCache | null = null;
+
+/** Solo para pruebas. */
+export function _reiniciarCacheToken() {
+  tokenCache = null;
+}
+
+async function obtenerToken(cfg: ConfigFormacionSharePoint, f: Fetch): Promise<string> {
+  const clave = `${cfg.tenantId}|${cfg.clientId}`;
+  if (tokenCache && tokenCache.clave === clave && tokenCache.vence > Date.now() + 60_000) return tokenCache.token;
+
+  const res = await f(`https://login.microsoftonline.com/${encodeURIComponent(cfg.tenantId)}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: cfg.clientId,
+      client_secret: cfg.clientSecret,
+      scope: 'https://graph.microsoft.com/.default',
+      grant_type: 'client_credentials',
+    }).toString(),
+  });
+  const data = (await res.json().catch(() => null)) as { access_token?: string; expires_in?: number } | null;
+  if (!res.ok || !data?.access_token) {
+    throw new FormacionStorageError(`No se pudo obtener token de Graph (${res.status}).`, res.status);
+  }
+  tokenCache = { clave, token: data.access_token, vence: Date.now() + (data.expires_in ?? 3600) * 1000 };
+  return data.access_token;
+}
+
+interface DriveItemGraph {
+  id?: string;
+  name?: string;
+  size?: number;
+  webUrl?: string;
+  file?: { mimeType?: string };
+}
+
+function aReferencia(item: DriveItemGraph, mime: string, tamano: number): ArchivoEnSharePoint {
+  if (!item?.id) throw new FormacionStorageError('Graph no devolvió el id del archivo subido.');
+  return {
+    driveItemId: item.id,
+    webUrl: item.webUrl ?? null,
+    nombre: item.name ?? '',
+    tamano: item.size ?? tamano,
+    mime: item.file?.mimeType || mime,
+  };
+}
+
+export interface SubirParams {
+  carpetaCurso: string;
+  subcarpeta: SubcarpetaFormacion;
+  nombreArchivo: string;
+  contenido: Uint8Array;
+  mime: string;
+}
+
+/**
+ * Sube un archivo a `FORMACION/<curso>/<subcarpeta>/<nombre>`.
+ * - ≤ 4 MB: PUT simple a `:/content`.
+ * - > 4 MB: `createUploadSession` y trozos de 5 MiB.
+ * En ambos casos `conflictBehavior=rename`: si ya existe uno con ese nombre,
+ * SharePoint le agrega " 1", " 2"… en vez de pisarlo.
+ */
+export async function subirArchivoFormacion(
+  params: SubirParams,
+  deps: { config?: ConfigFormacionSharePoint; fetch?: Fetch } = {}
+): Promise<ArchivoEnSharePoint> {
+  const cfg = deps.config ?? leerConfigFormacion();
+  const f = deps.fetch ?? fetch;
+  const nombre = nombreArchivoSeguro(params.nombreArchivo);
+  const ruta = rutaDentroDeFormacion(cfg.carpetaBase, params.carpetaCurso, params.subcarpeta, nombre);
+  const token = await obtenerToken(cfg, f);
+  const base = `${GRAPH}/sites/${encodeURIComponent(cfg.siteId)}/drive/root:/${codificarRuta(ruta)}:`;
+  const total = params.contenido.byteLength;
+
+  if (total <= LIMITE_SUBIDA_SIMPLE) {
+    const res = await f(`${base}/content?@microsoft.graph.conflictBehavior=rename`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': params.mime || 'application/octet-stream' },
+      body: params.contenido as BodyInit,
+    });
+    if (!res.ok) throw new FormacionStorageError(`Graph rechazó la subida (${res.status}).`, res.status);
+    return aReferencia((await res.json()) as DriveItemGraph, params.mime, total);
+  }
+
+  const sesion = await f(`${base}/createUploadSession`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } }),
+  });
+  const datosSesion = (await sesion.json().catch(() => null)) as { uploadUrl?: string } | null;
+  if (!sesion.ok || !datosSesion?.uploadUrl) {
+    throw new FormacionStorageError(`No se pudo abrir la sesión de subida (${sesion.status}).`, sesion.status);
+  }
+  const uploadUrl = datosSesion.uploadUrl;
+
+  try {
+    for (let inicio = 0; inicio < total; inicio += TAMANO_TROZO) {
+      const fin = Math.min(inicio + TAMANO_TROZO, total);
+      // La uploadUrl ya viene preautorizada: NO se manda el Bearer (Graph lo
+      // rechaza si se incluye).
+      const res = await f(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Length': String(fin - inicio),
+          'Content-Range': `bytes ${inicio}-${fin - 1}/${total}`,
+        },
+        body: params.contenido.subarray(inicio, fin) as BodyInit,
+      });
+      if (res.status === 200 || res.status === 201) {
+        return aReferencia((await res.json()) as DriveItemGraph, params.mime, total);
+      }
+      if (res.status !== 202) throw new FormacionStorageError(`Falló un trozo de la subida (${res.status}).`, res.status);
+    }
+  } catch (error) {
+    // Cierra la sesión para no dejar un archivo a medias ocupando la cuota.
+    await f(uploadUrl, { method: 'DELETE' }).catch(() => undefined);
+    throw error;
+  }
+  throw new FormacionStorageError('La subida terminó sin que Graph confirmara el archivo.');
+}
+
+/**
+ * Descarga un archivo por su driveItemId para servirlo por el portal (proxy):
+ * el navegador nunca ve una URL de SharePoint.
+ */
+export async function descargarArchivoFormacion(
+  driveItemId: string,
+  deps: { config?: ConfigFormacionSharePoint; fetch?: Fetch } = {}
+): Promise<{ cuerpo: ReadableStream<Uint8Array> | null; tamano: number | null; mime: string | null }> {
+  if (!/^[A-Za-z0-9!._-]{1,200}$/.test(driveItemId)) throw new FormacionStorageError('Id de archivo no válido.');
+  const cfg = deps.config ?? leerConfigFormacion();
+  const f = deps.fetch ?? fetch;
+  const token = await obtenerToken(cfg, f);
+  const res = await f(
+    `${GRAPH}/sites/${encodeURIComponent(cfg.siteId)}/drive/items/${encodeURIComponent(driveItemId)}/content`,
+    { headers: { Authorization: `Bearer ${token}` }, redirect: 'follow' }
+  );
+  if (!res.ok) throw new FormacionStorageError(`Graph no entregó el archivo (${res.status}).`, res.status);
+  const largo = Number(res.headers.get('content-length'));
+  return {
+    cuerpo: res.body,
+    tamano: Number.isFinite(largo) && largo > 0 ? largo : null,
+    mime: res.headers.get('content-type'),
+  };
+}
