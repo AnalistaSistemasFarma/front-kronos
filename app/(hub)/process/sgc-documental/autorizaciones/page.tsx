@@ -47,6 +47,9 @@ import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch'
 import { sgcAuthorizationColor } from '../../../../../lib/sgc/authorizations';
 import type { SgcAuthorizationRow, SgcAuthorizationTypeRow } from '../../../../../lib/sgc/db/authorizations';
 import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
+import type { SgcRequestDetail } from '../../../../../lib/sgc/db/requests';
+import type { SgcSignatureMeaning } from '../../../../../lib/sgc/flows/definition';
+import SgcSignModal from '../../../../../components/sgc/signature/SgcSignModal';
 
 /**
  * «Autorizaciones SGC» — MÓDULO INDEPENDIENTE del SGC. COPIA CONGELADA
@@ -214,6 +217,8 @@ function AuthorizationBoard() {
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // Sprint 3: autorizar un paso con firma = FIRMA ELECTRÓNICA propia del SGC (reautenticación + motivo).
+  const [signFor, setSignFor] = useState<{ row: SgcAuthorizationRow; detail: SgcRequestDetail } | null>(null);
   const all = useMemo(() => data?.authorizations ?? [], [data]);
   const rows = all.filter((r) => !status || status === 'todas' || r.status === status);
   const stats = { total: all.length, pendientes: all.filter((r) => r.status === 'pendiente').length, autorizadas: all.filter((r) => r.status === 'autorizada').length, rechazadas: all.filter((r) => r.status === 'rechazada').length };
@@ -233,6 +238,20 @@ function AuthorizationBoard() {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
+    }
+  };
+
+  const startAuthorize = async (row: SgcAuthorizationRow) => {
+    setMsg(null);
+    try {
+      const res = await fetch(`/api/sgc/tasks/${row.idTask}`, { cache: 'no-store' });
+      const detail = (await res.json()) as SgcRequestDetail & { error?: string };
+      if (!res.ok) throw new Error(detail.error || `Error ${res.status}`);
+      const focus = detail.tasks.find((t) => t.id === row.idTask);
+      if (focus?.myAction?.signatureMeaning) setSignFor({ row, detail });
+      else setAuthorize(row);
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
     }
   };
 
@@ -357,7 +376,7 @@ function AuthorizationBoard() {
                           {isPending && req.inTurn && (
                             <>
                               <Tooltip label='Autorizar'>
-                                <ActionIcon variant='light' color='green' onClick={() => setAuthorize(req)} aria-label='Autorizar' data-testid='sgc-autorizar'>
+                                <ActionIcon variant='light' color='green' onClick={() => void startAuthorize(req)} aria-label='Autorizar' data-testid='sgc-autorizar'>
                                   <IconThumbUp size={16} />
                                 </ActionIcon>
                               </Tooltip>
@@ -462,9 +481,6 @@ function AuthorizationBoard() {
             </Text>
           </Group>
           <Textarea label='Comentario (opcional)' autosize minRows={2} value={comment} onChange={(e) => setComment(e.currentTarget.value)} />
-          <Text size='xs' c='dimmed'>
-            La firma electrónica propia del SGC (con reautenticación y motivo) se habilita en el Sprint 3; por ahora la decisión queda registrada con su sesión.
-          </Text>
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setAuthorize(null)} disabled={busy}>
               Cancelar
@@ -475,6 +491,35 @@ function AuthorizationBoard() {
           </Group>
         </Stack>
       </Modal>
+
+      {signFor && (() => {
+        const focus = signFor.detail.tasks.find((t) => t.id === signFor.row.idTask)!;
+        const d = signFor.detail;
+        const draftHref = d.currentDraft
+          ? d.currentDraft.kind === 'borrador_editor'
+            ? `/process/sgc-documental/solicitudes/${d.request.id}/borrador?empresa=${d.request.idCompany}`
+            : `/api/sgc/requests/${d.request.id}/attachments/${d.currentDraft.ref.split(':')[1]}`
+          : null;
+        return (
+          <SgcSignModal
+            opened
+            onClose={() => setSignFor(null)}
+            title={`Autorizar firmando · Solicitud #${signFor.row.idRequest} (${signFor.row.typeName})`}
+            meaning={focus.myAction!.signatureMeaning as SgcSignatureMeaning}
+            draft={d.currentDraft}
+            draftHref={draftHref}
+            checklist={focus.myAction!.checklist}
+            submitLabel='Firmar y autorizar'
+            onSign={async (payload) => {
+              const res = await sgcSend<{ controlledPdf?: { status: string | null; error?: string } }>(`/api/sgc/authorizations/${signFor.row.id}/sign`, 'POST', payload);
+              setSignFor(null);
+              const pdf = res.controlledPdf?.status === 'generado' ? ' Se generó el PDF controlado.' : res.controlledPdf?.status === 'error' ? ` El PDF controlado quedó pendiente: ${res.controlledPdf.error ?? ''}` : '';
+              setMsg({ ok: true, text: `Autorización registrada con firma electrónica.${pdf}` });
+              reload();
+            }}
+          />
+        );
+      })()}
 
       <Modal opened={Boolean(reject)} onClose={() => setReject(null)} title={`Rechazar la solicitud #${reject?.idRequest ?? ''}`} centered>
         <Stack>

@@ -18,6 +18,9 @@ import { defineConfig, devices } from '@playwright/test';
  *                   reportes 90 días.
  *   - con-sesion  → pruebas *.session.spec.ts con esa sesión; nunca escriben
  *                   la contraseña, así que su traza no la contiene.
+ *   - firma       → (S3) pruebas *.firma.spec.ts: firman con reautenticación
+ *                   (escriben la contraseña), así que corren SIN traza,
+ *                   capturas ni video, como `setup`.
  *   (S2) Con E2E_USER_EMAIL2/3 y E2E_USER_PASSWORD2/3, `setup` también deja
  *   las sesiones 2 y 3 para el recorrido con varios revisores y aprobadores.
  * setup y con-sesion solo existen si hay E2E_USER_EMAIL y E2E_USER_PASSWORD.
@@ -54,7 +57,7 @@ export default defineConfig({
   projects: [
     {
       name: 'publico',
-      testIgnore: [/\.setup\.ts$/, /\.session\.spec\.ts$/],
+      testIgnore: [/\.setup\.ts$/, /\.session\.spec\.ts$/, /\.firma\.spec\.ts$/],
       use: { ...devices['Desktop Chrome'] },
     },
     ...(hasUser
@@ -69,6 +72,16 @@ export default defineConfig({
             testMatch: /\.session\.spec\.ts$/,
             dependencies: ['setup'],
             use: { ...devices['Desktop Chrome'], storageState: STORAGE_STATE },
+          },
+          {
+            // Sprint 3: firma electrónica con REAUTENTICACIÓN. Estas pruebas
+            // escriben la contraseña al firmar, así que corren como `setup`:
+            // sin traza, sin capturas y sin video (la CI verifica además que
+            // ninguna contraseña quede en los reportes).
+            name: 'firma',
+            testMatch: /\.firma\.spec\.ts$/,
+            dependencies: ['setup'],
+            use: { ...devices['Desktop Chrome'], storageState: STORAGE_STATE, trace: 'off' as const, screenshot: 'off' as const, video: 'off' as const },
           },
         ]
       : []),

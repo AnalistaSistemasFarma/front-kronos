@@ -121,6 +121,7 @@ export async function loadDefinition(db: Tx, idFlowVersion: number): Promise<Sgc
       options: parseOptions(f.options_json),
       helpText: f.help_text,
       sortOrder: f.sort_order,
+      qualityCheck: f.quality_check,
     })),
   };
 }
@@ -303,6 +304,7 @@ async function writeDefinitionRows(tx: Prisma.TransactionClient, idFlowVersion: 
         options_json: f.options.length ? JSON.stringify(f.options) : null,
         help_text: f.helpText,
         sort_order: f.sortOrder,
+        quality_check: Boolean(f.qualityCheck),
       })),
     });
   }

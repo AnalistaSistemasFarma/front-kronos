@@ -189,3 +189,58 @@ export const SGC_DOCUMENT_FLOW_V1: SgcFlowDefinition = {
     },
   ],
 };
+
+/**
+ * Sprint 3 — lista de chequeo de ESTRUCTURA DOCUMENTAL de Calidad dentro de la
+ * Aprobación (paso 3): la responde el cupo del grupo SGC-VERIF-CALIDAD al
+ * firmar. Es configurable desde el administrador de flujos (campos marcados
+ * «Chequeo Calidad»); estos son los puntos iniciales de OLP (supuesto a
+ * validar con Calidad).
+ */
+export const SGC_QUALITY_CHECKLIST_OLP: SgcFlowDefinition['formFields'] = [
+  {
+    taskKey: 'aprobacion',
+    key: 'chk_codificacion',
+    label: 'Codificación conforme a la guía de codificación',
+    type: 'si_no',
+    required: true,
+    options: [],
+    helpText: 'Código, versión y tipo documental según la guía de la empresa.',
+    sortOrder: 10,
+    qualityCheck: true,
+  },
+  {
+    taskKey: 'aprobacion',
+    key: 'chk_formato',
+    label: 'Formato institucional (encabezado, estructura y numeración)',
+    type: 'si_no',
+    required: true,
+    options: [],
+    helpText: 'Plantilla vigente, secciones obligatorias y paginación.',
+    sortOrder: 11,
+    qualityCheck: true,
+  },
+  {
+    taskKey: 'aprobacion',
+    key: 'chk_anexos',
+    label: 'Anexos y formatos relacionados completos y referenciados',
+    type: 'si_no',
+    required: false,
+    options: [],
+    helpText: 'Si el documento no tiene anexos, marque «No aplica».',
+    sortOrder: 12,
+    qualityCheck: true,
+  },
+];
+
+/**
+ * Flujo DOCUMENTAL v2 (Sprint 3): la v1 más la lista de chequeo de Calidad en
+ * la Aprobación. La siembra prisma/manual/2026-09-30-sgc-s3-firma-calidad-olp.sql
+ * como versión nueva (la v1 queda retirada; las solicitudes en curso siguen
+ * con la v1).
+ */
+export const SGC_DOCUMENT_FLOW_V2: SgcFlowDefinition = {
+  tasks: SGC_DOCUMENT_FLOW_V1.tasks,
+  transitions: SGC_DOCUMENT_FLOW_V1.transitions,
+  formFields: [...SGC_DOCUMENT_FLOW_V1.formFields, ...SGC_QUALITY_CHECKLIST_OLP],
+};

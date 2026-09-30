@@ -119,9 +119,13 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
       : []),
     {
       title: 'Firma electrónica del SGC',
-      description: 'Elaboró, revisó y aprobó con reautenticación, motivo y sello de tiempo.',
+      description: company.canQuality
+        ? 'Maestro de firmas de la inducción; se firma en cada tarea con reautenticación, motivo y sello de tiempo.'
+        : 'Elaboró, revisó y aprobó se firman en la tarea con su contraseña, motivo y sello de tiempo.',
       icon: <IconFileCertificate size={24} />,
       sprint: 'Sprint 3',
+      href: sgcHref(`${SGC_BASE_URL}/${company.canQuality ? 'firmas' : 'tareas'}`, id),
+      ...(company.canQuality ? { badge: 'Calidad' } : {}),
     }
   );
   return cards;

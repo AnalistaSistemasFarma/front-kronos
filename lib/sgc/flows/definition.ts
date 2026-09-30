@@ -122,6 +122,13 @@ export interface SgcFormFieldDefinition {
   options: string[];
   helpText: string | null;
   sortOrder: number;
+  /**
+   * Sprint 3: punto de la LISTA DE CHEQUEO de estructura documental de
+   * Calidad (guía de codificación, formato, anexos…). Lo responde el cupo del
+   * grupo de verificación de la tarea al firmar: Cumple / No cumple / No
+   * aplica (si es obligatorio, «No aplica» no vale).
+   */
+  qualityCheck?: boolean;
 }
 
 export interface SgcFlowDefinition {
@@ -315,7 +322,17 @@ export function normalizeFlowDefinition(input: unknown): SgcFlowDefinition {
       options: type === 'seleccion' ? options : [],
       helpText: text(f?.helpText, `${label} · ayuda`, 500, true),
       sortOrder: int(f?.sortOrder ?? i, `${label} · orden`, 0, 999)!,
+      qualityCheck: Boolean(f?.qualityCheck),
     };
+    if (def.qualityCheck) {
+      const owner = tasks.find((t) => t.key === taskKey);
+      if (!owner || !owner.poolAuthorizationTypeCode) {
+        throw new SgcError(`${label}: un punto de la lista de chequeo de Calidad va en una tarea con grupo de verificación.`);
+      }
+      // La respuesta es Cumple / No cumple / No aplica (no depende del tipo).
+      def.type = 'si_no';
+      def.options = [];
+    }
     const id = `${taskKey ?? ''}:${def.key}`;
     if (fieldIds.has(id)) throw new SgcError(`${label}: la clave "${def.key}" ya existe en ese formulario.`);
     fieldIds.add(id);

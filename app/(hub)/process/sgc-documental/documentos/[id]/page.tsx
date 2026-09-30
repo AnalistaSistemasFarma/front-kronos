@@ -23,6 +23,7 @@ import {
 import { IconAlertTriangle, IconArrowLeft, IconBan, IconCheck, IconEdit, IconEye, IconKey } from '@tabler/icons-react';
 import SgcShell from '../../../../../../components/sgc/SgcShell';
 import SgcSecureViewer from '../../../../../../components/sgc/SgcSecureViewer';
+import { SgcDocumentAuditCard, SgcVerifyVersionButton } from '../../../../../../components/sgc/signature/SgcDocumentAudit';
 import { SgcConfidentialityBadge, SgcDocumentCode, SgcReviewBadge, SgcStatusBadge } from '../../../../../../components/sgc/SgcBadges';
 import { sgcHref } from '../../../../../../components/sgc/useSgcCompany';
 import { sgcSend, useSgcFetch } from '../../../../../../components/sgc/useSgcFetch';
@@ -273,9 +274,12 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
                     </Text>
                   </Table.Td>
                   <Table.Td>
-                    <Button size='xs' variant='subtle' onClick={() => setViewVersion(v.id)}>
-                      Ver
-                    </Button>
+                    <Group gap={4} wrap='nowrap'>
+                      <Button size='xs' variant='subtle' onClick={() => setViewVersion(v.id)}>
+                        Ver
+                      </Button>
+                      <SgcVerifyVersionButton idDocument={d.idDocument} idVersion={v.id} />
+                    </Group>
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -283,6 +287,8 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
           </Table>
         </Table.ScrollContainer>
       </Card>
+
+      {permissions.canAdminister && company.canQuality && <SgcDocumentAuditCard idDocument={d.idDocument} />}
 
       {permissions.canAdminister && accesses && (
         <Card withBorder radius='md' p='lg' shadow='xs'>

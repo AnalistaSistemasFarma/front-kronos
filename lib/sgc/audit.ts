@@ -35,6 +35,19 @@ export const SGC_AUDIT_ACTIONS = {
   adjuntoCargado: 'solicitud.adjunto',
   adjuntoRetirado: 'solicitud.adjunto_retirado',
   adjuntoDescarga: 'solicitud.adjunto_descarga',
+  // Sprint 3: firma electrónica propia, PDF controlado, Calidad y borrador en la app.
+  firmaRegistrada: 'firma.registrada',
+  firmaReautenticacionFallida: 'firma.reautenticacion_fallida',
+  firmaRechazada: 'firma.rechazada',
+  firmaConsentimiento: 'firma.consentimiento',
+  firmaMaestroRegistrado: 'firma.maestro_registrado',
+  firmaMaestroRevocado: 'firma.maestro_revocado',
+  chequeoCalidad: 'calidad.chequeo',
+  pdfControladoGenerado: 'documento.pdf_controlado',
+  pdfControladoError: 'documento.pdf_controlado_error',
+  pdfControladoVerificado: 'documento.pdf_verificado',
+  borradorGuardado: 'solicitud.borrador_guardado',
+  reporteAuditoria: 'documento.reporte_auditoria',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];

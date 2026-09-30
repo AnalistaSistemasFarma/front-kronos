@@ -6,7 +6,7 @@ vi.mock('../../notifications.js', () => ({ createAndSendNotifications }));
 import { authorizationReaches, authorizationStatusFor, getAuthorizationTypeCodeError, sgcAuthorizationColor, SGC_AUTHORIZATION_STATUS_LABELS } from '../authorizations';
 import { suggestResponsibles, type SgcMatrixEntry } from '../flows/matrix';
 import { noopNotifier, recipients, requestUrl, sgcNotifier, SGC_NOTIFICATION_TITLES, taskUrl } from '../notifications';
-import { describeSignaturePoint, signaturePointFor, SGC_SIGNATURE_STUB_NOTICE } from '../signature/signaturePoint';
+import { describeSignaturePoint, signaturePointFor, SGC_SIGNATURE_NOTICE, SGC_SIGNATURE_STATUS_LABELS } from '../signature/signaturePoint';
 
 describe('SGC · matriz de responsables (solo sugiere)', () => {
   const e = (id: number, role: SgcMatrixEntry['role'], idProcess: number | null, idDocumentType: number | null, who: { userEmail?: string; cargoName?: string }, extra: Partial<SgcMatrixEntry> = {}): SgcMatrixEntry => ({
@@ -63,16 +63,18 @@ describe('SGC · Autorizaciones SGC (copia congelada del mecanismo de SynerLink)
   });
 });
 
-describe('SGC · punto de firma (stub del Sprint 2; la firma propia llega en el S3)', () => {
-  it('[SGC-REQ-036] cada paso con firma deja su significado pendiente de la firma electrónica propia', () => {
-    expect(signaturePointFor('reviso')).toEqual({ signatureStatus: 'pendiente_s3', signatureMeaning: 'reviso' });
+describe('SGC · punto de firma (preparado en el S2, cumplido con la firma propia del S3)', () => {
+  it('[SGC-REQ-036][SGC-REQ-038] cada paso con firma deja su significado pendiente hasta la firma electrónica propia', () => {
+    expect(signaturePointFor('reviso')).toEqual({ signatureStatus: 'pendiente', signatureMeaning: 'reviso' });
     expect(signaturePointFor(null)).toEqual({ signatureStatus: 'no_aplica', signatureMeaning: null });
-    expect(describeSignaturePoint('aprobo', 'pendiente_s3')).toBe('Aprobó (firma electrónica pendiente — Sprint 3)');
-    expect(describeSignaturePoint('elaboro', 'firmada')).toBe('Elaboró (firmado)');
-    expect(describeSignaturePoint('otro', 'firmada')).toBe('otro (firmado)');
-    expect(describeSignaturePoint(null, 'pendiente_s3')).toBeNull();
+    expect(describeSignaturePoint('aprobo', 'pendiente')).toBe('Aprobó (firma pendiente)');
+    expect(describeSignaturePoint('elaboro', 'firmada')).toBe('Elaboró (firmado electrónicamente)');
+    expect(describeSignaturePoint('otro', 'firmada')).toBe('otro (firmado electrónicamente)');
+    expect(describeSignaturePoint('reviso', 'sin_firma_s2')).toBe('Revisó (decidido en el Sprint 2, sin firma electrónica)');
+    expect(describeSignaturePoint(null, 'pendiente')).toBeNull();
     expect(describeSignaturePoint('reviso', 'no_aplica')).toBeNull();
-    expect(SGC_SIGNATURE_STUB_NOTICE).toMatch(/Sprint 3/);
+    expect(SGC_SIGNATURE_NOTICE).toMatch(/contraseña de SynerLink/);
+    expect(SGC_SIGNATURE_STATUS_LABELS.sin_firma_s2).toMatch(/Sprint 2/);
   });
 });
 

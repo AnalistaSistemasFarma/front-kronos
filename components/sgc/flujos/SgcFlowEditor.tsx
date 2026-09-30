@@ -250,6 +250,7 @@ export default function SgcFlowEditor({ definition, editable, authorizationTypes
                 <Table.Th>Tipo</Table.Th>
                 <Table.Th>Opciones (separadas por ;)</Table.Th>
                 <Table.Th>Obligatorio</Table.Th>
+                <Table.Th>Chequeo Calidad</Table.Th>
                 <Table.Th />
               </Table.Tr>
             </Table.Thead>
@@ -273,6 +274,15 @@ export default function SgcFlowEditor({ definition, editable, authorizationTypes
                   </Table.Td>
                   <Table.Td w={90}>
                     <Checkbox checked={f.required} disabled={ro} onChange={(e) => setField(i, { required: e.currentTarget.checked })} />
+                  </Table.Td>
+                  <Table.Td w={110}>
+                    <Checkbox
+                      checked={Boolean(f.qualityCheck)}
+                      disabled={ro || !f.taskKey}
+                      title='Punto de la lista de chequeo de estructura documental que responde el grupo de Calidad al firmar (Cumple / No cumple / No aplica).'
+                      onChange={(e) => setField(i, { qualityCheck: e.currentTarget.checked })}
+                      data-testid='sgc-flujo-campo-chequeo'
+                    />
                   </Table.Td>
                   <Table.Td w={40}>
                     {editable && (
