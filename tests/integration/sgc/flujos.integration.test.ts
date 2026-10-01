@@ -617,6 +617,12 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
 
     await addNote(prisma, notifier, idRequest, { body: 'Por favor revisar el anexo', notifyEmails: [E.rev2, E.elab2] }, await viewer(E.elab2), actor(E.elab2));
     expect(sent.at(-1)).toMatchObject({ emails: [E.rev2], payload: { title: 'Nueva nota en solicitud documental · SynerLink' } });
+    // Sprint 6 [SGC-REQ-085]: una nota solo notifica a personas que pueden actuar en el SGC (no a cualquier correo).
+    sent.length = 0;
+    await addNote(prisma, notifier, idRequest, { body: 'Aviso a alguien de fuera', notifyEmails: ['externo@otra.com', E.lector, E.rev2] }, await viewer(E.elab2), actor(E.elab2));
+    expect(sent.at(-1)).toMatchObject({ emails: [E.rev2] });
+    sent.length = 0;
+    await addNote(prisma, notifier, idRequest, { body: 'Nota sin avisos' }, await viewer(E.elab2), actor(E.elab2));
     await expect(addNote(prisma, notifier, idRequest, { body: '' }, await viewer(E.elab2), actor(E.elab2))).rejects.toThrow(/nota/);
     await expect(addNote(prisma, notifier, idRequest, { body: 'hola' }, await viewer(E.lector), actor(E.lector))).rejects.toMatchObject({ status: 404 });
 
