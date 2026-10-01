@@ -272,6 +272,12 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     await expect(listDraftRevisions(prisma, reqA, asReader)).rejects.toMatchObject({ status: 404 });
     // El revisor (también lector) sí, porque participó en la elaboración.
     await expect(getAttachmentForDownload(prisma, reqA, att.id_attachment, await viewer(E.rev), actor(E.rev))).resolves.toMatchObject({ fileName: att.file_name });
+    // Su lectura sí la ve (vista propia del lector) y la versión en divulgación se verifica como tal.
+    const t = await taskOf(reqA, 'divulgacion');
+    expect(await getMyReading(prisma, t.id_task, E.l1)).toMatchObject({ status: 'pendiente', pdfReady: true, fileUrl: expect.stringContaining('/api/sgc/reading/') });
+    expect(await getMyReading(prisma, t.id_task, E.ajeno)).toBeNull();
+    const code = (await prisma.sgcDocument.findUniqueOrThrow({ where: { id_document: idDoc } })).code;
+    expect(await verifyVersionByCode(prisma, asReader.access, await getAccessSubject(prisma, E.l1), { idCompany: CO, code, versionNumber: 2 }, actor(E.l1))).toMatchObject({ verdict: 'en_divulgacion' });
   });
 
   it('[SGC-REQ-055] «Leído» NO se firma sin abrir el documento desde el servidor y llegar al final', async () => {
@@ -423,7 +429,7 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     await expect(verifyVersionByCode(prisma, v.access, subject, { idCompany: 3, code, versionNumber: 2 }, actor(E.l1))).rejects.toMatchObject({ status: 404 });
     await expect(verifyVersionByCode(prisma, v.access, subject, { idCompany: CO, code: '', versionNumber: 2 }, actor(E.l1))).rejects.toMatchObject({ status: 400 });
     expect(await canViewDocument(prisma, v.access, subject, idDoc)).toBe(true);
-    expect(await prisma.sgcAuditLog.count({ where: { id_company: CO, action: 'documento.verificacion_qr' } })).toBe(3);
+    expect(await prisma.sgcAuditLog.count({ where: { id_company: CO, action: 'documento.verificacion_qr' } })).toBe(4); // 3 de esta prueba + 1 en divulgación (S6)
   });
 
   it('[SGC-REQ-062] cancelar en la divulgación solo lo hace Calidad: la versión aprobada se ANULA y la vigente no cambia; o Calidad cierra la divulgación con justificación', async () => {
