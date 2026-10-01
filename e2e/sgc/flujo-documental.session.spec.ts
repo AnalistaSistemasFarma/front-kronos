@@ -53,7 +53,9 @@ test.describe('SGC documental · Sprint 2 · administración de flujos validados
     await expect(page.getByTestId('sgc-version-estado')).toHaveText('borrador');
     await expect(page).toHaveURL(/version=2/);
     await page.getByTestId('sgc-flujo-editar').click();
-    await page.getByRole('switch').click({ force: true });
+    // El input del Switch de Mantine está oculto fuera de la vista: se pulsa su riel.
+    await page.locator('.mantine-Switch-track').click();
+    await expect(page.getByRole('switch')).not.toBeChecked();
     await page.getByTestId('sgc-flujo-guardar').click();
     await page.getByTestId('sgc-modal-motivo').fill(`Inactivar el flujo de prueba (e2e ${code}).`);
     await page.getByTestId('sgc-modal-confirmar').click();
