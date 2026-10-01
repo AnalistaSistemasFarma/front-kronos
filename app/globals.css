@@ -2669,6 +2669,58 @@ body.chat-inmersivo .chat-page-thread--completa {
   border-color: #ffffff;
 }
 
+/* ── Miniatura de una imagen adjunta (2026-10-01) ──
+   Caja de tamaño FIJO: la imagen llega después que la burbuja y, si la caja
+   creciera al cargar, el hilo cambiaría de alto y el desplazamiento saltaría
+   (ver el doble rAF de ChatThread). `cover` recorta sin deformar. */
+.chat-imagen {
+  display: block;
+  width: min(240px, 100%);
+  height: 180px;
+  padding: 0;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  border-radius: 12px;
+  overflow: hidden;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  cursor: zoom-in;
+}
+
+.chat-imagen img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chat-imagen:focus-visible {
+  outline: 2px solid var(--app-accent, #2563eb);
+  outline-offset: 2px;
+}
+
+/* Visor a pantalla completa */
+.chat-visor__contenido {
+  max-width: 96vw;
+  background-color: var(--app-surface, var(--surface));
+}
+
+.chat-visor__cuerpo {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-visor__barra {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--app-border, var(--border-subtle));
+}
+
+.chat-visor__imagen {
+  display: block;
+  max-width: 96vw;
+  max-height: calc(100dvh - 120px);
+  margin: 0 auto;
+  object-fit: contain;
+}
+
 /* Markdown de los mensajes */
 .chat-md {
   /* +2 pt sobre los 13.5 originales, a pedido de Nicolás (2026-09-07): en el
