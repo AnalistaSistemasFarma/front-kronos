@@ -460,10 +460,14 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     expect((await prisma.sgcDocument.findUniqueOrThrow({ where: { id_document: idDoc } })).status).toBe('vigente');
   });
 
-  it('[SGC-REQ-057][SGC-REQ-085] excluir con justificación al último lector pendiente cierra la divulgación', async () => {
+  it('[SGC-REQ-057][SGC-REQ-085] si los demás ya firmaron, excluir con justificación al último pendiente cierra la divulgación', async () => {
     const reqC = await approvedRequest('Divulgación cerrada por exclusión S6');
-    await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqC, { entry: { kind: 'persona', email: E.l3 }, reason: 'Lector único de la prueba S6' }, actor(E.elab));
+    await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqC, { entry: { kind: 'persona', email: E.l3 }, reason: 'Lector de la prueba S6' }, actor(E.elab));
+    await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqC, { entry: { kind: 'persona', email: E.l2 }, reason: 'Lector de la prueba S6' }, actor(E.elab));
     await signThroughApproval(reqC);
+    // Uno lee y firma; el otro (el último pendiente) se excluye con justificación.
+    const { idTask, idAssignee } = await readToEnd(reqC, E.l2);
+    await signTask(prisma, deps, idTask, firma('leyo', { idAssignee }), actor(E.l2));
     const t = await taskOf(reqC, 'divulgacion');
     const rec = await prisma.sgcReadRecord.findFirstOrThrow({ where: { id_task: t.id_task, user_email: E.l3 } });
     await excludeReader(prisma, notifier, await accessOf(E.cal), reqC, rec.id_read_record, { reason: 'Ya no pertenece al área (prueba S6)' }, actor(E.cal));
