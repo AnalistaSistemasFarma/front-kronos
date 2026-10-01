@@ -1327,6 +1327,14 @@ model SgcCompanyConfig {
   // Sprint 4: personas por cargo (alcance de divulgación por cargo).
   cargoMembers SgcCargoMember[]
 
+  // Sprint 5: relaciones, mapa, vencimientos, iCal y solicitudes de acceso.
+  documentRelations  SgcDocumentRelation[]
+  graphLayouts       SgcGraphLayout[]
+  reviewAlertConfigs SgcReviewAlertConfig[]
+  reviewAlerts       SgcReviewAlert[]
+  icalTokens         SgcIcalToken[]
+  accessRequests     SgcAccessRequest[]
+
   @@map("company_config")
   @@schema("sgc")
 }
@@ -1424,6 +1432,8 @@ model SgcDocumentType {
   // Sprint 2
   responsibles  SgcResponsibleMatrix[]
   requests      SgcRequest[]
+  // Sprint 5: avisos de vencimiento configurados por tipo documental.
+  reviewAlertConfigs SgcReviewAlertConfig[]
 
   @@unique([id_company, code])
   @@map("document_type")
@@ -1462,6 +1472,12 @@ model SgcDocument {
   accesses        SgcDocumentAccess[]
   // Sprint 2: solicitudes documentales sobre el documento (nueva versión, modificación).
   requests        SgcRequest[]
+  // Sprint 5: relaciones tipadas, avisos de vencimiento y solicitudes de acceso.
+  relationsFrom      SgcDocumentRelation[]  @relation("SgcRelationSource")
+  relationsTo        SgcDocumentRelation[]  @relation("SgcRelationTarget")
+  reviewAlertConfigs SgcReviewAlertConfig[]
+  reviewAlerts       SgcReviewAlert[]
+  accessRequests     SgcAccessRequest[]
 
   @@unique([id_company, code])
   @@index([id_company, status])
@@ -1499,6 +1515,8 @@ model SgcDocumentVersion {
   id_superseded_by      Int?
 
   document SgcDocument @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  // Sprint 5: avisos de vencimiento de la versión.
+  reviewAlerts SgcReviewAlert[]
 
   @@unique([id_document, version_number])
   @@map("document_version")
@@ -1525,6 +1543,8 @@ model SgcDocumentAccess {
 
   document   SgcDocument @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
   department Department? @relation(fields: [id_department], references: [id_department], onDelete: NoAction, onUpdate: NoAction)
+  // Sprint 5: solicitud de acceso que originó este acceso (si aplica).
+  accessRequests SgcAccessRequest[]
 
   @@index([id_document])
   @@map("document_access")
@@ -2336,5 +2356,175 @@ model SgcCargoMember {
 
   @@index([id_company, id_cargo])
   @@map("cargo_member")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 5: mapa de relaciones, vencimientos y accesos
+// (esquema `sgc`). Nada se borra: las relaciones se retiran con motivo, los
+// avisos de vencimiento quedan como registro (una fila por aviso, clave única
+// para que cada aviso salga una sola vez) y las solicitudes de acceso se
+// deciden o cancelan.
+// ---------------------------------------------------------------------------
+
+// Relación tipada entre dos documentos de la misma empresa (nunca hacia
+// módulos de proceso): procedimiento_padre | formato | anexo | referencia.
+model SgcDocumentRelation {
+  id_document_relation Int       @id @default(autoincrement())
+  id_company           Int
+  id_source_document   Int
+  id_target_document   Int
+  relation_type        String    @db.NVarChar(30)
+  note                 String?   @db.NVarChar(500)
+  is_active            Boolean   @default(true)
+  created_by           String    @db.NVarChar(255)
+  created_at           DateTime  @default(now())
+  change_reason        String    @db.NVarChar(1000)
+  removed_by           String?   @db.NVarChar(255)
+  removed_at           DateTime?
+  remove_reason        String?   @db.NVarChar(1000)
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  source        SgcDocument      @relation("SgcRelationSource", fields: [id_source_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  target        SgcDocument      @relation("SgcRelationTarget", fields: [id_target_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_company, is_active])
+  @@index([id_target_document])
+  @@index([id_source_document])
+  @@map("document_relation")
+  @@schema("sgc")
+}
+
+// Posiciones guardadas de los nodos del mapa de relaciones, por persona.
+model SgcGraphLayout {
+  id_graph_layout Int      @id @default(autoincrement())
+  id_company      Int
+  user_email      String   @db.NVarChar(255)
+  layout_json     String   @db.NVarChar(Max)
+  updated_at      DateTime @default(now())
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, user_email])
+  @@map("graph_layout")
+  @@schema("sgc")
+}
+
+// Configuración de los avisos anticipados de vencimiento: por empresa (la
+// general), por tipo documental o, excepcionalmente, por documento (gana la
+// más específica). scope_key = empresa | tipo:<id> | documento:<id>.
+model SgcReviewAlertConfig {
+  id_review_alert_config Int      @id @default(autoincrement())
+  id_company             Int
+  scope                  String   @db.NVarChar(20)
+  scope_key              String   @db.NVarChar(40)
+  id_document_type       Int?
+  id_document            Int?
+  // Días de anticipación, de mayor a menor; 0 = el día del vencimiento. Ej. [60,30,15,7,0].
+  offsets_json           String   @db.NVarChar(200)
+  // Cada cuántos días se repite el aviso a un documento vencido (escalado a Calidad).
+  overdue_every_days     Int      @default(7)
+  // Solo en la fila de empresa: cada cuántos días se recuerda una lectura pendiente (0 = no).
+  reading_reminder_days  Int?
+  email_enabled          Boolean  @default(true)
+  // Destinatarios adicionales que agrega Calidad (correos, JSON).
+  extra_emails_json      String   @default("[]") @db.NVarChar(2000)
+  is_active              Boolean  @default(true)
+  change_reason          String   @db.NVarChar(1000)
+  updated_by             String   @db.NVarChar(255)
+  created_at             DateTime @default(now())
+  updated_at             DateTime @default(now())
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  documentType  SgcDocumentType? @relation(fields: [id_document_type], references: [id_document_type], onDelete: NoAction, onUpdate: NoAction)
+  document      SgcDocument?     @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, scope_key])
+  @@map("review_alert_config")
+  @@schema("sgc")
+}
+
+// Cada aviso de vencimiento (enviado u omitido por haber pasado su día sin
+// correr el programador). alert_key ÚNICA: un aviso sale una sola vez aunque
+// el programador corra varias veces o en paralelo. No se borra.
+model SgcReviewAlert {
+  id_review_alert     Int       @id @default(autoincrement())
+  id_company          Int
+  id_document         Int
+  id_document_version Int
+  review_due_date     DateTime  @db.Date
+  // anticipado | vencimiento | vencido
+  kind                String    @db.NVarChar(20)
+  // Días antes del vencimiento (anticipado/vencimiento) o días de vencido (vencido).
+  offset_days         Int
+  alert_key           String    @unique @db.NVarChar(120)
+  // enviado | omitido
+  status              String    @db.NVarChar(20)
+  scheduled_for       DateTime  @db.Date
+  run_date            DateTime  @db.Date
+  // programador | manual
+  run_source          String    @db.NVarChar(20)
+  recipients_json     String    @default("[]") @db.NVarChar(Max)
+  channels_json       String    @default("[]") @db.NVarChar(Max)
+  created_at          DateTime  @default(now())
+  sent_at             DateTime?
+
+  companyConfig SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  document      SgcDocument        @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  version       SgcDocumentVersion @relation(fields: [id_document_version], references: [id_document_version], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_company, run_date])
+  @@index([id_document])
+  @@map("review_alert")
+  @@schema("sgc")
+}
+
+// Enlace iCal PRIVADO por persona (solo lectura) para suscribir el calendario
+// de vencimientos en Outlook. Se guarda solo el SHA-256 del token; se revoca.
+model SgcIcalToken {
+  id_ical_token Int       @id @default(autoincrement())
+  id_company    Int
+  user_email    String    @db.NVarChar(255)
+  token_sha256  String    @unique @db.Char(64)
+  created_at    DateTime  @default(now())
+  revoked_at    DateTime?
+  revoked_by    String?   @db.NVarChar(255)
+  last_used_at  DateTime?
+  use_count     Int       @default(0)
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_company, user_email])
+  @@map("ical_token")
+  @@schema("sgc")
+}
+
+// Solicitud de acceso a un documento de otra área (con justificación). Calidad
+// la aprueba (se crea el acceso en document_access) o la rechaza con motivo.
+// Si el código pedido no existe o no se puede consultar, id_document queda
+// NULL y a quien pide no se le revela nada.
+model SgcAccessRequest {
+  id_access_request  Int       @id @default(autoincrement())
+  id_company         Int
+  id_document        Int?
+  requested_code     String    @db.NVarChar(60)
+  requester_email    String    @db.NVarChar(255)
+  justification      String    @db.NVarChar(2000)
+  // pendiente | aprobada | rechazada | cancelada
+  status             String    @default("pendiente") @db.NVarChar(20)
+  decided_by         String?   @db.NVarChar(255)
+  decided_at         DateTime?
+  decision_reason    String?   @db.NVarChar(1000)
+  access_expires_at  DateTime?
+  id_document_access Int?
+  created_at         DateTime  @default(now())
+
+  companyConfig SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  document      SgcDocument?       @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  access        SgcDocumentAccess? @relation(fields: [id_document_access], references: [id_document_access], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_company, status])
+  @@index([requester_email])
+  @@map("access_request")
   @@schema("sgc")
 }

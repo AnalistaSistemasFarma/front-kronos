@@ -4,13 +4,16 @@ import React from 'react';
 import { SimpleGrid, Tabs, Text } from '@mantine/core';
 import {
   IconBook2,
+  IconCalendarDue,
   IconChecklist,
   IconFileCertificate,
   IconFilePlus,
   IconFileUpload,
   IconGitBranch,
   IconHierarchy2,
+  IconKey,
   IconListDetails,
+  IconTopologyStar3,
   IconSettings,
   IconShieldCheck,
 } from '@tabler/icons-react';
@@ -61,6 +64,28 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
       icon: <IconBook2 size={24} />,
       sprint: 'Sprint 1',
       href: sgcHref(`${SGC_BASE_URL}/listado`, id, { tipo: 'MA' }),
+    },
+    {
+      title: 'Mapa de relaciones',
+      description: 'Documentos conectados (procedimiento padre, formatos, anexos, referencias) en un mapa que se arrastra y acerca.',
+      icon: <IconTopologyStar3 size={24} />,
+      sprint: 'Sprint 5',
+      href: sgcHref(`${SGC_BASE_URL}/relaciones`, id),
+    },
+    {
+      title: 'Calendario de vencimientos',
+      description: 'Próximos vencimientos de la vigencia, avisos anticipados y «Mis vencimientos».',
+      icon: <IconCalendarDue size={24} />,
+      sprint: 'Sprint 5',
+      href: sgcHref(`${SGC_BASE_URL}/vencimientos`, id),
+    },
+    {
+      title: 'Solicitudes de acceso',
+      description: 'Pida consultar un documento de otra área, con justificación.',
+      icon: <IconKey size={24} />,
+      sprint: 'Sprint 5',
+      href: sgcHref(`${SGC_BASE_URL}/accesos`, id),
+      ...(company.canQuality ? { badge: 'Calidad decide' } : {}),
     },
   ];
   if (company.canQuality) {

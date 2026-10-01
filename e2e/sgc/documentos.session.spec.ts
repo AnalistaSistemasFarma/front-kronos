@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { STORAGE_STATE_3 } from '../../playwright.config';
 
 /**
  * SGC documental CON SESIÓN (usuario de pruebas qa.sgc, con los permisos del
@@ -78,7 +79,19 @@ test.describe('SGC documental · con sesión', () => {
     await expect(page.getByText('OLP-GC-PR-001')).toBeVisible();
   });
 
-  test('[SGC-REQ-018] un usuario SIN permiso no ve el documento confidencial', async () => {
-    test.skip(true, 'Requiere un segundo usuario de pruebas sin permiso de Calidad (qa.sgc tiene Calidad y ve todo). La regla está cubierta por las pruebas unitarias y de integración.');
+  // Sprint 5: se usa qa.sgc3 (consulta + gestión, SIN Calidad), creado en el S2.
+  test('[SGC-REQ-018] un usuario SIN permiso no ve el documento confidencial', async ({ browser, page }) => {
+    test.skip(!process.env.E2E_USER_EMAIL3 || !process.env.E2E_USER_PASSWORD3, 'Requiere el usuario de pruebas qa.sgc3 (sin Calidad).');
+    const all = await (await page.request.get(`/api/sgc/documents?company=${OLP}`)).json();
+    const conf = (all.documents as { idDocument: number; code: string; confidentiality: string }[]).find((d) => d.confidentiality === 'confidencial');
+    test.skip(!conf, 'No hay un documento confidencial vigente en pruebas.');
+    const ctx = await browser.newContext({ storageState: STORAGE_STATE_3 });
+    const p3 = await ctx.newPage();
+    expect((await p3.request.get(`/api/sgc/documents/${conf!.idDocument}`)).status()).toBe(404);
+    const mine = await (await p3.request.get(`/api/sgc/documents?company=${OLP}`)).json();
+    expect((mine.documents as { code: string }[]).map((d) => d.code)).not.toContain(conf!.code);
+    await p3.goto(`/process/sgc-documental/documentos/${conf!.idDocument}?empresa=${OLP}`);
+    await expect(p3.getByTestId('sgc-ficha-error')).toBeVisible();
+    await ctx.close();
   });
 });
