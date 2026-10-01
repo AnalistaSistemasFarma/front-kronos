@@ -460,6 +460,19 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     expect((await prisma.sgcDocument.findUniqueOrThrow({ where: { id_document: idDoc } })).status).toBe('vigente');
   });
 
+  it('[SGC-REQ-057][SGC-REQ-085] excluir con justificación al último lector pendiente cierra la divulgación', async () => {
+    const reqC = await approvedRequest('Divulgación cerrada por exclusión S6');
+    await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqC, { entry: { kind: 'persona', email: E.l3 }, reason: 'Lector único de la prueba S6' }, actor(E.elab));
+    await signThroughApproval(reqC);
+    const t = await taskOf(reqC, 'divulgacion');
+    const rec = await prisma.sgcReadRecord.findFirstOrThrow({ where: { id_task: t.id_task, user_email: E.l3 } });
+    await excludeReader(prisma, notifier, await accessOf(E.cal), reqC, rec.id_read_record, { reason: 'Ya no pertenece al área (prueba S6)' }, actor(E.cal));
+    expect(await taskOf(reqC, 'divulgacion')).toMatchObject({ status: 'resuelta' });
+    expect(await taskOf(reqC, 'capacitacion')).toMatchObject({ status: 'abierta' });
+    // Se cierra la solicitud de prueba (Calidad cancela en la capacitación) para no estorbar a las siguientes.
+    await cancelRequest(prisma, notifier, await accessOf(E.cal), reqC, { reason: 'Fin de la prueba de exclusión del S6' }, actor(E.cal));
+  });
+
   it('[SGC-REQ-053][SGC-REQ-061] un documento NUEVO sin alcance usa el departamento dueño del proceso y, si se cancela en la divulgación, el documento queda anulado', async () => {
     await prisma.sgcProcessMap.update({ where: { id_process_map: procGC }, data: { id_department: dept } });
     const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.elab), { idCompany: CO, requestType: 'nuevo', subject: 'Instructivo nuevo S4', description: 'Documento nuevo sin alcance definido (S4).', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } }, actor(E.elab));
