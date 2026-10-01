@@ -131,7 +131,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
           </Group>
           {kind === 'cargo' && (
             <Text size='xs' c='dimmed' mt='xs'>
-              Las personas de cada cargo las registra Calidad en «Configuración del SGC → Personas por cargo».
+              Las personas de cada cargo las registra Calidad en «Configuración → Personas por cargo».
             </Text>
           )}
         </Card>

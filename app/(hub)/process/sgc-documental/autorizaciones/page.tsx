@@ -44,6 +44,7 @@ import {
 import { formatDateCO } from '../../../../../components/sgc/tareas/format';
 import { useSgcCompany } from '../../../../../components/sgc/useSgcCompany';
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
+import { useSgcRowLink } from '../../../../../components/sgc/useSgcRowLink';
 import { sgcAuthorizationColor } from '../../../../../lib/sgc/authorizations';
 import type { SgcAuthorizationRow, SgcAuthorizationTypeRow } from '../../../../../lib/sgc/db/authorizations';
 import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
@@ -112,25 +113,27 @@ function TypesAdmin({ company }: { company: SgcCompanyAccess }) {
             </Button>
           </Group>
           {t.members.length ? (
-            <Table>
-              <Table.Tbody>
-                {t.members.map((m) => (
-                  <Table.Tr key={m.id}>
-                    <Table.Td>{m.name ? `${m.name} (${m.email})` : m.email}</Table.Td>
-                    <Table.Td>
-                      <Text size='xs' c='dimmed'>
-                        Otorgado por {m.grantedBy} · {m.reason}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td w={100}>
-                      <Button size='xs' variant='subtle' color='red' onClick={() => setRevoke({ id: m.id, reason: '' })}>
-                        Retirar
-                      </Button>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
+            <Table.ScrollContainer minWidth={520}>
+              <Table>
+                <Table.Tbody>
+                  {t.members.map((m) => (
+                    <Table.Tr key={m.id}>
+                      <Table.Td>{m.name ? `${m.name} (${m.email})` : m.email}</Table.Td>
+                      <Table.Td>
+                        <Text size='xs' c='dimmed'>
+                          Otorgado por {m.grantedBy} · {m.reason}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td w={100}>
+                        <Button size='xs' variant='subtle' color='red' onClick={() => setRevoke({ id: m.id, reason: '' })}>
+                          Retirar
+                        </Button>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
           ) : (
             <Text size='sm' c='dimmed'>
               Sin personas en el grupo (solo se asigna directamente).
@@ -209,6 +212,7 @@ function TypesAdmin({ company }: { company: SgcCompanyAccess }) {
 
 function AuthorizationBoard() {
   const router = useRouter();
+  const rowLink = useSgcRowLink();
   const { company } = useSgcCompany();
   const [status, setStatus] = useState<string>('pendiente');
   const { data, error, loading, reload } = useSgcFetch<{ authorizations: SgcAuthorizationRow[] }>(`/api/sgc/authorizations?status=todas`);
@@ -262,7 +266,7 @@ function AuthorizationBoard() {
 
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
-    { title: 'Autorizaciones SGC', href: '#' },
+    { title: 'Autorizaciones', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (
       <Link key={index} href={item.href} passHref>
@@ -335,7 +339,7 @@ function AuthorizationBoard() {
                 rows.map((req) => {
                   const isPending = req.status === 'pendiente';
                   return (
-                    <Table.Tr key={req.id} data-testid='sgc-autorizacion-fila' data-request={req.idRequest} data-status={req.status}>
+                    <Table.Tr key={req.id} data-testid='sgc-autorizacion-fila' data-request={req.idRequest} data-status={req.status} {...rowLink(`/process/sgc-documental/tareas/${req.idTask}?empresa=${req.idCompany}`)}>
                       <Table.Td>
                         <Text size='sm' fw={700}>
                           {req.idRequest}
@@ -416,7 +420,7 @@ function AuthorizationBoard() {
             <div>
               <Title order={1} className='text-3xl font-bold mb-2 flex items-center gap-3' data-testid='sgc-autorizaciones-titulo'>
                 <IconShieldCheck size={32} className='text-blue-600' />
-                Autorizaciones SGC
+                Autorizaciones
               </Title>
               <Text size='lg' c='dimmed'>
                 Autoriza o rechaza las aprobaciones y verificaciones del Sistema de Gestión de Calidad

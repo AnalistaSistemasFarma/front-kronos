@@ -121,54 +121,56 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
           Maestro de firmas
         </Title>
         {error && <Alert color='red'>{error}</Alert>}
-        <Table withTableBorder striped verticalSpacing='xs'>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Persona</Table.Th>
-              <Table.Th>Versión</Table.Th>
-              <Table.Th>Trazo</Table.Th>
-              <Table.Th>Registró</Table.Th>
-              <Table.Th>Estado</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {(data?.masters ?? []).map((m) => (
-              <Table.Tr key={m.id} data-testid='sgc-firmas-fila'>
-                <Table.Td>
-                  <Text size='sm'>{m.name ?? m.email}</Text>
-                  <Text size='xs' c='dimmed'>
-                    {m.email}
-                  </Text>
-                </Table.Td>
-                <Table.Td>{m.versionNumber}</Table.Td>
-                <Table.Td>{m.imagePng ? <Image src={m.imagePng} alt={`Firma de ${m.email}`} h={40} w='auto' fit='contain' /> : <Text size='xs' c='dimmed'>—</Text>}</Table.Td>
-                <Table.Td>
-                  <Text size='xs'>{m.registeredBy}</Text>
-                  <Text size='xs' c='dimmed'>
-                    {formatDateCO(m.registeredAt)} · {m.reason}
-                  </Text>
-                </Table.Td>
-                <Table.Td>
-                  {m.revokedAt ? (
-                    <Badge color='gray' title={m.revokeReason ?? ''}>
-                      Revocada
-                    </Badge>
-                  ) : (
-                    <Badge color='teal'>Vigente</Badge>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  {!m.revokedAt && (
-                    <Button size='xs' variant='subtle' color='red' leftSection={<IconX size={14} />} onClick={() => setRevoke({ id: m.id, reason: '' })}>
-                      Revocar
-                    </Button>
-                  )}
-                </Table.Td>
+        <Table.ScrollContainer minWidth={640}>
+          <Table withTableBorder striped verticalSpacing='xs'>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Persona</Table.Th>
+                <Table.Th>Versión</Table.Th>
+                <Table.Th>Trazo</Table.Th>
+                <Table.Th>Registró</Table.Th>
+                <Table.Th>Estado</Table.Th>
+                <Table.Th />
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {(data?.masters ?? []).map((m) => (
+                <Table.Tr key={m.id} data-testid='sgc-firmas-fila'>
+                  <Table.Td>
+                    <Text size='sm'>{m.name ?? m.email}</Text>
+                    <Text size='xs' c='dimmed'>
+                      {m.email}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>{m.versionNumber}</Table.Td>
+                  <Table.Td>{m.imagePng ? <Image src={m.imagePng} alt={`Firma de ${m.email}`} h={40} w='auto' fit='contain' /> : <Text size='xs' c='dimmed'>—</Text>}</Table.Td>
+                  <Table.Td>
+                    <Text size='xs'>{m.registeredBy}</Text>
+                    <Text size='xs' c='dimmed'>
+                      {formatDateCO(m.registeredAt)} · {m.reason}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    {m.revokedAt ? (
+                      <Badge color='gray' title={m.revokeReason ?? ''}>
+                        Revocada
+                      </Badge>
+                    ) : (
+                      <Badge color='teal'>Vigente</Badge>
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    {!m.revokedAt && (
+                      <Button size='xs' variant='subtle' color='red' leftSection={<IconX size={14} />} onClick={() => setRevoke({ id: m.id, reason: '' })}>
+                        Revocar
+                      </Button>
+                    )}
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
       </Card>
 
       <Modal opened={Boolean(revoke)} onClose={() => setRevoke(null)} title='Revocar firma registrada' centered>
@@ -199,7 +201,7 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
 
 export default function SgcSignatureMastersPage() {
   return (
-    <SgcShell section='Firma electrónica del SGC' subtitle='Maestro de firmas registrado por Aseguramiento de Calidad' requireQuality>
+    <SgcShell section='Firma electrónica' subtitle='Maestro de firmas registrado por Aseguramiento de Calidad' requireQuality>
       {(company) => <Masters company={company} />}
     </SgcShell>
   );

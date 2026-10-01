@@ -339,7 +339,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
 
 export default function ConfiguracionSgcPage() {
   return (
-    <SgcShell section='Configuración del SGC' subtitle='Maestros de la empresa: codificación, procesos y tipos documentales' requireQuality>
+    <SgcShell section='Configuración' subtitle='Maestros de la empresa: codificación, procesos y tipos documentales' requireQuality>
       {(company) => <Configuracion company={company} />}
     </SgcShell>
   );

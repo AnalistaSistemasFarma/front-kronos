@@ -54,7 +54,7 @@ function MapaProcesos({ company }: { company: SgcCompanyAccess }) {
   if (cascade.length === 0) {
     return (
       <Alert color='yellow' icon={<IconAlertTriangle size={18} />}>
-        La empresa aún no tiene configurado su mapa de procesos. Aseguramiento de Calidad lo configura en «Configuración del SGC».
+        La empresa aún no tiene configurado su mapa de procesos. Aseguramiento de Calidad lo configura en «Configuración».
       </Alert>
     );
   }
