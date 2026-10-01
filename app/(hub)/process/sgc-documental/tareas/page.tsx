@@ -44,6 +44,7 @@ import {
 } from '@tabler/icons-react';
 import { formatDateCO } from '../../../../../components/sgc/tareas/format';
 import { useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
+import { useSgcRowLink } from '../../../../../components/sgc/useSgcRowLink';
 import type { SgcInboxRow } from '../../../../../lib/sgc/db/requests';
 
 /**
@@ -97,6 +98,7 @@ function inRange(iso: string, from: string, to: string): boolean {
 
 function TaskBoard() {
   const router = useRouter();
+  const rowLink = useSgcRowLink();
   const [filtersExpanded, setFiltersExpanded] = useState(true);
   const [filters, setFilters] = useState(EMPTY);
   const [applied, setApplied] = useState(EMPTY);
@@ -300,8 +302,7 @@ function TaskBoard() {
                     return (
                       <Table.Tr
                         key={task.idAssignee}
-                        className='cursor-pointer transition-colors'
-                        onClick={() => router.push(`/process/sgc-documental/tareas/${task.idTask}?empresa=${task.idCompany}`)}
+                        {...rowLink(`/process/sgc-documental/tareas/${task.idTask}?empresa=${task.idCompany}`)}
                         data-testid='bandeja-fila'
                         data-request={task.idRequest}
                         data-task={task.idTask}

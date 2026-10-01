@@ -6,6 +6,7 @@ import { ActionIcon, Alert, Badge, Button, Card, Group, Loader, Modal, MultiSele
 import { IconAlertTriangle, IconChevronLeft, IconChevronRight, IconFileSearch, IconFilePlus, IconSearch } from '@tabler/icons-react';
 import { sgcHref } from '../useSgcCompany';
 import { useSgcFetch } from '../useSgcFetch';
+import { useSgcRowLink } from '../useSgcRowLink';
 import { SGC_BASE_URL } from '../../../lib/sgc/constants';
 import {
   SGC_WEEKDAY_LABELS,
@@ -102,6 +103,7 @@ export default function SgcReviewCalendar({ company }: { company: SgcCompanyAcce
   const [states, setStates] = useState<string[]>([]);
   const [text, setText] = useState('');
   const [open, setOpen] = useState<SgcCalendarItem | null>(null);
+  const rowLink = useSgcRowLink();
 
   const all = useMemo(() => cal.data?.items ?? [], [cal.data]);
   const items = useMemo(
@@ -272,7 +274,7 @@ export default function SgcReviewCalendar({ company }: { company: SgcCompanyAcce
                   </Text>
                   <Stack gap={4} mt={4}>
                     {g.items.map((i) => (
-                      <Group key={i.idDocument} justify='space-between' wrap='nowrap' gap='sm' data-testid='sgc-cal-agenda-fila' data-code={i.code} data-date={i.dueDate}>
+                      <Group key={i.idDocument} justify='space-between' wrap='nowrap' gap='sm' data-testid='sgc-cal-agenda-fila' data-code={i.code} data-date={i.dueDate} {...rowLink(sgcHref(`${SGC_BASE_URL}/documentos/${i.idDocument}`, company.idCompany), { onOpen: () => setOpen(i) })}>
                         <Group gap='xs' wrap='nowrap' style={{ minWidth: 0 }}>
                           <StateBadge state={i.state} />
                           <Text size='sm' ff='monospace' fw={700}>

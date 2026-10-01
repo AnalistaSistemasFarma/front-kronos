@@ -44,6 +44,7 @@ import {
 import { formatDateCO } from '../../../../../components/sgc/tareas/format';
 import { useSgcCompany } from '../../../../../components/sgc/useSgcCompany';
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
+import { useSgcRowLink } from '../../../../../components/sgc/useSgcRowLink';
 import { sgcAuthorizationColor } from '../../../../../lib/sgc/authorizations';
 import type { SgcAuthorizationRow, SgcAuthorizationTypeRow } from '../../../../../lib/sgc/db/authorizations';
 import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
@@ -209,6 +210,7 @@ function TypesAdmin({ company }: { company: SgcCompanyAccess }) {
 
 function AuthorizationBoard() {
   const router = useRouter();
+  const rowLink = useSgcRowLink();
   const { company } = useSgcCompany();
   const [status, setStatus] = useState<string>('pendiente');
   const { data, error, loading, reload } = useSgcFetch<{ authorizations: SgcAuthorizationRow[] }>(`/api/sgc/authorizations?status=todas`);
@@ -335,7 +337,7 @@ function AuthorizationBoard() {
                 rows.map((req) => {
                   const isPending = req.status === 'pendiente';
                   return (
-                    <Table.Tr key={req.id} data-testid='sgc-autorizacion-fila' data-request={req.idRequest} data-status={req.status}>
+                    <Table.Tr key={req.id} data-testid='sgc-autorizacion-fila' data-request={req.idRequest} data-status={req.status} {...rowLink(`/process/sgc-documental/tareas/${req.idTask}?empresa=${req.idCompany}`)}>
                       <Table.Td>
                         <Text size='sm' fw={700}>
                           {req.idRequest}
