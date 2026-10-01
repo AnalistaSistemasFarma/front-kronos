@@ -71,6 +71,11 @@ Herramientas: `node scripts/sgc/pase-produccion/aplicar-sql.mjs --confirmo-produ
 
 **Ensayo de la reversa (PRUEBAS, 2026-10-01):** se recrearon en KRONOSDB_PRUEBAS las 3 tablas viejas y 2 subprocesos con las mismas URL. Se corrió el retiro; una segunda corrida idempotente; la reversa, que restauró los mismos ids; y el retiro final. Todo dio el resultado esperado y se limpiaron los respaldos del ensayo. La primera versión del script fallaba en la segunda corrida (`Invalid object name 'dbo.document'`) y se corrigió con SQL dinámico.
 
+**Ensayo del despliegue con reversa (PRUEBAS, .230, 2026-10-01):**
+- Con fallo simulado en `prisma generate`: la reversa restauró `.next` y el cliente y levantó la app; **interrupción de 48 s**; `/login` 200.
+- Sin fallo (mismo commit, compilación completa): respaldo con las apps arriba 83 s; **interrupción de 4 min 32 s** (generar 16 s y compilar 4 min 11 s); humo correcto; 7 min 3 s en total.
+- El ensayo encontró dos errores del script, ya corregidos: el archivo debía guardarse con BOM (PowerShell 5.1 leía mal las tildes) y la función `Pm2` se llamaba a sí misma.
+
 ## 6. Verificación posterior
 
 1. `http://localhost:3003/login` 200; `/process/sgc-documental` 307 al login sin sesión; `/api/sgc/access` 401 sin sesión; `/api/chat/agent/inbox` 401.
