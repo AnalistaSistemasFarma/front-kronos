@@ -34,6 +34,9 @@ import { getPoolMembers, getPoolTypeCodes } from './authorizations';
 import type { SgcActor, SgcDb } from './catalogs';
 import type { SgcUploader } from './documents';
 import { getCurrentFlowVersion, loadDefinition } from './flows';
+import { activateReaders, getDisseminationView, getMyReading } from './dissemination';
+import { getTrainingView } from './training';
+import { annulUnpublishedVersion, publishApprovedVersion, type SgcPublishResult } from './vigencia';
 
 /**
  * Solicitudes y «Tareas documentales» del SGC (Sprint 2): instancias del
@@ -154,6 +157,16 @@ async function activateTask(ctx: EngineCtx, taskDef: SgcTaskDefinition, round: n
     return;
   }
 
+  // Sprint 4 — DIVULGACIÓN: un cupo de lectura firmada («Leyó») por cada persona del alcance.
+  if (taskDef.assignment === 'alcance') {
+    const task = await tx.sgcTask.create({
+      data: { id_request: request.id_request, id_flow_task_def: flowTaskDef.id_flow_task_def, task_key: taskDef.key, name: taskDef.name, step_order: taskDef.stepOrder, round, status: 'abierta', signing_mode: 'paralelo', started_at: now },
+    });
+    await tx.sgcRequest.update({ where: { id_request: request.id_request }, data: { current_task_key: taskDef.key, status: 'abierta' } });
+    await activateReaders({ tx, request, idTask: task.id_task, poolTypeCode: taskDef.poolAuthorizationTypeCode, actor: ctx.actor, notifications: ctx.notifications });
+    return;
+  }
+
   const modes = parseSigningModes(request.signing_modes_json);
   const mode = signingModeFor(taskDef, modes);
   const point = signaturePointFor(taskDef.signatureMeaning);
@@ -219,6 +232,41 @@ async function notifyTurn(ctx: EngineCtx, idTask: number, taskDef: { name: strin
     const members = recipients(await getPoolMembers(ctx.tx, ctx.request.id_company, code), ctx.actor.email);
     if (members.length) ctx.notifications.push({ emails: members, payload: { title: SGC_NOTIFICATION_TITLES.autorizacionPendiente, body, url: '/process/sgc-documental/autorizaciones', tag: `sgc-task-${idTask}-grupo` } });
   }
+}
+
+/**
+ * Después de resolver una tarea: activa el siguiente paso o cierra la
+ * solicitud. Sprint 4: al cerrarse COMPLETADA una solicitud documental con
+ * versión aprobada, la versión pasa a VIGENTE y la anterior a OBSOLETA en la
+ * misma transacción (vigencia automática).
+ */
+async function advanceAfterResolved(ctx: EngineCtx, fromKey: string, now: Date, me: string): Promise<{ next: string; published: SgcPublishResult | null }> {
+  const { tx, request, def } = ctx;
+  const condition = { requestType: request.request_type, requiresTraining: request.documentType?.requires_training ?? true };
+  const step = resolveNextStep(def, fromKey, 'aprobar', condition);
+  if (step.kind === 'task') {
+    await activateTask(ctx, step.task, 1);
+    return { next: step.task.key, published: null };
+  }
+  let published: SgcPublishResult | null = null;
+  if (step.status === 'completada') {
+    const fresh = await tx.sgcRequest.findUniqueOrThrow({ where: { id_request: request.id_request } });
+    if (fresh.id_document_version) published = await publishApprovedVersion(tx, fresh, ctx.actor, now);
+  }
+  await tx.sgcRequest.update({ where: { id_request: request.id_request }, data: { status: step.status, current_task_key: null, closed_by: me, closed_at: now } });
+  const vigencia = published
+    ? `\n${published.code} V${published.versionNumber} VIGENTE desde ${published.effectiveDate}; próxima revisión ${published.reviewDueDate}.${published.obsolete ? ` La V${published.obsolete.versionNumber} queda OBSOLETA.` : ''}`
+    : '';
+  await addInteraction(tx, request.id_request, 'estado', me, `Solicitud cerrada: ${SGC_REQUEST_STATUS_LABELS[step.status]}.${vigencia}`, { meta: published ? { published } : undefined });
+  if (published) {
+    const readers = await tx.sgcReadRecord.findMany({ where: { id_request: request.id_request, status: 'leido' }, select: { user_email: true } });
+    const signers = await tx.sgcRequestSigner.findMany({ where: { id_request: request.id_request, is_active: true }, select: { user_email: true } });
+    ctx.notifications.push({
+      emails: recipients([request.requester_email, request.elaborator_email, ...signers.map((x) => x.user_email), ...readers.map((x) => x.user_email)], me),
+      payload: { title: SGC_NOTIFICATION_TITLES.documentoVigente, body: `${published.code} V${published.versionNumber} está vigente desde ${published.effectiveDate} — ${request.subject}`.slice(0, 300), url: `/process/sgc-documental/documentos/${published.idDocument}?empresa=${request.id_company}`, tag: `sgc-doc-${published.idDocument}` },
+    });
+  }
+  return { next: step.status, published };
 }
 
 async function lockRequest(tx: Tx, idRequest: number): Promise<RequestRow> {
@@ -442,7 +490,8 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     const states = task.assignees.map(toAssigneeState);
     const chosen = pickAssigneeForDecision(states, (task.signing_mode as 'orden' | 'paralelo' | null) ?? null, { email: me, poolTypeCodes: pools }, {
       elaboratorEmail: request.elaborator_email,
-      allowElaborator: taskDef.assignment === 'solicitante' || taskDef.assignment === 'elaborador',
+      // La lectura («Leyó») no es revisión ni aprobación: el elaborador también lee.
+      allowElaborator: taskDef.assignment === 'solicitante' || taskDef.assignment === 'elaborador' || taskDef.assignment === 'alcance',
     });
     if (input.idAssignee && input.idAssignee !== chosen.id) {
       throw new SgcError('Esa autorización no es la que le corresponde decidir ahora (firma en orden).', 409);
@@ -480,6 +529,11 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
       checklistResult = chk.result;
     }
 
+    // Sprint 4: la firma «Leyó» cierra la lectura obligatoria de la persona.
+    if (signed && assignee.signature_meaning === 'leyo') {
+      await tx.sgcReadRecord.update({ where: { id_task_assignee: chosen.id }, data: { status: 'leido', signed_at: now, id_signature: signed.idSignature } });
+    }
+
     await tx.sgcTaskAssignee.update({
       where: { id_task_assignee: chosen.id },
       data: {
@@ -495,7 +549,15 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
       data: { status: authorizationStatusFor(decision), decided_by: me, decided_at: now, decision_comment: comment || null },
     });
     const signText = describeSignaturePoint(assignee.signature_meaning, signed ? 'firmada' : assignee.signature_status);
-    const verb = isSubmit ? 'Envió el documento' : decision === 'aprobar' ? 'Aprobó' : 'Devolvió a elaboración';
+    const verb = isSubmit
+      ? 'Envió el documento'
+      : assignee.signature_meaning === 'leyo'
+        ? 'Leyó el documento hasta el final y firmó «Leído»'
+        : assignee.signature_meaning === 'capacito'
+          ? 'Cerró la capacitación'
+          : decision === 'aprobar'
+            ? 'Aprobó'
+            : 'Devolvió a elaboración';
     const slotText = assignee.pool_type_code && !assignee.user_email ? ` como integrante del grupo ${assignee.pool_type_code}` : '';
     const signLines = signed
       ? `\nFirma electrónica: ${signText}. Motivo: ${signed.payload.reason}\nContenido firmado: ${signed.payload.content.name} · SHA-256 ${signed.payload.content.sha256}`
@@ -518,20 +580,15 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     const ctx: EngineCtx = { tx, request, def, notifications, actor, subjectLabel: request.subject };
     const condition = { requestType: request.request_type, requiresTraining: request.documentType?.requires_training ?? true };
     let next: string = task.task_key;
+    let published: SgcPublishResult | null = null;
 
     if (outcome === 'abierta') {
-      await notifyTurn(ctx, idTask, taskDef, after, (task.signing_mode as 'orden' | 'paralelo' | null) ?? null);
+      // En la divulgación cada lectura es independiente: no se re-notifica a los demás lectores.
+      if (taskDef.assignment !== 'alcance') await notifyTurn(ctx, idTask, taskDef, after, (task.signing_mode as 'orden' | 'paralelo' | null) ?? null);
     } else if (outcome === 'resuelta') {
-      await tx.sgcTask.update({ where: { id_task: idTask }, data: { status: 'resuelta', ended_at: now, resolved_by: me, resolution: comment || `${task.name} aprobada.` } });
-      const step = resolveNextStep(def, task.task_key, 'aprobar', condition);
-      if (step.kind === 'task') {
-        await activateTask(ctx, step.task, 1);
-        next = step.task.key;
-      } else {
-        await tx.sgcRequest.update({ where: { id_request: request.id_request }, data: { status: step.status, current_task_key: null, closed_by: me, closed_at: now } });
-        await addInteraction(tx, request.id_request, 'estado', me, `Solicitud cerrada: ${SGC_REQUEST_STATUS_LABELS[step.status]}.`);
-        next = step.status;
-      }
+      const resolution = taskDef.assignment === 'alcance' ? 'Divulgación completa: todas las personas del alcance leyeron y firmaron.' : comment || `${task.name} aprobada.`;
+      await tx.sgcTask.update({ where: { id_task: idTask }, data: { status: 'resuelta', ended_at: now, resolved_by: me, resolution } });
+      ({ next, published } = await advanceAfterResolved(ctx, task.task_key, now, me));
     } else {
       // Devuelta: los demás cupos pendientes se anulan y se reabre la tarea destino en una ronda nueva.
       await tx.sgcTask.update({ where: { id_task: idTask }, data: { status: 'devuelta', ended_at: now, resolved_by: me, resolution: comment } });
@@ -557,7 +614,7 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
       entity: 'task',
       entityId: idTask,
       before: { status: 'abierta', assignee: chosen.id },
-      after: { decision, outcome, next, signature: signed ? { status: 'firmada', uid: signed.payload.uid } : assignee.signature_status, checklist: checklistResult },
+      after: { decision, outcome, next, signature: signed ? { status: 'firmada', uid: signed.payload.uid } : assignee.signature_status, checklist: checklistResult, published: published ? { code: published.code, version: published.versionNumber, obsolete: published.obsolete?.versionNumber ?? null } : null },
       detail: comment || null,
       ip: actor.ip,
       userAgent: actor.userAgent,
@@ -569,6 +626,7 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
       signatureUid: signed?.payload.uid ?? null,
       // Paso resuelto y su firma: «aprobo» resuelto ⇒ se genera el PDF controlado (signatures.ts).
       resolvedMeaning: outcome === 'resuelta' ? taskDef.signatureMeaning : null,
+      published,
     };
   }, TX_OPTS);
   await send(notifier, notifications);
@@ -737,6 +795,10 @@ export async function cancelRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
     if (!def.transitions.some((t) => t.from === request.current_task_key && t.action === 'cancelar')) {
       throw new SgcError('En esta etapa la solicitud ya no se cancela (el documento se anula desde su ficha).', 409);
     }
+    // Sprint 4: en la divulgación y la capacitación (versión ya aprobada) solo Calidad cancela.
+    const currentDef = def.tasks.find((t) => t.key === request.current_task_key);
+    const postApproval = Boolean(currentDef && (currentDef.assignment === 'alcance' || currentDef.role === 'capacitacion'));
+    if (postApproval && !access?.canQuality) throw new SgcError('En la divulgación y la capacitación solo Aseguramiento de Calidad cancela la solicitud.', 403);
     const now = new Date();
     const open = await tx.sgcTask.findMany({ where: { id_request: idRequest, status: { in: ['abierta', 'sin_empezar', 'en_espera'] } }, include: { assignees: true } });
     const pendingIds = open.flatMap((t) => t.assignees.filter((a) => a.status === 'pendiente').map((a) => a.id_task_assignee));
@@ -745,8 +807,12 @@ export async function cancelRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
       await tx.sgcTaskAssignee.updateMany({ where: { id_task_assignee: { in: pendingIds } }, data: { status: 'anulado' } });
       await tx.sgcAuthorization.updateMany({ where: { id_task_assignee: { in: pendingIds }, status: 'pendiente' }, data: { status: 'anulada' } });
     }
+    // Lecturas pendientes: quedan excluidas por la cancelación (no se borran).
+    await tx.sgcReadRecord.updateMany({ where: { id_request: idRequest, status: 'pendiente' }, data: { status: 'excluido', excluded_by: me, excluded_at: now, exclude_reason: `Solicitud cancelada: ${reason}`.slice(0, 1000) } });
+    // La versión aprobada que no llegó a vigente se ANULA; la vigente anterior no cambia.
+    const annulled = postApproval ? await annulUnpublishedVersion(tx, request, reason, actor, now) : null;
     await tx.sgcRequest.update({ where: { id_request: idRequest }, data: { status: 'cancelada', cancel_reason: reason, closed_by: me, closed_at: now, current_task_key: null } });
-    await addInteraction(tx, idRequest, 'cancelacion', me, `Canceló la solicitud.\nMotivo: ${reason}`);
+    await addInteraction(tx, idRequest, 'cancelacion', me, `Canceló la solicitud.\nMotivo: ${reason}${annulled ? `\nLa versión aprobada de ${annulled.code} quedó ANULADA (no llegó a vigente); la versión vigente anterior no cambia.` : ''}`);
     const involved = await tx.sgcRequestSigner.findMany({ where: { id_request: idRequest, is_active: true }, select: { user_email: true } });
     notifications.push({
       emails: recipients([request.requester_email, request.elaborator_email, ...involved.map((s) => s.user_email)], me),
@@ -754,6 +820,85 @@ export async function cancelRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
     });
     await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: me, action: SGC_AUDIT_ACTIONS.solicitudCancelada, entity: 'request', entityId: idRequest, before: { status: request.status }, after: { status: 'cancelada' }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });
     return { status: 'cancelada' };
+  }, TX_OPTS);
+  await send(notifier, notifications);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Divulgación (Sprint 4): excluir un lector y cerrar la divulgación
+// ---------------------------------------------------------------------------
+
+async function openDisseminationTask(tx: Tx, request: RequestRow) {
+  const task = await tx.sgcTask.findFirst({ where: { id_request: request.id_request, status: 'abierta', taskDef: { assignment: 'alcance' } }, include: { assignees: true, taskDef: true } });
+  if (request.status !== 'abierta' || !task) throw new SgcError('La solicitud no está en divulgación.', 409);
+  return task;
+}
+
+/**
+ * Excluye la lectura de una persona (Calidad, con justificación): p. ej. se
+ * retiró de la empresa o está incapacitada. Su cupo se anula (no se borra).
+ * Si con eso ya leyeron todos los demás, la divulgación se cierra sola.
+ */
+export async function excludeReader(db: SgcDb, notifier: SgcNotifier, access: SgcCompanyAccess, idRequest: number, idReadRecord: number, input: { reason: unknown }, actor: SgcActor) {
+  if (!access.canQuality) throw new SgcError('Solo Aseguramiento de Calidad excluye una lectura.', 403);
+  const reason = text(input.reason, 'La justificación', 1000, 10);
+  const me = lower(actor.email);
+  const notifications: SgcNotification[] = [];
+  const result = await db.$transaction(async (tx) => {
+    const request = await lockRequest(tx, idRequest);
+    if (request.id_company !== access.idCompany) throw new SgcError('Solicitud no encontrada.', 404);
+    const task = await openDisseminationTask(tx, request);
+    const rec = await tx.sgcReadRecord.findUnique({ where: { id_read_record: idReadRecord } });
+    if (!rec || rec.id_task !== task.id_task) throw new SgcError('Lectura no encontrada.', 404);
+    if (rec.status !== 'pendiente') throw new SgcError('Solo se excluye una lectura pendiente.', 409);
+    const now = new Date();
+    await tx.sgcTaskAssignee.update({ where: { id_task_assignee: rec.id_task_assignee }, data: { status: 'anulado', decided_by: me, decided_at: now, comment: `Excluida: ${reason}` } });
+    await tx.sgcReadRecord.update({ where: { id_read_record: rec.id_read_record }, data: { status: 'excluido', excluded_by: me, excluded_at: now, exclude_reason: reason } });
+    await addInteraction(tx, idRequest, 'estado', me, `Excluyó la lectura de ${rec.user_email}.\nJustificación: ${reason}`, { idTask: task.id_task, meta: { idReadRecord, email: rec.user_email } });
+    await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: me, action: SGC_AUDIT_ACTIONS.lecturaExcluida, entity: 'read_record', entityId: idReadRecord, before: { status: 'pendiente' }, after: { status: 'excluido' }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });
+    const states = task.assignees.map((a) => (a.id_task_assignee === rec.id_task_assignee ? { ...toAssigneeState(a), status: 'anulado' as SgcAssigneeStatus } : toAssigneeState(a)));
+    let next: string = task.task_key;
+    if (taskOutcome(states) === 'resuelta') {
+      const def = await loadDefinition(tx, request.id_flow_version);
+      await tx.sgcTask.update({ where: { id_task: task.id_task }, data: { status: 'resuelta', ended_at: now, resolved_by: me, resolution: 'Divulgación completa: las personas del alcance leyeron y firmaron (con exclusiones justificadas).' } });
+      ({ next } = await advanceAfterResolved({ tx, request, def, notifications, actor, subjectLabel: request.subject }, task.task_key, now, me));
+    }
+    return { excluded: rec.user_email, next };
+  }, TX_OPTS);
+  await send(notifier, notifications);
+  return result;
+}
+
+/**
+ * Cierra la divulgación por DECISIÓN DE CALIDAD con justificación (plan:
+ * «cierra al completar el alcance o por decisión de Calidad»): las lecturas
+ * pendientes quedan excluidas con esa justificación y el flujo sigue.
+ */
+export async function closeDissemination(db: SgcDb, notifier: SgcNotifier, access: SgcCompanyAccess, idRequest: number, input: { reason: unknown }, actor: SgcActor) {
+  if (!access.canQuality) throw new SgcError('Solo Aseguramiento de Calidad cierra la divulgación.', 403);
+  const reason = text(input.reason, 'La justificación del cierre', 1000, 10);
+  const me = lower(actor.email);
+  const notifications: SgcNotification[] = [];
+  const result = await db.$transaction(async (tx) => {
+    const request = await lockRequest(tx, idRequest);
+    if (request.id_company !== access.idCompany) throw new SgcError('Solicitud no encontrada.', 404);
+    const task = await openDisseminationTask(tx, request);
+    if (!request.id_document_version || request.controlled_pdf_status !== 'generado') throw new SgcError('El PDF controlado aún no está generado: no se cierra la divulgación.', 409);
+    const now = new Date();
+    const pending = await tx.sgcReadRecord.findMany({ where: { id_task: task.id_task, status: 'pendiente' } });
+    const read = await tx.sgcReadRecord.count({ where: { id_task: task.id_task, status: 'leido' } });
+    if (pending.length) {
+      await tx.sgcTaskAssignee.updateMany({ where: { id_task_assignee: { in: pending.map((p) => p.id_task_assignee) }, status: 'pendiente' }, data: { status: 'anulado', decided_by: me, decided_at: now, comment: `Cierre de la divulgación por Calidad: ${reason}`.slice(0, 2000) } });
+      await tx.sgcReadRecord.updateMany({ where: { id_read_record: { in: pending.map((p) => p.id_read_record) } }, data: { status: 'excluido', excluded_by: me, excluded_at: now, exclude_reason: `Cierre de la divulgación por Calidad: ${reason}`.slice(0, 1000) } });
+    }
+    const resolution = `Divulgación cerrada por Aseguramiento de Calidad: ${read} lectura(s) firmada(s), ${pending.length} pendiente(s) excluida(s).\nJustificación: ${reason}`;
+    await tx.sgcTask.update({ where: { id_task: task.id_task }, data: { status: 'resuelta', ended_at: now, resolved_by: me, resolution: resolution.slice(0, 2000) } });
+    await addInteraction(tx, idRequest, 'estado', me, resolution, { idTask: task.id_task, meta: { read, excluded: pending.map((p) => p.user_email) } });
+    await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: me, action: SGC_AUDIT_ACTIONS.divulgacionCerrada, entity: 'task', entityId: task.id_task, before: { status: 'abierta', pending: pending.length, read }, after: { status: 'resuelta', excluded: pending.map((p) => p.user_email) }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });
+    const def = await loadDefinition(tx, request.id_flow_version);
+    const { next } = await advanceAfterResolved({ tx, request, def, notifications, actor, subjectLabel: request.subject }, task.task_key, now, me);
+    return { read, excluded: pending.length, next };
   }, TX_OPTS);
   await send(notifier, notifications);
   return result;
@@ -800,16 +945,35 @@ export interface SgcRequestPermissions {
   isQuality: boolean;
 }
 
-function involvement(row: DetailRow, email: string, pools: readonly string[]) {
+/**
+ * Cómo participa la persona: «full» (solicitante, elaborador, firmante,
+ * responsable o integrante del grupo con un cupo pendiente), «reader» (SOLO
+ * como lectora de la divulgación, Sprint 4) o null (no participa).
+ */
+function involvementKind(row: DetailRow, email: string, pools: readonly string[]): 'full' | 'reader' | null {
   const me = lower(email);
   const emails = new Set<string>([lower(row.requester_email), lower(row.elaborator_email)]);
+  let reader = false;
   for (const s of row.signers) emails.add(lower(s.user_email));
-  for (const t of row.tasks) for (const a of t.assignees) {
-    if (a.user_email) emails.add(lower(a.user_email));
-    if (a.decided_by) emails.add(lower(a.decided_by));
+  for (const t of row.tasks) {
+    const isReading = t.taskDef.assignment === 'alcance';
+    for (const a of t.assignees) {
+      if (isReading) {
+        if (a.user_email && lower(a.user_email) === me) reader = true;
+        if (a.decided_by && lower(a.decided_by) !== lower(a.user_email)) emails.add(lower(a.decided_by));
+        continue;
+      }
+      if (a.user_email) emails.add(lower(a.user_email));
+      if (a.decided_by) emails.add(lower(a.decided_by));
+    }
   }
   const poolPending = row.tasks.some((t) => t.status === 'abierta' && t.assignees.some((a) => !a.user_email && a.status === 'pendiente' && a.pool_type_code && pools.includes(a.pool_type_code)));
-  return emails.has(me) || poolPending;
+  if (emails.has(me) || poolPending) return 'full';
+  return reader ? 'reader' : null;
+}
+
+function involvement(row: DetailRow, email: string, pools: readonly string[]) {
+  return involvementKind(row, email, pools) !== null;
 }
 
 /** Detalle completo si la persona puede verlo (involucrada o Calidad); si no, 404 (no se revela). */
@@ -821,7 +985,10 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
   const me = lower(viewer.email);
   const pools = await getPoolTypeCodes(db, row.id_company, me);
   const isQuality = access.canQuality;
-  if (!isQuality && !involvement(row, me, pools)) throw new SgcError('Solicitud no encontrada.', 404);
+  const kind = isQuality ? 'full' : involvementKind(row, me, pools);
+  if (!kind) throw new SgcError('Solicitud no encontrada.', 404);
+  // Sprint 4: quien solo es LECTOR de la divulgación ve su lectura, no el expediente de elaboración.
+  const readerOnly = kind === 'reader';
   const def = await loadDefinition(db, row.id_flow_version);
   const defByKey = new Map(def.tasks.map((t) => [t.key, t]));
 
@@ -840,13 +1007,15 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
   const currentTask = row.tasks.filter((t) => t.status === 'abierta' || t.status === 'en_espera').at(-1) ?? null;
   const inElaboration = Boolean(currentTask && currentTask.status === 'abierta' && defByKey.get(currentTask.task_key)?.assignment === 'elaborador');
   const cancellable = def.transitions.some((t) => t.from === row.current_task_key && t.action === 'cancelar');
+  const currentDef = row.current_task_key ? defByKey.get(row.current_task_key) : undefined;
+  const postApproval = Boolean(currentDef && (currentDef.assignment === 'alcance' || currentDef.role === 'capacitacion'));
   const permissions: SgcRequestPermissions = {
-    canNote: row.status === 'abierta' || row.status === 'en_espera',
+    canNote: !readerOnly && (row.status === 'abierta' || row.status === 'en_espera'),
     canUploadDraft: isOpen && isElaborator && inElaboration,
-    canUploadSupport: isOpen,
-    canChangeSigners: isOpen && isElaborator,
-    canCancel: (row.status === 'abierta' || row.status === 'en_espera') && cancellable && (isRequester || isElaborator || isQuality),
-    canEditForm: isOpen && (isRequester || isElaborator),
+    canUploadSupport: isOpen && !readerOnly,
+    canChangeSigners: isOpen && isElaborator && !postApproval,
+    canCancel: (row.status === 'abierta' || row.status === 'en_espera') && cancellable && (postApproval ? isQuality : isRequester || isElaborator || isQuality),
+    canEditForm: isOpen && (isRequester || isElaborator) && !postApproval,
     isRequester,
     isElaborator,
     isQuality,
@@ -863,7 +1032,7 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
     const turn = new Set(t.status === 'abierta' ? assigneesInTurn(states, (t.signing_mode as 'orden' | 'paralelo' | null) ?? null).map((a) => a.id) : []);
     const mine = t.assignees.filter((a) => a.status === 'pendiente' && ((a.user_email && lower(a.user_email) === me) || (!a.user_email && a.pool_type_code && pools.includes(a.pool_type_code))));
     const myTurn = mine.find((a) => turn.has(a.id_task_assignee)) ?? null;
-    const blockedBySoD = Boolean(myTurn && tDef && tDef.assignment !== 'elaborador' && tDef.assignment !== 'solicitante' && isElaborator);
+    const blockedBySoD = Boolean(myTurn && tDef && tDef.assignment !== 'elaborador' && tDef.assignment !== 'solicitante' && tDef.assignment !== 'alcance' && isElaborator);
     const myPoolSlot = Boolean(myTurn && !myTurn.user_email && myTurn.pool_type_code);
     const checklist = myPoolSlot ? checklistFieldsFor(def.formFields, t.task_key).map((f) => ({ key: f.key, label: f.label, required: f.required, helpText: f.helpText })) : [];
     const single = !t.taskDef.multi_assignee && t.taskDef.assignment !== 'calidad';
@@ -908,15 +1077,21 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
         myTurn && !blockedBySoD
           ? {
               idAssignee: myTurn.id_task_assignee,
-              kind: tDef?.assignment === 'elaborador' ? ('enviar' as const) : ('decidir' as const),
+              kind: tDef?.assignment === 'elaborador' ? ('enviar' as const) : tDef?.assignment === 'alcance' ? ('leer' as const) : ('decidir' as const),
               // Sprint 3: aprobar/enviar exige firma electrónica con este significado.
               signatureMeaning: myTurn.signature_meaning,
               checklist,
             }
           : null,
       myWaiting: !myTurn && mine.length > 0,
+      assignment: tDef?.assignment ?? t.taskDef.assignment,
+      role: tDef?.role ?? t.taskDef.role,
+      canReturn: def.transitions.some((x) => x.from === t.task_key && x.action === 'devolver'),
       canReassign: t.status === 'abierta' && single && isOpen && Boolean(currentAssignee) && (isRequester || isQuality || lower(currentAssignee?.user_email) === me),
-      assignedLabel: t.assignees.filter((a) => a.status !== 'reemplazado' && a.status !== 'anulado').map((a) => (a.user_email ? nameOf(a.user_email) : `Grupo ${a.pool_type_code}`)).join(', '),
+      assignedLabel:
+        t.taskDef.assignment === 'alcance'
+          ? `Personas del alcance de divulgación (${t.assignees.filter((a) => a.status !== 'reemplazado' && a.status !== 'anulado').length})`
+          : t.assignees.filter((a) => a.status !== 'reemplazado' && a.status !== 'anulado').map((a) => (a.user_email ? nameOf(a.user_email) : `Grupo ${a.pool_type_code}`)).join(', '),
     };
   });
 
@@ -944,7 +1119,17 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
   });
 
   const status = row.status as SgcRequestStatus;
-  return {
+  // Sprint 4: divulgación (alcance, lectores, cobertura), lectura propia y capacitación.
+  const hasDissemination = def.tasks.some((t) => t.assignment === 'alcance' && t.isEnabled);
+  const focusRow = focusTaskId ? row.tasks.find((t) => t.id_task === focusTaskId) : null;
+  const reading = focusRow && focusRow.taskDef.assignment === 'alcance' ? await getMyReading(db, focusRow.id_task, me) : null;
+  const dissemination = hasDissemination && !readerOnly ? await getDisseminationView(db, row, { email: me, isQuality }, nameOf) : null;
+  const training = !readerOnly ? await getTrainingView(db, row, { isQuality }, nameOf) : null;
+  const detail = {
+    readerOnly,
+    reading,
+    dissemination,
+    training,
     request: {
       id: row.id_request,
       idCompany: row.id_company,
@@ -1016,6 +1201,20 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       idDocumentVersion: row.id_document_version,
       idDocument: row.id_document,
     },
+  };
+  if (!readerOnly) return detail;
+  // LECTOR: solo su tarea de lectura y su propia firma; nada del expediente de elaboración.
+  return {
+    ...detail,
+    tasks: detail.tasks.filter((t) => t.assignment === 'alcance').map((t) => ({ ...t, assignees: t.assignees.filter((a) => lower(a.email) === me) })),
+    steps: [],
+    formFields: [],
+    interactions: [],
+    attachments: [],
+    currentDraft: null,
+    draftRevisions: [],
+    signatures: detail.signatures.filter((sg) => lower(sg.signerEmail) === me),
+    qualityChecks: [],
   };
 }
 

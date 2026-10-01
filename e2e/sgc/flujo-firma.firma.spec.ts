@@ -172,7 +172,8 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
       qualityChecks: { result: string }[];
       controlledPdf: { status: string; idDocument: number; idDocumentVersion: number };
     };
-    expect(detail.request).toMatchObject({ status: 'en_espera', currentTaskKey: 'divulgacion' });
+    // Desde el Sprint 4 la divulgación está habilitada: la solicitud sigue ABIERTA en «Divulgación».
+    expect(detail.request).toMatchObject({ status: 'abierta', currentTaskKey: 'divulgacion' });
     expect(detail.signatures.map((s) => s.meaning)).toEqual(['elaboro', 'reviso', 'reviso', 'aprobo', 'aprobo', 'aprobo']);
     expect(detail.qualityChecks[0]).toMatchObject({ result: 'conforme' });
     expect(detail.controlledPdf).toMatchObject({ status: 'generado' });

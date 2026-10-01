@@ -29,6 +29,11 @@ export const SGC_NOTIFICATION_TITLES = {
   cancelada: 'Solicitud documental cancelada · SynerLink',
   nota: 'Nueva nota en solicitud documental · SynerLink',
   avance: 'Solicitud documental avanzó · SynerLink',
+  // Sprint 4
+  lecturaAsignada: 'Lectura obligatoria de documento · SynerLink',
+  lecturaRecordatorio: 'Recordatorio: lectura obligatoria pendiente · SynerLink',
+  capacitacionPendiente: 'Capacitación documental pendiente · SynerLink',
+  documentoVigente: 'Documento vigente · SynerLink',
 } as const;
 
 export function taskUrl(idTask: number): string {

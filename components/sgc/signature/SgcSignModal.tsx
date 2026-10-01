@@ -131,7 +131,7 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
             </>
           ) : (
             <Text size='sm' c='red'>
-              La solicitud no tiene borrador: no se puede firmar.
+              No hay contenido para firmar (borrador, PDF controlado o resultados): no se puede firmar.
             </Text>
           )}
         </Card>

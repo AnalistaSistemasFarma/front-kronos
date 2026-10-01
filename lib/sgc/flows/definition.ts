@@ -14,8 +14,12 @@ import { SgcError } from '../errors';
 export const SGC_FLOW_ROLES = ['solicitante', 'elaborador', 'revisor', 'aprobador', 'calidad', 'alcance', 'capacitacion'] as const;
 export type SgcFlowRole = (typeof SGC_FLOW_ROLES)[number];
 
-/** Cómo se asigna la tarea al crearse. */
-export const SGC_FLOW_ASSIGNMENTS = ['solicitante', 'elaborador', 'firmantes', 'calidad'] as const;
+/**
+ * Cómo se asigna la tarea al crearse. «alcance» (Sprint 4): las personas del
+ * ALCANCE DE DIVULGACIÓN de la solicitud (departamentos, cargos, personas o
+ * toda la empresa), cada una con su propio cupo de lectura firmada.
+ */
+export const SGC_FLOW_ASSIGNMENTS = ['solicitante', 'elaborador', 'firmantes', 'calidad', 'alcance'] as const;
 export type SgcFlowAssignment = (typeof SGC_FLOW_ASSIGNMENTS)[number];
 
 export const SGC_SIGNING_MODES = ['orden', 'paralelo'] as const;
@@ -57,6 +61,7 @@ export const SGC_ASSIGNMENT_LABELS: Record<SgcFlowAssignment, string> = {
   elaborador: 'El elaborador del documento',
   firmantes: 'Firmantes que asigna el elaborador',
   calidad: 'Grupo de Aseguramiento de Calidad',
+  alcance: 'Personas del alcance de divulgación',
 };
 
 export const SGC_SIGNATURE_LABELS: Record<SgcSignatureMeaning, string> = {
@@ -230,6 +235,15 @@ export function normalizeFlowDefinition(input: unknown): SgcFlowDefinition {
       throw new SgcError(`${label}: una tarea de autorización necesita su tipo de autorización.`);
     }
     if (!def.isAuthorization) def.authorizationTypeCode = null;
+    if (def.assignment === 'alcance') {
+      // Cada persona del alcance firma su propia lectura (en paralelo); el
+      // grupo indicado es quien ADMINISTRA la divulgación (no es un cupo).
+      if (def.multiAssignee) throw new SgcError(`${label}: la divulgación toma a las personas del alcance (no marque «varios responsables»).`);
+      if (def.isAuthorization) throw new SgcError(`${label}: la divulgación no es una tarea de autorización.`);
+      if (!def.poolAuthorizationTypeCode) throw new SgcError(`${label}: indique el grupo que administra la divulgación (tipo de autorización del grupo de Calidad).`);
+      if (def.signatureMeaning !== 'leyo') throw new SgcError(`${label}: la divulgación se cierra con la firma de lectura «Leyó».`);
+      def.signingModeDefault = null;
+    }
     if (def.assignment === 'calidad' && !def.poolAuthorizationTypeCode) {
       throw new SgcError(`${label}: la asignación al grupo de Calidad necesita el tipo de autorización del grupo.`);
     }

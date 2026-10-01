@@ -248,6 +248,11 @@ function AuthorizationBoard() {
       const detail = (await res.json()) as SgcRequestDetail & { error?: string };
       if (!res.ok) throw new Error(detail.error || `Error ${res.status}`);
       const focus = detail.tasks.find((t) => t.id === row.idTask);
+      // Sprint 4: la capacitación se cierra desde su tarea (registro, Excel de resultados y firma «Capacitó»).
+      if (focus?.myAction?.signatureMeaning === 'capacito') {
+        window.location.href = `/process/sgc-documental/tareas/${row.idTask}?empresa=${detail.request.idCompany}`;
+        return;
+      }
       if (focus?.myAction?.signatureMeaning) setSignFor({ row, detail });
       else setAuthorize(row);
     } catch (e) {

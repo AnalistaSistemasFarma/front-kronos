@@ -1,6 +1,7 @@
 import { PDFDocument, PDFHexString, PDFName, PDFString, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { canonicalJson, sha256HexOf } from '../signature/record';
 import { formatBogotaDateTime, toWinAnsiSafe } from '../watermark';
+import { drawQr } from './qr';
 
 /**
  * PDF CONTROLADO del SGC — funciones PURAS sobre pdf-lib (se prueban sin red).
@@ -121,11 +122,11 @@ class Writer {
       this.y = A4[1] - MARGIN - 18;
     }
   }
-  text(value: string, opts: { size?: number; font?: keyof Fonts; color?: ReturnType<typeof rgb>; indent?: number; gap?: number } = {}) {
+  text(value: string, opts: { size?: number; font?: keyof Fonts; color?: ReturnType<typeof rgb>; indent?: number; gap?: number; right?: number } = {}) {
     const size = opts.size ?? 10;
     const font = this.fonts[opts.font ?? 'regular'];
     const x = MARGIN + (opts.indent ?? 0);
-    for (const line of wrap(value, font, size, A4[0] - MARGIN - x)) {
+    for (const line of wrap(value, font, size, A4[0] - MARGIN - x - (opts.right ?? 0))) {
       this.ensure(size + 3);
       this.page.drawText(line, { x, y: this.y, size, font, color: opts.color ?? INK });
       this.y -= size + 3;
@@ -156,11 +157,19 @@ function colombia(iso: string): string {
   return `${formatBogotaDateTime(new Date(iso))} (hora Colombia)`;
 }
 
+/** Lado del QR de verificación en la portada (puntos) y su espacio reservado a la derecha. */
+export const SGC_QR_SIZE = 86;
+const QR_RESERVE = SGC_QR_SIZE + 12;
+
 function drawCover(w: Writer, m: SgcManifest, mSha: string) {
-  w.text(m.company, { size: 11, font: 'bold', color: BRAND, gap: 0 });
-  w.text('DOCUMENTO CONTROLADO — Sistema de Gestión de Calidad', { size: 8.5, color: MUTED, gap: 10 });
-  w.text(m.title, { size: 17, font: 'bold', gap: 2 });
-  w.text(`${m.code} · Versión ${m.versionNumber}`, { size: 12, font: 'bold', color: BRAND, gap: 10 });
+  // Sprint 4: QR de verificación arriba a la derecha (abre la verificación de vigencia en SynerLink).
+  if (m.verifyUrl) drawQr(w.page, m.verifyUrl, { x: A4[0] - MARGIN - SGC_QR_SIZE, y: A4[1] - 44 - SGC_QR_SIZE, size: SGC_QR_SIZE });
+  const right = m.verifyUrl ? QR_RESERVE : 0;
+  w.text(m.company, { size: 11, font: 'bold', color: BRAND, gap: 0, right });
+  w.text('DOCUMENTO CONTROLADO · Sistema de Gestión de Calidad', { size: 8.5, color: MUTED, gap: 10, right });
+  w.text(m.title, { size: 17, font: 'bold', gap: 2, right });
+  w.text(`${m.code} · Versión ${m.versionNumber}`, { size: 12, font: 'bold', color: BRAND, gap: 10, right });
+  if (m.verifyUrl && w.y > A4[1] - 44 - SGC_QR_SIZE - 14) w.y = A4[1] - 44 - SGC_QR_SIZE - 14;
   w.rule();
   w.text('Control del documento', { size: 11, font: 'bold', gap: 4 });
   w.row('Código', m.code);
@@ -184,7 +193,7 @@ function drawCover(w: Writer, m: SgcManifest, mSha: string) {
     'Firmado electrónicamente en SynerLink (Ley 527 de 1999, Decreto 2364 de 2012): cada firmante se reautenticó con su contraseña, indicó el significado y el motivo, y el sistema registró el sello de tiempo del servidor y la huella del contenido. El detalle está en el manifiesto de firmas al final del documento.',
     { size: 8.5, color: MUTED, gap: 4 }
   );
-  w.text(`Verifique la vigencia y la integridad de esta versión en SynerLink: ${m.verifyUrl}`, { size: 8.5, color: MUTED, gap: 2 });
+  w.text(`Verifique la vigencia y la integridad de esta versión en SynerLink (código QR de la portada o este enlace): ${m.verifyUrl}`, { size: 8.5, color: MUTED, gap: 2 });
   w.text(`Huella del manifiesto (SHA-256): ${mSha}`, { size: 8, font: 'mono', color: MUTED });
 }
 

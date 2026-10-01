@@ -21,12 +21,19 @@ import { SGC_SIGNATURE_AUTH_METHOD, SGC_SIGNATURE_CONSENT, SGC_SIGNATURE_CONSENT
  */
 
 export const SGC_SIGNATURE_SCHEMA = 'sgc-firma-electronica/v1';
-export const SGC_CONTENT_KINDS = ['borrador_adjunto', 'borrador_editor'] as const;
+/**
+ * Contenido firmado. Sprint 4: la firma «Leyó» se hace sobre el PDF
+ * CONTROLADO de la versión que se divulga (su SHA-256 registrado) y la firma
+ * «Capacitó» sobre el Excel de RESULTADOS de la capacitación que cargó Calidad.
+ */
+export const SGC_CONTENT_KINDS = ['borrador_adjunto', 'borrador_editor', 'pdf_controlado', 'resultados_capacitacion'] as const;
 export type SgcContentKind = (typeof SGC_CONTENT_KINDS)[number];
 
 export const SGC_CONTENT_KIND_LABELS: Record<SgcContentKind, string> = {
   borrador_adjunto: 'Borrador cargado (archivo)',
   borrador_editor: 'Borrador editado en la app',
+  pdf_controlado: 'PDF controlado de la versión aprobada',
+  resultados_capacitacion: 'Resultados de la capacitación (Excel de Forms)',
 };
 
 const SHA_RE = /^[0-9a-f]{64}$/;
