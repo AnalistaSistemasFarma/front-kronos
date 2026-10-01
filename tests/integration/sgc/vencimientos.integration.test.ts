@@ -432,5 +432,13 @@ describe.skipIf(!url)('SGC · Sprint 5 · relaciones, vencimientos y accesos con
     await expect(prisma.$executeRawUnsafe(`DELETE FROM [sgc].[access_request] WHERE id_company = ${CO}`)).rejects.toThrow(/no se borra/);
     // Ya con acceso, ese documento deja de aparecer para pedir.
     expect(await listRequestableDocuments(prisma, otra, subOtra)).toEqual([]);
+    // Sprint 6 [SGC-REQ-084]: dos decisiones simultáneas sobre la misma solicitud: solo una gana.
+    const e = await createAccessRequest(prisma, notifier, otra, subOtra, { code: d2.code, justification: 'Nueva solicitud para la prueba de concurrencia' }, actor(E.otra));
+    const both = await Promise.allSettled([
+      decideAccessRequest(prisma, notifier, cal, e.idAccessRequest, { decision: 'rechazar', reason: 'Primera decisión simultánea' }, actor(E.cal)),
+      decideAccessRequest(prisma, notifier, cal, e.idAccessRequest, { decision: 'rechazar', reason: 'Segunda decisión simultánea' }, actor(E.cal)),
+    ]);
+    expect(both.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(both.find((r) => r.status === 'rejected')).toMatchObject({ reason: { status: 409 } });
   });
 });

@@ -364,6 +364,16 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     expect(csv.split('\r\n')[0]).toContain('"fecha_utc";"quien";"accion"');
     expect(csv).toContain('firma.registrada');
     await expect(getDocumentAuditReport(prisma, (await viewer(E.rev)).access, r.id_document!, actor(E.rev))).rejects.toMatchObject({ status: 403 });
+    expect(report.truncated).toBe(false);
+    // Sprint 6: con más de 5.000 eventos el reporte trae los MÁS RECIENTES (en orden) y avisa que está truncado.
+    await prisma.$executeRawUnsafe(`INSERT INTO sgc.audit_log (id_company, occurred_at, actor_email, action, entity, entity_id, detail)
+      SELECT TOP 5001 ${CO}, SYSUTCDATETIME(), N'carga@x.co', N'documento.consulta', N'document', N'${r.id_document}', N'Consulta masiva de la prueba S6'
+      FROM sys.all_objects a CROSS JOIN sys.all_objects b`);
+    const big = await getDocumentAuditReport(prisma, (await viewer(E.cal)).access, r.id_document!, actor(E.cal));
+    expect(big.truncated).toBe(true);
+    expect(big.events).toHaveLength(5000);
+    expect(big.events.at(-1)!.actor).toBe('carga@x.co');
+    expect(Number(big.events[0].id)).toBeLessThan(Number(big.events.at(-1)!.id));
     await expect(getDocumentAuditReport(prisma, (await viewer(E.cal)).access, 999999, actor(E.cal))).rejects.toMatchObject({ status: 404 });
     await expect(getDocumentAuditReport(prisma, [], r.id_document!, actor(E.cal))).rejects.toMatchObject({ status: 404 });
     expect(await prisma.sgcAuditLog.count({ where: { action: 'documento.reporte_auditoria', entity_id: String(r.id_document) } })).toBe(1);

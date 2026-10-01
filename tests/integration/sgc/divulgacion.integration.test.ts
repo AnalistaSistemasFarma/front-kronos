@@ -332,6 +332,9 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     await expect(excludeReader(prisma, notifier, await accessOf(E.cal), reqA, recAjeno.id_read_record, { reason: 'corto' }, actor(E.cal))).rejects.toThrow(/mínimo 10/);
     await excludeReader(prisma, notifier, await accessOf(E.cal), reqA, recAjeno.id_read_record, { reason: 'Se retiró de la empresa (prueba S4)' }, actor(E.cal));
     await expect(excludeReader(prisma, notifier, await accessOf(E.cal), reqA, recAjeno.id_read_record, { reason: 'Se retiró de la empresa (prueba S4)' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
+    // Sprint 6 [SGC-REQ-085]: una lectura excluida ya no da acceso al PDF controlado.
+    const cupoAjeno = await prisma.sgcTaskAssignee.findFirstOrThrow({ where: { id_task: t.id_task, user_email: E.ajeno } });
+    await expect(openReadingFile(prisma, cupoAjeno.id_task_assignee, await viewer(E.ajeno), actor(E.ajeno))).rejects.toMatchObject({ status: 404 });
     const d = (await getRequestDetail(prisma, reqA, await viewer(E.cal))).dissemination!;
     expect(d.coverage).toMatchObject({ total: 5, read: 1, pending: 3, excluded: 1, percent: 25 });
     expect(d.readers.find((r) => r.email === E.l2)).toMatchObject({ status: 'pendiente', remindersSent: 1 });
@@ -344,6 +347,9 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
       await signTask(prisma, deps, idTask, firma('leyo', { idAssignee }), actor(email));
     }
     expect(await taskOf(reqA, 'divulgacion')).toMatchObject({ status: 'resuelta' });
+    // Sprint 6 [SGC-REQ-085]: cerrada la divulgación, la lectura ya firmada no vuelve a abrir el PDF por esta vía.
+    const cupoL1 = await prisma.sgcTaskAssignee.findFirstOrThrow({ where: { id_task: (await taskOf(reqA, 'divulgacion')).id_task, user_email: E.l1 } });
+    await expect(openReadingFile(prisma, cupoL1.id_task_assignee, await viewer(E.l1), actor(E.l1))).rejects.toMatchObject({ status: 409 });
     const cap = await taskOf(reqA, 'capacitacion');
     expect(cap.status).toBe('abierta');
     expect(cap.assignees).toEqual([expect.objectContaining({ user_email: null, pool_type_code: 'SGC-VERIF-CALIDAD', signature_meaning: 'capacito' })]);
