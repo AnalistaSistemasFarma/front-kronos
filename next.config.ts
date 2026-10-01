@@ -62,7 +62,15 @@ const nextConfig: NextConfig = {
 // En `next dev` ambos quedan fuera: Sentry solo se habilita en producción (lib/sentry.ts)
 // y next-pwa está desactivado, pero cargarlos encarece cada arranque y recompilación.
 export default async function config(phase: string): Promise<NextConfig> {
-  if (phase === PHASE_DEVELOPMENT_SERVER) return nextConfig;
+  if (phase === PHASE_DEVELOPMENT_SERVER) {
+    // En local el servidor de desarrollo crecía a 3+ GB de RAM y con el equipo sin memoria libre
+    // todo se volvía lento. Esta opción de Next reduce bastante ese consumo a cambio de
+    // compilar un poco más despacio la primera vez cada página.
+    return {
+      ...nextConfig,
+      experimental: { ...nextConfig.experimental, webpackMemoryOptimizations: true },
+    };
+  }
 
   const [{ default: withPWA }, { withSentryConfig }] = await Promise.all([
     import('@ducanh2912/next-pwa'),

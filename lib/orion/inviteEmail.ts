@@ -50,6 +50,7 @@ function footerLink(href: string, label: string): string {
  */
 function buildInviteOutro(params: {
   inviteUrl: string;
+  kind?: InviteEmailKind;
   documentTitle?: string | null;
   invitedByName?: string | null;
   invitedByEmail?: string | null;
@@ -80,17 +81,22 @@ function buildInviteOutro(params: {
     COMPANY;
   const senderEmail = String(params.invitedByEmail || '').trim();
   const year = new Date().getFullYear();
+  const isDraft = params.kind === 'draft-review';
 
   return `
 <div style="margin:28px 0 20px;text-align:center;">
   <a href="${url}"
      style="display:inline-block;padding:14px 32px;background:${ACCENT};color:#ffffff;font-size:16px;font-weight:700;text-decoration:none;border-radius:8px;letter-spacing:0.02em;${FONT}">
-    Revisar y firmar
+    ${isDraft ? 'Revisar borrador' : 'Revisar y firmar'}
   </a>
 </div>
 <p style="margin:0 0 8px;font-size:14px;line-height:1.55;color:#374151;${FONT}">
-  Pulse el botón para abrir el documento en
-  <strong>${escapeHtml(PRODUCT)}</strong> (${escapeHtml(BRAND)}) y firmarlo.
+  ${
+    isDraft
+      ? `Pulse el botón para ver el <strong>borrador</strong> en <strong>${escapeHtml(PRODUCT)}</strong> (${escapeHtml(BRAND)}) y aceptarlo o rechazarlo. Este borrador todavía no es un documento para firmar.`
+      : `Pulse el botón para abrir el documento en
+  <strong>${escapeHtml(PRODUCT)}</strong> (${escapeHtml(BRAND)}) y firmarlo.`
+  }
 </p>
 ${
   doc
@@ -145,7 +151,11 @@ ${
 `.trim();
 }
 
+/** `draft-review`: revisión de borrador por el cliente (Aceptar / Rechazar), no firma. */
+export type InviteEmailKind = 'sign' | 'draft-review';
+
 export async function sendExternalSignerInviteEmail(params: {
+  kind?: InviteEmailKind;
   to: string;
   signerName?: string | null;
   documentTitle?: string | null;
@@ -195,7 +205,9 @@ export async function sendExternalSignerInviteEmail(params: {
     throw new Error('Falta la URL de firma para el correo.');
   }
 
+  const isDraft = params.kind === 'draft-review';
   const outro = buildInviteOutro({
+    kind: params.kind,
     inviteUrl,
     documentTitle: doc,
     invitedByName: params.invitedByName,
@@ -214,9 +226,9 @@ export async function sendExternalSignerInviteEmail(params: {
       senderEmail: fromEmail,
       mailFrom: fromEmail,
       replyTo: fromEmail,
-      title: `Invitación a firmar: ${doc}`,
+      title: isDraft ? `Borrador para su revisión: ${doc}` : `Invitación a firmar: ${doc}`,
       table: [
-        { Firmante: name },
+        isDraft ? { Aprobador: name } : { Firmante: name },
         { Documento: doc },
         ...(subject ? [{ Solicitud: subject }] : []),
         ...(expiresLabel ? [{ 'Válido hasta': expiresLabel }] : []),

@@ -110,6 +110,8 @@ import { buildOrionParticipants } from '../../../../../lib/orion/participants';
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableRow';
+import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
 import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import TableFieldInput from '../create-request/TableFieldInput';
@@ -2133,9 +2135,11 @@ function ViewRequestPage() {
   );
   const hasOrionDocuments = Object.keys(orionInitialDocuments).length > 0;
   const hasPdfAttachments = attachmentRows.some((f) => /\.pdf$/i.test(f.name));
+  // Word en preparación (etapa previa a la firma): también usa la tabla de firma.
+  const hasWordAttachments = attachmentRows.some((f) => isWordDraftFileName(f.name));
   // Firma en solicitud normal: basta con PDFs adjuntos (o bag Orion).
   const showOrionPanel =
-    hasPdfAttachments || hasOrionSignatureField || hasOrionDocuments;
+    hasPdfAttachments || hasWordAttachments || hasOrionSignatureField || hasOrionDocuments;
   const currentUserEmailNorm = String(session?.user?.email || '')
     .trim()
     .toLowerCase();
@@ -3041,6 +3045,28 @@ function ViewRequestPage() {
                               requestId={request.id}
                               fileId={fileId}
                             />
+                          }
+                        />
+                      );
+                    }
+
+                    if (showOrionPanel && isWordDraftFileName(file.name)) {
+                      return (
+                        <OrionDraftTableRow
+                          key={file.id}
+                          rowNumber={fileIndex + 1}
+                          requestId={request.id}
+                          fileId={fileId}
+                          fileName={file.name}
+                          fileSizeLabel={sizeLabel}
+                          processName={request?.process || request?.category || null}
+                          requesterName={request?.requester || null}
+                          openUrl={openUrl}
+                          canDeleteAttachment={canDeleteAttachments}
+                          onDeleteAttachment={requestDeleteAttachment}
+                          autoOpenReview={
+                            orionActionParam === 'review' &&
+                            String(orionFileIdParam || '') === fileId
                           }
                         />
                       );

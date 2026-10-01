@@ -755,3 +755,64 @@ export async function fetchOrionSignedFileContent(params: {
 
   return last;
 }
+
+/**
+ * Contrato v3: URL pública `/review/{token}` para que un aprobador del cliente revise el
+ * borrador (Aceptar / Rechazar). 404 = Orion aún no implementa la revisión de borradores.
+ */
+export async function fetchOrionDraftReviewUrl(params: {
+  orionDocumentId: string;
+  email: string;
+  name?: string | null;
+  cardCode?: string | null;
+  reviewOrder: number;
+  expiresInHours?: number;
+  forceRefresh?: boolean;
+}): Promise<{ ok: boolean; status: number; reviewUrl: string | null; expiresAt: string | null; error?: string }> {
+  const res = await orionFetch<{
+    reviewUrl?: string;
+    url?: string;
+    expiresAt?: string;
+    error?: string;
+  }>(`/api/integrations/synerlink/embed/review-url`, {
+    method: 'POST',
+    body: JSON.stringify({
+      docId: params.orionDocumentId,
+      email: params.email.trim().toLowerCase(),
+      name: params.name ?? undefined,
+      cardCode: params.cardCode ?? undefined,
+      reviewOrder: params.reviewOrder,
+      expiresInHours: params.expiresInHours ?? 24,
+      sendEmail: false,
+      forceRefresh: params.forceRefresh === true,
+    }),
+  });
+  const raw = String(res.data?.reviewUrl || res.data?.url || '').trim();
+  const reviewUrl = resolveOrionAbsoluteUrl(raw) || raw || null;
+  if (!res.ok || !reviewUrl) {
+    return {
+      ok: false,
+      status: res.status,
+      reviewUrl: null,
+      expiresAt: null,
+      error: res.error || res.data?.error || 'Orion no devolvió la URL de revisión',
+    };
+  }
+  return { ok: true, status: res.status, reviewUrl, expiresAt: res.data?.expiresAt ?? null };
+}
+
+/** Contrato v3: anula enlaces de revisión pendientes (otro aprobador rechazó). */
+export async function revokeOrionDraftReviewUrls(params: {
+  orionDocumentId: string;
+  emails: string[];
+  reason: string;
+}): Promise<OrionResult<unknown>> {
+  return orionFetch<unknown>(`/api/integrations/synerlink/embed/review-url/revoke`, {
+    method: 'POST',
+    body: JSON.stringify({
+      docId: params.orionDocumentId,
+      emails: params.emails.map((e) => e.trim().toLowerCase()),
+      reason: params.reason,
+    }),
+  });
+}

@@ -191,7 +191,7 @@ async function ensureReviewTaskTemplateId(pool: SqlPool, requestId: number): Pro
   return id;
 }
 
-async function openReviewTask(
+export async function openReviewTask(
   pool: SqlPool,
   params: {
     requestId: number;
@@ -253,15 +253,21 @@ async function openReviewTask(
     ]
       .filter(Boolean)
       .join(' · '),
+    // Un Word se valida en su tablero (ver, marcar, comentar y aprobar): la notificación lleva directo ahí.
     url: buildAppUrl(
-      `/process/authorization?highlight=${encodeURIComponent(String(taskId))}&orionReviewFileId=${encodeURIComponent(params.fileId)}`
+      /\.docx$/i.test(docLabel)
+        ? `/process/request-general/draft-board?${new URLSearchParams({
+            requestId: String(params.requestId),
+            fileId: params.fileId,
+          }).toString()}`
+        : `/process/authorization?highlight=${encodeURIComponent(String(taskId))}&orionReviewFileId=${encodeURIComponent(params.fileId)}`
     ),
     tag: `orion-review-${taskId}`,
   }).catch((err: unknown) => console.warn('[orion/review] Notificación falló:', err));
 }
 
 /** Cierra las tareas de validación abiertas del archivo (todas o solo las de un usuario). */
-async function closeReviewTasks(
+export async function closeReviewTasks(
   pool: SqlPool,
   params: {
     requestId: number;

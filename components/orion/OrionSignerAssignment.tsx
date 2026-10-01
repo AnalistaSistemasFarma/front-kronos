@@ -70,7 +70,7 @@ function statusFor(
   return { label: 'Sin asignar', color: 'gray', done: false };
 }
 
-type PartnerOption = {
+export type PartnerOption = {
   value: string;
   label: string;
   cardCode: string;
@@ -78,7 +78,7 @@ type PartnerOption = {
   email: string;
 };
 
-function PartnerSearch({
+export function PartnerSearch({
   companyId,
   disabled,
   onPick,
