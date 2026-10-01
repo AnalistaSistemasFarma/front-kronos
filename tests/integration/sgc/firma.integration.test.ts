@@ -227,13 +227,21 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     expect((await taskOf(reqA, 'elaboracion')).status).toBe('abierta');
   });
 
-  it('[SGC-REQ-088] una ráfaga EN PARALELO de contraseñas erradas no se salta el bloqueo: 5 fallos y el resto bloqueado', async () => {
+  it('[SGC-REQ-088] una ráfaga EN PARALELO de contraseñas erradas no se salta el bloqueo de 5 intentos', async () => {
     const elab = await taskOf(reqA, 'elaboracion');
-    const results = await Promise.allSettled(Array.from({ length: 9 }, (_, i) => signTask(prisma, deps, elab.id_task, firma('elaboro', { password: `rafaga-${i}` }), actor(E.rafaga))));
-    const statuses = results.map((r) => (r.status === 'rejected' ? (r.reason as { status?: number }).status : 200)).sort();
-    expect(statuses.filter((x) => x === 403)).toHaveLength(5);
-    expect(statuses.filter((x) => x === 429)).toHaveLength(4);
-    expect(await prisma.sgcAuditLog.count({ where: { action: 'firma.reautenticacion_fallida', actor_email: E.rafaga } })).toBe(5);
+    const failures = () => prisma.sgcAuditLog.count({ where: { action: 'firma.reautenticacion_fallida', actor_email: E.rafaga } });
+    // En paralelo: cada intento se serializa por persona; los que llegan mientras otro está en curso se rechazan (409) sin contar.
+    const results = await Promise.allSettled(Array.from({ length: 12 }, (_, i) => signTask(prisma, deps, elab.id_task, firma('elaboro', { password: `rafaga-${i}` }), actor(E.rafaga))));
+    const statuses = results.map((r) => (r.status === 'rejected' ? (r.reason as { status?: number }).status : 200));
+    expect(statuses.every((s) => s === 403 || s === 409 || s === 429)).toBe(true);
+    expect(statuses.filter((s) => s === 403).length).toBeLessThanOrEqual(5);
+    expect(await failures()).toBeLessThanOrEqual(5);
+    // Uno tras otro hasta el bloqueo: en total, nunca más de 5 intentos fallidos en la ventana.
+    for (let i = 0; i < 6 && (await failures()) < 5; i++) {
+      await expect(signTask(prisma, deps, elab.id_task, firma('elaboro', { password: `seguido-${i}` }), actor(E.rafaga))).rejects.toMatchObject({ status: 403 });
+    }
+    expect(await failures()).toBe(5);
+    await expect(signTask(prisma, deps, elab.id_task, firma('elaboro', { password: PW }), actor(E.rafaga))).rejects.toMatchObject({ status: 429 });
   });
 
   it('[SGC-REQ-038][SGC-REQ-040][SGC-REQ-041][SGC-REQ-049] el elaborador firma «Elaboró»: sello de tiempo del servidor, hash del contenido, evidencia propia y SIN Orión', async () => {
@@ -427,8 +435,11 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     await round();
     failHtmlToPdf = true;
     const res = await signTask(prisma, deps, (await taskOf(idRequest, 'aprobacion')).id_task, firma('aprobo', { checklist: checklistOk }), actor(E.cal));
-    expect(res.controlledPdf).toMatchObject({ status: 'error', error: expect.stringContaining('Chrome') });
+    // Sprint 6 [SGC-REQ-087]: al firmante le llega un mensaje genérico; el detalle técnico queda para Calidad (estado) y la auditoría.
+    expect(res.controlledPdf).toMatchObject({ status: 'error', error: expect.stringContaining('error técnico') });
+    expect(res.controlledPdf.error).not.toContain('Chrome');
     expect(await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest } })).toMatchObject({ controlled_pdf_status: 'error', controlled_pdf_error: expect.stringContaining('Chrome') });
+    expect(await prisma.sgcAuditLog.count({ where: { action: 'documento.pdf_controlado_error', entity_id: String(idRequest), detail: { contains: 'Chrome' } } })).toBeGreaterThan(0);
     const retry = await generateControlledVersion(prisma, deps, idRequest, actor(E.cal));
     expect(retry).toMatchObject({ idDocument: doc.idDocument, created: true });
     const v2 = await prisma.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: retry.idDocumentVersion } });

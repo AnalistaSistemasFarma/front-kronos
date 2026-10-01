@@ -119,11 +119,13 @@ export async function signTask(db: SgcDb, deps: SgcSignatureDeps, idTask: number
 
   // Sprint 6: contar intentos → comparar → registrar el fallo, serializado por persona entre todas las
   // instancias; así una ráfaga en paralelo no se salta el bloqueo de 5 intentos en 15 minutos.
-  const ok = await withSgcAppLock(db, `sgc-reautenticacion-${email}`, { waitMs: 20_000, busyMessage: 'Hay otra firma suya en curso. Intente de nuevo en un momento.', holdMs: 60_000 }, async () => {
-    await assertReauthNotLocked(db, email, now);
+  // Sin espera: un segundo intento de la MISMA persona mientras otro está en curso se rechaza (409) y no cuenta
+  // (así ninguna conexión queda retenida esperando el bloqueo). El conteo y el registro van en la misma conexión.
+  const ok = await withSgcAppLock(db, `sgc-reautenticacion-${email}`, { waitMs: 0, busyMessage: 'Hay otra firma suya en curso. Espere a que termine e intente de nuevo.', holdMs: 60_000 }, async (tx) => {
+    await assertReauthNotLocked(tx, email, now);
     const valid = await deps.verifyPassword(email, input.password);
     if (!valid) {
-      await writeSgcAudit(db, {
+      await writeSgcAudit(tx, {
         idCompany,
         actorEmail: email,
         action: SGC_AUDIT_ACTIONS.firmaReautenticacionFallida,
