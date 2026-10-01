@@ -649,3 +649,17 @@ export function notificarActividad(idConversation: number, at: string): void {
     new CustomEvent<ChatActivityDetail>(CHAT_ACTIVITY_EVENT, { detail: { idConversation, at } })
   );
 }
+
+/** Un adjunto del apartado "Multimedia y archivos" de una conversación. */
+export interface ChatSharedFileDto {
+  id: number;
+  fileName: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  /** SIEMPRE /api/chat/attachments/<id>: nunca una URL de OneDrive. */
+  downloadUrl: string;
+  createdAt: string;
+  /** "Usted", el nombre de la persona o el del asistente. */
+  sentBy: string;
+  isImage: boolean;
+}

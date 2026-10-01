@@ -39,6 +39,8 @@ export function ChatImageViewer({
       padding={0}
       radius='md'
       lockScroll={false}
+      // Por encima del panel de Multimedia, que también es un Modal.
+      zIndex={400}
       overlayProps={{ backgroundOpacity: 0.85, blur: 2 }}
       classNames={{ content: 'chat-visor__contenido', body: 'chat-visor__cuerpo' }}
     >
