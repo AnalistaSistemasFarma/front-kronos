@@ -98,7 +98,7 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     const cat = await ok<{ processes: { id: number; code: string }[]; documentTypes: { id: number; code: string }[] }>(await page.request.get(`/api/sgc/catalogs?company=${OLP}`));
     const created = await ok<{ idRequest: number }>(
       await page.request.post('/api/sgc/requests', {
-        data: { company: OLP, requestType: 'nuevo', subject: `E2E S4 · divulgación y vigencia ${new Date().toISOString()}`, description: 'Recorrido automático de la e2e del Sprint 4 (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, formValues: { urgencia: 'Normal' } },
+        data: { company: OLP, requestType: 'nuevo', subject: `E2E S4 · lectura y vigencia ${new Date().toISOString()}`, description: 'Recorrido automático de la e2e del Sprint 4 (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, formValues: { urgencia: 'Normal' } },
       }),
       [201]
     );
@@ -109,7 +109,10 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     expect(detail.dissemination.readers.map((r) => r.email).sort()).toEqual([U1, U2, U3].map((e) => e.toLowerCase()).sort());
     idDocument = detail.controlledPdf.idDocument;
     await p3.goto(`/process/sgc-documental/tareas?empresa=${OLP}`);
-    await expect(p3.locator(`[data-testid="bandeja-fila"][data-request="${idRequest}"]`).filter({ hasText: 'Divulgación' })).toBeVisible();
+    // La única tarea ABIERTA de qa.sgc3 en esta solicitud es su lectura (revisión y aprobación ya quedaron resueltas).
+    const open = p3.locator(`[data-testid="bandeja-fila"][data-request="${idRequest}"][data-status="abierta"]`);
+    await expect(open).toHaveCount(1);
+    await expect(open).toContainText('Divulgación');
     await p2.context().close();
     await p3.context().close();
   });
