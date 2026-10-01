@@ -35,7 +35,7 @@ test.describe('SGC documental · Sprint 2 · administración de flujos validados
     await page.getByTestId('sgc-flujo-guardar').click();
     await page.getByTestId('sgc-modal-motivo').fill(`Cambio de nombre de la tarea (e2e ${code}).`);
     await page.getByTestId('sgc-modal-confirmar').click();
-    await expect(page.getByTestId('sgc-flujos-mensaje')).toContainText('Borrador guardado');
+    await expect(page.getByTestId('sgc-flujos-mensaje')).toContainText('Cambios guardados en el borrador. Publíquelo para que aplique a las nuevas solicitudes.');
     await expect(page.getByTestId('sgc-flujo-tarea').nth(1)).toContainText('Ejecución editada en e2e');
 
     await page.getByTestId('sgc-flujo-publicar').click();
@@ -43,23 +43,34 @@ test.describe('SGC documental · Sprint 2 · administración de flujos validados
     await page.getByTestId('sgc-modal-confirmar').click();
     await expect(page.getByTestId('sgc-flujos-mensaje')).toContainText('Versión publicada');
     await expect(page.getByTestId('sgc-version-estado')).toHaveText('vigente');
-    // La vigente no se edita: solo se crea un borrador nuevo.
-    await expect(page.getByTestId('sgc-flujo-editar')).toHaveCount(0);
-
-    // Nueva versión → se inactiva el flujo de prueba (dato del proceso) → se descarta el borrador.
-    await page.getByTestId('sgc-flujo-nueva-version').click();
+    // 2026-10-01: sobre la vigente, «Editar Flujo de Trabajo» sigue visible como en SynerLink:
+    // pide el motivo, crea el borrador y entra directo a editarlo.
+    await expect(page.getByTestId('sgc-flujo-editar')).toHaveText('Editar Flujo de Trabajo');
+    await page.getByTestId('sgc-flujo-editar').click();
     await page.getByTestId('sgc-modal-motivo').fill(`Nueva versión de prueba (e2e ${code}).`);
     await page.getByTestId('sgc-modal-confirmar').click();
     await expect(page.getByTestId('sgc-version-estado')).toHaveText('borrador');
     await expect(page).toHaveURL(/version=2/);
+    await expect(page.getByTestId('sgc-flujo-guardar')).toBeVisible();
+    await expect(page.getByTestId('sgc-flujo-tarea-nombre').first()).toBeVisible();
+
+    // Si ya hay borrador, desde la vigente el botón lo abre en edición sin volver a pedir motivo.
+    await page.getByTestId('sgc-abrir-versiones').click();
+    await page.locator('[data-testid="sgc-version-fila"][data-status="vigente"]').click();
+    await expect(page.getByTestId('sgc-version-estado')).toHaveText('vigente');
     await page.getByTestId('sgc-flujo-editar').click();
+    await expect(page.getByTestId('sgc-modal-motivo')).toHaveCount(0);
+    await expect(page.getByTestId('sgc-version-estado')).toHaveText('borrador');
+    await expect(page.getByTestId('sgc-flujo-guardar')).toBeVisible();
+
+    // Se inactiva el flujo de prueba (dato del proceso) → se descarta el borrador.
     // El input del Switch de Mantine está oculto fuera de la vista: se pulsa su riel.
     await page.locator('.mantine-Switch-track').click();
     await expect(page.getByRole('switch')).not.toBeChecked();
     await page.getByTestId('sgc-flujo-guardar').click();
     await page.getByTestId('sgc-modal-motivo').fill(`Inactivar el flujo de prueba (e2e ${code}).`);
     await page.getByTestId('sgc-modal-confirmar').click();
-    await expect(page.getByTestId('sgc-flujos-mensaje')).toContainText('Borrador guardado');
+    await expect(page.getByTestId('sgc-flujos-mensaje')).toContainText('Cambios guardados en el borrador');
     await page.getByTestId('sgc-flujo-descartar').click();
     await page.getByTestId('sgc-modal-motivo').fill(`Descartar borrador de prueba (e2e ${code}).`);
     await page.getByTestId('sgc-modal-confirmar').click();
@@ -145,6 +156,7 @@ test.describe('SGC documental · paridad visual del administrador de flujos con 
     infoBox: string;
     infoLabel: string;
     backButton: string;
+    editButton: string;
   };
   async function flowShape(page: Page): Promise<FlowShape> {
     return page.evaluate(() => {
@@ -158,6 +170,9 @@ test.describe('SGC documental · paridad visual del administrador de flujos con 
       const cardOf = (title: string) => h2.find((h) => h.textContent?.trim() === title)?.closest('.mantine-Card-root');
       const activities = cardOf('Flujo de Actividades');
       const back = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('Volver a Flujos de Trabajo'));
+      // «Editar Flujo de Trabajo»: mismo texto, ícono, color y lugar (primer botón de la botonera inferior, junto a «Volver»).
+      const edit = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Editar Flujo de Trabajo');
+      const editIcon = edit?.querySelector('svg')?.getAttribute('class')?.split(/\s+/).find((c) => c.startsWith('tabler-icon-') && c !== 'tabler-icon') ?? '';
       return {
         titleFont: cs(header.querySelector('h1'), ['font-size', 'font-weight', 'line-height', 'display', 'gap']),
         headerCard: cs(header, ['border-radius', 'box-shadow', 'padding-top', 'padding-left', 'border-top-width']),
@@ -171,6 +186,9 @@ test.describe('SGC documental · paridad visual del administrador de flujos con 
         infoBox: cs(activities?.querySelector('.rounded-lg.p-3'), ['padding-top', 'border-radius', 'background-color']),
         infoLabel: cs(activities?.querySelector('.rounded-lg.p-3 .uppercase'), ['font-size', 'font-weight', 'text-transform', 'color']),
         backButton: cs(back, ['height', 'font-size', 'font-weight', 'border-radius', 'border-top-width']),
+        editButton: edit
+          ? [edit.textContent?.trim(), editIcon, edit.parentElement?.firstElementChild === edit && edit.parentElement?.contains(back ?? null) ? 'primero-junto-a-volver' : 'otro-lugar', cs(edit, ['background-color', 'color', 'height', 'font-size', 'font-weight', 'border-radius'])].join('|')
+          : '',
       };
     });
   }
@@ -199,7 +217,9 @@ test.describe('SGC documental · paridad visual del administrador de flujos con 
 
     expect(sgc.sections).toEqual(['Categoría', 'Proceso', 'Flujo de Actividades']);
     expect(sgc.sections).toEqual(synerlink.sections);
-    for (const k of ['titleFont', 'headerCard', 'headerButton', 'sectionFont', 'infoCard', 'taskCard', 'taskNumber', 'infoBox', 'infoLabel', 'backButton'] as const) {
+    // 2026-10-01: «Editar Flujo de Trabajo» también se ve sobre la VIGENTE (DOC), igual que en SynerLink.
+    expect(sgc.editButton).toContain('Editar Flujo de Trabajo|tabler-icon-ticket|primero-junto-a-volver');
+    for (const k of ['titleFont', 'headerCard', 'headerButton', 'sectionFont', 'infoCard', 'taskCard', 'taskNumber', 'infoBox', 'infoLabel', 'backButton', 'editButton'] as const) {
       expect(sgc[k], k).toBe(synerlink[k]);
     }
     expect(sgc.sectionCards).toEqual(synerlink.sectionCards);
