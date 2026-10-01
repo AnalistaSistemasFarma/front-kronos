@@ -20,7 +20,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     if (new URL(request.url).searchParams.get('formato') === 'csv') {
       return new NextResponse(auditReportToCsv(report), {
         status: 200,
-        headers: { ...NO_STORE, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`auditoria-${report.document.code}.csv`)}` },
+        headers: { ...NO_STORE, 'Content-Type': 'text/csv; charset=utf-8', 'X-Content-Type-Options': 'nosniff', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`auditoria-${report.document.code}.csv`)}` },
       });
     }
     return jsonNoStore(report);

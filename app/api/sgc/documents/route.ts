@@ -1,7 +1,7 @@
 import { prisma } from '../../../../lib/prisma';
 import { createInitialDocument, listMasterDocuments } from '../../../../lib/sgc/db/documents';
 import { uploadToSgcStorage } from '../../../../lib/sgc/onedrive';
-import { companyAccess, errorResponse, getSgcRequestContext, jsonNoStore, parseCompanyParam } from '../_lib/context';
+import { companyAccess, errorResponse, getSgcRequestContext, jsonNoStore, parseCompanyParam, uploadGuard } from '../_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +48,9 @@ export async function POST(request: Request) {
   try {
     const ctx = await getSgcRequestContext(request);
     if (ctx instanceof Response) return ctx;
+    const guard = uploadGuard(request, ctx);
+    if (guard) return guard;
+    if (!ctx.access.some((a) => a.canQuality)) return jsonNoStore({ error: 'Solo Aseguramiento de Calidad carga documentos vigentes' }, 403);
     const form = await request.formData().catch(() => null);
     if (!form) return jsonNoStore({ error: 'Se esperaba un formulario con archivos' }, 400);
     const idCompany = Number(text(form, 'company'));

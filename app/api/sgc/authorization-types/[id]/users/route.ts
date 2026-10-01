@@ -13,8 +13,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const body = await readJson(request);
     if (!id || !body) return jsonNoStore({ error: 'Petición inválida' }, 400);
     const idCompany = Number(body.company);
-    if (!configAccess(ctx, idCompany)) return jsonNoStore({ error: 'Sin permiso para configurar autorizaciones' }, 403);
-    return jsonNoStore(await grantAuthorizationTypeUser(prisma, idCompany, id, body as never, ctx.actor), 201);
+    const access = configAccess(ctx, idCompany);
+    if (!access) return jsonNoStore({ error: 'Sin permiso para configurar autorizaciones' }, 403);
+    return jsonNoStore(await grantAuthorizationTypeUser(prisma, idCompany, id, body as never, ctx.actor, { actorIsQuality: access.canQuality }), 201);
   } catch (error) {
     return errorResponse(error, 'authorization-types:grupo');
   }

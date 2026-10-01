@@ -9,6 +9,7 @@ import type { SgcActor } from '../../../../lib/sgc/db/catalogs';
 import type { SgcAccessSubject } from '../../../../lib/sgc/documentAccess';
 import { isSgcError } from '../../../../lib/sgc/errors';
 import type { SgcCompanyAccess } from '../../../../lib/sgc/permissions';
+import { bodyTooLarge, checkSgcRate, type SgcRateBucket } from '../../../../lib/sgc/rateLimit';
 
 /**
  * Contexto común de las rutas /api/sgc/**: sesión, acceso por empresa (dos
@@ -71,6 +72,30 @@ export function parseCompanyParam(url: string): number | null {
   const raw = new URL(url).searchParams.get('company');
   const n = Number(raw);
   return raw && Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * Sprint 6 — límite de tasa: 429 con Retry-After si la persona (o la IP, en
+ * rutas sin sesión) superó el límite del tipo de ruta; null si puede seguir.
+ */
+export function rateLimitResponse(bucket: SgcRateBucket, who: string): NextResponse | null {
+  const d = checkSgcRate(bucket, who);
+  if (d.allowed) return null;
+  return NextResponse.json(
+    { error: 'Demasiadas solicitudes seguidas. Espere un momento e intente de nuevo.' },
+    { status: 429, headers: { ...NO_STORE, 'Retry-After': String(d.retryAfterSeconds) } }
+  );
+}
+
+/**
+ * Sprint 6 — antes de leer un formulario con archivos: 413 si el cuerpo
+ * declarado es demasiado grande y 403 si la persona no tiene ningún acceso al
+ * SGC (así nadie sin permiso hace que el servidor cargue el cuerpo en memoria).
+ */
+export function uploadGuard(request: Request, ctx: SgcRequestContext): NextResponse | null {
+  if (bodyTooLarge(request.headers.get('content-length'))) return jsonNoStore({ error: 'El archivo supera el tamaño permitido (25 MB).' }, 413);
+  if (ctx.access.length === 0) return jsonNoStore({ error: 'Sin acceso al SGC' }, 403);
+  return null;
 }
 
 /** Traduce un error a respuesta: los de negocio con su mensaje; el resto, 500 sin detalle. */

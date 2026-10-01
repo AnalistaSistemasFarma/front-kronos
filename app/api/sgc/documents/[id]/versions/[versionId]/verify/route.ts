@@ -1,7 +1,7 @@
 import { prisma } from '../../../../../../../../lib/prisma';
 import { verifyDocumentVersion } from '../../../../../../../../lib/sgc/db/signatures';
 import { downloadSgcFile } from '../../../../../../../../lib/sgc/onedrive';
-import { errorResponse, getSgcRequestContext, jsonNoStore, parseId } from '../../../../../_lib/context';
+import { errorResponse, getSgcRequestContext, jsonNoStore, parseId, rateLimitResponse } from '../../../../../_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,6 +15,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const ctx = await getSgcRequestContext(request);
     if (ctx instanceof Response) return ctx;
+    const limited = rateLimitResponse('verificacion', ctx.email);
+    if (limited) return limited;
     const p = await params;
     const id = parseId(p.id);
     const versionId = parseId(p.versionId);

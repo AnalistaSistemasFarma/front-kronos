@@ -57,8 +57,12 @@ export async function getRelationGraph(
   const ids = nodes.map((n) => n.id);
   const rows = ids.length
     ? await db.sgcDocumentRelation.findMany({
-        where: { id_company: access.idCompany, is_active: true, id_source_document: { in: ids }, id_target_document: { in: ids } },
+        // Sprint 6: sin listas IN gigantes (SQL Server admite 2.100 parámetros); se filtra en memoria.
+        where: { id_company: access.idCompany, is_active: true },
         orderBy: { id_document_relation: 'asc' },
+      }).then((all) => {
+        const visible = new Set(ids);
+        return all.filter((r) => visible.has(r.id_source_document) && visible.has(r.id_target_document));
       })
     : [];
   const [layoutRow, types] = await Promise.all([

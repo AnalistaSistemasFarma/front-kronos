@@ -261,6 +261,12 @@ async function loadMyRead(db: Db, idAssignee: number, email: string) {
 export async function openReadingFile(db: SgcDb, idAssignee: number, viewer: { email: string; access: readonly SgcCompanyAccess[] }, actor: SgcActor) {
   const rec = await loadMyRead(db, idAssignee, viewer.email);
   if (!viewer.access.some((a) => a.idCompany === rec.request.id_company && a.canRead)) throw new SgcError('Lectura no encontrada.', 404);
+  // Sprint 6: la asignación de lectura no es un acceso permanente. Excluida = sin archivo; ya firmada,
+  // solo mientras la divulgación siga abierta (después se consulta como cualquiera, por el listado maestro).
+  if (rec.status === 'excluido') throw new SgcError('Lectura no encontrada.', 404);
+  if (rec.status !== 'pendiente' && rec.task.status !== 'abierta') {
+    throw new SgcError('La divulgación ya cerró: consulte el documento desde el listado maestro.', 409);
+  }
   const idVersion = rec.request.id_document_version;
   if (!idVersion || rec.request.controlled_pdf_status !== 'generado') throw new SgcError('El PDF controlado de esta versión aún no está disponible. Intente más tarde.', 409);
   const version = await db.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: idVersion }, include: { document: true } });
@@ -287,9 +293,11 @@ export async function openReadingFile(db: SgcDb, idAssignee: number, viewer: { e
  * Se exige haber abierto el archivo desde el servidor antes. Solo la primera
  * vez queda la hora; es la condición del servidor para firmar «Leyó».
  */
-export async function recordReadingEvent(db: SgcDb, idAssignee: number, raw: unknown, viewer: { email: string }, actor: SgcActor) {
+export async function recordReadingEvent(db: SgcDb, idAssignee: number, raw: unknown, viewer: { email: string; access?: readonly SgcCompanyAccess[] }, actor: SgcActor) {
   const ev = normalizeReadingEvent(raw);
   const rec = await loadMyRead(db, idAssignee, viewer.email);
+  // Sprint 6: quien perdió el acceso al SGC de la empresa ya no registra avance.
+  if (viewer.access && !viewer.access.some((a) => a.idCompany === rec.request.id_company && a.canRead)) throw new SgcError('Lectura no encontrada.', 404);
   if (rec.status !== 'pendiente') return { status: rec.status, reachedEndAt: rec.reached_end_at?.toISOString() ?? null };
   if (!rec.first_opened_at) throw new SgcError('Abra el documento antes de registrar la lectura.', 409);
   if (ev.event === 'abierto' || rec.reached_end_at) return { status: rec.status, reachedEndAt: rec.reached_end_at?.toISOString() ?? null };

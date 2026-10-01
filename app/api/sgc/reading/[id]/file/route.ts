@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { openReadingFile } from '@/lib/sgc/db/dissemination';
 import { downloadVerifiedPdf } from '@/lib/sgc/onedrive';
 import { stampControlledCopy } from '@/lib/sgc/watermark';
-import { NO_STORE, errorResponse, getSgcRequestContext, jsonNoStore, parseId } from '@/app/api/sgc/_lib/context';
+import { NO_STORE, errorResponse, getSgcRequestContext, jsonNoStore, parseId, rateLimitResponse } from '@/app/api/sgc/_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +17,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const ctx = await getSgcRequestContext(request);
     if (ctx instanceof Response) return ctx;
+    const limited = rateLimitResponse('archivo', ctx.email);
+    if (limited) return limited;
     const id = parseId((await params).id);
     if (!id) return jsonNoStore({ error: 'Petición inválida' }, 400);
     const file = await openReadingFile(prisma, id, { email: ctx.email, access: ctx.access }, ctx.actor);

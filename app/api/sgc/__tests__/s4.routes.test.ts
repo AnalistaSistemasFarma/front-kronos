@@ -143,7 +143,7 @@ describe('Rutas S4 · lectura obligatoria', () => {
     m.recordReadingEvent.mockResolvedValue({ status: 'pendiente', reachedEndAt: '2026-10-01T15:00:00.000Z' });
     const r = await readingProgress.POST(req('/', { event: 'final', pages: 3 }), params({ id: '12' }));
     expect(await r.json()).toMatchObject({ reachedEndAt: '2026-10-01T15:00:00.000Z' });
-    expect(m.recordReadingEvent).toHaveBeenCalledWith(expect.anything(), 12, { event: 'final', pages: 3 }, { email: EMAIL }, ACTOR);
+    expect(m.recordReadingEvent).toHaveBeenCalledWith(expect.anything(), 12, { event: 'final', pages: 3 }, { email: EMAIL, access: [lectura] }, ACTOR);
     expect((await readingProgress.POST(new Request('http://x', { method: 'POST', body: 'no' }), params({ id: '12' }))).status).toBe(400);
     m.recordReadingEvent.mockRejectedValue(new SgcError('Abra el documento antes de registrar la lectura.', 409));
     expect((await readingProgress.POST(req('/', { event: 'final' }), params({ id: '12' }))).status).toBe(409);
