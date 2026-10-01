@@ -22,6 +22,12 @@ export interface SgcSecureViewerProps {
   fileUrl: string;
   canDownload: boolean;
   canPrint: boolean;
+  /**
+   * Sprint 4 (lectura obligatoria): se llama UNA vez cuando la persona llega
+   * al final del documento (se desplazó hasta la última página, o el
+   * documento completo cabe en pantalla). Con esto se habilita «Leído».
+   */
+  onReachedEnd?: (pages: number) => void;
 }
 
 async function renderPdf(bytes: Uint8Array, scale: number, container: HTMLElement, isCancelled: () => boolean) {
@@ -86,9 +92,11 @@ async function printAuthorized(url: string) {
   setTimeout(() => frame.remove(), 60_000);
 }
 
-export default function SgcSecureViewer({ fileUrl, canDownload, canPrint }: SgcSecureViewerProps) {
+export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReachedEnd }: SgcSecureViewerProps) {
   const pagesRef = useRef<HTMLDivElement>(null);
   const bytesRef = useRef<Uint8Array | null>(null);
+  const endRef = useRef(false);
+  const [progress, setProgress] = useState(0);
   const [scale, setScale] = useState(1.3);
   const [state, setState] = useState<{ tipo: 'cargando' } | { tipo: 'listo'; pages: number } | { tipo: 'error'; mensaje: string }>({
     tipo: 'cargando',
@@ -137,6 +145,28 @@ export default function SgcSecureViewer({ fileUrl, canDownload, canPrint }: SgcS
   }, []);
 
   const block = (e: React.SyntheticEvent) => e.preventDefault();
+
+  // Lectura obligatoria: avance de lectura y detección del final del documento.
+  const checkEnd = useCallback(() => {
+    const el = pagesRef.current;
+    if (!el || !onReachedEnd || state.tipo !== 'listo') return;
+    const max = el.scrollHeight - el.clientHeight;
+    const pct = max <= 4 ? 100 : Math.min(100, Math.round((el.scrollTop / max) * 100));
+    setProgress((p) => Math.max(p, pct));
+    if (!endRef.current && (max <= 4 || el.scrollTop >= max - 8)) {
+      endRef.current = true;
+      onReachedEnd(state.pages);
+    }
+  }, [onReachedEnd, state]);
+
+  useEffect(() => {
+    endRef.current = false;
+    setProgress(0);
+  }, [fileUrl]);
+
+  useEffect(() => {
+    checkEnd();
+  }, [checkEnd]);
 
   return (
     <Stack gap='sm' className='sgc-visor' data-testid='sgc-visor'>
@@ -194,8 +224,14 @@ export default function SgcSecureViewer({ fileUrl, canDownload, canPrint }: SgcS
           </Text>
         </Group>
       )}
+      {onReachedEnd && state.tipo === 'listo' && (
+        <Text size='sm' c={progress >= 100 ? 'teal' : 'dimmed'} data-testid='sgc-lectura-avance'>
+          {progress >= 100 ? 'Llegó al final del documento.' : `Lectura obligatoria: desplácese hasta el final del documento (${progress} %).`}
+        </Text>
+      )}
       <div
         ref={pagesRef}
+        onScroll={onReachedEnd ? checkEnd : undefined}
         onContextMenu={block}
         onDragStart={block}
         onCopy={block}

@@ -18,7 +18,21 @@ export interface SgcWatermarkInfo {
   /** Momento de la consulta (se muestra en hora de Colombia). */
   at: Date;
   mode: 'consulta' | 'descarga' | 'impresion';
+  /**
+   * Sprint 4: estado de la versión que se entrega. Una versión OBSOLETA o
+   * ANULADA sale marcada como tal (diagonal y pie); una versión aprobada que
+   * se está divulgando sale como «en divulgación — aún no vigente». El PDF
+   * guardado no cambia (su SHA-256 sigue siendo el registrado).
+   */
+  state?: 'vigente' | 'obsoleto' | 'anulado' | 'divulgacion';
 }
+
+const STATE_TEXT: Record<NonNullable<SgcWatermarkInfo['state']>, { diagonal: string; banner: string | null }> = {
+  vigente: { diagonal: 'COPIA CONTROLADA', banner: null },
+  obsoleto: { diagonal: 'OBSOLETO', banner: 'DOCUMENTO OBSOLETO - NO VÁLIDO PARA USO' },
+  anulado: { diagonal: 'ANULADO', banner: 'DOCUMENTO ANULADO - NO VÁLIDO PARA USO' },
+  divulgacion: { diagonal: 'EN DIVULGACIÓN', banner: 'EN DIVULGACIÓN - AÚN NO VIGENTE' },
+};
 
 const MODE_TEXT: Record<SgcWatermarkInfo['mode'], string> = {
   consulta: 'Consulta en línea',
@@ -45,14 +59,16 @@ export function formatBogotaDateTime(at: Date): string {
 
 /** Textos de la marca: la diagonal y el pie de cada página. */
 export function buildWatermarkLines(info: SgcWatermarkInfo): { diagonal: string; footer: string } {
+  const state = STATE_TEXT[info.state ?? 'vigente'];
   const footer = [
+    ...(state.banner ? [state.banner] : []),
     'COPIA CONTROLADA',
     `${info.code} V${info.versionNumber}`,
     `${MODE_TEXT[info.mode]}: ${info.viewerEmail}`,
     `${formatBogotaDateTime(info.at)} (hora Colombia)`,
     'Prohibida su reproducción sin autorización de Calidad',
   ].join(' · ');
-  return { diagonal: 'COPIA CONTROLADA', footer: toWinAnsiSafe(footer) };
+  return { diagonal: toWinAnsiSafe(state.diagonal), footer: toWinAnsiSafe(footer) };
 }
 
 /** Devuelve el PDF con la marca de agua estampada en todas sus páginas. */
@@ -73,7 +89,8 @@ export async function stampControlledCopy(pdfBytes: Uint8Array, info: SgcWaterma
       size,
       font,
       color: rgb(0.75, 0.1, 0.1),
-      opacity: 0.12,
+      // Obsoleto/anulado: marca más visible (no debe confundirse con una copia vigente).
+      opacity: info.state === 'obsoleto' || info.state === 'anulado' ? 0.28 : 0.12,
       rotate: degrees((angle * 180) / Math.PI),
     });
 

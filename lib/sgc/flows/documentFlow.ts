@@ -12,8 +12,9 @@ import type { SgcFlowDefinition } from './definition';
  *   2 Revisión (varios revisores, en orden o en paralelo; firma «Revisó»)
  *   3 Aprobación (varios aprobadores + verificación de estructura de Calidad
  *     integrada; firma «Aprobó»; también llega a Autorizaciones SGC)
- *   4 Divulgación con lectura firmada   ┐ definidas, pero el motor las deja
- *   5 Capacitación (obligatoria)        ┘ «en espera» hasta el Sprint 4
+ *   4 Divulgación con lectura firmada   ┐ en la v1 y la v2 quedan definidas
+ *   5 Capacitación (obligatoria)        ┘ pero deshabilitadas («en espera»);
+ *                                         la v3 (Sprint 4) las habilita
  *   ✓ Vigente (automático, Sprint 4)
  *
  * Devolver, reasignar y cancelar son ACCIONES, no pasos.
@@ -243,4 +244,51 @@ export const SGC_DOCUMENT_FLOW_V2: SgcFlowDefinition = {
   tasks: SGC_DOCUMENT_FLOW_V1.tasks,
   transitions: SGC_DOCUMENT_FLOW_V1.transitions,
   formFields: [...SGC_DOCUMENT_FLOW_V1.formFields, ...SGC_QUALITY_CHECKLIST_OLP],
+};
+
+/**
+ * Flujo DOCUMENTAL v3 (Sprint 4): la v2 con los pasos 4 y 5 HABILITADOS.
+ *
+ *   4 Divulgación: cada persona del ALCANCE (departamentos, cargos, personas
+ *     o toda la empresa) lee el PDF controlado hasta el final y firma «Leyó».
+ *     El grupo de Calidad la administra (alcance, recordatorios, cierre con
+ *     justificación). Mientras tanto, la versión anterior SIGUE VIGENTE.
+ *   5 Capacitación (obligatoria para todos los tipos): Calidad registra la
+ *     sesión o el video y la evaluación de Microsoft Forms, carga el Excel de
+ *     resultados (nota mínima configurable) y firma «Capacitó».
+ *   ✓ Vigente automático: la versión nueva pasa a vigente y la anterior a
+ *     OBSOLETA (con fecha); su PDF se muestra marcado «OBSOLETO».
+ *
+ * En estos dos pasos solo Calidad puede cancelar la solicitud (la versión
+ * aprobada se anula y nunca llega a vigente).
+ *
+ * La siembra prisma/manual/2026-10-01-sgc-s4-divulgacion-capacitacion-olp.sql
+ * como versión nueva de DOC (el número en la base puede ser mayor: cada pase
+ * y cada reversa probada crean una versión nueva; nunca se edita una vigente).
+ */
+export const SGC_DOCUMENT_FLOW_V3: SgcFlowDefinition = {
+  tasks: SGC_DOCUMENT_FLOW_V2.tasks.map((t) => {
+    if (t.key === 'divulgacion') {
+      return {
+        ...t,
+        assignment: 'alcance' as const,
+        isEnabled: true,
+        description: 'Lectura obligatoria del PDF controlado hasta el final y firma «Leyó» de cada persona del alcance (departamentos, cargos, personas o toda la empresa). La administra Aseguramiento de Calidad.',
+      };
+    }
+    if (t.key === 'capacitacion') {
+      return {
+        ...t,
+        isEnabled: true,
+        description: 'Sesión o video y evaluación en Microsoft Forms; Calidad carga el Excel de resultados (nota mínima configurable) y firma «Capacitó». Obligatoria para todos los tipos documentales.',
+      };
+    }
+    return t;
+  }),
+  transitions: [
+    ...SGC_DOCUMENT_FLOW_V2.transitions,
+    { from: 'divulgacion', action: 'cancelar', to: null, terminalStatus: 'cancelada' },
+    { from: 'capacitacion', action: 'cancelar', to: null, terminalStatus: 'cancelada' },
+  ],
+  formFields: SGC_DOCUMENT_FLOW_V2.formFields,
 };

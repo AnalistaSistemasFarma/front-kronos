@@ -1324,6 +1324,9 @@ model SgcCompanyConfig {
   signatureConsents SgcSignatureConsent[]
   signatureMasters  SgcSignatureMaster[]
 
+  // Sprint 4: personas por cargo (alcance de divulgación por cargo).
+  cargoMembers SgcCargoMember[]
+
   @@map("company_config")
   @@schema("sgc")
 }
@@ -1492,6 +1495,8 @@ model SgcDocumentVersion {
   id_request            Int?
   signed_content_sha256 String?   @db.Char(64)
   manifest_json         String?   @db.NVarChar(Max)
+  // Sprint 4: versión que la reemplazó al pasar a vigente (esta queda obsoleta).
+  id_superseded_by      Int?
 
   document SgcDocument @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1792,6 +1797,10 @@ model SgcRequest {
   signatures     SgcSignature[]
   draftRevisions SgcDraftRevision[]
   qualityChecks  SgcQualityCheck[]
+  // Sprint 4: divulgación y capacitación.
+  disseminationScopes SgcDisseminationScope[]
+  readRecords         SgcReadRecord[]
+  trainings           SgcTraining[]
 
   @@index([id_company, status])
   @@index([requester_email])
@@ -1843,6 +1852,9 @@ model SgcTask {
   request   SgcRequest        @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
   taskDef   SgcFlowTaskDef    @relation(fields: [id_flow_task_def], references: [id_flow_task_def], onDelete: NoAction, onUpdate: NoAction)
   assignees SgcTaskAssignee[]
+  // Sprint 4
+  readRecords SgcReadRecord[]
+  training    SgcTraining?
 
   @@index([id_request])
   @@map("task")
@@ -1875,6 +1887,8 @@ model SgcTaskAssignee {
   authorizations SgcAuthorization[]
   signatures     SgcSignature[]
   qualityChecks  SgcQualityCheck[]
+  // Sprint 4: lectura obligatoria del cupo (divulgación).
+  readRecord     SgcReadRecord?
 
   @@index([id_task])
   @@index([user_email, status])
@@ -2038,7 +2052,7 @@ model SgcSignature {
   reason              String   @db.NVarChar(1000)
   // Sello de tiempo del servidor (UTC).
   signed_at           DateTime
-  // borrador_adjunto | borrador_editor
+  // borrador_adjunto | borrador_editor | pdf_controlado | resultados_capacitacion (S4)
   content_kind        String   @db.NVarChar(30)
   content_ref         String   @db.NVarChar(60)
   content_name        String   @db.NVarChar(260)
@@ -2151,5 +2165,176 @@ model SgcQualityCheck {
 
   @@index([id_request])
   @@map("quality_check")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 4: divulgación, capacitación y vigencia.
+// ---------------------------------------------------------------------------
+
+// Alcance de divulgación de una solicitud: toda la empresa, departamentos,
+// cargos o personas. Nada se borra: una entrada se retira con motivo.
+model SgcDisseminationScope {
+  id_scope      Int       @id @default(autoincrement())
+  id_request    Int
+  // empresa | departamento | cargo | persona
+  kind          String    @db.NVarChar(20)
+  id_department Int?
+  id_cargo      Int?
+  user_email    String?   @db.NVarChar(255)
+  scope_key     String    @db.NVarChar(300)
+  is_active     Boolean   @default(true)
+  added_by      String    @db.NVarChar(255)
+  added_at      DateTime  @default(now())
+  change_reason String?   @db.NVarChar(1000)
+  removed_by    String?   @db.NVarChar(255)
+  removed_at    DateTime?
+  remove_reason String?   @db.NVarChar(1000)
+
+  request SgcRequest @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_request])
+  @@map("dissemination_scope")
+  @@schema("sgc")
+}
+
+// Lectura obligatoria de una persona del alcance (un cupo de la tarea de
+// divulgación): abrió, llegó al final, firmó «Leyó». No se borra.
+model SgcReadRecord {
+  id_read_record      Int       @id @default(autoincrement())
+  id_request          Int
+  id_task             Int
+  id_task_assignee    Int       @unique
+  user_email          String    @db.NVarChar(255)
+  // Claves de las entradas del alcance que la incluyen (JSON).
+  sources_json        String    @db.NVarChar(1000)
+  // pendiente | leido | excluido
+  status              String    @default("pendiente") @db.NVarChar(20)
+  id_document_version Int?
+  assigned_at         DateTime
+  first_opened_at     DateTime?
+  last_opened_at      DateTime?
+  open_count          Int       @default(0)
+  reached_end_at      DateTime?
+  pages               Int?
+  signed_at           DateTime?
+  id_signature        Int?
+  excluded_by         String?   @db.NVarChar(255)
+  excluded_at         DateTime?
+  exclude_reason      String?   @db.NVarChar(1000)
+  reminders_sent      Int       @default(0)
+  last_reminder_at    DateTime?
+
+  request  SgcRequest      @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+  task     SgcTask         @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
+  assignee SgcTaskAssignee @relation(fields: [id_task_assignee], references: [id_task_assignee], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_task, user_email])
+  @@index([id_request])
+  @@index([user_email, status])
+  @@map("read_record")
+  @@schema("sgc")
+}
+
+// Capacitación de una solicitud (paso 5): sesión y/o video, evaluación de
+// Microsoft Forms y nota mínima. Una por tarea; no se borra.
+model SgcTraining {
+  id_training   Int       @id @default(autoincrement())
+  id_request    Int
+  id_task       Int       @unique
+  // video | sesion | mixta
+  mode          String    @db.NVarChar(20)
+  title         String    @db.NVarChar(300)
+  video_url     String?   @db.NVarChar(1000)
+  forms_url     String?   @db.NVarChar(1000)
+  session_date  DateTime? @db.Date
+  instructor    String?   @db.NVarChar(200)
+  max_score     Decimal   @db.Decimal(9, 2)
+  min_score_pct Decimal   @db.Decimal(5, 2)
+  notes         String?   @db.NVarChar(2000)
+  registered_by String    @db.NVarChar(255)
+  registered_at DateTime
+  updated_by    String    @db.NVarChar(255)
+  updated_at    DateTime
+
+  request SgcRequest          @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+  task    SgcTask             @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
+  uploads SgcTrainingUpload[]
+
+  @@index([id_request])
+  @@map("training")
+  @@schema("sgc")
+}
+
+// Cada carga del Excel de resultados (SOLO INSERCIÓN): la vigente es la última.
+model SgcTrainingUpload {
+  id_training_upload Int      @id @default(autoincrement())
+  id_training        Int
+  file_name          String   @db.NVarChar(260)
+  item_id            String   @db.NVarChar(200)
+  storage_path       String   @db.NVarChar(600)
+  sha256             String   @db.Char(64)
+  size_bytes         Int
+  // Nota mínima y puntaje máximo con que se evaluó (fotografía).
+  max_score          Decimal  @db.Decimal(9, 2)
+  min_score_pct      Decimal  @db.Decimal(5, 2)
+  rows_total         Int
+  people             Int
+  in_scope           Int
+  passed             Int
+  failed             Int
+  out_of_scope       Int
+  missing_json       String   @db.NVarChar(Max)
+  rejected_json      String   @db.NVarChar(Max)
+  uploaded_by        String   @db.NVarChar(255)
+  uploaded_at        DateTime
+
+  training SgcTraining         @relation(fields: [id_training], references: [id_training], onDelete: NoAction, onUpdate: NoAction)
+  results  SgcTrainingResult[]
+
+  @@index([id_training])
+  @@map("training_upload")
+  @@schema("sgc")
+}
+
+// Resultado por persona de una carga (SOLO INSERCIÓN).
+model SgcTrainingResult {
+  id_training_result Int     @id @default(autoincrement())
+  id_training_upload Int
+  user_email         String  @db.NVarChar(255)
+  full_name          String? @db.NVarChar(255)
+  score              Decimal @db.Decimal(9, 2)
+  percent            Decimal @db.Decimal(5, 1)
+  passed             Boolean
+  attempts           Int
+  in_scope           Boolean
+  completed_at_text  String? @db.NVarChar(40)
+
+  upload SgcTrainingUpload @relation(fields: [id_training_upload], references: [id_training_upload], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_training_upload])
+  @@map("training_result")
+  @@schema("sgc")
+}
+
+// Personas por cargo en la empresa, para el alcance «por cargo» (SynerLink no
+// vincula persona↔cargo). Lo mantiene Calidad; no se borra: se desactiva.
+model SgcCargoMember {
+  id_cargo_member Int       @id @default(autoincrement())
+  id_company      Int
+  id_cargo        Int
+  user_email      String    @db.NVarChar(255)
+  is_active       Boolean   @default(true)
+  added_by        String    @db.NVarChar(255)
+  added_at        DateTime  @default(now())
+  reason          String    @db.NVarChar(1000)
+  removed_by      String?   @db.NVarChar(255)
+  removed_at      DateTime?
+  remove_reason   String?   @db.NVarChar(1000)
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_company, id_cargo])
+  @@map("cargo_member")
   @@schema("sgc")
 }

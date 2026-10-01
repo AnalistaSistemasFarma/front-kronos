@@ -55,6 +55,7 @@
     "pdfjs-dist": "^4.10.38",
     "prisma": "^6.17.0",
     "puppeteer": "^24.43.1",
+    "qrcode-generator": "^2.0.4",
     "react": "19.1.0",
     "react-chartjs-2": "^5.3.1",
     "react-d3-tree": "^3.6.6",

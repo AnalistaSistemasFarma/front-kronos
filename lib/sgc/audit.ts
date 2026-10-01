@@ -48,6 +48,23 @@ export const SGC_AUDIT_ACTIONS = {
   pdfControladoVerificado: 'documento.pdf_verificado',
   borradorGuardado: 'solicitud.borrador_guardado',
   reporteAuditoria: 'documento.reporte_auditoria',
+  // Sprint 4: divulgación, capacitación y vigencia.
+  alcanceAgregado: 'divulgacion.alcance_agregado',
+  alcanceRetirado: 'divulgacion.alcance_retirado',
+  lectoresAsignados: 'divulgacion.lectores_asignados',
+  lecturaAbierta: 'divulgacion.lectura_abierta',
+  lecturaFinal: 'divulgacion.lectura_final',
+  lecturaExcluida: 'divulgacion.lectura_excluida',
+  divulgacionRecordatorio: 'divulgacion.recordatorio',
+  divulgacionCerrada: 'divulgacion.cerrada',
+  capacitacionRegistrada: 'capacitacion.registrada',
+  capacitacionResultados: 'capacitacion.resultados',
+  documentoVigente: 'documento.vigente',
+  versionObsoleta: 'documento.version_obsoleta',
+  versionAnuladaSinVigencia: 'documento.version_anulada',
+  verificacionQr: 'documento.verificacion_qr',
+  cargoPersonaAgregada: 'cargo.persona_agregada',
+  cargoPersonaRetirada: 'cargo.persona_retirada',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];

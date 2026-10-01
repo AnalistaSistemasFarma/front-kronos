@@ -63,6 +63,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       viewerEmail: ctx.email,
       at: now,
       mode,
+      // Sprint 4: una versión obsoleta o anulada sale marcada como tal; una aprobada en divulgación, como «aún no vigente».
+      state: found.version.status === 'obsoleto' ? 'obsoleto' : found.version.status === 'anulado' ? 'anulado' : found.version.status === 'borrador' ? 'divulgacion' : 'vigente',
     };
     const stamped = await stampControlledCopy(original, info);
 
