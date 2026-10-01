@@ -2627,6 +2627,35 @@ body.chat-inmersivo .chat-page-thread--completa {
   outline-offset: 2px;
 }
 
+/* Multimedia y archivos de una conversación */
+.chat-galeria {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px;
+}
+
+.chat-galeria__foto {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+}
+
+.chat-galeria__archivo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  color: var(--app-text, var(--foreground));
+  text-decoration: none;
+}
+
+.chat-galeria__archivo:hover {
+  border-color: var(--app-accent, #2563eb);
+}
+
 /* Visor a pantalla completa */
 .chat-visor__contenido {
   max-width: 96vw;
