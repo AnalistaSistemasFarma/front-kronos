@@ -151,7 +151,7 @@ function Accesos({ company }: { company: SgcCompanyAccess }) {
           {rows.length === 0 && (
             <Table.Tr>
               <Table.Td colSpan={7}>
-                <Text size='sm' c='dimmed'>
+                <Text size='sm' c='dimmed' ta='center' py='lg'>
                   Sin solicitudes.
                 </Text>
               </Table.Td>

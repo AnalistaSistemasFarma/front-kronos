@@ -113,25 +113,27 @@ function TypesAdmin({ company }: { company: SgcCompanyAccess }) {
             </Button>
           </Group>
           {t.members.length ? (
-            <Table>
-              <Table.Tbody>
-                {t.members.map((m) => (
-                  <Table.Tr key={m.id}>
-                    <Table.Td>{m.name ? `${m.name} (${m.email})` : m.email}</Table.Td>
-                    <Table.Td>
-                      <Text size='xs' c='dimmed'>
-                        Otorgado por {m.grantedBy} · {m.reason}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td w={100}>
-                      <Button size='xs' variant='subtle' color='red' onClick={() => setRevoke({ id: m.id, reason: '' })}>
-                        Retirar
-                      </Button>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
+            <Table.ScrollContainer minWidth={520}>
+              <Table>
+                <Table.Tbody>
+                  {t.members.map((m) => (
+                    <Table.Tr key={m.id}>
+                      <Table.Td>{m.name ? `${m.name} (${m.email})` : m.email}</Table.Td>
+                      <Table.Td>
+                        <Text size='xs' c='dimmed'>
+                          Otorgado por {m.grantedBy} · {m.reason}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td w={100}>
+                        <Button size='xs' variant='subtle' color='red' onClick={() => setRevoke({ id: m.id, reason: '' })}>
+                          Retirar
+                        </Button>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
           ) : (
             <Text size='sm' c='dimmed'>
               Sin personas en el grupo (solo se asigna directamente).

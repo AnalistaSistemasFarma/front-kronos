@@ -3,7 +3,7 @@
 import { useCallback } from 'react';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import './sgc-row-link.css';
+import './sgc-states.css';
 
 /**
  * Filas de tabla que se comportan como un enlace: clic abre la vista interna,
