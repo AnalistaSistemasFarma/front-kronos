@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import {
   ActionIcon,
   Alert,
@@ -717,6 +718,13 @@ export default function ChatThread({
       ? `persona:${person.idConversation}`
       : `agente:${agent?.idAgent ?? 0}`;
 
+  // Clave del BORRADOR del compositor: persona + hilo. Sin saber quién es la
+  // persona (sesión cargando) o sin hilo, no se guarda borrador.
+  const { data: sesionBorrador } = useSession();
+  const miIdBorrador = currentUserId ?? sesionBorrador?.user?.id ?? null;
+  const claveBorrador =
+    miIdBorrador && (group || person || agent) ? `${miIdBorrador}:${claveHilo}` : null;
+
   const participantes = thread.conversation?.participants ?? group?.participants;
   // Memorizado: es prop del compositor (en `memo`) y un arreglo nuevo en cada
   // render lo obligaría a re-renderizarse en cada vuelta del sondeo.
@@ -1169,6 +1177,7 @@ export default function ChatThread({
           onSend={alEnviar}
           cita={cita}
           onQuitarCita={quitarCita}
+          draftKey={claveBorrador}
           sending={thread.sending}
           disabled={composerDisabled}
           placeholder={

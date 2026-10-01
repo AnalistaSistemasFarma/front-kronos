@@ -1232,6 +1232,22 @@ body.chat-inmersivo.con-chat-rail .app-page-shell {
   padding-left: 0;
 }
 
+/* El marco del chat de escritorio (`.chat-escritorio`) va `fixed` con
+   `left: 0`, así que el `padding-left` de arriba no lo mueve y la barra le
+   tapaba la lista de conversaciones (reporte de Nicolás, 2026-10-01). Se corre
+   el mismo ancho de la barra. En modo inmersivo no hay barra: vuelve a 0. */
+body.con-chat-rail .chat-escritorio {
+  left: var(--chat-rail-w);
+}
+
+body.con-chat-rail.con-chat-rail--expandida .chat-escritorio {
+  left: var(--chat-rail-w-expandida);
+}
+
+body.chat-inmersivo.con-chat-rail .chat-escritorio {
+  left: 0;
+}
+
 .chat-rail__cabecera {
   display: flex;
   align-items: center;
@@ -1638,14 +1654,23 @@ body.chat-inmersivo.con-chat-rail .app-page-shell {
 }
 
 /* En la burbuja del usuario el fondo es azul, así que la cita necesita su
-   propio contraste o desaparece. */
+   propio contraste o desaparece. El `!important` hace falta: `.chat-text-muted`
+   trae `!important` y pintaba el extracto citado en gris sobre el azul, donde
+   no se leía (reporte de Nicolás, 2026-10-01). */
 .chat-bubble--user .chat-cita--burbuja {
   background-color: rgba(255, 255, 255, 0.18);
 }
 
 .chat-bubble--user .chat-cita--burbuja .chat-text-muted,
 .chat-bubble--user .chat-cita--burbuja .mantine-Text-root {
-  color: #ffffff;
+  color: #ffffff !important;
+}
+
+/* Tema oscuro: el acento es claro (celeste, verde, gris…), y blanco sobre un
+   velo blanco se pierde. Un velo oscuro le devuelve el contraste al texto. */
+html.dark .chat-bubble--user .chat-cita--burbuja,
+html[data-mantine-color-scheme='dark'] .chat-bubble--user .chat-cita--burbuja {
+  background-color: rgba(0, 0, 0, 0.45);
 }
 
 .chat-bubble--user .chat-cita--burbuja .chat-cita__barra {
