@@ -1,4 +1,4 @@
-<#
+﻿<#
   DESPLIEGUE CON REVERSA AUTOMÁTICA — pase del SGC documental (con cambio de esquema).
 
   Aprendizaje del incidente del 2026-09-30 (PR #472, SynerLink caído 21 min):
@@ -46,7 +46,7 @@ $log = Join-Path $env:TEMP "pase-sgc-$stamp.log"
 $global:t0 = Get-Date
 function Log([string]$m) { $line = "{0:HH:mm:ss} (+{1,6:N1}s) {2}" -f (Get-Date), ((Get-Date) - $global:t0).TotalSeconds, $m; Write-Host $line; Add-Content -Path $log -Value $line }
 if ($Pm2Home) { $env:PM2_HOME = $Pm2Home }
-function Pm2([string[]]$a) { $ErrorActionPreference = 'Continue'; & $Pm2Cmd @a 2>&1 | Out-String }
+function Invoke-Pm2([string[]]$a) { $ErrorActionPreference = 'Continue'; & $Pm2Cmd @a 2>&1 | Out-String }
 
 Set-Location $ProjectDir
 $prevHead = (git rev-parse HEAD).Trim()
@@ -78,13 +78,13 @@ try {
   # -------------------------------------------------------------------------
   # 2. Detener apps, liberar el motor de Prisma.
   # -------------------------------------------------------------------------
-  foreach ($a in $Apps) { Pm2 @('stop', $a) | Out-Null }
+  foreach ($a in $Apps) { Invoke-Pm2 @('stop', $a) | Out-Null }
   $stopped = $true
   Log "Apps detenidas: $($Apps -join ', ')  ← INICIO DE LA INTERRUPCIÓN"
   node scripts\esperar-motor-prisma.cjs 20 500 | Out-Null
   for ($round = 1; $round -le 4; $round++) {
     $claimed = @()
-    try { $claimed = (Pm2 @('jlist') | ConvertFrom-Json) | Where-Object { $_.pid -gt 0 } | ForEach-Object { [int]$_.pid } } catch { }
+    try { $claimed = (Invoke-Pm2 @('jlist') | ConvertFrom-Json) | Where-Object { $_.pid -gt 0 } | ForEach-Object { [int]$_.pid } } catch { }
     $holders = Get-Process node -ErrorAction SilentlyContinue | Where-Object {
       try { $_.Modules | Where-Object { $_.FileName -like "$ProjectDir*query_engine*" } } catch { $false }
     }
@@ -113,7 +113,7 @@ try {
   # -------------------------------------------------------------------------
   # 4. Levantar y probar humo.
   # -------------------------------------------------------------------------
-  foreach ($a in $Apps) { Pm2 @('start', $a) | Out-Null }
+  foreach ($a in $Apps) { Invoke-Pm2 @('start', $a) | Out-Null }
   $stopped = $false
   Log 'Apps levantadas  ← FIN DE LA INTERRUPCIÓN'
   Start-Sleep -Seconds 8
@@ -122,20 +122,20 @@ try {
   $api = try { (Invoke-WebRequest -Uri "http://localhost:$Port/api/sgc/access" -UseBasicParsing -TimeoutSec 60).StatusCode } catch { [int]$_.Exception.Response.StatusCode }
   if ($login -ne 200 -or $api -ne 401) { throw "Prueba de humo falló (/login=$login, /api/sgc/access=$api)" }
   Log "Humo correcto: /login=$login, /api/sgc/access=$api"
-  Pm2 @('save') | Out-Null
+  Invoke-Pm2 @('save') | Out-Null
   $ok = $true
 }
 catch {
   Log "ERROR: $($_.Exception.Message)  → REVERSA"
   try {
-    foreach ($a in $Apps) { Pm2 @('stop', $a) | Out-Null }
+    foreach ($a in $Apps) { Invoke-Pm2 @('stop', $a) | Out-Null }
     git reset --hard $prevHead | Out-Null
     robocopy $bkNext (Join-Path $ProjectDir '.next') /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
     robocopy $bkGen (Join-Path $ProjectDir 'app\generated\prisma') /MIR /XF 'query_engine-windows.dll.node' /NFL /NDL /NJH /NJS /NP | Out-Null
     Log "Reversa aplicada: commit $prevHead, .next y cliente restaurados"
   }
   finally {
-    foreach ($a in $Apps) { Pm2 @('start', $a) | Out-Null }
+    foreach ($a in $Apps) { Invoke-Pm2 @('start', $a) | Out-Null }
     $stopped = $false
     Start-Sleep -Seconds 8
     $code = try { (Invoke-WebRequest -Uri "http://localhost:$Port/login" -UseBasicParsing -TimeoutSec 60).StatusCode } catch { 0 }
@@ -143,7 +143,7 @@ catch {
   }
 }
 finally {
-  if ($stopped) { foreach ($a in $Apps) { Pm2 @('start', $a) | Out-Null }; Log 'Apps levantadas (salvaguarda final)' }
+  if ($stopped) { foreach ($a in $Apps) { Invoke-Pm2 @('start', $a) | Out-Null }; Log 'Apps levantadas (salvaguarda final)' }
 }
 
 if ($ok) {
