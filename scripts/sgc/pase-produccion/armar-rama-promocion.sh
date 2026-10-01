@@ -63,11 +63,45 @@ SHARED=(lib/chat/access.ts app/api/chat/access/route.ts lib/chat/attachmentStora
 for f in "${SHARED[@]}"; do
   for c in $SGC_COMMITS; do
     if git show --format= --name-only "$c" | grep -qxF "$f"; then
-      if git format-patch -1 --stdout "$c" -- "$f" | git apply -3 --index >/dev/null 2>&1; then log "  OK      $f  ($(git log -1 --format=%h "$c"))";
-      else log "  REVISAR $f  ($(git log -1 --format='%h %s' "$c"))"; git checkout -q -- "$f" 2>/dev/null || true; fi
+      cp "$f" "$f.antes-sgc"
+      if git format-patch -1 --stdout "$c" -- "$f" | git apply -3 --index >/dev/null 2>&1 && ! grep -q '^<<<<<<<' "$f"; then
+        log "  OK      $f  ($(git log -1 --format=%h "$c"))"
+      else
+        # No aplicó limpio: se deja el archivo como estaba (sin marcas de conflicto) y se corrige abajo o a mano.
+        mv -f "$f.antes-sgc" "$f"; git add "$f"
+        log "  REVISAR $f  ($(git log -1 --format='%h %s' "$c"))"
+      fi
+      rm -f "$f.antes-sgc"
     fi
   done
 done
+
+# 4b. Correcciones puntuales conocidas (lo que no aplica limpio porque main difiere de testing).
+log "== Correcciones puntuales =="
+node - <<'NODE'
+const fs = require('node:fs');
+// view-activities: quitar el JOIN al módulo viejo (las tablas document* se borran en el pase).
+const va = 'app/api/requests-general/view-activities/route.js';
+let s = fs.readFileSync(va, 'utf8');
+const before = s;
+s = s.replace(/,\s*docmgmt\.id_document/g, '');
+s = s.split('\n').filter((l) => !/LEFT JOIN document_version docver|LEFT JOIN document docmgmt/.test(l)).join('\n');
+fs.writeFileSync(va, s);
+console.log(`  ${va}: ${before === s ? 'sin cambios' : 'JOIN a document/document_version retirado'}`);
+// eslint: ignorar reports/ (evidencia de pruebas).
+const es = 'eslint.config.mjs';
+let e = fs.readFileSync(es, 'utf8');
+if (!e.includes("'reports/**'")) {
+  e = e.replace("'coverage/**',", "'coverage/**',\n      'reports/**',");
+  fs.writeFileSync(es, e);
+  console.log(`  ${es}: reports/** ignorado`);
+}
+NODE
+git add app/api/requests-general/view-activities/route.js eslint.config.mjs
+# Vitest de main (vitest.config.ts): incluir también las pruebas de las rutas del SGC.
+node -e "const fs=require('fs');const f=fs.existsSync('vitest.config.ts')?'vitest.config.ts':'vitest.config.mts';let s=fs.readFileSync(f,'utf8');if(!s.includes('app/api/sgc/**/*.test.ts')){s=s.replace(\"include: ['lib/**/*.test.ts']\",\"include: ['lib/**/*.test.ts', 'app/api/sgc/**/*.test.ts']\");fs.writeFileSync(f,s);console.log('  '+f+': pruebas de app/api/sgc incluidas')}"
+git add vitest.config.ts 2>/dev/null || git add vitest.config.mts
+if git grep -n -E 'docver|docmgmt' -- app/api/requests-general/view-activities/route.js; then log "  REVISAR: quedan referencias a document_version en view-activities"; fi
 
 # 5a. package.json: dependencias del SGC con la versión exacta que usa testing.
 log "== package.json =="

@@ -96,8 +96,10 @@ describe('SGC · S6 · permisos excepcionales y CSV de auditoría', () => {
 
 describe('SGC · S6 · cabeceras de seguridad de las rutas del SGC', () => {
   it('[SGC-REQ-092] next.config agrega nosniff, SAMEORIGIN, Referrer-Policy y Permissions-Policy SOLO a /process/sgc-documental y /api/sgc', async () => {
-    const mod = await import('../../../next.config');
-    const cfg = await (mod.default as (phase: string) => Promise<{ headers?: () => Promise<{ source: string; headers: { key: string; value: string }[] }[]> }>)('phase-development-server');
+    type Cfg = { headers?: () => Promise<{ source: string; headers: { key: string; value: string }[] }[]> };
+    const mod = (await import('../../../next.config')) as { default: Cfg | ((phase: string) => Promise<Cfg>) };
+    // En testing la configuración es una función por fase; en main, un objeto.
+    const cfg = typeof mod.default === 'function' ? await mod.default('phase-development-server') : mod.default;
     const rules = await cfg.headers!();
     expect(rules.map((r) => r.source)).toEqual(['/process/sgc-documental/:path*', '/api/sgc/:path*']);
     for (const r of rules) {
