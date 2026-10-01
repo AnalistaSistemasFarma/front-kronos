@@ -342,8 +342,61 @@ export function safeDownloadContentType(stored: string | null | undefined): stri
  * comillas y las barras del ASCII se quitan para que nadie pueda cerrar el
  * valor y agregar parámetros propios.
  */
-export function buildContentDisposition(fileName: string): string {
+export function buildContentDisposition(
+  fileName: string,
+  disposition: 'attachment' | 'inline' = 'attachment'
+): string {
   const safe = sanitizeChatAttachmentName(fileName);
   const ascii = safe.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
+  return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
+}
+
+/* ─────────────────── Vista previa de imágenes (inline) ─────────────────── */
+
+/**
+ * Imágenes que se pueden mostrar EN LÍNEA (miniatura y visor del chat). Solo
+ * formatos de mapa de bits: NUNCA `image/svg+xml`, que es un documento con
+ * scripts y no una imagen. HEIC/HEIF solo los pinta Safari; en los demás
+ * navegadores la miniatura falla y se queda la ficha de descarga.
+ */
+const INLINE_IMAGE_BY_EXT: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+};
+const INLINE_IMAGE_TYPES = new Set(Object.values(INLINE_IMAGE_BY_EXT));
+
+/**
+ * Tipo con el que se sirve un adjunto como imagen en línea, o null si no es
+ * una imagen mostrable. Manda el `content_type` guardado si es uno de la lista;
+ * si viene vacío o genérico (`application/octet-stream`), se mira la extensión.
+ * Un tipo declarado que NO es imagen (p. ej. `text/html` con nombre `.png`) no
+ * pasa: no se confía en el nombre para contradecir el tipo.
+ */
+export function inlineImageContentType(
+  contentType: string | null | undefined,
+  fileName: string | null | undefined
+): string | null {
+  const ct = (contentType ?? '').split(';')[0].trim().toLowerCase();
+  if (INLINE_IMAGE_TYPES.has(ct)) return ct === 'image/jpg' ? 'image/jpeg' : ct;
+  if (ct !== '' && ct !== 'application/octet-stream') return null;
+  const ext = (fileName ?? '').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  return INLINE_IMAGE_BY_EXT[ext] ?? null;
+}
+
+/** ¿El adjunto se muestra como imagen (miniatura + visor)? */
+export function esImagenAdjunta(adjunto: {
+  contentType?: string | null;
+  fileName?: string | null;
+}): boolean {
+  return inlineImageContentType(adjunto.contentType, adjunto.fileName) !== null;
+}
+
+/** URL de la imagen en línea: la MISMA ruta de descarga, que re-verifica permisos. */
+export function urlImagenEnLinea(downloadUrl: string): string {
+  return `${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}inline=1`;
 }

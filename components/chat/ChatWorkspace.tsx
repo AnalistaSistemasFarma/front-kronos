@@ -39,12 +39,14 @@ import {
   IconTrash,
   IconUsersGroup,
   IconMessageCircle,
+  IconPhoto,
   IconX,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import { EsqueletoPantallaChat } from './ChatSkeletons';
 import ChatThread from './ChatThread';
 import { ChatNudgeButton, ChatNudgeMenu } from './ChatNudgeControls';
+import ChatSoundMenu from './ChatSoundMenu';
 
 /*
  * Los tres cuadros (detalle de agente, mensaje masivo, grupo nuevo) quedan
@@ -60,9 +62,14 @@ const AgentDetailModal = dynamic(() => import('./AgentDetailModal'), { ssr: fals
 const ChatBroadcastModal = dynamic(() => import('./ChatBroadcastModal'), { ssr: false });
 const ChatGroupModal = dynamic(() => import('./ChatGroupModal'), { ssr: false });
 const ChatPeopleModal = dynamic(() => import('./ChatPeopleModal'), { ssr: false });
+const ChatMediaPanel = dynamic(() => import('./ChatMediaPanel'), { ssr: false });
 import { useChatOverview } from './useChatOverview';
 import { precargarHiloDeAgente } from './useChatConversation';
-import { CHAT_RAIL_OPEN_EVENT, type ChatRailOpenDetail } from '../../lib/chat/rail';
+import {
+  CHAT_RAIL_OPEN_EVENT,
+  sortConversationsByActivity,
+  type ChatRailOpenDetail,
+} from '../../lib/chat/rail';
 import {
   describeAgentStatus,
   findAgentByRouteKey,
@@ -471,6 +478,7 @@ export default function ChatWorkspace({
   // pinta con `overview.canBroadcast`, pero la reja de verdad está en el
   // endpoint: esconder un botón no protege nada.
   const [masivoAbierto, setMasivoAbierto] = useState(false);
+  const [mediaAbierto, setMediaAbierto] = useState(false);
 
   const [expandido, setExpandido] = useState(false);
   useEffect(() => {
@@ -677,8 +685,14 @@ export default function ChatWorkspace({
   // la otra persona).
   const filteredPeople = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return overview.people;
-    return overview.people.filter((p) =>
+    // Por actividad reciente (enviado o recibido), como cualquier mensajería:
+    // la bandeja ya sube la conversación al instante al enviar o recibir.
+    const ordenadas = sortConversationsByActivity(
+      overview.people,
+      (p) => otraPersona(p, miId)?.name ?? ''
+    );
+    if (!query) return ordenadas;
+    return ordenadas.filter((p) =>
       (p.participants ?? []).some(
         (x) => x.kind === 'user' && String(x.id) !== miId && x.name.toLowerCase().includes(query)
       )
@@ -698,8 +712,9 @@ export default function ChatWorkspace({
   // busca por el nombre de Cali, no por el del grupo.
   const filteredGroups = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return overview.groups;
-    return overview.groups.filter(
+    const ordenados = sortConversationsByActivity(overview.groups, (g) => g.title ?? '');
+    if (!query) return ordenados;
+    return ordenados.filter(
       (g) =>
         (g.title ?? '').toLowerCase().includes(query) ||
         (g.company?.companyName ?? '').toLowerCase().includes(query) ||
@@ -1154,6 +1169,32 @@ export default function ChatWorkspace({
    * van los mensajes de todos, no solo los míos. Un borrado destructivo detrás
    * de un solo clic es de las cosas que uno lamenta una sola vez.
    */
+  // El hilo abierto, sea cual sea su clase: para "Multimedia y archivos".
+  const idConversacionAbierta = selectedPersona
+    ? selectedPersona.id
+    : selectedGroup
+      ? selectedGroup.id
+      : selectedAgent
+        ? (overview.conversationByAgent.get(selectedAgent.idAgent)?.id ?? null)
+        : null;
+  const tituloAbierto = selectedPersona
+    ? (otraPersona(selectedPersona, miId)?.name ?? 'Persona')
+    : selectedGroup
+      ? (selectedGroup.title ?? 'Grupo')
+      : selectedAgent?.displayName;
+
+  // Se monta solo mientras está abierto: ni el módulo ni la consulta se
+  // cargan hasta que alguien toca el botón.
+  const modalDeMedia =
+    mediaAbierto && idConversacionAbierta !== null ? (
+      <ChatMediaPanel
+        opened
+        onClose={() => setMediaAbierto(false)}
+        idConversation={idConversacionAbierta}
+        titulo={tituloAbierto}
+      />
+    ) : null;
+
   const modalDeBorrado = (
     <Modal
       opened={grupoABorrar !== null}
@@ -1211,6 +1252,19 @@ export default function ChatWorkspace({
   // lo que uno abrió se siente como dos pantallas distintas.
   const botonesDelEncabezado = (
     <Group gap={4} wrap='nowrap'>
+      {idConversacionAbierta !== null && (
+        <Tooltip label='Multimedia y archivos' withArrow>
+          <ActionIcon
+            variant='subtle'
+            color='gray'
+            onClick={() => setMediaAbierto(true)}
+            aria-label='Multimedia y archivos de la conversación'
+          >
+            <IconPhoto size={18} />
+          </ActionIcon>
+        </Tooltip>
+      )}
+      <ChatSoundMenu />
       {/* Solo en escritorio: en el celular la barra ya se esconde sola y el
           botón no tendría nada que hacer. */}
       {modoEscritorio && (
@@ -1470,6 +1524,7 @@ export default function ChatWorkspace({
         {modalDePersonas}
         {modalDeDetalle}
         {modalDeBorrado}
+        {modalDeMedia}
       </div>
     );
   }
@@ -1541,6 +1596,7 @@ export default function ChatWorkspace({
             )}
 
             <Group gap={4} wrap='nowrap'>
+              <ChatSoundMenu />
               <Tooltip label='Vista en tarjetas' withArrow>
                 <ActionIcon
                   variant={viewMode === 'grid' ? 'filled' : 'subtle'}
@@ -1603,6 +1659,7 @@ export default function ChatWorkspace({
         {modalDePersonas}
         {modalDeDetalle}
         {modalDeBorrado}
+        {modalDeMedia}
     </div>
   );
 }

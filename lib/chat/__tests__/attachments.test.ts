@@ -12,6 +12,9 @@ import {
   canAccessChatAttachment,
   collectChatAttachments,
   formatBytes,
+  esImagenAdjunta,
+  inlineImageContentType,
+  urlImagenEnLinea,
   getChatAttachmentError,
   isBlockedAttachmentExtension,
   safeDownloadContentType,
@@ -289,5 +292,36 @@ describe('formatBytes', () => {
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(2048)).toBe('2 KB');
     expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB');
+  });
+});
+
+describe('vista previa de imágenes en línea', () => {
+  it('acepta imágenes de mapa de bits por su tipo', () => {
+    expect(inlineImageContentType('image/png', 'x.bin')).toBe('image/png');
+    expect(inlineImageContentType('IMAGE/JPEG; charset=x', 'foto')).toBe('image/jpeg');
+    expect(inlineImageContentType('image/webp', null)).toBe('image/webp');
+  });
+
+  it('sin tipo o con tipo genérico, decide la extensión', () => {
+    expect(inlineImageContentType(null, 'Foto.JPG')).toBe('image/jpeg');
+    expect(inlineImageContentType('application/octet-stream', 'a.heic')).toBe('image/heic');
+    expect(inlineImageContentType('', 'a.gif')).toBe('image/gif');
+  });
+
+  it('nunca SVG ni un tipo declarado que no es imagen', () => {
+    expect(inlineImageContentType('image/svg+xml', 'a.svg')).toBeNull();
+    expect(inlineImageContentType(null, 'a.svg')).toBeNull();
+    expect(inlineImageContentType('text/html', 'a.png')).toBeNull();
+    expect(inlineImageContentType('application/pdf', 'a.pdf')).toBeNull();
+  });
+
+  it('esImagenAdjunta y la URL en línea sobre la misma ruta', () => {
+    expect(esImagenAdjunta({ contentType: null, fileName: 'x.png' })).toBe(true);
+    expect(esImagenAdjunta({ contentType: 'application/pdf', fileName: 'x.pdf' })).toBe(false);
+    expect(urlImagenEnLinea('/api/chat/attachments/7')).toBe('/api/chat/attachments/7?inline=1');
+  });
+
+  it('la cabecera inline conserva el nombre saneado', () => {
+    expect(buildContentDisposition('foto.png', 'inline')).toMatch(/^inline; filename="foto.png"/);
   });
 });
