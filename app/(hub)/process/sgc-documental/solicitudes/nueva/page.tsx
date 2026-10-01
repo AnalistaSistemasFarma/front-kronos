@@ -33,10 +33,17 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const catalogs = useSgcFetch<SgcCatalogs>(`/api/sgc/catalogs?company=${id}`);
   const docs = useSgcFetch<{ documents: { idDocument: number; code: string; title: string; versionNumber: number | null }[] }>(`/api/sgc/documents?company=${id}`);
   const users = useSgcFetch<{ users: { email: string; name: string | null }[] }>(`/api/sgc/users?company=${id}`);
-  const [requestType, setRequestType] = useState<string | null>('nuevo');
+  // Sprint 5: «Iniciar nueva versión» desde el calendario o la ficha llega con ?tipo=nueva_version&documento=<id>.
+  const [prefill] = useState(() => {
+    if (typeof window === 'undefined') return { tipo: null as string | null, documento: null as string | null };
+    const q = new URLSearchParams(window.location.search);
+    const tipo = q.get('tipo');
+    return { tipo: tipo === 'nueva_version' || tipo === 'modificacion' ? tipo : null, documento: /^\d+$/.test(q.get('documento') ?? '') ? q.get('documento') : null };
+  });
+  const [requestType, setRequestType] = useState<string | null>(prefill.tipo ?? 'nuevo');
   const [idProcess, setIdProcess] = useState<string | null>(null);
   const [idDocumentType, setIdDocumentType] = useState<string | null>(null);
-  const [idDocument, setIdDocument] = useState<string | null>(null);
+  const [idDocument, setIdDocument] = useState<string | null>(prefill.tipo ? prefill.documento : null);
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [elaborator, setElaborator] = useState<string | null>(null);
@@ -45,6 +52,8 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const [error, setError] = useState<string | null>(null);
 
   const selectedDoc = docs.data?.documents.find((d) => String(d.idDocument) === idDocument);
+  const [subjectTouched, setSubjectTouched] = useState(false);
+  const suggestedSubject = selectedDoc && requestType === 'nueva_version' ? `Nueva versión de ${selectedDoc.code} (V${(selectedDoc.versionNumber ?? 0) + 1})` : '';
   const suggestUrl =
     requestType === 'nuevo' && idProcess && idDocumentType ? `/api/sgc/matrix?company=${id}&process=${idProcess}&documentType=${idDocumentType}` : null;
   const sugg = useSgcFetch<{ suggestion: SgcMatrixSuggestion[] }>(suggestUrl);
@@ -66,7 +75,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
       const res = await sgcSend<{ idRequest: number }>('/api/sgc/requests', 'POST', {
         company: id,
         requestType,
-        subject,
+        subject: subjectTouched || !prefill.tipo ? subject : subject || suggestedSubject,
         description,
         idProcess: requestType === 'nuevo' ? Number(idProcess) : undefined,
         idDocumentType: requestType === 'nuevo' ? Number(idDocumentType) : undefined,
@@ -138,8 +147,11 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         <TextInput
           label='Asunto'
           required
-          value={subject}
-          onChange={(e) => setSubject(e.currentTarget.value)}
+          value={subjectTouched || !prefill.tipo ? subject : subject || suggestedSubject}
+          onChange={(e) => {
+            setSubjectTouched(true);
+            setSubject(e.currentTarget.value);
+          }}
           placeholder={selectedDoc ? `Nueva versión de ${selectedDoc.code}` : 'Procedimiento de…'}
           data-testid='sgc-nueva-asunto'
         />

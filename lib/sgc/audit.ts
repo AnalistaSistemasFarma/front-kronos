@@ -65,6 +65,21 @@ export const SGC_AUDIT_ACTIONS = {
   verificacionQr: 'documento.verificacion_qr',
   cargoPersonaAgregada: 'cargo.persona_agregada',
   cargoPersonaRetirada: 'cargo.persona_retirada',
+  // Sprint 5: relaciones, vencimientos, iCal y solicitudes de acceso.
+  relacionAgregada: 'relacion.agregada',
+  relacionRetirada: 'relacion.retirada',
+  vencimientoConfigurado: 'vencimiento.configurado',
+  vencimientoAviso: 'vencimiento.aviso',
+  vencimientoAvisoOmitido: 'vencimiento.aviso_omitido',
+  vencimientoEscalado: 'vencimiento.escalado',
+  vencimientoEjecucion: 'vencimiento.ejecucion',
+  lecturaRecordatorioAutomatico: 'divulgacion.recordatorio_automatico',
+  icalCreado: 'ical.creado',
+  icalRevocado: 'ical.revocado',
+  icalConsulta: 'ical.consulta',
+  accesoSolicitado: 'acceso.solicitado',
+  accesoSolicitudDecidida: 'acceso.solicitud_decidida',
+  accesoSolicitudCancelada: 'acceso.solicitud_cancelada',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];
