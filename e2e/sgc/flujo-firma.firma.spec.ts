@@ -196,4 +196,12 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     await expect(page.locator('[data-testid="sgc-reporte-evento"][data-action="firma.registrada"]').first()).toBeVisible();
     await expect(page.locator('[data-testid="sgc-reporte-evento"][data-action="documento.pdf_controlado"]')).toHaveCount(1);
   });
+
+  test('[SGC-REQ-062] limpieza: Calidad cancela la solicitud de prueba en la divulgación (la versión aprobada queda anulada y no se acumulan lecturas)', async ({ page }) => {
+    // Sprint 6: antes cada corrida dejaba una solicitud abierta en divulgación con lecturas para los usuarios QA.
+    const res = await page.request.post(`/api/sgc/requests/${idRequest}/cancel`, { data: { reason: 'Limpieza de la prueba e2e del S3: la solicitud de prueba no se divulga.' } });
+    expect(res.status()).toBe(200);
+    const detail = (await (await page.request.get(`/api/sgc/requests/${idRequest}`)).json()) as { request: { status: string } };
+    expect(detail.request.status).toBe('cancelada');
+  });
 });

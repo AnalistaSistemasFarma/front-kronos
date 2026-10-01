@@ -28,7 +28,7 @@ import type { SgcCompanyAccess } from '../permissions';
 import { getDraftForSubmitError, pickCurrentDraft } from '../draft/current';
 import { checklistFieldsFor, normalizeChecklist } from '../signature/checklist';
 import { SGC_SIGNATURE_NOTICE, SGC_SIGNATURE_STATUS_LABELS, describeSignaturePoint, signaturePointFor, type SgcSignatureStatus } from '../signature/signaturePoint';
-import { sha256Hex } from '../storage';
+import { isPdf, isWord, sha256Hex } from '../storage';
 import { currentDraftInTx, recordQualityCheck, recordSignature, type SgcSignatureRequest } from './signatureRecord';
 import { getPoolMembers, getPoolTypeCodes } from './authorizations';
 import type { SgcActor, SgcDb } from './catalogs';
@@ -57,6 +57,8 @@ const TX_OPTS = { maxWait: 10_000, timeout: 30_000 } as const;
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const DRAFT_EXT = /\.(docx|doc|pdf)$/i;
+/** Sprint 6: soportes que no se admiten (se ejecutan o se abren como página en el navegador). */
+const BLOCKED_SUPPORT_EXT = /\.(exe|bat|cmd|com|msi|scr|ps1|vbs|vbe|js|jse|wsf|hta|jar|html?|svg|xhtml|lnk|dll)$/i;
 
 function text(value: unknown, label: string, max: number, min = 1): string {
   const s = typeof value === 'string' ? value.trim() : '';
@@ -972,10 +974,6 @@ function involvementKind(row: DetailRow, email: string, pools: readonly string[]
   return reader ? 'reader' : null;
 }
 
-function involvement(row: DetailRow, email: string, pools: readonly string[]) {
-  return involvementKind(row, email, pools) !== null;
-}
-
 /** Detalle completo si la persona puede verlo (involucrada o Calidad); si no, 404 (no se revela). */
 export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: SgcViewer, focusTaskId?: number | null) {
   const row = await db.sgcRequest.findUnique({ where: { id_request: idRequest }, include: detailInclude });
@@ -1266,7 +1264,8 @@ export async function listTaskInbox(
       task: { request: { id_company: { in: companies }, ...(opts.idRequest ? { id_request: opts.idRequest } : {}) } },
       OR: [{ user_email: me }, ...(poolCodes.length ? [{ user_email: null, pool_type_code: { in: poolCodes }, status: 'pendiente' }] : []), { user_email: null, decided_by: me }],
     },
-    include: { task: { include: { assignees: true, taskDef: true, request: { include: { companyConfig: { include: { company: { select: { company: true } } } } } } } } },
+    // Sprint 6 (rendimiento): para saber a quién le toca bastan los cupos PENDIENTES (una divulgación tiene un cupo por lector).
+    include: { task: { include: { assignees: { where: { status: 'pendiente' } }, taskDef: true, request: { include: { companyConfig: { include: { company: { select: { company: true } } } } } } } } },
     orderBy: { id_task_assignee: 'desc' },
     take: 500,
   });
@@ -1355,7 +1354,9 @@ export async function assertCanView(db: SgcDb | Tx, idRequest: number, viewer: S
   const access = viewer.access.find((a) => a.idCompany === row.id_company && a.canRead);
   if (!access) throw new SgcError('Solicitud no encontrada.', 404);
   const pools = await getPoolTypeCodes(db, row.id_company, viewer.email);
-  if (!access.canQuality && !involvement(row as unknown as DetailRow, viewer.email, pools)) throw new SgcError('Solicitud no encontrada.', 404);
+  // Sprint 6: quien SOLO es lector de la divulgación no entra al expediente por la API (notas,
+  // adjuntos, borradores), igual que la vista ya se lo oculta; su lectura va por /reading.
+  if (!access.canQuality && involvementKind(row as unknown as DetailRow, viewer.email, pools) !== 'full') throw new SgcError('Solicitud no encontrada.', 404);
   return { row, access };
 }
 
@@ -1363,7 +1364,10 @@ export async function addNote(db: SgcDb, notifier: SgcNotifier, idRequest: numbe
   const body = text(input.body, 'La nota', 4000);
   const { row } = await assertCanView(db, idRequest, viewer);
   if (row.status !== 'abierta' && row.status !== 'en_espera') throw new SgcError('La solicitud está cerrada: el historial ya no admite notas.', 409);
-  const notify = Array.isArray(input.notifyEmails) ? recipients(input.notifyEmails.map(String), actor.email).slice(0, 30) : [];
+  const requested = Array.isArray(input.notifyEmails) ? recipients(input.notifyEmails.map(String), actor.email).slice(0, 30) : [];
+  // Sprint 6: solo se notifica a personas que pueden actuar en el SGC de la empresa (no a cualquier correo).
+  const eligible = requested.length ? new Set((await listEligibleUsers(db, row.id_company)).map((u) => u.email)) : new Set<string>();
+  const notify = requested.filter((e) => eligible.has(lower(e)));
   await db.$transaction(async (tx) => {
     await addInteraction(tx, idRequest, 'nota', lower(actor.email), body, { notifyEmails: notify });
     await writeSgcAudit(tx, { idCompany: row.id_company, actorEmail: actor.email, action: SGC_AUDIT_ACTIONS.notaAgregada, entity: 'request', entityId: idRequest, after: { length: body.length, notify }, ip: actor.ip, userAgent: actor.userAgent });
@@ -1392,6 +1396,10 @@ export async function uploadAttachment(
     const open = row.tasks.find((t) => t.status === 'abierta' && t.taskDef.assignment === 'elaborador');
     if (!open) throw new SgcError('El borrador se carga durante la elaboración.', 409);
     if (!DRAFT_EXT.test(fileName)) throw new SgcError('El borrador debe ser Word (.docx, .doc) o PDF.');
+    // Sprint 6: el contenido debe ser de verdad un Word o un PDF (firma del archivo, no solo la extensión).
+    if (!(isPdf(input.bytes) || isWord(input.bytes, fileName))) throw new SgcError('El borrador no es un Word o PDF válido.');
+  } else if (BLOCKED_SUPPORT_EXT.test(fileName)) {
+    throw new SgcError('Ese tipo de archivo no se admite como soporte (ejecutables, scripts o páginas web).');
   }
   const config = await db.sgcCompanyConfig.findUniqueOrThrow({ where: { id_company: row.id_company } });
   const segments = [...config.storage_root.split('/').filter(Boolean), '_solicitudes', `SOL-${idRequest}`];
@@ -1427,6 +1435,10 @@ export async function withdrawAttachment(db: SgcDb, idRequest: number, idAttachm
   if (att.withdrawn_at) throw new SgcError('El adjunto ya estaba retirado.', 409);
   const me = lower(actor.email);
   if (me !== lower(att.uploaded_by) && me !== lower(row.elaborator_email) && !access.canQuality) throw new SgcError('Solo quien lo cargó, el elaborador o Calidad retiran un adjunto.', 403);
+  // Sprint 6: el borrador solo se retira durante la elaboración (después ya lo están firmando).
+  if (att.purpose === 'borrador' && !row.tasks.some((t) => t.status === 'abierta' && t.taskDef.assignment === 'elaborador')) {
+    throw new SgcError('El borrador solo se retira durante la elaboración; para cambiarlo, devuelva el documento a elaboración.', 409);
+  }
   return db.$transaction(async (tx) => {
     await tx.sgcAttachment.update({ where: { id_attachment: idAttachment }, data: { withdrawn_at: new Date(), withdrawn_by: me, withdraw_reason: reason } });
     await addInteraction(tx, idRequest, 'adjunto', me, `Retiró el adjunto ${att.file_name} (no se borra: queda en el historial).\nMotivo: ${reason}`, { meta: { idAttachment } });

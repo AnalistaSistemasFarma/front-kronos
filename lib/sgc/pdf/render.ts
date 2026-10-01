@@ -61,7 +61,12 @@ async function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
     browserPromise = (async () => {
       const puppeteer = (await import('puppeteer')).default;
-      return (await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })) as unknown as Browser;
+      const b = (await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })) as unknown as Browser;
+      // Sprint 6: si Chrome se cae, el siguiente PDF lanza uno nuevo (antes quedaba roto hasta reiniciar).
+      (b as unknown as { on?: (ev: string, cb: () => void) => void }).on?.('disconnected', () => {
+        browserPromise = null;
+      });
+      return b;
     })().catch((e) => {
       browserPromise = null;
       throw e;

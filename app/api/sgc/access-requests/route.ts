@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { createAccessRequest, listAccessRequests, listRequestableDocuments } from '@/lib/sgc/db/accessRequests';
 import { sgcNotifier } from '@/lib/sgc/notifications';
-import { companyAccess, errorResponse, getSgcRequestContext, jsonNoStore, parseCompanyParam, readJson } from '@/app/api/sgc/_lib/context';
+import { companyAccess, errorResponse, getSgcRequestContext, jsonNoStore, parseCompanyParam, rateLimitResponse, readJson } from '@/app/api/sgc/_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +30,8 @@ export async function POST(request: Request) {
   try {
     const ctx = await getSgcRequestContext(request);
     if (ctx instanceof Response) return ctx;
+    const limited = rateLimitResponse('solicitudAcceso', ctx.email);
+    if (limited) return limited;
     const body = await readJson(request);
     const idCompany = Number(body?.company);
     if (!body || !Number.isInteger(idCompany) || idCompany < 1) return jsonNoStore({ error: 'Petición inválida' }, 400);

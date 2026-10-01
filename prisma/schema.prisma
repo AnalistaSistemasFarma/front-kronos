@@ -1570,6 +1570,7 @@ model SgcAuditLog {
 
   @@index([entity, entity_id])
   @@index([id_company, occurred_at])
+  @@index([actor_email, action, occurred_at], map: "IX_sgc_audit_log_actor_email_action_occurred_at")
   @@map("audit_log")
   @@schema("sgc")
 }
@@ -1824,6 +1825,7 @@ model SgcRequest {
 
   @@index([id_company, status])
   @@index([requester_email])
+  @@index([id_document, status], map: "IX_sgc_request_id_document_status")
   @@map("request")
   @@schema("sgc")
 }
@@ -2475,6 +2477,7 @@ model SgcReviewAlert {
 
   @@index([id_company, run_date])
   @@index([id_document])
+  @@index([id_document_version, alert_key], map: "IX_sgc_review_alert_id_document_version_alert_key")
   @@map("review_alert")
   @@schema("sgc")
 }

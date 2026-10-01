@@ -21,7 +21,22 @@ const tunnelOrigins = (process.env.TUNNEL_ALLOWED_ORIGIN ?? '')
   .map((o) => o.trim())
   .filter(Boolean);
 
+// SGC documental (sistema validado, Sprint 6): cabeceras de seguridad SOLO para sus rutas
+// (páginas y APIs). No cambia nada del resto de SynerLink.
+const sgcSecurityHeaders = [
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+  { key: 'Referrer-Policy', value: 'same-origin' },
+  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
+];
+
 const nextConfig: NextConfig = {
+  async headers() {
+    return [
+      { source: '/process/sgc-documental/:path*', headers: sgcSecurityHeaders },
+      { source: '/api/sgc/:path*', headers: sgcSecurityHeaders },
+    ];
+  },
   turbopack: {
     root: projectRoot,
   },

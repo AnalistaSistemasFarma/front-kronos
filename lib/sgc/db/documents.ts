@@ -410,14 +410,16 @@ export async function createInitialDocument(
     code: p.code,
     versionNumber: input.versionNumber,
   });
-  const pdfName = buildVersionFileName(p.code, input.versionNumber, input.pdf.fileName, 'pdf');
+  // Sprint 6: la extensión y el tipo salen del CONTENIDO validado, no del nombre ni del tipo que manda el navegador.
+  const pdfName = buildVersionFileName(p.code, input.versionNumber, 'x.pdf', 'pdf');
   const pdfHash = sha256Hex(input.pdf.bytes);
   const pdfItem = await upload(segments, pdfName, input.pdf.bytes, 'application/pdf');
   let sourceItem: { id: string } | null = null;
   let sourceName: string | null = null;
   if (input.source && input.source.bytes.length > 0) {
-    sourceName = buildVersionFileName(p.code, input.versionNumber, input.source.fileName, 'docx');
-    sourceItem = await upload(segments, sourceName, input.source.bytes, input.source.contentType || 'application/octet-stream');
+    const isZip = input.source.bytes[0] === 0x50 && input.source.bytes[1] === 0x4b;
+    sourceName = buildVersionFileName(p.code, input.versionNumber, isZip ? 'x.docx' : 'x.doc', 'docx');
+    sourceItem = await upload(segments, sourceName, input.source.bytes, isZip ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/msword');
   }
   const reviewDue = computeReviewDueDate(p.effective, p.docType.review_months);
   const folder = segments.join('/');
@@ -619,6 +621,14 @@ export async function grantDocumentAccess(
   };
   const error = getGrantInputError(input, now);
   if (error) throw new SgcError(error);
+  // Sprint 6 (segregación): nadie se otorga a sí mismo ni a su departamento descarga o impresión.
+  if (input.canDownload || input.canPrint) {
+    const me = actor.email.trim().toLowerCase();
+    if (userEmail === me) throw new SgcError('Una persona no se otorga a sí misma permisos de descarga o impresión: los otorga otra persona de Calidad.', 403);
+    if (idDepartment !== null && (await getAccessSubject(db, me)).departmentIds.includes(idDepartment)) {
+      throw new SgcError('Una persona no otorga descarga o impresión a su propio departamento: los otorga otra persona de Calidad.', 403);
+    }
+  }
   if (idDepartment !== null) {
     const dept = await db.department.findUnique({ where: { id_department: idDepartment } });
     if (!dept) throw new SgcError('El departamento no existe.');

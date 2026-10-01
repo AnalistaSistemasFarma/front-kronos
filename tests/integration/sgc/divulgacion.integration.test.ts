@@ -13,7 +13,8 @@ import { getCatalogs } from '../../../lib/sgc/db/catalogs';
 import { addScopeEntry, getMyReading, openReadingFile, recordReadingEvent, removeScopeEntry, sendReadingReminders } from '../../../lib/sgc/db/dissemination';
 import { canViewDocument, createInitialDocument, getAccessSubject, type SgcUploader } from '../../../lib/sgc/db/documents';
 import { getCurrentFlowVersion, loadDefinition } from '../../../lib/sgc/db/flows';
-import { cancelRequest, closeDissemination, createRequest, excludeReader, getRequestDetail, getTaskDetail, listTaskInbox, setSigners, uploadAttachment } from '../../../lib/sgc/db/requests';
+import { addNote, cancelRequest, closeDissemination, createRequest, excludeReader, getAttachmentForDownload, getRequestDetail, getTaskDetail, listTaskInbox, setSigners, uploadAttachment } from '../../../lib/sgc/db/requests';
+import { listDraftRevisions } from '../../../lib/sgc/db/drafts';
 import { signTask, type SgcSignatureDeps } from '../../../lib/sgc/db/signatures';
 import { saveTraining, uploadTrainingResults } from '../../../lib/sgc/db/training';
 import { verifyVersionByCode } from '../../../lib/sgc/db/verify';
@@ -262,6 +263,23 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     await expect(getRequestDetail(prisma, reqA, await viewer(E.ajeno))).rejects.toMatchObject({ status: 404 });
   });
 
+  it('[SGC-REQ-085] quien SOLO es lector no entra al expediente por la API: ni notas, ni adjuntos, ni borradores', async () => {
+    const asReader = await viewer(E.l1);
+    await expect(addNote(prisma, notifier, reqA, { body: 'Nota de un lector' }, asReader, actor(E.l1))).rejects.toMatchObject({ status: 404 });
+    await expect(uploadAttachment(prisma, upload, reqA, { purpose: 'soporte', ...docx('soporte') }, asReader, actor(E.l1))).rejects.toMatchObject({ status: 404 });
+    const att = await prisma.sgcAttachment.findFirstOrThrow({ where: { id_request: reqA } });
+    await expect(getAttachmentForDownload(prisma, reqA, att.id_attachment, asReader, actor(E.l1))).rejects.toMatchObject({ status: 404 });
+    await expect(listDraftRevisions(prisma, reqA, asReader)).rejects.toMatchObject({ status: 404 });
+    // El revisor (también lector) sí, porque participó en la elaboración.
+    await expect(getAttachmentForDownload(prisma, reqA, att.id_attachment, await viewer(E.rev), actor(E.rev))).resolves.toMatchObject({ fileName: att.file_name });
+    // Su lectura sí la ve (vista propia del lector) y la versión en divulgación se verifica como tal.
+    const t = await taskOf(reqA, 'divulgacion');
+    expect(await getMyReading(prisma, t.id_task, E.l1)).toMatchObject({ status: 'pendiente', pdfReady: true, fileUrl: expect.stringContaining('/api/sgc/reading/') });
+    expect(await getMyReading(prisma, t.id_task, E.ajeno)).toBeNull();
+    const code = (await prisma.sgcDocument.findUniqueOrThrow({ where: { id_document: idDoc } })).code;
+    expect(await verifyVersionByCode(prisma, asReader.access, await getAccessSubject(prisma, E.l1), { idCompany: CO, code, versionNumber: 2 }, actor(E.l1))).toMatchObject({ verdict: 'en_divulgacion' });
+  });
+
   it('[SGC-REQ-055] «Leído» NO se firma sin abrir el documento desde el servidor y llegar al final', async () => {
     const t = await taskOf(reqA, 'divulgacion');
     const a = t.assignees.find((x) => x.user_email === E.l1)!;
@@ -320,6 +338,9 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     await expect(excludeReader(prisma, notifier, await accessOf(E.cal), reqA, recAjeno.id_read_record, { reason: 'corto' }, actor(E.cal))).rejects.toThrow(/mínimo 10/);
     await excludeReader(prisma, notifier, await accessOf(E.cal), reqA, recAjeno.id_read_record, { reason: 'Se retiró de la empresa (prueba S4)' }, actor(E.cal));
     await expect(excludeReader(prisma, notifier, await accessOf(E.cal), reqA, recAjeno.id_read_record, { reason: 'Se retiró de la empresa (prueba S4)' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
+    // Sprint 6 [SGC-REQ-085]: una lectura excluida ya no da acceso al PDF controlado.
+    const cupoAjeno = await prisma.sgcTaskAssignee.findFirstOrThrow({ where: { id_task: t.id_task, user_email: E.ajeno } });
+    await expect(openReadingFile(prisma, cupoAjeno.id_task_assignee, await viewer(E.ajeno), actor(E.ajeno))).rejects.toMatchObject({ status: 404 });
     const d = (await getRequestDetail(prisma, reqA, await viewer(E.cal))).dissemination!;
     expect(d.coverage).toMatchObject({ total: 5, read: 1, pending: 3, excluded: 1, percent: 25 });
     expect(d.readers.find((r) => r.email === E.l2)).toMatchObject({ status: 'pendiente', remindersSent: 1 });
@@ -332,6 +353,9 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
       await signTask(prisma, deps, idTask, firma('leyo', { idAssignee }), actor(email));
     }
     expect(await taskOf(reqA, 'divulgacion')).toMatchObject({ status: 'resuelta' });
+    // Sprint 6 [SGC-REQ-085]: cerrada la divulgación, la lectura ya firmada no vuelve a abrir el PDF por esta vía.
+    const cupoL1 = await prisma.sgcTaskAssignee.findFirstOrThrow({ where: { id_task: (await taskOf(reqA, 'divulgacion')).id_task, user_email: E.l1 } });
+    await expect(openReadingFile(prisma, cupoL1.id_task_assignee, await viewer(E.l1), actor(E.l1))).rejects.toMatchObject({ status: 409 });
     const cap = await taskOf(reqA, 'capacitacion');
     expect(cap.status).toBe('abierta');
     expect(cap.assignees).toEqual([expect.objectContaining({ user_email: null, pool_type_code: 'SGC-VERIF-CALIDAD', signature_meaning: 'capacito' })]);
@@ -405,7 +429,7 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     await expect(verifyVersionByCode(prisma, v.access, subject, { idCompany: 3, code, versionNumber: 2 }, actor(E.l1))).rejects.toMatchObject({ status: 404 });
     await expect(verifyVersionByCode(prisma, v.access, subject, { idCompany: CO, code: '', versionNumber: 2 }, actor(E.l1))).rejects.toMatchObject({ status: 400 });
     expect(await canViewDocument(prisma, v.access, subject, idDoc)).toBe(true);
-    expect(await prisma.sgcAuditLog.count({ where: { id_company: CO, action: 'documento.verificacion_qr' } })).toBe(3);
+    expect(await prisma.sgcAuditLog.count({ where: { id_company: CO, action: 'documento.verificacion_qr' } })).toBe(4); // 3 de esta prueba + 1 en divulgación (S6)
   });
 
   it('[SGC-REQ-062] cancelar en la divulgación solo lo hace Calidad: la versión aprobada se ANULA y la vigente no cambia; o Calidad cierra la divulgación con justificación', async () => {
@@ -434,6 +458,23 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     await expect(closeDissemination(prisma, notifier, await accessOf(E.cal), reqC, { reason: 'Otra vez el cierre de la divulgación' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
     await cancelRequest(prisma, notifier, await accessOf(E.cal), reqC, { reason: 'Fin de la prueba del cierre de divulgación' }, actor(E.cal));
     expect((await prisma.sgcDocument.findUniqueOrThrow({ where: { id_document: idDoc } })).status).toBe('vigente');
+  });
+
+  it('[SGC-REQ-057][SGC-REQ-085] si los demás ya firmaron, excluir con justificación al último pendiente cierra la divulgación', async () => {
+    const reqC = await approvedRequest('Divulgación cerrada por exclusión S6');
+    await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqC, { entry: { kind: 'persona', email: E.l3 }, reason: 'Lector de la prueba S6' }, actor(E.elab));
+    await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqC, { entry: { kind: 'persona', email: E.l2 }, reason: 'Lector de la prueba S6' }, actor(E.elab));
+    await signThroughApproval(reqC);
+    // Uno lee y firma; el otro (el último pendiente) se excluye con justificación.
+    const { idTask, idAssignee } = await readToEnd(reqC, E.l2);
+    await signTask(prisma, deps, idTask, firma('leyo', { idAssignee }), actor(E.l2));
+    const t = await taskOf(reqC, 'divulgacion');
+    const rec = await prisma.sgcReadRecord.findFirstOrThrow({ where: { id_task: t.id_task, user_email: E.l3 } });
+    await excludeReader(prisma, notifier, await accessOf(E.cal), reqC, rec.id_read_record, { reason: 'Ya no pertenece al área (prueba S6)' }, actor(E.cal));
+    expect(await taskOf(reqC, 'divulgacion')).toMatchObject({ status: 'resuelta' });
+    expect(await taskOf(reqC, 'capacitacion')).toMatchObject({ status: 'abierta' });
+    // Se cierra la solicitud de prueba (Calidad cancela en la capacitación) para no estorbar a las siguientes.
+    await cancelRequest(prisma, notifier, await accessOf(E.cal), reqC, { reason: 'Fin de la prueba de exclusión del S6' }, actor(E.cal));
   });
 
   it('[SGC-REQ-053][SGC-REQ-061] un documento NUEVO sin alcance usa el departamento dueño del proceso y, si se cancela en la divulgación, el documento queda anulado', async () => {

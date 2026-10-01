@@ -82,9 +82,10 @@ export async function verifyVersionByCode(
     versionNumber,
     title: canSee ? doc!.title : null,
     idDocument: canSee ? doc!.id_document : null,
-    effectiveDate: formatCalendarDate(version?.effective_date ?? null),
-    obsoleteDate: formatCalendarDate(version?.obsolete_date ?? null),
-    currentVersionNumber: current && current.status === 'vigente' ? current.version_number : null,
-    pdfSha256: version ? version.pdf_sha256.trim() : null,
+    // Sprint 6: a quien no puede consultar el documento solo se le da el veredicto (sin fechas ni huella).
+    effectiveDate: canSee ? formatCalendarDate(version?.effective_date ?? null) : null,
+    obsoleteDate: canSee ? formatCalendarDate(version?.obsolete_date ?? null) : null,
+    currentVersionNumber: canSee && current && current.status === 'vigente' ? current.version_number : null,
+    pdfSha256: canSee && version ? version.pdf_sha256.trim() : null,
   };
 }

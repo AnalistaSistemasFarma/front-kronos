@@ -25,7 +25,8 @@ export async function getSgcAccessForUser(db: SgcAccessDb, userEmail: string): P
   const [grants, activeIds] = await Promise.all([
     db.subprocessUserCompany.findMany({
       where: {
-        companyUser: { user: { email: userEmail } },
+        // Sprint 6: una persona desactivada pierde el SGC de inmediato, aunque su sesión (JWT) siga vigente.
+        companyUser: { user: { email: userEmail, isActive: true } },
         subprocess: { subprocess_url: { in: Object.values(SGC_SUBPROCESS_URLS) } },
       },
       select: {

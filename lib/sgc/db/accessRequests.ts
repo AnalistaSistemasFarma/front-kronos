@@ -6,7 +6,7 @@ import { SgcError, isUniqueViolation } from '../errors';
 import type { SgcNotifier } from '../notifications';
 import type { SgcCompanyAccess } from '../permissions';
 import type { SgcActor, SgcDb } from './catalogs';
-import { canViewDocument } from './documents';
+import { canViewDocument, listVisibleDocuments } from './documents';
 
 /**
  * SOLICITUD DE ACCESO a un documento de otra área (Sprint 5).
@@ -56,8 +56,10 @@ export async function listRequestableDocuments(db: SgcDb, access: SgcCompanyAcce
     orderBy: { code: 'asc' },
   });
   const out: { idDocument: number; code: string; title: string; process: string; ownerDepartment: string | null }[] = [];
+  // Sprint 6 (rendimiento): una sola consulta de lo visible, en vez de ~7 consultas por documento.
+  const visibleIds = docs.length ? new Set((await listVisibleDocuments(db, access, subject, {}, now)).map((v) => v.doc.id_document)) : new Set<number>();
   for (const d of docs) {
-    if (await canViewDocument(db, [access], subject, d.id_document, now)) continue;
+    if (visibleIds.has(d.id_document)) continue;
     out.push({ idDocument: d.id_document, code: d.code, title: d.title, process: `${d.process.code} · ${d.process.name}`, ownerDepartment: d.ownerDepartment?.department ?? null });
   }
   return out;
@@ -196,6 +198,10 @@ export async function decideAccessRequest(
   if (approve && (!req.document || req.document.status !== 'vigente')) throw new SgcError('El código pedido no corresponde a un documento vigente de la empresa: rechace la solicitud con su motivo.', 409);
   const me = lower(actor.email);
   const result = await db.$transaction(async (tx) => {
+    // Sprint 6: se «reclama» la solicitud dentro de la transacción; si otra decisión llegó
+    // al mismo tiempo, esta no encuentra la fila pendiente y no crea un segundo acceso.
+    const claim = await tx.sgcAccessRequest.updateMany({ where: { id_access_request: req.id_access_request, status: 'pendiente', decided_by: null }, data: { decided_by: me, decided_at: now } });
+    if (claim.count !== 1) throw new SgcError('La solicitud ya fue decidida.', 409);
     let idAccess: number | null = null;
     if (approve) {
       const grant = await tx.sgcDocumentAccess.create({

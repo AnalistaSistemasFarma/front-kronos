@@ -58,6 +58,7 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     cal: 'calidad.s3@onelatampharma.com',
     lector: 'lector.s3@onelatampharma.com',
     intruso: 'intruso.s3@onelatampharma.com',
+    rafaga: 'rafaga.s3@onelatampharma.com',
   };
   const actor = (email: string) => ({ email, ip: '10.3.3.3', userAgent: 'vitest-s3' });
   const viewer = async (email: string) => ({ email, access: await getSgcAccessForUser(prisma, email) });
@@ -129,6 +130,7 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
       [E.cal, ['calidad']],
       [E.lector, ['lectura']],
       [E.intruso, ['gestion']],
+      [E.rafaga, ['gestion']],
     ];
     for (const [email, perms] of grants) {
       const user = await prisma.user.create({ data: { email, name: email.split('@')[0].toUpperCase(), password: hash } });
@@ -223,6 +225,23 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     for (let i = 0; i < 5; i++) await expect(signTask(prisma, deps, elab.id_task, firma('elaboro', { password: `mala-${i}` }), actor(E.intruso))).rejects.toMatchObject({ status: 403 });
     await expect(signTask(prisma, deps, elab.id_task, firma('elaboro'), actor(E.intruso))).rejects.toMatchObject({ status: 429 });
     expect((await taskOf(reqA, 'elaboracion')).status).toBe('abierta');
+  });
+
+  it('[SGC-REQ-088] una ráfaga EN PARALELO de contraseñas erradas no se salta el bloqueo de 5 intentos', async () => {
+    const elab = await taskOf(reqA, 'elaboracion');
+    const failures = () => prisma.sgcAuditLog.count({ where: { action: 'firma.reautenticacion_fallida', actor_email: E.rafaga } });
+    // En paralelo: cada intento se serializa por persona; los que llegan mientras otro está en curso se rechazan (409) sin contar.
+    const results = await Promise.allSettled(Array.from({ length: 12 }, (_, i) => signTask(prisma, deps, elab.id_task, firma('elaboro', { password: `rafaga-${i}` }), actor(E.rafaga))));
+    const statuses = results.map((r) => (r.status === 'rejected' ? (r.reason as { status?: number }).status : 200));
+    expect(statuses.every((s) => s === 403 || s === 409 || s === 429)).toBe(true);
+    expect(statuses.filter((s) => s === 403).length).toBeLessThanOrEqual(5);
+    expect(await failures()).toBeLessThanOrEqual(5);
+    // Uno tras otro hasta el bloqueo: en total, nunca más de 5 intentos fallidos en la ventana.
+    for (let i = 0; i < 6 && (await failures()) < 5; i++) {
+      await expect(signTask(prisma, deps, elab.id_task, firma('elaboro', { password: `seguido-${i}` }), actor(E.rafaga))).rejects.toMatchObject({ status: 403 });
+    }
+    expect(await failures()).toBe(5);
+    await expect(signTask(prisma, deps, elab.id_task, firma('elaboro', { password: PW }), actor(E.rafaga))).rejects.toMatchObject({ status: 429 });
   });
 
   it('[SGC-REQ-038][SGC-REQ-040][SGC-REQ-041][SGC-REQ-049] el elaborador firma «Elaboró»: sello de tiempo del servidor, hash del contenido, evidencia propia y SIN Orión', async () => {
@@ -345,9 +364,19 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     expect(csv.split('\r\n')[0]).toContain('"fecha_utc";"quien";"accion"');
     expect(csv).toContain('firma.registrada');
     await expect(getDocumentAuditReport(prisma, (await viewer(E.rev)).access, r.id_document!, actor(E.rev))).rejects.toMatchObject({ status: 403 });
+    expect(report.truncated).toBe(false);
+    // Sprint 6: con más de 5.000 eventos el reporte trae los MÁS RECIENTES (en orden) y avisa que está truncado.
+    await prisma.$executeRawUnsafe(`INSERT INTO sgc.audit_log (id_company, occurred_at, actor_email, action, entity, entity_id, detail)
+      SELECT TOP 5001 ${CO}, SYSUTCDATETIME(), N'carga@x.co', N'documento.consulta', N'document', N'${r.id_document}', N'Consulta masiva de la prueba S6'
+      FROM sys.all_objects a CROSS JOIN sys.all_objects b`);
+    const big = await getDocumentAuditReport(prisma, (await viewer(E.cal)).access, r.id_document!, actor(E.cal));
+    expect(big.truncated).toBe(true);
+    expect(big.events).toHaveLength(5000);
+    expect(big.events.at(-1)!.actor).toBe('carga@x.co');
+    expect(Number(big.events[0].id)).toBeLessThan(Number(big.events.at(-1)!.id));
     await expect(getDocumentAuditReport(prisma, (await viewer(E.cal)).access, 999999, actor(E.cal))).rejects.toMatchObject({ status: 404 });
     await expect(getDocumentAuditReport(prisma, [], r.id_document!, actor(E.cal))).rejects.toMatchObject({ status: 404 });
-    expect(await prisma.sgcAuditLog.count({ where: { action: 'documento.reporte_auditoria', entity_id: String(r.id_document) } })).toBe(1);
+    expect(await prisma.sgcAuditLog.count({ where: { action: 'documento.reporte_auditoria', entity_id: String(r.id_document) } })).toBe(2); // el reporte normal y el truncado
   });
 
   it('[SGC-REQ-050] maestro de firmas: Calidad registra el trazo de la inducción (versionado); no se borra, se revoca', async () => {
@@ -416,8 +445,11 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     await round();
     failHtmlToPdf = true;
     const res = await signTask(prisma, deps, (await taskOf(idRequest, 'aprobacion')).id_task, firma('aprobo', { checklist: checklistOk }), actor(E.cal));
-    expect(res.controlledPdf).toMatchObject({ status: 'error', error: expect.stringContaining('Chrome') });
+    // Sprint 6 [SGC-REQ-087]: al firmante le llega un mensaje genérico; el detalle técnico queda para Calidad (estado) y la auditoría.
+    expect(res.controlledPdf).toMatchObject({ status: 'error', error: expect.stringContaining('error técnico') });
+    expect(res.controlledPdf.error).not.toContain('Chrome');
     expect(await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest } })).toMatchObject({ controlled_pdf_status: 'error', controlled_pdf_error: expect.stringContaining('Chrome') });
+    expect(await prisma.sgcAuditLog.count({ where: { action: 'documento.pdf_controlado_error', entity_id: String(idRequest), detail: { contains: 'Chrome' } } })).toBeGreaterThan(0);
     const retry = await generateControlledVersion(prisma, deps, idRequest, actor(E.cal));
     expect(retry).toMatchObject({ idDocument: doc.idDocument, created: true });
     const v2 = await prisma.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: retry.idDocumentVersion } });
@@ -451,5 +483,16 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     const v = await prisma.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: res.controlledPdf.idDocumentVersion! } });
     expect(v.source_item_id).toBeNull();
     expect((await PDFDocument.load(store.get(v.pdf_item_id)!)).getPageCount()).toBeGreaterThanOrEqual(3);
+  });
+
+  it('[SGC-REQ-093] la base no admite dos firmas de la empresa colgando del mismo registro anterior (ni dos génesis)', async () => {
+    const cols = 'id_company, id_request, id_task, id_task_assignee, signer_email, signer_name, meaning, reason, signed_at, content_kind, content_ref, content_name, content_sha256, auth_method, consent_version, id_signature_master, master_sha256, ip, user_agent, evidence_item_id, evidence_path, evidence_sha256';
+    const copy = (where: string) =>
+      prisma.$executeRawUnsafe(`INSERT INTO sgc.signature (signature_uid, ${cols}, prev_record_hash, record_hash, created_at)
+        SELECT TOP 1 LOWER(CONVERT(CHAR(36), NEWID())), ${cols}, prev_record_hash, LOWER(CONVERT(CHAR(64), HASHBYTES('SHA2_256', CAST(NEWID() AS NVARCHAR(36))), 2)), created_at
+        FROM sgc.signature WHERE id_company = ${CO} AND ${where} ORDER BY id_signature DESC`);
+    await expect(copy('prev_record_hash IS NOT NULL')).rejects.toThrow(/signature_cadena_prev_uq|duplicate/i);
+    await expect(copy('prev_record_hash IS NULL')).rejects.toThrow(/signature_cadena_genesis_uq|duplicate/i);
+    expect((await verifyCompanySignatureChain(prisma, CO)).ok).toBe(true);
   });
 });
