@@ -38,7 +38,8 @@ import {
   type ChatMessageDto,
   type ChatParticipantDto,
 } from '../../lib/chat/client';
-import { formatBytes } from '../../lib/chat/attachments';
+import { esImagenAdjunta, formatBytes } from '../../lib/chat/attachments';
+import { ChatImageThumb, ChatImageViewer, type ImagenAdjunta } from './ChatImageViewer';
 import {
   efectoZumbido,
   marcarZumbidoMostrado,
@@ -72,8 +73,14 @@ import type { ChatReplyToDto } from '../../lib/chat/client';
  * ahí se vuelve a comprobar el permiso en cada descarga. Mientras el mensaje
  * está en vuelo el id todavía no existe, así que la ficha se muestra sin
  * enlace en vez de ofrecer una descarga que daría 404.
+ *
+ * Las IMÁGENES (2026-10-01) llevan además una miniatura encima de su ficha,
+ * pedida a la misma ruta con `?inline=1`; al tocarla se abre el visor con
+ * Descargar. El estado del visor vive aquí, no en el hilo: abrirlo no
+ * re-renderiza las demás burbujas (MessageBubble está en `memo`).
  */
 function MessageAttachments({ message }: { message: ChatMessageDto }) {
+  const [visor, setVisor] = useState<ImagenAdjunta | null>(null);
   if (message.attachments.length === 0) return null;
 
   return (
@@ -101,7 +108,7 @@ function MessageAttachments({ message }: { message: ChatMessageDto }) {
           );
         }
 
-        return (
+        const ficha = (
           <a
             key={attachment.id}
             href={attachment.downloadUrl}
@@ -112,7 +119,17 @@ function MessageAttachments({ message }: { message: ChatMessageDto }) {
             {content}
           </a>
         );
+
+        if (!esImagenAdjunta(attachment)) return ficha;
+
+        return (
+          <Stack key={attachment.id} gap={4}>
+            <ChatImageThumb imagen={attachment} onAbrir={setVisor} />
+            {ficha}
+          </Stack>
+        );
       })}
+      {visor && <ChatImageViewer imagen={visor} onClose={() => setVisor(null)} />}
     </Stack>
   );
 }

@@ -5,11 +5,18 @@ import { authenticateAgent } from '../../../../../lib/chat/agent-auth';
 import {
   buildContentDisposition,
   canAccessChatAttachment,
+  inlineImageContentType,
   safeDownloadContentType,
   type ChatAttachmentRequester,
 } from '../../../../../lib/chat/attachments';
 import { downloadChatAttachment } from '../../../../../lib/chat/attachmentStorage';
-import { NO_STORE, resolveSessionUser, serverError, unauthorized } from '../../../../../lib/chat/http';
+import {
+  NO_STORE,
+  guardConversation,
+  resolveSessionUser,
+  serverError,
+  unauthorized,
+} from '../../../../../lib/chat/http';
 
 // El archivo se transmite en vivo desde Graph: nada de esto se cachea ni se
 // prerenderiza.
@@ -48,6 +55,25 @@ export const dynamic = 'force-dynamic';
  * Graph: esas URL funcionan sin sesión y se reenvían por correo o por chat con
  * un copiar y pegar, así que la autorización de arriba se volvería decorativa.
  * Con el paso a través, el permiso se comprueba en CADA descarga.
+ *
+ * -------------------------------------------------------------------------
+ * GRUPOS Y PERSONAS (2026-10-01)
+ * -------------------------------------------------------------------------
+ * La regla de arriba es la del hilo DIRECTO (dueño + permiso sobre el agente).
+ * Un grupo o un hilo entre personas no tiene "dueño": ahí la persona puede
+ * bajar el adjunto si hoy puede abrir ese hilo, con la MISMA puerta que usa el
+ * hilo (guardConversation → assertGroupAccess / assertPeopleAccess). Antes esos
+ * adjuntos respondían 404 a todos.
+ *
+ * -------------------------------------------------------------------------
+ * VISTA PREVIA (?inline=1)
+ * -------------------------------------------------------------------------
+ * Para la miniatura y el visor del chat. Misma autorización, sin atajos; solo
+ * cambia la respuesta, y solo si el adjunto es una imagen de mapa de bits
+ * (inlineImageContentType: nunca SVG): `Content-Disposition: inline`, el tipo
+ * real, `nosniff`, una CSP que no deja ejecutar nada y caché PRIVADA de 10 min
+ * para no volver a pedirle el archivo a Graph cada vez que se pinta el hilo.
+ * Cualquier otro archivo con `?inline=1` se descarga igual que siempre.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -85,7 +111,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         onedrive_item_id: true,
         message: {
           select: {
-            conversation: { select: { id: true, id_user: true, id_agent: true } },
+            conversation: { select: { id: true, kind: true, id_user: true, id_agent: true } },
           },
         },
       },
@@ -94,21 +120,27 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const conversation = attachment.message.conversation;
 
-    const allowed = canAccessChatAttachment(
-      {
-        conversationUserId: conversation.id_user,
-        conversationAgentId: conversation.id_agent,
-      },
-      requester
-    );
-    if (!allowed) return notFound();
+    if (requester.kind === 'user' && conversation.kind !== 'direct') {
+      // Grupo o personas: la misma puerta del hilo (ver arriba).
+      const guard = await guardConversation(String(conversation.id));
+      if ('response' in guard) return notFound();
+    } else {
+      const allowed = canAccessChatAttachment(
+        {
+          conversationUserId: conversation.id_user,
+          conversationAgentId: conversation.id_agent,
+        },
+        requester
+      );
+      if (!allowed) return notFound();
 
-    // Segunda vuelta para el usuario: propiedad del hilo + permiso VIGENTE
-    // sobre el agente. Es el mismo guardia del resto del módulo
-    // (lib/chat/http.ts, guardConversation).
-    if (requester.kind === 'user') {
-      const owned = await assertConversationOwnership(sessionEmail ?? '', conversation.id);
-      if (!owned) return notFound();
+      // Segunda vuelta para el usuario: propiedad del hilo + permiso VIGENTE
+      // sobre el agente. Es el mismo guardia del resto del módulo
+      // (lib/chat/http.ts, guardConversation).
+      if (requester.kind === 'user') {
+        const owned = await assertConversationOwnership(sessionEmail ?? '', conversation.id);
+        if (!owned) return notFound();
+      }
     }
 
     /* ─────────────────────── 3. El contenido ───────────────────────────── */
@@ -123,9 +155,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       );
     }
 
-    const headers = new Headers(NO_STORE);
-    headers.set('Content-Type', safeDownloadContentType(attachment.content_type));
-    headers.set('Content-Disposition', buildContentDisposition(attachment.file_name));
+    const imagenEnLinea =
+      request.nextUrl.searchParams.get('inline') === '1'
+        ? inlineImageContentType(attachment.content_type, attachment.file_name)
+        : null;
+
+    const headers = new Headers(imagenEnLinea ? undefined : NO_STORE);
+    if (imagenEnLinea) {
+      headers.set('Content-Type', imagenEnLinea);
+      headers.set('Content-Disposition', buildContentDisposition(attachment.file_name, 'inline'));
+      headers.set('Cache-Control', 'private, max-age=600');
+      headers.set('Content-Security-Policy', "default-src 'none'; sandbox");
+    } else {
+      headers.set('Content-Type', safeDownloadContentType(attachment.content_type));
+      headers.set('Content-Disposition', buildContentDisposition(attachment.file_name));
+    }
     // El navegador NO debe adivinar el tipo: con `attachment` + `nosniff`, un
     // archivo subido por un tercero no se puede hacer pasar por HTML.
     headers.set('X-Content-Type-Options', 'nosniff');
