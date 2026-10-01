@@ -15,7 +15,7 @@ export type SgcReviewState = 'al_dia' | 'por_vencer' | 'vencido' | 'sin_fecha';
 export const SGC_REVIEW_STATE_LABELS: Record<SgcReviewState, string> = {
   al_dia: 'Al día',
   por_vencer: 'Revisión próxima',
-  vencido: 'Revisión vencida',
+  vencido: 'Vencido — en revisión',
   sin_fecha: 'Sin fecha de revisión',
 };
 

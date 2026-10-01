@@ -701,3 +701,33 @@ export async function canViewDocument(db: SgcDb, accessByCompany: readonly SgcCo
   if (!access) return false;
   return permissionsFor(access, subject, doc, now).canView;
 }
+
+/**
+ * Sprint 5: documentos de la empresa que la persona puede CONSULTAR (misma
+ * regla del listado maestro y la ficha), con la versión vigente, para el mapa
+ * de relaciones y el calendario de vencimientos. Quien no es de Calidad solo
+ * ve VIGENTES; Calidad puede pedir otros estados.
+ */
+export async function listVisibleDocuments(
+  db: SgcDb,
+  access: SgcCompanyAccess,
+  subject: SgcAccessSubject,
+  opts: { statuses?: readonly string[] } = {},
+  now: Date = new Date()
+) {
+  const statuses = access.canQuality && opts.statuses?.length ? opts.statuses.filter(isSgcDocumentStatus) : ['vigente'];
+  const docs = await db.sgcDocument.findMany({
+    where: { id_company: access.idCompany, status: { in: [...statuses] } },
+    include: documentInclude,
+  });
+  const visible = docs.filter((d) => permissionsFor(access, subject, d, now).canView);
+  const versionIds = visible.map((d) => d.current_version_id).filter((v): v is number => v !== null);
+  const versions = versionIds.length
+    ? await db.sgcDocumentVersion.findMany({
+        where: { id_document_version: { in: versionIds } },
+        select: { id_document_version: true, version_number: true, review_due_date: true, effective_date: true, status: true },
+      })
+    : [];
+  const byId = new Map(versions.map((v) => [v.id_document_version, v]));
+  return visible.map((d) => ({ doc: d, current: d.current_version_id ? (byId.get(d.current_version_id) ?? null) : null }));
+}

@@ -20,9 +20,11 @@ import {
   Textarea,
   Title,
 } from '@mantine/core';
-import { IconAlertTriangle, IconArrowLeft, IconBan, IconCheck, IconEdit, IconEye, IconKey } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowLeft, IconBan, IconCheck, IconEdit, IconEye, IconFilePlus, IconKey } from '@tabler/icons-react';
 import SgcShell from '../../../../../../components/sgc/SgcShell';
 import SgcSecureViewer from '../../../../../../components/sgc/SgcSecureViewer';
+import SgcDocumentRelations from '../../../../../../components/sgc/relations/SgcDocumentRelations';
+import { SgcDocumentAlertsCard } from '../../../../../../components/sgc/vencimientos/SgcAlertsAdmin';
 import { SgcDocumentAuditCard, SgcVerifyVersionButton } from '../../../../../../components/sgc/signature/SgcDocumentAudit';
 import { SgcConfidentialityBadge, SgcDocumentCode, SgcReviewBadge, SgcStatusBadge } from '../../../../../../components/sgc/SgcBadges';
 import { sgcHref } from '../../../../../../components/sgc/useSgcCompany';
@@ -139,6 +141,17 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
             {current && (
               <Button leftSection={<IconEye size={16} />} onClick={() => setViewVersion(current.id)} data-testid='sgc-abrir-visor'>
                 Abrir en visor
+              </Button>
+            )}
+            {d.status === 'vigente' && (company.canManage || company.canQuality) && (
+              <Button
+                component={Link}
+                href={sgcHref(`${SGC_BASE_URL}/solicitudes/nueva`, company.idCompany, { tipo: 'nueva_version', documento: String(d.idDocument) })}
+                variant='light'
+                leftSection={<IconFilePlus size={16} />}
+                data-testid='sgc-ficha-nueva-version'
+              >
+                Solicitar nueva versión
               </Button>
             )}
             {permissions.canAdminister && d.status !== 'anulado' && (
@@ -287,6 +300,10 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
           </Table>
         </Table.ScrollContainer>
       </Card>
+
+      <SgcDocumentRelations idDocument={d.idDocument} idCompany={company.idCompany} code={d.code} canAdminister={permissions.canAdminister && company.canQuality && d.status !== 'anulado'} />
+
+      {permissions.canAdminister && company.canQuality && <SgcDocumentAlertsCard idDocument={d.idDocument} idCompany={company.idCompany} />}
 
       {permissions.canAdminister && company.canQuality && <SgcDocumentAuditCard idDocument={d.idDocument} />}
 
