@@ -281,7 +281,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                     `Nueva Nota en la Solicitud documental #${request.id} - ${request.subject}`,
                     emails.join('; '),
                     [{ 'ID de la Solicitud': request.id, Asunto: request.subject, Proceso: request.flow.name, Empresa: request.company, Nota: body }],
-                    `Este es un mensaje automático del Sistema de Gestión de Calidad (SGC documental). Se ha agregado una nueva nota a la solicitud #${request.id}.`,
+                    `Este es un mensaje automático del módulo Documentos de SynerLink. Se ha agregado una nueva nota a la solicitud #${request.id}.`,
                     'https://farmalogica.com.co/imagenes/logos/logo20.png',
                     []
                   ).catch(() => undefined);

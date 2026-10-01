@@ -199,7 +199,7 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
 
 export default function SgcSignatureMastersPage() {
   return (
-    <SgcShell section='Firma electrónica del SGC' subtitle='Maestro de firmas registrado por Aseguramiento de Calidad' requireQuality>
+    <SgcShell section='Firma electrónica' subtitle='Maestro de firmas registrado por Aseguramiento de Calidad' requireQuality>
       {(company) => <Masters company={company} />}
     </SgcShell>
   );

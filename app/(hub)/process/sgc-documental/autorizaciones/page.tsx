@@ -262,7 +262,7 @@ function AuthorizationBoard() {
 
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
-    { title: 'Autorizaciones SGC', href: '#' },
+    { title: 'Autorizaciones', href: '#' },
   ].map((item, index) =>
     item.href !== '#' ? (
       <Link key={index} href={item.href} passHref>
@@ -416,7 +416,7 @@ function AuthorizationBoard() {
             <div>
               <Title order={1} className='text-3xl font-bold mb-2 flex items-center gap-3' data-testid='sgc-autorizaciones-titulo'>
                 <IconShieldCheck size={32} className='text-blue-600' />
-                Autorizaciones SGC
+                Autorizaciones
               </Title>
               <Text size='lg' c='dimmed'>
                 Autoriza o rechaza las aprobaciones y verificaciones del Sistema de Gestión de Calidad

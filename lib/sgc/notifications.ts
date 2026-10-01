@@ -24,7 +24,7 @@ export type SgcNotifier = (notifications: SgcNotification[]) => Promise<void>;
 
 export const SGC_NOTIFICATION_TITLES = {
   tareaAsignada: 'Tarea documental asignada · SynerLink',
-  autorizacionPendiente: 'Autorización SGC pendiente · SynerLink',
+  autorizacionPendiente: 'Autorización pendiente en Documentos · SynerLink',
   devuelta: 'Documento devuelto a elaboración · SynerLink',
   cancelada: 'Solicitud documental cancelada · SynerLink',
   nota: 'Nueva nota en solicitud documental · SynerLink',

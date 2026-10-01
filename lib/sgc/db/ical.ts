@@ -95,5 +95,5 @@ export async function getIcalFeed(db: SgcDb, token: string, meta: { ip?: string 
       userAgent: meta.userAgent ?? null,
     });
   });
-  return buildIcalendar(events, { calendarName: 'SGC · vencimientos de documentos', now });
+  return buildIcalendar(events, { calendarName: 'Documentos · vencimientos', now });
 }
