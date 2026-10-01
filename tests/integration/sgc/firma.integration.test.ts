@@ -376,7 +376,7 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     expect(Number(big.events[0].id)).toBeLessThan(Number(big.events.at(-1)!.id));
     await expect(getDocumentAuditReport(prisma, (await viewer(E.cal)).access, 999999, actor(E.cal))).rejects.toMatchObject({ status: 404 });
     await expect(getDocumentAuditReport(prisma, [], r.id_document!, actor(E.cal))).rejects.toMatchObject({ status: 404 });
-    expect(await prisma.sgcAuditLog.count({ where: { action: 'documento.reporte_auditoria', entity_id: String(r.id_document) } })).toBe(1);
+    expect(await prisma.sgcAuditLog.count({ where: { action: 'documento.reporte_auditoria', entity_id: String(r.id_document) } })).toBe(2); // el reporte normal y el truncado
   });
 
   it('[SGC-REQ-050] maestro de firmas: Calidad registra el trazo de la inducción (versionado); no se borra, se revoca', async () => {
