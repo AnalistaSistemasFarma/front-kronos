@@ -126,6 +126,7 @@ export function SgcDocumentAuditCard({ idDocument }: { idDocument: number }) {
               Cadena de firmas de la empresa: {report.signatureChain.ok ? `íntegra (${report.signatureChain.checked})` : 'ROTA'}
             </Badge>
             <Badge variant='light'>{report.events.length} eventos</Badge>
+            {report.truncated && <Badge color='yellow' variant='light'>Se muestran los {report.events.length} eventos más recientes</Badge>}
             <Badge variant='light'>{report.signatures.length} firmas</Badge>
           </Group>
           {report.signatures.length > 0 && (

@@ -2,8 +2,12 @@ import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
 import { SgcError } from '../errors';
 import { SGC_SIGNATURE_LABELS } from '../flows/definition';
 import type { SgcCompanyAccess } from '../permissions';
-import { verifySignatureChain, verifySignatureRow } from '../signature/record';
+import { verifySignatureRow } from '../signature/record';
 import type { SgcActor, SgcDb } from './catalogs';
+import { verifyCompanySignatureChain } from './signatures';
+
+/** Máximo de eventos del reporte por documento (los más recientes). */
+export const AUDIT_REPORT_MAX_EVENTS = 5000;
 
 /**
  * REPORTE DE AUDITORÍA POR DOCUMENTO (Sprint 3), para Calidad y para la
@@ -53,13 +57,17 @@ export async function getDocumentAuditReport(db: SgcDb, access: readonly SgcComp
     { entity: 'signature', ids: ids(signatures.map((s) => s.id_signature)) },
     { entity: 'quality_check', ids: ids(qualityChecks.map((q) => q.id_quality_check)) },
   ].filter((t) => t.ids.length);
-  const logs = await db.sgcAuditLog.findMany({
-    where: { id_company: doc.id_company, OR: targets.map((t) => ({ entity: t.entity, entity_id: { in: t.ids } })) },
-    orderBy: { id_audit_log: 'asc' },
-    take: 5000,
-  });
+  // Sprint 6: los 5.000 eventos MÁS RECIENTES (antes se cortaban los últimos sin avisar), en orden
+  // cronológico, y `truncated` dice si hay más (el reporte lo informa).
+  const logs = (
+    await db.sgcAuditLog.findMany({
+      where: { id_company: doc.id_company, OR: targets.map((t) => ({ entity: t.entity, entity_id: { in: t.ids } })) },
+      orderBy: { id_audit_log: 'desc' },
+      take: AUDIT_REPORT_MAX_EVENTS,
+    })
+  ).reverse();
 
-  const companyChain = verifySignatureChain(await db.sgcSignature.findMany({ where: { id_company: doc.id_company }, orderBy: { id_signature: 'asc' } }));
+  const companyChain = await verifyCompanySignatureChain(db, doc.id_company);
   await writeSgcAudit(db, { idCompany: doc.id_company, actorEmail: actor.email, action: SGC_AUDIT_ACTIONS.reporteAuditoria, entity: 'document', entityId: idDocument, detail: `Reporte de auditoría de ${doc.code} (${logs.length} eventos).`, ip: actor.ip, userAgent: actor.userAgent });
 
   return {
@@ -82,6 +90,7 @@ export async function getDocumentAuditReport(db: SgcDb, access: readonly SgcComp
       intact: verifySignatureRow(s),
     })),
     signatureChain: companyChain,
+    truncated: logs.length >= AUDIT_REPORT_MAX_EVENTS,
     events: logs.map<SgcAuditReportRow>((l) => ({
       id: l.id_audit_log.toString(),
       at: l.occurred_at.toISOString(),
@@ -100,7 +109,13 @@ export type SgcDocumentAuditReport = Awaited<ReturnType<typeof getDocumentAuditR
 
 /** CSV del reporte (separador «;», como lo abre Excel en español). */
 export function auditReportToCsv(report: SgcDocumentAuditReport): string {
-  const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
+  // Sprint 6: un valor que empieza por = + - @ (o tabulador) se antepone con «'» para que Excel
+  // no lo ejecute como fórmula (inyección de fórmulas en CSV): motivos y notas los escriben personas.
+  const q = (v: unknown) => {
+    let s = String(v ?? '').replace(/\r?\n/g, ' ');
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return `"${s.replace(/"/g, '""')}"`;
+  };
   const lines = [['fecha_utc', 'quien', 'accion', 'entidad', 'id', 'ip', 'detalle', 'datos'].map(q).join(';')];
   for (const e of report.events) lines.push([e.at, e.actor, e.action, e.entity, e.entityId, e.ip, e.detail, e.after].map(q).join(';'));
   return `﻿${lines.join('\r\n')}\r\n`;

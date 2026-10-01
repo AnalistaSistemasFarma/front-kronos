@@ -58,6 +58,7 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     cal: 'calidad.s3@onelatampharma.com',
     lector: 'lector.s3@onelatampharma.com',
     intruso: 'intruso.s3@onelatampharma.com',
+    rafaga: 'rafaga.s3@onelatampharma.com',
   };
   const actor = (email: string) => ({ email, ip: '10.3.3.3', userAgent: 'vitest-s3' });
   const viewer = async (email: string) => ({ email, access: await getSgcAccessForUser(prisma, email) });
@@ -129,6 +130,7 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
       [E.cal, ['calidad']],
       [E.lector, ['lectura']],
       [E.intruso, ['gestion']],
+      [E.rafaga, ['gestion']],
     ];
     for (const [email, perms] of grants) {
       const user = await prisma.user.create({ data: { email, name: email.split('@')[0].toUpperCase(), password: hash } });
@@ -223,6 +225,15 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     for (let i = 0; i < 5; i++) await expect(signTask(prisma, deps, elab.id_task, firma('elaboro', { password: `mala-${i}` }), actor(E.intruso))).rejects.toMatchObject({ status: 403 });
     await expect(signTask(prisma, deps, elab.id_task, firma('elaboro'), actor(E.intruso))).rejects.toMatchObject({ status: 429 });
     expect((await taskOf(reqA, 'elaboracion')).status).toBe('abierta');
+  });
+
+  it('[SGC-REQ-088] una ráfaga EN PARALELO de contraseñas erradas no se salta el bloqueo: 5 fallos y el resto bloqueado', async () => {
+    const elab = await taskOf(reqA, 'elaboracion');
+    const results = await Promise.allSettled(Array.from({ length: 9 }, (_, i) => signTask(prisma, deps, elab.id_task, firma('elaboro', { password: `rafaga-${i}` }), actor(E.rafaga))));
+    const statuses = results.map((r) => (r.status === 'rejected' ? (r.reason as { status?: number }).status : 200)).sort();
+    expect(statuses.filter((x) => x === 403)).toHaveLength(5);
+    expect(statuses.filter((x) => x === 429)).toHaveLength(4);
+    expect(await prisma.sgcAuditLog.count({ where: { action: 'firma.reautenticacion_fallida', actor_email: E.rafaga } })).toBe(5);
   });
 
   it('[SGC-REQ-038][SGC-REQ-040][SGC-REQ-041][SGC-REQ-049] el elaborador firma «Elaboró»: sello de tiempo del servidor, hash del contenido, evidencia propia y SIN Orión', async () => {
@@ -451,5 +462,16 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     const v = await prisma.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: res.controlledPdf.idDocumentVersion! } });
     expect(v.source_item_id).toBeNull();
     expect((await PDFDocument.load(store.get(v.pdf_item_id)!)).getPageCount()).toBeGreaterThanOrEqual(3);
+  });
+
+  it('[SGC-REQ-093] la base no admite dos firmas de la empresa colgando del mismo registro anterior (ni dos génesis)', async () => {
+    const cols = 'id_company, id_request, id_task, id_task_assignee, signer_email, signer_name, meaning, reason, signed_at, content_kind, content_ref, content_name, content_sha256, auth_method, consent_version, id_signature_master, master_sha256, ip, user_agent, evidence_item_id, evidence_path, evidence_sha256';
+    const copy = (where: string) =>
+      prisma.$executeRawUnsafe(`INSERT INTO sgc.signature (signature_uid, ${cols}, prev_record_hash, record_hash, created_at)
+        SELECT TOP 1 LOWER(CONVERT(CHAR(36), NEWID())), ${cols}, prev_record_hash, LOWER(CONVERT(CHAR(64), HASHBYTES('SHA2_256', CAST(NEWID() AS NVARCHAR(36))), 2)), created_at
+        FROM sgc.signature WHERE id_company = ${CO} AND ${where} ORDER BY id_signature DESC`);
+    await expect(copy('prev_record_hash IS NOT NULL')).rejects.toThrow(/signature_cadena_prev_uq|duplicate/i);
+    await expect(copy('prev_record_hash IS NULL')).rejects.toThrow(/signature_cadena_genesis_uq|duplicate/i);
+    expect((await verifyCompanySignatureChain(prisma, CO)).ok).toBe(true);
   });
 });

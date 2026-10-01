@@ -1,4 +1,4 @@
-import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
+import { SGC_AUDIT_ACTIONS, buildAuditRow, writeSgcAudit } from '../audit';
 import type { SgcCalendarItem } from '../calendar';
 import { SGC_SUBPROCESS_URLS } from '../constants';
 import type { SgcAccessSubject } from '../documentAccess';
@@ -207,10 +207,18 @@ async function resolveResponsibles(db: SgcDb, idCompany: number, docs: readonly 
   const owners = new Map<number, string[]>();
   const lastElaborator = new Map<number, string | null>();
   const openRequest = new Map<number, number | null>();
+  // Sprint 6: solicitudes agrupadas por documento (antes se filtraba la lista completa por cada documento).
+  const requestsByDoc = new Map<number, (typeof requests)[number][]>();
+  for (const r of requests) {
+    if (r.id_document === null) continue;
+    const list = requestsByDoc.get(r.id_document);
+    if (list) list.push(r);
+    else requestsByDoc.set(r.id_document, [r]);
+  }
   for (const d of docs) {
     const dept = deptOf(d);
     owners.set(d.id_document, dept !== null ? (byDept.get(dept) ?? []) : []);
-    const mine = requests.filter((r) => r.id_document === d.id_document);
+    const mine = requestsByDoc.get(d.id_document) ?? [];
     const producer = mine.find((r) => r.id_document_version !== null && r.id_document_version === d.current_version_id && r.status === 'completada') ?? mine.find((r) => r.status === 'completada');
     lastElaborator.set(d.id_document, producer ? lower(producer.elaborator_email) : lower(d.created_by) || null);
     openRequest.set(d.id_document, mine.find((r) => r.status === 'abierta' || r.status === 'en_espera')?.id_request ?? null);
@@ -459,16 +467,21 @@ export async function runReviewAlerts(
       await db.$transaction(async (tx) => {
         // UPDATE directo: la tabla tiene un trigger INSTEAD OF UPDATE que solo deja completar los canales una vez.
         await tx.$executeRaw`UPDATE [sgc].[review_alert] SET channels_json = ${JSON.stringify(channels)}, sent_at = ${sentAt} WHERE id_review_alert = ${row.id_review_alert} AND sent_at IS NULL`;
-        for (const c of channels) {
-          const rr = roles.get(c.email) ?? [];
-          await writeSgcAudit(tx, {
-            idCompany,
-            actorEmail: opts.actorEmail ?? SYSTEM_ACTOR,
-            action: SGC_AUDIT_ACTIONS.vencimientoAviso,
-            entity: 'review_alert',
-            entityId: row.id_review_alert,
-            after: { key: it.key, to: c.email, roles: rr, channels: { campana: c.campana, correo: c.correo }, sentAt: sentAt.toISOString() },
-            detail: `${doc.code} V${version.version_number} · ${KIND_LABELS[it.kind]} (${it.kind === 'vencido' ? `${it.offsetDays} días vencido` : `${it.offsetDays} días`}; vence ${dueText}) → ${c.email} (${rr.map((x) => ROLE_LABELS[x]).join(', ')}) por campana/push${cfg.emailEnabled ? ` y correo (${c.correo})` : ''}.`.slice(0, 1000),
+        // Sprint 6 (rendimiento): una sola inserción con todas las filas de auditoría del aviso.
+        if (channels.length) {
+          await tx.sgcAuditLog.createMany({
+            data: channels.map((c) => {
+              const rr = roles.get(c.email) ?? [];
+              return buildAuditRow({
+                idCompany,
+                actorEmail: opts.actorEmail ?? SYSTEM_ACTOR,
+                action: SGC_AUDIT_ACTIONS.vencimientoAviso,
+                entity: 'review_alert',
+                entityId: row.id_review_alert,
+                after: { key: it.key, to: c.email, roles: rr, channels: { campana: c.campana, correo: c.correo }, sentAt: sentAt.toISOString() },
+                detail: `${doc.code} V${version.version_number} · ${KIND_LABELS[it.kind]} (${it.kind === 'vencido' ? `${it.offsetDays} días vencido` : `${it.offsetDays} días`}; vence ${dueText}) → ${c.email} (${rr.map((x) => ROLE_LABELS[x]).join(', ')}) por campana/push${cfg.emailEnabled ? ` y correo (${c.correo})` : ''}.`.slice(0, 1000),
+              });
+            }),
           });
         }
         if (it.kind !== 'anticipado') {

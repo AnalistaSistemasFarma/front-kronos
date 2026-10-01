@@ -17,7 +17,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const id = parseId((await params).id);
     const body = await readJson(request);
     if (!id || !body) return jsonNoStore({ error: 'Petición inválida' }, 400);
-    return jsonNoStore(await recordReadingEvent(prisma, id, body, { email: ctx.email }, ctx.actor));
+    return jsonNoStore(await recordReadingEvent(prisma, id, body, { email: ctx.email, access: ctx.access }, ctx.actor));
   } catch (error) {
     return errorResponse(error, 'lectura:avance');
   }

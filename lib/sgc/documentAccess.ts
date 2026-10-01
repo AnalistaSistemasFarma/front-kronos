@@ -106,6 +106,9 @@ export function resolveDocumentPermissions(
 }
 
 /** Motivo por el que un acceso excepcional es inválido, o null si se puede registrar. */
+/** Duración máxima de un permiso excepcional de descarga o impresión (Sprint 6). */
+export const SGC_MAX_EXCEPTIONAL_DAYS = 366;
+
 export function getGrantInputError(input: {
   idDepartment: number | null;
   userEmail: string | null;
@@ -124,6 +127,10 @@ export function getGrantInputError(input: {
     return 'La descarga y la impresión son excepcionales: exigen fecha de vencimiento.';
   }
   if (input.expiresAt && input.expiresAt.getTime() <= now.getTime()) return 'El vencimiento debe ser una fecha futura.';
+  // Sprint 6: un permiso excepcional no puede durar más de un año.
+  if ((input.canDownload || input.canPrint) && input.expiresAt && input.expiresAt.getTime() > now.getTime() + SGC_MAX_EXCEPTIONAL_DAYS * 86_400_000) {
+    return `La descarga y la impresión son excepcionales: el vencimiento no puede pasar de ${SGC_MAX_EXCEPTIONAL_DAYS} días.`;
+  }
   if ((input.reason ?? '').trim().length < 10) return 'Explique el motivo (mínimo 10 caracteres).';
   return null;
 }

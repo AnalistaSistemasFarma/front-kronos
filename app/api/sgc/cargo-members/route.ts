@@ -15,8 +15,12 @@ export async function GET(request: Request) {
     if (ctx instanceof Response) return ctx;
     const idCompany = parseCompanyParam(request.url);
     if (!idCompany) return jsonNoStore({ error: 'Falta la empresa' }, 400);
-    if (!companyAccess(ctx, idCompany)) return jsonNoStore({ error: 'Sin acceso al SGC de esta empresa' }, 403);
-    return jsonNoStore(await listCargoMembers(prisma, idCompany));
+    const access = companyAccess(ctx, idCompany);
+    if (!access) return jsonNoStore({ error: 'Sin acceso al SGC de esta empresa' }, 403);
+    const data = await listCargoMembers(prisma, idCompany);
+    // Sprint 6: quién registró a cada persona y por qué es dato de Calidad (mínimo necesario para los demás).
+    if (!access.canQuality) return jsonNoStore({ ...data, members: data.members.map(({ addedBy: _a, reason: _r, ...m }) => m) });
+    return jsonNoStore(data);
   } catch (error) {
     return errorResponse(error, 'cargos');
   }

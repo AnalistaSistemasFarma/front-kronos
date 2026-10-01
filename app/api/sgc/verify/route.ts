@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { verifyVersionByCode } from '@/lib/sgc/db/verify';
-import { errorResponse, getSgcRequestContext, jsonNoStore } from '@/app/api/sgc/_lib/context';
+import { errorResponse, getSgcRequestContext, jsonNoStore, rateLimitResponse } from '@/app/api/sgc/_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +13,8 @@ export async function GET(request: Request) {
   try {
     const ctx = await getSgcRequestContext(request);
     if (ctx instanceof Response) return ctx;
+    const limited = rateLimitResponse('verificacion', ctx.email);
+    if (limited) return limited;
     const q = new URL(request.url).searchParams;
     return jsonNoStore(await verifyVersionByCode(prisma, ctx.access, ctx.subject, { idCompany: q.get('empresa'), code: q.get('codigo'), versionNumber: q.get('version') }, ctx.actor));
   } catch (error) {

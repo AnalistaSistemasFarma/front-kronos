@@ -6,6 +6,8 @@ import { assigneesInTurn } from '../flows/engine';
 import type { SgcCompanyAccess } from '../permissions';
 import type { SgcActor, SgcDb } from './catalogs';
 import { requireReason, writeConfigChange } from './flows';
+import { SGC_AUTH_TYPE_QUALITY } from '../flows/documentFlow';
+import { listEligibleUsers } from './requests';
 
 /**
  * Autorizaciones SGC (módulo independiente, tablas propias): tipos, grupos
@@ -107,13 +109,29 @@ export async function saveAuthorizationType(
   }
 }
 
-export async function grantAuthorizationTypeUser(db: SgcDb, idCompany: number, idType: number, input: { email: unknown; reason: unknown }, actor: SgcActor) {
+export async function grantAuthorizationTypeUser(
+  db: SgcDb,
+  idCompany: number,
+  idType: number,
+  input: { email: unknown; reason: unknown },
+  actor: SgcActor,
+  opts: { actorIsQuality?: boolean } = {}
+) {
   const reason = requireReason(input.reason);
   const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
   if (!email) throw new SgcError('Indique el correo de la persona.');
   const type = await db.sgcAuthorizationType.findUnique({ where: { id_authorization_type: idType } });
   if (!type || type.id_company !== idCompany) throw new SgcError('Tipo de autorización no encontrado.', 404);
   if (!(await db.user.findUnique({ where: { email }, select: { id: true } }))) throw new SgcError('No existe un usuario con ese correo.');
+  // Sprint 6 (segregación de funciones):
+  // - nadie se agrega a sí mismo a un grupo de autorización (lo hace otra persona);
+  // - el grupo de verificación de Calidad lo administra Calidad (no basta administrar flujos);
+  // - solo entra quien puede decidir en el SGC de la empresa (gestión o Calidad, activo).
+  if (email === actor.email.trim().toLowerCase()) throw new SgcError('Una persona no se agrega a sí misma a un grupo de autorización: la agrega otra persona.', 403);
+  if (type.code === SGC_AUTH_TYPE_QUALITY && opts.actorIsQuality === false) throw new SgcError('El grupo de verificación de Calidad lo administra Aseguramiento de Calidad.', 403);
+  if (!(await listEligibleUsers(db, idCompany)).some((u) => u.email === email)) {
+    throw new SgcError('La persona no tiene permiso de gestión o de Calidad del SGC en esta empresa (o está inactiva).');
+  }
   return db.$transaction(async (tx) => {
     const existing = await tx.sgcAuthorizationTypeUser.findFirst({ where: { id_authorization_type: idType, user_email: email, revoked_at: null } });
     if (existing) throw new SgcError('La persona ya pertenece a este grupo.', 409);
@@ -190,7 +208,8 @@ export async function listAuthorizationInbox(
     include: {
       type: true,
       request: { include: { companyConfig: { include: { company: { select: { company: true } } } } } },
-      assignee: { include: { task: { include: { assignees: true } } } },
+      // Sprint 6 (rendimiento): solo los cupos pendientes (bastan para saber a quién le toca).
+      assignee: { include: { task: { include: { assignees: { where: { status: 'pendiente' } } } } } },
     },
     orderBy: { id_authorization: 'desc' },
     take: 500,

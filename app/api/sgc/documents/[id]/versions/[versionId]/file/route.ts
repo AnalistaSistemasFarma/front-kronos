@@ -4,7 +4,7 @@ import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../../../../../../../../lib/sg
 import { getVersionForViewer } from '../../../../../../../../lib/sgc/db/documents';
 import { downloadVerifiedPdf } from '../../../../../../../../lib/sgc/onedrive';
 import { stampControlledCopy, type SgcWatermarkInfo } from '../../../../../../../../lib/sgc/watermark';
-import { NO_STORE, errorResponse, getSgcRequestContext, jsonNoStore } from '../../../../../_lib/context';
+import { NO_STORE, errorResponse, getSgcRequestContext, jsonNoStore, rateLimitResponse } from '../../../../../_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +30,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const ctx = await getSgcRequestContext(request);
     if (ctx instanceof Response) return ctx;
+    // Sprint 6: sin ningún acceso al SGC no se consulta nada ni se escribe auditoría (evita llenar audit_log).
+    if (ctx.access.length === 0) return jsonNoStore({ error: 'Sin acceso al SGC' }, 403);
+    const limited = rateLimitResponse('archivo', ctx.email);
+    if (limited) return limited;
     const { id, versionId } = await params;
     const rawMode = new URL(request.url).searchParams.get('modo') ?? 'consulta';
     if (!(MODES as readonly string[]).includes(rawMode)) return jsonNoStore({ error: 'Modo inválido' }, 400);

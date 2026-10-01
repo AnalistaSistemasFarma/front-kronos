@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { importWordToHtml } from '@/lib/sgc/db/drafts';
 import { docxToHtml } from '@/lib/sgc/pdf/render';
-import { errorResponse, getSgcRequestContext, jsonNoStore, parseId } from '@/app/api/sgc/_lib/context';
+import { errorResponse, getSgcRequestContext, jsonNoStore, parseId, uploadGuard } from '@/app/api/sgc/_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +11,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const ctx = await getSgcRequestContext(request);
     if (ctx instanceof Response) return ctx;
     const id = parseId((await params).id);
+    const guard = uploadGuard(request, ctx);
+    if (guard) return guard;
     const form = await request.formData().catch(() => null);
     const file = form?.get('file');
     if (!id || !(file instanceof File)) return jsonNoStore({ error: 'Se esperaba un archivo .docx' }, 400);

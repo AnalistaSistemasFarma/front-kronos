@@ -2,22 +2,23 @@ import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
 import { buildCodeRoot, buildDocumentCode, nextSequence } from '../coding';
 import { SGC_SUBPROCESS_URLS } from '../constants';
 import type { SgcAccessSubject } from '../documentAccess';
-import { SgcError } from '../errors';
+import { SgcError, isSgcError } from '../errors';
 import { SGC_SIGNATURE_LABELS, type SgcSignatureMeaning } from '../flows/definition';
 import type { SgcNotifier } from '../notifications';
 import type { SgcCompanyAccess } from '../permissions';
 import { buildControlledPdf, manifestSha256, readManifest, verifyControlledPdf, type SgcManifest, type SgcPdfVerification } from '../pdf/controlledPdf';
 import { wrapDraftForPdf, type SgcDocxToHtml, type SgcHtmlToPdf } from '../pdf/render';
 import { SGC_SIGNATURE_CONSENT_VERSION } from '../signature/consent';
-import { consentTextSha256, sha256HexOf, validateSignInput, verifySignatureChain, verifySignatureRow } from '../signature/record';
+import { consentTextSha256, sha256HexOf, validateSignInput, verifySignatureRow } from '../signature/record';
 import { assertReauthNotLocked, type SgcPasswordVerifier } from '../signature/reauth';
 import { buildVersionFileName, buildVersionFolderSegments, isPdf } from '../storage';
 import type { SgcActor, SgcDb } from './catalogs';
 import { getVersionForViewer, type SgcUploader } from './documents';
 import { addInteraction, decideTask, requestOfTask } from './requests';
 import { currentDraftInTx } from './signatureRecord';
+import { withSgcAppLock } from './lock';
 import { getReadSignError, type SgcReadStatus } from '../dissemination/scope';
-import type { SgcSignedContent } from '../signature/record';
+import type { SgcSignatureRow, SgcSignedContent } from '../signature/record';
 import { buildVerifyUrl } from '../pdf/qr';
 import { latestTrainingUpload, trainingNeedsJustification, uploadSummary } from './training';
 
@@ -116,19 +117,26 @@ export async function signTask(db: SgcDb, deps: SgcSignatureDeps, idTask: number
   const task = await db.sgcTask.findUniqueOrThrow({ where: { id_task: idTask }, include: { taskDef: true } });
   const input = validateSignInput(raw, (task.taskDef.signature_meaning as SgcSignatureMeaning | null) ?? null);
 
-  await assertReauthNotLocked(db, email, now);
-  const ok = await deps.verifyPassword(email, input.password);
+  // Sprint 6: contar intentos → comparar → registrar el fallo, serializado por persona entre todas las
+  // instancias; así una ráfaga en paralelo no se salta el bloqueo de 5 intentos en 15 minutos.
+  const ok = await withSgcAppLock(db, `sgc-reautenticacion-${email}`, { waitMs: 20_000, busyMessage: 'Hay otra firma suya en curso. Intente de nuevo en un momento.', holdMs: 60_000 }, async () => {
+    await assertReauthNotLocked(db, email, now);
+    const valid = await deps.verifyPassword(email, input.password);
+    if (!valid) {
+      await writeSgcAudit(db, {
+        idCompany,
+        actorEmail: email,
+        action: SGC_AUDIT_ACTIONS.firmaReautenticacionFallida,
+        entity: 'task',
+        entityId: idTask,
+        detail: `Reautenticación fallida al firmar «${SGC_SIGNATURE_LABELS[input.meaning]}» (solicitud #${idRequest}). No se firmó.`,
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      });
+    }
+    return valid;
+  });
   if (!ok) {
-    await writeSgcAudit(db, {
-      idCompany,
-      actorEmail: email,
-      action: SGC_AUDIT_ACTIONS.firmaReautenticacionFallida,
-      entity: 'task',
-      entityId: idTask,
-      detail: `Reautenticación fallida al firmar «${SGC_SIGNATURE_LABELS[input.meaning]}» (solicitud #${idRequest}). No se firmó.`,
-      ip: actor.ip,
-      userAgent: actor.userAgent,
-    });
     throw new SgcError('Contraseña incorrecta: no se firmó. Escriba su contraseña de SynerLink.', 403);
   }
 
@@ -173,7 +181,8 @@ export async function signTask(db: SgcDb, deps: SgcSignatureDeps, idTask: number
       const v = await generateControlledVersion(db, deps, result.idRequest, actor);
       controlledPdf = { status: 'generado', idDocumentVersion: v.idDocumentVersion };
     } catch (e) {
-      controlledPdf = { status: 'error', error: e instanceof Error ? e.message : String(e) };
+      // Sprint 6: el mensaje técnico (Graph, Chrome, base) queda en la auditoría, no en la respuesta.
+      controlledPdf = { status: 'error', error: isSgcError(e) ? e.message : PDF_GENERIC_ERROR };
     }
   }
   return { ...result, controlledPdf };
@@ -235,10 +244,15 @@ function dataUrlToBytes(dataUrl: string): Uint8Array | null {
   return m ? new Uint8Array(Buffer.from(m[1], 'base64')) : null;
 }
 
-async function markPdfError(db: SgcDb, idRequest: number, idCompany: number, message: string, actor: SgcActor) {
+const PDF_GENERIC_ERROR = 'No se pudo generar el PDF controlado por un error técnico. Calidad puede reintentarlo desde la solicitud.';
+
+async function markPdfError(db: SgcDb, idRequest: number, idCompany: number, message: string, actor: SgcActor, publicMessage: string = message) {
   await db.$transaction(async (tx) => {
+    // Sprint 6: si otra ejecución ya lo generó (carrera), no se pisa el estado «generado».
+    const current = await tx.sgcRequest.findUnique({ where: { id_request: idRequest }, select: { controlled_pdf_status: true, id_document_version: true } });
+    if (current?.controlled_pdf_status === 'generado' && current.id_document_version) return;
     await tx.sgcRequest.update({ where: { id_request: idRequest }, data: { controlled_pdf_status: 'error', controlled_pdf_error: message.slice(0, 1000) } });
-    await addInteraction(tx, idRequest, 'sistema', lower(actor.email), `No se pudo generar el PDF controlado: ${message}\nCalidad puede reintentarlo desde la solicitud.`);
+    await addInteraction(tx, idRequest, 'sistema', lower(actor.email), `No se pudo generar el PDF controlado: ${publicMessage}\nCalidad puede reintentarlo desde la solicitud.`);
     await writeSgcAudit(tx, { idCompany, actorEmail: actor.email, action: SGC_AUDIT_ACTIONS.pdfControladoError, entity: 'request', entityId: idRequest, detail: message, ip: actor.ip, userAgent: actor.userAgent });
   });
 }
@@ -252,6 +266,14 @@ async function markPdfError(db: SgcDb, idRequest: number, idCompany: number, mes
  * Idempotente: si ya se generó, devuelve la versión existente.
  */
 export async function generateControlledVersion(db: SgcDb, deps: SgcSignatureDeps, idRequest: number, actor: SgcActor): Promise<{ idDocument: number; idDocumentVersion: number; pdfSha256: string; created: boolean }> {
+  // Sprint 6: una sola generación a la vez por solicitud (la última firma y un reintento de Calidad
+  // podían correr juntas, subir el mismo archivo dos veces y dejar el PDF distinto de su huella).
+  return withSgcAppLock(db, `sgc-pdf-controlado-${idRequest}`, { waitMs: 0, busyMessage: 'El PDF controlado de esta solicitud ya se está generando. Espere un momento y recargue.', holdMs: 180_000 }, () =>
+    generateControlledVersionUnlocked(db, deps, idRequest, actor)
+  );
+}
+
+async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDeps, idRequest: number, actor: SgcActor): Promise<{ idDocument: number; idDocumentVersion: number; pdfSha256: string; created: boolean }> {
   const request = await db.sgcRequest.findUniqueOrThrow({
     where: { id_request: idRequest },
     include: { documentType: true, processMap: { include: { processType: true } }, document: true, companyConfig: { include: { company: { select: { company: true } } } }, formValues: { include: { field: true } } },
@@ -429,7 +451,7 @@ export async function generateControlledVersion(db: SgcDb, deps: SgcSignatureDep
     return { ...saved, pdfSha256, created: true };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    await markPdfError(db, idRequest, request.id_company, message, actor).catch((err) => console.error('[sgc/pdf-controlado]', err));
+    await markPdfError(db, idRequest, request.id_company, message, actor, isSgcError(e) ? message : PDF_GENERIC_ERROR).catch((err) => console.error('[sgc/pdf-controlado]', err));
     throw e;
   }
 }
@@ -478,11 +500,62 @@ export async function verifyDocumentVersion(
   return { ...result, hasManifest: Boolean(found.version.manifest_json), code: found.document.code, versionNumber: found.version.version_number };
 }
 
-/** Verifica la cadena completa de firmas de una empresa. */
-export async function verifyCompanySignatureChain(db: SgcDb, idCompany: number) {
-  const rows = await db.sgcSignature.findMany({ where: { id_company: idCompany }, orderBy: { id_signature: 'asc' } });
-  return verifySignatureChain(rows);
+/**
+ * Verifica la cadena completa de firmas de una empresa. Sprint 6: por páginas
+ * y solo con las columnas que entran en la huella, para que el costo en
+ * memoria no crezca con los años (cada «Leyó» es una firma). Mismo resultado
+ * que verifySignatureChain sobre todas las filas.
+ */
+export async function verifyCompanySignatureChain(db: SgcDb, idCompany: number, pageSize = 2000) {
+  let prev: string | null = null;
+  let checked = 0;
+  let after = 0;
+  for (;;) {
+    const rows: (SgcSignatureRow & { id_signature: number })[] = await db.sgcSignature.findMany({
+      where: { id_company: idCompany, id_signature: { gt: after } },
+      orderBy: { id_signature: 'asc' },
+      take: pageSize,
+      select: SIGNATURE_ROW_SELECT,
+    });
+    if (rows.length === 0) break;
+    for (const r of rows) {
+      checked += 1;
+      const uid = r.signature_uid.trim();
+      if (!verifySignatureRow(r)) return { ok: false, checked, brokenAt: uid, problem: 'El registro no coincide con su huella (fue alterado).' };
+      if ((r.prev_record_hash?.trim() ?? null) !== prev) return { ok: false, checked, brokenAt: uid, problem: 'La cadena de firmas está rota (falta o sobra un registro).' };
+      prev = r.record_hash.trim();
+    }
+    after = rows[rows.length - 1].id_signature;
+    if (rows.length < pageSize) break;
+  }
+  return { ok: true, checked, brokenAt: null, problem: null };
 }
+
+const SIGNATURE_ROW_SELECT = {
+  id_signature: true,
+  signature_uid: true,
+  id_company: true,
+  id_request: true,
+  id_task: true,
+  id_task_assignee: true,
+  signer_email: true,
+  signer_name: true,
+  meaning: true,
+  reason: true,
+  signed_at: true,
+  content_kind: true,
+  content_ref: true,
+  content_name: true,
+  content_sha256: true,
+  auth_method: true,
+  consent_version: true,
+  master_sha256: true,
+  ip: true,
+  user_agent: true,
+  evidence_sha256: true,
+  prev_record_hash: true,
+  record_hash: true,
+} as const;
 
 // ---------------------------------------------------------------------------
 // Maestro de firmas (Calidad, en la inducción)
@@ -534,7 +607,7 @@ export async function registerSignatureMaster(db: SgcDb, idCompany: number, inpu
   if (!email.includes('@')) throw new SgcError('Indique el correo de la persona.');
   const imgError = getMasterImageError(input.imagePng);
   if (imgError) throw new SgcError(imgError);
-  const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+  const reason = typeof input.reason === 'string' ? input.reason.trim().slice(0, 1000) : '';
   if (reason.length < 5) throw new SgcError('Escriba el motivo (p. ej. «Inducción del 2026-10-01»), mínimo 5 caracteres.');
   const eligible = await db.subprocessUserCompany.count({
     where: { subprocess: { subprocess_url: { in: Object.values(SGC_SUBPROCESS_URLS) } }, companyUser: { company: { id_company: idCompany }, user: { email, isActive: true } } },
@@ -555,7 +628,7 @@ export async function registerSignatureMaster(db: SgcDb, idCompany: number, inpu
 }
 
 export async function revokeSignatureMaster(db: SgcDb, idCompany: number, idMaster: number, input: { reason: unknown }, actor: SgcActor) {
-  const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+  const reason = typeof input.reason === 'string' ? input.reason.trim().slice(0, 1000) : '';
   if (reason.length < 5) throw new SgcError('Escriba el motivo de la revocación (mínimo 5 caracteres).');
   const row = await db.sgcSignatureMaster.findUnique({ where: { id_signature_master: idMaster } });
   if (!row || row.id_company !== idCompany) throw new SgcError('Firma registrada no encontrada.', 404);

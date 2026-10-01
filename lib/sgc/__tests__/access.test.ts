@@ -24,14 +24,15 @@ describe('SGC · lectura del acceso desde la base', () => {
     expect(configFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { is_active: true } }));
   });
 
-  it('[SGC-REQ-005] consulta solo los subprocesos del SGC del correo pedido', async () => {
+  it('[SGC-REQ-005][SGC-REQ-083] consulta solo los subprocesos del SGC del correo pedido (y solo de personas activas)', async () => {
     const { db, subprocessFindMany } = fakeDb(
       [{ url: SGC_SUBPROCESS_URLS.gestion, id: 3, name: 'ONELATAMPHARMA' }],
       [3]
     );
     const access = await getSgcAccessForUser(db, 'nicolas.rivera@gsslatam.com');
     const where = subprocessFindMany.mock.calls[0][0].where;
-    expect(where.companyUser).toEqual({ user: { email: 'nicolas.rivera@gsslatam.com' } });
+    // Sprint 6: solo personas ACTIVAS (una desactivada pierde el SGC aunque su sesión siga vigente).
+    expect(where.companyUser).toEqual({ user: { email: 'nicolas.rivera@gsslatam.com', isActive: true } });
     expect(where.subprocess.subprocess_url.in).toEqual(Object.values(SGC_SUBPROCESS_URLS));
     expect(access).toEqual([
       { idCompany: 3, companyName: 'ONELATAMPHARMA', canRead: true, canManage: true, canQuality: false, canAdminFlows: false },

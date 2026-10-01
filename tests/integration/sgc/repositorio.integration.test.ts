@@ -213,13 +213,16 @@ describe.skipIf(!url)('SGC · Sprint 1 · integración con SQL Server', () => {
     expect(await getDocumentDetail(prisma, [lectura], subject, 0)).toBeNull();
   });
 
-  it('[SGC-REQ-017] permisos excepcionales de descarga/impresión: vencen, se revocan y la fila no se borra', async () => {
+  it('[SGC-REQ-017][SGC-REQ-084] permisos excepcionales de descarga/impresión: vencen (máximo un año), no se otorgan a sí mismo, se revocan y la fila no se borra', async () => {
     const d = await prisma.sgcDocument.findFirstOrThrow({ where: { id_company: OLP, code: 'OLP-LO-MA-001' } });
     const subject = await getAccessSubject(prisma, LECTOR);
     await expect(grantDocumentAccess(prisma, [calidad], d.id_document, { userEmail: LECTOR, canDownload: true, reason: 'Visita del INVIMA' }, actor)).rejects.toThrow('vencimiento');
     await expect(grantDocumentAccess(prisma, [lectura], d.id_document, { userEmail: LECTOR, reason: 'Visita del INVIMA' }, actor)).rejects.toMatchObject({ status: 403 });
     await expect(grantDocumentAccess(prisma, [calidad], d.id_document, { idDepartment: 999999, reason: 'Visita del INVIMA' }, actor)).rejects.toThrow('no existe');
     await expect(grantDocumentAccess(prisma, [calidad], d.id_document, { userEmail: LECTOR, canPrint: true, expiresAt: 'mañana', reason: 'Visita del INVIMA' }, actor)).rejects.toThrow('vencimiento');
+    // Sprint 6: nadie se otorga a sí mismo descarga o impresión, y no por más de 366 días.
+    await expect(grantDocumentAccess(prisma, [calidad], d.id_document, { userEmail: CALIDAD, canDownload: true, expiresAt: new Date(Date.now() + 86_400_000).toISOString(), reason: 'Visita del INVIMA' }, actor)).rejects.toMatchObject({ status: 403 });
+    await expect(grantDocumentAccess(prisma, [calidad], d.id_document, { userEmail: LECTOR, canDownload: true, expiresAt: new Date(Date.now() + 400 * 86_400_000).toISOString(), reason: 'Visita del INVIMA' }, actor)).rejects.toThrow('366');
     const g = await grantDocumentAccess(
       prisma,
       [calidad],

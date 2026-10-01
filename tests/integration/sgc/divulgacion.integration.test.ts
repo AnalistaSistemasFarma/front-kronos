@@ -13,7 +13,8 @@ import { getCatalogs } from '../../../lib/sgc/db/catalogs';
 import { addScopeEntry, getMyReading, openReadingFile, recordReadingEvent, removeScopeEntry, sendReadingReminders } from '../../../lib/sgc/db/dissemination';
 import { canViewDocument, createInitialDocument, getAccessSubject, type SgcUploader } from '../../../lib/sgc/db/documents';
 import { getCurrentFlowVersion, loadDefinition } from '../../../lib/sgc/db/flows';
-import { cancelRequest, closeDissemination, createRequest, excludeReader, getRequestDetail, getTaskDetail, listTaskInbox, setSigners, uploadAttachment } from '../../../lib/sgc/db/requests';
+import { addNote, cancelRequest, closeDissemination, createRequest, excludeReader, getAttachmentForDownload, getRequestDetail, getTaskDetail, listTaskInbox, setSigners, uploadAttachment } from '../../../lib/sgc/db/requests';
+import { listDraftRevisions } from '../../../lib/sgc/db/drafts';
 import { signTask, type SgcSignatureDeps } from '../../../lib/sgc/db/signatures';
 import { saveTraining, uploadTrainingResults } from '../../../lib/sgc/db/training';
 import { verifyVersionByCode } from '../../../lib/sgc/db/verify';
@@ -260,6 +261,17 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     // El revisor, aunque también es lector, sigue viendo todo (participó en la elaboración).
     expect((await getRequestDetail(prisma, reqA, await viewer(E.rev))).readerOnly).toBe(false);
     await expect(getRequestDetail(prisma, reqA, await viewer(E.ajeno))).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('[SGC-REQ-085] quien SOLO es lector no entra al expediente por la API: ni notas, ni adjuntos, ni borradores', async () => {
+    const asReader = await viewer(E.l1);
+    await expect(addNote(prisma, notifier, reqA, { body: 'Nota de un lector' }, asReader, actor(E.l1))).rejects.toMatchObject({ status: 404 });
+    await expect(uploadAttachment(prisma, upload, reqA, { purpose: 'soporte', ...docx('soporte') }, asReader, actor(E.l1))).rejects.toMatchObject({ status: 404 });
+    const att = await prisma.sgcAttachment.findFirstOrThrow({ where: { id_request: reqA } });
+    await expect(getAttachmentForDownload(prisma, reqA, att.id_attachment, asReader, actor(E.l1))).rejects.toMatchObject({ status: 404 });
+    await expect(listDraftRevisions(prisma, reqA, asReader)).rejects.toMatchObject({ status: 404 });
+    // El revisor (también lector) sí, porque participó en la elaboración.
+    await expect(getAttachmentForDownload(prisma, reqA, att.id_attachment, await viewer(E.rev), actor(E.rev))).resolves.toMatchObject({ fileName: att.file_name });
   });
 
   it('[SGC-REQ-055] «Leído» NO se firma sin abrir el documento desde el servidor y llegar al final', async () => {

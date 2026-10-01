@@ -94,7 +94,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     uploads.push({ segments, fileName });
     return { id: `it-${uploads.length}` };
   };
-  const word = (text = 'borrador') => ({ fileName: 'Procedimiento.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', bytes: new TextEncoder().encode(`PK${text}`) });
+  const word = (text = 'borrador') => ({ fileName: 'Procedimiento.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', bytes: new TextEncoder().encode(`PK\u0003\u0004${text}`) });
   const accessOf = async (email: string): Promise<SgcCompanyAccess> => (await getSgcAccessForUser(prisma, email)).find((a) => a.idCompany === CO)!;
   const viewer = async (email: string) => ({ email, access: await getSgcAccessForUser(prisma, email) });
   const seed = (file: string) => fs.readFileSync(path.join(process.cwd(), 'prisma/manual', file), 'utf8').replace('DECLARE @IdCompany INT = 3;', `DECLARE @IdCompany INT = ${CO};`);
@@ -294,7 +294,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     expect(log[0]).toMatchObject({ action: 'matriz.fila_desactivada', reason: 'Cambio de cargo', actorEmail: E.cal });
   });
 
-  it('[SGC-REQ-033] Autorizaciones SGC: tipos y grupos propios, con motivo y registro; nada se borra, se revoca', async () => {
+  it('[SGC-REQ-033][SGC-REQ-086] Autorizaciones SGC: tipos y grupos propios, con motivo y registro; nada se borra, se revoca', async () => {
     const who = actor(E.cal);
     await expect(saveAuthorizationType(prisma, CO, { code: 'x', name: 'X', reason: 'código inválido' }, who)).rejects.toThrow(/Código/);
     await expect(saveAuthorizationType(prisma, CO, { code: 'SGC-X', name: '', reason: 'sin nombre' }, who)).rejects.toThrow(/nombre/);
@@ -306,9 +306,13 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(grantAuthorizationTypeUser(prisma, CO, calidadType.id, { email: '', reason: 'sin correo' }, who)).rejects.toThrow(/correo/);
     await expect(grantAuthorizationTypeUser(prisma, CO, calidadType.id, { email: 'nadie@x.co', reason: 'no existe' }, who)).rejects.toThrow(/No existe/);
     await expect(grantAuthorizationTypeUser(prisma, 3, calidadType.id, { email: E.cal, reason: 'otra empresa' }, who)).rejects.toMatchObject({ status: 404 });
-    const g = await grantAuthorizationTypeUser(prisma, CO, calidadType.id, { email: E.cal, reason: 'Aseguramiento de Calidad' }, who);
-    await expect(grantAuthorizationTypeUser(prisma, CO, calidadType.id, { email: E.cal, reason: 'repetido' }, who)).rejects.toMatchObject({ status: 409 });
-    const tmp = await grantAuthorizationTypeUser(prisma, CO, calidadType.id, { email: E.lector, reason: 'Temporal' }, who);
+    // Sprint 6: nadie se agrega a sí mismo, el grupo de Calidad lo administra Calidad y solo entra quien puede decidir.
+    await expect(grantAuthorizationTypeUser(prisma, CO, calidadType.id, { email: E.cal, reason: 'a sí misma' }, who)).rejects.toMatchObject({ status: 403 });
+    await expect(grantAuthorizationTypeUser(prisma, CO, calidadType.id, { email: E.rev1, reason: 'solo flujos' }, actor(E.flujos), { actorIsQuality: false })).rejects.toMatchObject({ status: 403 });
+    await expect(grantAuthorizationTypeUser(prisma, CO, calidadType.id, { email: E.lector, reason: 'solo consulta' }, actor(E.flujos))).rejects.toThrow(/gestión o de Calidad/);
+    const g = await grantAuthorizationTypeUser(prisma, CO, calidadType.id, { email: E.cal, reason: 'Aseguramiento de Calidad' }, actor(E.flujos));
+    await expect(grantAuthorizationTypeUser(prisma, CO, calidadType.id, { email: E.cal, reason: 'repetido' }, actor(E.flujos))).rejects.toMatchObject({ status: 409 });
+    const tmp = await grantAuthorizationTypeUser(prisma, CO, calidadType.id, { email: E.rev1, reason: 'Temporal' }, who);
     await revokeAuthorizationTypeUser(prisma, CO, tmp.id, { reason: 'Fin del reemplazo' }, who);
     await expect(revokeAuthorizationTypeUser(prisma, CO, tmp.id, { reason: 'otra vez' }, who)).rejects.toMatchObject({ status: 409 });
     await expect(revokeAuthorizationTypeUser(prisma, 3, g.id, { reason: 'otra empresa' }, who)).rejects.toMatchObject({ status: 404 });
@@ -378,6 +382,9 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(uploadAttachment(prisma, upload, req1, { purpose: 'soporte', ...word(), bytes: new Uint8Array() }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/vacío/);
     await expect(uploadAttachment(prisma, upload, req1, { purpose: 'soporte', ...word(), fileName: '   ' }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/Nombre/);
     await expect(uploadAttachment(prisma, upload, req1, { purpose: 'soporte', ...word() }, await viewer(E.lector), actor(E.lector))).rejects.toMatchObject({ status: 404 });
+    // Sprint 6: el borrador debe ser de verdad un Word o PDF, y un soporte no puede ser ejecutable ni página web.
+    await expect(uploadAttachment(prisma, upload, req1, { purpose: 'borrador', ...word(), bytes: new TextEncoder().encode('no soy un word') }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/no es un Word o PDF válido/);
+    await expect(uploadAttachment(prisma, upload, req1, { purpose: 'soporte', ...word(), fileName: 'pagina.html' }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/no se admite/);
     const wrong = await uploadAttachment(prisma, upload, req1, { purpose: 'borrador', ...word('versión equivocada') }, await viewer(E.elab), actor(E.elab));
     await withdrawAttachment(prisma, req1, wrong.id, { reason: 'Versión equivocada' }, await viewer(E.elab), actor(E.elab));
     await expect(withdrawAttachment(prisma, req1, wrong.id, { reason: 'otra vez' }, await viewer(E.elab), actor(E.elab))).rejects.toMatchObject({ status: 409 });
@@ -395,7 +402,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     expect(await prisma.sgcAuditLog.count({ where: { action: 'solicitud.adjunto_descarga', entity_id: String(good.id) } })).toBe(1);
   });
 
-  it('[SGC-REQ-029][SGC-REQ-035][SGC-REQ-036] enviar abre la revisión con 2 revisores EN PARALELO; no avanza hasta que ambos aprueban', async () => {
+  it('[SGC-REQ-029][SGC-REQ-035][SGC-REQ-036][SGC-REQ-085] enviar abre la revisión con 2 revisores EN PARALELO; no avanza hasta que ambos aprueban', async () => {
     sent.length = 0;
     const elab = await taskOf(req1, 'elaboracion');
     await expect(decideTask(prisma, notifier, elab.id_task, { decision: 'aprobar' }, actor(E.rev1))).rejects.toMatchObject({ status: 403 });
@@ -405,6 +412,9 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(decideTask(prisma, notifier, elab.id_task, { decision: 'aprobar', comment: 'Listo para revisión' }, actor(E.elab))).rejects.toThrow(/firma electrónica/);
     const sub = await decideTask(prisma, notifier, elab.id_task, { decision: 'aprobar', comment: 'Listo para revisión', signature: await sig(elab.id_task) }, actor(E.elab));
     expect(sub).toMatchObject({ outcome: 'resuelta', next: 'revision' });
+    // Sprint 6 [SGC-REQ-085]: ya en revisión, el borrador que se está firmando no se puede retirar.
+    const borrador = await prisma.sgcAttachment.findFirstOrThrow({ where: { id_request: req1, purpose: 'borrador', withdrawn_at: null } });
+    await expect(withdrawAttachment(prisma, req1, borrador.id_attachment, { reason: 'Cambiarlo a mitad de la revisión' }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/durante la elaboración/);
     const elabAfter = await taskOf(req1, 'elaboracion');
     expect(elabAfter.assignees[0]).toMatchObject({ status: 'aprobado', signature_status: 'firmada', signature_meaning: 'elaboro', decided_by: E.elab });
 
