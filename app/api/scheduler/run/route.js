@@ -9,12 +9,6 @@ import { runDueJobs } from '../../../../lib/scheduler/runner.js';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * POST /api/scheduler/run — ejecuta los jobs vencidos del servicio central de tareas
- * automáticas. Invocadores: la tarea programada de Windows (Bearer INTEGRATION_API_KEYS),
- * el botón "Ejecutar ahora" de la UI (sesión) y el respaldo oportunista (interno).
- * Concurrencia segura: el runner reclama cada job con un UPDATE atómico.
- */
 export async function POST(req) {
   try {
     const bearer = extractBearer(req.headers.get('authorization'));

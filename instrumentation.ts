@@ -4,13 +4,17 @@ import type { Instrumentation } from 'next';
 const sentryActive = process.env.NODE_ENV === 'production';
 
 export async function register() {
-  if (!sentryActive) return;
-  if (process.env.NEXT_RUNTIME === 'nodejs' || process.env.NEXT_RUNTIME === 'edge') {
+  if (sentryActive && (process.env.NEXT_RUNTIME === 'nodejs' || process.env.NEXT_RUNTIME === 'edge')) {
     const [Sentry, { sentryBaseOptions }] = await Promise.all([
       import('@sentry/nextjs'),
       import('./lib/sentry'),
     ]);
     Sentry.init(sentryBaseOptions);
+  }
+
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    const { startScheduler } = await import('./lib/scheduler/startScheduler.js');
+    startScheduler();
   }
 }
 
