@@ -79,6 +79,49 @@ export function compareByActivity(a: ChatRailItem, b: ChatRailItem): number {
   return a.name.localeCompare(b.name, 'es');
 }
 
+/**
+ * Orden de las listas de conversaciones (Personas y Grupos de la página del
+ * chat), como cualquier mensajería: el último mensaje —enviado o recibido— más
+ * nuevo arriba; a igual hora, el id mayor. Las que no tienen mensajes van al
+ * final, por nombre. No muta la lista.
+ */
+export function sortConversationsByActivity<T extends { id: number; lastMessageAt: string | null }>(
+  lista: readonly T[],
+  nombre: (c: T) => string
+): T[] {
+  return [...lista].sort((a, b) => {
+    const ta = tiempo(a.lastMessageAt);
+    const tb = tiempo(b.lastMessageAt);
+    if (ta !== tb) return tb > ta ? 1 : -1;
+    if (ta === Number.NEGATIVE_INFINITY) {
+      const porNombre = nombre(a).localeCompare(nombre(b), 'es');
+      if (porNombre !== 0) return porNombre;
+    }
+    return b.id - a.id;
+  });
+}
+
+/**
+ * Sube la fecha del último mensaje de UNA conversación (envío optimista o
+ * mensaje recibido), sin bajarla nunca. Devuelve la MISMA lista si no cambia
+ * nada, para no provocar un re-render de balde.
+ */
+export function bumpConversationActivity<T extends { id: number; lastMessageAt: string | null }>(
+  lista: T[],
+  idConversation: number,
+  at: string
+): T[] {
+  const nueva = tiempo(at);
+  if (nueva === Number.NEGATIVE_INFINITY) return lista;
+  let cambio = false;
+  const resultado = lista.map((c) => {
+    if (c.id !== idConversation || tiempo(c.lastMessageAt) >= nueva) return c;
+    cambio = true;
+    return { ...c, lastMessageAt: at };
+  });
+  return cambio ? resultado : lista;
+}
+
 /** Minúsculas y sin tildes: "José" se encuentra escribiendo "jose". */
 export function normalizeSearch(value: string): string {
   return value
@@ -103,10 +146,22 @@ export function matchesSearch(item: ChatRailItem, query: string): boolean {
  */
 export function buildRailSections(
   items: ChatRailItem[],
-  pinned: ReadonlySet<string>,
+  /**
+   * Las anclas. Con la LISTA (en el orden en que se anclaron) la sección
+   * "Anclados" respeta ese orden, el último anclado arriba, como WhatsApp o
+   * Telegram; con un Set (forma vieja) se ordena por actividad.
+   */
+  pinned: ReadonlySet<string> | readonly string[],
   query = ''
 ): ChatRailSection[] {
   const visibles = items.filter((item) => matchesSearch(item, query));
+  const ordenAncla = Array.isArray(pinned)
+    ? new Map((pinned as readonly string[]).map((key, i) => [key, i]))
+    : null;
+  const estaAnclado = (key: string) =>
+    ordenAncla ? ordenAncla.has(key) : (pinned as ReadonlySet<string>).has(key);
+  const porAncla = (a: ChatRailItem, b: ChatRailItem) =>
+    (ordenAncla?.get(b.key) ?? 0) - (ordenAncla?.get(a.key) ?? 0);
 
   const anclados: ChatRailItem[] = [];
   const agentes: ChatRailItem[] = [];
@@ -114,14 +169,14 @@ export function buildRailSections(
   const grupos: ChatRailItem[] = [];
 
   for (const item of visibles) {
-    if (pinned.has(item.key)) anclados.push(item);
+    if (estaAnclado(item.key)) anclados.push(item);
     else if (item.kind === 'agent') agentes.push(item);
     else if (item.kind === 'people') personas.push(item);
     else grupos.push(item);
   }
 
   const secciones: ChatRailSection[] = [
-    { id: 'pinned', title: 'Anclados', items: anclados.sort(compareByActivity) },
+    { id: 'pinned', title: 'Anclados', items: anclados.sort(ordenAncla ? porAncla : compareByActivity) },
     { id: 'agents', title: 'Agentes', items: agentes.sort(compareByActivity) },
     { id: 'people', title: 'Personas', items: personas.sort(compareByActivity) },
     { id: 'groups', title: 'Grupos', items: grupos.sort(compareByActivity) },

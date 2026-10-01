@@ -42,6 +42,7 @@ import AgentAvatar from './AgentAvatar';
 import { EsqueletoPantallaChat } from './ChatSkeletons';
 import ChatThread from './ChatThread';
 import { ChatNudgeButton, ChatNudgeMenu } from './ChatNudgeControls';
+import ChatSoundMenu from './ChatSoundMenu';
 
 /*
  * Los tres cuadros (detalle de agente, mensaje masivo, grupo nuevo) quedan
@@ -59,7 +60,11 @@ const ChatGroupModal = dynamic(() => import('./ChatGroupModal'), { ssr: false })
 const ChatPeopleModal = dynamic(() => import('./ChatPeopleModal'), { ssr: false });
 import { useChatOverview } from './useChatOverview';
 import { precargarHiloDeAgente } from './useChatConversation';
-import { CHAT_RAIL_OPEN_EVENT, type ChatRailOpenDetail } from '../../lib/chat/rail';
+import {
+  CHAT_RAIL_OPEN_EVENT,
+  sortConversationsByActivity,
+  type ChatRailOpenDetail,
+} from '../../lib/chat/rail';
 import {
   describeAgentStatus,
   findAgentByRouteKey,
@@ -669,8 +674,14 @@ export default function ChatWorkspace({
   // la otra persona).
   const filteredPeople = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return overview.people;
-    return overview.people.filter((p) =>
+    // Por actividad reciente (enviado o recibido), como cualquier mensajería:
+    // la bandeja ya sube la conversación al instante al enviar o recibir.
+    const ordenadas = sortConversationsByActivity(
+      overview.people,
+      (p) => otraPersona(p, miId)?.name ?? ''
+    );
+    if (!query) return ordenadas;
+    return ordenadas.filter((p) =>
       (p.participants ?? []).some(
         (x) => x.kind === 'user' && String(x.id) !== miId && x.name.toLowerCase().includes(query)
       )
@@ -690,8 +701,9 @@ export default function ChatWorkspace({
   // busca por el nombre de Cali, no por el del grupo.
   const filteredGroups = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return overview.groups;
-    return overview.groups.filter(
+    const ordenados = sortConversationsByActivity(overview.groups, (g) => g.title ?? '');
+    if (!query) return ordenados;
+    return ordenados.filter(
       (g) =>
         (g.title ?? '').toLowerCase().includes(query) ||
         (g.company?.companyName ?? '').toLowerCase().includes(query) ||
@@ -1123,6 +1135,7 @@ export default function ChatWorkspace({
   // lo que uno abrió se siente como dos pantallas distintas.
   const botonesDelEncabezado = (
     <Group gap={4} wrap='nowrap'>
+      <ChatSoundMenu />
       {/* Solo en escritorio: en el celular la barra ya se esconde sola y el
           botón no tendría nada que hacer. */}
       {modoEscritorio && (
@@ -1435,6 +1448,7 @@ export default function ChatWorkspace({
             )}
 
             <Group gap={4} wrap='nowrap'>
+              <ChatSoundMenu />
               <Tooltip label='Vista en tarjetas' withArrow>
                 <ActionIcon
                   variant={viewMode === 'grid' ? 'filled' : 'subtle'}

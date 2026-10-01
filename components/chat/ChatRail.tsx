@@ -358,8 +358,8 @@ export default function ChatRail() {
   // Contraída se ignora el buscador: con solo íconos no se ve qué se filtró.
   const mostrarExpandida = expandida || Boolean(enCelular);
   const sections = useMemo(
-    () => buildRailSections(items, pins.pinnedSet, mostrarExpandida ? busqueda : ''),
-    [items, pins.pinnedSet, busqueda, mostrarExpandida]
+    () => buildRailSections(items, pins.pins, mostrarExpandida ? busqueda : ''),
+    [items, pins.pins, busqueda, mostrarExpandida]
   );
   const pendientes = useMemo(() => totalUnread(items), [items]);
 

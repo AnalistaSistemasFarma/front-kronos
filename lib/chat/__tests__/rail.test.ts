@@ -3,11 +3,13 @@ import {
   MAX_PINS,
   buildRailItems,
   buildRailSections,
+  bumpConversationActivity,
   compareByActivity,
   formatUnread,
   isChatRailKey,
   railItemHref,
   railOpenDetail,
+  sortConversationsByActivity,
   togglePin,
   totalUnread,
   type ChatRailItem,
@@ -232,5 +234,67 @@ describe('buildRailItems (desde la bandeja)', () => {
     expect(railItemHref(porClave('conv:20'))).toBe('/process/chat/grupo/20');
     expect(railOpenDetail(porClave('conv:10'))).toEqual({ tipo: 'persona', id: 10 });
     expect(railOpenDetail(porClave('agent:1'))).toEqual({ tipo: 'agente', code: 'horus' });
+  });
+});
+
+describe('Anclados en su propio orden (lista de anclas)', () => {
+  it('con la lista, el último anclado va arriba aunque tenga menos actividad', () => {
+    // Se anclaron en este orden: Ana primero, luego Troy (sin mensajes).
+    const secciones = buildRailSections(todos, ['conv:11', 'agent:3']);
+    expect(secciones[0].id).toBe('pinned');
+    expect(secciones[0].items.map((i) => i.name)).toEqual(['Troy', 'Ana']);
+    // Los no anclados siguen por actividad.
+    expect(secciones.find((s) => s.id === 'agents')?.items.map((i) => i.name)).toEqual([
+      'Mark',
+      'Orus',
+      'Cali',
+    ]);
+  });
+});
+
+describe('sortConversationsByActivity (Personas y Grupos)', () => {
+  type C = { id: number; lastMessageAt: string | null; nombre: string };
+  const nombre = (c: C) => c.nombre;
+  const lista: C[] = [
+    { id: 1, lastMessageAt: '2026-10-01T10:00:00Z', nombre: 'Viejo' },
+    { id: 2, lastMessageAt: null, nombre: 'Zeta' },
+    { id: 3, lastMessageAt: '2026-10-01T12:00:00Z', nombre: 'Nuevo' },
+    { id: 4, lastMessageAt: null, nombre: 'Alfa' },
+    { id: 5, lastMessageAt: '2026-10-01T10:00:00Z', nombre: 'Empate' },
+  ];
+
+  it('más reciente arriba, empate por id mayor y sin mensajes al final por nombre', () => {
+    expect(sortConversationsByActivity(lista, nombre).map((c) => c.id)).toEqual([3, 5, 1, 4, 2]);
+  });
+
+  it('no muta la lista original', () => {
+    const copia = [...lista];
+    sortConversationsByActivity(lista, nombre);
+    expect(lista).toEqual(copia);
+  });
+});
+
+describe('bumpConversationActivity (sube al enviar o recibir)', () => {
+  const lista = [
+    { id: 1, lastMessageAt: '2026-10-01T12:00:00Z' },
+    { id: 2, lastMessageAt: '2026-10-01T10:00:00Z' },
+    { id: 3, lastMessageAt: null },
+  ];
+
+  it('pone la nueva fecha y la conversación queda de primera al ordenar', () => {
+    const nueva = bumpConversationActivity(lista, 2, '2026-10-01T13:00:00Z');
+    expect(nueva).not.toBe(lista);
+    expect(sortConversationsByActivity(nueva, () => '').map((c) => c.id)).toEqual([2, 1, 3]);
+  });
+
+  it('una conversación sin mensajes también sube', () => {
+    const nueva = bumpConversationActivity(lista, 3, '2026-10-01T13:00:00Z');
+    expect(sortConversationsByActivity(nueva, () => '')[0].id).toBe(3);
+  });
+
+  it('nunca baja la fecha ni crea una lista nueva si no cambia nada', () => {
+    expect(bumpConversationActivity(lista, 1, '2026-10-01T11:00:00Z')).toBe(lista);
+    expect(bumpConversationActivity(lista, 99, '2026-10-01T13:00:00Z')).toBe(lista);
+    expect(bumpConversationActivity(lista, 1, 'no-es-fecha')).toBe(lista);
   });
 });
