@@ -9,6 +9,7 @@ import { cancelAccessRequest, createAccessRequest, decideAccessRequest, listAcce
 import { getCatalogs } from '../../../lib/sgc/db/catalogs';
 import { canViewDocument, createInitialDocument, getAccessSubject, type SgcUploader } from '../../../lib/sgc/db/documents';
 import { getCurrentFlowVersion } from '../../../lib/sgc/db/flows';
+import { verifyVersionByCode } from '../../../lib/sgc/db/verify';
 import { createIcalToken, getIcalFeed, getIcalStatus, revokeIcalToken } from '../../../lib/sgc/db/ical';
 import { addDocumentRelation, getRelationGraph, listDocumentRelations, removeDocumentRelation, saveGraphLayout } from '../../../lib/sgc/db/relations';
 import { getAlertSchedulerStatus, listAlertConfigs, listAlertLog, listReviewCalendar, runDailySgcJob, runReadingReminders, runReviewAlerts, saveAlertConfig } from '../../../lib/sgc/db/reviewAlerts';
@@ -440,5 +441,8 @@ describe.skipIf(!url)('SGC · Sprint 5 · relaciones, vencimientos y accesos con
     ]);
     expect(both.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     expect(both.find((r) => r.status === 'rejected')).toMatchObject({ reason: { status: 409 } });
+    // Sprint 6 [SGC-REQ-091]: verificar por QR un confidencial sin poder consultarlo da solo el veredicto.
+    const ver = await verifyVersionByCode(prisma, [otra], subOtra, { idCompany: CO, code: d2.code, versionNumber: 1 }, actor(E.otra));
+    expect(ver).toMatchObject({ verdict: 'vigente', title: null, idDocument: null, effectiveDate: null, obsoleteDate: null, currentVersionNumber: null, pdfSha256: null });
   });
 });

@@ -220,7 +220,11 @@ describe.skipIf(!url)('SGC · Sprint 1 · integración con SQL Server', () => {
     await expect(grantDocumentAccess(prisma, [lectura], d.id_document, { userEmail: LECTOR, reason: 'Visita del INVIMA' }, actor)).rejects.toMatchObject({ status: 403 });
     await expect(grantDocumentAccess(prisma, [calidad], d.id_document, { idDepartment: 999999, reason: 'Visita del INVIMA' }, actor)).rejects.toThrow('no existe');
     await expect(grantDocumentAccess(prisma, [calidad], d.id_document, { userEmail: LECTOR, canPrint: true, expiresAt: 'mañana', reason: 'Visita del INVIMA' }, actor)).rejects.toThrow('vencimiento');
-    // Sprint 6: nadie se otorga a sí mismo descarga o impresión, y no por más de 366 días.
+    // Sprint 6: nadie se otorga a sí mismo (ni a su departamento) descarga o impresión, y no por más de 366 días.
+    const calUser = await prisma.user.upsert({ where: { email: CALIDAD }, create: { email: CALIDAD, name: 'Calidad S1' }, update: {} });
+    await prisma.departmentUser.create({ data: { id_user: calUser.id, id_department: deptCalidad } });
+    await expect(grantDocumentAccess(prisma, [calidad], d.id_document, { idDepartment: deptCalidad, canPrint: true, expiresAt: new Date(Date.now() + 86_400_000).toISOString(), reason: 'Visita del INVIMA' }, actor)).rejects.toThrow(/propio departamento/);
+    await prisma.departmentUser.deleteMany({ where: { id_user: calUser.id, id_department: deptCalidad } });
     await expect(grantDocumentAccess(prisma, [calidad], d.id_document, { userEmail: CALIDAD, canDownload: true, expiresAt: new Date(Date.now() + 86_400_000).toISOString(), reason: 'Visita del INVIMA' }, actor)).rejects.toMatchObject({ status: 403 });
     await expect(grantDocumentAccess(prisma, [calidad], d.id_document, { userEmail: LECTOR, canDownload: true, expiresAt: new Date(Date.now() + 400 * 86_400_000).toISOString(), reason: 'Visita del INVIMA' }, actor)).rejects.toThrow('366');
     const g = await grantDocumentAccess(
