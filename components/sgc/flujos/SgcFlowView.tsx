@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Alert, Anchor, Badge, Box, Breadcrumbs, Button, Card, Flex, Grid, Group, Stack, Switch, Text, Textarea, Title } from '@mantine/core';
@@ -47,9 +47,13 @@ import { SGC_FLOWS_URL } from './SgcFlowsList';
  * solo se edita un BORRADOR; guardar, publicar, descartar y crear versión
  * piden motivo y quedan en sgc.config_change_log; publicar retira la vigente.
  * El diagrama del flujo está deshabilitado, igual que en SynerLink.
+ * «Editar Flujo de Trabajo» está siempre abajo, como en SynerLink, para quien
+ * tiene /flujos: sobre el borrador entra a editar; sobre la vigente pide el
+ * motivo, crea el borrador y entra a editarlo; si ya hay borrador, lo abre en
+ * edición (?editar=1) sin volver a pedir motivo.
  */
 
-type Modal = null | 'save' | 'publish' | 'discard' | 'draft' | 'addTask' | 'matrix' | 'changes' | 'versions';
+type Modal = null | 'save' | 'publish' | 'discard' | 'draft' | 'draftEdit' | 'addTask' | 'matrix' | 'changes' | 'versions';
 
 function pickVersion(flow: SgcFlowProcessSummary | undefined, versionParam: string | null): SgcFlowVersionSummary | null {
   if (!flow) return null;
@@ -67,6 +71,7 @@ export default function SgcFlowView({ idFlowProcess }: { idFlowProcess: number }
   const router = useRouter();
   const searchParams = useSearchParams();
   const versionParam = searchParams.get('version');
+  const editParam = searchParams.get('editar') === '1';
   const { estado, company } = useSgcCompany();
   const idCompany = company?.idCompany ?? null;
   const allowed = !!company && (company.canAdminFlows || company.canQuality);
@@ -95,7 +100,10 @@ export default function SgcFlowView({ idFlowProcess }: { idFlowProcess: number }
   const originalFieldIds = useMemo(() => new Set((detail?.definition.formFields ?? []).map((f) => `${f.taskKey ?? ''}:${f.key}`)), [detail]);
   const shown: SgcFlowDefinition | null = isEditing && edited ? edited : detail?.definition ?? null;
 
-  const versionHref = useCallback((n: number) => sgcHref(`${SGC_FLOWS_URL}/${idFlowProcess}`, idCompany, { version: String(n) }), [idFlowProcess, idCompany]);
+  const versionHref = useCallback(
+    (n: number, edit = false) => sgcHref(`${SGC_FLOWS_URL}/${idFlowProcess}`, idCompany, edit ? { version: String(n), editar: '1' } : { version: String(n) }),
+    [idFlowProcess, idCompany]
+  );
 
   useEffect(() => {
     setIsEditing(false);
@@ -105,6 +113,8 @@ export default function SgcFlowView({ idFlowProcess }: { idFlowProcess: number }
 
   const notify = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
+    // El aviso está arriba y los botones abajo: se sube para que no pase inadvertido.
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
     if (type === 'success') toast.success(text);
     else toast.error(text);
   };
@@ -120,6 +130,22 @@ export default function SgcFlowView({ idFlowProcess }: { idFlowProcess: number }
     setEditedProcess({ description: flow.description ?? '', isActive: flow.isActive });
     setMessage(null);
     setIsEditing(true);
+  };
+  // ?editar=1: se llegó desde «Editar Flujo de Trabajo» sobre la vigente; al cargar el borrador se entra a editarlo una sola vez.
+  const autoEditedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (!editParam || !canEdit || !isDraft || !detail || isEditing || autoEditedFor.current === detail.version.id) return;
+    autoEditedFor.current = detail.version.id;
+    startEditing();
+    setMessage({ type: 'success', text: `Editando el borrador v${detail.version.versionNumber}. Al guardar, los cambios quedan en el borrador hasta que se publique.` });
+    router.replace(versionHref(detail.version.versionNumber));
+  }, [editParam, canEdit, isDraft, detail, isEditing]);
+
+  // Botón de SynerLink: el borrador se edita aquí; con borrador en otra versión, se abre en edición; sin borrador, se pide el motivo para crearlo.
+  const editFlow = () => {
+    if (isDraft) startEditing();
+    else if (draft) router.push(versionHref(draft.versionNumber, true));
+    else setModal('draftEdit');
   };
   const cancelEditing = () => {
     setIsEditing(false);
@@ -452,9 +478,9 @@ export default function SgcFlowView({ idFlowProcess }: { idFlowProcess: number }
 
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           <Group justify='space-between'>
-            {canEdit && isDraft ? (
+            {canEdit ? (
               !isEditing ? (
-                <Button color='blue' onClick={startEditing} leftSection={<IconTicket size={16} />} data-testid='sgc-flujo-editar'>
+                <Button color='blue' onClick={editFlow} leftSection={<IconTicket size={16} />} data-testid='sgc-flujo-editar'>
                   Editar Flujo de Trabajo
                 </Button>
               ) : (
@@ -472,14 +498,6 @@ export default function SgcFlowView({ idFlowProcess }: { idFlowProcess: number }
                   </Button>
                 </Group>
               )
-            ) : canEdit && !draft ? (
-              <Button color='blue' onClick={() => setModal('draft')} leftSection={<IconGitBranch size={16} />}>
-                Crear borrador
-              </Button>
-            ) : canEdit && draft ? (
-              <Button color='blue' component={Link} href={versionHref(draft.versionNumber)} leftSection={<IconTicket size={16} />}>
-                Editar borrador v{draft.versionNumber}
-              </Button>
             ) : (
               <Text size='sm' c='dimmed'>
                 Solo consulta: la edición es de la administración de flujos validados.
@@ -513,7 +531,7 @@ export default function SgcFlowView({ idFlowProcess }: { idFlowProcess: number }
               if (definitionDirty && edited) await sgcSend(`/api/sgc/flows/versions/${v.id}`, 'PUT', { company: idCompany, definition: edited, reason });
               setModal(null);
               cancelEditing();
-              notify('success', 'Borrador guardado y registrado en el control de cambios.');
+              notify('success', 'Cambios guardados en el borrador. Publíquelo para que aplique a las nuevas solicitudes.');
               reloadAll();
             } catch (e) {
               setModal(null);
@@ -567,7 +585,7 @@ export default function SgcFlowView({ idFlowProcess }: { idFlowProcess: number }
           }}
         />
         <SgcReasonModal
-          opened={modal === 'draft'}
+          opened={modal === 'draft' || modal === 'draftEdit'}
           title='Nueva versión del flujo'
           hint='Se copia la versión vigente a un borrador editable; la vigente sigue funcionando hasta publicar'
           icon={<IconGitBranch size={20} className='text-blue-600' />}
@@ -576,11 +594,12 @@ export default function SgcFlowView({ idFlowProcess }: { idFlowProcess: number }
           confirmLabel='Crear borrador'
           onClose={() => setModal(null)}
           onConfirm={async (reason) => {
+            const thenEdit = modal === 'draftEdit';
             try {
               const res = await sgcSend<{ idFlowVersion: number; versionNumber: number }>(`/api/sgc/flows/${flow.id}/versions`, 'POST', { company: idCompany, reason });
               setModal(null);
               notify('success', 'Borrador creado a partir de la versión vigente.');
-              router.push(versionHref(res.versionNumber));
+              router.push(versionHref(res.versionNumber, thenEdit));
               reloadAll();
             } catch (e) {
               setModal(null);
