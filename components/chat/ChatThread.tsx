@@ -47,6 +47,7 @@ import {
   sacudirHilo,
   zumbidoFresco,
 } from '../../lib/chat/nudge-fx';
+import { registrarHiloAbierto, soltarHiloAbierto } from '../../lib/chat/message-sound';
 import type { ChatReplyToDto } from '../../lib/chat/client';
 
 /**
@@ -659,6 +660,16 @@ export default function ChatThread({
     miId: currentUserId,
     onZumbido: enPersonas ? alZumbido : undefined,
   });
+
+  // Sonido de mensaje nuevo: este hilo está a la vista, así que lo que llegue
+  // aquí no suena mientras la ventana tenga el foco (ver message-sound.ts).
+  const idHiloAbierto = thread.conversation?.id ?? null;
+  useEffect(() => {
+    if (idHiloAbierto === null || !active) return;
+    prepararAudioZumbido();
+    registrarHiloAbierto(idHiloAbierto);
+    return () => soltarHiloAbierto(idHiloAbierto);
+  }, [idHiloAbierto, active]);
 
   /* ─────────────────────────── Citar y responder ───────────────────────── */
 

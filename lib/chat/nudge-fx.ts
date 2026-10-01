@@ -105,24 +105,64 @@ function crearAudio(): AudioContext | null {
   return audio;
 }
 
-/** Instala (una sola vez) el desbloqueo del audio con el primer gesto. */
+/**
+ * Instala (una sola vez) el desbloqueo del audio con los gestos de la persona.
+ *
+ * En iOS un `pointerdown` de un dedo NO cuenta como gesto que habilite el audio
+ * (solo `touchend`, `click` o una tecla), y el contexto vuelve a quedar
+ * suspendido/interrumpido cuando la app pasa a segundo plano. Por eso los
+ * oyentes NO se quitan tras el primer intento: en cada gesto, si el contexto no
+ * está sonando, se reanuda. Cuando ya está `running` no hacen nada (pasivos y
+ * baratos).
+ */
 export function prepararAudioZumbido(): void {
   if (desbloqueoInstalado || typeof window === 'undefined') return;
   desbloqueoInstalado = true;
   const desbloquear = () => {
+    if (audio && audio.state === 'running') return;
     const ctx = crearAudio();
-    if (ctx && ctx.state === 'suspended') void ctx.resume().catch(() => undefined);
-    window.removeEventListener('pointerdown', desbloquear);
-    window.removeEventListener('keydown', desbloquear);
+    if (!ctx) return;
+    try {
+      // Safari viejo solo se desbloquea si algo suena DENTRO del gesto: un
+      // búfer mudo de una muestra basta.
+      const mudo = ctx.createBufferSource();
+      mudo.buffer = ctx.createBuffer(1, 1, 22050);
+      mudo.connect(ctx.destination);
+      mudo.start(0);
+    } catch {
+      /* sin búfer: queda el resume() */
+    }
+    if (ctx.state !== 'running') void ctx.resume().catch(() => undefined);
   };
-  window.addEventListener('pointerdown', desbloquear, { passive: true });
-  window.addEventListener('keydown', desbloquear);
+  for (const evento of ['pointerdown', 'touchend', 'click', 'keydown'] as const) {
+    window.addEventListener(evento, desbloquear, { passive: true, capture: true });
+  }
+}
+
+/**
+ * El contexto de audio compartido (zumbido y sonido de mensaje nuevo usan el
+ * mismo: iOS limita cuántos puede haber). Con `crear`, lo crea y lo reanuda —
+ * solo tiene sentido dentro de un gesto, como la vista previa de un tono.
+ * Devuelve null si no hay Web Audio o si aún no está habilitado.
+ */
+export function contextoAudio(crear = false): AudioContext | null {
+  const ctx = crear ? crearAudio() : audio;
+  if (!ctx) return null;
+  if (crear && ctx.state !== 'running') void ctx.resume().catch(() => undefined);
+  return ctx;
+}
+
+/** Cuándo sonó el último zumbido (para no encimarle el sonido de mensaje). */
+let ultimoZumbidoAt = 0;
+export function momentoUltimoZumbido(): number {
+  return ultimoZumbidoAt;
 }
 
 function sonar(): void {
   if (!sonidoZumbidoActivado()) return;
   const ctx = audio;
   if (!ctx || ctx.state !== 'running') return;
+  ultimoZumbidoAt = Date.now();
   try {
     // Tres golpes graves y cortos: "brr-brr-brr", no una alarma.
     const inicio = ctx.currentTime + 0.01;

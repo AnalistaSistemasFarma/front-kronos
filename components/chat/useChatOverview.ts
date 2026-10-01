@@ -3,14 +3,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import {
+  CHAT_ACTIVITY_EVENT,
   CHAT_REFRESH_EVENT,
   chatGetJson,
+  type ChatActivityDetail,
   isAbortError,
   type ChatAccessDto,
   type ChatAgentDto,
   type ChatConversationDto,
   type ChatStatusDto,
 } from '../../lib/chat/client';
+import { olvidarNoLeidos, revisarNoLeidos } from '../../lib/chat/message-sound';
+import { bumpConversationActivity } from '../../lib/chat/rail';
 
 /**
  * Estado compartido de "qué agentes tengo y cómo están": alimenta tanto los
@@ -192,6 +196,8 @@ export function useChatOverview(opciones?: {
       );
       if (controller.signal.aborted || !data) return;
       const lista = data.conversations ?? [];
+      // Sonido de mensaje nuevo: un no leído que sube (ver message-sound.ts).
+      revisarNoLeidos(email, lista);
       const listaJson = JSON.stringify(lista);
       if (listaJson === lastConversationsJson.current) {
         escribirCache(email, { conversationsLoaded: true });
@@ -225,6 +231,7 @@ export function useChatOverview(opciones?: {
       // Se cierra la sesión: fuera el estado Y la caché. Lo que se guardó es de
       // alguien que ya no está en esta pestaña.
       cache = null;
+      olvidarNoLeidos();
       setAccess(null);
       setConversations([]);
       setConversationsReady(false);
@@ -247,19 +254,36 @@ export function useChatOverview(opciones?: {
       if (document.visibilityState === 'visible') void fetchConversations();
     };
     const onRefresh = () => refresh();
+    // Envié o recibí en un hilo: sube de una en las listas, sin esperar a la
+    // bandeja. La próxima respuesta del servidor manda (por eso se actualiza
+    // también la última serialización: lo que llegue, se aplica).
+    const onActividad = (event: Event) => {
+      const detalle = (event as CustomEvent<ChatActivityDetail>).detail;
+      if (!detalle) return;
+      setConversations((prev) => {
+        const next = bumpConversationActivity(prev, detalle.idConversation, detalle.at);
+        if (next !== prev) {
+          lastConversationsJson.current = JSON.stringify(next);
+          escribirCache(email, { conversations: next });
+        }
+        return next;
+      });
+    };
 
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener(CHAT_REFRESH_EVENT, onRefresh);
+    window.addEventListener(CHAT_ACTIVITY_EVENT, onActividad);
 
     return () => {
       window.clearTimeout(first);
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener(CHAT_REFRESH_EVENT, onRefresh);
+      window.removeEventListener(CHAT_ACTIVITY_EVENT, onActividad);
       accessAbort.current?.abort();
       listAbort.current?.abort();
     };
-  }, [isAuthenticated, fetchAccess, fetchConversations, refresh, primeraCargaInmediata]);
+  }, [isAuthenticated, email, fetchAccess, fetchConversations, refresh, primeraCargaInmediata]);
 
   const derived = useMemo(() => {
     const unreadByAgent = new Map<number, number>();

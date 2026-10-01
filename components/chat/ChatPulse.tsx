@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import {
   chatFetch,
   isAbortError,
+  notificarActividad,
   notifyChatRefresh,
   pedirSondeoDelHilo,
 } from '../../lib/chat/client';
@@ -86,7 +87,12 @@ export default function ChatPulse() {
     const procesar = (eventos: ChatPulseEvent[]) => {
       if (eventos.length === 0) return;
       const hilos = new Set<number>();
-      for (const e of eventos) hilos.add(e.idConversation);
+      for (const e of eventos) {
+        hilos.add(e.idConversation);
+        // Me escribieron: la conversación sube de primera ya, antes de que la
+        // bandeja vuelva con los contadores.
+        notificarActividad(e.idConversation, e.createdAt);
+      }
       // Que el hilo abierto (si es uno de estos) pregunte ya, y que la bandeja
       // actualice sus contadores.
       for (const id of hilos) pedirSondeoDelHilo(id);
