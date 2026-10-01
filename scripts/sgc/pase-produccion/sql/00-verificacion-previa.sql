@@ -27,17 +27,17 @@ DECLARE @problemas NVARCHAR(MAX) = N'';
 DECLARE @n BIGINT;
 IF OBJECT_ID(N'dbo.document', N'U') IS NOT NULL
 BEGIN
-  SELECT @n = COUNT_BIG(*) FROM dbo.document;
+  EXEC sp_executesql N'SELECT @x = COUNT_BIG(*) FROM dbo.document', N'@x BIGINT OUTPUT', @x = @n OUTPUT;
   IF @n > 0 SET @problemas += CONCAT(N'dbo.document tiene ', @n, N' filas. ');
 END
 IF OBJECT_ID(N'dbo.document_type', N'U') IS NOT NULL
 BEGIN
-  SELECT @n = COUNT_BIG(*) FROM dbo.document_type;
+  EXEC sp_executesql N'SELECT @x = COUNT_BIG(*) FROM dbo.document_type', N'@x BIGINT OUTPUT', @x = @n OUTPUT;
   IF @n > 0 SET @problemas += CONCAT(N'dbo.document_type tiene ', @n, N' filas. ');
 END
 IF OBJECT_ID(N'dbo.document_version', N'U') IS NOT NULL
 BEGIN
-  SELECT @n = COUNT_BIG(*) FROM dbo.document_version;
+  EXEC sp_executesql N'SELECT @x = COUNT_BIG(*) FROM dbo.document_version', N'@x BIGINT OUTPUT', @x = @n OUTPUT;
   IF @n > 0 SET @problemas += CONCAT(N'dbo.document_version tiene ', @n, N' filas. ');
 END
 IF OBJECT_ID(N'dbo.document_process_category', N'U') IS NOT NULL
@@ -68,10 +68,12 @@ IF NOT EXISTS (SELECT 1 FROM dbo.company WHERE id_company = 3 AND company = N'ON
 DECLARE @ultimoRespaldo DATETIME = (SELECT MAX(backup_finish_date) FROM msdb.dbo.backupset WHERE database_name = DB_NAME() AND type = 'D');
 
 SELECT 'estado' AS q, DB_NAME() AS base, @@SERVERNAME AS servidor,
-       (SELECT COUNT(*) FROM dbo.document) AS document, (SELECT COUNT(*) FROM dbo.document_type) AS document_type, (SELECT COUNT(*) FROM dbo.document_version) AS document_version,
+       (SELECT SUM(p.rows) FROM sys.partitions p WHERE p.object_id = OBJECT_ID(N'dbo.document') AND p.index_id IN (0, 1)) AS document,
+       (SELECT SUM(p.rows) FROM sys.partitions p WHERE p.object_id = OBJECT_ID(N'dbo.document_type') AND p.index_id IN (0, 1)) AS document_type,
+       (SELECT SUM(p.rows) FROM sys.partitions p WHERE p.object_id = OBJECT_ID(N'dbo.document_version') AND p.index_id IN (0, 1)) AS document_version,
        @subs AS subprocesos_viejos, @asig AS asignaciones_viejas,
        (SELECT COUNT(*) FROM dbo.notifications WHERE url LIKE N'/process/document-management%') AS notificaciones_viejas,
-       CASE WHEN OBJECT_ID(N'dbo.document_signatures', N'U') IS NOT NULL THEN (SELECT COUNT(*) FROM dbo.document_signatures) END AS document_signatures_orion_no_se_toca,
+       (SELECT SUM(p.rows) FROM sys.partitions p WHERE p.object_id = OBJECT_ID(N'dbo.document_signatures') AND p.index_id IN (0, 1)) AS document_signatures_orion_no_se_toca,
        (SELECT COUNT(*) FROM sys.schemas WHERE name = N'sgc') AS esquema_sgc,
        @ultimoRespaldo AS ultimo_respaldo_completo,
        DATEDIFF(HOUR, @ultimoRespaldo, GETDATE()) AS horas_desde_respaldo;

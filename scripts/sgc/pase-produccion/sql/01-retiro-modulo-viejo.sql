@@ -23,9 +23,22 @@
 SET XACT_ABORT ON;
 SET NOCOUNT ON;
 
-IF (OBJECT_ID(N'dbo.document', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM dbo.document))
-   OR (OBJECT_ID(N'dbo.document_type', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM dbo.document_type))
-   OR (OBJECT_ID(N'dbo.document_version', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM dbo.document_version))
+-- Conteos con SQL dinámico: si la tabla ya no existe (segunda corrida), no falla la compilación.
+DECLARE @filas BIGINT = 0, @n BIGINT, @t SYSNAME, @q NVARCHAR(400);
+DECLARE c CURSOR LOCAL FAST_FORWARD FOR SELECT name FROM (VALUES (N'document'), (N'document_type'), (N'document_version')) v(name);
+OPEN c; FETCH NEXT FROM c INTO @t;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+  IF OBJECT_ID(N'dbo.' + @t, N'U') IS NOT NULL
+  BEGIN
+    SET @q = N'SELECT @x = COUNT_BIG(*) FROM dbo.' + QUOTENAME(@t);
+    EXEC sp_executesql @q, N'@x BIGINT OUTPUT', @x = @n OUTPUT;
+    SET @filas += @n;
+  END
+  FETCH NEXT FROM c INTO @t;
+END
+CLOSE c; DEALLOCATE c;
+IF @filas > 0
   THROW 50611, N'Candado: alguna tabla del módulo documental viejo YA TIENE FILAS. No se tocó nada; consultar con Nicolás.', 1;
 
 BEGIN TRY
@@ -61,4 +74,4 @@ SELECT 'despues' AS q,
   (SELECT COUNT(*) FROM dbo.subprocess WHERE subprocess_url LIKE N'/process/document-management%') AS subprocesos_viejos,
   (SELECT COUNT(*) FROM dbo.bk_sgc_pase_subprocess) AS respaldo_subprocesos,
   (SELECT COUNT(*) FROM dbo.bk_sgc_pase_subprocess_user_company) AS respaldo_asignaciones,
-  CASE WHEN OBJECT_ID(N'dbo.document_signatures', N'U') IS NOT NULL THEN (SELECT COUNT(*) FROM dbo.document_signatures) END AS document_signatures_intacta;
+  (SELECT SUM(p.rows) FROM sys.partitions p WHERE p.object_id = OBJECT_ID(N'dbo.document_signatures') AND p.index_id IN (0, 1)) AS document_signatures_intacta;
