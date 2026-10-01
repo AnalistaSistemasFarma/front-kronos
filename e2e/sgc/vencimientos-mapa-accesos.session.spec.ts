@@ -83,7 +83,9 @@ test.describe.serial('SGC documental · Sprint 5 · vencimientos, mapa y accesos
     await expect(chip).toBeVisible({ timeout: 30_000 });
     await expect(chip).toHaveAttribute('data-state', 'proximo');
     // «Mis vencimientos»: qa.sgc lo cargó (último elaborador).
-    await page.getByTestId('sgc-cal-mios').check();
+    // El input del interruptor de Mantine queda fuera de la vista: se activa con su etiqueta.
+    await page.getByText('Mis vencimientos', { exact: true }).click();
+    await expect(page.getByTestId('sgc-cal-mios')).toBeChecked();
     await expect(chip).toBeVisible();
     // Agenda: la misma fecha. Semanal: la vista existe y navega por semanas.
     await page.getByTestId('sgc-cal-vista').getByText('Semanal').click();
