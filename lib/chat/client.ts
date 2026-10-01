@@ -629,3 +629,37 @@ export function pedirSondeoDelHilo(idConversation: number): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(CHAT_THREAD_POKE_EVENT, { detail: { idConversation } }));
 }
+
+/**
+ * "En el hilo X acaba de haber actividad (envié o recibí)": la bandeja le sube
+ * la fecha del último mensaje AL INSTANTE, sin esperar su sondeo, para que la
+ * conversación suba de primera en las listas (como WhatsApp o Teams). El
+ * servidor la confirma en la siguiente vuelta de la bandeja.
+ */
+export const CHAT_ACTIVITY_EVENT = 'synerlink:chat-activity';
+
+export interface ChatActivityDetail {
+  idConversation: number;
+  at: string;
+}
+
+export function notificarActividad(idConversation: number, at: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent<ChatActivityDetail>(CHAT_ACTIVITY_EVENT, { detail: { idConversation, at } })
+  );
+}
+
+/** Un adjunto del apartado "Multimedia y archivos" de una conversación. */
+export interface ChatSharedFileDto {
+  id: number;
+  fileName: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  /** SIEMPRE /api/chat/attachments/<id>: nunca una URL de OneDrive. */
+  downloadUrl: string;
+  createdAt: string;
+  /** "Usted", el nombre de la persona o el del asistente. */
+  sentBy: string;
+  isImage: boolean;
+}

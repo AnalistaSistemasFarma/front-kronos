@@ -7,6 +7,7 @@ import {
   chatGetJson,
   isAbortError,
   notifyChatRefresh,
+  notificarActividad,
   type ChatConversationDto,
   type ChatMessageDto,
   type ChatAgentStatusDto,
@@ -15,6 +16,7 @@ import {
   type ChatStatusDto,
 } from '../../lib/chat/client';
 import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
+import { avisarMensajeEntrante, mensajeFresco } from '../../lib/chat/message-sound';
 
 /**
  * El hilo abierto —con UN agente o un GRUPO—: histórico, sondeo en vivo, envío
@@ -462,6 +464,23 @@ export function useChatConversation(
             onZumbidoRef.current?.(m);
           }
         }
+        // Sonido de mensaje nuevo si llegó algo de otra persona o de un agente
+        // y no lo está viendo (pestaña oculta o sin foco). Lo propio y los
+        // eventos de sistema (zumbido) no suenan aquí.
+        if (
+          data.messages.some(
+            (m) =>
+              !m.eventType &&
+              mensajeFresco(m.createdAt) &&
+              (m.role === 'agent' ||
+                (m.role === 'user' && Boolean(m.author) && Boolean(yo) && String(m.author?.id) !== yo))
+          )
+        ) {
+          avisarMensajeEntrante(conversationId);
+        }
+        // La conversación sube de primera en las listas ya mismo.
+        const ultimo = data.messages[data.messages.length - 1];
+        if (ultimo) notificarActividad(conversationId, ultimo.createdAt);
         // La barra de la cabecera debe enterarse del mensaje nuevo.
         notifyChatRefresh();
       }
@@ -527,6 +546,8 @@ export function useChatConversation(
       if (conversationId === null || (text.length === 0 && files.length === 0)) return false;
 
       const optimisticId = -Date.now();
+      // Optimista: la conversación sube de primera en las listas al enviar.
+      notificarActividad(conversationId, new Date().toISOString());
       setSending(true);
       setError(null);
       setMessages((prev) => [
