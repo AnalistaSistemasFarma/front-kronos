@@ -134,7 +134,11 @@ export default function SgcFlowView({ idFlowProcess }: { idFlowProcess: number }
   // ?editar=1: se llegó desde «Editar Flujo de Trabajo» sobre la vigente; al cargar el borrador se entra a editarlo una sola vez.
   const autoEditedFor = useRef<number | null>(null);
   useEffect(() => {
-    if (!editParam || !canEdit || !isDraft || !detail || isEditing || autoEditedFor.current === detail.version.id) return;
+    if (!editParam) {
+      autoEditedFor.current = null;
+      return;
+    }
+    if (!canEdit || !isDraft || !detail || isEditing || autoEditedFor.current === detail.version.id) return;
     autoEditedFor.current = detail.version.id;
     startEditing();
     setMessage({ type: 'success', text: `Editando el borrador v${detail.version.versionNumber}. Al guardar, los cambios quedan en el borrador hasta que se publique.` });
