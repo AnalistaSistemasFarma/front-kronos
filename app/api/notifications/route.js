@@ -8,23 +8,16 @@ import {
   cleanupObsoleteTicketNotifications,
   filterNotificationsForUser,
 } from '../../../lib/notificationEvents.js';
-import { maybeRunScheduler } from '../../../lib/scheduler/runner.js';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
   try {
-    // Respaldo oportunista del scheduler: la campana se consulta cada 30s por todo
-    // usuario logueado; con throttle en memoria (10 min) + claim atómico en BD es
-    // barato e idempotente. Sin await: no retrasa la respuesta.
-    maybeRunScheduler();
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
-    // status=unread (por defecto): consulta ligera para el polling recurrente.
-    // status=read: solo bajo demanda cuando el usuario pide ver las leídas.
     const { searchParams } = new URL(request.url);
     const statusFilter = searchParams.get('status') === 'read' ? 'read' : 'unread';
 
