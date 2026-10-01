@@ -126,7 +126,7 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     await page.getByTestId('sgc-firma-confirmar').click();
     await expect(page.getByTestId('sgc-mensaje')).toContainText('Firma registrada', { timeout: 60_000 });
     await expect(page.getByTestId('sgc-firma-fila').filter({ hasText: 'Elaboró' })).toBeVisible();
-    await expect(page.getByTestId('sgc-historial')).toContainText('firmado electrónicamente');
+    await expect(page.getByTestId('sgc-historial')).toContainText('firmó como «Elaboró»');
   });
 
   test('[SGC-REQ-029][SGC-REQ-040] qa.sgc2 y qa.sgc3 firman «Revisó» EN PARALELO sobre el mismo contenido', async ({ browser }) => {
