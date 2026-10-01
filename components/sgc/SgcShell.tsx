@@ -85,7 +85,7 @@ export default function SgcShell({ section, subtitle, requireQuality, actions, c
                 {section ?? 'Documentos'}
               </Title>
               <Text size='lg' c='dimmed'>
-                {subtitle ?? `Gestión documental del sistema validado de ${company.companyName}`}
+                {subtitle ?? 'Gestión documental del sistema validado'}
               </Text>
             </div>
             <Group gap='sm' align='flex-end'>
@@ -113,7 +113,7 @@ export default function SgcShell({ section, subtitle, requireQuality, actions, c
 
         {denied ? (
           <Alert color='yellow' icon={<IconAlertTriangle size={18} />} title='Solo Aseguramiento de Calidad' data-testid='sgc-solo-calidad'>
-            Esta sección es exclusiva de Aseguramiento de Calidad de {company.companyName}.
+            Esta sección es exclusiva de Aseguramiento de Calidad.
           </Alert>
         ) : (
           children(company)
