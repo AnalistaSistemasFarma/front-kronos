@@ -4,7 +4,10 @@ import { useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Loader, Modal, SegmentedControl, Select, Stack, Table, Tabs, Text, TextInput, Textarea, Title } from '@mantine/core';
 import { IconAlertTriangle, IconCheck, IconKey } from '@tabler/icons-react';
 import SgcShell from '../../../../../components/sgc/SgcShell';
+import { sgcHref } from '../../../../../components/sgc/useSgcCompany';
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
+import { useSgcRowLink } from '../../../../../components/sgc/useSgcRowLink';
+import { SGC_BASE_URL } from '../../../../../lib/sgc/constants';
 import type { SgcAccessRequestRow } from '../../../../../lib/sgc/db/accessRequests';
 import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
 
@@ -33,6 +36,7 @@ function StatusBadge({ r }: { r: SgcAccessRequestRow }) {
 }
 
 function Accesos({ company }: { company: SgcCompanyAccess }) {
+  const rowLink = useSgcRowLink();
   const data = useSgcFetch<AccessData>(`/api/sgc/access-requests?company=${company.idCompany}`);
   const [mode, setMode] = useState<'lista' | 'codigo'>('lista');
   const [idDocument, setIdDocument] = useState<string | null>(null);
@@ -147,14 +151,14 @@ function Accesos({ company }: { company: SgcCompanyAccess }) {
           {rows.length === 0 && (
             <Table.Tr>
               <Table.Td colSpan={7}>
-                <Text size='sm' c='dimmed'>
+                <Text size='sm' c='dimmed' ta='center' py='lg'>
                   Sin solicitudes.
                 </Text>
               </Table.Td>
             </Table.Tr>
           )}
           {rows.map((r) => (
-            <Table.Tr key={r.id} data-testid='sgc-acceso-fila' data-id={r.id} data-code={r.code} data-status={r.status}>
+            <Table.Tr key={r.id} data-testid='sgc-acceso-fila' data-id={r.id} data-code={r.code} data-status={r.status} {...rowLink(r.document ? sgcHref(`${SGC_BASE_URL}/documentos/${r.document.idDocument}`, company.idCompany) : null)}>
               <Table.Td>{r.id}</Table.Td>
               <Table.Td>
                 <Text size='sm' ff='monospace'>

@@ -102,60 +102,62 @@ function FlowsTab({ company }: { company: SgcCompanyAccess }) {
             </Button>
           )}
         </Group>
-        <Table striped highlightOnHover data-testid='sgc-flujos-tabla'>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Código</Table.Th>
-              <Table.Th>Flujo</Table.Th>
-              <Table.Th>Categoría</Table.Th>
-              <Table.Th>Versiones</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {(flows.data?.flows ?? []).map((f) => (
-              <Table.Tr key={f.id} data-testid='sgc-flujo-fila' data-code={f.code}>
-                <Table.Td>
-                  <Text fw={700}>{f.code}</Text>
-                </Table.Td>
-                <Table.Td>
-                  {f.name}
-                  {!f.isActive && (
-                    <Badge ml='xs' color='gray' size='xs'>
-                      Inactivo
-                    </Badge>
-                  )}
-                </Table.Td>
-                <Table.Td>{f.category}</Table.Td>
-                <Table.Td>
-                  <Group gap={4}>
-                    {f.versions.map((v) => (
-                      <Badge
-                        key={v.id}
-                        variant={selected === v.id ? 'filled' : 'light'}
-                        color={v.status === 'vigente' ? 'green' : v.status === 'borrador' ? 'orange' : 'gray'}
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => setSelected(v.id)}
-                        data-testid='sgc-flujo-version'
-                        data-status={v.status}
-                      >
-                        v{v.versionNumber} · {v.status}
-                        {v.requestCount ? ` · ${v.requestCount} sol.` : ''}
-                      </Badge>
-                    ))}
-                  </Group>
-                </Table.Td>
-                <Table.Td>
-                  {canEdit && !f.draftVersionId && (
-                    <Button size='xs' variant='light' leftSection={<IconGitBranch size={14} />} onClick={() => setModal({ kind: 'draft', idProcess: f.id })} data-testid='sgc-flujo-nueva-version'>
-                      Nueva versión
-                    </Button>
-                  )}
-                </Table.Td>
+        <Table.ScrollContainer minWidth={640}>
+          <Table striped highlightOnHover data-testid='sgc-flujos-tabla'>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Código</Table.Th>
+                <Table.Th>Flujo</Table.Th>
+                <Table.Th>Categoría</Table.Th>
+                <Table.Th>Versiones</Table.Th>
+                <Table.Th />
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {(flows.data?.flows ?? []).map((f) => (
+                <Table.Tr key={f.id} data-testid='sgc-flujo-fila' data-code={f.code}>
+                  <Table.Td>
+                    <Text fw={700}>{f.code}</Text>
+                  </Table.Td>
+                  <Table.Td>
+                    {f.name}
+                    {!f.isActive && (
+                      <Badge ml='xs' color='gray' size='xs'>
+                        Inactivo
+                      </Badge>
+                    )}
+                  </Table.Td>
+                  <Table.Td>{f.category}</Table.Td>
+                  <Table.Td>
+                    <Group gap={4}>
+                      {f.versions.map((v) => (
+                        <Badge
+                          key={v.id}
+                          variant={selected === v.id ? 'filled' : 'light'}
+                          color={v.status === 'vigente' ? 'green' : v.status === 'borrador' ? 'orange' : 'gray'}
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => setSelected(v.id)}
+                          data-testid='sgc-flujo-version'
+                          data-status={v.status}
+                        >
+                          v{v.versionNumber} · {v.status}
+                          {v.requestCount ? ` · ${v.requestCount} sol.` : ''}
+                        </Badge>
+                      ))}
+                    </Group>
+                  </Table.Td>
+                  <Table.Td>
+                    {canEdit && !f.draftVersionId && (
+                      <Button size='xs' variant='light' leftSection={<IconGitBranch size={14} />} onClick={() => setModal({ kind: 'draft', idProcess: f.id })} data-testid='sgc-flujo-nueva-version'>
+                        Nueva versión
+                      </Button>
+                    )}
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
       </Card>
 
       {version.data && (
@@ -301,39 +303,41 @@ function MatrixTab({ company }: { company: SgcCompanyAccess }) {
         </Alert>
       )}
       <Card withBorder radius='md' p='md'>
-        <Table striped data-testid='sgc-matriz'>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Rol</Table.Th>
-              <Table.Th>Proceso</Table.Th>
-              <Table.Th>Tipo documental</Table.Th>
-              <Table.Th>Persona o cargo</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {(matrix.data?.matrix ?? []).map((m) => (
-              <Table.Tr key={m.id}>
-                <Table.Td>{m.role}</Table.Td>
-                <Table.Td>{m.processCode ? `${m.processCode} · ${m.processName}` : 'Todos'}</Table.Td>
-                <Table.Td>{m.documentTypeCode ? `${m.documentTypeCode} · ${m.documentTypeName}` : 'Todos'}</Table.Td>
-                <Table.Td>
-                  {m.userEmail ?? `Cargo: ${m.cargoName}`}
-                  {m.isExample && (
-                    <Badge ml='xs' size='xs' color='yellow' variant='light'>
-                      Ejemplo
-                    </Badge>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  <Button size='xs' variant='subtle' color='red' onClick={() => setDeactivate(m.id)}>
-                    Desactivar
-                  </Button>
-                </Table.Td>
+        <Table.ScrollContainer minWidth={640}>
+          <Table striped data-testid='sgc-matriz'>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Rol</Table.Th>
+                <Table.Th>Proceso</Table.Th>
+                <Table.Th>Tipo documental</Table.Th>
+                <Table.Th>Persona o cargo</Table.Th>
+                <Table.Th />
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {(matrix.data?.matrix ?? []).map((m) => (
+                <Table.Tr key={m.id}>
+                  <Table.Td>{m.role}</Table.Td>
+                  <Table.Td>{m.processCode ? `${m.processCode} · ${m.processName}` : 'Todos'}</Table.Td>
+                  <Table.Td>{m.documentTypeCode ? `${m.documentTypeCode} · ${m.documentTypeName}` : 'Todos'}</Table.Td>
+                  <Table.Td>
+                    {m.userEmail ?? `Cargo: ${m.cargoName}`}
+                    {m.isExample && (
+                      <Badge ml='xs' size='xs' color='yellow' variant='light'>
+                        Ejemplo
+                      </Badge>
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    <Button size='xs' variant='subtle' color='red' onClick={() => setDeactivate(m.id)}>
+                      Desactivar
+                    </Button>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
       </Card>
       <Card withBorder radius='md' p='md'>
         <Title order={5} mb='sm'>

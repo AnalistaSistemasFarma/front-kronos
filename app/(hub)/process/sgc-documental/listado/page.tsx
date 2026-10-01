@@ -2,13 +2,13 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Alert, Badge, Button, Card, Group, Loader, Select, Table, Text, TextInput } from '@mantine/core';
 import { IconAlertTriangle, IconFileUpload, IconHierarchy2, IconSearch } from '@tabler/icons-react';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { SgcConfidentialityBadge, SgcDocumentCode, SgcReviewBadge, SgcStatusBadge } from '../../../../../components/sgc/SgcBadges';
 import { sgcHref } from '../../../../../components/sgc/useSgcCompany';
 import { useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
+import { useSgcRowLink } from '../../../../../components/sgc/useSgcRowLink';
 import { SGC_BASE_URL } from '../../../../../lib/sgc/constants';
 import type { SgcCatalogs } from '../../../../../lib/sgc/db/catalogs';
 import { filterMasterList, type SgcMasterItem } from '../../../../../lib/sgc/masterList';
@@ -33,7 +33,7 @@ const STATUS_OPTIONS = [
 ];
 
 function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
-  const router = useRouter();
+  const rowLink = useSgcRowLink();
   const [status, setStatus] = useState('vigente');
   const [q, setQ] = useState('');
   const [processTypeId, setProcessTypeId] = useState<string | null>(null);
@@ -162,8 +162,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
               {items.map((d) => (
                 <Table.Tr
                   key={d.idDocument}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => router.push(sgcHref(`${SGC_BASE_URL}/documentos/${d.idDocument}`, company.idCompany))}
+                  {...rowLink(sgcHref(`${SGC_BASE_URL}/documentos/${d.idDocument}`, company.idCompany))}
                   data-testid='sgc-fila-documento'
                 >
                   <Table.Td style={NOWRAP}>

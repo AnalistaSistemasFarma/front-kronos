@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { Badge, Card, Group, Text, ThemeIcon } from '@mantine/core';
+import './sgc-states.css';
 
 /**
  * Tarjeta del tablero de accesos del SGC documental. Con `href` es un acceso
@@ -59,7 +60,7 @@ export default function SgcModuleCard({ title, description, icon, sprint, href, 
         href={href}
         data-testid='sgc-module-card'
         data-enabled='true'
-        className='transition-shadow hover:shadow-md'
+        className='sgc-module-card'
       >
         {body}
       </Card>
@@ -67,7 +68,7 @@ export default function SgcModuleCard({ title, description, icon, sprint, href, 
   }
 
   return (
-    <Card withBorder radius='md' p='lg' shadow='xs' aria-disabled='true' data-testid='sgc-module-card' data-enabled='false' style={{ opacity: 0.85 }}>
+    <Card withBorder radius='md' p='lg' shadow='xs' aria-disabled='true' data-testid='sgc-module-card' data-enabled='false' style={{ opacity: 0.5, cursor: 'not-allowed' }}>
       {body}
     </Card>
   );

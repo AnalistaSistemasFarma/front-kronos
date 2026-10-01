@@ -99,7 +99,7 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
         badge: 'Calidad',
       },
       {
-        title: 'Configuración del SGC',
+        title: 'Configuración',
         description: 'Guía de codificación, tipos de proceso, procesos y tipos documentales.',
         icon: <IconSettings size={24} />,
         sprint: 'Sprint 1',
@@ -124,7 +124,7 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
       href: sgcHref(`${SGC_BASE_URL}/tareas`, id),
     },
     {
-      title: 'Autorizaciones SGC',
+      title: 'Autorizaciones',
       description: 'Aprobaciones y verificación de Calidad, con su propio registro.',
       icon: <IconShieldCheck size={24} />,
       sprint: 'Sprint 2',
@@ -143,7 +143,7 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
         ]
       : []),
     {
-      title: 'Firma electrónica del SGC',
+      title: 'Firma electrónica',
       description: company.canQuality
         ? 'Maestro de firmas de la inducción; se firma en cada tarea con reautenticación, motivo y sello de tiempo.'
         : 'Elaboró, revisó y aprobó se firman en la tarea con su contraseña, motivo y sello de tiempo.',

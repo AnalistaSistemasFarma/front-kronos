@@ -12,7 +12,7 @@ const OLP = 3;
 test.describe('SGC documental · con sesión', () => {
   test('[SGC-REQ-010] el tablero muestra la pestaña Documentos con los accesos del Sprint 1 habilitados', async ({ page }) => {
     await page.goto(`/process/sgc-documental?empresa=${OLP}`);
-    await expect(page.getByTestId('sgc-titulo')).toContainText('Sistema de Gestión de Calidad');
+    await expect(page.getByTestId('sgc-titulo')).toContainText('Documentos');
     await expect(page.getByRole('tab', { name: 'Documentos' })).toBeVisible();
     const activos = page.locator('[data-testid="sgc-module-card"][data-enabled="true"]');
     await expect(activos.filter({ hasText: 'Listado maestro' })).toBeVisible();

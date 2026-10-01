@@ -7,6 +7,7 @@ import SgcShell from '../../../../../components/sgc/SgcShell';
 import { formatDateCO } from '../../../../../components/sgc/tareas/format';
 import { sgcHref } from '../../../../../components/sgc/useSgcCompany';
 import { useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
+import { useSgcRowLink } from '../../../../../components/sgc/useSgcRowLink';
 import type { SgcMyRequestRow } from '../../../../../lib/sgc/db/requests';
 import { sgcStatusColor } from '../../../../../lib/sgc/flows/engine';
 import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
@@ -15,6 +16,7 @@ import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
 function RequestList({ company }: { company: SgcCompanyAccess }) {
   const { data, error, loading } = useSgcFetch<{ requests: SgcMyRequestRow[] }>(`/api/sgc/requests?company=${company.idCompany}`);
   const rows = data?.requests ?? [];
+  const rowLink = useSgcRowLink();
   return (
     <Card shadow='sm' radius='md' withBorder p='lg'>
       <Title order={3} mb='md' className='flex items-center gap-2'>
@@ -50,7 +52,7 @@ function RequestList({ company }: { company: SgcCompanyAccess }) {
               </Table.Tr>
             ) : (
               rows.map((r) => (
-                <Table.Tr key={r.id} data-testid='sgc-solicitud-fila'>
+                <Table.Tr key={r.id} data-testid='sgc-solicitud-fila' {...rowLink(sgcHref(`/process/sgc-documental/solicitudes/${r.id}`, company.idCompany))}>
                   <Table.Td>
                     <Link href={sgcHref(`/process/sgc-documental/solicitudes/${r.id}`, company.idCompany)} className='font-bold text-blue-600'>
                       {r.id}

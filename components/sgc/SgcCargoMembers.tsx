@@ -65,45 +65,47 @@ export default function SgcCargoMembers({ idCompany }: { idCompany: number }) {
             Registrar
           </Button>
         </Group>
-        <Table striped>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Cargo</Table.Th>
-              <Table.Th>Persona</Table.Th>
-              <Table.Th>Registrado</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {(data?.members ?? []).map((m) => (
-              <Table.Tr key={m.id}>
-                <Table.Td>{m.cargo}</Table.Td>
-                <Table.Td>
-                  {m.name ?? m.email} <Text span size='xs' c='dimmed'>({m.email})</Text>
-                </Table.Td>
-                <Table.Td>
-                  <Text size='xs'>
-                    {m.addedBy} · {formatDateCO(m.addedAt)}
-                  </Text>
-                </Table.Td>
-                <Table.Td>
-                  <Button size='xs' variant='subtle' color='red' leftSection={<IconX size={12} />} onClick={() => setRemove({ id: m.id, label: `${m.email} (${m.cargo})`, reason: '' })}>
-                    Retirar
-                  </Button>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-            {data && data.members.length === 0 && (
+        <Table.ScrollContainer minWidth={520}>
+          <Table striped>
+            <Table.Thead>
               <Table.Tr>
-                <Table.Td colSpan={4}>
-                  <Text size='sm' c='dimmed'>
-                    Aún no hay personas registradas por cargo.
-                  </Text>
-                </Table.Td>
+                <Table.Th>Cargo</Table.Th>
+                <Table.Th>Persona</Table.Th>
+                <Table.Th>Registrado</Table.Th>
+                <Table.Th />
               </Table.Tr>
-            )}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {(data?.members ?? []).map((m) => (
+                <Table.Tr key={m.id}>
+                  <Table.Td>{m.cargo}</Table.Td>
+                  <Table.Td>
+                    {m.name ?? m.email} <Text span size='xs' c='dimmed'>({m.email})</Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size='xs'>
+                      {m.addedBy} · {formatDateCO(m.addedAt)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Button size='xs' variant='subtle' color='red' leftSection={<IconX size={12} />} onClick={() => setRemove({ id: m.id, label: `${m.email} (${m.cargo})`, reason: '' })}>
+                      Retirar
+                    </Button>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+              {data && data.members.length === 0 && (
+                <Table.Tr>
+                  <Table.Td colSpan={4}>
+                    <Text size='sm' c='dimmed'>
+                      Aún no hay personas registradas por cargo.
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              )}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
       </Stack>
       <Modal opened={Boolean(remove)} onClose={() => setRemove(null)} title={`Retirar ${remove?.label ?? ''}`} centered>
         <Stack>

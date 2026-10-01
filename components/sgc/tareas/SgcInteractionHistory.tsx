@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { ActionIcon, Avatar, Box, Card, Checkbox, Divider, Group, MultiSelect, ScrollArea, Stack, Text, Textarea, Title } from '@mantine/core';
-import { IconCheck, IconNote } from '@tabler/icons-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActionIcon, Anchor, Avatar, Box, Card, Checkbox, Collapse, Divider, Group, MultiSelect, ScrollArea, Stack, Text, Textarea, Title } from '@mantine/core';
+import { IconCheck, IconNote, IconSettingsAutomation } from '@tabler/icons-react';
+import { presentInteractions, type SgcInteractionView } from '../../../lib/sgc/interactionView';
 import { formatDateCO } from './format';
 
 /**
@@ -10,6 +11,11 @@ import { formatDateCO } from './format';
  * (sgc.interaction). COPIA CONGELADA (2026-09-30) del bloque «Historial de
  * interacciones» de SynerLink: variante «tarea» = view-activities y variante
  * «solicitud» = view-request, con el mismo marcado y las mismas clases.
+ *
+ * Desde 2026-10-01 cada entrada se LEE simplificada (quién, qué hizo, cuándo
+ * y la observación de la persona; lo técnico detrás de «Ver detalle») con
+ * lib/sgc/interactionView. Solo cambia la presentación: lo guardado en
+ * sgc.interaction no se toca y su texto original sigue en «Ver detalle».
  */
 export interface SgcInteractionItem {
   id: string;
@@ -29,6 +35,83 @@ export interface SgcInteractionHistoryProps {
   onSend: (body: string, notifyEmails: string[]) => Promise<void>;
 }
 
+function Detail({ v, tone }: { v: SgcInteractionView; tone?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Anchor component='button' type='button' size='xs' c={tone} underline='always' onClick={() => setOpen((o) => !o)} aria-expanded={open} data-testid='sgc-interaccion-ver-detalle'>
+        {open ? 'Ocultar detalle' : 'Ver detalle'}
+      </Anchor>
+      <Collapse in={open}>
+        <Stack gap={4} mt={4}>
+          {v.count > 1 && (
+            <Text size='xs' c={tone ?? 'dimmed'}>
+              {v.count} veces: {v.groupedDates.map((d) => formatDateCO(d, { month: 'short' })).join(' · ')}
+            </Text>
+          )}
+          {v.details.map((d, i) => (
+            <Text key={i} size='xs' c={tone ?? 'dimmed'} style={{ wordBreak: 'break-all' }}>
+              {d}
+            </Text>
+          ))}
+          <Text size='xs' c={tone ?? 'dimmed'} fw={600} mt={2}>
+            Texto registrado
+          </Text>
+          <Text size='xs' c={tone ?? 'dimmed'} className='whitespace-pre-line' style={{ wordBreak: 'break-word' }}>
+            {v.raw}
+          </Text>
+        </Stack>
+      </Collapse>
+    </>
+  );
+}
+
+/** Qué hizo + observación + dato complementario, dentro de la burbuja. */
+function EntryBody({ v, tone }: { v: SgcInteractionView; tone?: string }) {
+  return (
+    <Stack gap={4}>
+      <Text size='sm' style={{ lineHeight: 1.45 }} data-testid='sgc-interaccion-accion'>
+        {v.action.charAt(0).toUpperCase() + v.action.slice(1)}
+        {v.count > 1 ? ` (${v.count} veces)` : ''}
+      </Text>
+      {v.observation && (
+        <Text size='sm' className='whitespace-pre-line' style={{ lineHeight: 1.5, borderLeft: '3px solid currentColor', paddingLeft: 8, opacity: 0.9 }} data-testid='sgc-interaccion-observacion'>
+          {v.observation}
+        </Text>
+      )}
+      {v.note && (
+        <Text size='xs' c={tone ?? 'dimmed'} className='whitespace-pre-line'>
+          {v.note}
+        </Text>
+      )}
+      <Detail v={v} tone={tone} />
+    </Stack>
+  );
+}
+
+/** Evento automático: una línea discreta y centrada, sin burbuja. */
+function SystemLine({ v }: { v: SgcInteractionView }) {
+  return (
+    <Box style={{ display: 'flex', justifyContent: 'center' }} data-testid='sgc-interaccion' data-automatic='1'>
+      <Box maw='90%' px='sm' py={6} style={{ borderRadius: 10, background: 'var(--mantine-color-default-hover)', textAlign: 'center' }}>
+        <Group gap={6} justify='center' wrap='nowrap'>
+          <IconSettingsAutomation size={14} style={{ flexShrink: 0, opacity: 0.6 }} aria-hidden />
+          <Text size='xs' c='dimmed'>
+            {v.who} {v.action}
+            {v.count > 1 ? ` (${v.count} veces)` : ''} · {formatDateCO(v.createdAt, { month: 'short' })}
+          </Text>
+        </Group>
+        {v.note && (
+          <Text size='xs' c='dimmed' className='whitespace-pre-line'>
+            {v.note}
+          </Text>
+        )}
+        <Detail v={v} />
+      </Box>
+    </Box>
+  );
+}
+
 export default function SgcInteractionHistory({ variant, items, currentEmail, users, canNote, onSend }: SgcInteractionHistoryProps) {
   const [newNote, setNewNote] = useState('');
   const [notify, setNotify] = useState(false);
@@ -36,6 +119,13 @@ export default function SgcInteractionHistory({ variant, items, currentEmail, us
   const [sending, setSending] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const me = currentEmail.toLowerCase();
+
+  const views = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const u of users) names.set(u.value.toLowerCase(), u.label.replace(/\s*\([^()]*@[^()]*\)\s*$/, ''));
+    for (const i of items) if (i.author) names.set(i.authorEmail.toLowerCase(), i.author);
+    return presentInteractions(items, (e) => names.get(e.toLowerCase()) ?? e);
+  }, [items, users]);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -56,7 +146,6 @@ export default function SgcInteractionHistory({ variant, items, currentEmail, us
   };
 
   const disabled = !canNote || sending;
-  const name = (i: SgcInteractionItem) => i.author || i.authorEmail;
 
   if (variant === 'tarea') {
     return (
@@ -67,8 +156,9 @@ export default function SgcInteractionHistory({ variant, items, currentEmail, us
         </Title>
         <ScrollArea h='calc(100vh - 420px)' className='mb-4' offsetScrollbars viewportRef={viewportRef}>
           <div className='space-y-4 p-2'>
-            {items.length > 0 ? (
-              items.map((note) => {
+            {views.length > 0 ? (
+              views.map((note) => {
+                if (note.automatic) return <SystemLine key={note.id} v={note} />;
                 const isCurrentUser = note.authorEmail.toLowerCase() === me;
                 return (
                   <div key={note.id} className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`} data-testid='sgc-interaccion'>
@@ -79,15 +169,15 @@ export default function SgcInteractionHistory({ variant, items, currentEmail, us
                     >
                       <div className='flex items-center gap-2 mb-2'>
                         <Avatar size='sm' radius='xl' color={isCurrentUser ? 'white' : 'gray'}>
-                          {name(note).charAt(0).toUpperCase()}
+                          {note.who.charAt(0).toUpperCase()}
                         </Avatar>
                         <Text size='xs' fw={500} className={isCurrentUser ? 'text-blue-100 font-bold' : 'text-gray-600 font-bold'}>
-                          {name(note)}
+                          {note.who}
                         </Text>
                       </div>
-                      <Text size='sm' className='whitespace-pre-line mb-2'>
-                        {note.body}
-                      </Text>
+                      <div className='mb-2'>
+                        <EntryBody v={note} tone={isCurrentUser ? 'blue.0' : undefined} />
+                      </div>
                       <Text size='xs' className={isCurrentUser ? 'text-blue-100' : 'text-gray-500'}>
                         {formatDateCO(note.createdAt, { month: 'short' })}
                       </Text>
@@ -165,8 +255,9 @@ export default function SgcInteractionHistory({ variant, items, currentEmail, us
       </Title>
       <ScrollArea h={360} mb='md' offsetScrollbars type='auto' viewportRef={viewportRef} styles={{ viewport: { paddingRight: 4 } }}>
         <Stack gap='sm' py={4}>
-          {items.length > 0 ? (
-            items.map((note) => {
+          {views.length > 0 ? (
+            views.map((note) => {
+              if (note.automatic) return <SystemLine key={note.id} v={note} />;
               const isCurrentUser = note.authorEmail.toLowerCase() === me;
               return (
                 <Box key={note.id} style={{ display: 'flex', justifyContent: isCurrentUser ? 'flex-end' : 'flex-start' }} data-testid='sgc-interaccion'>
@@ -184,18 +275,16 @@ export default function SgcInteractionHistory({ variant, items, currentEmail, us
                   >
                     <Group gap={8} mb={6} wrap='nowrap'>
                       <Avatar size={24} radius='xl' color={isCurrentUser ? 'blue' : 'gray'}>
-                        {name(note).charAt(0).toUpperCase()}
+                        {note.who.charAt(0).toUpperCase()}
                       </Avatar>
                       <Text size='xs' fw={600} lineClamp={1}>
-                        {name(note)}
+                        {note.who}
                       </Text>
                       <Text size='10px' c='dimmed' ml='auto' style={{ whiteSpace: 'nowrap' }}>
                         {formatDateCO(note.createdAt, { month: 'short' })}
                       </Text>
                     </Group>
-                    <Text size='sm' className='whitespace-pre-line' style={{ lineHeight: 1.5 }}>
-                      {note.body}
-                    </Text>
+                    <EntryBody v={note} />
                   </Box>
                 </Box>
               );

@@ -6,6 +6,7 @@ import { Alert, Badge, Button, Card, Group, Modal, Select, Stack, Table, Text, T
 import { IconLink, IconPlus } from '@tabler/icons-react';
 import { sgcHref } from '../useSgcCompany';
 import { sgcSend, useSgcFetch } from '../useSgcFetch';
+import { useSgcRowLink } from '../useSgcRowLink';
 import { SGC_BASE_URL } from '../../../lib/sgc/constants';
 import type { SgcDocumentRelationItem } from '../../../lib/sgc/db/relations';
 import { SGC_RELATION_LABELS, SGC_RELATION_PHRASES, SGC_RELATION_STYLES, SGC_RELATION_TYPES } from '../../../lib/sgc/relations';
@@ -16,6 +17,7 @@ import { SGC_RELATION_LABELS, SGC_RELATION_PHRASES, SGC_RELATION_STYLES, SGC_REL
  */
 export default function SgcDocumentRelations({ idDocument, idCompany, code, canAdminister }: { idDocument: number; idCompany: number; code: string; canAdminister: boolean }) {
   const rel = useSgcFetch<{ relations: SgcDocumentRelationItem[] }>(`/api/sgc/documents/${idDocument}/relations`);
+  const rowLink = useSgcRowLink();
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<SgcDocumentRelationItem | null>(null);
   const [type, setType] = useState<string | null>('formato');
@@ -70,7 +72,7 @@ export default function SgcDocumentRelations({ idDocument, idCompany, code, canA
         <Table verticalSpacing='xs'>
           <Table.Tbody>
             {items.map((r) => (
-              <Table.Tr key={r.id} data-testid='sgc-relacion-fila' data-code={r.other.code} data-type={r.type}>
+              <Table.Tr key={r.id} data-testid='sgc-relacion-fila' data-code={r.other.code} data-type={r.type} {...rowLink(sgcHref(`${SGC_BASE_URL}/documentos/${r.other.idDocument}`, idCompany))}>
                 <Table.Td w={170}>
                   <Badge color={SGC_RELATION_STYLES[r.type].mantine} variant='light' size='sm'>
                     {r.typeLabel}

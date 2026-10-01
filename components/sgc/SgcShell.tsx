@@ -44,7 +44,7 @@ export default function SgcShell({ section, subtitle, requireQuality, actions, c
 
   if (estado.tipo === 'error') {
     return (
-      <Alert color='red' icon={<IconAlertTriangle size={18} />} title='SGC documental' mt='md'>
+      <Alert color='red' icon={<IconAlertTriangle size={18} />} title='Documentos' mt='md'>
         {estado.mensaje}
       </Alert>
     );
@@ -52,8 +52,8 @@ export default function SgcShell({ section, subtitle, requireQuality, actions, c
 
   if (estado.companies.length === 0 || !company) {
     return (
-      <Alert color='yellow' icon={<IconAlertTriangle size={18} />} title='SGC documental' mt='md' data-testid='sgc-sin-acceso'>
-        No tiene acceso al Sistema de Gestión de Calidad documental en ninguna empresa activa.
+      <Alert color='yellow' icon={<IconAlertTriangle size={18} />} title='Documentos' mt='md' data-testid='sgc-sin-acceso'>
+        No tiene acceso a Documentos en ninguna empresa activa.
       </Alert>
     );
   }
@@ -70,10 +70,10 @@ export default function SgcShell({ section, subtitle, requireQuality, actions, c
             </Anchor>
             {section ? (
               <Anchor component={Link} href={sgcHref(SGC_BASE_URL, company.idCompany)}>
-                SGC documental
+                Documentos
               </Anchor>
             ) : (
-              <Text>SGC documental</Text>
+              <Text>Documentos</Text>
             )}
             {section && <Text>{section}</Text>}
           </Breadcrumbs>
@@ -82,7 +82,7 @@ export default function SgcShell({ section, subtitle, requireQuality, actions, c
             <div>
               <Title order={1} className='text-3xl font-bold mb-2 flex items-center gap-3' data-testid='sgc-titulo'>
                 <IconShieldCheck size={32} className='text-blue-600' />
-                {section ?? 'Sistema de Gestión de Calidad'}
+                {section ?? 'Documentos'}
               </Title>
               <Text size='lg' c='dimmed'>
                 {subtitle ?? `Gestión documental del sistema validado de ${company.companyName}`}

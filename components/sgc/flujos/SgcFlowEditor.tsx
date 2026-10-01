@@ -179,50 +179,52 @@ export default function SgcFlowEditor({ definition, editable, authorizationTypes
             </Button>
           )}
         </Group>
-        <Table withTableBorder striped verticalSpacing='xs'>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Desde</Table.Th>
-              <Table.Th>Acción</Table.Th>
-              <Table.Th>Hacia</Table.Th>
-              <Table.Th>o cierra como</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {def.transitions.map((t, i) => (
-              <Table.Tr key={i} data-testid='sgc-flujo-transicion'>
-                <Table.Td>
-                  <Select size='xs' data={taskOptions} value={t.from} disabled={ro} allowDeselect={false} onChange={(v) => v && setTr(i, { from: v })} />
-                </Table.Td>
-                <Table.Td>
-                  <Select size='xs' data={opts(SGC_ACTION_LABELS)} value={t.action} disabled={ro} allowDeselect={false} onChange={(v) => v && setTr(i, { action: v as SgcTransitionDefinition['action'] })} />
-                </Table.Td>
-                <Table.Td>
-                  <Select size='xs' data={taskOptions} value={t.to} clearable disabled={ro} placeholder='—' onChange={(v) => setTr(i, { to: v, terminalStatus: v ? null : t.terminalStatus })} />
-                </Table.Td>
-                <Table.Td>
-                  <Select
-                    size='xs'
-                    data={[{ value: 'completada', label: 'Completada' }, { value: 'cancelada', label: 'Cancelada' }]}
-                    value={t.terminalStatus}
-                    clearable
-                    disabled={ro}
-                    placeholder='—'
-                    onChange={(v) => setTr(i, { terminalStatus: (v as 'completada' | 'cancelada') ?? null, to: v ? null : t.to })}
-                  />
-                </Table.Td>
-                <Table.Td w={40}>
-                  {editable && (
-                    <ActionIcon variant='subtle' color='red' onClick={() => setDef((d) => ({ ...d, transitions: d.transitions.filter((_, j) => j !== i) }))} aria-label='Quitar transición'>
-                      <IconTrash size={14} />
-                    </ActionIcon>
-                  )}
-                </Table.Td>
+        <Table.ScrollContainer minWidth={640}>
+          <Table withTableBorder striped verticalSpacing='xs'>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Desde</Table.Th>
+                <Table.Th>Acción</Table.Th>
+                <Table.Th>Hacia</Table.Th>
+                <Table.Th>o cierra como</Table.Th>
+                <Table.Th />
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {def.transitions.map((t, i) => (
+                <Table.Tr key={i} data-testid='sgc-flujo-transicion'>
+                  <Table.Td>
+                    <Select size='xs' data={taskOptions} value={t.from} disabled={ro} allowDeselect={false} onChange={(v) => v && setTr(i, { from: v })} />
+                  </Table.Td>
+                  <Table.Td>
+                    <Select size='xs' data={opts(SGC_ACTION_LABELS)} value={t.action} disabled={ro} allowDeselect={false} onChange={(v) => v && setTr(i, { action: v as SgcTransitionDefinition['action'] })} />
+                  </Table.Td>
+                  <Table.Td>
+                    <Select size='xs' data={taskOptions} value={t.to} clearable disabled={ro} placeholder='—' onChange={(v) => setTr(i, { to: v, terminalStatus: v ? null : t.terminalStatus })} />
+                  </Table.Td>
+                  <Table.Td>
+                    <Select
+                      size='xs'
+                      data={[{ value: 'completada', label: 'Completada' }, { value: 'cancelada', label: 'Cancelada' }]}
+                      value={t.terminalStatus}
+                      clearable
+                      disabled={ro}
+                      placeholder='—'
+                      onChange={(v) => setTr(i, { terminalStatus: (v as 'completada' | 'cancelada') ?? null, to: v ? null : t.to })}
+                    />
+                  </Table.Td>
+                  <Table.Td w={40}>
+                    {editable && (
+                      <ActionIcon variant='subtle' color='red' onClick={() => setDef((d) => ({ ...d, transitions: d.transitions.filter((_, j) => j !== i) }))} aria-label='Quitar transición'>
+                        <IconTrash size={14} />
+                      </ActionIcon>
+                    )}
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
       </Card>
 
       <Card withBorder radius='md' p='md'>
