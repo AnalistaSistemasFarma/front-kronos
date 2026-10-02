@@ -23,6 +23,7 @@ import {
   IconAlertTriangle,
   IconArrowLeft,
   IconCircleCheck,
+  IconId,
   IconListDetails,
   IconLock,
   IconRefresh,
@@ -444,6 +445,18 @@ function TarjetaAgente({ a }: { a: Agente }) {
           </Text>
         </Stack>
       )}
+
+      <Group justify='flex-end' mt={8}>
+        <Button
+          component={Link}
+          href={`/process/chat/auditoria/inventario/${encodeURIComponent(a.code)}`}
+          size='xs'
+          variant='light'
+          leftSection={<IconId size={14} />}
+        >
+          Ver hoja de vida
+        </Button>
+      </Group>
     </Card>
   );
 }

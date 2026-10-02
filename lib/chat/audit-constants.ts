@@ -16,3 +16,18 @@ export function isAuditConversationsMarkerSubprocess(subprocess: {
 }): boolean {
   return (subprocess.subprocess_url ?? '').toLowerCase().trim() === AUDIT_CONVERSATIONS_URL;
 }
+
+/**
+ * Subproceso-permiso para CONFIGURAR la hoja de vida de los agentes (F2):
+ * editar el propósito y el dueño. Ver solo la hoja de vida no lo necesita
+ * (basta el permiso del módulo). Es un marcador, no una página: no se lista en
+ * el hub. Sin segunda puerta para administradores: se otorga con nombre propio.
+ */
+export const AUDIT_CONFIGURE_URL = '/process/chat/auditoria/configurar';
+
+/** ¿Es el marcador del permiso de configurar? (para ocultarlo del hub). */
+export function isAuditConfigureMarkerSubprocess(subprocess: {
+  subprocess_url?: string | null;
+}): boolean {
+  return (subprocess.subprocess_url ?? '').toLowerCase().trim() === AUDIT_CONFIGURE_URL;
+}

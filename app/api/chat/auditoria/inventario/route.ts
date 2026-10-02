@@ -19,6 +19,7 @@ import {
   SolicitudInvalidaError,
   vencerSolicitudesColgadas,
 } from '../../../../../lib/agent-audit/inventory-db';
+import { reconstruirHistorial } from '../../../../../lib/agent-audit/cv-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -93,6 +94,14 @@ export async function POST(request: NextRequest) {
 
     try {
       const r = await guardarInventario(payload);
+      // Hoja de vida (F2): los cambios de este escaneo entran de una vez a la
+      // línea de tiempo. Si falla, el inventario ya quedó guardado y la
+      // corrida nocturna lo completa: no se le devuelve error al recolector.
+      try {
+        await reconstruirHistorial({ desde: new Date(Date.now() - 2 * 86_400_000) });
+      } catch (err) {
+        console.error('[inventario] no se pudo actualizar la hoja de vida', err);
+      }
       return jsonNoStore({ ok: true, ...r });
     } catch (err) {
       if (err instanceof SolicitudInvalidaError) {
