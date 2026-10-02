@@ -115,7 +115,7 @@ export async function signTask(db: SgcDb, deps: SgcSignatureDeps, idTask: number
   const email = lower(actor.email);
   const { idRequest, idCompany } = await requestOfTask(db, idTask);
   const task = await db.sgcTask.findUniqueOrThrow({ where: { id_task: idTask }, include: { taskDef: true } });
-  const input = validateSignInput(raw, (task.taskDef.signature_meaning as SgcSignatureMeaning | null) ?? null);
+  const input = validateSignInput(raw, (task.taskDef.signature_meaning as SgcSignatureMeaning | null) ?? null, email);
 
   // Sprint 6: contar intentos → comparar → registrar el fallo, serializado por persona entre todas las
   // instancias; así una ráfaga en paralelo no se salta el bloqueo de 5 intentos en 15 minutos.

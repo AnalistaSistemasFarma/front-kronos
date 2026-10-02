@@ -98,7 +98,7 @@ function StepEditor({ step, canEdit, users, suggestion, onSave }: { step: Step }
             data-testid={`sgc-firmantes-modo-${step.key}`}
           />
           {!initial && (
-            <Textarea label='Motivo del cambio' required minRows={2} autosize value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid={`sgc-firmantes-motivo-${step.key}`} />
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo del cambio' required minRows={2} autosize value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid={`sgc-firmantes-motivo-${step.key}`} />
           )}
           <Group justify='flex-end'>
             <Button variant='default' size='xs' onClick={() => setEditing(false)} disabled={saving}>

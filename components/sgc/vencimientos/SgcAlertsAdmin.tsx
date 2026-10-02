@@ -243,7 +243,7 @@ export function SgcAlertConfigPanel({ company, calendar }: { company: SgcCompany
             {form.scope === 'documento' && (
               <Select label='Documento' searchable data={docs.map((d) => ({ value: String(d.idDocument), label: `${d.code} · ${d.title}` }))} value={form.idDocument} onChange={(v) => setForm({ ...form, idDocument: v })} required data-testid='sgc-avisos-documento' />
             )}
-            <TextInput label='Días de aviso antes del vencimiento' description='Separados por coma; 0 = el día del vencimiento.' value={form.offsets} onChange={(e) => setForm({ ...form, offsets: e.currentTarget.value })} data-testid='sgc-avisos-dias' />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Días de aviso antes del vencimiento' description='Separados por coma; 0 = el día del vencimiento.' value={form.offsets} onChange={(e) => setForm({ ...form, offsets: e.currentTarget.value })} data-testid='sgc-avisos-dias' />
             <NumberInput label='Repetir el aviso de vencido cada (días)' min={1} max={90} value={form.overdueEveryDays} onChange={(v) => setForm({ ...form, overdueEveryDays: Number(v) || 1 })} />
             {form.scope === 'empresa' && (
               <>
@@ -251,9 +251,9 @@ export function SgcAlertConfigPanel({ company, calendar }: { company: SgcCompany
                 <Switch label='Enviar también por correo' checked={form.emailEnabled} onChange={(e) => setForm({ ...form, emailEnabled: e.currentTarget.checked })} />
               </>
             )}
-            <TextInput label='Destinatarios adicionales' description='Correos separados por coma (además del dueño, el elaborador y Calidad).' value={form.extraEmails} onChange={(e) => setForm({ ...form, extraEmails: e.currentTarget.value })} />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Destinatarios adicionales' description='Correos separados por coma (además del dueño, el elaborador y Calidad).' value={form.extraEmails} onChange={(e) => setForm({ ...form, extraEmails: e.currentTarget.value })} />
             {form.scope !== 'empresa' && <Switch label='Activa' checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.currentTarget.checked })} />}
-            <Textarea label='Motivo del cambio' description='Queda en la auditoría (mínimo 10 caracteres).' value={form.reason} onChange={(e) => setForm({ ...form, reason: e.currentTarget.value })} data-testid='sgc-avisos-motivo' />
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo del cambio' description='Queda en la auditoría (mínimo 10 caracteres).' value={form.reason} onChange={(e) => setForm({ ...form, reason: e.currentTarget.value })} data-testid='sgc-avisos-motivo' />
             <Button loading={busy} onClick={save} data-testid='sgc-avisos-guardar'>
               Guardar
             </Button>

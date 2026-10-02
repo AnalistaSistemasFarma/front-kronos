@@ -76,7 +76,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
   return (
     <Card withBorder radius='md' p='lg' shadow='xs'>
       <Group gap='sm' mb='md' align='flex-end' wrap='wrap'>
-        <TextInput
+        <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
           label='Buscar'
           placeholder='Código o título'
           leftSection={<IconSearch size={16} />}

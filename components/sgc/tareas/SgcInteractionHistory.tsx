@@ -199,7 +199,7 @@ export default function SgcInteractionHistory({ variant, items, currentEmail, us
         </ScrollArea>
         <div className='border-t pt-4'>
           <Stack gap='sm'>
-            <Textarea
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true'
               placeholder='Escribe una nota...'
               value={newNote}
               onChange={(e) => setNewNote(e.target.value)}
@@ -304,7 +304,7 @@ export default function SgcInteractionHistory({ variant, items, currentEmail, us
       <Divider mb='sm' color='var(--app-border)' />
       <Stack gap='xs'>
         <Group align='flex-end' gap='sm' wrap='nowrap'>
-          <Textarea
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true'
             placeholder='Escribe un mensaje…'
             value={newNote}
             onChange={(e) => setNewNote(e.target.value)}

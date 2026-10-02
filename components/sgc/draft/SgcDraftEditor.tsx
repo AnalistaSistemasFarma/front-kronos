@@ -29,6 +29,7 @@ import {
 } from '@tabler/icons-react';
 import { sgcSend, useSgcFetch } from '../useSgcFetch';
 import { formatDateCO } from '../tareas/format';
+import { draftBackTarget, draftEditorHref, parseTaskParam } from '../../../lib/sgc/draft/view';
 
 /**
  * EDITOR DEL BORRADOR en la app (Sprint 3). Copia adaptada del editor Tiptap
@@ -65,6 +66,8 @@ function Tool({ label, icon, active, onClick, disabled }: { label: string; icon:
 export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
   const search = useSearchParams();
   const viewRev = search.get('ver');
+  // Si se abrió desde una tarea (?tarea=<id>, solo un número), «Volver» regresa a esa tarea.
+  const tareaParam = search.get('tarea');
   const meta = useSgcFetch<DraftMeta>(`/api/sgc/requests/${idRequest}/draft`);
   const [origin, setOrigin] = useState<{ origin: string; originRef: string | null }>({ origin: 'revision', originRef: null });
   const [note, setNote] = useState('');
@@ -175,7 +178,8 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
     );
   }
   const d = meta.data;
-  const back = `/process/sgc-documental/solicitudes/${idRequest}?empresa=${d.request.idCompany}`;
+  const backTarget = draftBackTarget(idRequest, d.request.idCompany, tareaParam);
+  const back = backTarget.href;
 
   return (
     <div className='app-canvas'>
@@ -186,7 +190,7 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
               Procesos
             </Anchor>
             <Anchor component={Link} href={back}>
-              Solicitud #{idRequest}
+              {backTarget.crumb}
             </Anchor>
             <Text c='dimmed'>Borrador</Text>
           </Breadcrumbs>
@@ -270,7 +274,7 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
                   <Tool label='Insertar tabla 3x3' icon={<IconTable size={16} />} onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} />
                 </Group>
                 <Group gap='xs'>
-                  <TextInput size='sm' placeholder='Nota de la revisión (opcional)' value={note} onChange={(e) => setNote(e.currentTarget.value)} w={260} data-testid='sgc-borrador-nota' />
+                  <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' size='sm' placeholder='Nota de la revisión (opcional)' value={note} onChange={(e) => setNote(e.currentTarget.value)} w={260} data-testid='sgc-borrador-nota' />
                   <Button leftSection={<IconDeviceFloppy size={16} />} onClick={save} loading={busy} data-testid='sgc-borrador-guardar'>
                     Guardar revisión
                   </Button>
@@ -308,7 +312,7 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
                 {d.revisions.map((r) => (
                   <MTable.Tr key={r.id} data-testid='sgc-borrador-fila'>
                     <MTable.Td>
-                      <Anchor component={Link} href={`/process/sgc-documental/solicitudes/${idRequest}/borrador?empresa=${d.request.idCompany}&ver=${r.id}`}>
+                      <Anchor component={Link} href={draftEditorHref(idRequest, d.request.idCompany, parseTaskParam(tareaParam), r.id)}>
                         {r.number}
                       </Anchor>
                     </MTable.Td>
@@ -326,7 +330,7 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
           )}
           <Group mt='md'>
             <Button component={Link} href={back} variant='outline' leftSection={<IconArrowLeft size={16} />}>
-              Volver a la solicitud
+              {backTarget.label}
             </Button>
           </Group>
         </Card>

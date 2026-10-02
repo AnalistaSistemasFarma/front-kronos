@@ -84,7 +84,7 @@ export default function SgcFlowFieldsCard({ definition, isEditing, originalField
                 {isEditing ? (
                   <Stack gap='sm'>
                     <Group align='flex-end' wrap='nowrap'>
-                      <TextInput label='Nombre del campo' placeholder='Ej. Tipo de cambio' value={field.label} onChange={(e) => setField(i, { label: e.target.value })} style={{ flex: 1 }} data-testid='sgc-flujo-campo-etiqueta' />
+                      <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Nombre del campo' placeholder='Ej. Tipo de cambio' value={field.label} onChange={(e) => setField(i, { label: e.target.value })} style={{ flex: 1 }} data-testid='sgc-flujo-campo-etiqueta' />
                       <Select label='Tipo' data={opts(SGC_FIELD_TYPE_LABELS)} value={field.type} onChange={(v) => v && setField(i, { type: v as SgcFormFieldDefinition['type'] })} allowDeselect={false} disabled={!!field.qualityCheck} w={170} />
                       <Checkbox label='Obligatorio' checked={field.required} onChange={(e) => setField(i, { required: e.currentTarget.checked })} mb={8} />
                       <Checkbox
@@ -110,11 +110,11 @@ export default function SgcFlowFieldsCard({ definition, isEditing, originalField
                         allowDeselect={false}
                       />
                       {isNew ? (
-                        <TextInput label='Clave' description='Minúsculas, números y guion bajo' value={field.key} onChange={(e) => setField(i, { key: e.target.value })} data-testid='sgc-flujo-campo-clave' />
+                        <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Clave' description='Minúsculas, números y guion bajo' value={field.key} onChange={(e) => setField(i, { key: e.target.value })} data-testid='sgc-flujo-campo-clave' />
                       ) : (
-                        <TextInput label='Clave' value={field.key} disabled />
+                        <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Clave' value={field.key} disabled />
                       )}
-                      <TextInput label='Ayuda' placeholder='Texto de ayuda (opcional)' value={field.helpText ?? ''} onChange={(e) => setField(i, { helpText: e.target.value || null })} />
+                      <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Ayuda' placeholder='Texto de ayuda (opcional)' value={field.helpText ?? ''} onChange={(e) => setField(i, { helpText: e.target.value || null })} />
                     </Group>
 
                     {field.type === 'seleccion' ? (
@@ -144,7 +144,7 @@ export default function SgcFlowFieldsCard({ definition, isEditing, originalField
                           )}
                         </Group>
                         <Group gap='xs'>
-                          <TextInput
+                          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
                             placeholder='Nueva opción (ej. Menor)'
                             value={optionInputs[i] || ''}
                             onChange={(e) => setOptionInputs((p) => ({ ...p, [i]: e.target.value }))}

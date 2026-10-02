@@ -5,6 +5,7 @@ import { Alert, Anchor, Badge, Button, Card, Code, Group, ScrollArea, Stack, Tab
 import { IconAlertCircle, IconEdit, IconFileCertificate, IconRefresh, IconSignature } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import { formatDateCO } from '../tareas/format';
+import { draftEditorHref } from '../../../lib/sgc/draft/view';
 
 /**
  * Tarjeta «Firmas electrónicas y borrador» de la solicitud documental
@@ -13,8 +14,9 @@ import { formatDateCO } from '../tareas/format';
  * servidor, motivo, huellas), listas de chequeo de Calidad y el PDF
  * controlado generado al cerrar la Aprobación.
  */
-export default function SgcSignaturesCard({ data, onRetryPdf }: { data: SgcRequestDetail; onRetryPdf: () => Promise<void> }) {
+export default function SgcSignaturesCard({ data, onRetryPdf, idTask = null }: { data: SgcRequestDetail; onRetryPdf: () => Promise<void>; idTask?: number | null }) {
   const { request, permissions, currentDraft, signatures, qualityChecks, controlledPdf, draftRevisions } = data;
+  const editorHref = draftEditorHref(request.id, request.idCompany, idTask);
   return (
     <Card shadow='sm' p='xl' radius='md' withBorder mt='6' data-testid='sgc-firmas'>
       <Group justify='space-between' mb='sm'>
@@ -23,7 +25,7 @@ export default function SgcSignaturesCard({ data, onRetryPdf }: { data: SgcReque
           Firmas electrónicas y borrador
         </Title>
         {permissions.canUploadDraft && (
-          <Button component={Link} href={`/process/sgc-documental/solicitudes/${request.id}/borrador?empresa=${request.idCompany}`} leftSection={<IconEdit size={16} />} variant='light' data-testid='sgc-editar-borrador'>
+          <Button component={Link} href={editorHref} leftSection={<IconEdit size={16} />} variant='light' data-testid='sgc-editar-borrador'>
             Editar borrador en la app
           </Button>
         )}
@@ -36,7 +38,7 @@ export default function SgcSignaturesCard({ data, onRetryPdf }: { data: SgcReque
           {currentDraft ? (
             <Text size='sm' data-testid='sgc-borrador-vigente'>
               {currentDraft.kind === 'borrador_editor' ? (
-                <Anchor component={Link} href={`/process/sgc-documental/solicitudes/${request.id}/borrador?empresa=${request.idCompany}`}>
+                <Anchor component={Link} href={editorHref}>
                   {currentDraft.name}
                 </Anchor>
               ) : (
