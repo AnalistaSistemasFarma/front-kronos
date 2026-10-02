@@ -857,8 +857,8 @@ async function sendReviewerEmail(params: {
 
 /**
  * Envía la versión validada al cliente: PDF de vista previa con marca "BORRADOR", documento
- * Orion no firmable y URL de revisión para cada aprobador activo. Los correos los envía el
- * elaborador con "Enviar URL al correo" (orionDraftClientInvite).
+ * Orion no firmable, URL de revisión y correo para cada aprobador activo (en orden: solo el
+ * primero; los demás al aceptar el anterior). Reenviar/renovar: orionDraftClientInvite.
  */
 export async function sendOrionDraftToClient(
   pool: SqlPool,
@@ -944,6 +944,31 @@ export async function sendOrionDraftToClient(
     throw err;
   }
 
+  // Un solo paso: cada aprobador activo recibe ya su correo. Si uno falla, queda para
+  // "Enviar al correo" en el tablero sin deshacer el envío de los demás.
+  const unsent: string[] = [];
+  for (const reviewer of activeClientReviewers(draft.clientReview)) {
+    if (!reviewer.reviewUrl) continue;
+    try {
+      await sendReviewerEmail({
+        draft,
+        reviewer,
+        reviewUrl: reviewer.reviewUrl,
+        expiresAt: reviewer.expiresAt,
+        subject: ctx.subject_request ?? null,
+        invitedBy: { name: params.actor.name, email: params.actor.email },
+      });
+      draft = applyDraftReviewerInvite(draft, reviewer.email, {
+        reviewUrl: reviewer.reviewUrl,
+        expiresAt: reviewer.expiresAt ?? null,
+        sent: true,
+      });
+    } catch (err) {
+      console.warn('[orion/draft] correo al aprobador del cliente:', reviewer.email, err);
+      unsent.push(reviewer.name || reviewer.email);
+    }
+  }
+
   await saveDraft(pool, params.requestId, loaded.formFieldId, loaded.bag, draft);
   const review = draft.clientReview!;
   await note(
@@ -951,7 +976,9 @@ export async function sendOrionDraftToClient(
     params.requestId,
     `📤 ${draft.fileName} (borrador ${review.versionLabel}) enviado al cliente — ${
       review.mode === 'parallel' ? 'en paralelo' : 'en orden'
-    }: ${review.reviewers.map((r) => `${r.order}. ${r.name || r.email}`).join(' · ')}`,
+    }: ${review.reviewers.map((r) => `${r.order}. ${r.name || r.email}`).join(' · ')}${
+      unsent.length ? ` · ⚠️ sin correo (enviar desde el tablero): ${unsent.join(', ')}` : ''
+    }`,
     params.actor
   );
   await publishDraftEvent(pool, params.requestId, params.fileId, 'status_changed', { status: draft.status });

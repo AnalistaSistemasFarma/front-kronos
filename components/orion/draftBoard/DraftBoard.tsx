@@ -1392,13 +1392,13 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
               onClick={async () => {
                 const ok = await postDraft(
                   'send-client',
-                  'Borrador listo en Orion. Envíe el enlace por correo a cada aprobador (panel "Aprobadores del cliente").',
+                  'Borrador enviado: el cliente recibió el correo con el enlace de revisión.',
                   { reviewers: clientReviewers, mode: clientMode }
                 );
                 if (ok) setSendClientOpen(false);
               }}
             >
-              Crear borrador
+              Enviar correo al cliente
             </Button>
           </Group>
         </Stack>
