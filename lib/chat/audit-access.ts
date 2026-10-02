@@ -1,6 +1,6 @@
 import { prisma } from '../prisma';
 import { checkAdminPrivileges } from '../access-control';
-import { AUDIT_CONVERSATIONS_URL } from './audit-constants';
+import { AUDIT_CONFIGURE_URL, AUDIT_CONVERSATIONS_URL } from './audit-constants';
 
 /**
  * PERMISO DEL MÓDULO "Auditoría de agentes".
@@ -53,7 +53,7 @@ export async function canAuditAgents(userEmail: string): Promise<boolean> {
   return checkAdminPrivileges(email);
 }
 
-export { AUDIT_CONVERSATIONS_URL };
+export { AUDIT_CONFIGURE_URL, AUDIT_CONVERSATIONS_URL };
 
 /**
  * ¿Puede este usuario leer el TEXTO de las conversaciones en la auditoría?
@@ -80,4 +80,27 @@ export async function canViewAuditConversations(userEmail: string): Promise<bool
     select: { id_subprocess_user_company: true },
   });
   return Boolean(asignado);
+}
+
+/**
+ * ¿Puede este usuario CONFIGURAR la hoja de vida de los agentes (propósito y
+ * dueño)? Hoja de vida, F2 (2026-10-02).
+ *
+ * Exige el subproceso AUDIT_CONFIGURE_URL con nombre propio (ser administrador
+ * NO alcanza, mismo criterio que el permiso de conversaciones) y, además,
+ * poder auditar: el permiso de configurar no abre el módulo por sí solo.
+ */
+export async function canConfigureAgents(userEmail: string): Promise<boolean> {
+  const email = userEmail.trim();
+  if (!email) return false;
+
+  const asignado = await prisma.subprocessUserCompany.findFirst({
+    where: {
+      companyUser: { user: { email } },
+      subprocess: { subprocess_url: AUDIT_CONFIGURE_URL },
+    },
+    select: { id_subprocess_user_company: true },
+  });
+  if (!asignado) return false;
+  return canAuditAgents(email);
 }

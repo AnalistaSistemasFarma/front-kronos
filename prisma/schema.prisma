@@ -660,6 +660,11 @@ model Agent {
   // Auditoría de agentes → Inventario (F1): back-relations requeridas por Prisma.
   inventories      AgentInventory[]
   auditFindings    AgentAuditFinding[]
+  // Auditoría de agentes → Hoja de vida (F2): back-relations requeridas por Prisma.
+  profile          AgentProfile?
+  metricsDaily     AgentMetricsDaily[]
+  cvEntries        AgentCvEntry[]
+  cvSummaries      AgentCvSummary[]
 
   @@unique([code])
   @@map("agent")
@@ -2673,5 +2678,112 @@ model AgentAuditFinding {
   @@unique([id_agent, rule_code, subject])
   @@index([status, severity])
   @@map("agent_audit_finding")
+  @@schema("dbo")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDITORÍA DE AGENTES → HOJA DE VIDA (F2)
+//
+// Pedido de Nicolás (2026-10-01): una ficha por agente con su propósito, su
+// dueño, quién lo usa, qué tiene (inventario de F1), sus métricas, su historial
+// y sus hallazgos, que se actualiza sola. Las métricas salen cada noche de lo
+// que ya registra la auditoría (chat_message y chat_agent_turn_usage); el
+// resumen semanal lo redacta una IA SOLO con datos estructurados, nunca con el
+// texto de las conversaciones.
+//
+// Solo agrega tablas (no toca `agent`). Migración:
+// prisma/migrations/20261002180000_auditoria_hoja_de_vida_agentes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Propósito y dueño del agente. Lo edita quien tenga el permiso de configurar
+/// (subproceso /process/chat/auditoria/configurar). Una fila por agente.
+model AgentProfile {
+  id_agent    Int      @id
+  purpose     String?  @db.NVarChar(1000)
+  owner_name  String?  @db.NVarChar(160)
+  owner_email String?  @db.NVarChar(255)
+  /// Correo de quien hizo el último cambio.
+  updated_by  String?  @db.NVarChar(255)
+  updated_at  DateTime @default(now())
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("agent_profile")
+  @@schema("dbo")
+}
+
+/// Métricas de un agente en un día (hora de Colombia). Las recalcula el job
+/// nocturno sobre una ventana de días: se borran y se vuelven a escribir, así
+/// que repetir la corrida no duplica nada.
+model AgentMetricsDaily {
+  id                    Int      @id @default(autoincrement())
+  id_agent              Int
+  day                   DateTime @db.Date
+  /// Mensajes de personas en los hilos del agente.
+  messages_received     Int      @default(0)
+  /// Mensajes que publicó el agente.
+  messages_sent         Int      @default(0)
+  /// Personas distintas que le escribieron ese día.
+  active_users          Int      @default(0)
+  conversations         Int      @default(0)
+  /// Turnos con consumo reportado, ya DEDUPLICADOS: un turno que atendió varias
+  /// conversaciones se reporta una vez por conversación con la misma cifra
+  /// (mismo session_id + turn_started_at) y aquí cuenta una sola vez.
+  turns                 Int      @default(0)
+  input_tokens          BigInt   @default(0)
+  cache_creation_tokens BigInt   @default(0)
+  cache_read_tokens     BigInt   @default(0)
+  output_tokens         BigInt   @default(0)
+  total_tokens          BigInt   @default(0)
+  computed_at           DateTime @default(now())
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, day])
+  @@index([day])
+  @@map("agent_metrics_daily")
+  @@schema("dbo")
+}
+
+/// Entrada de la línea de tiempo de la hoja de vida. `source_ref` es único por
+/// agente y hace idempotente la reconstrucción (p. ej. 'alta', 'inv:123',
+/// 'hal-abre:<ms>', 'hal-cierra:<ms>', 'perfil:<ms>').
+model AgentCvEntry {
+  id          Int      @id @default(autoincrement())
+  id_agent    Int
+  occurred_at DateTime
+  /// 'alta' | 'inventario' | 'hallazgo_abierto' | 'hallazgo_cerrado' | 'perfil'
+  kind        String   @db.NVarChar(30)
+  title       String   @db.NVarChar(300)
+  detail      String?  @db.NVarChar(2000)
+  source_ref  String   @db.NVarChar(120)
+  created_by  String?  @db.NVarChar(255)
+  created_at  DateTime @default(now())
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, source_ref])
+  @@index([id_agent, occurred_at(sort: Desc)])
+  @@map("agent_cv_entry")
+  @@schema("dbo")
+}
+
+/// Resumen semanal redactado con IA a partir SOLO de datos estructurados
+/// (métricas, inventario, hallazgos, historial). `week_start` = lunes de la
+/// semana resumida (hora de Colombia).
+model AgentCvSummary {
+  id           Int      @id @default(autoincrement())
+  id_agent     Int
+  week_start   DateTime @db.Date
+  summary      String   @db.NVarChar(4000)
+  model        String?  @db.NVarChar(120)
+  /// Huella (sha256) de los datos con que se redactó, para auditar qué vio la IA.
+  input_hash   String?  @db.NVarChar(64)
+  generated_at DateTime @default(now())
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, week_start])
+  @@map("agent_cv_summary")
   @@schema("dbo")
 }

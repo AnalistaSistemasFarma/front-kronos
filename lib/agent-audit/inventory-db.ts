@@ -2,6 +2,7 @@
  * INVENTARIO DE AGENTES — parte que toca la base (Prisma). La validación, la
  * barrera contra secretos y las reglas de riesgo están en ./inventory.ts.
  */
+import type { Prisma } from '../../app/generated/prisma';
 import { prisma } from '../prisma';
 import { evaluarHallazgos, type InventoryAgent, type InventoryPayload } from './inventory';
 
@@ -196,6 +197,46 @@ function parseLista<T>(raw: string | null, porDefecto: T): T {
   }
 }
 
+type InventarioConMcps = Prisma.AgentInventoryGetPayload<{ include: { mcps: true } }>;
+
+/** Una fila de inventario (con sus MCP) en la forma que consumen las pantallas. */
+export function mapearInventario(inv: InventarioConMcps) {
+  return {
+    scannedAt: inv.scanned_at.toISOString(),
+    kind: inv.kind,
+    host: inv.host,
+    location: inv.location,
+    model: inv.model,
+    serviceStatus: inv.service_status,
+    execMode: inv.exec_mode,
+    execRequiresApproval: inv.exec_requires_approval,
+    tools: parseLista(inv.tools_json, {
+      allow: [] as string[],
+      deny: [] as string[],
+    }),
+    skills: parseLista(inv.skills_json, [] as string[]),
+    channels: parseLista(
+      inv.channels_json,
+      [] as {
+        type: string;
+        policy: string;
+        allowed: number | null;
+        detail: string | null;
+      }[]
+    ),
+    scanError: inv.scan_error,
+    mcps: inv.mcps.map((m) => ({
+      name: m.name,
+      transport: m.transport,
+      target: m.target,
+      company: m.company,
+      access: m.access,
+      auth: m.auth,
+      writeTools: m.write_tools,
+    })),
+  };
+}
+
 /** Lo que pinta la pestaña Inventario: el último inventario de cada agente. */
 export async function leerInventarioVigente() {
   const agentes = await prisma.agent.findMany({
@@ -269,42 +310,7 @@ export async function leerInventarioVigente() {
         displayName: a.display_name,
         handle: a.handle,
         empresas: a.companies.map((c) => c.company.company.trim()),
-        inventario: inv
-          ? {
-              scannedAt: inv.scanned_at.toISOString(),
-              kind: inv.kind,
-              host: inv.host,
-              location: inv.location,
-              model: inv.model,
-              serviceStatus: inv.service_status,
-              execMode: inv.exec_mode,
-              execRequiresApproval: inv.exec_requires_approval,
-              tools: parseLista(inv.tools_json, {
-                allow: [] as string[],
-                deny: [] as string[],
-              }),
-              skills: parseLista(inv.skills_json, [] as string[]),
-              channels: parseLista(
-                inv.channels_json,
-                [] as {
-                  type: string;
-                  policy: string;
-                  allowed: number | null;
-                  detail: string | null;
-                }[]
-              ),
-              scanError: inv.scan_error,
-              mcps: inv.mcps.map((m) => ({
-                name: m.name,
-                transport: m.transport,
-                target: m.target,
-                company: m.company,
-                access: m.access,
-                auth: m.auth,
-                writeTools: m.write_tools,
-              })),
-            }
-          : null,
+        inventario: inv ? mapearInventario(inv) : null,
         hallazgos: (halPorAgente.get(a.id_agent) ?? []).map((h) => ({
           id: h.id,
           ruleCode: h.rule_code,

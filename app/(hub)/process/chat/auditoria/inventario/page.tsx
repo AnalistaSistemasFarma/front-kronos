@@ -23,6 +23,7 @@ import {
   IconAlertTriangle,
   IconArrowLeft,
   IconCircleCheck,
+  IconId,
   IconListDetails,
   IconLock,
   IconRefresh,
@@ -127,6 +128,12 @@ const NOMBRE_SEVERIDAD: Record<string, string> = {
   alto: 'Alto',
   medio: 'Medio',
   bajo: 'Bajo',
+};
+const PLURAL_SEVERIDAD: Record<string, string> = {
+  critico: 'críticos',
+  alto: 'altos',
+  medio: 'medios',
+  bajo: 'bajos',
 };
 const NOMBRE_TIPO: Record<string, string> = {
   'claude-code': 'Claude Code',
@@ -444,6 +451,18 @@ function TarjetaAgente({ a }: { a: Agente }) {
           </Text>
         </Stack>
       )}
+
+      <Group justify='flex-end' mt={8}>
+        <Button
+          component={Link}
+          href={`/process/chat/auditoria/inventario/${encodeURIComponent(a.code)}`}
+          size='xs'
+          variant='light'
+          leftSection={<IconId size={14} />}
+        >
+          Ver hoja de vida
+        </Button>
+      </Group>
     </Card>
   );
 }
@@ -622,7 +641,7 @@ export default function AuditoriaInventarioPage() {
           Qué MCP (con su empresa y si lee o escribe), herramientas, skills y canales tiene cada
           agente registrado en SynerLink, y los riesgos que salen de eso. Se escanea cada noche
           desde la Mac de horus, en solo lectura y sin guardar credenciales.
-          {ultimo?.finishedAt && ` Último escaneo: ${fechaHora(ultimo.finishedAt)}.`}
+          {ultimo?.finishedAt && ` Último escaneo: ${fechaHora(ultimo.finishedAt)}`}
         </Text>
 
         {aviso && (
@@ -651,7 +670,7 @@ export default function AuditoriaInventarioPage() {
           <Alert color='blue' radius='md' mb='md' icon={<Loader size={16} />}>
             Escaneo #{pendiente.id} {pendiente.status === 'en_curso' ? 'en curso' : 'pendiente'}
             {pendiente.requestedBy ? `, pedido por ${pendiente.requestedBy}` : ''} el{' '}
-            {fechaHora(pendiente.requestedAt)}.
+            {fechaHora(pendiente.requestedAt)}
           </Alert>
         )}
 
@@ -756,7 +775,7 @@ export default function AuditoriaInventarioPage() {
                 {SEVERIDADES.map((s) => (
                   <div key={s}>
                     <Text size='xs' c='dimmed'>
-                      Hallazgos {NOMBRE_SEVERIDAD[s].toLowerCase()}
+                      Hallazgos {PLURAL_SEVERIDAD[s]}
                     </Text>
                     <Text
                       fw={resumen[s] > 0 && (s === 'critico' || s === 'alto') ? 700 : undefined}
