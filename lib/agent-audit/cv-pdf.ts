@@ -225,8 +225,8 @@ export function htmlHojaDeVida(
   .t tr { break-inside: avoid; }
   .r { text-align: right; }
   .chip { display: inline-block; border: 1px solid; border-radius: 999px; padding: 0 7px; font-size: 8pt; margin: 1px 2px 1px 0; }
-  .kpis { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
-  .kpi { flex: 1 1 22%; border: 1px solid #d8dde6; border-radius: 10px; padding: 8px 10px; }
+  .kpis { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; break-inside: avoid; }
+  .kpi { break-inside: avoid; flex: 1 1 22%; border: 1px solid #d8dde6; border-radius: 10px; padding: 8px 10px; }
   .kpi-v { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; font-size: 15pt; font-weight: 700; color: #1a3c6e; }
   .kpi-k { font-size: 8.5pt; color: #38445a; }
   .kpi-n { font-size: 7.5pt; color: #6a7689; }

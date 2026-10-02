@@ -112,6 +112,12 @@ describe('cambios de inventario', () => {
     expect(c).toContain('sapbo-ryan pasó de sin autenticación a con autenticación.');
     expect(c).toContain('Skills nuevos: olp-design.');
   });
+  it('no cuenta como cambio un sondeo que no pudo determinar acceso o autenticación', () => {
+    const conAuth = foto({ mcps: [{ name: 'higgsfield', access: 'lectura', auth: 'requerida', company: null }] });
+    const sinDato = foto({ mcps: [{ name: 'higgsfield', access: 'desconocido', auth: 'desconocida', company: null }] });
+    expect(diffInventarios(conAuth, sinDato)).toEqual([]);
+    expect(diffInventarios(sinDato, conAuth)).toEqual([]);
+  });
   it('resume listas largas', () => {
     const muchos = Array.from({ length: 12 }, (_, i) => `s${String(i).padStart(2, '0')}`);
     const c = diffInventarios(foto({ skills: [] }), foto({ skills: muchos }));

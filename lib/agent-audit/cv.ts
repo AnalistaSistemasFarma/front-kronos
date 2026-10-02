@@ -184,12 +184,15 @@ export function diffInventarios(prev: FotoInventario, next: FotoInventario): str
   for (const [nombre, m] of mcpNext) {
     const p = mcpPrev.get(nombre);
     if (!p) continue;
-    if (p.access !== m.access) {
+    // 'desconocido'/'desconocida' = el sondeo no pudo saberlo en esa corrida
+    // (p. ej. el MCP no respondió a tiempo). No es un cambio real: contarlo
+    // llenaría el historial de idas y vueltas.
+    if (p.access !== m.access && p.access !== 'desconocido' && m.access !== 'desconocido') {
       cambios.push(
         `${nombre} pasó de ${NOMBRE_ACCESO[p.access] ?? p.access} a ${NOMBRE_ACCESO[m.access] ?? m.access}.`
       );
     }
-    if (p.auth !== m.auth) {
+    if (p.auth !== m.auth && p.auth !== 'desconocida' && m.auth !== 'desconocida') {
       cambios.push(`${nombre} pasó de ${NOMBRE_AUTH[p.auth] ?? p.auth} a ${NOMBRE_AUTH[m.auth] ?? m.auth}.`);
     }
   }
