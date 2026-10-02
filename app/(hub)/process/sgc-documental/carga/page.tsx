@@ -154,10 +154,10 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
             />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 8 }}>
-            <TextInput label='Título' value={title} onChange={(e) => setTitle(e.currentTarget.value)} required />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Título' value={title} onChange={(e) => setTitle(e.currentTarget.value)} required />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 4 }}>
-            <TextInput
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
               label='Código'
               description={codePreview ? `Vacío = siguiente consecutivo: ${codePreview}` : 'Vacío = se genera con la guía'}
               value={code}
@@ -189,10 +189,10 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
             <NumberInput label='Versión' min={1} max={999} value={versionNumber} onChange={setVersionNumber} />
           </Grid.Col>
           <Grid.Col span={{ base: 6, md: 2 }}>
-            <TextInput type='date' label='Vigente desde' value={effectiveDate} max={today()} onChange={(e) => setEffectiveDate(e.currentTarget.value)} />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' type='date' label='Vigente desde' value={effectiveDate} max={today()} onChange={(e) => setEffectiveDate(e.currentTarget.value)} />
           </Grid.Col>
           <Grid.Col span={12}>
-            <Textarea
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true'
               label='Descripción de la versión'
               placeholder='Carga inicial del documento vigente.'
               value={changeDescription}

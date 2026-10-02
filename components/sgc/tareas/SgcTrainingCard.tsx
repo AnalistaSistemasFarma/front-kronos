@@ -108,19 +108,19 @@ export default function SgcTrainingCard({ view, onSave, onUpload }: SgcTrainingC
               <Select label='Modalidad' data={(Object.keys(SGC_TRAINING_MODE_LABELS) as SgcTrainingMode[]).map((k) => ({ value: k, label: SGC_TRAINING_MODE_LABELS[k] }))} value={form.mode} onChange={(v) => set('mode', v ?? 'mixta')} allowDeselect={false} data-testid='sgc-capacitacion-modalidad' />
             </Grid.Col>
             <Grid.Col span={{ base: 12, md: 8 }}>
-              <TextInput label='Tema' required value={form.title} onChange={(e) => set('title', e.currentTarget.value)} data-testid='sgc-capacitacion-titulo' />
+              <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Tema' required value={form.title} onChange={(e) => set('title', e.currentTarget.value)} data-testid='sgc-capacitacion-titulo' />
             </Grid.Col>
             <Grid.Col span={{ base: 12, md: 6 }}>
-              <TextInput label='Enlace del video (https)' value={form.videoUrl} onChange={(e) => set('videoUrl', e.currentTarget.value)} data-testid='sgc-capacitacion-video' />
+              <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Enlace del video (https)' value={form.videoUrl} onChange={(e) => set('videoUrl', e.currentTarget.value)} data-testid='sgc-capacitacion-video' />
             </Grid.Col>
             <Grid.Col span={{ base: 12, md: 6 }}>
-              <TextInput label='Enlace de la evaluación en Microsoft Forms (https)' required value={form.formsUrl} onChange={(e) => set('formsUrl', e.currentTarget.value)} data-testid='sgc-capacitacion-forms' />
+              <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Enlace de la evaluación en Microsoft Forms (https)' required value={form.formsUrl} onChange={(e) => set('formsUrl', e.currentTarget.value)} data-testid='sgc-capacitacion-forms' />
             </Grid.Col>
             <Grid.Col span={{ base: 12, md: 4 }}>
-              <TextInput label='Fecha de la sesión (AAAA-MM-DD)' value={form.sessionDate} onChange={(e) => set('sessionDate', e.currentTarget.value)} data-testid='sgc-capacitacion-fecha' />
+              <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Fecha de la sesión (AAAA-MM-DD)' value={form.sessionDate} onChange={(e) => set('sessionDate', e.currentTarget.value)} data-testid='sgc-capacitacion-fecha' />
             </Grid.Col>
             <Grid.Col span={{ base: 12, md: 4 }}>
-              <TextInput label='Quién dicta' value={form.instructor} onChange={(e) => set('instructor', e.currentTarget.value)} />
+              <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Quién dicta' value={form.instructor} onChange={(e) => set('instructor', e.currentTarget.value)} />
             </Grid.Col>
             <Grid.Col span={{ base: 6, md: 2 }}>
               <NumberInput label='Puntaje máximo' min={1} max={1000} value={form.maxScore} onChange={(v) => set('maxScore', v)} data-testid='sgc-capacitacion-maximo' />
@@ -129,7 +129,7 @@ export default function SgcTrainingCard({ view, onSave, onUpload }: SgcTrainingC
               <NumberInput label='Nota mínima (%)' min={1} max={100} value={form.minScorePct} onChange={(v) => set('minScorePct', v)} data-testid='sgc-capacitacion-minima' />
             </Grid.Col>
             <Grid.Col span={12}>
-              <Textarea label='Observaciones' autosize minRows={1} value={form.notes} onChange={(e) => set('notes', e.currentTarget.value)} />
+              <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Observaciones' autosize minRows={1} value={form.notes} onChange={(e) => set('notes', e.currentTarget.value)} />
             </Grid.Col>
           </Grid>
           <Group>

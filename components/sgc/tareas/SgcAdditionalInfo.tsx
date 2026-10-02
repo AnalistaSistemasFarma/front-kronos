@@ -64,9 +64,9 @@ export default function SgcAdditionalInfo({ fields, canEdit, onSave }: SgcAdditi
                         placeholder='Seleccione una opción'
                       />
                     ) : f.type === 'texto_largo' ? (
-                      <Textarea value={value} onChange={(e) => setValue(e.target.value)} autosize minRows={3} />
+                      <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' value={value} onChange={(e) => setValue(e.target.value)} autosize minRows={3} />
                     ) : (
-                      <TextInput type={f.type === 'numero' ? 'number' : f.type === 'fecha' ? 'date' : 'text'} value={value} onChange={(e) => setValue(e.target.value)} />
+                      <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' type={f.type === 'numero' ? 'number' : f.type === 'fecha' ? 'date' : 'text'} value={value} onChange={(e) => setValue(e.target.value)} />
                     )}
                     <Group justify='flex-end' gap='xs'>
                       <Button variant='outline' size='xs' onClick={() => setEditing(null)} disabled={saving}>

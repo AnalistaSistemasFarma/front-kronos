@@ -176,7 +176,7 @@ function MapCanvas({ company, graph, showObsolete, setShowObsolete }: { company:
     <Stack gap='sm'>
       <Card withBorder radius='md' p='sm'>
         <Group gap='sm' align='flex-end' wrap='wrap'>
-          <TextInput
+          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
             label='Buscar por código'
             placeholder='OLP-GC-PR-001'
             value={query}

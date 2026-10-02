@@ -144,7 +144,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
             data-testid='sgc-nueva-documento'
           />
         )}
-        <TextInput
+        <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
           label='Asunto'
           required
           value={subjectTouched || !prefill.tipo ? subject : subject || suggestedSubject}
@@ -155,7 +155,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
           placeholder={selectedDoc ? `Nueva versión de ${selectedDoc.code}` : 'Procedimiento de…'}
           data-testid='sgc-nueva-asunto'
         />
-        <Textarea label='Justificación' required minRows={3} autosize value={description} onChange={(e) => setDescription(e.currentTarget.value)} data-testid='sgc-nueva-justificacion' />
+        <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Justificación' required minRows={3} autosize value={description} onChange={(e) => setDescription(e.currentTarget.value)} data-testid='sgc-nueva-justificacion' />
         <Select
           label='Elaborador'
           description='Quien elabora el documento y asigna a los revisores y aprobadores.'
@@ -185,9 +185,9 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
               data-testid={`sgc-campo-${f.key}`}
             />
           ) : f.type === 'texto_largo' ? (
-            <Textarea key={f.key} label={f.label} description={f.helpText ?? undefined} required={f.required} autosize minRows={2} value={values[f.key] ?? ''} onChange={(e) => setValues((p) => ({ ...p, [f.key]: e.currentTarget.value }))} data-testid={`sgc-campo-${f.key}`} />
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' key={f.key} label={f.label} description={f.helpText ?? undefined} required={f.required} autosize minRows={2} value={values[f.key] ?? ''} onChange={(e) => setValues((p) => ({ ...p, [f.key]: e.currentTarget.value }))} data-testid={`sgc-campo-${f.key}`} />
           ) : (
-            <TextInput
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
               key={f.key}
               label={f.label}
               description={f.helpText ?? undefined}

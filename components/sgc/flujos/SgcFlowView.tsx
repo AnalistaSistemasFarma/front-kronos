@@ -411,7 +411,7 @@ export default function SgcFlowView({ idFlowProcess }: { idFlowProcess: number }
                         Descripción
                       </Text>
                       {isEditing && editedProcess ? (
-                        <Textarea value={editedProcess.description} onChange={(e) => setEditedProcess({ ...editedProcess, description: e.target.value })} placeholder='Ingrese la descripción' minRows={3} autosize />
+                        <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' value={editedProcess.description} onChange={(e) => setEditedProcess({ ...editedProcess, description: e.target.value })} placeholder='Ingrese la descripción' minRows={3} autosize />
                       ) : (
                         <Text size='md' className='whitespace-pre-line'>
                           {flow.description || 'Sin descripción'}

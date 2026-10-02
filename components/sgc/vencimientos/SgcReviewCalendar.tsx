@@ -185,7 +185,7 @@ export default function SgcReviewCalendar({ company }: { company: SgcCompanyAcce
           <Switch label='Mis vencimientos' checked={mine} onChange={(e) => setMine(e.currentTarget.checked)} data-testid='sgc-cal-mios' />
         </Group>
         <Group gap='sm' mt='sm' wrap='wrap' align='flex-end'>
-          <TextInput placeholder='Código o título' leftSection={<IconSearch size={14} />} value={text} onChange={(e) => setText(e.currentTarget.value)} w={200} data-testid='sgc-cal-buscar' />
+          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' placeholder='Código o título' leftSection={<IconSearch size={14} />} value={text} onChange={(e) => setText(e.currentTarget.value)} w={200} data-testid='sgc-cal-buscar' />
           <Select placeholder='Área' data={uniq(all.filter((i) => i.idDepartment).map((i) => [i.idDepartment!, i.department ?? `#${i.idDepartment}`]))} value={dept} onChange={setDept} clearable searchable w={190} />
           <Select placeholder='Proceso' data={uniq(all.map((i) => [i.idProcess, i.process]))} value={proc} onChange={setProc} clearable searchable w={210} data-testid='sgc-cal-proceso' />
           <Select placeholder='Tipo documental' data={uniq(all.map((i) => [i.idDocumentType, i.documentType]))} value={type} onChange={setType} clearable w={190} />

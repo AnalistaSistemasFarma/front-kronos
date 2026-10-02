@@ -86,7 +86,7 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
         </Title>
         <Stack>
           <Select label='Persona' placeholder='Elija la persona' data={options} value={email} onChange={setEmail} searchable data-testid='sgc-firmas-persona' />
-          <TextInput label='Motivo' placeholder='Inducción al SGC del 2026-10-01' value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-firmas-motivo' />
+          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' placeholder='Inducción al SGC del 2026-10-01' value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-firmas-motivo' />
           {image ? (
             <Group>
               <Image src={image} alt='Firma dibujada' h={80} w='auto' fit='contain' radius='sm' />
@@ -175,7 +175,7 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
 
       <Modal opened={Boolean(revoke)} onClose={() => setRevoke(null)} title='Revocar firma registrada' centered>
         <Stack>
-          <Textarea label='Motivo' minRows={2} autosize value={revoke?.reason ?? ''} onChange={(e) => setRevoke((r) => (r ? { ...r, reason: e.currentTarget.value } : r))} />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' minRows={2} autosize value={revoke?.reason ?? ''} onChange={(e) => setRevoke((r) => (r ? { ...r, reason: e.currentTarget.value } : r))} />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setRevoke(null)}>
               Volver

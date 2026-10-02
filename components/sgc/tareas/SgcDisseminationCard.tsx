@@ -123,8 +123,8 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
             {(kind === 'departamento' || kind === 'cargo') && (
               <Select label={kind === 'departamento' ? 'Departamento' : 'Cargo'} data={targetOptions} value={target} onChange={setTarget} searchable w={280} data-testid='sgc-alcance-destino' />
             )}
-            {kind === 'persona' && <Autocomplete label='Correo de la persona' data={users} value={email} onChange={setEmail} w={300} data-testid='sgc-alcance-persona' />}
-            <Textarea label='Motivo' autosize minRows={1} value={reason} onChange={(e) => setReason(e.currentTarget.value)} w={260} data-testid='sgc-alcance-motivo' />
+            {kind === 'persona' && <Autocomplete autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Correo de la persona' data={users} value={email} onChange={setEmail} w={300} data-testid='sgc-alcance-persona' />}
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' autosize minRows={1} value={reason} onChange={(e) => setReason(e.currentTarget.value)} w={260} data-testid='sgc-alcance-motivo' />
             <Button leftSection={<IconPlus size={14} />} disabled={!ready} onClick={add} data-testid='sgc-alcance-agregar'>
               Agregar
             </Button>
@@ -225,7 +225,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
                 ? 'La persona deja de tener la lectura pendiente (no se borra: queda excluida con la justificación).'
                 : 'La entrada se retira del alcance (no se borra: queda en el historial).'}
           </Text>
-          <Textarea label={modal?.type === 'retirar' ? 'Motivo' : 'Justificación'} required autosize minRows={3} value={modalReason} onChange={(e) => setModalReason(e.currentTarget.value)} data-testid='sgc-divulgacion-motivo' />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label={modal?.type === 'retirar' ? 'Motivo' : 'Justificación'} required autosize minRows={3} value={modalReason} onChange={(e) => setModalReason(e.currentTarget.value)} data-testid='sgc-divulgacion-motivo' />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setModal(null)}>
               Volver

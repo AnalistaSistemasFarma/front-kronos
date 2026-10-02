@@ -71,7 +71,7 @@ export function SgcAddTaskModal({ opened, onClose, onAdd, authorizationTypes }: 
       <Stack gap='lg'>
         <Grid>
           <Grid.Col span={12}>
-            <TextInput label='Nombre de la Tarea' placeholder='Ingrese el nombre de la tarea' value={form.name} onChange={(e) => set({ name: e.target.value })} required leftSection={<IconListCheck size={16} />} size='lg' classNames={LG_FIELD} data-testid='sgc-nueva-tarea-nombre' />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Nombre de la Tarea' placeholder='Ingrese el nombre de la tarea' value={form.name} onChange={(e) => set({ name: e.target.value })} required leftSection={<IconListCheck size={16} />} size='lg' classNames={LG_FIELD} data-testid='sgc-nueva-tarea-nombre' />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 6 }}>
             <Select
@@ -275,13 +275,13 @@ export function SgcMatrixModal({ opened, onClose, idCompany, canEdit, onCount }:
                 <Select label='Tipo documental' clearable placeholder='Todos' data={(catalogs.data?.documentTypes ?? []).map((t) => ({ value: String(t.id), label: `${t.code} · ${t.name}` }))} value={row.idDocumentType || null} onChange={(v) => setRow({ ...row, idDocumentType: v ?? '' })} />
               </Grid.Col>
               <Grid.Col span={{ base: 12, md: 6 }}>
-                <TextInput label='Correo (persona)' value={row.userEmail} onChange={(e) => setRow({ ...row, userEmail: e.currentTarget.value, cargoName: '' })} leftSection={<IconUser size={16} />} />
+                <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Correo (persona)' value={row.userEmail} onChange={(e) => setRow({ ...row, userEmail: e.currentTarget.value, cargoName: '' })} leftSection={<IconUser size={16} />} />
               </Grid.Col>
               <Grid.Col span={{ base: 12, md: 6 }}>
-                <TextInput label='o Cargo' value={row.cargoName} onChange={(e) => setRow({ ...row, cargoName: e.currentTarget.value, userEmail: '' })} />
+                <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='o Cargo' value={row.cargoName} onChange={(e) => setRow({ ...row, cargoName: e.currentTarget.value, userEmail: '' })} />
               </Grid.Col>
               <Grid.Col span={12}>
-                <Textarea label='Motivo del cambio' required autosize minRows={1} value={row.reason} onChange={(e) => setRow({ ...row, reason: e.currentTarget.value })} />
+                <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo del cambio' required autosize minRows={1} value={row.reason} onChange={(e) => setRow({ ...row, reason: e.currentTarget.value })} />
               </Grid.Col>
             </Grid>
           </>

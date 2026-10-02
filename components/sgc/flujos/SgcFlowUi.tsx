@@ -144,7 +144,7 @@ export function SgcReasonModal({
     >
       <Stack gap='lg'>
         {children}
-        <Textarea
+        <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true'
           label={label}
           placeholder='Explique qué cambia y por qué (mínimo 5 caracteres)'
           required

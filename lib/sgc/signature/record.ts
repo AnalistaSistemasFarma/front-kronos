@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { SgcError } from '../errors';
+import { looksLikeAutofilledEmail } from '../autofill';
 import { SGC_SIGNATURE_LABELS, SGC_SIGNATURE_MEANINGS, type SgcSignatureMeaning } from '../flows/definition';
 import { SGC_SIGNATURE_AUTH_METHOD, SGC_SIGNATURE_CONSENT, SGC_SIGNATURE_CONSENT_REQUIRED_MESSAGE, SGC_SIGNATURE_CONSENT_VERSION } from './consent';
 
@@ -83,7 +84,7 @@ export interface SgcSignInput {
  * sin aceptar el consentimiento NO se firma. El significado debe ser el que
  * exige la tarea (no lo elige el cliente).
  */
-export function validateSignInput(raw: SgcSignInputRaw, expected: SgcSignatureMeaning | null): SgcSignInput {
+export function validateSignInput(raw: SgcSignInputRaw, expected: SgcSignatureMeaning | null, signerEmail?: string | null): SgcSignInput {
   if (!expected) throw new SgcError('Esta tarea no lleva firma electrónica.', 409);
   if (raw.meaning !== expected) {
     throw new SgcError(`El significado de la firma de esta tarea es «${SGC_SIGNATURE_LABELS[expected]}».`);
@@ -92,6 +93,8 @@ export function validateSignInput(raw: SgcSignInputRaw, expected: SgcSignatureMe
   const reason = typeof raw.reason === 'string' ? raw.reason.trim() : '';
   if (reason.length < 5) throw new SgcError('Escriba el motivo de la firma (mínimo 5 caracteres).');
   if (reason.length > 1000) throw new SgcError('El motivo admite máximo 1000 caracteres.');
+  // El gestor de contraseñas del navegador puede rellenar el motivo con el correo: eso no es un motivo.
+  if (looksLikeAutofilledEmail(reason, signerEmail)) throw new SgcError('Escriba el motivo de la firma: el campo tiene su correo (lo rellenó el navegador).');
   if (raw.consentAccepted !== true) throw new SgcError(SGC_SIGNATURE_CONSENT_REQUIRED_MESSAGE);
   const password = typeof raw.password === 'string' ? raw.password : '';
   if (!password) throw new SgcError('Escriba su contraseña de SynerLink para firmar (reautenticación).', 401);

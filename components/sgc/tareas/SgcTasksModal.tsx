@@ -192,7 +192,7 @@ export default function SgcTasksModal({ opened, onClose, requestId, tasks, users
           <Text size='sm'>
             La tarea pasará a <strong>{users.find((u) => u.value === pending?.toEmail)?.label ?? pending?.toEmail}</strong>. El cambio queda en el historial.
           </Text>
-          <Textarea label='Motivo de la reasignación' required minRows={2} autosize value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-reasignar-motivo' />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo de la reasignación' required minRows={2} autosize value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-reasignar-motivo' />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setPending(null)} disabled={saving}>
               Cancelar

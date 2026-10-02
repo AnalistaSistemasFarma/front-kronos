@@ -523,7 +523,7 @@ export default function SgcFlowsList() {
                       <Select label='Empresa Solicitante' data={companies} value={companyId} disabled leftSection={<IconBuilding size={16} />} size='lg' classNames={LG_FIELD} />
                     </Grid.Col>
                     <Grid.Col span={{ base: 12, md: 4 }}>
-                      <TextInput
+                      <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
                         label='Código'
                         placeholder='Ej. CC'
                         description='Mayúsculas, p. ej. CC (control de cambios)'
@@ -538,7 +538,7 @@ export default function SgcFlowsList() {
                       />
                     </Grid.Col>
                     <Grid.Col span={12}>
-                      <TextInput
+                      <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
                         label='Nombre del Proceso'
                         placeholder='Ingrese el nombre del proceso'
                         required
@@ -588,10 +588,10 @@ export default function SgcFlowsList() {
                       />
                     </Grid.Col>
                     <Grid.Col span={12}>
-                      <Textarea label='Descripción' placeholder='Ingrese la descripción' autosize minRows={2} value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.currentTarget.value })} classNames={{ label: 'text-sm font-medium mb-2' }} />
+                      <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Descripción' placeholder='Ingrese la descripción' autosize minRows={2} value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.currentTarget.value })} classNames={{ label: 'text-sm font-medium mb-2' }} />
                     </Grid.Col>
                     <Grid.Col span={12}>
-                      <Textarea
+                      <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true'
                         label='Motivo (control de cambios)'
                         placeholder='Por qué se crea este flujo'
                         required

@@ -121,9 +121,9 @@ export default function SgcDocumentRelations({ idDocument, idCompany, code, canA
             onChange={setDirection}
             allowDeselect={false}
           />
-          <TextInput label='Código del otro documento' placeholder='OLP-GC-FO-001' value={other} onChange={(e) => setOther(e.currentTarget.value)} data-testid='sgc-relacion-codigo' />
-          <TextInput label='Nota (opcional)' value={note} onChange={(e) => setNote(e.currentTarget.value)} />
-          <Textarea label='Motivo' description='Queda en la auditoría (mínimo 10 caracteres).' value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-relacion-motivo' />
+          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Código del otro documento' placeholder='OLP-GC-FO-001' value={other} onChange={(e) => setOther(e.currentTarget.value)} data-testid='sgc-relacion-codigo' />
+          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Nota (opcional)' value={note} onChange={(e) => setNote(e.currentTarget.value)} />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' description='Queda en la auditoría (mínimo 10 caracteres).' value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-relacion-motivo' />
           <Button
             loading={busy}
             data-testid='sgc-relacion-guardar'
@@ -152,7 +152,7 @@ export default function SgcDocumentRelations({ idDocument, idCompany, code, canA
         <Stack>
           {error && <Alert color='red'>{error}</Alert>}
           <Text size='sm'>No se borra: queda retirada con su motivo en la auditoría.</Text>
-          <Textarea label='Motivo' value={reason} onChange={(e) => setReason(e.currentTarget.value)} />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' value={reason} onChange={(e) => setReason(e.currentTarget.value)} />
           <Button color='red' loading={busy} onClick={() => removing && save(() => sgcSend(`/api/sgc/relations/${removing.id}/remove`, 'POST', { reason }))}>
             Retirar
           </Button>

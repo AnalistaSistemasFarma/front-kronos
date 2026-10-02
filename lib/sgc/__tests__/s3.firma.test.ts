@@ -87,6 +87,10 @@ describe('SGC · S3 · validación de la firma (reautenticación, significado, m
     expect(() => validateSignInput({ ...ok, reason: 42 }, 'reviso')).toThrow(/motivo/);
     expect(() => validateSignInput({ ...ok, reason: 'x'.repeat(1001) }, 'reviso')).toThrow(/1000/);
     expect(() => validateSignInput({ ...ok, consentAccepted: 'si' }, 'reviso')).toThrow(/aceptar las condiciones/);
+    // Autocompletado del navegador: el motivo no puede ser el correo del firmante.
+    expect(() => validateSignInput({ ...ok, reason: 'Nicolas.Rivera@gsslatam.com' }, 'reviso', 'nicolas.rivera@gsslatam.com')).toThrow(/Escriba el motivo de la firma/);
+    expect(() => validateSignInput({ ...ok, reason: ' nicolas.rivera@gsslatam.com ' }, 'reviso', 'nicolas.rivera@gsslatam.com')).toThrow(/Escriba el motivo de la firma/);
+    expect(validateSignInput(ok, 'reviso', 'nicolas.rivera@gsslatam.com').reason).toBe('Revisado sin observaciones');
   });
 
   it('[SGC-REQ-039] el significado lo fija la tarea (Elaboró/Revisó/Aprobó/Leyó), no el cliente', () => {
