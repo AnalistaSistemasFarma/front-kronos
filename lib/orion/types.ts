@@ -87,6 +87,12 @@ export type OrionReviewApproval = {
   decision: OrionReviewDecision;
   decidedAt?: string | null;
   comment?: string | null;
+  /** Tablero Word: subversión que aprobó (una subversión nueva le pide aprobar otra vez). */
+  approvedVersion?: string | null;
+  /** Tablero Word: subversión sobre la que pidió corrección (decision DEVUELTO). */
+  correctionVersion?: string | null;
+  /** Tablero Word: subversión en la que la preparadora resolvió su pedido (vuelve a revisar). */
+  correctedIn?: string | null;
 };
 
 /** Validación previa a firma (validadores en secuencia configurados por flujo). */
@@ -182,6 +188,8 @@ export type OrionSignatureState = {
     kind?: 'signature' | 'fingerprint' | 'validation' | 'approval';
     validatorEmail?: string | null;
   }>;
+  /** PDF generado desde una preparación en Word (fileId del .docx). */
+  sourceDraftFileId?: string | null;
   updatedAt?: string;
 };
 
@@ -199,9 +207,97 @@ export type OrionSignatureBagBag = {
   documents: Record<string, OrionSignatureState>;
   updatedAt?: string;
   deletedDocuments?: OrionDeletedDocument[];
+  /** Preparación en Word antes de la firma, por fileId del .docx (docs/orion-borrador-word-diseno.md). */
+  drafts?: Record<string, OrionDraftState>;
+};
+
+/** Estados de la preparación en Word (etapa previa al PDF). */
+export type OrionDraftStatus =
+  | 'EN_ELABORACION'
+  | 'EN_VALIDACION_INTERNA'
+  | 'DEVUELTO_INTERNO'
+  | 'VALIDADO_INTERNO'
+  | 'EN_REVISION_CLIENTE'
+  | 'RECHAZADO_CLIENTE'
+  | 'APROBADO_CLIENTE'
+  | 'CONVERTIDO_PDF';
+
+/** Cada subida del Word queda como copia congelada en OneDrive. */
+export type OrionDraftVersion = {
+  id: string;
+  /** v0.1, v0.2… */
+  label: string;
+  kind: 'elaboracion' | 'validacion' | 'borrador_cliente' | 'pdf';
+  oneDriveItemId: string;
+  fileName: string;
+  uploadedByEmail: string;
+  uploadedByName?: string | null;
+  createdAt: string;
+  note?: string | null;
+};
+
+export type OrionDraftLock = {
+  userId: string;
+  email: string;
+  name?: string | null;
+  lockedAt: string;
+};
+
+export type OrionDraftClientDecision = 'PENDIENTE' | 'ACEPTADO' | 'RECHAZADO' | 'ANULADO';
+
+/** Aprobador del cliente (socio de negocio SAP) que revisa el borrador en Orion. */
+export type OrionDraftClientReviewer = {
+  email: string;
+  name?: string | null;
+  cardCode?: string | null;
+  order: number;
+  decision: OrionDraftClientDecision;
+  decidedAt?: string | null;
+  /** Descripción del rechazo. */
+  comment?: string | null;
+  reviewUrl?: string | null;
+  sentAt?: string | null;
+  expiresAt?: string | null;
+};
+
+/** Una ronda de revisión del cliente sobre una versión validada. */
+export type OrionDraftClientReview = {
+  mode: 'sequential' | 'parallel';
+  round: number;
+  versionLabel: string;
+  /** Documento Orion de revisión (purpose DRAFT_REVIEW, no firmable). */
+  orionDocumentId?: string | null;
+  reviewers: OrionDraftClientReviewer[];
+  submittedAt: string;
+  submittedBy: string;
+  closedAt?: string | null;
+};
+
+export type OrionDraftState = {
+  /** .docx de trabajo (adjunto de la solicitud en OneDrive). */
+  fileId: string;
+  fileName: string;
+  status: OrionDraftStatus;
+  versionLabel: string;
+  /** Ya no se usa (antes "Tomar para editar"); se conserva para leer estados guardados. */
+  lock?: OrionDraftLock | null;
+  versions: OrionDraftVersion[];
+  /** Validadores internos sobre el Word (mismo formato que la validación del PDF). */
+  internalReview?: OrionReviewState | null;
+  /** Ronda vigente (o la última) de revisión del cliente. */
+  clientReview?: OrionDraftClientReview | null;
+  /** Rondas anteriores del cliente (cada rechazo cierra una). */
+  clientReviewHistory?: OrionDraftClientReview[];
+  /** PDF generado al terminar la etapa Word. */
+  pdfFileId?: string | null;
+  createdByEmail: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type OrionCreateDocumentPayload = {
+  /** Ausente = SIGNATURE. DRAFT_REVIEW = borrador no firmable para el cliente (contrato v3). */
+  purpose?: 'SIGNATURE' | 'DRAFT_REVIEW';
   externalRef: string;
   synerlinkRequestId: number;
   synerlinkCompanyId: number;
@@ -291,6 +387,24 @@ export type OrionWebhookPayload = {
   versionLabel?: string | null;
   previousOrionDocumentId?: string | null;
   completedSignerEmail?: string | null;
+};
+
+/** Webhook de revisión de borrador por el cliente (contrato v3). */
+export type OrionDraftReviewWebhookPayload = {
+  purpose: 'DRAFT_REVIEW';
+  event: 'DRAFT_REVIEWER_DECIDED' | 'DRAFT_REVIEW_LINK_EXPIRED' | string;
+  orionDocumentId: string;
+  externalRef?: string;
+  synerlinkRequestId?: number;
+  versionLabel?: string | null;
+  reviewer?: {
+    email: string;
+    name?: string | null;
+    reviewOrder?: number | null;
+    decision?: 'ACEPTADO' | 'RECHAZADO' | string;
+    comment?: string | null;
+    decidedAt?: string | null;
+  };
 };
 
 export type OrionPostMessageEvent =

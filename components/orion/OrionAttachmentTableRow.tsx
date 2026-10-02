@@ -282,6 +282,13 @@ export default function OrionAttachmentTableRow({
                 {fileSizeLabel}
               </Text>
             ) : null}
+            {d.state.sourceDraftFileId ? (
+              <Tooltip label='Se preparó en Word: lo revisaron los validadores y lo aprobó el cliente.' multiline maw={260} withArrow>
+                <Badge size='xs' variant='light' color='teal' mt={4} styles={{ label: { textTransform: 'none' } }}>
+                  Viene del Word · validado y aprobado
+                </Badge>
+              </Tooltip>
+            ) : null}
           </div>
           {viewOnlineHref ? (
             <Tooltip label='Ver en línea (sin descargar)'>

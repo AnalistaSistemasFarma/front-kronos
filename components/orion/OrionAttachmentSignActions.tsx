@@ -216,6 +216,8 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
 
   const hasCompletedSignatures = (state.signers ?? []).some((s) => isSignerCompleted(s.status));
   const activeSignFlow = hasOrionActiveSignFlow(state);
+  /** PDF generado desde la preparación en Word: ya validado y aprobado por el cliente, es para firmar. */
+  const fromWordDraft = Boolean(state.sourceDraftFileId);
   /** Solo el responsable del flujo puede cambiar Para firmar / Solo ver (y aún sin Orion). */
   const canToggleIntent =
     Boolean(api?.canManage) &&
@@ -223,9 +225,12 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     !workflowLocked &&
     !isTerminal &&
     !activeSignFlow &&
-    !hasCompletedSignatures;
+    !hasCompletedSignatures &&
+    !fromWordDraft;
   const permissionsPending = Boolean(api) && api?.permissionsReady === false;
-  const intentLockedReason = !permissions.isFlowResponsible
+  const intentLockedReason = fromWordDraft
+    ? 'Este PDF salió del Word ya validado y aprobado por el cliente: es para firmar.'
+    : !permissions.isFlowResponsible
     ? 'Solo un preparador documento asignado al flujo puede marcar el documento como “Para firmar” o “Solo ver”.'
     : activeSignFlow
       ? hasCompletedSignatures

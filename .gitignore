@@ -53,3 +53,5 @@ dbconfig.js
 
 # Logs de jobs programados (service-layer-metrics, etc.) - generado, no versionar
 /logs/
+
+CLAUDE.md

@@ -26,7 +26,12 @@ import {
   IconWriting,
 } from '@tabler/icons-react';
 import type { SignatureFieldPlacement, SignatureFieldKind } from '../../lib/orion/signatureFields';
-import { normalizeFieldKind, splitValidatorFields } from '../../lib/orion/signatureFields';
+import {
+  isValidatorPlacementOrder,
+  normalizeFieldKind,
+  splitValidatorFields,
+  validatorPlacementOrder,
+} from '../../lib/orion/signatureFields';
 import type { OrionDocumentSignatureKind, OrionSignatureState } from '../../lib/orion/types';
 import {
   emptySignerSlot,
@@ -157,12 +162,39 @@ export default function OrionDocumentEditor({
     [initialFields]
   );
   const [fields, setFields] = useState<SignatureFieldPlacement[]>(signerInitialFields);
-  // Los validadores ya están en el PDF (SynerLink estampa su visto bueno, ubicado o
-  // automático): aquí solo se ubican firmantes y sus cajas se conservan al guardar.
-  const preservedValidatorFields = useMemo(
-    () => (state.validatorFields ?? []) as SignatureFieldPlacement[],
-    [state.validatorFields]
-  );
+  // Validadores que aprobaron: se ubica su visto bueno (chulito / firma guardada en la
+  // versión final). Orden de caja = 900 + orden del validador; no se envían a Orion.
+  const validatorParticipants = useMemo<OrionParticipant[]>(() => {
+    const review = state.review;
+    if (!review || review.status !== 'APROBADO') return [];
+    return [...review.approvals]
+      .filter((a) => a.decision === 'APROBADO' && a.email)
+      .sort((a, b) => a.order - b.order)
+      .map((a) => ({
+        order: validatorPlacementOrder(a.order),
+        email: normalizeEmail(a.email),
+        name: a.name || a.email,
+        role: 'Validador',
+        type: 'internal',
+      }));
+  }, [state.review]);
+  // Caja guardada de cada validador: por correo (sobrevive a cambios de orden) o por orden.
+  const validatorInitialFields = useMemo(() => {
+    const saved = (state.validatorFields ?? []) as SignatureFieldPlacement[];
+    return validatorParticipants.flatMap((v) => {
+      const field =
+        saved.find((f) => normalizeEmail(f.validatorEmail) === v.email) ??
+        saved.find((f) => !f.validatorEmail && f.signerOrder === v.order);
+      return field ? [{ ...field, signerOrder: v.order, kind: 'approval' as const }] : [];
+    });
+  }, [state.validatorFields, validatorParticipants]);
+  const [validatorFields, setValidatorFields] =
+    useState<SignatureFieldPlacement[]>(validatorInitialFields);
+  const placementFields = useMemo(() => [...fields, ...validatorFields], [fields, validatorFields]);
+  const handlePlacementChange = useCallback((next: SignatureFieldPlacement[]) => {
+    setFields(next.filter((f) => !isValidatorPlacementOrder(f.signerOrder)));
+    setValidatorFields(next.filter((f) => isValidatorPlacementOrder(f.signerOrder)));
+  }, []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signatureKind, setSignatureKind] = useState<OrionDocumentSignatureKind>(
@@ -200,11 +232,17 @@ export default function OrionDocumentEditor({
   }, [signerInitialFields]);
 
   useEffect(() => {
-    const known = orderedParticipants.some((p) => p.order === activeOrder);
+    setValidatorFields(validatorInitialFields);
+  }, [validatorInitialFields]);
+
+  useEffect(() => {
+    const known =
+      orderedParticipants.some((p) => p.order === activeOrder) ||
+      validatorParticipants.some((p) => p.order === activeOrder);
     if (orderedParticipants.length && !known) {
       setActiveOrder(orderedParticipants[0]!.order);
     }
-  }, [activeOrder, orderedParticipants]);
+  }, [activeOrder, orderedParticipants, validatorParticipants]);
 
   const signerStatuses = useMemo(() => {
     // Clave por orden de slot (mismo email puede aparecer varias veces).
@@ -251,7 +289,10 @@ export default function OrionDocumentEditor({
     assignedParticipants.every((p) => participantHasRequiredBoxes(p));
 
   const placedCount = assignedParticipants.filter((p) => participantHasRequiredBoxes(p)).length;
-  const placementParticipants = assignedParticipants;
+  const placementParticipants = useMemo(
+    () => [...assignedParticipants, ...validatorParticipants],
+    [assignedParticipants, validatorParticipants]
+  );
 
   const activeNeedsFingerprint =
     canUseFingerprint &&
@@ -504,7 +545,7 @@ export default function OrionDocumentEditor({
         body: JSON.stringify({
           requestId,
           fileId,
-          signatureFields: [...fields, ...preservedValidatorFields],
+          signatureFields: [...fields, ...validatorFields],
         }),
       });
 
@@ -548,7 +589,7 @@ export default function OrionDocumentEditor({
         signatureFields: fields as OrionSignatureState['signatureFields'],
       });
     }
-  }, [fields, fileId, fileName, onStateUpdate, preservedValidatorFields, requestId, state]);
+  }, [fields, fileId, fileName, onStateUpdate, requestId, state, validatorFields]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -1026,8 +1067,8 @@ export default function OrionDocumentEditor({
                   Orden de firma
                 </Text>
                 <Text size='xs' c='dimmed'>
-                  Seleccione la persona y ubique su firma en el PDF. El visto bueno de los
-                  validadores ya queda en el documento.
+                  Seleccione la persona y ubique su firma en el PDF. Los validadores que
+                  aprobaron también aparecen: ubique su visto bueno donde lo necesite.
                 </Text>
                 {activeNeedsFingerprint ? (
                   <SegmentedControl
@@ -1046,10 +1087,10 @@ export default function OrionDocumentEditor({
               <ScrollArea style={{ flex: 1 }} offsetScrollbars type='scroll' scrollbarSize={8}>
                 <Box p='md'>
                   <OrionSignersList
-                    participants={assignedParticipants}
+                    participants={placementParticipants}
                     activeOrder={activeOrder}
                     onSelect={setActiveOrder}
-                    fields={fields}
+                    fields={placementFields}
                     signerStatuses={signerStatuses}
                     variant='placement'
                     sequential={sequential}
@@ -1077,8 +1118,8 @@ export default function OrionDocumentEditor({
                 participants={placementParticipants}
                 activeOrder={activeOrder}
                 activeKind={activeFieldKind}
-                fields={fields}
-                onChange={setFields}
+                fields={placementFields}
+                onChange={handlePlacementChange}
               />
             </Box>
           </Box>
@@ -1094,7 +1135,7 @@ export default function OrionDocumentEditor({
       >
         {editorStep === 2 ? (
           <Text size='sm' c='dimmed' fw={500}>
-            {placedCount} de {placementParticipants.length} participante(s) con cajas listas
+            {placedCount} de {assignedParticipants.length} firmante(s) con cajas listas
           </Text>
         ) : (
           <Button variant='subtle' color='gray' onClick={onClose} disabled={saving} radius='md'>

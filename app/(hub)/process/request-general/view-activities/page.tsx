@@ -112,6 +112,8 @@ import { isSynerlinkWorkflowLocked } from '../../../../../lib/orion/workflowLock
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableRow';
+import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
 import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
@@ -1527,8 +1529,11 @@ function ViewRequestPage() {
   const taskOrionFileId = parseOrionFileIdFromResolution(request?.resolution);
   const taskPendingOrionAuth = isOrionSignerAuthResolution(request?.resolution);
   const hasPdfAttachments = attachmentRows.some((f) => /\.pdf$/i.test(f.name));
+  // Word en preparación (etapa previa a la firma): también usa la tabla de firma.
+  const hasWordAttachments = attachmentRows.some((f) => isWordDraftFileName(f.name));
   const showOrionPanel =
     hasPdfAttachments ||
+    hasWordAttachments ||
     hasOrionSignatureField ||
     hasOrionDocuments ||
     Boolean(taskOrionFileId) ||
@@ -2052,9 +2057,10 @@ function ViewRequestPage() {
                         placeholder='Selecciona estado'
                         data={statusOptions}
                         value={resolutionData.estado}
-                        onChange={(val) =>
-                          setResolutionData({ ...resolutionData, estado: val || '' })
-                        }
+                        onChange={(val) => {
+                          setResolutionData({ ...resolutionData, estado: val || '' });
+                          if (val === '2') setShowResolution(true);
+                        }}
                         error={formErrors.estado}
                       />
                     </Stack>
@@ -2093,7 +2099,7 @@ function ViewRequestPage() {
                     )}
                   </Group>
 
-                  {isEditing && showResolution && (
+                  {isEditing && (showResolution || resolutionData.estado === '2') && (
                     <Stack>
                       {/* Validación: solo permitir resolución si el estado es 2 */}
                       {resolutionData.resolucion && resolutionData.estado !== '2' && !resolutionData.estado ? (
@@ -2517,6 +2523,28 @@ function ViewRequestPage() {
                               requestId={request.id_request_general}
                               fileId={fileId}
                             />
+                          }
+                        />
+                      );
+                    }
+
+                    if (showOrionPanel && request.id_request_general && isWordDraftFileName(file.name)) {
+                      return (
+                        <OrionDraftTableRow
+                          key={file.id}
+                          rowNumber={fileIndex + 1}
+                          requestId={request.id_request_general}
+                          fileId={String(file.id)}
+                          fileName={file.name}
+                          fileSizeLabel={sizeLabel}
+                          processName={request?.process || request?.category || null}
+                          requesterName={request?.name_requester || null}
+                          openUrl={openUrl}
+                          canDeleteAttachment={canDeleteAttachments}
+                          onDeleteAttachment={requestDeleteAttachment}
+                          autoOpenReview={
+                            searchParams.get('orionAction') === 'review' &&
+                            String(orionFileIdParam || '') === String(file.id)
                           }
                         />
                       );

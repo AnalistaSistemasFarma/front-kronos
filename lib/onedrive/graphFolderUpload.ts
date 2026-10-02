@@ -383,3 +383,34 @@ export async function ensureFolderAndUploadFile(
   const folderId = await ensureOneDriveFolderPath(token, segments);
   return uploadFileToOneDriveFolder(token, folderId, fileName, content, contentType);
 }
+
+/**
+ * Convierte un driveItem (.docx, .xlsx…) a PDF con la conversión nativa de Graph
+ * (`content?format=pdf`). Graph responde 302 a una URL firmada que no necesita el
+ * header Authorization (mismo patrón que document-management/.../pdf/route.ts).
+ */
+export async function convertOneDriveItemToPdf(token: string, itemId: string): Promise<Buffer> {
+  const graph = graphBase();
+  const id = String(itemId || '').trim();
+  if (!id) throw new Error('itemId es obligatorio');
+
+  const response = await fetch(`${graph}items/${encodeURIComponent(id)}/content?format=pdf`, {
+    headers: { Authorization: `Bearer ${token}` },
+    redirect: 'manual',
+    cache: 'no-store',
+  });
+
+  let pdfResponse: Response = response;
+  const location = response.headers.get('location');
+  if (location) {
+    pdfResponse = await fetch(location, { cache: 'no-store' });
+  }
+  if (!pdfResponse.ok) {
+    throw new Error(`OneDrive no pudo convertir el archivo a PDF (HTTP ${pdfResponse.status})`);
+  }
+  const buffer = Buffer.from(await pdfResponse.arrayBuffer());
+  if (buffer.subarray(0, 5).toString('latin1') !== '%PDF-') {
+    throw new Error('OneDrive no devolvió un PDF válido al convertir el archivo');
+  }
+  return buffer;
+}
