@@ -327,6 +327,12 @@ export async function guardarPerfil(code: string, entrada: PerfilEntrada, email:
   const agente = await prisma.agent.findUnique({ where: { code }, select: { id_agent: true } });
   if (!agente) return null;
   const antes = await prisma.agentProfile.findUnique({ where: { id_agent: agente.id_agent } });
+  const cambios = cambiosPerfil(
+    antes ? { purpose: antes.purpose, ownerName: antes.owner_name, ownerEmail: antes.owner_email } : null,
+    entrada
+  );
+  // Sin cambios no se escribe nada: ni la fila ni la marca de "actualizado por".
+  if (cambios.length === 0) return { cambios };
   const ahora = new Date();
   const data = {
     purpose: entrada.purpose,
@@ -340,10 +346,6 @@ export async function guardarPerfil(code: string, entrada: PerfilEntrada, email:
     create: { id_agent: agente.id_agent, ...data },
     update: data,
   });
-  const cambios = cambiosPerfil(
-    antes ? { purpose: antes.purpose, ownerName: antes.owner_name, ownerEmail: antes.owner_email } : null,
-    entrada
-  );
   if (cambios.length > 0) {
     await insertarEntradas([
       {

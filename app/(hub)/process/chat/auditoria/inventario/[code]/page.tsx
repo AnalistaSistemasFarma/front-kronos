@@ -383,6 +383,7 @@ export default function HojaDeVidaAgentePage() {
       ownerEmail: datos?.perfil?.ownerEmail ?? '',
     });
     setErrorEdicion(null);
+    setAviso(null);
     setEditando(true);
   };
 
