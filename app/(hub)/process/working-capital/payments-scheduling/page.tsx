@@ -124,6 +124,7 @@ const SUBTYPE_REQUEST_OPTIONS = [
   { value: '0', label: 'Todos' },
   { value: 'AFC', label: 'AFC' },
   { value: 'Anticipo', label: 'Anticipo' },
+  { value: 'Anticipo Empleados', label: 'Anticipo Empleados' },
   { value: 'Anticipos Viajes', label: 'Anticipos Viajes' },
   { value: 'Apostilla', label: 'Apostilla' },
   { value: 'Cámara y Comercio', label: 'Cámara y Comercio' },
