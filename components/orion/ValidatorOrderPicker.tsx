@@ -14,10 +14,12 @@ type Props = {
   value: string[];
   onChange: (next: string[]) => void;
   disabled?: boolean;
+  /** Todos validan al mismo tiempo: sin orden ni flechas para reordenar. */
+  parallel?: boolean;
 };
 
 /** Elige, de las personas validadoras del flujo, quiénes validan este documento y en qué orden. */
-export default function ValidatorOrderPicker({ options, value, onChange, disabled }: Props) {
+export default function ValidatorOrderPicker({ options, value, onChange, disabled, parallel = false }: Props) {
   const byId = new Map(options.map((o) => [o.userId, o]));
   const labelOf = (id: string) => {
     const o = byId.get(id);
@@ -36,7 +38,11 @@ export default function ValidatorOrderPicker({ options, value, onChange, disable
     <Stack gap='xs'>
       <Select
         label='Agregar validador'
-        description='Al elegirlo se agrega al final. El orden es el orden de aprobación.'
+        description={
+          parallel
+            ? 'Todos los validadores revisan al mismo tiempo, sin orden.'
+            : 'Al elegirlo se agrega al final. El orden es el orden de aprobación.'
+        }
         placeholder={
           value.length === options.length ? 'Ya agregó a todos los validadores' : 'Selecciona un validador'
         }
@@ -63,32 +69,38 @@ export default function ValidatorOrderPicker({ options, value, onChange, disable
             <Paper key={id} withBorder radius='md' p={6}>
               <Group justify='space-between' wrap='nowrap'>
                 <Group gap='sm' wrap='nowrap'>
-                  <Badge variant='filled' color='violet' circle>
-                    {index + 1}
-                  </Badge>
+                  {parallel ? null : (
+                    <Badge variant='filled' color='violet' circle>
+                      {index + 1}
+                    </Badge>
+                  )}
                   <Text size='sm' fw={600} lineClamp={1}>
                     {labelOf(id)}
                   </Text>
                 </Group>
                 <Group gap={2} wrap='nowrap'>
-                  <ActionIcon
-                    variant='subtle'
-                    size='sm'
-                    onClick={() => move(index, -1)}
-                    disabled={disabled || index === 0}
-                    aria-label='Subir'
-                  >
-                    <IconArrowUp size={14} />
-                  </ActionIcon>
-                  <ActionIcon
-                    variant='subtle'
-                    size='sm'
-                    onClick={() => move(index, 1)}
-                    disabled={disabled || index === value.length - 1}
-                    aria-label='Bajar'
-                  >
-                    <IconArrowDown size={14} />
-                  </ActionIcon>
+                  {parallel ? null : (
+                    <>
+                      <ActionIcon
+                        variant='subtle'
+                        size='sm'
+                        onClick={() => move(index, -1)}
+                        disabled={disabled || index === 0}
+                        aria-label='Subir'
+                      >
+                        <IconArrowUp size={14} />
+                      </ActionIcon>
+                      <ActionIcon
+                        variant='subtle'
+                        size='sm'
+                        onClick={() => move(index, 1)}
+                        disabled={disabled || index === value.length - 1}
+                        aria-label='Bajar'
+                      >
+                        <IconArrowDown size={14} />
+                      </ActionIcon>
+                    </>
+                  )}
                   <ActionIcon
                     variant='subtle'
                     size='sm'

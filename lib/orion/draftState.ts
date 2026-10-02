@@ -187,24 +187,30 @@ export function resolveDraftPermissions(params: {
     canConvertPdf: false,
   };
   const isValidator = isDraftValidator(state, me, params.actorUserId);
-  const canViewBoard = params.isElaborator || isValidator || Boolean(params.isAdmin);
+  // Solo las personas del documento: quien lo prepara y sus validadores (ni siquiera admin).
+  const canViewBoard = params.isElaborator || isValidator;
   if (params.workflowLocked) return { ...none, canViewBoard };
 
+  // Un validador nunca sube ni corrige, aunque además tenga permiso de preparar.
+  const prepares = params.isElaborator && !isValidator;
   const elaborating = isDraftElaborationStatus(state.status);
   const reviewing = state.status === 'EN_VALIDACION_INTERNA';
   const pendingValidator = pendingDraftValidators(state).some((a) => isSameValidator(a, me, params.actorUserId));
+  const allResponded = reviewing && pendingDraftValidators(state).length === 0;
   const clientApproved = state.status === 'APROBADO_CLIENTE';
 
   return {
-    // La preparadora corrige también durante la validación; tras el cliente, solo la versión limpia.
-    canUpload: params.isElaborator && (elaborating || reviewing || clientApproved),
-    canSubmitInternal: elaborating && params.isElaborator,
+    // En validación, la versión corregida se sube cuando todos respondieron; tras el cliente, la limpia.
+    canUpload: prepares && (elaborating || allResponded || clientApproved),
+    canSubmitInternal: elaborating && prepares,
     canDecideInternal: pendingValidator,
     canViewBoard,
-    canMark: reviewing && (params.isElaborator || isValidator),
-    canSendClient: state.status === 'VALIDADO_INTERNO' && params.isElaborator,
-    canManageClientInvites: state.status === 'EN_REVISION_CLIENTE' && params.isElaborator,
-    canConvertPdf: clientApproved && params.isElaborator,
+    // Comentan los validadores; la preparadora responde sus marcas pero no marca su propio documento.
+    canMark: reviewing && isValidator,
+    canSendClient: state.status === 'VALIDADO_INTERNO' && prepares,
+    canManageClientInvites: state.status === 'EN_REVISION_CLIENTE' && prepares,
+    // Sin revisión del cliente se puede pasar directo a PDF al quedar validado.
+    canConvertPdf: (clientApproved || state.status === 'VALIDADO_INTERNO') && prepares,
   };
 }
 
@@ -254,6 +260,16 @@ export function applyDraftNewVersion(
   }
 
   if (state.status === 'EN_VALIDACION_INTERNA') {
+    // Validación asíncrona: la versión corregida se sube cuando todos respondieron.
+    const waiting = pendingDraftValidators(state);
+    if (waiting.length > 0) {
+      throw draftError(
+        `Espere a que todos los validadores respondan antes de subir la versión corregida. Falta: ${waiting
+          .map((a) => a.name || a.email)
+          .join(', ')}.`,
+        409
+      );
+    }
     const review = state.internalReview;
     const resolved = params.resolvedEmails ? new Set(params.resolvedEmails.map(normalizeEmail)) : null;
     return {
@@ -311,7 +327,7 @@ export function applyDraftSubmitInternal(
     throw draftError('El documento no está en elaboración: no se puede enviar a validación.');
   }
   if (params.validators.length === 0) {
-    throw draftError('Elija al menos un validador y el orden en que debe aprobar el documento.', 400);
+    throw draftError('Elija al menos un validador. Todos revisan el documento al mismo tiempo.', 400);
   }
   return {
     ...state,
@@ -636,8 +652,8 @@ export function applyDraftConverted(
   params: { pdfFileId: string; version: Omit<OrionDraftVersion, 'label' | 'kind'> },
   now = new Date().toISOString()
 ): OrionDraftState {
-  if (state.status !== 'APROBADO_CLIENTE') {
-    throw draftError('Solo un documento aprobado por el cliente se puede convertir a PDF.');
+  if (state.status !== 'APROBADO_CLIENTE' && state.status !== 'VALIDADO_INTERNO') {
+    throw draftError('Solo un documento validado (o aprobado por el cliente) se puede convertir a PDF.');
   }
   return {
     ...state,

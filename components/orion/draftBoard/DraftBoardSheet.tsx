@@ -13,6 +13,7 @@ import {
 import type { DraftMark } from '../../../lib/orion/draftBoardDb';
 import { fetchPdfArrayBuffer } from '../pdfFetchCache';
 import type { DraftSelection } from './DraftBoardDocument';
+import DraftMarkBubble, { markStyle } from './DraftMarkBubble';
 
 /**
  * Lienzo del tablero: la hoja real del Word (convertida a PDF por OneDrive, con sus márgenes,
@@ -29,9 +30,15 @@ type Props = {
   previousBlocks: DraftBlock[] | null;
   marks: DraftMark[];
   activeMarkId: number | null;
+  /** Marca con la burbuja abierta. */
+  openMarkId: number | null;
   onMarkClick: (id: number) => void;
+  onMarkDetails: (id: number) => void;
+  onBubbleClose: () => void;
   onSelect: ((sel: DraftSelection) => void) | null;
 };
+
+type BubbleHandlers = Pick<Props, 'openMarkId' | 'onMarkClick' | 'onMarkDetails' | 'onBubbleClose'>;
 
 type SheetItem = { str: string; x: number; top: number; w: number; h: number };
 type SheetPage = {
@@ -183,9 +190,42 @@ function locate(pages: SheetPage[], phrase: string, blockText?: string | null): 
 }
 
 type Overlay =
-  | { kind: 'mark'; id: number; number: number; fixed: boolean; hit: Hit }
+  | { kind: 'mark'; id: number; mark: DraftMark; fixed: boolean; type: DraftMark['type']; hit: Hit }
   | { kind: 'ins'; key: string; hit: Hit }
   | { kind: 'del'; key: string; text: string; hit: Hit };
+
+const PILL_H = 26;
+const PILL_W = 50;
+
+type BubbleSpot = { id: number; left: number; top: number };
+
+/**
+ * Posición de cada burbuja en píxeles de pantalla (fuera de la escala de la hoja, para que se
+ * vea siempre del mismo tamaño): al final del subrayado y sin encimarse con otra.
+ */
+function bubbleSpots(marks: Array<Extract<Overlay, { kind: 'mark' }>>, k: number, pageWidth: number): BubbleSpot[] {
+  const raw = marks
+    .map((o) => {
+      const last = o.hit.rects[o.hit.rects.length - 1];
+      if (!last) return null;
+      return {
+        id: o.id,
+        left: Math.max(2, Math.min((last.x + last.w) * k + 4, pageWidth * k - PILL_W - 2)),
+        top: (last.y + last.h / 2) * k - PILL_H / 2,
+      };
+    })
+    .filter((s): s is BubbleSpot => s !== null)
+    .sort((a, b) => a.top - b.top || a.left - b.left);
+  const placed: BubbleSpot[] = [];
+  for (const spot of raw) {
+    let top = spot.top;
+    for (const p of placed) {
+      if (Math.abs(p.left - spot.left) < PILL_W + 4 && Math.abs(p.top - top) < PILL_H + 4) top = p.top + PILL_H + 4;
+    }
+    placed.push({ ...spot, top });
+  }
+  return placed;
+}
 
 function versionOrder(label: string): number {
   const m = /^v?0\.(\d+)$/i.exec(label);
@@ -267,7 +307,16 @@ function buildOverlays(
     const phrase = fixedHere && mark.fixedQuote ? mark.fixedQuote : mark.quote;
     const anchor = findAnchorLoose(blocks, phrase, mark.blockIndex);
     const hit = locate(pages, anchor?.quote ?? phrase, anchor ? blocks[anchor.index].text : null);
-    if (hit) overlays.push({ kind: 'mark', id: mark.id, number: mark.number, fixed: fixedHere, hit });
+    if (hit) {
+      overlays.push({
+        kind: 'mark',
+        id: mark.id,
+        mark,
+        fixed: fixedHere,
+        type: mark.type,
+        hit,
+      });
+    }
   }
   return overlays;
 }
@@ -276,13 +325,15 @@ function PageView({
   page,
   overlays,
   activeMarkId,
+  openMarkId,
   onMarkClick,
+  onMarkDetails,
+  onBubbleClose,
 }: {
   page: SheetPage;
   overlays: Overlay[];
   activeMarkId: number | null;
-  onMarkClick: (id: number) => void;
-}) {
+} & BubbleHandlers) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [k, setK] = useState(1);
   useEffect(() => {
@@ -296,6 +347,9 @@ function PageView({
   }, [page.width]);
 
   const mine = overlays.filter((o) => o.hit.page === page.number);
+  const markOverlays = mine.filter((o): o is Extract<Overlay, { kind: 'mark' }> => o.kind === 'mark');
+  const markById = new Map(markOverlays.map((o) => [o.id, o]));
+  const spots = bubbleSpots(markOverlays, k, page.width);
   return (
     <div ref={wrapRef} style={{ width: '100%' }}>
       <div
@@ -359,14 +413,8 @@ function PageView({
                     pointerEvents: 'none',
                     mixBlendMode: 'multiply',
                     zIndex: 1,
-                    background: isMark
-                      ? o.fixed
-                        ? 'rgba(45, 212, 140, .35)'
-                        : 'rgba(250, 204, 21, .45)'
-                      : 'rgba(34, 197, 94, .28)',
-                    borderBottom: isMark
-                      ? `2px solid ${o.fixed ? 'rgba(13, 148, 96, .9)' : 'rgba(202, 138, 4, .9)'}`
-                      : '2px solid rgba(22, 163, 74, .9)',
+                    background: isMark ? markStyle(o).fill : 'rgba(34, 197, 94, .28)',
+                    borderBottom: isMark ? `2px solid ${markStyle(o).line}` : '2px solid rgba(22, 163, 74, .9)',
                     outline: active ? '2px solid rgba(37, 99, 235, .9)' : undefined,
                     outlineOffset: 2,
                   }}
@@ -374,39 +422,6 @@ function PageView({
               );
             })
           )}
-
-          {mine.map((o) => {
-            if (o.kind !== 'mark') return null;
-            const last = o.hit.rects[o.hit.rects.length - 1];
-            if (!last) return null;
-            return (
-              <button
-                key={`badge-${o.id}`}
-                type='button'
-                onClick={() => onMarkClick(o.id)}
-                aria-label={`Ver marca ${o.number}`}
-                style={{
-                  position: 'absolute',
-                  left: last.x + last.w + 2,
-                  top: last.y - last.h * 0.45,
-                  zIndex: 4,
-                  border: 0,
-                  borderRadius: 10,
-                  padding: '0 6px',
-                  minWidth: 20,
-                  height: 20,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: '#fff',
-                  cursor: 'pointer',
-                  background: o.fixed ? '#0d9460' : '#ca8a04',
-                  boxShadow: '0 1px 3px rgba(0,0,0,.25)',
-                }}
-              >
-                {o.number}
-              </button>
-            );
-          })}
 
           {/* Capa de texto invisible: permite seleccionar sobre la hoja. */}
           <div className='draft-sheet-text' style={{ position: 'absolute', inset: 0, zIndex: 2, lineHeight: 1 }}>
@@ -435,6 +450,23 @@ function PageView({
             })}
           </div>
         </div>
+        {spots.map((spot) => {
+          const o = markById.get(spot.id);
+          if (!o) return null;
+          return (
+            <DraftMarkBubble
+              key={`bubble-${o.id}`}
+              mark={o.mark}
+              fixed={o.fixed}
+              open={openMarkId === o.id}
+              onPaper
+              onOpen={() => onMarkClick(o.id)}
+              onClose={onBubbleClose}
+              onDetails={() => onMarkDetails(o.id)}
+              style={{ position: 'absolute', left: spot.left, top: spot.top, zIndex: 6 }}
+            />
+          );
+        })}
       </div>
       <Text size='xs' c='dimmed' ta='center' mt={6} mb='md'>
         Página {page.number}
@@ -450,7 +482,10 @@ export default function DraftBoardSheet({
   previousBlocks,
   marks,
   activeMarkId,
+  openMarkId,
   onMarkClick,
+  onMarkDetails,
+  onBubbleClose,
   onSelect,
 }: Props) {
   const [pages, setPages] = useState<SheetPage[] | null>(null);
@@ -529,7 +564,16 @@ export default function DraftBoardSheet({
     <div ref={wrapRef} style={{ position: 'relative' }} onMouseUp={handleMouseUp}>
       <style>{`.draft-sheet-text span::selection{background:rgba(37,99,235,.35);color:transparent}`}</style>
       {pages.map((page) => (
-        <PageView key={page.number} page={page} overlays={overlays} activeMarkId={activeMarkId} onMarkClick={onMarkClick} />
+        <PageView
+          key={page.number}
+          page={page}
+          overlays={overlays}
+          activeMarkId={activeMarkId}
+          openMarkId={openMarkId}
+          onMarkClick={onMarkClick}
+          onMarkDetails={onMarkDetails}
+          onBubbleClose={onBubbleClose}
+        />
       ))}
       {pending && onSelect ? (
         <Button

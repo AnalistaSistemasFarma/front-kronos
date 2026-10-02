@@ -12,6 +12,8 @@ import { withMssqlPool } from '@/lib/mssqlPool';
 import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
 import { loadOrionFormBag } from '@/lib/orion/service';
 import { applyValidatorMarks } from '@/lib/orion/validatorMarks';
+import { getOrionDraftInfo } from '@/lib/orion/draftService';
+import { getDraftSessionActor } from '@/lib/orion/draftRouteAuth';
 
 function safePathSegment(value: string, fallback: string): string {
   const v = String(value || '').trim();
@@ -35,6 +37,21 @@ async function withValidatorMarks(
   } catch {
     return pdf;
   }
+}
+
+/** Mensaje de bloqueo si el adjunto es un Word en preparación y quien pide no es su preparadora. */
+async function draftDownloadBlocked(requestId: number, fileId: string): Promise<string | null> {
+  const loaded = await withMssqlPool((pool) => loadOrionFormBag(pool, requestId)).catch(() => null);
+  const draft = loaded?.bag.drafts?.[fileId];
+  if (!draft || draft.status === 'CONVERTIDO_PDF') return null;
+  const auth = await getDraftSessionActor();
+  if (!auth) return 'No autorizado';
+  const info = await withMssqlPool((pool) =>
+    getOrionDraftInfo(pool, { requestId, fileId, ...auth })
+  ).catch(() => null);
+  return info?.isElaborator
+    ? null
+    : 'Este Word está en preparación: solo quien lo prepara puede descargarlo. Revíselo en el tablero del documento.';
 }
 
 function contentDisposition(fileName: string, download: boolean): string {
@@ -88,6 +105,13 @@ export async function GET(req: Request) {
     }
     if (!inFolder) {
       return NextResponse.json({ error: 'Documento no encontrado' }, { status: 404 });
+    }
+
+    // Word en preparación: solo su preparadora lo descarga (los validadores revisan en el tablero).
+    // Solo .docx: los PDF e imágenes no pagan esta consulta.
+    if (storagePath === 'SG' && entityType === 'Request' && /\.docx$/i.test(String(meta.name || ''))) {
+      const blocked = await draftDownloadBlocked(requestId, fileId);
+      if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
     }
 
     const downloaded = await downloadOneDriveItemContent(token, fileId, meta);

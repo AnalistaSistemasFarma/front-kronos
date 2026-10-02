@@ -3,8 +3,15 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Alert, Badge, Button, Group, Stack, Table, Text, Tooltip, UnstyledButton } from '@mantine/core';
-import { IconDownload, IconFile, IconFileText, IconLayoutBoard, IconTrash } from '@tabler/icons-react';
+import { Alert, Badge, Button, Group, Modal, Stack, Table, Text, Tooltip, UnstyledButton } from '@mantine/core';
+import {
+  IconDownload,
+  IconFile,
+  IconFileText,
+  IconFileTypePdf,
+  IconLayoutBoard,
+  IconTrash,
+} from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import type { OrionDraftState } from '../../lib/orion/types';
 import {
@@ -38,6 +45,8 @@ type Props = {
   onDeleteAttachment?: (fileId: string, fileName?: string | null) => void | Promise<void>;
   /** Llegó desde Autorizaciones a validar este documento: abre el tablero. */
   autoOpenReview?: boolean;
+  /** Tras convertir a PDF: la página recarga los adjuntos para mostrar el PDF debajo del Word. */
+  onConverted?: () => void | Promise<void>;
 };
 
 const API = '/api/integrations/orion/draft';
@@ -138,10 +147,13 @@ export default function OrionDraftTableRow({
   canDeleteAttachment = false,
   onDeleteAttachment,
   autoOpenReview = false,
+  onConverted,
 }: Props) {
   const [info, setInfo] = useState<DraftInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [convertOpen, setConvertOpen] = useState(false);
+  const [converting, setConverting] = useState(false);
   const router = useRouter();
   const autoOpenHandled = useRef(false);
 
@@ -207,6 +219,31 @@ export default function OrionDraftTableRow({
       toast.error('No se pudo iniciar la preparación');
     } finally {
       setStarting(false);
+    }
+  };
+
+  /** Validado (o aprobado por el cliente) → PDF v1.0, que aparece debajo de esta fila. */
+  const convert = async () => {
+    setConverting(true);
+    try {
+      const res = await fetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'convert-pdf', requestId, fileId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || 'No se pudo convertir a PDF', { duration: 10000 });
+        return;
+      }
+      setConvertOpen(false);
+      toast.success('PDF creado debajo del Word. Siguiente: enviarlo a la validación del PDF.');
+      await load();
+      await onConverted?.();
+    } catch {
+      toast.error('No se pudo convertir a PDF');
+    } finally {
+      setConverting(false);
     }
   };
 
@@ -286,16 +323,16 @@ export default function OrionDraftTableRow({
         return { text: `En validación: aprobaron ${approvedCount} de ${review?.approvals.length ?? 0}.` };
       case 'VALIDADO_INTERNO':
         return isElaborator
-          ? { text: 'Validado. Envíelo al cliente desde el tablero.', strong: true }
-          : { text: 'Validado internamente. Falta la revisión del cliente.' };
+          ? { text: 'Validado. Envíelo al cliente o conviértalo a PDF.', strong: true }
+          : { text: 'Validado internamente.' };
       case 'EN_REVISION_CLIENTE':
         return { text: `Esperando al cliente: aceptaron ${clientAccepted} de ${clientReview?.reviewers.length ?? 0}.` };
       case 'APROBADO_CLIENTE':
         return isElaborator
-          ? { text: 'El cliente lo aprobó. Conviértalo a PDF desde el tablero.', strong: true }
+          ? { text: 'El cliente lo aprobó. Conviértalo a PDF.', strong: true }
           : { text: 'Aprobado por el cliente. Falta convertirlo a PDF.' };
       case 'CONVERTIDO_PDF':
-        return { text: 'Ya pasó a firma: siga en la fila del PDF de este documento.' };
+        return { text: 'Sigue en el PDF, aquí debajo.' };
       default:
         return null;
     }
@@ -423,7 +460,7 @@ export default function OrionDraftTableRow({
                 Preparar en Word
               </Button>
             ) : null}
-            {/* El tablero solo lo ven preparadoras, validadores del documento y administradores. */}
+            {/* El tablero solo lo ven la preparadora y los validadores de este documento. */}
             {draft && canViewBoard ? (
               <Button
                 size='compact-sm'
@@ -437,13 +474,25 @@ export default function OrionDraftTableRow({
               </Button>
             ) : null}
 
-            {draft ? (
+            {perms?.canConvertPdf ? (
+              <Button
+                size='compact-sm'
+                color='teal'
+                leftSection={<IconFileTypePdf size={14} />}
+                onClick={() => setConvertOpen(true)}
+                fullWidth
+              >
+                Convertir a PDF
+              </Button>
+            ) : null}
+            {/* Solo la preparadora descarga el Word; los validadores lo revisan en el tablero. */}
+            {draft && info?.isElaborator ? (
               <RowAction
                 icon={<IconDownload size={15} stroke={1.6} />}
                 label={`Descargar Word ${draft.versionLabel}`}
                 href={`${API}/file?${new URLSearchParams({ requestId: String(requestId), fileId }).toString()}`}
               />
-            ) : openUrl ? (
+            ) : !draft && openUrl ? (
               <RowAction icon={<IconFile size={15} stroke={1.6} />} label='Abrir / descargar' href={openUrl} />
             ) : null}
             {!draft && canDeleteAttachment && onDeleteAttachment ? (
@@ -456,6 +505,30 @@ export default function OrionDraftTableRow({
             ) : null}
           </Stack>
         </div>
+        <Modal
+          opened={convertOpen}
+          onClose={() => (converting ? undefined : setConvertOpen(false))}
+          title='Convertir a PDF'
+          centered
+        >
+          <Stack gap='sm'>
+            <Text size='sm'>
+              Se creará el PDF <b>v1.0</b> de {draft?.fileName ?? fileName}. Aparecerá debajo de este Word y el Word
+              queda cerrado. El PDF pasa por su propia validación y luego se ubican las firmas.
+            </Text>
+            <Text size='xs' c='dimmed'>
+              Si el Word tiene comentarios o cambios sin aceptar, no se podrá convertir: quítelos en Word primero.
+            </Text>
+            <Group justify='flex-end'>
+              <Button variant='default' disabled={converting} onClick={() => setConvertOpen(false)}>
+                Cancelar
+              </Button>
+              <Button color='teal' leftSection={<IconFileTypePdf size={14} />} loading={converting} onClick={() => void convert()}>
+                Convertir
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
       </Table.Td>
     </Table.Tr>
   );

@@ -1,8 +1,6 @@
-import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
-import { authOptions } from '../../../../auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
-import { downloadOrionDraftFile, downloadOrionDraftWithComments } from '@/lib/orion/draftService';
+import { downloadOrionDraftFileAsOwner, downloadOrionDraftWithComments } from '@/lib/orion/draftService';
 import { getDraftSessionActor } from '@/lib/orion/draftRouteAuth';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -10,12 +8,13 @@ const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingm
 /**
  * GET /api/integrations/orion/draft/file?requestId=&fileId=&versionId=
  * Sin versionId: Word de trabajo vigente. Con versionId: copia congelada de esa versión.
- * withComments=1: Word vigente con las marcas del tablero como comentarios (solo preparadora).
+ * withComments=1: Word vigente con las marcas del tablero como comentarios.
+ * Solo la preparadora del documento (los validadores no descargan).
  */
 export async function GET(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    const auth = await getDraftSessionActor();
+    if (!auth) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
 
     const { searchParams } = new URL(req.url);
     const requestId = Number(searchParams.get('requestId'));
@@ -26,12 +25,10 @@ export async function GET(req: Request) {
     }
 
     const withComments = searchParams.get('withComments') === '1';
-    const auth = withComments ? await getDraftSessionActor() : null;
-    if (withComments && !auth) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     const file = await withMssqlPool((pool) =>
-      withComments && auth
+      withComments
         ? downloadOrionDraftWithComments(pool, { requestId, fileId, ...auth })
-        : downloadOrionDraftFile(pool, { requestId, fileId, versionId })
+        : downloadOrionDraftFileAsOwner(pool, { requestId, fileId, versionId, ...auth })
     );
     // Cabecera solo ASCII; el nombre real (con tildes) va en filename*.
     const safeName = file.fileName.replace(/[^\x20-\x7E]|["\\]/g, '_');

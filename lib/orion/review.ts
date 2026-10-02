@@ -199,6 +199,8 @@ export async function openReviewTask(
     fileName?: string | null;
     review: OrionReviewState;
     subject?: string | null;
+    /** false = solo crea la tarea; quien llama le manda su propio aviso (sin duplicar). */
+    notify?: boolean;
   }
 ): Promise<void> {
   const pending = currentPendingApproval(params.review);
@@ -239,7 +241,7 @@ export async function openReviewTask(
       VALUES (@id_request, @id_task, 4, @id_user, @resolution)
     `);
   const taskId = inserted.recordset[0]?.id;
-  if (!taskId) return;
+  if (!taskId || params.notify === false) return;
 
   const docLabel = String(params.fileName || '').trim();
   void createAndSendNotifications([pending.email], {

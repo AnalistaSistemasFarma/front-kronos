@@ -88,10 +88,10 @@ describe('preparación Word: trabajo al mismo tiempo (sin bloqueo)', () => {
     );
   });
 
-  it('quien no es preparadora ni validadora no ve el tablero ni sube', () => {
+  it('quien no es preparadora ni validadora no ve el tablero ni sube (ni siendo admin)', () => {
     const perms = resolveDraftPermissions({ state: nuevo(), actorEmail: 'otro@x.com', isElaborator: false });
     expect(perms).toMatchObject({ canViewBoard: false, canUpload: false, canSubmitInternal: false });
-    expect(resolveDraftPermissions({ state: nuevo(), actorEmail: 'otro@x.com', isElaborator: false, isAdmin: true }).canViewBoard).toBe(true);
+    expect(resolveDraftPermissions({ state: nuevo(), actorEmail: 'otro@x.com', isElaborator: false, isAdmin: true }).canViewBoard).toBe(false);
   });
 
   it('solicitud cerrada: nadie modifica nada, solo se puede ver el tablero', () => {
@@ -111,13 +111,27 @@ describe('preparación Word: validación interna', () => {
     return applyDraftSubmitInternal(nuevo(), { actor: elaborador, validators });
   }
 
-  it('en validación la preparadora corrige y sube mientras los validadores revisan', () => {
+  it('en validación la preparadora no sube la versión corregida hasta que respondan todos', () => {
     const s = enValidacion();
     expect(s.status).toBe('EN_VALIDACION_INTERNA');
     expect(pendingDraftValidators(s).map((a) => a.email)).toEqual(['ana@x.com', 'beto@x.com']);
     const perms = resolveDraftPermissions({ state: s, actorEmail: 'ela@x.com', isElaborator: true });
-    expect(perms).toMatchObject({ canUpload: true, canSubmitInternal: false, canMark: true, canViewBoard: true });
-    expect(applyDraftNewVersion(s, { actor: elaborador, version: version('b') }).versionLabel).toBe('v0.2');
+    // La preparadora no comenta su propio documento: solo responde las marcas.
+    expect(perms).toMatchObject({ canUpload: false, canSubmitInternal: false, canMark: false, canViewBoard: true });
+    expect(() => applyDraftNewVersion(s, { actor: elaborador, version: version('b') })).toThrow(/Falta: Ana, Beto/);
+
+    let respondieron = applyDraftInternalDecision(s, { actor: ana, decision: 'return', comment: 'Cambiar fecha' });
+    expect(resolveDraftPermissions({ state: respondieron, actorEmail: 'ela@x.com', isElaborator: true }).canUpload).toBe(false);
+    respondieron = applyDraftInternalDecision(respondieron, { actor: beto, decision: 'approve' });
+    expect(resolveDraftPermissions({ state: respondieron, actorEmail: 'ela@x.com', isElaborator: true }).canUpload).toBe(true);
+    expect(applyDraftNewVersion(respondieron, { actor: elaborador, version: version('b') }).versionLabel).toBe('v0.2');
+  });
+
+  it('un validador nunca sube, aunque además tenga permiso de preparar', () => {
+    let s = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'return', comment: 'Anexo' });
+    s = applyDraftInternalDecision(s, { actor: beto, decision: 'approve' });
+    const perms = resolveDraftPermissions({ state: s, actorEmail: 'ana@x.com', isElaborator: true });
+    expect(perms).toMatchObject({ canUpload: false, canSubmitInternal: false, canConvertPdf: false, canViewBoard: true });
   });
 
   it('los validadores no suben archivos: marcan en el tablero', () => {
@@ -147,7 +161,8 @@ describe('preparación Word: validación interna', () => {
 
   it('no se aprueba una subversión ya reemplazada; la nueva pide aprobar otra vez', () => {
     const aprobado = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'approve', baseVersion: 'v0.1' });
-    const v2 = applyDraftNewVersion(aprobado, { actor: elaborador, version: version('b') });
+    const respondieron = applyDraftInternalDecision(aprobado, { actor: beto, decision: 'return', comment: 'Fecha' });
+    const v2 = applyDraftNewVersion(respondieron, { actor: elaborador, version: version('b') });
     expect(v2.versionLabel).toBe('v0.2');
     expect(() => applyDraftInternalDecision(v2, { actor: beto, decision: 'approve', baseVersion: 'v0.1' })).toThrow(
       /se subió la v0\.2/
@@ -190,7 +205,8 @@ describe('preparación Word: validación interna', () => {
   });
 
   it('un pedido que no se marca como corregido sigue esperando', () => {
-    const s = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'return', comment: 'Anexo B' });
+    let s = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'return', comment: 'Anexo B' });
+    s = applyDraftInternalDecision(s, { actor: beto, decision: 'approve' });
     const v2 = applyDraftNewVersion(s, { actor: elaborador, version: version('g'), resolvedEmails: [] });
     expect(draftCorrectionRequests(v2).map((a) => a.email)).toEqual(['ana@x.com']);
   });
@@ -339,9 +355,11 @@ describe('preparación Word: revisión del cliente', () => {
     expect(ronda2.clientReviewHistory?.[0]?.orionDocumentId).toBe('orion-draft-1');
   });
 
-  it('convertir a PDF solo con aprobación del cliente', () => {
+  it('convertir a PDF: validado (sin cliente) o aprobado por el cliente', () => {
     const pdfVersion = { ...version('pdf'), fileName: 'Contrato.pdf' };
-    expect(() => applyDraftConverted(validado(), { pdfFileId: 'p1', version: pdfVersion })).toThrow(/aprobado por el cliente/);
+    expect(() => applyDraftConverted(nuevo(), { pdfFileId: 'p1', version: pdfVersion })).toThrow(/validado/);
+    expect(applyDraftConverted(validado(), { pdfFileId: 'p0', version: pdfVersion }).status).toBe('CONVERTIDO_PDF');
+    expect(resolveDraftPermissions({ state: validado(), actorEmail: 'ela@x.com', isElaborator: true }).canConvertPdf).toBe(true);
     const aprobado = applyDraftClientDecision(enviado('parallel'), { email: 'cli1@cliente.com', decision: 'ACEPTADO' });
     const todos = applyDraftClientDecision(aprobado.state, { email: 'cli2@cliente.com', decision: 'ACEPTADO' });
     const convertido = applyDraftConverted(todos.state, { pdfFileId: 'p1', version: pdfVersion });
