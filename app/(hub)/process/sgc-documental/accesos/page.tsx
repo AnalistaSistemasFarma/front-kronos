@@ -107,9 +107,9 @@ function Accesos({ company }: { company: SgcCompanyAccess }) {
             data-testid='sgc-acceso-documento'
           />
         ) : (
-          <TextInput label='Código del documento' placeholder='OLP-GC-PR-001' value={code} onChange={(e) => setCode(e.currentTarget.value)} data-testid='sgc-acceso-codigo' />
+          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Código del documento' placeholder='OLP-GC-PR-001' value={code} onChange={(e) => setCode(e.currentTarget.value)} data-testid='sgc-acceso-codigo' />
         )}
-        <Textarea label='Justificación' required minRows={2} autosize value={justification} onChange={(e) => setJustification(e.currentTarget.value)} description='Mínimo 10 caracteres.' data-testid='sgc-acceso-justificacion' />
+        <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Justificación' required minRows={2} autosize value={justification} onChange={(e) => setJustification(e.currentTarget.value)} description='Mínimo 10 caracteres.' data-testid='sgc-acceso-justificacion' />
         <Group justify='flex-end'>
           <Button
             loading={busy}
@@ -255,8 +255,8 @@ function Accesos({ company }: { company: SgcCompanyAccess }) {
             <Text size='sm'>
               {deciding.row.requester} · {deciding.row.code}
             </Text>
-            <Textarea label='Motivo de la decisión' description='Queda en la auditoría y se le notifica a quien pidió.' value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-acceso-motivo' />
-            {deciding.decision === 'aprobar' && <TextInput type='date' label='Vence (opcional)' value={expires} onChange={(e) => setExpires(e.currentTarget.value)} />}
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo de la decisión' description='Queda en la auditoría y se le notifica a quien pidió.' value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-acceso-motivo' />
+            {deciding.decision === 'aprobar' && <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' type='date' label='Vence (opcional)' value={expires} onChange={(e) => setExpires(e.currentTarget.value)} />}
             <Button
               color={deciding.decision === 'aprobar' ? 'green' : 'red'}
               loading={busy}

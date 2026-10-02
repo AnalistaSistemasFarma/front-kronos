@@ -56,6 +56,8 @@ import SgcSignaturesCard from '../signature/SgcSignaturesCard';
 import SgcDisseminationCard from './SgcDisseminationCard';
 import SgcReadingPanel from './SgcReadingPanel';
 import SgcTrainingCard from './SgcTrainingCard';
+import SgcCurrentDraftCard from './SgcCurrentDraftCard';
+import { draftEditorHref } from '../../../lib/sgc/draft/view';
 
 /**
  * Vista interna de una solicitud documental y de una «Tarea documental».
@@ -95,7 +97,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
       ? `/api/sgc/matrix?company=${idCompany}&process=${data.request.process?.id ?? ''}&documentType=${data.request.documentType?.id ?? ''}`
       : null
   );
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [decision, setDecision] = useState<string | null>(null);
@@ -215,7 +217,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
   const onDisseminationAction = (body: Record<string, unknown>, ok: string) => run(() => sgcSend(`/api/sgc/requests/${request.id}/dissemination`, 'POST', body), ok);
   const draftHref = data.currentDraft
     ? data.currentDraft.kind === 'borrador_editor'
-      ? `/process/sgc-documental/solicitudes/${request.id}/borrador?empresa=${request.idCompany}`
+      ? draftEditorHref(request.id, request.idCompany, mode === 'tarea' ? focus?.id : null)
       : `/api/sgc/requests/${request.id}/attachments/${data.currentDraft.ref.split(':')[1]}`
     : null;
 
@@ -246,11 +248,13 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
             </Alert>
           )}
           {message && (
-            <Alert color={message.type === 'success' ? 'green' : 'red'} mt='sm' icon={message.type === 'success' ? <IconCheck size={16} /> : <IconAlertCircle size={16} />} data-testid='sgc-mensaje'>
+            <Alert color={message.type === 'success' ? 'green' : message.type === 'warning' ? 'yellow' : 'red'} mt='sm' icon={message.type === 'success' ? <IconCheck size={16} /> : <IconAlertCircle size={16} />} data-testid='sgc-mensaje' data-type={message.type}>
               {message.text}
             </Alert>
           )}
         </Card>
+
+        {!data.readerOnly && <SgcCurrentDraftCard data={data} openTask={task ? { key: task.key, round: task.round } : null} idTask={mode === 'tarea' ? focus?.id ?? null : null} />}
 
         {mode === 'tarea' && focus && data.reading && (
           <SgcReadingPanel
@@ -466,7 +470,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                       </Group>
                       {isEditing && (
                         <Stack>
-                          <Textarea
+                          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true'
                             label={decision === 'devolver' ? 'Observaciones de la devolución' : 'Descripción de la resolución'}
                             placeholder={decision === 'devolver' ? 'Qué debe corregir el elaborador…' : 'Describe la resolución aplicada...'}
                             value={resolution}
@@ -573,6 +577,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
 
         <SgcSignaturesCard
           data={data}
+          idTask={mode === 'tarea' ? focus?.id ?? null : null}
           onRetryPdf={async () => {
             await run(() => sgcSend(`/api/sgc/requests/${request.id}/controlled-pdf`, 'POST', {}), 'PDF controlado generado.');
           }}
@@ -581,18 +586,29 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
         <SgcAttachmentsCard
           requestId={request.id}
           attachments={data.attachments}
+          currentDraft={data.currentDraft}
           canUploadDraft={permissions.canUploadDraft}
           canUploadSupport={permissions.canUploadSupport}
           canWithdraw={(a) => request.status === 'abierta' && (a.uploadedByEmail.toLowerCase() === me || permissions.isElaborator || permissions.isQuality)}
           onUpload={async (file, purpose) => {
-            await run(async () => {
+            let duplicateOf: { id: number; fileName: string }[] = [];
+            const ok = await run(async () => {
               const form = new FormData();
               form.append('file', file);
               form.append('purpose', purpose);
               const res = await fetch(`/api/sgc/requests/${request.id}/attachments`, { method: 'POST', body: form });
               const body = await res.json().catch(() => ({}));
               if (!res.ok) throw new Error((body as { error?: string }).error || `Error ${res.status}`);
+              duplicateOf = (body as { duplicateOf?: { id: number; fileName: string }[] }).duplicateOf ?? [];
             }, 'Archivo cargado.');
+            // Solo aviso (no bloquea): el borrador es idéntico (mismo SHA-256) a uno ya cargado en esta solicitud.
+            if (ok && duplicateOf.length) {
+              setMessage({
+                type: 'warning',
+                text: `Archivo cargado, pero es idéntico (mismo SHA-256) a ${duplicateOf.length === 1 ? 'otro ya cargado' : 'otros ya cargados'} en esta solicitud: ${duplicateOf.map((d) => d.fileName).join(', ')}. Verifique que cargó la versión corregida.`,
+              });
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
           }}
           onWithdraw={async (idAttachment, reason) => {
             await run(() => sgcSend(`/api/sgc/requests/${request.id}/attachments/${idAttachment}/withdraw`, 'POST', { reason }), 'Adjunto retirado.');
@@ -679,7 +695,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
             <Text size='sm' c='dimmed'>
               Cancelar es una acción (no un paso): cierra la solicitud y anula las tareas pendientes. Queda en el historial.
             </Text>
-            <Textarea label='Motivo de la cancelación' required minRows={3} autosize value={cancelReason} onChange={(e) => setCancelReason(e.currentTarget.value)} data-testid='sgc-cancelar-motivo' />
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo de la cancelación' required minRows={3} autosize value={cancelReason} onChange={(e) => setCancelReason(e.currentTarget.value)} data-testid='sgc-cancelar-motivo' />
             <Group justify='flex-end'>
               <Button variant='default' onClick={() => setCancelOpen(false)}>
                 Volver

@@ -133,7 +133,7 @@ export default function SgcFlowTasksCard({ definition, isEditing, originalKeys, 
                           <Group justify='space-between' align='flex-start'>
                             <div style={{ flex: 1 }}>
                               {isEditing ? (
-                                <TextInput value={task.name} onChange={(e) => setTask(index, { name: e.target.value })} placeholder='Nombre de la tarea' data-testid='sgc-flujo-tarea-nombre' />
+                                <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' value={task.name} onChange={(e) => setTask(index, { name: e.target.value })} placeholder='Nombre de la tarea' data-testid='sgc-flujo-tarea-nombre' />
                               ) : (
                                 <Group gap='xs'>
                                   <Text size='md' fw={600} className='mb-1'>
@@ -323,7 +323,7 @@ export default function SgcFlowTasksCard({ definition, isEditing, originalKeys, 
                                 <Grid.Col span={{ base: 12, sm: 4 }}>
                                   <InfoBox icon={<IconKey size={16} style={{ color: 'var(--mantine-color-dimmed)' }} />} label='Clave'>
                                     {isNew ? (
-                                      <TextInput value={task.key} onChange={(e) => setTask(index, { key: e.target.value })} size='sm' data-testid='sgc-flujo-tarea-clave' />
+                                      <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' value={task.key} onChange={(e) => setTask(index, { key: e.target.value })} size='sm' data-testid='sgc-flujo-tarea-clave' />
                                     ) : (
                                       <Text size='sm' fw={500} ff='monospace'>
                                         {task.key}

@@ -390,6 +390,9 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(withdrawAttachment(prisma, req1, wrong.id, { reason: 'otra vez' }, await viewer(E.elab), actor(E.elab))).rejects.toMatchObject({ status: 409 });
     await expect(withdrawAttachment(prisma, req1, 999999, { reason: 'no existe' }, await viewer(E.elab), actor(E.elab))).rejects.toMatchObject({ status: 404 });
     const good = await uploadAttachment(prisma, upload, req1, { purpose: 'borrador', ...word() }, await viewer(E.elab), actor(E.elab));
+    // Aviso de borrador duplicado (mismo SHA-256): el retirado no cuenta y uno distinto no es duplicado.
+    expect(wrong.duplicateOf).toEqual([]);
+    expect(good.duplicateOf).toEqual([]);
     const soporte = await uploadAttachment(prisma, upload, req1, { purpose: 'soporte', ...word('acta'), fileName: 'Acta.pdf', contentType: '' }, await viewer(E.rev1), actor(E.rev1));
     await expect(withdrawAttachment(prisma, req1, soporte.id, { reason: 'no es mío' }, await viewer(E.rev2), actor(E.rev2))).rejects.toMatchObject({ status: 403 });
     expect(uploads.at(-1)!.segments).toEqual(['SGC', 'S2', '_solicitudes', `SOL-${req1}`]);

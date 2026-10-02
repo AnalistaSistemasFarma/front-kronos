@@ -49,8 +49,8 @@ export default function SgcCargoMembers({ idCompany }: { idCompany: number }) {
         {msg && <Alert color={msg.ok ? 'green' : 'red'}>{msg.text}</Alert>}
         <Group align='flex-end' wrap='wrap'>
           <Select label='Cargo' data={(data?.cargos ?? []).map((c) => ({ value: String(c.id), label: c.name }))} value={idCargo} onChange={setIdCargo} searchable w={300} />
-          <Autocomplete label='Correo de la persona' data={options} value={email} onChange={setEmail} w={300} />
-          <Textarea label='Motivo' autosize minRows={1} value={reason} onChange={(e) => setReason(e.currentTarget.value)} w={260} />
+          <Autocomplete autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Correo de la persona' data={options} value={email} onChange={setEmail} w={300} />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' autosize minRows={1} value={reason} onChange={(e) => setReason(e.currentTarget.value)} w={260} />
           <Button
             leftSection={<IconPlus size={14} />}
             disabled={!idCargo || !email.includes('@') || reason.trim().length < 5}
@@ -109,7 +109,7 @@ export default function SgcCargoMembers({ idCompany }: { idCompany: number }) {
       </Stack>
       <Modal opened={Boolean(remove)} onClose={() => setRemove(null)} title={`Retirar ${remove?.label ?? ''}`} centered>
         <Stack>
-          <Textarea label='Motivo' required autosize minRows={2} value={remove?.reason ?? ''} onChange={(e) => remove && setRemove({ ...remove, reason: e.currentTarget.value })} />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' required autosize minRows={2} value={remove?.reason ?? ''} onChange={(e) => remove && setRemove({ ...remove, reason: e.currentTarget.value })} />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setRemove(null)}>
               Volver
