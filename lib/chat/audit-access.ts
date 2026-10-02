@@ -1,5 +1,6 @@
 import { prisma } from '../prisma';
 import { checkAdminPrivileges } from '../access-control';
+import { AUDIT_CONVERSATIONS_URL } from './audit-constants';
 
 /**
  * PERMISO DEL MÓDULO "Auditoría de agentes".
@@ -50,4 +51,33 @@ export async function canAuditAgents(userEmail: string): Promise<boolean> {
   if (asignado) return true;
 
   return checkAdminPrivileges(email);
+}
+
+export { AUDIT_CONVERSATIONS_URL };
+
+/**
+ * ¿Puede este usuario leer el TEXTO de las conversaciones en la auditoría?
+ *
+ * Decisión de Nicolás (2026-10-02): la vista general muestra solo agentes y
+ * métricas (persona, fecha, IP, consumo); el texto queda detrás de un permiso
+ * aparte, el subproceso AUDIT_CONVERSATIONS_URL.
+ *
+ * SIN SEGUNDA PUERTA, A PROPÓSITO: ser administrador NO alcanza. El texto es
+ * información confidencial y datos personales (Ley 1581 de 2012); quien lo lea
+ * debe tener el permiso asignado con nombre propio. Se exige además poder
+ * auditar (canAuditAgents): el permiso de conversaciones no abre el módulo
+ * por sí solo.
+ */
+export async function canViewAuditConversations(userEmail: string): Promise<boolean> {
+  const email = userEmail.trim();
+  if (!email) return false;
+
+  const asignado = await prisma.subprocessUserCompany.findFirst({
+    where: {
+      companyUser: { user: { email } },
+      subprocess: { subprocess_url: AUDIT_CONVERSATIONS_URL },
+    },
+    select: { id_subprocess_user_company: true },
+  });
+  return Boolean(asignado);
 }

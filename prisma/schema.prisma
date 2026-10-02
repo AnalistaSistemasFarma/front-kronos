@@ -657,6 +657,9 @@ model Agent {
   deliveries       ChatMessageDelivery[]
   statuses         ChatAgentStatus[]
   turnUsage        ChatAgentTurnUsage[]
+  // Auditoría de agentes → Inventario (F1): back-relations requeridas por Prisma.
+  inventories      AgentInventory[]
+  auditFindings    AgentAuditFinding[]
 
   @@unique([code])
   @@map("agent")
@@ -2530,4 +2533,145 @@ model SgcAccessRequest {
   @@index([requester_email])
   @@map("access_request")
   @@schema("sgc")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDITORÍA DE AGENTES → INVENTARIO (F1, solo lectura)
+//
+// Pedido de Nicolás (2026-10-01/02): por cada agente registrado en SynerLink,
+// qué MCP (con empresa y si lee o escribe), herramientas, skills y canales
+// tiene, y qué riesgos salen de eso. Lo llena un RECOLECTOR central que corre
+// por SSH desde la Mac de horus (cada noche y a pedido con "Re-escanear") y
+// publica en POST /api/chat/auditoria/inventario con su propia llave.
+//
+// NUNCA SE GUARDAN SECRETOS: ni tokens, ni contraseñas, ni valores de
+// variables de entorno. El recolector solo manda nombres, destinos (host:puerto)
+// y "requiere autenticación sí/no"; el endpoint además pasa todo texto por un
+// filtro que oculta lo que parezca una credencial (lib/agent-audit/inventory.ts).
+//
+// Solo agrega tablas (no toca las existentes). Migración:
+// prisma/migrations/20261002120000_auditoria_inventario_agentes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Solicitud de escaneo. La crea el botón "Re-escanear" (origin='manual',
+/// status='pendiente', la toma el recolector) o el propio recolector en la
+/// corrida nocturna (origin='programado'). Cada fila de inventario cuelga de
+/// una solicitud: así se sabe de qué corrida salió cada dato.
+model AgentScanRequest {
+  id             Int       @id @default(autoincrement())
+  /// 'manual' | 'programado'
+  origin         String    @db.NVarChar(20)
+  /// 'pendiente' | 'en_curso' | 'completado' | 'fallido'
+  status         String    @db.NVarChar(20)
+  /// Correo de quien pidió el escaneo (NULL en los programados).
+  requested_by   String?   @db.NVarChar(255)
+  requested_at   DateTime  @default(now())
+  started_at     DateTime?
+  finished_at    DateTime?
+  /// Equipo desde el que corrió el recolector.
+  collector_host String?   @db.NVarChar(120)
+  agents_scanned Int       @default(0)
+  /// Resumen de lo que no se pudo leer (equipos sin conexión, etc.).
+  error_summary  String?   @db.NVarChar(2000)
+
+  inventories AgentInventory[]
+
+  @@index([status, requested_at])
+  @@map("agent_scan_request")
+  @@schema("dbo")
+}
+
+/// Foto del inventario de UN agente en UNA corrida. Lo vigente es la fila más
+/// reciente por agente; las anteriores quedan como historia (base de la hoja
+/// de vida de F2).
+model AgentInventory {
+  id                     Int      @id @default(autoincrement())
+  id_agent               Int
+  id_scan_request        Int
+  scanned_at             DateTime
+  /// 'claude-code' | 'openclaw'
+  kind                   String   @db.NVarChar(30)
+  /// Equipo donde corre (etiqueta legible, p. ej. 'Mac mini de Pedro').
+  host                   String   @db.NVarChar(120)
+  /// Carpeta o identificador del agente dentro del equipo (sin rutas a secretos).
+  location               String?  @db.NVarChar(300)
+  model                  String?  @db.NVarChar(120)
+  /// 'activo' | 'detenido' | 'sin-servicio' | 'desconocido'
+  service_status         String?  @db.NVarChar(30)
+  /// Cómo ejecuta comandos: 'sin-aprobacion' | 'con-aprobacion' | 'restringido' | 'desconocido'
+  exec_mode              String?  @db.NVarChar(60)
+  /// false = ejecuta comandos del sistema sin pedir aprobación (hallazgo H-01).
+  exec_requires_approval Boolean?
+  /// JSON: herramientas permitidas/negadas declaradas (nombres, sin argumentos).
+  tools_json             String?  @db.NVarChar(Max)
+  /// JSON: nombres de skills instalados.
+  skills_json            String?  @db.NVarChar(Max)
+  /// JSON: canales [{tipo, detalle}] (sin tokens ni ids de chat).
+  channels_json          String?  @db.NVarChar(Max)
+  /// Si el agente no se pudo leer en esta corrida, el motivo.
+  scan_error             String?  @db.NVarChar(500)
+  created_at             DateTime @default(now())
+
+  agent       Agent               @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+  scanRequest AgentScanRequest    @relation(fields: [id_scan_request], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  mcps        AgentInventoryMcp[]
+
+  @@index([id_agent, scanned_at])
+  @@index([id_scan_request])
+  @@map("agent_inventory")
+  @@schema("dbo")
+}
+
+/// Un servidor MCP configurado en el agente, con su empresa y si puede
+/// escribir. Normalizado (y no dentro de un JSON) porque es por donde se
+/// filtra y se calcula el riesgo.
+model AgentInventoryMcp {
+  id           Int     @id @default(autoincrement())
+  id_inventory Int
+  name         String  @db.NVarChar(120)
+  /// 'http' | 'stdio' | 'sse' | 'desconocido'
+  transport    String  @db.NVarChar(20)
+  /// host:puerto/ruta del HTTP, o el ejecutable del stdio. Nunca la cadena de conexión.
+  target       String? @db.NVarChar(300)
+  company      String? @db.NVarChar(120)
+  /// 'lectura' | 'escritura' | 'desconocido'
+  access       String  @db.NVarChar(20)
+  /// 'requerida' | 'ninguna' | 'local' (stdio, no expuesto en red) | 'desconocida'.
+  auth         String  @db.NVarChar(30)
+  /// Herramientas de escritura detectadas (nombres separados por coma).
+  write_tools  String? @db.NVarChar(1000)
+
+  inventory AgentInventory @relation(fields: [id_inventory], references: [id], onDelete: Cascade)
+
+  @@index([id_inventory])
+  @@map("agent_inventory_mcp")
+  @@schema("dbo")
+}
+
+/// Hallazgo de riesgo calculado AUTOMÁTICAMENTE por el endpoint de ingesta a
+/// partir del inventario (no lo escribe nadie a mano). Uno por agente + regla +
+/// sujeto: si en el siguiente escaneo ya no aparece, pasa a 'resuelto'.
+model AgentAuditFinding {
+  id            Int       @id @default(autoincrement())
+  id_agent      Int
+  /// Código estable de la regla, p. ej. 'mcp-escritura-sin-auth'.
+  rule_code     String    @db.NVarChar(60)
+  /// 'critico' | 'alto' | 'medio' | 'bajo'
+  severity      String    @db.NVarChar(20)
+  /// Sobre qué recae (nombre del MCP, del canal…); '' si es del agente entero.
+  subject       String    @db.NVarChar(200)
+  title         String    @db.NVarChar(300)
+  detail        String?   @db.NVarChar(1000)
+  /// 'abierto' | 'resuelto'
+  status        String    @db.NVarChar(20)
+  first_seen_at DateTime
+  last_seen_at  DateTime
+  resolved_at   DateTime?
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, rule_code, subject])
+  @@index([status, severity])
+  @@map("agent_audit_finding")
+  @@schema("dbo")
 }

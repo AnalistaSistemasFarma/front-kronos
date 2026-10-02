@@ -45,6 +45,11 @@ import {
  * LA REJA ESTÁ EN EL ENDPOINT (/api/chat/auditoria). Aquí solo se pinta el
  * mensaje de "sin acceso": una pantalla escondida no es un permiso.
  *
+ * EL TEXTO DE LAS CONVERSACIONES VA DETRÁS DE UN PERMISO APARTE (decisión de
+ * Nicolás, 2026-10-02): sin el subproceso de conversaciones, el endpoint no lo
+ * entrega (body = null) y aquí no se pinta la columna "Mensaje" ni el filtro
+ * por texto. La vista general queda con agentes y métricas.
+ *
  * EL TEXTO VIENE RECORTADO EN LA TABLA y se abre a pedido. Una auditoría se
  * lee de arriba hacia abajo buscando algo raro; con los mensajes completos
  * desplegados no se alcanza a ver ni diez filas.
@@ -54,7 +59,8 @@ type MensajeAuditoria = {
   id: number;
   idConversation: number;
   role: string;
-  body: string;
+  /** null = sin el permiso de conversaciones. */
+  body: string | null;
   createdAt: string;
   clientIp: string | null;
   userAgent: string | null;
@@ -83,6 +89,7 @@ type ConsumoConversacion = {
 };
 
 type Respuesta = {
+  verConversaciones: boolean;
   page: number;
   porPagina: number;
   total: number;
@@ -117,10 +124,11 @@ function rangoPorDefecto(): { desde: string; hasta: string } {
 }
 
 /** Una fila de la tabla, con su texto plegable. */
-function FilaMensaje({ m }: { m: MensajeAuditoria }) {
+function FilaMensaje({ m, verTexto }: { m: MensajeAuditoria; verTexto: boolean }) {
   const [abierto, setAbierto] = useState(false);
-  const largo = m.body.length > 180;
-  const texto = abierto || !largo ? m.body : `${m.body.slice(0, 180)}…`;
+  const body = m.body ?? '';
+  const largo = body.length > 180;
+  const texto = abierto || !largo ? body : `${body.slice(0, 180)}…`;
 
   return (
     <Table.Tr>
@@ -180,27 +188,29 @@ function FilaMensaje({ m }: { m: MensajeAuditoria }) {
           </Text>
         )}
       </Table.Td>
-      <Table.Td style={{ verticalAlign: 'top', minWidth: 320 }}>
-        <Text size='xs' style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {texto}
-        </Text>
-        {m.adjuntos.length > 0 && (
-          <Text size='xs' c='dimmed' mt={4}>
-            📎 {m.adjuntos.join(', ')}
+      {verTexto && (
+        <Table.Td style={{ verticalAlign: 'top', minWidth: 320 }}>
+          <Text size='xs' style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {texto}
           </Text>
-        )}
-        {largo && (
-          <ActionIcon
-            variant='subtle'
-            size='sm'
-            mt={2}
-            onClick={() => setAbierto((v) => !v)}
-            aria-label={abierto ? 'Recoger' : 'Ver completo'}
-          >
-            {abierto ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
-          </ActionIcon>
-        )}
-      </Table.Td>
+          {m.adjuntos.length > 0 && (
+            <Text size='xs' c='dimmed' mt={4}>
+              📎 {m.adjuntos.join(', ')}
+            </Text>
+          )}
+          {largo && (
+            <ActionIcon
+              variant='subtle'
+              size='sm'
+              mt={2}
+              onClick={() => setAbierto((v) => !v)}
+              aria-label={abierto ? 'Recoger' : 'Ver completo'}
+            >
+              {abierto ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
+            </ActionIcon>
+          )}
+        </Table.Td>
+      )}
     </Table.Tr>
   );
 }
@@ -259,6 +269,8 @@ export default function AuditoriaAgentesPage() {
     void consultar(1);
   }, []);
 
+  const verTexto = datos?.verConversaciones === true;
+
   const totales = useMemo(() => {
     const c = datos?.consumo ?? [];
     return {
@@ -282,6 +294,9 @@ export default function AuditoriaAgentesPage() {
    */
   const exportar = () => {
     if (!datos || datos.mensajes.length === 0) return;
+    // Sin el permiso de conversaciones el archivo sale sin texto ni adjuntos:
+    // el endpoint ya no los entrega, y las columnas vacías confundirían.
+    const conTexto = datos.verConversaciones;
     const encabezado = [
       'Fecha y hora',
       'Conversación',
@@ -292,8 +307,7 @@ export default function AuditoriaAgentesPage() {
       'Empresa',
       'IP',
       'Navegador',
-      'Mensaje',
-      'Adjuntos',
+      ...(conTexto ? ['Mensaje', 'Adjuntos'] : []),
     ];
     const escapar = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const filas = datos.mensajes.map((m) =>
@@ -307,8 +321,7 @@ export default function AuditoriaAgentesPage() {
         m.conversacion.empresa ?? '',
         m.clientIp ?? '',
         m.userAgent ?? '',
-        m.body,
-        m.adjuntos.join(' | '),
+        ...(conTexto ? [m.body ?? '', m.adjuntos.join(' | ')] : []),
       ]
         .map(escapar)
         .join(';')
@@ -349,6 +362,12 @@ export default function AuditoriaAgentesPage() {
           </Text>
           <Link href='/process/chat/auditoria/skills' className='chat-text-muted' style={{ fontSize: 13 }}>
             Ver skills de la flota
+          </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link href='/process/chat/auditoria/inventario' className='chat-text-muted' style={{ fontSize: 13 }}>
+            Ver inventario de agentes
           </Link>
         </Group>
 
@@ -406,13 +425,15 @@ export default function AuditoriaAgentesPage() {
               value={conversacion}
               onChange={(e) => setConversacion(e.currentTarget.value)}
             />
-            <TextInput
-              label='Contiene el texto'
-              size='xs'
-              placeholder='Palabra o frase'
-              value={q}
-              onChange={(e) => setQ(e.currentTarget.value)}
-            />
+            {verTexto && (
+              <TextInput
+                label='Contiene el texto'
+                size='xs'
+                placeholder='Palabra o frase'
+                value={q}
+                onChange={(e) => setQ(e.currentTarget.value)}
+              />
+            )}
             <Checkbox
               label='Solo con dirección registrada'
               size='xs'
@@ -447,6 +468,14 @@ export default function AuditoriaAgentesPage() {
         {error && (
           <Alert color='red' radius='md' icon={<IconAlertCircle size={18} />} mb='md'>
             {error}
+          </Alert>
+        )}
+
+        {datos && !verTexto && (
+          <Alert color='blue' radius='md' icon={<IconLock size={18} />} mb='md'>
+            El texto de las conversaciones no se muestra en esta vista. Para leerlo se necesita el
+            permiso «Auditoría de agentes · Conversaciones», que se asigna aparte desde
+            Administración → Usuarios.
           </Alert>
         )}
 
@@ -532,12 +561,12 @@ export default function AuditoriaAgentesPage() {
                     <Table.Th>Quién</Table.Th>
                     <Table.Th>Asistente</Table.Th>
                     <Table.Th>Dirección</Table.Th>
-                    <Table.Th>Mensaje</Table.Th>
+                    {verTexto && <Table.Th>Mensaje</Table.Th>}
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {datos.mensajes.map((m) => (
-                    <FilaMensaje key={m.id} m={m} />
+                    <FilaMensaje key={m.id} m={m} verTexto={verTexto} />
                   ))}
                 </Table.Tbody>
               </Table>

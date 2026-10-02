@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../lib/prisma';
-import { canAuditAgents } from '../../../../lib/chat/audit-access';
+import { canAuditAgents, canViewAuditConversations } from '../../../../lib/chat/audit-access';
 import { jsonNoStore, resolveSessionUser, serverError, unauthorized } from '../../../../lib/chat/http';
 
 export const dynamic = 'force-dynamic';
@@ -32,6 +32,14 @@ export const dynamic = 'force-dynamic';
  * servidor se caen antes de pintar nada.
  *
  * Reservado a administración: ver la nota de lib/chat/audit-access.ts.
+ *
+ * EL TEXTO VA APARTE (decisión de Nicolás, 2026-10-02). La vista general
+ * entrega solo agentes y métricas: persona, fecha, IP y consumo. El texto del
+ * mensaje, los nombres de los adjuntos, el título del hilo y el filtro por
+ * texto (`q`) solo se usan si el usuario tiene ADEMÁS el permiso de
+ * conversaciones (canViewAuditConversations). El filtro `q` se ignora sin ese
+ * permiso porque, aunque no devolviera el texto, permitiría adivinarlo
+ * buscando palabra por palabra.
  */
 
 const POR_PAGINA_POR_DEFECTO = 50;
@@ -56,13 +64,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const verConversaciones = await canViewAuditConversations(user.email);
+
     const sp = request.nextUrl.searchParams;
     const desde = fecha(sp.get('desde'));
     const hasta = fecha(sp.get('hasta'));
     const idAgent = Number(sp.get('agente')) || null;
     const idConversation = Number(sp.get('conversacion')) || null;
     const usuario = (sp.get('usuario') ?? '').trim();
-    const texto = (sp.get('q') ?? '').trim();
+    const texto = verConversaciones ? (sp.get('q') ?? '').trim() : '';
     const soloConIp = sp.get('conIp') === '1';
 
     const page = Math.max(1, Number(sp.get('page')) || 1);
@@ -118,7 +128,7 @@ export async function GET(request: NextRequest) {
           id: true,
           id_conversation: true,
           role: true,
-          body: true,
+          body: verConversaciones,
           created_at: true,
           client_ip: true,
           user_agent: true,
@@ -134,7 +144,7 @@ export async function GET(request: NextRequest) {
               company: { select: { company: true } },
             },
           },
-          attachments: { select: { file_name: true } },
+          ...(verConversaciones ? { attachments: { select: { file_name: true } } } : {}),
         },
       }),
     ]);
@@ -174,6 +184,7 @@ export async function GET(request: NextRequest) {
     });
 
     return jsonNoStore({
+      verConversaciones,
       page,
       porPagina,
       total,
@@ -187,7 +198,8 @@ export async function GET(request: NextRequest) {
         id: m.id,
         idConversation: m.id_conversation,
         role: m.role,
-        body: m.body,
+        // null = sin el permiso de conversaciones (ver la nota de arriba).
+        body: verConversaciones ? (m.body ?? '') : null,
         createdAt: m.created_at.toISOString(),
         clientIp: m.client_ip,
         userAgent: m.user_agent,
@@ -199,11 +211,11 @@ export async function GET(request: NextRequest) {
               m.conversation.user.name?.trim() ||
               m.conversation.user.email,
         autorEmail: m.role === 'agent' ? null : m.userAuthor?.email ?? m.conversation.user.email,
-        adjuntos: m.attachments.map((a) => a.file_name),
+        adjuntos: verConversaciones ? (m.attachments ?? []).map((a) => a.file_name) : [],
         conversacion: {
           id: m.conversation.id,
           kind: m.conversation.kind,
-          title: m.conversation.title,
+          title: verConversaciones ? m.conversation.title : null,
           agente: {
             idAgent: m.conversation.agent.id_agent,
             code: m.conversation.agent.code,

@@ -5,6 +5,7 @@ import {
 import { isDeleteAttachmentsSubprocess } from '../attachments/access';
 import { isValentineWallSubprocess } from '../valentine/constants';
 import { isSgcPermissionMarkerSubprocess } from '../sgc/constants';
+import { isAuditConversationsMarkerSubprocess } from '../chat/audit-constants';
 
 export const DASHBOARD_SOLICITANTE_URL = '/process/request-general/dashboard-solicitante';
 export const DASHBOARD_SOLICITADO_URL = '/process/request-general/dashboard-solicitado';
@@ -22,7 +23,8 @@ export function isHubHiddenRequestDashboardSubprocess(subprocess: {
     isOrionFirmaSignSubprocess(subprocess) ||
     isDeleteAttachmentsSubprocess(subprocess) ||
     isValentineWallSubprocess(subprocess) ||
-    isSgcPermissionMarkerSubprocess(subprocess)
+    isSgcPermissionMarkerSubprocess(subprocess) ||
+    isAuditConversationsMarkerSubprocess(subprocess)
   ) {
     return true;
   }
