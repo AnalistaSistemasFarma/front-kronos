@@ -372,8 +372,9 @@ export async function buildControlledPdfWithLayout(contentPdf: Uint8Array, manif
       let size = 7.5;
       while (size > 5 && fonts.regular.widthOfTextAtSize(top, size) > width - 40) size -= 0.5;
       page.drawText(top, { x: 20, y: height - 14, size, font: fonts.regular, color: MUTED });
+      // Con encabezado institucional, la página x de y ya va en el encabezado (y el pie lo ocupa la marca de la copia controlada).
+      page.drawText(toWinAnsiSafe(`Documento controlado · Página ${i + 1} de ${total}`), { x: 20, y: 8, size: 7, font: fonts.regular, color: MUTED });
     }
-    page.drawText(toWinAnsiSafe(`Documento controlado · Página ${i + 1} de ${total}`), { x: 20, y: 8, size: 7, font: fonts.regular, color: MUTED });
   });
   let emission: SgcControlledLayout['emission'] = null;
   if (header) {
