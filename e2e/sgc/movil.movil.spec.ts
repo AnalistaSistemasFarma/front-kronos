@@ -94,34 +94,60 @@ test.describe.serial('SGC documental · celular', () => {
     const pageImg = page.getByTestId('sgc-ubicar-firmas').getByAltText('Página 1');
     await expect(pageImg).toBeVisible({ timeout: 60_000 });
 
+    // Espera a que el lienzo deje de moverse (las páginas se dibujan después de abrir el modal).
+    let img = (await pageImg.boundingBox())!;
+    await expect
+      .poll(async () => {
+        const now = (await pageImg.boundingBox())!;
+        const stable = Math.abs(now.y - img.y) < 1 && Math.abs(now.height - img.height) < 1 && now.height > 100;
+        img = now;
+        return stable;
+      }, { timeout: 30_000 })
+      .toBe(true);
+
     // El documento usa casi todo el ancho (antes quedaba en ~40 px detrás de la lista «Orden de firma»).
     const vw = page.viewportSize()!.width;
-    const img = (await pageImg.boundingBox())!;
     expect(img.width).toBeGreaterThan(vw * 0.75);
     await expect(page.getByTestId('sgc-ubicar-firmante-movil')).toHaveCount(4);
+    await expect(page.getByTestId('sgc-ubicar-documento')).toContainText('Toque el documento para colocar');
 
     // Tocar para ubicar: con «Elaboró» elegido, un toque en el documento lleva su caja ahí.
     await page.getByTestId('sgc-ubicar-firmante-movil').first().tap();
     await expect(page.getByTestId('sgc-ubicar-firmante-movil').first()).toHaveAttribute('data-active', 'true');
-    const target = { x: img.x + img.width * 0.5, y: Math.min(img.y + img.height * 0.6, page.viewportSize()!.height - 160) };
-    await page.touchscreen.tap(target.x, target.y);
-    const moved = (await boxes(page)).find((b) => Math.abs(b.x + b.w / 2 - target.x) < 30 && Math.abs(b.y + b.h / 2 - target.y) < 30);
-    expect(moved, 'la caja de «Elaboró» quedó donde se tocó').toBeTruthy();
+    const docArea = (await page.getByTestId('sgc-ubicar-documento').boundingBox())!;
+    const visibleBottom = Math.min(img.y + img.height, docArea.y + docArea.height) - 30;
+    const target = { x: img.x + img.width * 0.5, y: Math.max(img.y + 40, Math.min(img.y + img.height * 0.6, visibleBottom)) };
+    const near = async () => (await boxes(page)).find((b) => Math.abs(b.x + b.w / 2 - target.x) < 30 && Math.abs(b.y + b.h / 2 - target.y) < 30);
+    await expect
+      .poll(async () => {
+        if (!(await near())) await page.touchscreen.tap(target.x, target.y);
+        return Boolean(await near());
+      }, { message: 'la caja de «Elaboró» quedó donde se tocó', timeout: 20_000 })
+      .toBe(true);
+    const moved = (await near())!;
 
     // Arrastrar la caja con el dedo.
     const cdp = await page.context().newCDPSession(page);
-    const start = { x: moved!.x + 6, y: moved!.y + moved!.h / 2 };
+    const start = { x: moved.x + 6, y: moved.y + moved.h / 2 };
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [start] });
-    for (let i = 1; i <= 10; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: start.x - 5 * i, y: start.y + 6 * i }] });
+    for (let i = 1; i <= 10; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: start.x - 5 * i, y: start.y + 3 * i }] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    const dragged = (await boxes(page)).find((b) => Math.abs(b.x - (moved!.x - 50)) < 15 && Math.abs(b.y - (moved!.y + 60)) < 15);
-    expect(dragged, 'la caja se movió con el dedo').toBeTruthy();
+    await expect
+      .poll(async () => Boolean((await boxes(page)).find((b) => Math.abs(b.x - (moved.x - 50)) < 15 && Math.abs(b.y - (moved.y + 30)) < 15)), { message: 'la caja se movió con el dedo', timeout: 10_000 })
+      .toBe(true);
 
-    // Desplazar el documento con el dedo sobre la página (antes el lienzo atrapaba el gesto).
+    // Desplazar el documento con el dedo sobre la página (antes el lienzo atrapaba el gesto),
+    // si el documento es más alto que el área visible.
     const viewport = page.getByTestId('sgc-ubicar-documento').locator('.mantine-ScrollArea-viewport').first();
-    const before = await viewport.evaluate((el) => el.scrollTop);
-    await cdp.send('Input.synthesizeScrollGesture', { x: Math.round(img.x + 12), y: Math.round(page.viewportSize()!.height - 220), yDistance: -250, speed: 1500, gestureSourceType: 'touch' });
-    await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBeGreaterThan(before);
+    const { top, max } = await viewport.evaluate((el) => ({ top: el.scrollTop, max: el.scrollHeight - el.clientHeight }));
+    if (max > 20) {
+      const vb = (await viewport.boundingBox())!;
+      await cdp.send('Input.synthesizeScrollGesture', { x: Math.round(img.x + 12), y: Math.round(vb.y + vb.height * 0.75), yDistance: -Math.round(vb.height * 0.4), speed: 1200, gestureSourceType: 'touch' });
+      await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBeGreaterThan(top);
+    }
+    // La página no bloquea los gestos del dedo (en escritorio sí, como en SynerLink).
+    // «pan-x pan-y pinch-zoom» lo serializa Chrome como «manipulation».
+    expect(await pageImg.evaluate((el) => getComputedStyle(el.parentElement!).touchAction)).toMatch(/manipulation|pan-y/);
 
     await page.getByTestId('sgc-ubicar-guardar').tap();
     await expect(page.getByTestId('sgc-mensaje')).toContainText('Ubicación de firmas guardada', { timeout: 30_000 });
@@ -148,8 +174,23 @@ test.describe.serial('SGC documental · celular', () => {
     await confirm.scrollIntoViewIfNeeded();
     const cb = (await confirm.boundingBox())!;
     expect(cb.x + cb.width).toBeLessThanOrEqual(page.viewportSize()!.width);
-    await confirm.tap();
-    await expect(page.getByTestId('sgc-mensaje')).toContainText('Firma registrada', { timeout: 60_000 });
+    await expect(confirm).toBeEnabled();
+    // click() y no tap(): con el campo de contraseña enfocado, la emulación táctil de Chrome
+    // desplaza la página (teclado virtual simulado) entre medir y tocar.
+    await confirm.click();
+    // movil-ios y movil-android corren a la vez con la misma persona: el servidor serializa
+    // la reautenticación por persona y responde «Hay otra firma suya en curso»; se reintenta.
+    await expect
+      .poll(async () => {
+        if (await page.getByTestId('sgc-mensaje').filter({ hasText: 'Firma registrada' }).count()) return true;
+        const err = page.getByTestId('sgc-firma-error');
+        if ((await err.count()) && /otra firma suya en curso/.test(await err.innerText())) {
+          await page.getByTestId('sgc-firma-contrasena').fill(PW1);
+          if (await confirm.isEnabled()) await confirm.click();
+        }
+        return false;
+      }, { timeout: 90_000, intervals: [2_000] })
+      .toBe(true);
   });
 
   test('[SGC-REQ-107] las pantallas del SGC caben en el celular: sin desborde, campos de 16 px, «Autorizar» a la vista y calendario en agenda', async ({ page }) => {
