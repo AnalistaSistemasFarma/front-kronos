@@ -26,6 +26,7 @@ export const SGC_SCHEMA_MIGRATIONS = [
   '20261001000000_sgc_s4_divulgacion_capacitacion_vigencia',
   '20261001100000_sgc_s5_relaciones_vencimientos_accesos',
   '20261001200000_sgc_s6_endurecimiento',
+  '20261003120000_sgc_correcciones_calidad',
 ];
 
 export function sha256Hex(content) {

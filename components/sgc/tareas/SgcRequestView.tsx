@@ -57,6 +57,7 @@ import SgcDisseminationCard from './SgcDisseminationCard';
 import SgcReadingPanel from './SgcReadingPanel';
 import SgcTrainingCard from './SgcTrainingCard';
 import SgcCurrentDraftCard from './SgcCurrentDraftCard';
+import SgcDocumentLayoutCard from './SgcDocumentLayoutCard';
 import { draftEditorHref } from '../../../lib/sgc/draft/view';
 
 /**
@@ -254,7 +255,18 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           )}
         </Card>
 
-        {!data.readerOnly && <SgcCurrentDraftCard data={data} openTask={task ? { key: task.key, round: task.round } : null} idTask={mode === 'tarea' ? focus?.id ?? null : null} />}
+        {!data.readerOnly && (
+          <SgcCurrentDraftCard
+            data={data}
+            openTask={task ? { key: task.key, round: task.round } : null}
+            idTask={mode === 'tarea' ? focus?.id ?? null : null}
+            minorHref={
+              permissions.isQuality && !permissions.isElaborator && request.status === 'abierta' && task?.status === 'abierta' && task.signatureMeaning === 'aprobo' && data.currentDraft && data.currentDraft.format !== 'pdf'
+                ? draftEditorHref(request.id, request.idCompany, mode === 'tarea' ? focus?.id : null)
+                : null
+            }
+          />
+        )}
 
         {mode === 'tarea' && focus && data.reading && (
           <SgcReadingPanel
@@ -564,6 +576,15 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           suggestion={sugg.data?.suggestion ?? null}
           onSave={async (stepKey, signers, signingMode, reason) => {
             await run(() => sgcSend(`/api/sgc/requests/${request.id}/signers`, 'POST', { stepKey, signers, mode: signingMode, reason }), 'Firmantes actualizados.');
+          }}
+        />
+
+        <SgcDocumentLayoutCard
+          key={`${data.currentDraft?.sha256 ?? 'sin-borrador'}-${data.steps.map((st) => st.signers.map((x) => x.email).join(',')).join('|')}`}
+          requestId={request.id}
+          onMessage={(type, text) => {
+            setMessage({ type, text });
+            window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
         />
 

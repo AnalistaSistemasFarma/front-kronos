@@ -1,5 +1,6 @@
 import { sanitizeDraftHtml } from '../draft/html';
 import { SgcError } from '../errors';
+import { SGC_INSTITUTIONAL_FIRST_TOP_CM, SGC_INSTITUTIONAL_OTHER_TOP_CM } from './institutional';
 
 /**
  * Conversión del borrador a PDF para el PDF controlado (servidor).
@@ -21,12 +22,20 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
-/** Documento imprimible A4 con el contenido limpio (no es una plantilla por tipo documental). */
-export function wrapDraftForPdf(params: { title: string; code: string; contentHtml: string }): string {
+/**
+ * Documento imprimible A4 con el contenido limpio. Con `institutional` deja
+ * arriba el espacio del encabezado institucional que el sistema dibuja después
+ * (más alto en la primera página; ver lib/sgc/pdf/institutional.ts).
+ */
+export function wrapDraftForPdf(params: { title: string; code: string; contentHtml: string; institutional?: boolean }): string {
+  const page = params.institutional
+    ? `@page { size: A4; margin: ${SGC_INSTITUTIONAL_OTHER_TOP_CM}cm 2cm 2.2cm 2cm; }
+  @page :first { margin-top: ${SGC_INSTITUTIONAL_FIRST_TOP_CM}cm; }`
+    : '@page { size: A4; margin: 2.2cm 2cm; }';
   return `<!doctype html>
 <html lang="es"><head><meta charset="utf-8" /><title>${escapeHtml(params.title)}</title>
 <style>
-  @page { size: A4; margin: 2.2cm 2cm; }
+  ${page}
   * { box-sizing: border-box; }
   body { font-family: Calibri, 'Segoe UI', Arial, sans-serif; font-size: 11pt; color: #1a1a1a; line-height: 1.5; margin: 0; }
   h1 { font-size: 18pt; margin: 0 0 6pt; } h2 { font-size: 14pt; margin: 16pt 0 6pt; } h3 { font-size: 12pt; margin: 12pt 0 4pt; }
@@ -36,6 +45,7 @@ export function wrapDraftForPdf(params: { title: string; code: string; contentHt
   th { background: #f0f0f0; font-weight: 600; }
   ul, ol { margin: 0 0 8pt 18pt; padding: 0; }
   blockquote { border-left: 3px solid #ccc; margin: 8pt 0; padding-left: 10pt; color: #444; }
+  img { max-width: 100%; height: auto; }
 </style></head>
 <body>${sanitizeDraftHtml(params.contentHtml)}</body></html>`;
 }
