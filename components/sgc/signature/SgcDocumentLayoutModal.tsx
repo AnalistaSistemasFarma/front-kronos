@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Box, Button, Group, Loader, Modal, ScrollArea, Stack, Text } from '@mantine/core';
-import { IconDeviceFloppy } from '@tabler/icons-react';
+import { useMediaQuery } from '@mantine/hooks';
+import { IconCircleCheckFilled, IconDeviceFloppy } from '@tabler/icons-react';
 import {
   SGC_FIELD_KIND,
   fromPlacements,
@@ -52,6 +53,16 @@ export interface SgcDocumentLayoutModalProps {
 
 const EDITOR_HEIGHT = '100%';
 
+/**
+ * Celular / pantalla angosta (revisión móvil 2026-10-03). En SynerLink la
+ * ubicación de firmas no tiene versión móvil: la lista «Orden de firma» de
+ * 260 px dejaba el documento en ~40 px y no se podía ubicar nada. Con el mismo
+ * corte de SynerLink para el paso 1 (`isNarrowPrep`, 900 px), el modal ocupa
+ * toda la pantalla, los firmantes pasan a una fila de botones arriba y el
+ * documento usa el resto. En escritorio el marcado es el mismo de siempre.
+ */
+const NARROW_QUERY = '(max-width: 900px)';
+
 export default function SgcDocumentLayoutModal({ opened, onClose, layout, onSave }: SgcDocumentLayoutModalProps) {
   const documentId = `SOL-${layout.idRequest}`;
   const persons: SgcPlacementPerson[] = useMemo(
@@ -66,6 +77,7 @@ export default function SgcDocumentLayoutModal({ opened, onClose, layout, onSave
   const [activeOrder, setActiveOrder] = useState(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const narrow = useMediaQuery(NARROW_QUERY) ?? false;
 
   useEffect(() => {
     if (!opened) return;
@@ -105,15 +117,16 @@ export default function SgcDocumentLayoutModal({ opened, onClose, layout, onSave
       title={`${layout.canEdit ? 'Ubicar firmas' : 'Ubicación de firmas'} — ${layout.draft?.name || 'Documento'}`}
       size='100%'
       centered
+      fullScreen={narrow}
       zIndex={300}
-      padding='md'
+      padding={narrow ? 'xs' : 'md'}
       overlayProps={{ blur: 3, backgroundOpacity: 0.45 }}
       styles={{
         content: {
-          maxWidth: 'min(1600px, 98vw)',
-          width: '98vw',
-          height: '96vh',
-          maxHeight: '96vh',
+          maxWidth: narrow ? '100vw' : 'min(1600px, 98vw)',
+          width: narrow ? '100vw' : '98vw',
+          height: narrow ? '100dvh' : '96vh',
+          maxHeight: narrow ? '100dvh' : '96vh',
           display: 'flex',
           flexDirection: 'column',
           background: 'var(--app-surface)',
@@ -148,10 +161,10 @@ export default function SgcDocumentLayoutModal({ opened, onClose, layout, onSave
         ) : (
           <Stack gap='sm' style={{ height: EDITOR_HEIGHT, minHeight: 0, flex: 1 }}>
             <Box px={4}>
-              <Text size='xs' c='dimmed' mb={10} style={{ letterSpacing: '0.02em', textTransform: 'uppercase', fontWeight: 600 }}>
+              <Text size='xs' c='dimmed' mb={narrow ? 0 : 10} style={{ letterSpacing: '0.02em', textTransform: 'uppercase', fontWeight: 600 }}>
                 {editorStepSubtitle(2)}
               </Text>
-              <SgcEditorSteps active={2} />
+              {!narrow && <SgcEditorSteps active={2} />}
             </Box>
 
             {error && (
@@ -162,12 +175,12 @@ export default function SgcDocumentLayoutModal({ opened, onClose, layout, onSave
 
             <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
               {!layout.canEdit && (
-                <Alert color='gray' variant='light' mb='md'>
+                <Alert color='gray' variant='light' mb={narrow ? 'xs' : 'md'} p={narrow ? 'xs' : undefined}>
                   Solo el elaborador ubica las firmas mientras el documento está en elaboración.
                 </Alert>
               )}
               {usedSuggestions && (
-                <Alert color='blue' variant='light' mb='md' data-testid='sgc-ubicar-sugeridas'>
+                <Alert color='blue' variant='light' mb={narrow ? 'xs' : 'md'} p={narrow ? 'xs' : undefined} styles={narrow ? { message: { fontSize: 'var(--mantine-font-size-xs)' } } : undefined} data-testid='sgc-ubicar-sugeridas'>
                   Las firmas sin ubicar se pusieron en los recuadros «Firma» del encabezado institucional. Puede moverlas o redimensionarlas; se guardan al presionar «Guardar ubicaciones».
                 </Alert>
               )}
@@ -176,10 +189,37 @@ export default function SgcDocumentLayoutModal({ opened, onClose, layout, onSave
                   flex: 1,
                   minHeight: 0,
                   display: 'flex',
-                  flexDirection: 'row',
-                  gap: 16,
+                  flexDirection: narrow ? 'column' : 'row',
+                  gap: narrow ? 8 : 16,
                 }}
               >
+                {narrow ? (
+                  <ScrollArea type='auto' scrollbarSize={6} offsetScrollbars='x' style={{ flexShrink: 0 }} data-testid='sgc-ubicar-firmantes-movil'>
+                    <Group gap={6} wrap='nowrap' pb={4}>
+                      {persons.map((p) => {
+                        const placed = fields.some((f) => f.signerOrder === p.order);
+                        const active = p.order === activeOrder;
+                        return (
+                          <Button
+                            key={p.order}
+                            size='sm'
+                            radius='xl'
+                            variant={active ? 'filled' : 'light'}
+                            color={active ? 'blue' : placed ? 'teal' : 'gray'}
+                            leftSection={placed ? <IconCircleCheckFilled size={16} /> : <Text span fw={700} size='sm'>{p.order}</Text>}
+                            onClick={() => setActiveOrder(p.order)}
+                            aria-pressed={active}
+                            style={{ flexShrink: 0 }}
+                            data-testid='sgc-ubicar-firmante-movil'
+                            data-active={active ? 'true' : 'false'}
+                          >
+                            {p.role} · {p.name}
+                          </Button>
+                        );
+                      })}
+                    </Group>
+                  </ScrollArea>
+                ) : (
                 <Box
                   style={{
                     width: '30%',
@@ -215,6 +255,7 @@ export default function SgcDocumentLayoutModal({ opened, onClose, layout, onSave
                     </Box>
                   </ScrollArea>
                 </Box>
+                )}
 
                 <Box
                   style={{
