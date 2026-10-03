@@ -94,7 +94,8 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
   let idDoc = 0;
 
   async function newRequest(subject: string, file: { fileName: string; contentType: string; bytes: Uint8Array } = docx(subject)) {
-    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.elab), { idCompany: CO, requestType: 'nueva_version', subject, description: `Cambio de prueba: ${subject}.`, idDocument: idDoc, formValues: { urgencia: 'Normal' } }, actor(E.elab));
+    // Documento NUEVO en cada solicitud (un documento vigente solo admite una solicitud en curso).
+    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.elab), { idCompany: CO, requestType: 'nuevo', subject, description: `Cambio de prueba: ${subject}.`, idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } }, actor(E.elab));
     await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'orden' }, actor(E.elab));
     await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab));
     await uploadAttachment(prisma, upload, idRequest, { purpose: 'borrador', ...file }, await viewer(E.elab), actor(E.elab));
@@ -211,7 +212,7 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
     const preview = await buildLayoutPreview(prisma, deps, r1, await viewer(E.rev));
     expect((await PDFDocument.load(preview)).getPageCount()).toBe(2);
     expect(htmls[0]).toContain('@page :first { margin-top: 6.6cm; }');
-    expect(htmls[0]).toMatch(/Código \S+ versión 2\./);
+    expect(htmls[0]).toMatch(/Código \S+ \(provisional\) versión 1\./);
     expect(htmls[0]).toContain('<th>Motivo del cambio</th>');
     expect(htmls[0]).toContain('Al aprobar');
     // Segunda consulta: sale de la caché (no vuelve a convertir).
