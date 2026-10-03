@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Alert, Badge, Button, Card, Code, Group, Image, Modal, Select, Stack, Table, Text, TextInput, Textarea, Title } from '@mantine/core';
+import { Alert, Badge, Button, Card, Code, Group, Image, Modal, Stack, Table, Text, TextInput, Textarea, Title } from '@mantine/core';
+import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import { IconAlertCircle, IconCheck, IconSignature, IconX } from '@tabler/icons-react';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import SgcSignaturePad from '../../../../../components/sgc/signature/SgcSignaturePad';
@@ -85,7 +86,7 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
           Registrar firma (inducción)
         </Title>
         <Stack>
-          <Select label='Persona' placeholder='Elija la persona' data={options} value={email} onChange={setEmail} searchable data-testid='sgc-firmas-persona' />
+          <SgcSelect label='Persona' placeholder='Elija la persona' data={options} value={email} onChange={setEmail} searchable data-testid='sgc-firmas-persona' />
           <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' placeholder='Inducción al SGC del 2026-10-01' value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-firmas-motivo' />
           {image ? (
             <Group>

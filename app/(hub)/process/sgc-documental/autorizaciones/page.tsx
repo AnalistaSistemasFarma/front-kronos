@@ -16,7 +16,6 @@ import {
   Group,
   Loader,
   Modal,
-  Select,
   Stack,
   Table,
   Tabs,
@@ -27,6 +26,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
+import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import {
   IconAlertCircle,
   IconCalendarEvent,
@@ -297,7 +297,7 @@ function AuthorizationBoard() {
             <IconFileText size={20} />
             Autorizaciones
           </Title>
-          <Select
+          <SgcSelect
             data={[
               { value: 'pendiente', label: 'Pendientes' },
               { value: 'autorizada', label: 'Autorizadas' },

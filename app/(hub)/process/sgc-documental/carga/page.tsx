@@ -2,7 +2,8 @@
 
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Alert, Anchor, Button, Card, FileInput, Grid, Group, Loader, NumberInput, Select, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import { Alert, Anchor, Button, Card, FileInput, Grid, Group, Loader, NumberInput, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import { IconAlertTriangle, IconCheck, IconFileTypePdf, IconFileTypeDoc, IconUpload } from '@tabler/icons-react';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { sgcHref } from '../../../../../components/sgc/useSgcCompany';
@@ -141,10 +142,10 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
         </Text>
         <Grid gutter='md'>
           <Grid.Col span={{ base: 12, md: 6 }}>
-            <Select label='Proceso' placeholder='Seleccione' data={processOptions} value={idProcess} onChange={setIdProcess} searchable required />
+            <SgcSelect label='Proceso' placeholder='Seleccione' data={processOptions} value={idProcess} onChange={setIdProcess} searchable required />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 6 }}>
-            <Select
+            <SgcSelect
               label='Tipo documental'
               placeholder='Seleccione'
               data={data.documentTypes.map((t) => ({ value: String(t.id), label: `${t.code} · ${t.name}` }))}
@@ -166,7 +167,7 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
             />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 4 }}>
-            <Select
+            <SgcSelect
               label='Confidencialidad'
               data={SGC_CONFIDENTIALITY_LEVELS.map((c) => ({ value: c, label: SGC_CONFIDENTIALITY_LABELS[c] }))}
               value={confidentiality}
@@ -175,7 +176,7 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
             />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 4 }}>
-            <Select
+            <SgcSelect
               label='Departamento dueño'
               description={process?.department ? `Vacío = el del proceso (${process.department})` : 'Vacío = el del proceso'}
               data={data.departments.map((x) => ({ value: String(x.id), label: x.name }))}

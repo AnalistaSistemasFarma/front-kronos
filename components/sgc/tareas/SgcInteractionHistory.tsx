@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActionIcon, Anchor, Avatar, Box, Card, Checkbox, Collapse, Divider, Group, MultiSelect, ScrollArea, Stack, Text, Textarea, Title } from '@mantine/core';
+import { sgcTouchComboboxProps } from '../SgcSelect';
 import { IconCheck, IconNote, IconSettingsAutomation } from '@tabler/icons-react';
 import { presentInteractions, type SgcInteractionView } from '../../../lib/sgc/interactionView';
 import { formatDateCO } from './format';
@@ -220,7 +221,7 @@ export default function SgcInteractionHistory({ variant, items, currentEmail, us
               disabled={disabled}
             />
             {notify && (
-              <MultiSelect
+              <MultiSelect comboboxProps={sgcTouchComboboxProps()}
                 label='Correo electrónico de contacto'
                 placeholder='Buscar y seleccionar usuarios...'
                 data={users}
@@ -331,7 +332,7 @@ export default function SgcInteractionHistory({ variant, items, currentEmail, us
           disabled={disabled}
         />
         {notify && (
-          <MultiSelect placeholder='Destinatarios del correo…' data={users} value={emails} onChange={setEmails} searchable clearable nothingFoundMessage='No se encontraron usuarios' size='xs' />
+          <MultiSelect comboboxProps={sgcTouchComboboxProps()} placeholder='Destinatarios del correo…' data={users} value={emails} onChange={setEmails} searchable clearable nothingFoundMessage='No se encontraron usuarios' size='xs' />
         )}
         {!canNote && (
           <Text size='xs' c='orange'>

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { ActionIcon, Badge, Button, Card, FileInput, Group, Modal, ScrollArea, Select, Stack, Table, Text, Textarea, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Button, Card, FileInput, Group, Modal, ScrollArea, Stack, Table, Text, Textarea, Title, Tooltip } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import { IconDownload, IconEye, IconTrash, IconUpload } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import { formatDateCO, formatFileSize } from './format';
@@ -147,7 +148,7 @@ export default function SgcAttachmentsCard({ requestId, attachments, currentDraf
             clearable
             data-testid='sgc-adjunto-archivo'
           />
-          <Select
+          <SgcSelect
             label='Tipo'
             data={[...(canUploadDraft ? [{ value: 'borrador', label: 'Borrador del documento' }] : []), { value: 'soporte', label: 'Soporte' }]}
             value={purpose}

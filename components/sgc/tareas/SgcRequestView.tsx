@@ -18,12 +18,12 @@ import {
   Group,
   Loader,
   Modal,
-  Select,
   Stack,
   Text,
   Textarea,
   Title,
 } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import {
   IconAlertCircle,
   IconArrowLeft,
@@ -442,7 +442,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                       </Title>
                       {isEditing ? (
                         <Stack>
-                          <Select
+                          <SgcSelect
                             label='Estado de la Tarea'
                             placeholder='Selecciona estado'
                             data={decisionOptions}

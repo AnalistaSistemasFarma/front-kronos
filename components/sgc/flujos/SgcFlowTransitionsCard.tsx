@@ -1,6 +1,7 @@
 'use client';
 
-import { ActionIcon, Alert, Badge, Button, Card, Group, Select, Stack, Text } from '@mantine/core';
+import { ActionIcon, Alert, Badge, Button, Card, Group, Stack, Text } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import { IconAlertCircle, IconArrowRight, IconGitBranch, IconPlus, IconTrash } from '@tabler/icons-react';
 import { SGC_ACTION_LABELS, type SgcFlowDefinition, type SgcTransitionDefinition } from '../../../lib/sgc/flows/definition';
 import { SectionHeader } from './SgcFlowUi';
@@ -75,10 +76,10 @@ export default function SgcFlowTransitionsCard({ definition, isEditing, onChange
             <Card key={i} withBorder radius='md' p='md' data-testid='sgc-flujo-transicion'>
               {isEditing ? (
                 <Group align='flex-end' wrap='nowrap'>
-                  <Select label='Desde' data={taskOptions} value={t.from} onChange={(v) => v && setTr(i, { from: v })} allowDeselect={false} style={{ flex: 1 }} />
-                  <Select label='Acción' data={opts(SGC_ACTION_LABELS)} value={t.action} onChange={(v) => v && setTr(i, { action: v as SgcTransitionDefinition['action'] })} allowDeselect={false} w={190} />
-                  <Select label='Hacia' data={taskOptions} value={t.to} onChange={(v) => setTr(i, { to: v, terminalStatus: v ? null : t.terminalStatus })} clearable placeholder='—' style={{ flex: 1 }} />
-                  <Select
+                  <SgcSelect label='Desde' data={taskOptions} value={t.from} onChange={(v) => v && setTr(i, { from: v })} allowDeselect={false} style={{ flex: 1 }} />
+                  <SgcSelect label='Acción' data={opts(SGC_ACTION_LABELS)} value={t.action} onChange={(v) => v && setTr(i, { action: v as SgcTransitionDefinition['action'] })} allowDeselect={false} w={190} />
+                  <SgcSelect label='Hacia' data={taskOptions} value={t.to} onChange={(v) => setTr(i, { to: v, terminalStatus: v ? null : t.terminalStatus })} clearable placeholder='—' style={{ flex: 1 }} />
+                  <SgcSelect
                     label='o cierra como'
                     data={TERMINAL}
                     value={t.terminalStatus}

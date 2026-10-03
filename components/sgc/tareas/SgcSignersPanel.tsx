@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Alert, Badge, Button, Card, Group, MultiSelect, SegmentedControl, Stack, Text, Textarea, Title } from '@mantine/core';
+import { sgcTouchComboboxProps } from '../SgcSelect';
 import { IconBulb, IconPencil, IconUsersGroup } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import type { SgcMatrixSuggestion } from '../../../lib/sgc/flows/matrix';
@@ -78,7 +79,7 @@ function StepEditor({ step, canEdit, users, suggestion, onSave }: { step: Step }
               </Text>
             </Alert>
           )}
-          <MultiSelect
+          <MultiSelect comboboxProps={sgcTouchComboboxProps()}
             label={`Personas (${mode === 'orden' ? 'firman en el orden en que las elija' : 'firman todas a la vez'})`}
             data={users}
             value={value}

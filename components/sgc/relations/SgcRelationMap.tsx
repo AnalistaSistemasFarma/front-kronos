@@ -19,7 +19,8 @@ import {
   type Node,
   type NodeProps,
 } from '@xyflow/react';
-import { Alert, Badge, Button, Card, Group, Loader, MultiSelect, Select, Stack, Switch, Text, TextInput } from '@mantine/core';
+import { Alert, Badge, Button, Card, Group, Loader, MultiSelect, Stack, Switch, Text, TextInput } from '@mantine/core';
+import SgcSelect, { sgcTouchComboboxProps } from '../SgcSelect';
 import { IconAlertTriangle, IconFocus2, IconSearch } from '@tabler/icons-react';
 import { sgcHref } from '../useSgcCompany';
 import { sgcSend, useSgcFetch } from '../useSgcFetch';
@@ -190,10 +191,10 @@ function MapCanvas({ company, graph, showObsolete, setShowObsolete }: { company:
           <Button leftSection={<IconFocus2 size={16} />} variant='light' onClick={search} data-testid='sgc-mapa-centrar'>
             Centrar
           </Button>
-          <Select label='Tipo de proceso' data={processTypes.map(([v, l]) => ({ value: String(v), label: l }))} value={processType} onChange={(v) => { setProcessType(v); setProcess(null); }} clearable w={190} />
-          <Select label='Proceso (área)' data={processes.map(([v, l]) => ({ value: String(v), label: l }))} value={process} onChange={setProcess} clearable searchable w={220} />
-          <Select label='Tipo documental' data={docTypes.map(([v, l]) => ({ value: String(v), label: l }))} value={docType} onChange={setDocType} clearable w={150} />
-          <MultiSelect label='Tipo de relación' data={SGC_RELATION_TYPES.map((t) => ({ value: t, label: SGC_RELATION_LABELS[t] }))} value={relTypes} onChange={setRelTypes} clearable w={240} />
+          <SgcSelect label='Tipo de proceso' data={processTypes.map(([v, l]) => ({ value: String(v), label: l }))} value={processType} onChange={(v) => { setProcessType(v); setProcess(null); }} clearable w={190} />
+          <SgcSelect label='Proceso (área)' data={processes.map(([v, l]) => ({ value: String(v), label: l }))} value={process} onChange={setProcess} clearable searchable w={220} />
+          <SgcSelect label='Tipo documental' data={docTypes.map(([v, l]) => ({ value: String(v), label: l }))} value={docType} onChange={setDocType} clearable w={150} />
+          <MultiSelect comboboxProps={sgcTouchComboboxProps()} label='Tipo de relación' data={SGC_RELATION_TYPES.map((t) => ({ value: t, label: SGC_RELATION_LABELS[t] }))} value={relTypes} onChange={setRelTypes} clearable w={240} />
           <Stack gap={4}>
             <Switch label='Solo relacionados' checked={onlyConnected} onChange={(e) => setOnlyConnected(e.currentTarget.checked)} />
             {company.canQuality && <Switch label='Incluir obsoletos' checked={showObsolete} onChange={(e) => setShowObsolete(e.currentTarget.checked)} data-testid='sgc-mapa-obsoletos' />}

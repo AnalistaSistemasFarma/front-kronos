@@ -1,6 +1,7 @@
 'use client';
 
-import { ActionIcon, Alert, Badge, Button, Card, Checkbox, Grid, Group, NumberInput, ScrollArea, Select, Stack, Text, TextInput } from '@mantine/core';
+import { ActionIcon, Alert, Badge, Button, Card, Checkbox, Grid, Group, NumberInput, ScrollArea, Stack, Text, TextInput } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import { IconAlertCircle, IconCalendarTime, IconChevronDown, IconChevronUp, IconKey, IconListCheck, IconPlus, IconShieldCheck, IconSignature, IconTag, IconTrash, IconUserCheck, IconUsers } from '@tabler/icons-react';
 import {
   SGC_ASSIGNMENT_LABELS,
@@ -188,7 +189,7 @@ export default function SgcFlowTasksCard({ definition, isEditing, originalKeys, 
                           </Group>
 
                           {isEditing && task.multiAssignee && (
-                            <Select
+                            <SgcSelect
                               label='Firmantes: en orden o en paralelo (por defecto; el elaborador lo puede cambiar por documento)'
                               data={[
                                 { value: 'paralelo', label: 'En paralelo' },
@@ -213,7 +214,7 @@ export default function SgcFlowTasksCard({ definition, isEditing, originalKeys, 
                           )}
 
                           {isEditing && task.isAuthorization && (
-                            <Select
+                            <SgcSelect
                               label='Tipo de autorización'
                               placeholder='Seleccione el tipo'
                               data={authorizationTypes}
@@ -235,7 +236,7 @@ export default function SgcFlowTasksCard({ definition, isEditing, originalKeys, 
                           )}
 
                           {isEditing && index > 0 && (
-                            <Select
+                            <SgcSelect
                               mt='sm'
                               label='Ejecutar esta tarea solo si'
                               placeholder='Siempre (sin condición)'
@@ -251,7 +252,7 @@ export default function SgcFlowTasksCard({ definition, isEditing, originalKeys, 
                             <Grid.Col span={{ base: 12, sm: 4 }}>
                               <InfoBox icon={<IconUserCheck size={16} style={{ color: 'var(--mantine-color-dimmed)' }} />} label='Asignado a'>
                                 {isEditing ? (
-                                  <Select
+                                  <SgcSelect
                                     value={task.assignment}
                                     onChange={(v) =>
                                       v &&
@@ -275,7 +276,7 @@ export default function SgcFlowTasksCard({ definition, isEditing, originalKeys, 
                             <Grid.Col span={{ base: 12, sm: 4 }}>
                               <InfoBox icon={<IconUsers size={16} style={{ color: 'var(--mantine-color-dimmed)' }} />} label='Rol'>
                                 {isEditing ? (
-                                  <Select value={task.role} onChange={(v) => v && setTask(index, { role: v as SgcTaskDefinition['role'] })} data={opts(SGC_ROLE_LABELS)} allowDeselect={false} size='sm' />
+                                  <SgcSelect value={task.role} onChange={(v) => v && setTask(index, { role: v as SgcTaskDefinition['role'] })} data={opts(SGC_ROLE_LABELS)} allowDeselect={false} size='sm' />
                                 ) : (
                                   <Text size='sm' fw={500}>
                                     {SGC_ROLE_LABELS[task.role]}
@@ -298,7 +299,7 @@ export default function SgcFlowTasksCard({ definition, isEditing, originalKeys, 
                               <>
                                 <Grid.Col span={{ base: 12, sm: 4 }}>
                                   <InfoBox icon={<IconSignature size={16} style={{ color: 'var(--mantine-color-dimmed)' }} />} label='Firma (significado)'>
-                                    <Select
+                                    <SgcSelect
                                       value={task.signatureMeaning}
                                       onChange={(v) => setTask(index, { signatureMeaning: (v as SgcTaskDefinition['signatureMeaning']) ?? null })}
                                       data={opts(SGC_SIGNATURE_LABELS)}
@@ -310,7 +311,7 @@ export default function SgcFlowTasksCard({ definition, isEditing, originalKeys, 
                                 </Grid.Col>
                                 <Grid.Col span={{ base: 12, sm: 4 }}>
                                   <InfoBox icon={<IconShieldCheck size={16} style={{ color: 'var(--mantine-color-dimmed)' }} />} label='Grupo de verificación'>
-                                    <Select
+                                    <SgcSelect
                                       value={task.poolAuthorizationTypeCode}
                                       onChange={(v) => setTask(index, { poolAuthorizationTypeCode: v })}
                                       data={authorizationTypes}

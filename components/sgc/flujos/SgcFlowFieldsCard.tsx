@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { ActionIcon, Alert, Badge, Button, Card, Checkbox, Group, Select, Stack, Text, TextInput } from '@mantine/core';
+import { ActionIcon, Alert, Badge, Button, Card, Checkbox, Group, Stack, Text, TextInput } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import { IconAlertCircle, IconPlus, IconTag, IconTrash, IconX } from '@tabler/icons-react';
 import { SGC_FIELD_TYPE_LABELS, type SgcFlowDefinition, type SgcFormFieldDefinition } from '../../../lib/sgc/flows/definition';
 import { SectionHeader } from './SgcFlowUi';
@@ -85,7 +86,7 @@ export default function SgcFlowFieldsCard({ definition, isEditing, originalField
                   <Stack gap='sm'>
                     <Group align='flex-end' wrap='nowrap'>
                       <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Nombre del campo' placeholder='Ej. Tipo de cambio' value={field.label} onChange={(e) => setField(i, { label: e.target.value })} style={{ flex: 1 }} data-testid='sgc-flujo-campo-etiqueta' />
-                      <Select label='Tipo' data={opts(SGC_FIELD_TYPE_LABELS)} value={field.type} onChange={(v) => v && setField(i, { type: v as SgcFormFieldDefinition['type'] })} allowDeselect={false} disabled={!!field.qualityCheck} w={170} />
+                      <SgcSelect label='Tipo' data={opts(SGC_FIELD_TYPE_LABELS)} value={field.type} onChange={(v) => v && setField(i, { type: v as SgcFormFieldDefinition['type'] })} allowDeselect={false} disabled={!!field.qualityCheck} w={170} />
                       <Checkbox label='Obligatorio' checked={field.required} onChange={(e) => setField(i, { required: e.currentTarget.checked })} mb={8} />
                       <Checkbox
                         label='Chequeo Calidad'
@@ -102,7 +103,7 @@ export default function SgcFlowFieldsCard({ definition, isEditing, originalField
                     </Group>
 
                     <Group grow align='flex-start'>
-                      <Select
+                      <SgcSelect
                         label='Formulario'
                         data={[{ value: '__solicitud', label: 'Solicitud' }, ...taskOptions]}
                         value={field.taskKey ?? '__solicitud'}

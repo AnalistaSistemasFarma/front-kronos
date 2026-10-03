@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Accordion, ActionIcon, Alert, Badge, Button, Checkbox, Code, Grid, Group, Modal, NumberInput, ScrollArea, SegmentedControl, Select, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
+import { Accordion, ActionIcon, Alert, Badge, Button, Checkbox, Code, Grid, Group, Modal, NumberInput, ScrollArea, SegmentedControl, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import {
   IconAlertCircle,
   IconCalendarTime,
@@ -74,7 +75,7 @@ export function SgcAddTaskModal({ opened, onClose, onAdd, authorizationTypes }: 
             <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Nombre de la Tarea' placeholder='Ingrese el nombre de la tarea' value={form.name} onChange={(e) => set({ name: e.target.value })} required leftSection={<IconListCheck size={16} />} size='lg' classNames={LG_FIELD} data-testid='sgc-nueva-tarea-nombre' />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 6 }}>
-            <Select
+            <SgcSelect
               label='Asignado a'
               data={opts(SGC_ASSIGNMENT_LABELS)}
               value={form.assignment}
@@ -86,10 +87,10 @@ export function SgcAddTaskModal({ opened, onClose, onAdd, authorizationTypes }: 
             />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 6 }}>
-            <Select label='Rol' data={opts(SGC_ROLE_LABELS)} value={form.role} onChange={(v) => v && set({ role: v as SgcTaskDefinition['role'] })} allowDeselect={false} leftSection={<IconUserCheck size={16} />} size='lg' classNames={LG_FIELD} />
+            <SgcSelect label='Rol' data={opts(SGC_ROLE_LABELS)} value={form.role} onChange={(v) => v && set({ role: v as SgcTaskDefinition['role'] })} allowDeselect={false} leftSection={<IconUserCheck size={16} />} size='lg' classNames={LG_FIELD} />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 6 }}>
-            <Select
+            <SgcSelect
               label='Firma (significado)'
               placeholder='Sin firma'
               data={opts(SGC_SIGNATURE_LABELS)}
@@ -105,7 +106,7 @@ export function SgcAddTaskModal({ opened, onClose, onAdd, authorizationTypes }: 
             <NumberInput label='Días objetivo' placeholder='Sin plazo' value={form.targetDays ?? ''} onChange={(v) => set({ targetDays: v === '' ? null : Number(v) })} min={1} max={365} hideControls leftSection={<IconCalendarTime size={16} />} size='lg' classNames={LG_FIELD} />
           </Grid.Col>
           <Grid.Col span={12}>
-            <Select
+            <SgcSelect
               label='Grupo de verificación de Calidad'
               placeholder='Ninguno'
               data={authorizationTypes}
@@ -120,7 +121,7 @@ export function SgcAddTaskModal({ opened, onClose, onAdd, authorizationTypes }: 
         </Grid>
 
         {form.multiAssignee && (
-          <Select
+          <SgcSelect
             label='Firmantes: en orden o en paralelo'
             data={[
               { value: 'paralelo', label: 'En paralelo' },
@@ -136,7 +137,7 @@ export function SgcAddTaskModal({ opened, onClose, onAdd, authorizationTypes }: 
         <Checkbox label='Tarea de autorización' checked={form.isAuthorization} onChange={(e) => set({ isAuthorization: e.currentTarget.checked, authorizationTypeCode: e.currentTarget.checked ? form.authorizationTypeCode : null })} />
 
         {form.isAuthorization && (
-          <Select
+          <SgcSelect
             mt='sm'
             label='Tipo de autorización'
             placeholder='Seleccione el tipo'
@@ -150,7 +151,7 @@ export function SgcAddTaskModal({ opened, onClose, onAdd, authorizationTypes }: 
           />
         )}
 
-        <Select
+        <SgcSelect
           mt='sm'
           label='Ejecutar esta tarea solo si'
           placeholder='Siempre (sin condición)'
@@ -266,13 +267,13 @@ export function SgcMatrixModal({ opened, onClose, idCompany, canEdit, onCount }:
             </Text>
             <Grid>
               <Grid.Col span={{ base: 12, md: 4 }}>
-                <Select label='Rol' data={['elaborador', 'revisor', 'aprobador']} value={row.role} onChange={(v) => setRow({ ...row, role: v ?? 'revisor' })} allowDeselect={false} />
+                <SgcSelect label='Rol' data={['elaborador', 'revisor', 'aprobador']} value={row.role} onChange={(v) => setRow({ ...row, role: v ?? 'revisor' })} allowDeselect={false} />
               </Grid.Col>
               <Grid.Col span={{ base: 12, md: 4 }}>
-                <Select label='Proceso' clearable placeholder='Todos' data={(catalogs.data?.processes ?? []).map((p) => ({ value: String(p.id), label: `${p.code} · ${p.name}` }))} value={row.idProcess || null} onChange={(v) => setRow({ ...row, idProcess: v ?? '' })} />
+                <SgcSelect label='Proceso' clearable placeholder='Todos' data={(catalogs.data?.processes ?? []).map((p) => ({ value: String(p.id), label: `${p.code} · ${p.name}` }))} value={row.idProcess || null} onChange={(v) => setRow({ ...row, idProcess: v ?? '' })} />
               </Grid.Col>
               <Grid.Col span={{ base: 12, md: 4 }}>
-                <Select label='Tipo documental' clearable placeholder='Todos' data={(catalogs.data?.documentTypes ?? []).map((t) => ({ value: String(t.id), label: `${t.code} · ${t.name}` }))} value={row.idDocumentType || null} onChange={(v) => setRow({ ...row, idDocumentType: v ?? '' })} />
+                <SgcSelect label='Tipo documental' clearable placeholder='Todos' data={(catalogs.data?.documentTypes ?? []).map((t) => ({ value: String(t.id), label: `${t.code} · ${t.name}` }))} value={row.idDocumentType || null} onChange={(v) => setRow({ ...row, idDocumentType: v ?? '' })} />
               </Grid.Col>
               <Grid.Col span={{ base: 12, md: 6 }}>
                 <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Correo (persona)' value={row.userEmail} onChange={(e) => setRow({ ...row, userEmail: e.currentTarget.value, cargoName: '' })} leftSection={<IconUser size={16} />} />
