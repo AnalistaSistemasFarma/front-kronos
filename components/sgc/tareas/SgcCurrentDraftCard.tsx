@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Alert, Badge, Button, Card, Code, Group, Stack, Text, Title } from '@mantine/core';
-import { IconArrowBackUp, IconEye, IconFileCheck } from '@tabler/icons-react';
+import { IconArrowBackUp, IconEye, IconFileCheck, IconPencilCheck } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import { buildRoundNotice, draftCardTitle, draftEditorHref, summarizeCurrentDraft } from '../../../lib/sgc/draft/view';
 import { formatDateCO } from './format';
@@ -17,7 +17,7 @@ import { formatDateCO } from './format';
  * dice quién devolvió, cuándo, con qué observaciones y qué cambió.
  * Solo lectura: no cambia el flujo ni el cálculo del borrador vigente.
  */
-export default function SgcCurrentDraftCard({ data, openTask, idTask }: { data: SgcRequestDetail; openTask: { key: string; round: number } | null; idTask: number | null }) {
+export default function SgcCurrentDraftCard({ data, openTask, idTask, minorHref = null }: { data: SgcRequestDetail; openTask: { key: string; round: number } | null; idTask: number | null; minorHref?: string | null }) {
   const { request, currentDraft, attachments, draftRevisions, interactions, tasks } = data;
   const summary = summarizeCurrentDraft(currentDraft, attachments, draftRevisions);
   const notice = buildRoundNotice({ openTask, tasks, interactions, attachments, revisions: draftRevisions });
@@ -64,16 +64,24 @@ export default function SgcCurrentDraftCard({ data, openTask, idTask }: { data: 
             </Text>
           )}
         </Stack>
-        {href &&
-          (currentDraft?.kind === 'borrador_editor' ? (
-            <Button component={Link} href={href} size='md' leftSection={<IconEye size={18} />} data-testid='sgc-ver-documento'>
-              Ver documento
+        <Stack gap='xs' align='flex-end'>
+          {href &&
+            (currentDraft?.kind === 'borrador_editor' ? (
+              <Button component={Link} href={href} size='md' leftSection={<IconEye size={18} />} data-testid='sgc-ver-documento'>
+                Ver documento
+              </Button>
+            ) : (
+              <Button component='a' href={href} size='md' leftSection={<IconEye size={18} />} data-testid='sgc-ver-documento'>
+                Ver documento
+              </Button>
+            ))}
+          {/* 2026-10-03: Calidad corrige la forma durante la aprobación sin devolver el documento (revisión menor con motivo). */}
+          {minorHref && (
+            <Button component={Link} href={minorHref} variant='light' color='orange' leftSection={<IconPencilCheck size={16} />} data-testid='sgc-revision-menor'>
+              Revisión menor (Calidad)
             </Button>
-          ) : (
-            <Button component='a' href={href} size='md' leftSection={<IconEye size={18} />} data-testid='sgc-ver-documento'>
-              Ver documento
-            </Button>
-          ))}
+          )}
+        </Stack>
       </Group>
       {notice && (
         <Alert color='orange' variant='light' mt='md' icon={<IconArrowBackUp size={16} />} title={`Ronda ${notice.round} · devuelto por ${notice.returnedBy} el ${formatDateCO(notice.returnedAt)}`} data-testid='sgc-aviso-ronda'>

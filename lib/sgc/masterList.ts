@@ -20,7 +20,53 @@ export interface SgcMasterItem {
   reviewDueDate: string | null;
   processType: { id: number; code: string; name: string; color: string };
   process: { id: number; code: string; name: string; department: string | null };
+  /** 2026-10-03: área (departamento dueño) para la navegación área → tipo documental. */
+  area?: { id: number; name: string } | null;
   documentType: { id: number; code: string; name: string; pluralName: string; alertMonths: number };
+}
+
+/** Clave y nombre del área de un documento («sin área» si no tiene departamento dueño). */
+export const SGC_NO_AREA_ID = 0;
+export function areaOf(item: Pick<SgcMasterItem, 'area'>): { id: number; name: string } {
+  return item.area ?? { id: SGC_NO_AREA_ID, name: 'Sin área asignada' };
+}
+
+export interface SgcAreaGroup {
+  id: number;
+  name: string;
+  count: number;
+  types: { id: number; code: string; name: string; pluralName: string; count: number }[];
+}
+
+/**
+ * NAVEGACIÓN POR ÁREA → TIPO DOCUMENTAL (pedida por Calidad OLP el
+ * 2026-10-02): Documentación → área (p. ej. Compras) → tipo (manual,
+ * procedimiento, instructivo…). Agrupa el listado maestro (ya filtrado por
+ * permisos) por área y, dentro, por tipo documental, en orden alfabético; los
+ * documentos sin área quedan al final.
+ */
+export function groupByAreaAndType(items: readonly SgcMasterItem[]): SgcAreaGroup[] {
+  const areas = new Map<number, SgcAreaGroup>();
+  for (const it of items) {
+    const a = areaOf(it);
+    if (!areas.has(a.id)) areas.set(a.id, { id: a.id, name: a.name, count: 0, types: [] });
+    const g = areas.get(a.id)!;
+    g.count += 1;
+    let t = g.types.find((x) => x.id === it.documentType.id);
+    if (!t) {
+      t = { id: it.documentType.id, code: it.documentType.code, name: it.documentType.name, pluralName: it.documentType.pluralName, count: 0 };
+      g.types.push(t);
+    }
+    t.count += 1;
+  }
+  const out = [...areas.values()];
+  out.forEach((g) => g.types.sort((x, y) => x.pluralName.localeCompare(y.pluralName, 'es')));
+  return out.sort((x, y) => (x.id === SGC_NO_AREA_ID ? 1 : y.id === SGC_NO_AREA_ID ? -1 : x.name.localeCompare(y.name, 'es')));
+}
+
+/** Documentos de un área y (opcional) de un tipo documental, ordenados por código. */
+export function documentsOfArea(items: readonly SgcMasterItem[], areaId: number, documentTypeId?: number | null): SgcMasterItem[] {
+  return sortMasterList(items.filter((it) => areaOf(it).id === areaId && (!documentTypeId || it.documentType.id === documentTypeId)));
 }
 
 export interface SgcMasterFilters {

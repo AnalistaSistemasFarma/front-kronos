@@ -12,7 +12,7 @@ Asegurar que la información del SGC (documentos controlados, versiones, firmas 
 | Capa | Quién | Frecuencia | Qué protege | Cómo se recupera |
 |---|---|---|---|---|
 | 1. Respaldo completo de KRONOSDB | Infraestructura | Diario (00:00, completo) y COPY_ONLY (00:20); uno extra antes de cada pase | Toda la base, incluido `sgc` | Restauración nativa de SQL Server por infraestructura |
-| 2. Respaldo lógico del esquema `sgc` | Tecnología | Antes y después de cada cambio controlado; semanal recomendado | Las 45 tablas del SGC con su huella SHA-256 por tabla y el estado de la cadena de firmas | `scripts/sgc/respaldo/restaurar.mjs` y verificación con `verificar.mjs` |
+| 2. Respaldo lógico del esquema `sgc` | Tecnología | Antes y después de cada cambio controlado; semanal recomendado | Las tablas del SGC (47 desde las correcciones del 2026-10-03) con su huella SHA-256 por tabla y el estado de la cadena de firmas | `scripts/sgc/respaldo/restaurar.mjs` y verificación con `verificar.mjs` |
 | 3. Archivos en OneDrive/SharePoint | Microsoft 365 | Continuo (historial de versiones y papelera); el OneDrive tiene política de retención | Archivos del SGC con su id | Papelera o historial de versiones (conservan el id del archivo) |
 | 4. Copia verificada de los archivos | Tecnología | Junto con la capa 2 | Cada archivo que la base registra, comparado con su SHA-256 | `scripts/sgc/respaldo/onedrive.mjs` (último recurso: el archivo restaurado queda con id nuevo) |
 
@@ -45,7 +45,7 @@ node scripts/sgc/respaldo/verificar.mjs --from <carpeta> --schema sgc_rst --info
 node scripts/sgc/respaldo/limpiar-temporal.mjs --schema sgc_rst
 ```
 
-La restauración comprueba primero que los archivos del respaldo no cambiaron, recrea la estructura **con las mismas migraciones del control de cambios** y carga los datos conservando los ids. La verificación exige: mismas filas y huella en las 45 tablas, misma estructura (columnas, índices, CHECK, claves foráneas y triggers), cadena de firmas íntegra y registros de solo inserción que rechazan modificaciones.
+La restauración comprueba primero que los archivos del respaldo no cambiaron, recrea la estructura **con las mismas migraciones del control de cambios** y carga los datos conservando los ids. La verificación exige: mismas filas y huella en todas las tablas del SGC, misma estructura (columnas, índices, CHECK, claves foráneas y triggers), cadena de firmas íntegra y registros de solo inserción que rechazan modificaciones.
 
 **Recuperación real:**
 1. Primera opción: restauración nativa de la base por infraestructura (capa 1) en una base temporal; Tecnología verifica `sgc` con `verificar.mjs --schema sgc` contra el último respaldo lógico; infraestructura promueve la base.

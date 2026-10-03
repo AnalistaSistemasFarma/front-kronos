@@ -23,7 +23,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     if (!id) return jsonNoStore({ error: 'Petición inválida' }, 400);
     const file = await openReadingFile(prisma, id, { email: ctx.email, access: ctx.access }, ctx.actor);
     const original = await downloadVerifiedPdf(file.itemId, file.sha256);
-    const stamped = await stampControlledCopy(original, { code: file.code, versionNumber: file.versionNumber, viewerEmail: ctx.email, at: new Date(), mode: 'consulta', state: file.state });
+    const stamped = await stampControlledCopy(original, { code: file.code, versionNumber: file.versionNumber, viewerEmail: ctx.email, at: new Date(), mode: 'consulta', state: file.state, emission: file.emission });
     return new NextResponse(Buffer.from(stamped), {
       status: 200,
       headers: {

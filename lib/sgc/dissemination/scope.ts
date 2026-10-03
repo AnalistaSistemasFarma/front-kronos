@@ -90,6 +90,30 @@ export interface SgcScopeDirectory {
   companyMembers: readonly string[];
   departmentMembers: ReadonlyMap<number, readonly string[]>;
   cargoMembers: ReadonlyMap<number, readonly string[]>;
+  /**
+   * 2026-10-03: dominios de correo de las personas de la EMPRESA del documento
+   * (p. ej. ["onelatampharma.com"]). Si hay, el alcance automático (toda la
+   * empresa, departamento o cargo) solo incluye esos correos; a alguien de
+   * otra empresa (p. ej. GSS) solo se le asigna lectura como PERSONA elegida
+   * a mano. null = sin filtro (empresa sin dominios configurados).
+   */
+  companyDomains?: readonly string[] | null;
+}
+
+/** Normaliza la lista de dominios configurada («onelatampharma.com, @otra.com» → ["onelatampharma.com","otra.com"]). */
+export function parseCompanyDomains(raw: string | null | undefined): string[] | null {
+  const list = String(raw ?? '')
+    .split(/[\s,;]+/)
+    .map((d) => d.trim().toLowerCase().replace(/^@/, ''))
+    .filter((d) => d.includes('.') && d.split('.').every((part) => /^[a-z0-9-]+$/.test(part)));
+  return list.length ? [...new Set(list)] : null;
+}
+
+/** ¿El correo pertenece a la empresa (por dominio)? Sin dominios configurados, sí. */
+export function isCompanyEmail(email: string, domains: readonly string[] | null | undefined): boolean {
+  if (!domains || domains.length === 0) return true;
+  const domain = email.trim().toLowerCase().split('@')[1] ?? '';
+  return domains.includes(domain);
 }
 
 export interface SgcResolvedReader {
@@ -102,6 +126,8 @@ export interface SgcScopeResolution {
   readers: SgcResolvedReader[];
   /** Personas del alcance SIN permiso de consulta del SGC: no reciben tarea. */
   withoutAccess: SgcResolvedReader[];
+  /** 2026-10-03: personas de OTRA empresa que entraban por el alcance automático: no reciben tarea (solo como persona elegida a mano). */
+  outsideCompany: SgcResolvedReader[];
 }
 
 /**
@@ -111,11 +137,13 @@ export interface SgcScopeResolution {
  */
 export function resolveReaders(entries: readonly SgcScopeEntry[], dir: SgcScopeDirectory, exclude: ReadonlySet<string> = new Set()): SgcScopeResolution {
   const found = new Map<string, Set<string>>();
+  const manual = new Set<string>();
   const add = (email: string, source: string) => {
     const e = email.trim().toLowerCase();
     if (!e || exclude.has(e)) return;
     if (!found.has(e)) found.set(e, new Set());
     found.get(e)!.add(source);
+    if (source.startsWith('persona:')) manual.add(e);
   };
   for (const entry of entries) {
     const key = scopeKey(entry);
@@ -126,10 +154,13 @@ export function resolveReaders(entries: readonly SgcScopeEntry[], dir: SgcScopeD
   }
   const readers: SgcResolvedReader[] = [];
   const withoutAccess: SgcResolvedReader[] = [];
+  const outsideCompany: SgcResolvedReader[] = [];
   for (const [email, sources] of [...found.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    (dir.eligible.has(email) ? readers : withoutAccess).push({ email, sources: [...sources].sort() });
+    const r = { email, sources: [...sources].sort() };
+    if (!manual.has(email) && !isCompanyEmail(email, dir.companyDomains)) outsideCompany.push(r);
+    else (dir.eligible.has(email) ? readers : withoutAccess).push(r);
   }
-  return { readers, withoutAccess };
+  return { readers, withoutAccess, outsideCompany };
 }
 
 /** Alcance por defecto cuando nadie lo definió: el departamento dueño del proceso (si existe). */
