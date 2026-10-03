@@ -136,11 +136,12 @@ export async function stampControlledCopy(pdfBytes: Uint8Array, info: SgcWaterma
   const em = info.emission;
   const target = em ? pdf.getPages()[em.page - 1] : undefined;
   if (em && target) {
-    target.drawRectangle({ x: em.x, y: em.y, width: em.width, height: Math.max(0, em.height - 12), color: rgb(1, 1, 1) });
+    // El recuadro completo se cubre (el PDF guardado dice «Al quedar vigente») y la fecha va centrada en altura.
+    target.drawRectangle({ x: em.x, y: em.y, width: em.width, height: em.height, color: rgb(1, 1, 1) });
     const text = toWinAnsiSafe(em.text);
     let size = 9;
     while (size > 5 && font.widthOfTextAtSize(text, size) > em.width - 8) size -= 0.5;
-    target.drawText(text, { x: em.x + 4, y: em.y + (em.height - 12) / 2 - size / 2 + 2, size, font, color: rgb(0.1, 0.12, 0.16) });
+    target.drawText(text, { x: em.x + 4, y: em.y + em.height / 2 - size / 2 + 1, size, font, color: rgb(0.1, 0.12, 0.16) });
   }
 
   pdf.setProducer('SynerLink — SGC documental (copia controlada)');
