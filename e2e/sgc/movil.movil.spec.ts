@@ -13,7 +13,9 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  *      no lo ensancha) y se firma «Elaboró» con la contraseña.
  *   3. Pantallas del módulo: sin desborde horizontal, campos de 16 px (iOS no
  *      hace zoom), «Autorizar» siempre a la vista y el calendario en agenda.
- *   4. Visor de la copia controlada: «Acercar» agranda la página también en
+ *   4. Selectores con el dedo cerca del final de la página (Prioridad,
+ *      Elaborador…): el valor queda guardado.
+ *   5. Visor de la copia controlada: «Acercar» agranda la página también en
  *      el celular.
  * La solicitud de prueba usa solo personas QA y se cancela al final.
  */
@@ -39,25 +41,37 @@ async function boxes(page: Page) {
 }
 
 /**
- * Elige una opción de un Select de Mantine. En la emulación táctil de Chrome,
- * enfocar un campo hace que el navegador desplace la página como si abriera
- * un teclado virtual y el menú se cierra por quedar fuera de la vista (no pasa
- * en un celular real); si eso ocurre, se agranda la pantalla un instante.
+ * Elige una opción como lo haría la persona con el dedo, sin trucos de
+ * pantalla. En el celular, las listas cortas del SGC son el selector NATIVO
+ * del sistema (se toca y se elige); las largas con búsqueda son el Select de
+ * Mantine, que ya no se cierra cuando la página se mueve.
  */
-async function choose(page: Page, testId: string, option: RegExp) {
-  const field = page.getByTestId(testId);
-  await field.click();
-  const opt = page.getByRole('option', { name: option }).first();
-  if (!(await opt.isVisible().catch(() => false))) {
-    const vp = page.viewportSize()!;
-    await page.setViewportSize({ width: vp.width, height: 2400 });
-    await field.click();
-    if (!(await opt.isVisible().catch(() => false))) await field.click();
-    await opt.click();
-    await page.setViewportSize(vp);
+async function pick(page: Page, testId: string, option: RegExp) {
+  const field = page.getByTestId(testId).first();
+  // Las opciones llegan del servidor: espera a que la lista tenga la opción (o a que sea el Select con búsqueda).
+  let native = false;
+  await expect
+    .poll(
+      async () => {
+        native = (await field.evaluate((el) => el.tagName)) === 'SELECT';
+        if (!native) return true;
+        const labels = await field.evaluate((el) => [...(el as HTMLSelectElement).options].map((o) => o.label));
+        return labels.some((l) => option.test(l));
+      },
+      { message: `opción ${option} en ${testId}`, timeout: 30_000 }
+    )
+    .toBe(true);
+  await field.scrollIntoViewIfNeeded();
+  if (native) {
+    await field.tap();
+    const labels = await field.evaluate((el) => [...(el as HTMLSelectElement).options].map((o) => o.label));
+    await field.selectOption({ label: labels.find((l) => option.test(l))! });
     return;
   }
-  await opt.click();
+  await field.tap();
+  const opt = page.getByRole('option', { name: option }).first();
+  await expect(opt).toBeVisible();
+  await opt.tap();
 }
 
 /** Ancho que se sale de la pantalla (0 = nada se sale). */
@@ -162,7 +176,7 @@ test.describe.serial('SGC documental · celular', () => {
     await expect(page.getByTestId('sgc-editar-tarea')).toBeVisible({ timeout: 45_000 });
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
     await page.getByTestId('sgc-editar-tarea').tap();
-    await choose(page, 'sgc-decision', /enviar a revisión/);
+    await pick(page, 'sgc-decision', /enviar a revisión/);
     await page.getByTestId('sgc-guardar-tarea').click();
     await expect(page.getByTestId('sgc-firma-modal')).toBeVisible();
     const body = page.locator('.mantine-Modal-body').filter({ has: page.getByTestId('sgc-firma-modal') });
@@ -193,6 +207,42 @@ test.describe.serial('SGC documental · celular', () => {
       .toBe(true);
   });
 
+  test('[SGC-REQ-109] los selectores funcionan con el dedo cerca del final de la página: la nueva solicitud guarda prioridad, proceso, tipo y elaborador, y la prioridad se edita en la solicitud', async ({ page }) => {
+    await page.goto(`/process/sgc-documental/solicitudes/nueva?empresa=${OLP}`);
+    await expect(page.getByTestId('sgc-nueva-asunto')).toBeVisible({ timeout: 45_000 });
+    await pick(page, 'sgc-nueva-proceso', /^GC · /);
+    await pick(page, 'sgc-nueva-tipo-documental', /^PR · /);
+    await page.getByTestId('sgc-nueva-asunto').fill(`E2E celular · selectores ${new Date().toISOString()}`);
+    await page.getByTestId('sgc-nueva-justificacion').fill('Recorrido automático de la e2e del SGC en celular (selectores, datos de prueba).');
+    // Al final de la página: elaborador (lista larga con búsqueda) y prioridad (lista corta).
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await pick(page, 'sgc-nueva-elaborador', /qa\.sgc3@/);
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await pick(page, 'sgc-campo-urgencia', /^Alta$/);
+    await page.getByTestId('sgc-nueva-crear').tap();
+    await page.waitForURL(/\/process\/sgc-documental\/solicitudes\/\d+/, { timeout: 45_000 });
+    const id = Number(/solicitudes\/(\d+)/.exec(page.url())![1]);
+    try {
+      type Detail = { request: { elaboratorEmail: string; process: { code: string }; documentType: { code: string } }; formFields: { key: string; value: string | null }[] };
+      const d = await ok<Detail>(await page.request.get(`/api/sgc/requests/${id}`));
+      expect(d.request.process.code).toBe('GC');
+      expect(d.request.documentType.code).toBe('PR');
+      expect(d.request.elaboratorEmail).toBe(U3.toLowerCase());
+      expect(d.formFields.find((f) => f.key === 'urgencia')?.value).toBe('Alta');
+      // Editar la prioridad desde la solicitud (Información adicional, al final de la página).
+      await expect(page.getByTestId('sgc-info-adicional')).toBeVisible({ timeout: 45_000 });
+      await page.getByTestId('sgc-campo-editar-urgencia').scrollIntoViewIfNeeded();
+      await page.getByTestId('sgc-campo-editar-urgencia').tap();
+      await pick(page, 'sgc-campo-valor-urgencia', /^Requerimiento regulatorio$/);
+      await page.getByTestId('sgc-campo-guardar-urgencia').tap();
+      await expect
+        .poll(async () => (await ok<Detail>(await page.request.get(`/api/sgc/requests/${id}`))).formFields.find((f) => f.key === 'urgencia')?.value, { timeout: 30_000 })
+        .toBe('Requerimiento regulatorio');
+    } finally {
+      await page.request.post(`/api/sgc/requests/${id}/cancel`, { data: { reason: 'Limpieza de la prueba e2e de selectores en celular.' } });
+    }
+  });
+
   test('[SGC-REQ-107] las pantallas del SGC caben en el celular: sin desborde, campos de 16 px, «Autorizar» a la vista y calendario en agenda', async ({ page }) => {
     for (const path of ['', '/listado', '/areas', '/solicitudes', '/solicitudes/nueva', '/tareas', '/autorizaciones', '/vencimientos', '/firmas', '/configuracion', '/flujos', '/relaciones']) {
       await page.goto(`/process/sgc-documental${path}?empresa=${OLP}`);
@@ -213,8 +263,9 @@ test.describe.serial('SGC documental · celular', () => {
     // Autorizaciones: la columna «Acciones» queda fija a la derecha de la tabla.
     await page.goto(`/process/sgc-documental/autorizaciones?empresa=${OLP}`);
     await expect(page.getByTestId('sgc-autorizaciones-tabla')).toBeVisible({ timeout: 45_000 });
-    const sticky = await page.getByTestId('sgc-autorizaciones-tabla').locator('th').last().evaluate((el) => getComputedStyle(el).position);
-    expect(sticky).toBe('sticky');
+    await expect
+      .poll(() => page.getByTestId('sgc-autorizaciones-tabla').locator('th').last().evaluate((el) => getComputedStyle(el).position).catch(() => ''), { timeout: 15_000 })
+      .toBe('sticky');
   });
 
   test('[SGC-REQ-108] el visor de la copia controlada acerca la página también en el celular', async ({ page }) => {
@@ -225,9 +276,12 @@ test.describe.serial('SGC documental · celular', () => {
     await page.getByTestId('sgc-abrir-visor').tap();
     const first = page.getByTestId('sgc-visor-pagina').first();
     await expect(first).toBeVisible({ timeout: 45_000 });
+    const zoomIn = page.getByRole('button', { name: 'Acercar' });
+    await expect(zoomIn).toBeEnabled({ timeout: 45_000 });
     const w0 = (await first.boundingBox())!.width;
-    await page.getByRole('button', { name: 'Acercar' }).tap();
-    await page.getByRole('button', { name: 'Acercar' }).tap();
+    await zoomIn.tap();
+    await expect(zoomIn).toBeEnabled();
+    await zoomIn.tap();
     await expect.poll(async () => (await page.getByTestId('sgc-visor-pagina').first().boundingBox())!.width).toBeGreaterThan(w0 * 1.2);
     const pages = page.getByTestId('sgc-visor-paginas');
     expect(await pages.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);

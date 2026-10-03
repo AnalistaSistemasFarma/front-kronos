@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Alert, Autocomplete, Badge, Button, Card, Group, Modal, Progress, Select, Stack, Table, Text, Textarea, Title } from '@mantine/core';
+import { Alert, Autocomplete, Badge, Button, Card, Group, Modal, Progress, Stack, Table, Text, Textarea, Title } from '@mantine/core';
+import SgcSelect, { sgcTouchComboboxProps } from '../SgcSelect';
 import { IconBell, IconPlus, IconSpeakerphone, IconUserMinus, IconX } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import { SGC_SCOPE_KIND_LABELS, type SgcScopeKind } from '../../../lib/sgc/dissemination/scope';
@@ -118,7 +119,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
       {view.canEditScope && (
         <Card withBorder radius='md' p='md' mb='md'>
           <Group align='flex-end' wrap='wrap'>
-            <Select
+            <SgcSelect
               label='Agregar al alcance'
               data={(Object.keys(SGC_SCOPE_KIND_LABELS) as SgcScopeKind[]).map((k) => ({ value: k, label: SGC_SCOPE_KIND_LABELS[k] }))}
               value={kind}
@@ -131,9 +132,9 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
               data-testid='sgc-alcance-clase'
             />
             {(kind === 'departamento' || kind === 'cargo') && (
-              <Select label={kind === 'departamento' ? 'Departamento' : 'Cargo'} data={targetOptions} value={target} onChange={setTarget} searchable w={280} data-testid='sgc-alcance-destino' />
+              <SgcSelect label={kind === 'departamento' ? 'Departamento' : 'Cargo'} data={targetOptions} value={target} onChange={setTarget} searchable w={280} data-testid='sgc-alcance-destino' />
             )}
-            {kind === 'persona' && <Autocomplete autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Correo de la persona' data={users} value={email} onChange={setEmail} w={300} data-testid='sgc-alcance-persona' />}
+            {kind === 'persona' && <Autocomplete comboboxProps={sgcTouchComboboxProps()} autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Correo de la persona' data={users} value={email} onChange={setEmail} w={300} data-testid='sgc-alcance-persona' />}
             <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' autosize minRows={1} value={reason} onChange={(e) => setReason(e.currentTarget.value)} w={260} data-testid='sgc-alcance-motivo' />
             <Button leftSection={<IconPlus size={14} />} disabled={!ready} onClick={add} data-testid='sgc-alcance-agregar'>
               Agregar

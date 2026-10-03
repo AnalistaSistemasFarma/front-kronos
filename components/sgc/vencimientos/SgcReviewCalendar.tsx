@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ActionIcon, Alert, Badge, Button, Card, Group, Loader, Modal, MultiSelect, SegmentedControl, Select, SimpleGrid, Stack, Switch, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Badge, Button, Card, Group, Loader, Modal, MultiSelect, SegmentedControl, SimpleGrid, Stack, Switch, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
+import SgcSelect, { sgcTouchComboboxProps } from '../SgcSelect';
 import { IconAlertTriangle, IconChevronLeft, IconChevronRight, IconFileSearch, IconFilePlus, IconSearch } from '@tabler/icons-react';
 import { sgcHref } from '../useSgcCompany';
 import { useSgcFetch } from '../useSgcFetch';
@@ -188,11 +189,11 @@ export default function SgcReviewCalendar({ company }: { company: SgcCompanyAcce
         </Group>
         <Group gap='sm' mt='sm' wrap='wrap' align='flex-end'>
           <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' placeholder='Código o título' leftSection={<IconSearch size={14} />} value={text} onChange={(e) => setText(e.currentTarget.value)} w={200} data-testid='sgc-cal-buscar' />
-          <Select placeholder='Área' data={uniq(all.filter((i) => i.idDepartment).map((i) => [i.idDepartment!, i.department ?? `#${i.idDepartment}`]))} value={dept} onChange={setDept} clearable searchable w={190} />
-          <Select placeholder='Proceso' data={uniq(all.map((i) => [i.idProcess, i.process]))} value={proc} onChange={setProc} clearable searchable w={210} data-testid='sgc-cal-proceso' />
-          <Select placeholder='Tipo documental' data={uniq(all.map((i) => [i.idDocumentType, i.documentType]))} value={type} onChange={setType} clearable w={190} />
-          <Select placeholder='Responsable' data={uniq(all.flatMap((i) => i.responsibles.map((r) => [r, r] as [string, string])))} value={resp} onChange={setResp} clearable searchable w={230} />
-          <MultiSelect placeholder='Estado' data={STATES.map((s) => ({ value: s, label: SGC_CALENDAR_STATE_LABELS[s] }))} value={states} onChange={setStates} clearable w={230} />
+          <SgcSelect placeholder='Área' data={uniq(all.filter((i) => i.idDepartment).map((i) => [i.idDepartment!, i.department ?? `#${i.idDepartment}`]))} value={dept} onChange={setDept} clearable searchable w={190} />
+          <SgcSelect placeholder='Proceso' data={uniq(all.map((i) => [i.idProcess, i.process]))} value={proc} onChange={setProc} clearable searchable w={210} data-testid='sgc-cal-proceso' />
+          <SgcSelect placeholder='Tipo documental' data={uniq(all.map((i) => [i.idDocumentType, i.documentType]))} value={type} onChange={setType} clearable w={190} />
+          <SgcSelect placeholder='Responsable' data={uniq(all.flatMap((i) => i.responsibles.map((r) => [r, r] as [string, string])))} value={resp} onChange={setResp} clearable searchable w={230} />
+          <MultiSelect comboboxProps={sgcTouchComboboxProps()} placeholder='Estado' data={STATES.map((s) => ({ value: s, label: SGC_CALENDAR_STATE_LABELS[s] }))} value={states} onChange={setStates} clearable w={230} />
         </Group>
         <Group gap='sm' mt='sm'>
           {counts.map(([s, n]) => (
