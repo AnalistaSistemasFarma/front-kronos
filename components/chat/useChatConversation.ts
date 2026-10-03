@@ -308,9 +308,14 @@ export function useChatConversation(
         // y DESPUÉS pedía el histórico, y el área de mensajes quedaba en
         // blanco los dos viajes. Ahora el histórico se pinta en cuanto llega,
         // aunque el POST no haya vuelto (el compositor sí espera al POST).
+        //
+        // Grupos y hilos entre personas (2026-10-03): su id SIEMPRE se conoce
+        // de entrada, así que el histórico sale en paralelo con la ficha en vez
+        // de esperarla. No abre ningún permiso: el endpoint del histórico
+        // valida el acceso por su cuenta (404 → null, y no se pinta nada).
         const idConocido =
           enCache?.conversation.id ??
-          (target.kind === 'agent' ? (target.idConversation ?? null) : null);
+          (target.kind === 'agent' ? (target.idConversation ?? null) : target.idConversation);
         const historialAnticipado = idConocido !== null ? pedirHistorial(idConocido) : null;
         // Si el anticipado falla, no debe quedar como promesa rechazada suelta.
         historialAnticipado?.catch(() => null);
