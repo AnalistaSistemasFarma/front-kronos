@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { Alert, Anchor, Autocomplete, Button, Card, Checkbox, Code, Group, Modal, PasswordInput, ScrollArea, SegmentedControl, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import { sgcTouchComboboxProps } from '../SgcSelect';
 import { IconAlertCircle, IconLock, IconSignature } from '@tabler/icons-react';
 import type { SgcSignatureMeaning } from '../../../lib/sgc/flows/definition';
 import { SGC_SIGNATURE_LABELS } from '../../../lib/sgc/flows/definition';
@@ -184,7 +185,7 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
           </Card>
         )}
 
-        <Autocomplete
+        <Autocomplete comboboxProps={sgcTouchComboboxProps()}
           label='Motivo de la firma'
           placeholder='Escriba o elija el motivo'
           data={SGC_SIGNATURE_REASONS[meaning]}

@@ -2,7 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Alert, Badge, Button, Card, Group, Loader, Select, Table, Text, TextInput } from '@mantine/core';
+import { Alert, Badge, Button, Card, Group, Loader, Table, Text, TextInput } from '@mantine/core';
+import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import { IconAlertTriangle, IconBuildingCommunity, IconFileUpload, IconHierarchy2, IconSearch } from '@tabler/icons-react';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { SgcConfidentialityBadge, SgcDocumentCode, SgcReviewBadge, SgcStatusBadge } from '../../../../../components/sgc/SgcBadges';
@@ -85,7 +86,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
           w={260}
           data-testid='sgc-buscador'
         />
-        <Select
+        <SgcSelect
           label='Tipo de proceso'
           placeholder='Todos'
           clearable
@@ -97,7 +98,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
           }}
           w={220}
         />
-        <Select
+        <SgcSelect
           label='Proceso'
           placeholder='Todos'
           clearable
@@ -107,7 +108,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
           onChange={setProcessId}
           w={260}
         />
-        <Select
+        <SgcSelect
           label='Tipo documental'
           placeholder='Todos'
           clearable
@@ -117,7 +118,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
           w={220}
         />
         {company.canQuality && (
-          <Select label='Estado' data={STATUS_OPTIONS} value={status} onChange={(v) => setStatus(v ?? 'vigente')} allowDeselect={false} w={180} />
+          <SgcSelect label='Estado' data={STATUS_OPTIONS} value={status} onChange={(v) => setStatus(v ?? 'vigente')} allowDeselect={false} w={180} />
         )}
       </Group>
 

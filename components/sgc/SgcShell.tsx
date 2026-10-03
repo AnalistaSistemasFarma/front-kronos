@@ -2,7 +2,8 @@
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { Alert, Anchor, Badge, Breadcrumbs, Card, Group, Loader, Select, Text, Title } from '@mantine/core';
+import { Alert, Anchor, Breadcrumbs, Card, Group, Loader, Text, Title } from '@mantine/core';
+import SgcSelect from './SgcSelect';
 import { IconAlertTriangle, IconChevronRight, IconShieldCheck } from '@tabler/icons-react';
 import { SGC_BASE_URL } from '../../lib/sgc/constants';
 import type { SgcCompanyAccess } from '../../lib/sgc/permissions';
@@ -20,15 +21,6 @@ export interface SgcShellProps {
   requireQuality?: boolean;
   actions?: (company: SgcCompanyAccess) => ReactNode;
   children: (company: SgcCompanyAccess) => ReactNode;
-}
-
-export function permisosVisibles(access: SgcCompanyAccess): string[] {
-  const out: string[] = [];
-  if (access.canRead) out.push('Consulta');
-  if (access.canManage) out.push('Gestión');
-  if (access.canQuality) out.push('Calidad');
-  if (access.canAdminFlows) out.push('Flujos validados');
-  return out;
 }
 
 export default function SgcShell({ section, subtitle, requireQuality, actions, children }: SgcShellProps) {
@@ -90,7 +82,7 @@ export default function SgcShell({ section, subtitle, requireQuality, actions, c
             </div>
             <Group gap='sm' align='flex-end'>
               {estado.companies.length > 1 && (
-                <Select
+                <SgcSelect
                   label='Empresa'
                   data={estado.companies.map((c) => ({ value: String(c.idCompany), label: c.companyName }))}
                   value={companyId}
@@ -99,13 +91,7 @@ export default function SgcShell({ section, subtitle, requireQuality, actions, c
                   w={240}
                 />
               )}
-              <Group gap={6}>
-                {permisosVisibles(company).map((p) => (
-                  <Badge key={p} variant='light'>
-                    {p}
-                  </Badge>
-                ))}
-              </Group>
+              {/* 2026-10-03 (Nicolás): sin las etiquetas de permisos (Consulta, Gestión, Calidad, Flujos validados) en el encabezado. */}
               {!denied && actions?.(company)}
             </Group>
           </Group>

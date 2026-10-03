@@ -37,6 +37,7 @@ async function renderPdf(bytes: Uint8Array, scale: number, container: HTMLElemen
   const pdfjs = await import('pdfjs-dist');
   pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
   const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+  if (isCancelled()) return 0;
   container.replaceChildren();
   for (let n = 1; n <= pdf.numPages; n++) {
     if (isCancelled()) return 0;
@@ -59,6 +60,8 @@ async function renderPdf(bytes: Uint8Array, scale: number, container: HTMLElemen
     const ctx = canvas.getContext('2d');
     if (!ctx) continue;
     await page.render({ canvasContext: ctx, viewport }).promise;
+    // Un dibujo más nuevo (p. ej. dos toques seguidos en «Acercar») reemplaza a este: no mezclar páginas.
+    if (isCancelled()) return 0;
     container.appendChild(canvas);
   }
   return pdf.numPages;
@@ -102,6 +105,7 @@ async function printAuthorized(url: string) {
 export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReachedEnd }: SgcSecureViewerProps) {
   const pagesRef = useRef<HTMLDivElement>(null);
   const bytesRef = useRef<Uint8Array | null>(null);
+  const renderGenRef = useRef(0);
   const endRef = useRef(false);
   const [progress, setProgress] = useState(0);
   const [scale, setScale] = useState(BASE_SCALE);
@@ -135,7 +139,8 @@ export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReac
 
   const rerender = useCallback(async (nextScale: number) => {
     setScale(nextScale);
-    if (bytesRef.current && pagesRef.current) await renderPdf(bytesRef.current.slice(), nextScale, pagesRef.current, () => false);
+    const gen = ++renderGenRef.current;
+    if (bytesRef.current && pagesRef.current) await renderPdf(bytesRef.current.slice(), nextScale, pagesRef.current, () => gen !== renderGenRef.current);
   }, []);
 
   // Bloqueo de atajos de guardar e imprimir mientras el visor está abierto.

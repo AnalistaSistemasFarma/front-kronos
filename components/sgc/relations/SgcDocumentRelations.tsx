@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Alert, Badge, Button, Card, Group, Modal, Select, Stack, Table, Text, TextInput, Textarea, Title } from '@mantine/core';
+import { Alert, Badge, Button, Card, Group, Modal, Stack, Table, Text, TextInput, Textarea, Title } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import { IconLink, IconPlus } from '@tabler/icons-react';
 import { sgcHref } from '../useSgcCompany';
 import { sgcSend, useSgcFetch } from '../useSgcFetch';
@@ -110,8 +111,8 @@ export default function SgcDocumentRelations({ idDocument, idCompany, code, canA
       <Modal opened={adding} onClose={() => setAdding(false)} title={`Relacionar ${code}`} centered>
         <Stack>
           {error && <Alert color='red'>{error}</Alert>}
-          <Select label='Tipo de relación' data={SGC_RELATION_TYPES.map((t) => ({ value: t, label: SGC_RELATION_LABELS[t] }))} value={type} onChange={setType} allowDeselect={false} data-testid='sgc-relacion-tipo' />
-          <Select
+          <SgcSelect label='Tipo de relación' data={SGC_RELATION_TYPES.map((t) => ({ value: t, label: SGC_RELATION_LABELS[t] }))} value={type} onChange={setType} allowDeselect={false} data-testid='sgc-relacion-tipo' />
+          <SgcSelect
             label='Sentido'
             data={[
               { value: 'entra', label: `El otro documento es ${type ? SGC_RELATION_LABELS[type as keyof typeof SGC_RELATION_LABELS].toLowerCase() : '…'} de ${code}` },

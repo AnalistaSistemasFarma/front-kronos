@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, Anchor, Badge, Button, Card, Code, FileButton, Grid, Group, NumberInput, Select, Stack, Table, Text, TextInput, Textarea, Title } from '@mantine/core';
+import { Alert, Anchor, Badge, Button, Card, Code, FileButton, Grid, Group, NumberInput, Stack, Table, Text, TextInput, Textarea, Title } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import { IconFileSpreadsheet, IconSchool, IconUpload } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import { SGC_TRAINING_DEFAULT_MIN_PCT, SGC_TRAINING_MODE_LABELS, type SgcTrainingMode } from '../../../lib/sgc/training/results';
@@ -105,7 +106,7 @@ export default function SgcTrainingCard({ view, onSave, onUpload }: SgcTrainingC
         <Stack mb='md'>
           <Grid>
             <Grid.Col span={{ base: 12, md: 4 }}>
-              <Select label='Modalidad' data={(Object.keys(SGC_TRAINING_MODE_LABELS) as SgcTrainingMode[]).map((k) => ({ value: k, label: SGC_TRAINING_MODE_LABELS[k] }))} value={form.mode} onChange={(v) => set('mode', v ?? 'mixta')} allowDeselect={false} data-testid='sgc-capacitacion-modalidad' />
+              <SgcSelect label='Modalidad' data={(Object.keys(SGC_TRAINING_MODE_LABELS) as SgcTrainingMode[]).map((k) => ({ value: k, label: SGC_TRAINING_MODE_LABELS[k] }))} value={form.mode} onChange={(v) => set('mode', v ?? 'mixta')} allowDeselect={false} data-testid='sgc-capacitacion-modalidad' />
             </Grid.Col>
             <Grid.Col span={{ base: 12, md: 8 }}>
               <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Tema' required value={form.title} onChange={(e) => set('title', e.currentTarget.value)} data-testid='sgc-capacitacion-titulo' />

@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Alert, Badge, Button, Card, Checkbox, Group, Loader, Modal, NumberInput, Select, Stack, Table, Tabs, Text, TextInput, Textarea } from '@mantine/core';
+import { Alert, Badge, Button, Card, Checkbox, Group, Loader, Modal, NumberInput, Stack, Table, Tabs, Text, TextInput, Textarea } from '@mantine/core';
+import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import { IconAlertTriangle, IconCheck, IconEdit, IconPlus } from '@tabler/icons-react';
 import SgcCargoMembers from '../../../../../components/sgc/SgcCargoMembers';
 import SgcCompanySettings from '../../../../../components/sgc/SgcCompanySettings';
@@ -297,7 +298,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
         {editing && (
           <Stack>
             {editing.entity === 'processes' && (
-              <Select
+              <SgcSelect
                 label='Tipo de proceso'
                 data={data.processTypes.map((t) => ({ value: String(t.id), label: t.name }))}
                 value={editing.form.idProcessType ? String(editing.form.idProcessType) : null}
@@ -318,7 +319,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
               </>
             )}
             {editing.entity === 'processes' && (
-              <Select
+              <SgcSelect
                 label='Departamento dueño'
                 data={data.departments.map((x) => ({ value: String(x.id), label: x.name }))}
                 value={editing.form.idDepartment ? String(editing.form.idDepartment) : null}
@@ -328,7 +329,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
               />
             )}
             {editing.entity === 'process-types' && (
-              <Select label='Color' data={COLORS} value={String(editing.form.color ?? 'blue')} onChange={(v) => set('color', v ?? 'blue')} allowDeselect={false} />
+              <SgcSelect label='Color' data={COLORS} value={String(editing.form.color ?? 'blue')} onChange={(v) => set('color', v ?? 'blue')} allowDeselect={false} />
             )}
             <NumberInput label='Orden' min={0} max={999} value={Number(editing.form.sortOrder ?? 0)} onChange={(v) => set('sortOrder', Number(v))} />
             <Checkbox label='Activo' checked={editing.form.isActive !== false} onChange={(e) => set('isActive', e.currentTarget.checked)} />

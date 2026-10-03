@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { ActionIcon, Badge, Box, Button, Flex, Group, Modal, Paper, ScrollArea, Select, Stack, Text, Textarea, ThemeIcon } from '@mantine/core';
+import { ActionIcon, Badge, Box, Button, Flex, Group, Modal, Paper, ScrollArea, Stack, Text, Textarea, ThemeIcon } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import { IconCheck, IconClock, IconEye, IconLock, IconX } from '@tabler/icons-react';
 import { sgcStatusColor } from '../../../lib/sgc/flows/engine';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
@@ -131,7 +132,7 @@ export default function SgcTasksModal({ opened, onClose, requestId, tasks, users
                                 Asignado:
                               </Text>
                               {task.canReassign ? (
-                                <Select
+                                <SgcSelect
                                   data={users}
                                   value={task.assignees.find((a) => a.status === 'pendiente')?.email ?? null}
                                   onChange={(value) => value && setPending({ idTask: task.id, toEmail: value })}

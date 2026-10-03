@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Alert, Badge, Button, Card, Group, Loader, Modal, SegmentedControl, Select, Stack, Table, Tabs, Text, TextInput, Textarea, Title } from '@mantine/core';
+import { Alert, Badge, Button, Card, Group, Loader, Modal, SegmentedControl, Stack, Table, Tabs, Text, TextInput, Textarea, Title } from '@mantine/core';
+import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import { IconAlertTriangle, IconCheck, IconKey } from '@tabler/icons-react';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { sgcHref } from '../../../../../components/sgc/useSgcCompany';
@@ -97,7 +98,7 @@ function Accesos({ company }: { company: SgcCompanyAccess }) {
           ]}
         />
         {mode === 'lista' ? (
-          <Select
+          <SgcSelect
             label='Documento de otra área'
             searchable
             data={d.requestable.map((r) => ({ value: String(r.idDocument), label: `${r.code} · ${r.title} (${r.ownerDepartment ?? r.process})` }))}

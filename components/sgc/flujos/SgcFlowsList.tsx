@@ -20,13 +20,13 @@ import {
   LoadingOverlay,
   Modal,
   ScrollArea,
-  Select,
   Table,
   Text,
   TextInput,
   Textarea,
   Title,
 } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import {
   IconAlertCircle,
   IconBuilding,
@@ -253,7 +253,7 @@ export default function SgcFlowsList() {
             <Box mt='md'>
               <Grid>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
+                  <SgcSelect
                     label='Empresa'
                     placeholder='Todas las empresas'
                     data={companies}
@@ -266,7 +266,7 @@ export default function SgcFlowsList() {
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
+                  <SgcSelect
                     label='Categoria'
                     placeholder='Todas las categorias'
                     clearable
@@ -279,7 +279,7 @@ export default function SgcFlowsList() {
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
+                  <SgcSelect
                     label='Proceso'
                     placeholder='Todas los procesos'
                     clearable
@@ -292,7 +292,7 @@ export default function SgcFlowsList() {
                   />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
+                  <SgcSelect
                     label='Vigencia'
                     placeholder='Activo / Inactivo'
                     clearable
@@ -520,7 +520,7 @@ export default function SgcFlowsList() {
 
                   <Grid>
                     <Grid.Col span={{ base: 12, md: 8 }}>
-                      <Select label='Empresa Solicitante' data={companies} value={companyId} disabled leftSection={<IconBuilding size={16} />} size='lg' classNames={LG_FIELD} />
+                      <SgcSelect label='Empresa Solicitante' data={companies} value={companyId} disabled leftSection={<IconBuilding size={16} />} size='lg' classNames={LG_FIELD} />
                     </Grid.Col>
                     <Grid.Col span={{ base: 12, md: 4 }}>
                       <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
@@ -574,7 +574,7 @@ export default function SgcFlowsList() {
 
                   <Grid>
                     <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Select
+                      <SgcSelect
                         label='Categoría'
                         placeholder='Seleccione la categoría'
                         data={categories}
