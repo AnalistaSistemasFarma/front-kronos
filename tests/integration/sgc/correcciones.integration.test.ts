@@ -14,7 +14,8 @@ import { addScopeEntry, getDisseminationView, openReadingFile, recordReadingDoub
 import { createInitialDocument, getAccessSubject, type SgcUploader } from '../../../lib/sgc/db/documents';
 import { getCurrentDraftHtml, listDraftRevisions, minorRevisionChain, saveDraftRevision } from '../../../lib/sgc/db/drafts';
 import { buildLayoutPreview, changeHistoryRows, getDocumentLayout, latestLayout, layoutParticipants, saveDocumentLayout } from '../../../lib/sgc/db/layout';
-import { createRequest, excludeReader, getRequestDetail, setSigners, uploadAttachment } from '../../../lib/sgc/db/requests';
+import { cancelRequest, createRequest, excludeReader, getRequestDetail, setSigners, uploadAttachment } from '../../../lib/sgc/db/requests';
+import { TINY_PNG_B64 } from '../../../lib/sgc/__tests__/fixtures/images';
 import { signTask, verifyDocumentVersion, type SgcSignatureDeps } from '../../../lib/sgc/db/signatures';
 import type { SgcNotification, SgcNotifier } from '../../../lib/sgc/notifications';
 import { readManifest } from '../../../lib/sgc/pdf/controlledPdf';
@@ -341,14 +342,19 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
     const r4 = await newRequest('Umbral y no entendí');
     await addScopeEntry(prisma, notifier, await accessOf(E.elab), r4, { entry: { kind: 'persona', email: E.l1 }, reason: 'Lector de la empresa' }, actor(E.elab));
     await addScopeEntry(prisma, notifier, await accessOf(E.elab), r4, { entry: { kind: 'persona', email: E.gss2 }, reason: 'Apoyo de GSS elegido a mano' }, actor(E.elab));
+    await addScopeEntry(prisma, notifier, await accessOf(E.elab), r4, { entry: { kind: 'persona', email: E.gss }, reason: 'Otro apoyo de GSS elegido a mano' }, actor(E.elab));
     await approve(r4);
     const t = await taskOf(r4, 'divulgacion');
-    expect(t.assignees.map((a) => a.user_email).sort()).toEqual([E.gss2, E.l1].sort());
+    expect(t.assignees.map((a) => a.user_email).sort()).toEqual([E.gss, E.gss2, E.l1].sort());
     const a1 = t.assignees.find((a) => a.user_email === E.l1)!;
     await openReadingFile(prisma, a1.id_task_assignee, await viewer(E.l1), actor(E.l1));
     await recordReadingEvent(prisma, a1.id_task_assignee, { event: 'final', pages: 4 }, { email: E.l1 }, actor(E.l1));
     sent.length = 0;
     await signTask(prisma, deps, t.id_task, firma('leyo', { idAssignee: a1.id_task_assignee }), actor(E.l1));
+    // 1 de 3 (33 %): aún no llega al umbral.
+    expect(await prisma.sgcReadThresholdNotice.count({ where: { id_task: t.id_task } })).toBe(0);
+    // Excluir a una persona cambia el porcentaje: 1 de 2 (50 %) llega al umbral y avisa.
+    await excludeReader(prisma, notifier, await accessOf(E.cal), r4, (await prisma.sgcReadRecord.findFirstOrThrow({ where: { id_task: t.id_task, user_email: E.gss } })).id_read_record, { reason: 'No participa en este proceso' }, actor(E.cal));
     const notices = await prisma.sgcReadThresholdNotice.findMany({ where: { id_task: t.id_task } });
     expect(notices).toHaveLength(1);
     expect(notices[0]).toMatchObject({ threshold_pct: 50, read_count: 1, counted: 2 });
@@ -375,5 +381,42 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
     await excludeReader(prisma, notifier, await accessOf(E.cal), r4, (await prisma.sgcReadRecord.findFirstOrThrow({ where: { id_task: t.id_task, user_email: E.gss2 } })).id_read_record, { reason: 'Ya no participa en el proceso' }, actor(E.cal));
     expect(await prisma.sgcReadThresholdNotice.count({ where: { id_task: t.id_task } })).toBe(1);
     await expect(recordReadingDoubt(prisma, notifier, a2.id_task_assignee, { body: 'Otra duda sobre el documento.' }, await viewer(E.gss2), actor(E.gss2))).rejects.toMatchObject({ status: 409 });
+    // Con la divulgación cerrada, quien ya leyó tampoco registra dudas por aquí.
+    await expect(recordReadingDoubt(prisma, notifier, a1.id_task_assignee, { body: 'Una duda tardía sobre el documento.' }, await viewer(E.l1), actor(E.l1))).rejects.toThrow(/ya cerró/);
+  });
+
+  it('[SGC-REQ-094][SGC-REQ-096][SGC-REQ-102][SGC-REQ-103] bordes: vista previa de una nueva versión con borrador PDF, historial agregado sin la marca, borrador alterado, revisión menor sobre un PDF y logo válido', async () => {
+    // Nueva versión del vigente con borrador PDF: la vista previa es el mismo PDF (sin encabezado) y valida páginas.
+    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.elab), { idCompany: CO, requestType: 'nueva_version', subject: 'Nueva versión con borrador PDF', description: 'Cambio de prueba con borrador PDF.', idDocument: idDoc, formValues: { urgencia: 'Normal' } }, actor(E.elab));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'paralelo' }, actor(E.elab));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab));
+    await uploadAttachment(prisma, upload, idRequest, { purpose: 'borrador', ...(await pdfFile('nueva versión en pdf')) }, await viewer(E.elab), actor(E.elab));
+    const prev = await buildLayoutPreview(prisma, deps, idRequest, await viewer(E.elab));
+    expect((await PDFDocument.load(prev)).getPageCount()).toBe(1);
+    await expect(saveDocumentLayout(prisma, idRequest, { pageCount: 1, fields: [{ signerKey: `revision:${E.rev}`, page: 2, x: 1, y: 1, width: 10, height: 5 }] }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/fuera del documento/);
+    expect((await saveDocumentLayout(prisma, idRequest, { pageCount: 1, fields: [{ signerKey: `revision:${E.rev}`, page: 1, x: 1, y: 1, width: 10, height: 5 }] }, await viewer(E.elab), actor(E.elab))).saved).toBe(true);
+    // Borrador alterado en el almacenamiento: no se compone ni se firma.
+    const att = await prisma.sgcAttachment.findFirstOrThrow({ where: { id_request: idRequest, purpose: 'borrador' } });
+    const original = store.get(att.item_id)!;
+    store.set(att.item_id, new Uint8Array([...original, 1]));
+    await expect(buildLayoutPreview(prisma, deps, idRequest, await viewer(E.rev))).rejects.toThrow(/huella/);
+    store.set(att.item_id, original);
+    // Revisión menor: un borrador PDF no se corrige en el editor (se devuelve).
+    await signUntilQuality(idRequest);
+    await expect(getCurrentDraftHtml(prisma, deps, idRequest, await viewer(E.cal))).rejects.toThrow(/es un PDF/);
+    await cancelRequest(prisma, notifier, await accessOf(E.cal), idRequest, { reason: 'Fin de la prueba de bordes' }, actor(E.cal));
+    // Historial sin la marca: con encabezado institucional se agrega al final.
+    const r = await newRequest('Historial agregado');
+    await saveDraftRevision(prisma, r, { html: '<h1>Sin marca de historial</h1><p>Contenido del procedimiento de prueba sin la marca.</p>', origin: 'plantilla' }, await viewer(E.elab), actor(E.elab));
+    htmls.length = 0;
+    await buildLayoutPreview(prisma, deps, r, await viewer(E.elab));
+    expect(htmls[0]).toContain('<h2>HISTORIAL DE CAMBIOS</h2><table>');
+    // Revisión menor sobre una revisión del EDITOR (no un Word).
+    await signUntilQuality(r);
+    const cur = await getCurrentDraftHtml(prisma, deps, r, await viewer(E.cal));
+    expect(cur.html).toContain('Sin marca de historial');
+    // Logo válido cargado por Calidad.
+    const s = await saveCompanySettings(prisma, CO, { logoDataUrl: `data:image/png;base64,${TINY_PNG_B64}`, reason: 'Logo de 8 px de la prueba' }, actor(E.cal));
+    expect(s.logoDataUrl).toBe(`data:image/png;base64,${TINY_PNG_B64}`);
   });
 });
