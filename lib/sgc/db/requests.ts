@@ -35,7 +35,7 @@ import { getPoolMembers, getPoolTypeCodes } from './authorizations';
 import type { SgcActor, SgcDb } from './catalogs';
 import type { SgcUploader } from './documents';
 import { getCurrentFlowVersion, loadDefinition } from './flows';
-import { activateReaders, getDisseminationView, getMyReading } from './dissemination';
+import { activateReaders, checkReadThreshold, getDisseminationView, getMyReading } from './dissemination';
 import { getTrainingView } from './training';
 import { annulUnpublishedVersion, publishApprovedVersion, type SgcPublishResult } from './vigencia';
 
@@ -588,6 +588,8 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     if (outcome === 'abierta') {
       // En la divulgación cada lectura es independiente: no se re-notifica a los demás lectores.
       if (taskDef.assignment !== 'alcance') await notifyTurn(ctx, idTask, taskDef, after, (task.signing_mode as 'orden' | 'paralelo' | null) ?? null);
+      // 2026-10-03: aviso de avance de lectura por UMBRAL (una vez), en lugar de uno por cada lectura.
+      else if (signed && assignee.signature_meaning === 'leyo') await checkReadThreshold(tx, request, idTask, taskDef.poolAuthorizationTypeCode, notifications, actor);
     } else if (outcome === 'resuelta') {
       const resolution = taskDef.assignment === 'alcance' ? 'Divulgación completa: todas las personas del alcance leyeron y firmaron.' : comment || `${task.name} aprobada.`;
       await tx.sgcTask.update({ where: { id_task: idTask }, data: { status: 'resuelta', ended_at: now, resolved_by: me, resolution } });
@@ -862,6 +864,11 @@ export async function excludeReader(db: SgcDb, notifier: SgcNotifier, access: Sg
     await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: me, action: SGC_AUDIT_ACTIONS.lecturaExcluida, entity: 'read_record', entityId: idReadRecord, before: { status: 'pendiente' }, after: { status: 'excluido' }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });
     const states = task.assignees.map((a) => (a.id_task_assignee === rec.id_task_assignee ? { ...toAssigneeState(a), status: 'anulado' as SgcAssigneeStatus } : toAssigneeState(a)));
     let next: string = task.task_key;
+    if (taskOutcome(states) !== 'resuelta') {
+      // 2026-10-03: excluir también cambia el porcentaje de lectura (umbral de aviso).
+      const def = await loadDefinition(tx, request.id_flow_version);
+      await checkReadThreshold(tx, request, task.id_task, def.tasks.find((t) => t.key === task.task_key)?.poolAuthorizationTypeCode ?? null, notifications, actor);
+    }
     if (taskOutcome(states) === 'resuelta') {
       const def = await loadDefinition(tx, request.id_flow_version);
       await tx.sgcTask.update({ where: { id_task: task.id_task }, data: { status: 'resuelta', ended_at: now, resolved_by: me, resolution: 'Divulgación completa: las personas del alcance leyeron y firmaron (con exclusiones justificadas).' } });

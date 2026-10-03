@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Alert, Badge, Button, Card, Group, Stack, Text, Title } from '@mantine/core';
-import { IconBook, IconCheck, IconLock, IconSignature } from '@tabler/icons-react';
+import { Alert, Badge, Button, Card, Group, Modal, Stack, Text, Textarea, Title } from '@mantine/core';
+import { IconBook, IconCheck, IconHelpCircle, IconLock, IconSignature } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import SgcSecureViewer from '../SgcSecureViewer';
 import SgcSignModal from '../signature/SgcSignModal';
@@ -28,7 +28,29 @@ export default function SgcReadingPanel({ idTask, requestId, reading, canSign, o
   const [reachedEnd, setReachedEnd] = useState<string | null>(reading.reachedEndAt);
   const [error, setError] = useState<string | null>(null);
   const [signOpen, setSignOpen] = useState(false);
+  // 2026-10-03: «No entendí» (va al historial de la solicitud y avisa al creador y a Calidad).
+  const [doubtOpen, setDoubtOpen] = useState(false);
+  const [doubt, setDoubt] = useState('');
+  const [doubtBusy, setDoubtBusy] = useState(false);
+  const [doubtSent, setDoubtSent] = useState<string | null>(null);
   const pending = reading.status === 'pendiente';
+  const canDoubt = reading.status !== 'excluido' && reading.pdfReady;
+
+  const sendDoubt = async () => {
+    setDoubtBusy(true);
+    setError(null);
+    try {
+      await sgcSend(`/api/sgc/reading/${reading.idAssignee}/doubt`, 'POST', { body: doubt.trim() });
+      setDoubtOpen(false);
+      setDoubt('');
+      setDoubtSent('Su «No entendí» quedó en el historial de la solicitud y se avisó al creador del documento y a Calidad.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setDoubtOpen(false);
+    } finally {
+      setDoubtBusy(false);
+    }
+  };
 
   const onEnd = async (pages: number) => {
     if (!pending || reachedEnd) return;
@@ -69,6 +91,11 @@ export default function SgcReadingPanel({ idTask, requestId, reading, canSign, o
         )}
         {reading.status === 'excluido' && <Alert color='gray'>Su lectura fue excluida por Calidad: {reading.excludeReason}</Alert>}
         {error && <Alert color='red'>{error}</Alert>}
+        {doubtSent && (
+          <Alert color='teal' icon={<IconCheck size={16} />} data-testid='sgc-no-entendi-enviado'>
+            {doubtSent}
+          </Alert>
+        )}
         {reading.pdfReady && reading.fileUrl ? (
           <SgcSecureViewer fileUrl={reading.fileUrl} canDownload={false} canPrint={false} onReachedEnd={pending ? onEnd : undefined} />
         ) : (
@@ -76,17 +103,42 @@ export default function SgcReadingPanel({ idTask, requestId, reading, canSign, o
             El PDF controlado de esta versión aún no está disponible. Intente de nuevo en unos minutos.
           </Alert>
         )}
-        {pending && (
+        {(pending || canDoubt) && (
           <Group>
-            <Button color='green' leftSection={<IconSignature size={16} />} disabled={!reachedEnd || !canSign || !reading.content} onClick={() => setSignOpen(true)} data-testid='sgc-lectura-leido'>
-              Leído
-            </Button>
-            <Text size='xs' c='dimmed' data-testid='sgc-lectura-ayuda'>
-              {reachedEnd ? `Llegó al final del documento el ${formatDateCO(reachedEnd)}.` : '«Leído» se habilita al llegar al final del documento.'}
-            </Text>
+            {pending && (
+              <Button color='green' leftSection={<IconSignature size={16} />} disabled={!reachedEnd || !canSign || !reading.content} onClick={() => setSignOpen(true)} data-testid='sgc-lectura-leido'>
+                Leído
+              </Button>
+            )}
+            {canDoubt && (
+              <Button variant='light' color='orange' leftSection={<IconHelpCircle size={16} />} onClick={() => setDoubtOpen(true)} data-testid='sgc-no-entendi'>
+                No entendí
+              </Button>
+            )}
+            {pending && (
+              <Text size='xs' c='dimmed' data-testid='sgc-lectura-ayuda'>
+                {reachedEnd ? `Llegó al final del documento el ${formatDateCO(reachedEnd)}.` : '«Leído» se habilita al llegar al final del documento.'}
+              </Text>
+            )}
           </Group>
         )}
       </Stack>
+      <Modal opened={doubtOpen} onClose={() => setDoubtOpen(false)} title='No entendí el documento' centered>
+        <Stack>
+          <Text size='sm' c='dimmed'>
+            Cuéntenos qué parte no entendió. Queda en el historial de la solicitud y se avisa al creador del documento y a Calidad. No reemplaza la firma «Leído».
+          </Text>
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='¿Qué no entendió?' required minRows={3} autosize value={doubt} onChange={(e) => setDoubt(e.currentTarget.value)} data-testid='sgc-no-entendi-texto' />
+          <Group justify='flex-end'>
+            <Button variant='default' onClick={() => setDoubtOpen(false)}>
+              Volver
+            </Button>
+            <Button color='orange' disabled={doubt.trim().length < 10} loading={doubtBusy} onClick={() => void sendDoubt()} data-testid='sgc-no-entendi-enviar'>
+              Enviar
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
       {reading.content && (
         <SgcSignModal
           opened={signOpen}

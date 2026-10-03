@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Alert, Badge, Button, Card, Group, Loader, Select, Table, Text, TextInput } from '@mantine/core';
-import { IconAlertTriangle, IconFileUpload, IconHierarchy2, IconSearch } from '@tabler/icons-react';
+import { IconAlertTriangle, IconBuildingCommunity, IconFileUpload, IconHierarchy2, IconSearch } from '@tabler/icons-react';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { SgcConfidentialityBadge, SgcDocumentCode, SgcReviewBadge, SgcStatusBadge } from '../../../../../components/sgc/SgcBadges';
 import { sgcHref } from '../../../../../components/sgc/useSgcCompany';
@@ -215,6 +215,9 @@ export default function ListadoMaestroPage() {
       subtitle='Documentos controlados vigentes, con código y versión'
       actions={(company) => (
         <Group gap='xs'>
+          <Button component={Link} href={sgcHref(`${SGC_BASE_URL}/areas`, company.idCompany)} variant='light' leftSection={<IconBuildingCommunity size={16} />}>
+            Por área
+          </Button>
           <Button component={Link} href={sgcHref(`${SGC_BASE_URL}/mapa`, company.idCompany)} variant='light' leftSection={<IconHierarchy2 size={16} />}>
             Mapa de procesos
           </Button>

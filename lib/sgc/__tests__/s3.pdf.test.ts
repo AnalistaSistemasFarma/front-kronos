@@ -158,7 +158,7 @@ describe('SGC · S3 · borrador vigente (lo que se firma) y edición en la app',
     expect(draftPlainText('<p>Hola&nbsp;<b>mundo</b></p>')).toBe('Hola mundo');
     expect(getDraftHtmlError(5)).toMatch(/inválido/);
     expect(getDraftHtmlError('<p>corto</p>')).toMatch(/vacío/);
-    expect(getDraftHtmlError(`<p>${'x'.repeat(3 * 1024 * 1024)}</p>`)).toMatch(/2 MB/);
+    expect(getDraftHtmlError(`<p>${'x'.repeat(7 * 1024 * 1024)}</p>`)).toMatch(/6 MB/);
     expect(getDraftHtmlError('<h1>Procedimiento</h1><p>Contenido suficiente del borrador.</p>')).toBeNull();
   });
 

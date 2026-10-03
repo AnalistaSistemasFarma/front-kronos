@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { listDraftRevisions, saveDraftRevision } from '@/lib/sgc/db/drafts';
+import { sgcNotifier } from '@/lib/sgc/notifications';
 import { errorResponse, getSgcRequestContext, jsonNoStore, parseId, readJson } from '@/app/api/sgc/_lib/context';
 
 export const dynamic = 'force-dynamic';
@@ -7,7 +8,9 @@ export const dynamic = 'force-dynamic';
 /**
  * GET /api/sgc/requests/<id>/draft — revisiones del borrador editado en la app.
  * POST — { html, note?, origin?, originRef? } guarda una REVISIÓN NUEVA (solo
- * el elaborador, durante la elaboración; nada se sobrescribe).
+ * el elaborador, durante la elaboración; nada se sobrescribe). Con
+ * { minor: true, minorReason } es la REVISIÓN MENOR de Calidad durante la
+ * aprobación (2026-10-03).
  */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -28,7 +31,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const id = parseId((await params).id);
     const body = await readJson(request);
     if (!id || !body) return jsonNoStore({ error: 'Petición inválida' }, 400);
-    const saved = await saveDraftRevision(prisma, id, { html: body.html, note: body.note, origin: body.origin, originRef: body.originRef }, { email: ctx.email, access: ctx.access }, ctx.actor);
+    const saved = await saveDraftRevision(prisma, id, { html: body.html, note: body.note, origin: body.origin, originRef: body.originRef, minor: body.minor, minorReason: body.minorReason }, { email: ctx.email, access: ctx.access }, ctx.actor, sgcNotifier);
     return jsonNoStore(saved, saved.unchanged ? 200 : 201);
   } catch (error) {
     return errorResponse(error, 'requests:borrador:guardar');

@@ -6,6 +6,7 @@ import {
   SGC_SCOPE_KIND_LABELS,
   defaultScope,
   normalizeReadingEvent,
+  parseCompanyDomains,
   normalizeScopeEntry,
   resolveReaders,
   scopeKey,
@@ -18,6 +19,7 @@ import {
 import { SgcError } from '../errors';
 import { SGC_NOTIFICATION_TITLES, recipients, requestUrl, taskUrl, type SgcNotification, type SgcNotifier } from '../notifications';
 import type { SgcCompanyAccess } from '../permissions';
+import { emissionStampFor } from '../watermark';
 import { getPoolMembers } from './authorizations';
 import type { SgcActor, SgcDb } from './catalogs';
 
@@ -53,9 +55,12 @@ function toEntry(row: { kind: string; id_department: number | null; id_cargo: nu
 /**
  * Directorio para resolver el alcance. «Toda la empresa» = las personas
  * activas con algún permiso del SGC en la empresa (quien no tiene acceso al
- * módulo no podría abrir su tarea de lectura).
+ * módulo no podría abrir su tarea de lectura) y, desde el 2026-10-03, solo las
+ * de la empresa del documento por su dominio de correo (Calidad OLP: «no me
+ * puede aparecer ningún correo de GSS, solamente One Latam»).
  */
 export async function buildScopeDirectory(db: Db, idCompany: number, entries: readonly SgcScopeEntry[]): Promise<SgcScopeDirectory> {
+  const config = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { dissemination_domains: true } });
   const permRows = await db.subprocessUserCompany.findMany({
     where: {
       subprocess: { subprocess_url: { in: Object.values(SGC_SUBPROCESS_URLS) } },
@@ -76,7 +81,7 @@ export async function buildScopeDirectory(db: Db, idCompany: number, entries: re
     const rows = await db.sgcCargoMember.findMany({ where: { id_company: idCompany, id_cargo: { in: cargoIds }, is_active: true }, select: { id_cargo: true, user_email: true } });
     for (const r of rows) cargoMembers.set(r.id_cargo, [...(cargoMembers.get(r.id_cargo) ?? []), lower(r.user_email)]);
   }
-  return { eligible, companyMembers: [...eligible], departmentMembers, cargoMembers };
+  return { eligible, companyMembers: [...eligible], departmentMembers, cargoMembers, companyDomains: parseCompanyDomains(config?.dissemination_domains) };
 }
 
 // ---------------------------------------------------------------------------
@@ -111,11 +116,11 @@ export async function activateReaders(ctx: SgcActivateReadersCtx): Promise<{ rea
   }
   const entries = scopeRows.map(toEntry);
   const dir = await buildScopeDirectory(tx, request.id_company, entries);
-  const { readers, withoutAccess } = resolveReaders(entries, dir);
+  const { readers, withoutAccess, outsideCompany } = resolveReaders(entries, dir);
   const added = await addReaders(tx, request, ctx.idTask, readers);
-  const summary = `Divulgación iniciada: ${added.length} persona(s) deben leer el documento hasta el final y firmar «Leyó».${withoutAccess.length ? `\n${withoutAccess.length} persona(s) del alcance no tienen acceso al SGC y no recibieron tarea: ${withoutAccess.map((w) => w.email).join(', ')}.` : ''}${added.length === 0 ? '\nEl alcance no tiene lectores: Calidad debe ampliarlo (departamentos, cargos o personas) o cerrar la divulgación con justificación.' : ''}`;
-  await tx.sgcInteraction.create({ data: { id_request: request.id_request, id_task: ctx.idTask, kind: 'estado', author_email: lower(ctx.actor.email), body: summary.slice(0, 8000), meta_json: JSON.stringify({ readers: added, withoutAccess: withoutAccess.map((w) => w.email) }) } });
-  await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: ctx.actor.email, action: SGC_AUDIT_ACTIONS.lectoresAsignados, entity: 'task', entityId: ctx.idTask, after: { idRequest: request.id_request, readers: added, withoutAccess: withoutAccess.map((w) => w.email), scope: entries.map(scopeKey) }, ip: ctx.actor.ip, userAgent: ctx.actor.userAgent });
+  const summary = `Divulgación iniciada: ${added.length} persona(s) deben leer el documento hasta el final y firmar «Leyó».${withoutAccess.length ? `\n${withoutAccess.length} persona(s) del alcance no tienen acceso al SGC y no recibieron tarea: ${withoutAccess.map((w) => w.email).join(', ')}.` : ''}${outsideCompany.length ? `\n${outsideCompany.length} persona(s) de otra empresa quedaron por fuera del alcance automático (solo se incluyen eligiéndolas como persona): ${outsideCompany.map((w) => w.email).join(', ')}.` : ''}${added.length === 0 ? '\nEl alcance no tiene lectores: Calidad debe ampliarlo (departamentos, cargos o personas) o cerrar la divulgación con justificación.' : ''}`;
+  await tx.sgcInteraction.create({ data: { id_request: request.id_request, id_task: ctx.idTask, kind: 'estado', author_email: lower(ctx.actor.email), body: summary.slice(0, 8000), meta_json: JSON.stringify({ readers: added, withoutAccess: withoutAccess.map((w) => w.email), outsideCompany: outsideCompany.map((w) => w.email) }) } });
+  await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: ctx.actor.email, action: SGC_AUDIT_ACTIONS.lectoresAsignados, entity: 'task', entityId: ctx.idTask, after: { idRequest: request.id_request, readers: added, withoutAccess: withoutAccess.map((w) => w.email), outsideCompany: outsideCompany.map((w) => w.email), scope: entries.map(scopeKey) }, ip: ctx.actor.ip, userAgent: ctx.actor.userAgent });
   pushReaderNotifications(ctx.notifications, added, request, ctx.idTask, ctx.actor.email);
   if (ctx.poolTypeCode) {
     const members = recipients(await getPoolMembers(tx, request.id_company, ctx.poolTypeCode), ctx.actor.email);
@@ -199,7 +204,7 @@ export async function addScopeEntry(db: SgcDb, notifier: SgcNotifier, access: Sg
       const dir = await buildScopeDirectory(tx, request.id_company, [entry]);
       const res = resolveReaders([entry], dir, excluded);
       added = await addReaders(tx, request, openDissemination.id_task, res.readers);
-      withoutAccess = res.withoutAccess.map((w) => w.email);
+      withoutAccess = [...res.withoutAccess, ...res.outsideCompany].map((w) => w.email);
       pushReaderNotifications(notifications, added, request, openDissemination.id_task, me);
     }
     await tx.sgcInteraction.create({
@@ -284,6 +289,8 @@ export async function openReadingFile(db: SgcDb, idAssignee: number, viewer: { e
     code: version.document.code,
     versionNumber: version.version_number,
     state: version.status === 'vigente' ? ('vigente' as const) : version.status === 'obsoleto' ? ('obsoleto' as const) : version.status === 'anulado' ? ('anulado' as const) : ('divulgacion' as const),
+    // 2026-10-03: fecha de emisión del encabezado institucional (se estampa en la copia).
+    emission: emissionStampFor(version),
   };
 }
 
@@ -353,6 +360,14 @@ export interface SgcDisseminationView {
     excludeReason: string | null;
   }[];
   withoutAccess: string[];
+  /** 2026-10-03: personas de otra empresa que el alcance automático deja por fuera. */
+  outsideCompany: string[];
+  /** 2026-10-03: dominios de la empresa (el alcance automático solo los incluye). */
+  companyDomains: string[] | null;
+  /** 2026-10-03: umbral de avance de lectura que se avisa y si ya se avisó. */
+  threshold: { pct: number; notifiedAt: string | null };
+  /** 2026-10-03: «No entendí» registrados en la lectura. */
+  doubts: { email: string; name: string | null; body: string; at: string }[];
   coverage: ReturnType<typeof summarizeCoverage>;
   started: boolean;
   open: boolean;
@@ -382,7 +397,7 @@ export async function getDisseminationView(
   const cargoName = new Map(cargos.map((c) => [c.id_cargo, c.nombre_normalizado]));
   const labelOf = (r: { kind: string; id_department: number | null; id_cargo: number | null; user_email: string | null }) =>
     r.kind === 'empresa'
-      ? 'Toda la empresa (personas con acceso al SGC)'
+      ? 'Toda la empresa (personas de la empresa con acceso al SGC)'
       : r.kind === 'departamento'
         ? `Departamento: ${deptName.get(r.id_department!) ?? r.id_department}`
         : r.kind === 'cargo'
@@ -391,8 +406,13 @@ export async function getDisseminationView(
   const active = rows.filter((r) => r.is_active);
   const entries = active.map(toEntry);
   const dir = await buildScopeDirectory(db, request.id_company, entries);
-  const { withoutAccess } = resolveReaders(entries, dir);
+  const { withoutAccess, outsideCompany } = resolveReaders(entries, dir);
   const isOpen = request.status === 'abierta';
+  const [config, notice, doubtRows] = await Promise.all([
+    db.sgcCompanyConfig.findUnique({ where: { id_company: request.id_company }, select: { read_threshold_pct: true } }),
+    current ? db.sgcReadThresholdNotice.findFirst({ where: { id_task: current.id_task }, orderBy: { id_read_threshold_notice: 'asc' } }) : null,
+    db.sgcInteraction.findMany({ where: { id_request: request.id_request, kind: 'duda' }, orderBy: { id_interaction: 'asc' }, select: { author_email: true, body: true, created_at: true } }),
+  ]);
   const started = dTasks.length > 0;
   const openTask = current && current.status === 'abierta' ? current : null;
   const isElaborator = lower(viewer.email) === lower(request.elaborator_email);
@@ -416,6 +436,10 @@ export async function getDisseminationView(
       excludeReason: r.exclude_reason,
     })),
     withoutAccess: withoutAccess.map((w) => w.email),
+    outsideCompany: outsideCompany.map((w) => w.email),
+    companyDomains: dir.companyDomains ? [...dir.companyDomains] : null,
+    threshold: { pct: config?.read_threshold_pct ?? 90, notifiedAt: notice?.notified_at.toISOString() ?? null },
+    doubts: doubtRows.map((d) => ({ email: d.author_email, name: names(d.author_email), body: d.body, at: d.created_at.toISOString() })),
     coverage: summarizeCoverage(records.map((r) => ({ status: r.status as SgcReadStatus, openedAt: r.first_opened_at, reachedEndAt: r.reached_end_at, signedAt: r.signed_at }))),
     started,
     open: Boolean(openTask),
@@ -447,4 +471,73 @@ export async function getMyReading(db: SgcDb, idTask: number, email: string) {
     pdfReady,
     fileUrl: pdfReady ? `/api/sgc/reading/${rec.id_task_assignee}/file` : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Correcciones de Calidad (2026-10-03): aviso por UMBRAL de lectura y «No entendí»
+// ---------------------------------------------------------------------------
+
+/**
+ * Aviso de AVANCE DE LECTURA por umbral (Calidad OLP: «para no llenar de
+ * avisos», en lugar de uno por cada lectura): cuando el porcentaje leído de la
+ * divulgación llega al umbral de la empresa (90 % por defecto, configurable),
+ * se avisa UNA sola vez al creador (solicitante y elaborador) y a Calidad
+ * (grupo que administra la divulgación). Corre dentro de la transacción que
+ * bloquea la solicitud (firma «Leyó» o exclusión), así no se duplica.
+ */
+export async function checkReadThreshold(
+  tx: Tx,
+  request: { id_request: number; id_company: number; subject: string; requester_email: string; elaborator_email: string },
+  idTask: number,
+  poolTypeCode: string | null,
+  notifications: SgcNotification[],
+  actor: SgcActor
+): Promise<{ notified: boolean; percent: number; threshold: number }> {
+  const config = await tx.sgcCompanyConfig.findUnique({ where: { id_company: request.id_company }, select: { read_threshold_pct: true } });
+  const threshold = config?.read_threshold_pct ?? 90;
+  const records = await tx.sgcReadRecord.findMany({ where: { id_task: idTask }, select: { status: true, first_opened_at: true, reached_end_at: true, signed_at: true } });
+  const cov = summarizeCoverage(records.map((r) => ({ status: r.status as SgcReadStatus, openedAt: r.first_opened_at, reachedEndAt: r.reached_end_at, signedAt: r.signed_at })));
+  const counted = cov.total - cov.excluded;
+  if (counted <= 0 || cov.percent < threshold) return { notified: false, percent: cov.percent, threshold };
+  if (await tx.sgcReadThresholdNotice.findUnique({ where: { id_task_threshold_pct: { id_task: idTask, threshold_pct: threshold } } })) return { notified: false, percent: cov.percent, threshold };
+  const pool = poolTypeCode ? await getPoolMembers(tx, request.id_company, poolTypeCode) : [];
+  const people = recipients([request.requester_email, request.elaborator_email, ...pool]);
+  const now = new Date();
+  await tx.sgcReadThresholdNotice.create({ data: { id_request: request.id_request, id_task: idTask, threshold_pct: threshold, percent_at: cov.percent, read_count: cov.read, counted, recipients_json: JSON.stringify(people).slice(0, 2000), notified_at: now } });
+  const text = `La lectura del documento llegó al ${cov.percent} % (${cov.read} de ${counted} persona(s)); umbral de aviso: ${threshold} %.`;
+  await tx.sgcInteraction.create({ data: { id_request: request.id_request, id_task: idTask, kind: 'estado', author_email: lower(actor.email), body: `${text}\nSe avisó al creador y a Calidad.`, meta_json: JSON.stringify({ threshold, percent: cov.percent, recipients: people }) } });
+  await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: actor.email, action: SGC_AUDIT_ACTIONS.lecturaUmbral, entity: 'task', entityId: idTask, after: { idRequest: request.id_request, threshold, percent: cov.percent, read: cov.read, counted, recipients: people }, ip: actor.ip, userAgent: actor.userAgent });
+  if (people.length) {
+    notifications.push({ emails: people, payload: { title: SGC_NOTIFICATION_TITLES.lecturaUmbral, body: `#${request.id_request} · ${text} — ${request.subject}`.slice(0, 300), url: requestUrl(request.id_request), tag: `sgc-request-${request.id_request}` } });
+  }
+  return { notified: true, percent: cov.percent, threshold };
+}
+
+/**
+ * «NO ENTENDÍ» en la lectura obligatoria (propuesta de Calidad OLP): la
+ * persona deja qué no entendió; queda en el HISTORIAL de la solicitud (para
+ * centralizar las dudas) y se avisa al creador y a Calidad. No reemplaza la
+ * firma «Leído» ni la bloquea.
+ */
+export async function recordReadingDoubt(db: SgcDb, notifier: SgcNotifier, idAssignee: number, input: { body?: unknown }, viewer: { email: string; access: readonly SgcCompanyAccess[] }, actor: SgcActor) {
+  const rec = await loadMyRead(db, idAssignee, viewer.email);
+  if (!viewer.access.some((a) => a.idCompany === rec.request.id_company && a.canRead)) throw new SgcError('Lectura no encontrada.', 404);
+  if (rec.status === 'excluido') throw new SgcError('Su lectura fue excluida por Calidad.', 409);
+  if (rec.task.status !== 'abierta') throw new SgcError('La divulgación ya cerró: escriba su duda a Calidad.', 409);
+  const body = typeof input.body === 'string' ? input.body.trim() : '';
+  if (body.length < 10) throw new SgcError('Cuéntenos qué no entendió (mínimo 10 caracteres).');
+  const version = rec.request.id_document_version ? await db.sgcDocumentVersion.findUnique({ where: { id_document_version: rec.request.id_document_version }, include: { document: { select: { code: true, title: true } } } }) : null;
+  const docLabel = version ? `${version.document.code} V${version.version_number} — ${version.document.title}` : rec.request.subject;
+  const def = await db.sgcFlowTaskDef.findUnique({ where: { id_flow_task_def: rec.task.id_flow_task_def }, select: { pool_authorization_type_code: true } });
+  const pool = def?.pool_authorization_type_code ? await getPoolMembers(db, rec.request.id_company, def.pool_authorization_type_code) : [];
+  const people = recipients([rec.request.requester_email, rec.request.elaborator_email, ...pool], viewer.email);
+  const created = await db.$transaction(async (tx) => {
+    const row = await tx.sgcInteraction.create({ data: { id_request: rec.id_request, id_task: rec.id_task, kind: 'duda', author_email: lower(viewer.email), body: `No entendí «${docLabel}».\n${body.slice(0, 2000)}`, meta_json: JSON.stringify({ idReadRecord: rec.id_read_record, noEntendi: true }) } });
+    await writeSgcAudit(tx, { idCompany: rec.request.id_company, actorEmail: viewer.email, action: SGC_AUDIT_ACTIONS.lecturaNoEntendi, entity: 'read_record', entityId: rec.id_read_record, after: { idRequest: rec.id_request, idInteraction: row.id_interaction.toString(), recipients: people }, detail: body.slice(0, 1000), ip: actor.ip, userAgent: actor.userAgent });
+    return row;
+  });
+  if (people.length) {
+    await notifier([{ emails: people, payload: { title: SGC_NOTIFICATION_TITLES.lecturaNoEntendi, body: `#${rec.id_request} · ${viewer.email} no entendió «${docLabel}»: ${body}`.slice(0, 300), url: requestUrl(rec.id_request), tag: `sgc-request-${rec.id_request}` } }]).catch((e) => console.error('[sgc/no-entendi] aviso', e));
+  }
+  return { ok: true, idInteraction: created.id_interaction.toString(), notified: people.length };
 }

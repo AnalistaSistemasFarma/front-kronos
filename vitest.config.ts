@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 // El servidor MCP tiene su propia suite en `mcp/` (no se incluye aquí).
 export default defineConfig({
   // El tsconfig de Next usa jsx «preserve»; las pruebas del avatar importan
-  // componentes .tsx (cabezas.test.ts), así que Vitest debe transformar el JSX.
+  // componentes .tsx (cabezas.test.ts) y la prueba de PARIDAD del SGC renderiza
+  // el marcado de sus pantallas, así que Vitest debe transformar el JSX.
   oxc: { jsx: { runtime: 'automatic' } },
   resolve: {
     alias: {
@@ -25,6 +26,8 @@ export default defineConfig({
       // `app/api/sgc/**`: pruebas de las rutas del SGC documental (con sesión y
       // base simuladas); son evidencia de validación del módulo.
       'app/api/sgc/**/*.test.ts',
+      // `components/sgc/**`: prueba de PARIDAD de las pantallas copiadas de SynerLink (render del marcado).
+      'components/sgc/**/*.test.ts',
     ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
 

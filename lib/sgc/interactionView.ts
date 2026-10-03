@@ -118,6 +118,8 @@ function parse(kind: string, lines: string[], nameOf: NameOf): Parsed {
   let m: RegExpMatchArray | null;
 
   if (kind === 'nota') return { action: 'agregó una nota', consumed: [] };
+  // 2026-10-03: «No entendí» de la lectura obligatoria (va al historial de la solicitud).
+  if (kind === 'duda') return { action: 'marcó «No entendí» en la lectura del documento', note: first, consumed: [0] };
 
   const assigned = parseAssigned(first);
   if (assigned) {
@@ -323,6 +325,9 @@ export function presentInteraction(item: SgcInteractionInput, nameOf: NameOf): S
 
   if (item.kind === 'nota') {
     observations.push(item.body.trim());
+  } else if (item.kind === 'duda') {
+    const text = lines.slice(1).join('\n').trim();
+    if (text) observations.push(text);
   } else {
     lines.forEach((l, i) => {
       if (i === 0 || consumed.has(i) || !l.trim()) return;

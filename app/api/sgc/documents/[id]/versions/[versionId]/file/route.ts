@@ -3,7 +3,7 @@ import { prisma } from '../../../../../../../../lib/prisma';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../../../../../../../../lib/sgc/audit';
 import { getVersionForViewer } from '../../../../../../../../lib/sgc/db/documents';
 import { downloadVerifiedPdf } from '../../../../../../../../lib/sgc/onedrive';
-import { stampControlledCopy, type SgcWatermarkInfo } from '../../../../../../../../lib/sgc/watermark';
+import { emissionStampFor, stampControlledCopy, type SgcWatermarkInfo } from '../../../../../../../../lib/sgc/watermark';
 import { NO_STORE, errorResponse, getSgcRequestContext, jsonNoStore, rateLimitResponse } from '../../../../../_lib/context';
 
 export const dynamic = 'force-dynamic';
@@ -69,6 +69,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       mode,
       // Sprint 4: una versión obsoleta o anulada sale marcada como tal; una aprobada en divulgación, como «aún no vigente».
       state: found.version.status === 'obsoleto' ? 'obsoleto' : found.version.status === 'anulado' ? 'anulado' : found.version.status === 'borrador' ? 'divulgacion' : 'vigente',
+      // 2026-10-03: fecha de emisión (vigencia) en el recuadro del encabezado institucional.
+      emission: emissionStampFor(found.version),
     };
     const stamped = await stampControlledCopy(original, info);
 

@@ -1,0 +1,127 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { Alert, Button, Card, FileInput, Group, Loader, NumberInput, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import { IconAlertTriangle, IconCheck, IconPhoto } from '@tabler/icons-react';
+import { sgcSend, useSgcFetch } from './useSgcFetch';
+
+/**
+ * «Encabezado y divulgación» en Configuración del SGC (correcciones de
+ * Calidad OLP, 2026-10-03; solo Aseguramiento de Calidad):
+ *   - LOGO de la empresa para el encabezado institucional del PDF controlado
+ *     (PNG o JPEG, máx. 400 KB; queda guardado en el SGC, sin enlaces externos);
+ *   - DOMINIOS de correo de la empresa: «toda la empresa», departamentos y
+ *     cargos solo incluyen esos correos en la divulgación (otras personas, solo
+ *     elegidas a mano como «Persona»);
+ *   - UMBRAL de avance de lectura que se avisa al creador y a Calidad.
+ * Cada cambio pide motivo y queda en la auditoría.
+ */
+interface Settings {
+  idCompany: number;
+  hasLogo: boolean;
+  logoDataUrl: string | null;
+  disseminationDomains: string[] | null;
+  readThresholdPct: number;
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+export default function SgcCompanySettings({ idCompany }: { idCompany: number }) {
+  const { data, error, reload } = useSgcFetch<Settings>(`/api/sgc/company-settings?company=${idCompany}`);
+  const [logo, setLogo] = useState<File | null>(null);
+  const [domains, setDomains] = useState('');
+  const [threshold, setThreshold] = useState<number | string>(90);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!data) return;
+    setDomains((data.disseminationDomains ?? []).join(', '));
+    setThreshold(data.readThresholdPct);
+  }, [data]);
+
+  if (error) {
+    return (
+      <Alert color='red' icon={<IconAlertTriangle size={18} />}>
+        {error}
+      </Alert>
+    );
+  }
+  if (!data) {
+    return (
+      <Group justify='center' my='xl'>
+        <Loader />
+      </Group>
+    );
+  }
+
+  const save = async () => {
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const body: Record<string, unknown> = { company: idCompany, reason, disseminationDomains: domains, readThresholdPct: Number(threshold) };
+      if (logo) body.logoDataUrl = await fileToDataUrl(logo);
+      await sgcSend('/api/sgc/company-settings', 'PUT', body);
+      setFeedback({ ok: true, text: 'Configuración guardada y registrada en la auditoría.' });
+      setLogo(null);
+      setReason('');
+      reload();
+    } catch (e) {
+      setFeedback({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card withBorder radius='md' p='lg' data-testid='sgc-config-empresa'>
+      <Stack gap='md'>
+        {feedback && (
+          <Alert color={feedback.ok ? 'green' : 'red'} icon={feedback.ok ? <IconCheck size={16} /> : <IconAlertTriangle size={16} />} data-testid='sgc-config-empresa-mensaje'>
+            {feedback.text}
+          </Alert>
+        )}
+        <div>
+          <Text fw={600} size='sm' mb={4}>
+            Logo del encabezado institucional
+          </Text>
+          <Group align='flex-end' wrap='wrap'>
+            {data.logoDataUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={data.logoDataUrl} alt='Logo de la empresa' style={{ height: 56, border: '1px solid var(--mantine-color-gray-3)', borderRadius: 6, padding: 4, background: '#fff' }} data-testid='sgc-config-logo' />
+            ) : (
+              <Text size='sm' c='dimmed'>
+                Sin logo: el encabezado muestra el nombre de la empresa.
+              </Text>
+            )}
+            <FileInput placeholder='Cargar logo (PNG o JPEG, máx. 400 KB)' accept='image/png,image/jpeg' value={logo} onChange={setLogo} leftSection={<IconPhoto size={16} />} w={340} data-testid='sgc-config-logo-archivo' />
+          </Group>
+        </div>
+        <TextInput
+          label='Dominios de correo de la empresa'
+          description='«Toda la empresa», departamentos y cargos solo incluyen estos correos en la divulgación. A una persona de otra empresa se le asigna lectura solo eligiéndola como «Persona». Vacío = sin filtro.'
+          placeholder='onelatampharma.com'
+          value={domains}
+          onChange={(e) => setDomains(e.currentTarget.value)}
+          autoComplete='off'
+          data-testid='sgc-config-dominios'
+        />
+        <NumberInput label='Umbral de aviso de avance de lectura (%)' description='Al llegar a este porcentaje de lectura se avisa una vez al creador del documento y a Calidad.' min={1} max={100} value={threshold} onChange={setThreshold} w={320} data-testid='sgc-config-umbral' />
+        <Textarea label='Motivo del cambio' description='Mínimo 10 caracteres: queda en el control de cambios.' autosize minRows={2} value={reason} onChange={(e) => setReason(e.currentTarget.value)} autoComplete='off' data-testid='sgc-config-empresa-motivo' />
+        <Group justify='flex-end'>
+          <Button onClick={() => void save()} loading={busy} disabled={reason.trim().length < 10} data-testid='sgc-config-empresa-guardar'>
+            Guardar
+          </Button>
+        </Group>
+      </Stack>
+    </Card>
+  );
+}

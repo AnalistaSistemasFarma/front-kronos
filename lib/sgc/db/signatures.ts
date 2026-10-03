@@ -6,16 +6,19 @@ import { SgcError, isSgcError } from '../errors';
 import { SGC_SIGNATURE_LABELS, type SgcSignatureMeaning } from '../flows/definition';
 import type { SgcNotifier } from '../notifications';
 import type { SgcCompanyAccess } from '../permissions';
-import { buildControlledPdf, manifestSha256, readManifest, verifyControlledPdf, type SgcManifest, type SgcPdfVerification } from '../pdf/controlledPdf';
-import { wrapDraftForPdf, type SgcDocxToHtml, type SgcHtmlToPdf } from '../pdf/render';
+import { buildControlledPdfWithLayout, manifestSha256, readManifest, verifyControlledPdf, type SgcManifest, type SgcManifestMinorRevision, type SgcManifestPlacement, type SgcPdfVerification } from '../pdf/controlledPdf';
+import { suggestInstitutionalPlacements } from '../pdf/institutional';
+import type { SgcDocxToHtml, SgcHtmlToPdf } from '../pdf/render';
+import { sgcSignerKey, type SgcPlacedMeaning, type SgcPlacementParticipant } from '../signature/fields';
 import { SGC_SIGNATURE_CONSENT_VERSION } from '../signature/consent';
 import { consentTextSha256, sha256HexOf, validateSignInput, verifySignatureRow } from '../signature/record';
 import { assertReauthNotLocked, type SgcPasswordVerifier } from '../signature/reauth';
-import { buildVersionFileName, buildVersionFolderSegments, isPdf } from '../storage';
+import { buildVersionFileName, buildVersionFolderSegments } from '../storage';
 import type { SgcActor, SgcDb } from './catalogs';
 import { getVersionForViewer, type SgcUploader } from './documents';
 import { addInteraction, decideTask, requestOfTask } from './requests';
-import { currentDraftInTx } from './signatureRecord';
+import { cargoOf, composeContent, latestLayout, loadVerifiedDraft, personLabel } from './layout';
+import { minorRevisionChain } from './drafts';
 import { withSgcAppLock } from './lock';
 import { getReadSignError, type SgcReadStatus } from '../dissemination/scope';
 import type { SgcSignatureRow, SgcSignedContent } from '../signature/record';
@@ -71,25 +74,6 @@ export interface SgcSignRawInput {
   /** Borrador que la persona vio al firmar (debe seguir siendo el vigente). */
   draftRef?: unknown;
   draftSha256?: unknown;
-}
-
-/** Descarga y VERIFICA el borrador vigente (lo que se va a firmar). */
-async function loadVerifiedDraft(db: SgcDb, deps: SgcSignatureDeps, idRequest: number) {
-  const draft = await currentDraftInTx(db as never, idRequest);
-  if (!draft) throw new SgcError('La solicitud no tiene borrador para firmar.', 409);
-  if (draft.kind === 'borrador_adjunto') {
-    const bytes = await deps.download(draft.itemId!);
-    if (sha256HexOf(bytes) !== draft.sha256) {
-      throw new SgcError('El borrador guardado no coincide con su huella registrada (SHA-256): no se puede firmar. Avise a Calidad.', 409);
-    }
-    return { draft, bytes, html: null as string | null };
-  }
-  const id = Number(draft.ref.split(':')[1]);
-  const rev = await db.sgcDraftRevision.findUniqueOrThrow({ where: { id_draft_revision: id } });
-  if (sha256HexOf(rev.content_html) !== draft.sha256) {
-    throw new SgcError('La revisión del borrador no coincide con su huella registrada (SHA-256): no se puede firmar. Avise a Calidad.', 409);
-  }
-  return { draft, bytes: null as Uint8Array | null, html: rev.content_html };
 }
 
 async function ensureConsent(db: SgcDb, idCompany: number, actor: SgcActor, now: Date) {
@@ -290,8 +274,15 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
     const approvals = signatures.filter((s) => s.meaning === 'aprobo');
     if (approvals.length === 0) throw new SgcError('La solicitud no tiene firmas de aprobación.', 409);
     const { draft, bytes, html } = await loadVerifiedDraft(db, deps, idRequest);
-    const offContent = signatures.filter((s) => s.content_sha256.trim() !== draft.sha256);
+    // 2026-10-03: una REVISIÓN MENOR de Calidad (con motivo) deja válidas las firmas hechas sobre el
+    // contenido que corrigió; la aprobación de Calidad va sobre el contenido final.
+    const chain = await minorRevisionChain(db, idRequest, draft.sha256);
+    const accepted = new Set([draft.sha256, ...chain.map((r) => r.baseSha256)]);
+    const offContent = signatures.filter((s) => !accepted.has(s.content_sha256.trim()));
     if (offContent.length) throw new SgcError('Hay firmas sobre un contenido distinto del borrador vigente: no se genera el PDF controlado.', 409);
+    if (chain.length && !approvals.some((s) => s.content_sha256.trim() === draft.sha256)) {
+      throw new SgcError('Hubo una revisión menor de Calidad y ninguna aprobación quedó sobre el contenido final: no se genera el PDF controlado.', 409);
+    }
     const broken = signatures.filter((s) => !verifySignatureRow(s));
     if (broken.length) throw new SgcError('Un registro de firma no coincide con su huella: no se genera el PDF controlado. Avise a Calidad.', 409);
     if (!request.documentType || !request.processMap) throw new SgcError('La solicitud no tiene tipo documental o proceso.', 409);
@@ -318,25 +309,58 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       versionNumber = 1;
     }
 
-    // Contenido → PDF.
-    let contentPdf: Uint8Array;
-    let source: { bytes: Uint8Array; ext: string; contentType: string } | null = null;
-    if (draft.format === 'pdf') {
-      if (!bytes || !isPdf(bytes)) throw new SgcError('El borrador PDF no es un PDF válido.', 409);
-      contentPdf = bytes;
-    } else if (draft.format === 'docx') {
-      const converted = await deps.docxToHtml(bytes!);
-      contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title, code, contentHtml: converted }));
-      source = { bytes: bytes!, ext: 'docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
-    } else if (draft.format === 'html') {
-      contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title, code, contentHtml: html! }));
-      source = { bytes: new TextEncoder().encode(html!), ext: 'html', contentType: 'text/html; charset=utf-8' };
-    } else {
-      throw new SgcError('El borrador debe ser PDF, Word (.docx) o editado en la app.', 409);
-    }
-
     const changeValue = request.formValues.find((v) => v.field.field_key === 'resumen_cambios')?.value_text ?? null;
     const changeDescription = (changeValue || request.description).slice(0, 2000);
+
+    // 2026-10-03: composición — encabezado institucional (si el documento lo usa), campos de sistema,
+    // historial de cambios y firmas DENTRO del documento en la posición que ubicó el elaborador.
+    const layout = await latestLayout(db, idRequest);
+    const institutional = layout.institutionalHeader && draft.format !== 'pdf';
+    const signerRows = await db.sgcTaskAssignee.findMany({ where: { id_task_assignee: { in: signatures.map((s) => s.id_task_assignee) } }, select: { id_task_assignee: true, user_email: true, pool_type_code: true, task: { select: { task_key: true } } } });
+    const keyOfAssignee = new Map(signerRows.map((a) => [a.id_task_assignee, sgcSignerKey(a.task.task_key, a.user_email, a.pool_type_code)]));
+    const cargos = await cargoOf(db, request.id_company, signatures.map((s) => s.signer_email));
+    const namesFor = (m: SgcPlacedMeaning) => [...new Set(signatures.filter((s) => s.meaning === m).map((s) => personLabel(s.signer_name, s.signer_email, cargos.get(s.signer_email.trim().toLowerCase()))))];
+    const approvedAt = approvals.at(-1)!.signed_at;
+    const composed = await composeContent(db, deps, {
+      idCompany: request.id_company,
+      idDocument: request.document?.id_document ?? null,
+      draft: { format: draft.format, bytes, html },
+      institutional,
+      code,
+      title,
+      versionNumber,
+      company: request.companyConfig.company.company,
+      process: `${request.processMap.code} · ${request.processMap.name}`,
+      documentType: request.documentType.name,
+      elaboro: namesFor('elaboro'),
+      reviso: namesFor('reviso'),
+      aprobo: namesFor('aprobo'),
+      changeDate: new Date(approvedAt.getTime() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      changeReason: changeDescription,
+      emissionText: 'Al quedar vigente',
+    });
+    const contentPdf = composed.contentPdf;
+    const source: { bytes: Uint8Array; ext: string; contentType: string } | null =
+      draft.format === 'docx'
+        ? { bytes: bytes!, ext: 'docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
+        : draft.format === 'html'
+          ? { bytes: new TextEncoder().encode(html!), ext: 'html', contentType: 'text/html; charset=utf-8' }
+          : null;
+    const explicit = new Map(layout.fields.map((f) => [f.signerKey, f]));
+    const signedParticipants: SgcPlacementParticipant[] = [];
+    for (const s of signatures) {
+      const key = keyOfAssignee.get(s.id_task_assignee);
+      if (key && !signedParticipants.some((p) => p.key === key)) signedParticipants.push({ key, meaning: s.meaning as SgcPlacedMeaning, name: s.signer_name ?? s.signer_email, email: s.signer_email, role: SGC_SIGNATURE_LABELS[s.meaning as SgcSignatureMeaning] });
+    }
+    // Con plantilla institucional, la firma que no se ubicó va en su recuadro «Firma» del encabezado.
+    const suggested = institutional ? new Map(suggestInstitutionalPlacements(signedParticipants, layout.fields).map((f) => [f.signerKey, f])) : new Map();
+    const placements: SgcManifestPlacement[] = [];
+    for (const s of signatures) {
+      const key = keyOfAssignee.get(s.id_task_assignee);
+      const f = key ? explicit.get(key) ?? suggested.get(key) : undefined;
+      if (f) placements.push({ uid: s.signature_uid.trim(), page: f.page, x: f.x, y: f.y, width: f.width, height: f.height });
+    }
+    const minorRevisions: SgcManifestMinorRevision[] = chain.map((r) => ({ revision: r.revision, baseSha256: r.baseSha256, newSha256: r.newSha256, reason: r.reason, by: r.by, at: r.at.toISOString() }));
     const manifest: SgcManifest = {
       schema: 'sgc-manifiesto-firmas/v1',
       company: request.companyConfig.company.company,
@@ -348,7 +372,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       documentType: `${request.documentType.code} · ${request.documentType.name}`,
       process: `${request.processMap.code} · ${request.processMap.name}`,
       statusLabel: 'Aprobado — pendiente de divulgación',
-      approvedAt: approvals.at(-1)!.signed_at.toISOString(),
+      approvedAt: approvedAt.toISOString(),
       generatedAt: now.toISOString(),
       changeDescription,
       signedContent: { name: draft.name, sha256: draft.sha256 },
@@ -366,6 +390,9 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       })),
       // Sprint 4: el QR de la portada abre esta verificación de vigencia de la versión.
       verifyUrl: buildVerifyUrl(deps.appUrl, request.id_company, code, versionNumber),
+      ...(placements.length ? { placements } : {}),
+      ...(institutional ? { institutionalHeader: true } : {}),
+      ...(minorRevisions.length ? { minorRevisions } : {}),
     };
     const masterIds = [...new Set(signatures.map((s) => s.id_signature_master).filter((x): x is number => !!x))];
     const masters = masterIds.length ? await db.sgcSignatureMaster.findMany({ where: { id_signature_master: { in: masterIds } } }) : [];
@@ -375,7 +402,8 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       const png = m ? dataUrlToBytes(m.image_png) : null;
       if (png) masterPng[s.signature_uid.trim()] = png;
     }
-    const controlled = await buildControlledPdf(contentPdf, manifest, masterPng);
+    const built = await buildControlledPdfWithLayout(contentPdf, manifest, masterPng, { header: composed.header });
+    const controlled = built.bytes;
     const pdfSha256 = sha256HexOf(controlled);
 
     const segments = buildVersionFolderSegments({ storageRoot: request.companyConfig.storage_root, documentTypeCode: request.documentType.code, code, versionNumber });
@@ -429,6 +457,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
           id_request: idRequest,
           signed_content_sha256: draft.sha256,
           manifest_json: JSON.stringify(manifest),
+          layout_json: JSON.stringify(built.layout),
         },
       });
       await tx.sgcRequest.update({

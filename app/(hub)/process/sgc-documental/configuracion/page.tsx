@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Alert, Badge, Button, Card, Checkbox, Group, Loader, Modal, NumberInput, Select, Stack, Table, Tabs, Text, TextInput, Textarea } from '@mantine/core';
 import { IconAlertTriangle, IconCheck, IconEdit, IconPlus } from '@tabler/icons-react';
 import SgcCargoMembers from '../../../../../components/sgc/SgcCargoMembers';
+import SgcCompanySettings from '../../../../../components/sgc/SgcCompanySettings';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
 import { SGC_CODING_TOKENS, buildDocumentCode, validateCodingGuide } from '../../../../../lib/sgc/coding';
@@ -110,6 +111,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
           <Tabs.Tab value='procesos'>Procesos</Tabs.Tab>
           <Tabs.Tab value='tipos-documentales'>Tipos documentales</Tabs.Tab>
           <Tabs.Tab value='cargos'>Personas por cargo</Tabs.Tab>
+          <Tabs.Tab value='empresa'>Encabezado y divulgación</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value='guia'>
@@ -284,6 +286,10 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
 
         <Tabs.Panel value='cargos'>
           <SgcCargoMembers idCompany={company.idCompany} />
+        </Tabs.Panel>
+
+        <Tabs.Panel value='empresa'>
+          <SgcCompanySettings idCompany={company.idCompany} />
         </Tabs.Panel>
       </Tabs>
 

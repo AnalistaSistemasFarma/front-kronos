@@ -80,6 +80,12 @@ export const SGC_AUDIT_ACTIONS = {
   accesoSolicitado: 'acceso.solicitado',
   accesoSolicitudDecidida: 'acceso.solicitud_decidida',
   accesoSolicitudCancelada: 'acceso.solicitud_cancelada',
+  // Correcciones de Calidad OLP (2026-10-03).
+  firmasUbicadas: 'documento.firmas_ubicadas',
+  revisionMenorCalidad: 'borrador.revision_menor_calidad',
+  lecturaNoEntendi: 'divulgacion.no_entendi',
+  lecturaUmbral: 'divulgacion.umbral_lectura',
+  empresaConfigurada: 'configuracion.empresa',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];

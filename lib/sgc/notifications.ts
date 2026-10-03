@@ -34,6 +34,10 @@ export const SGC_NOTIFICATION_TITLES = {
   lecturaRecordatorio: 'Recordatorio: lectura obligatoria pendiente · SynerLink',
   capacitacionPendiente: 'Capacitación documental pendiente · SynerLink',
   documentoVigente: 'Documento vigente · SynerLink',
+  // Correcciones de Calidad (2026-10-03)
+  revisionMenor: 'Revisión menor de Calidad en un documento · SynerLink',
+  lecturaUmbral: 'Avance de lectura de un documento · SynerLink',
+  lecturaNoEntendi: 'Una persona no entendió un documento · SynerLink',
 } as const;
 
 export function taskUrl(idTask: number): string {

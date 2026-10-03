@@ -101,6 +101,9 @@ try {
     ['signature', 'reason'],
     ['interaction', 'body'],
     ['config_change_log', 'reason'],
+    // Correcciones de Calidad (2026-10-03).
+    ['document_layout', 'change_reason'],
+    ['read_threshold_notice', 'recipients_json'],
   ]) {
     if (!tables.has(table)) continue;
     const tx = new sql.Transaction(pool);

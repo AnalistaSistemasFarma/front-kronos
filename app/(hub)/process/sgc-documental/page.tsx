@@ -4,6 +4,7 @@ import React from 'react';
 import { SimpleGrid, Tabs, Text } from '@mantine/core';
 import {
   IconBook2,
+  IconBuildingCommunity,
   IconCalendarDue,
   IconChecklist,
   IconFileCertificate,
@@ -50,6 +51,13 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
       icon: <IconListDetails size={24} />,
       sprint: 'Sprint 1',
       href: sgcHref(`${SGC_BASE_URL}/listado`, id),
+    },
+    {
+      title: 'Documentación por área',
+      description: 'Área → tipo documental (manual, procedimiento, instructivo…) → documento.',
+      icon: <IconBuildingCommunity size={24} />,
+      sprint: 'Calidad',
+      href: sgcHref(`${SGC_BASE_URL}/areas`, id),
     },
     {
       title: 'Mapa de procesos',
