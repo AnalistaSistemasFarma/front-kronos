@@ -216,6 +216,7 @@ describe('SGC · correcciones · firmas estampadas dentro del documento', () => 
     const p2 = await joined(bytes, 2);
     expect(p2).toContain('CÓDIGO: OLP-GC-PR-007');
     expect(p2).not.toContain('OLP-GC-PR-007 · Versión 1 ·');
+    expect(p2).not.toContain('Documento controlado · Página');
   });
 
   it('[SGC-REQ-097] la FECHA DE EMISIÓN (= vigencia) se estampa en su recuadro en cada copia controlada; el PDF firmado no cambia', async () => {
@@ -232,6 +233,11 @@ describe('SGC · correcciones · firmas estampadas dentro del documento', () => 
     const copy = await stampControlledCopy(bytes, { code: 'OLP-GC-PR-007', versionNumber: 1, viewerEmail: 'lector@onelatampharma.com', at: new Date('2026-10-21T15:00:00Z'), mode: 'consulta', emission: vigente });
     const p2 = await joined(copy, 2);
     expect(p2).toContain('2026-10-20');
+    // La fecha queda dentro del recuadro de la fecha de emisión (centrada en altura).
+    const date = (await pdfText(copy, 2)).find((t) => t.str === '2026-10-20')!;
+    expect(date.x).toBeGreaterThan(vigente!.x);
+    expect(date.y).toBeGreaterThan(vigente!.y);
+    expect(date.y).toBeLessThan(vigente!.y + vigente!.height);
     expect(sha256HexOf(bytes)).toBe(sha);
     // Recuadro de una página que no existe: no rompe la copia.
     await expect(stampControlledCopy(bytes, { code: 'X', versionNumber: 1, viewerEmail: 'a@b.co', at: new Date(), mode: 'consulta', emission: { ...vigente!, page: 99 } })).resolves.toBeInstanceOf(Uint8Array);
