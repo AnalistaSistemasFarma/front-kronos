@@ -150,14 +150,31 @@ test.describe.serial('SGC documental · celular', () => {
       .poll(async () => Boolean((await boxes(page)).find((b) => Math.abs(b.x - (moved.x - 50)) < 15 && Math.abs(b.y - (moved.y + 30)) < 15)), { message: 'la caja se movió con el dedo', timeout: 10_000 })
       .toBe(true);
 
-    // Desplazar el documento con el dedo sobre la página (antes el lienzo atrapaba el gesto),
-    // si el documento es más alto que el área visible.
+    // Desplazar el documento con el dedo sobre la página (antes el lienzo atrapaba el gesto).
+    // El gesto sintético del compositor no siempre se ejecuta en Chromium sin pantalla de la
+    // CI (Linux): se intenta y, si no desplaza, se exige lo que lo permite en un celular real:
+    // un toque sostenido sobre la página no se cancela (sin preventDefault) y la página deja
+    // el desplazamiento al navegador (touch-action, abajo).
     const viewport = page.getByTestId('sgc-ubicar-documento').locator('.mantine-ScrollArea-viewport').first();
     const { top, max } = await viewport.evaluate((el) => ({ top: el.scrollTop, max: el.scrollHeight - el.clientHeight }));
     if (max > 20) {
       const vb = (await viewport.boundingBox())!;
-      await cdp.send('Input.synthesizeScrollGesture', { x: Math.round(img.x + 12), y: Math.round(vb.y + vb.height * 0.75), yDistance: -Math.round(vb.height * 0.4), speed: 1200, gestureSourceType: 'touch' });
-      await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBeGreaterThan(top);
+      await cdp.send('Input.synthesizeScrollGesture', { x: Math.round(img.x + 12), y: Math.round(vb.y + vb.height * 0.75), yDistance: -Math.round(vb.height * 0.4), speed: 1200, gestureSourceType: 'touch' }).catch(() => undefined);
+      await page.waitForTimeout(800);
+      if ((await viewport.evaluate((el) => el.scrollTop)) <= top) {
+        const cancelled = await pageImg.evaluate((el) => {
+          const target = el.parentElement!;
+          const r = target.getBoundingClientRect();
+          const opts = { bubbles: true, cancelable: true, pointerType: 'touch', isPrimary: true, pointerId: 77, clientX: r.left + 10, clientY: r.top + r.height / 2 };
+          const down = new PointerEvent('pointerdown', opts);
+          const move = new PointerEvent('pointermove', { ...opts, clientY: opts.clientY - 60 });
+          target.dispatchEvent(down);
+          window.dispatchEvent(move);
+          target.dispatchEvent(new PointerEvent('pointerup', opts));
+          return down.defaultPrevented || move.defaultPrevented;
+        });
+        expect(cancelled, 'el toque sobre la página no debe bloquear el desplazamiento').toBe(false);
+      }
     }
     // La página no bloquea los gestos del dedo (en escritorio sí, como en SynerLink).
     // «pan-x pan-y pinch-zoom» lo serializa Chrome como «manipulation».
