@@ -10,10 +10,19 @@
  * cambian los imports y el rótulo de la caja (significado · nombre, p. ej.
  * «Aprobó · Ana Pérez»). La paridad se prueba en
  * components/sgc/signature/__tests__/placementParity.test.tsx.
+ *
+ * Celular (revisión móvil 2026-10-03): con dedo (`pointer: coarse`) el
+ * documento se desplaza y se amplía con los dedos (antes `touch-action: none`
+ * en toda la página atrapaba el desplazamiento), un toque en el documento
+ * coloca la caja de la persona elegida («tocar para ubicar») y la caja se
+ * arrastra con el dedo. Con ratón el marcado es idéntico al de SynerLink (la
+ * condición solo se activa en el navegador, así que la prueba de paridad no
+ * cambia).
  */
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Box, Loader, ScrollArea, Stack, Text } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { IconCircleCheckFilled } from '@tabler/icons-react';
 import {
   clampFieldSize,
@@ -124,6 +133,7 @@ export default function SgcSignaturePlacementCanvas({
   const dragRef = useRef<DragState | null>(null);
   const suppressClickUntilRef = useRef(0);
   const [, setInteractionTick] = useState(0);
+  const coarse = useMediaQuery('(pointer: coarse)') ?? false;
 
   useEffect(() => {
     fieldsRef.current = fields;
@@ -410,7 +420,7 @@ export default function SgcSignaturePlacementCanvas({
           </Text>
         ) : null}
         <Text size='xs' c='dimmed' mt={4}>
-          Clic para colocar · arrastre para mover · esquina inferior para redimensionar (
+          {coarse ? 'Toque el documento para colocar · arrastre la caja con el dedo para moverla · esquina inferior para redimensionar (' : 'Clic para colocar · arrastre para mover · esquina inferior para redimensionar ('}
           {kindBounds.minW}–{kindBounds.maxW}% × {kindBounds.minH}–{kindBounds.maxH}%).
         </Text>
       </Box>
@@ -442,7 +452,7 @@ export default function SgcSignaturePlacementCanvas({
                 overflow: 'hidden',
                 background: '#fff',
                 userSelect: 'none',
-                touchAction: 'none',
+                touchAction: coarse ? 'pan-x pan-y pinch-zoom' : 'none',
               }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}

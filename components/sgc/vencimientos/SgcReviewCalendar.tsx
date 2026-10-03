@@ -55,7 +55,9 @@ function initialMonth(): { year: number; month: number } {
 function initialView(): SgcCalendarView {
   if (typeof window === 'undefined') return 'mes';
   const v = new URLSearchParams(window.location.search).get('vista');
-  return v === 'semana' || v === 'agenda' ? v : 'mes';
+  if (v === 'semana' || v === 'agenda' || v === 'mes') return v;
+  // En celular la cuadrícula mensual (760 px) solo mostraba lunes a miércoles: se abre en «Agenda» (revisión móvil 2026-10-03).
+  return window.matchMedia?.('(max-width: 48em)').matches ? 'agenda' : 'mes';
 }
 
 function StateBadge({ state }: { state: SgcCalendarState }) {

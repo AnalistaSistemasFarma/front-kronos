@@ -229,8 +229,8 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
-          <Flex justify='space-between' align='center' mb='4'>
-            <div>
+          <Flex justify='space-between' align='center' mb='4' wrap='wrap' gap='sm'>
+            <div style={{ minWidth: 0 }}>
               <Title order={1} className='text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3' data-testid='sgc-tarea-titulo'>
                 <IconFileDescription size={32} className='text-blue-6' />
                 {mode === 'tarea' ? `Tarea #${focus?.id ?? id} - Solicitud #${request.id}` : `Solicitud #${request.id}`}

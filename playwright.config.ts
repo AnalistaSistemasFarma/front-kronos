@@ -21,6 +21,11 @@ import { defineConfig, devices } from '@playwright/test';
  *   - firma       → (S3) pruebas *.firma.spec.ts: firman con reautenticación
  *                   (escriben la contraseña), así que corren SIN traza,
  *                   capturas ni video, como `setup`.
+ *   - movil-ios / movil-android → (revisión móvil 2026-10-03) pruebas
+ *                   *.movil.spec.ts en pantalla de celular con toque (iPhone
+ *                   390×844 y Android 360×740, ambas con Chromium, que es el
+ *                   navegador que instala la CI). Firman con reautenticación,
+ *                   así que corren sin traza, capturas ni video.
  *   (S2) Con E2E_USER_EMAIL2/3 y E2E_USER_PASSWORD2/3, `setup` también deja
  *   las sesiones 2 y 3 para el recorrido con varios revisores y aprobadores.
  * setup y con-sesion solo existen si hay E2E_USER_EMAIL y E2E_USER_PASSWORD.
@@ -57,7 +62,7 @@ export default defineConfig({
   projects: [
     {
       name: 'publico',
-      testIgnore: [/\.setup\.ts$/, /\.session\.spec\.ts$/, /\.firma\.spec\.ts$/],
+      testIgnore: [/\.setup\.ts$/, /\.session\.spec\.ts$/, /\.firma\.spec\.ts$/, /\.movil\.spec\.ts$/],
       use: { ...devices['Desktop Chrome'] },
     },
     ...(hasUser
@@ -83,6 +88,17 @@ export default defineConfig({
             dependencies: ['setup'],
             use: { ...devices['Desktop Chrome'], storageState: STORAGE_STATE, trace: 'off' as const, screenshot: 'off' as const, video: 'off' as const },
           },
+          ...(
+            [
+              ['movil-ios', { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, userAgent: devices['iPhone 13'].userAgent }],
+              ['movil-android', { viewport: { width: 360, height: 740 }, deviceScaleFactor: 3, userAgent: devices['Galaxy S9+'].userAgent }],
+            ] as const
+          ).map(([name, screen]) => ({
+            name,
+            testMatch: /\.movil\.spec\.ts$/,
+            dependencies: ['setup'],
+            use: { ...screen, isMobile: true, hasTouch: true, defaultBrowserType: 'chromium' as const, storageState: STORAGE_STATE, trace: 'off' as const, screenshot: 'off' as const, video: 'off' as const },
+          })),
         ]
       : []),
   ],
