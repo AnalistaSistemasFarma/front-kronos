@@ -12,9 +12,9 @@ import { getCatalogs } from '../../../lib/sgc/db/catalogs';
 import { getCompanySettings, saveCompanySettings } from '../../../lib/sgc/db/companySettings';
 import { addScopeEntry, getDisseminationView, openReadingFile, recordReadingDoubt, recordReadingEvent } from '../../../lib/sgc/db/dissemination';
 import { createInitialDocument, getAccessSubject, type SgcUploader } from '../../../lib/sgc/db/documents';
-import { getCurrentDraftHtml, listDraftRevisions, minorRevisionChain, saveDraftRevision } from '../../../lib/sgc/db/drafts';
+import { getCurrentDraftHtml, getVigenteBaseHtml, listDraftRevisions, minorRevisionChain, saveDraftRevision } from '../../../lib/sgc/db/drafts';
 import { buildLayoutPreview, changeHistoryRows, getDocumentLayout, latestLayout, layoutParticipants, saveDocumentLayout } from '../../../lib/sgc/db/layout';
-import { cancelRequest, createRequest, excludeReader, getRequestDetail, setSigners, uploadAttachment } from '../../../lib/sgc/db/requests';
+import { cancelRequest, createRequest, decideTask, excludeReader, getRequestDetail, setSigners, uploadAttachment } from '../../../lib/sgc/db/requests';
 import { TINY_PNG_B64 } from '../../../lib/sgc/__tests__/fixtures/images';
 import { signTask, verifyDocumentVersion, type SgcSignatureDeps } from '../../../lib/sgc/db/signatures';
 import type { SgcNotification, SgcNotifier } from '../../../lib/sgc/notifications';
@@ -386,11 +386,22 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
   });
 
   it('[SGC-REQ-094][SGC-REQ-096][SGC-REQ-102][SGC-REQ-103] bordes: vista previa de una nueva versión con borrador PDF, historial agregado sin la marca, borrador alterado, revisión menor sobre un PDF y logo válido', async () => {
+    // Validaciones y acciones del motor que la composición no cambia (formulario, reorden de firmantes, devolución en paralelo).
+    await expect(createRequest(prisma, notifier, await accessOf(E.elab), { idCompany: CO, requestType: 'nuevo', subject: 'Valor no permitido', description: 'Prueba de validación del formulario.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Inexistente' } }, actor(E.elab))).rejects.toThrow(/no permitida/);
+    const r5 = await newRequest('Reorden y devolución en paralelo');
+    await setSigners(prisma, notifier, r5, { stepKey: 'revision', signers: [E.rev, E.apr], mode: 'paralelo', reason: 'Se agrega otro revisor' }, actor(E.elab));
+    await setSigners(prisma, notifier, r5, { stepKey: 'revision', signers: [E.apr, E.rev], mode: 'paralelo', reason: 'Cambia el orden' }, actor(E.elab));
+    expect((await latestLayout(prisma, r5)).fields).toEqual([]);
+    expect((await getDocumentLayout(prisma, r5, await viewer(E.elab))).participants.filter((p) => p.meaning === 'reviso').map((p) => p.email)).toEqual([E.apr, E.rev]);
+    await signTask(prisma, deps, (await taskOf(r5, 'elaboracion')).id_task, firma('elaboro'), actor(E.elab));
+    await decideTask(prisma, notifier, (await taskOf(r5, 'revision')).id_task, { decision: 'devolver', comment: 'Ajustar el alcance antes de seguir.' }, actor(E.rev));
+    expect((await taskOf(r5, 'elaboracion')).status).toBe('abierta');
     // Nueva versión del vigente con borrador PDF: la vista previa es el mismo PDF (sin encabezado) y valida páginas.
     const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.elab), { idCompany: CO, requestType: 'nueva_version', subject: 'Nueva versión con borrador PDF', description: 'Cambio de prueba con borrador PDF.', idDocument: idDoc, formValues: { urgencia: 'Normal' } }, actor(E.elab));
     await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'paralelo' }, actor(E.elab));
     await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab));
     await uploadAttachment(prisma, upload, idRequest, { purpose: 'borrador', ...(await pdfFile('nueva versión en pdf')) }, await viewer(E.elab), actor(E.elab));
+    await expect(getVigenteBaseHtml(prisma, deps, idRequest, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/no tiene Word fuente/);
     const prev = await buildLayoutPreview(prisma, deps, idRequest, await viewer(E.elab));
     expect((await PDFDocument.load(prev)).getPageCount()).toBe(1);
     await expect(saveDocumentLayout(prisma, idRequest, { pageCount: 1, fields: [{ signerKey: `revision:${E.rev}`, page: 2, x: 1, y: 1, width: 10, height: 5 }] }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/fuera del documento/);
