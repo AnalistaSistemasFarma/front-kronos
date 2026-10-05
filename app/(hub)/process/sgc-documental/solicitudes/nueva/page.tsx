@@ -48,7 +48,6 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [elaborator, setElaborator] = useState<string | null>(null);
-  const [proposal, setProposal] = useState('');
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +82,6 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         idDocumentType: requestType === 'nuevo' ? Number(idDocumentType) : undefined,
         idDocument: requestType !== 'nuevo' ? Number(idDocument) : undefined,
         elaboratorEmail: elaborator ?? undefined,
-        assignmentProposal: proposal.trim() || undefined,
         formValues: values,
       });
       router.push(`/process/sgc-documental/solicitudes/${res.idRequest}?empresa=${id}`);
@@ -161,7 +159,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Justificación' required minRows={3} autosize value={description} onChange={(e) => setDescription(e.currentTarget.value)} data-testid='sgc-nueva-justificacion' />
         <SgcSelect
           label='Elaborador'
-          description='Quien crea el documento (Aseguramiento de Calidad). Esa persona selecciona a los revisores, los aprobadores y la divulgación.'
+          description='Quien crea el documento (Aseguramiento de Calidad). Confirma o reasigna los revisores, los aprobadores y la divulgación que usted sugiera.'
           required
           searchable
           data={userOptions.filter((u) => u.value !== me)}
@@ -176,19 +174,6 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
             </Text>
           </Alert>
         )}
-        <Textarea
-          autoComplete='off'
-          data-1p-ignore='true'
-          data-lpignore='true'
-          label='Sugerencia de revisores, aprobadores y divulgación (propuesta)'
-          description='Opcional. Es solo una propuesta: queda como nota en el historial y la selección real la hace quien crea el documento.'
-          autosize
-          minRows={2}
-          maxLength={2000}
-          value={proposal}
-          onChange={(e) => setProposal(e.currentTarget.value)}
-          data-testid='sgc-nueva-sugerencia'
-        />
         {(form.data?.fields ?? []).map((f) =>
           f.type === 'seleccion' || f.type === 'si_no' ? (
             <SgcSelect

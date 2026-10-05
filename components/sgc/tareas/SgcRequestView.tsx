@@ -574,7 +574,11 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           canEdit={permissions.canChangeSigners}
           users={userOptions.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase())}
           suggestion={sugg.data?.suggestion ?? null}
-          proposal={data.assignmentProposal}
+          suggestOnly={permissions.signersSuggestOnly}
+          canConfirm={permissions.canConfirmSuggestion}
+          onConfirm={async () => {
+            await run(() => sgcSend(`/api/sgc/requests/${request.id}/signers`, 'POST', { action: 'confirmar' }), 'Sugerencia confirmada: los firmantes y el alcance quedan definitivos.');
+          }}
           onSave={async (stepKey, signers, signingMode, reason) => {
             await run(() => sgcSend(`/api/sgc/requests/${request.id}/signers`, 'POST', { stepKey, signers, mode: signingMode, reason }), 'Firmantes actualizados.');
           }}

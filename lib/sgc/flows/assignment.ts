@@ -6,8 +6,8 @@ import type { SgcFlowDefinition, SgcTaskDefinition } from './definition';
  *
  * Cambio pedido por Nicolás el 2026-10-05 (demo PiSA). Reemplaza la regla del
  * 2026-09-30/10-02 («el elaborador/solicitante asigna»):
- *  - quien hace la solicitud solo PROPONE, en texto libre, al crearla (queda
- *    como nota en el historial); nunca selecciona usuarios;
+ *  - quien hace la solicitud SUGIERE usuarios con la misma pantalla de siempre:
+ *    lo que elige queda «Sugerido» (no definitivo) hasta que se confirme;
  *  - la selección la hace quien ejecuta la PRIMERA TAREA del flujo (la que
  *    sigue a la solicitud: hoy, la elaboración, «quien crea el documento»,
  *    p. ej. Juan Mora de Calidad) y/o quien tiene el permiso de Calidad del
@@ -68,7 +68,7 @@ export function executesFirstTask(def: SgcFlowDefinition, input: SgcAssignerInpu
 export function assignmentDenial(def: SgcFlowDefinition, input: SgcAssignerInput, policy: SgcAssignmentPolicy = SGC_DEFAULT_ASSIGNMENT_POLICY): string | null {
   const me = input.email.trim().toLowerCase();
   if (me === input.requesterEmail.trim().toLowerCase()) {
-    return 'Quien hace la solicitud no selecciona a los revisores, los aprobadores ni la divulgación: los selecciona quien ejecuta la primera tarea (Aseguramiento de Calidad). Su sugerencia queda en el historial.';
+    return 'Quien hace la solicitud solo sugiere a los revisores, los aprobadores y la divulgación: los confirma o reasigna quien ejecuta la primera tarea (Aseguramiento de Calidad).';
   }
   const task = executesFirstTask(def, input);
   const quality = input.isQuality;
@@ -83,7 +83,7 @@ export function assignmentDenial(def: SgcFlowDefinition, input: SgcAssignerInput
         : policy === 'tarea_o_calidad'
           ? `quien ejecuta la tarea «${first?.name ?? 'primera tarea'}» o Aseguramiento de Calidad`
           : `quien ejecuta la tarea «${first?.name ?? 'primera tarea'}» con el permiso de Aseguramiento de Calidad`;
-  return `Solo ${who} selecciona a los revisores, los aprobadores y la divulgación.`;
+  return `Solo ${who} confirma o reasigna a los revisores, los aprobadores y la divulgación.`;
 }
 
 export function canAssignParticipants(def: SgcFlowDefinition, input: SgcAssignerInput, policy?: SgcAssignmentPolicy): boolean {
@@ -111,16 +111,26 @@ export function assignmentGaps(def: SgcFlowDefinition, signersByStep: ReadonlyMa
   return gaps;
 }
 
-/** Sugerencia libre del solicitante (opcional): texto limpio de máximo 2000 caracteres, o null. */
-export const SGC_PROPOSAL_NOTE_PREFIX = 'Sugerencia del solicitante de revisores, aprobadores y divulgación (propuesta, no definitiva):';
+/**
+ * SUGERIDO frente a CONFIRMADO, sin migración (2026-10-05): en
+ * sgc.request_signer y sgc.dissemination_scope una fila con is_active = 0 y
+ * SIN removed_at es una sugerencia pendiente; al confirmarla pasa a
+ * is_active = 1; si se reasigna o se reemplaza, se le pone removed_at (queda
+ * en el historial). Solo las filas activas entran a las tareas.
+ */
+export const SGC_PENDING_SUGGESTION = { is_active: false, removed_at: null } as const;
 
-export function normalizeAssignmentProposal(raw: unknown): string | null {
-  if (raw === null || raw === undefined) return null;
-  if (typeof raw !== 'string') throw new SgcError('La sugerencia de revisores, aprobadores y divulgación debe ser texto.');
-  const v = raw.trim();
-  if (!v) return null;
-  if (v.length > 2000) throw new SgcError('La sugerencia de revisores, aprobadores y divulgación admite máximo 2000 caracteres.');
-  return v;
+export function isPendingSuggestion(row: { is_active: boolean; removed_at: Date | null }): boolean {
+  return !row.is_active && row.removed_at === null;
+}
+
+/**
+ * Quien no puede seleccionar, pero es el solicitante o el elaborador, SUGIERE
+ * con la misma pantalla de siempre (queda pendiente de confirmación).
+ */
+export function canSuggestParticipants(input: SgcAssignerInput): boolean {
+  const me = input.email.trim().toLowerCase();
+  return me === input.requesterEmail.trim().toLowerCase() || me === input.elaboratorEmail.trim().toLowerCase();
 }
 
 /** Política vigente, leída del entorno del servidor (SGC_ASIGNACION_PERMISO). */
