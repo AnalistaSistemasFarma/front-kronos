@@ -5,7 +5,7 @@ import { Alert, Autocomplete, Badge, Button, Card, Group, Modal, Progress, Stack
 import SgcSelect, { sgcTouchComboboxProps } from '../SgcSelect';
 import { IconBell, IconPlus, IconSpeakerphone, IconUserMinus, IconX } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
-import { SGC_SCOPE_KIND_LABELS, type SgcScopeKind } from '../../../lib/sgc/dissemination/scope';
+import { SGC_SCOPE_KIND_LABELS, isPersonEmail, personEmailFromInput, type SgcScopeKind } from '../../../lib/sgc/dissemination/scope';
 import { useSgcFetch } from '../useSgcFetch';
 import { formatDateCO } from './format';
 
@@ -46,7 +46,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
         : [];
 
   const add = async () => {
-    const entry = kind === 'departamento' ? { kind, idDepartment: Number(target) } : kind === 'cargo' ? { kind, idCargo: Number(target) } : kind === 'persona' ? { kind, email: email.trim() } : { kind };
+    const entry = kind === 'departamento' ? { kind, idDepartment: Number(target) } : kind === 'cargo' ? { kind, idCargo: Number(target) } : kind === 'persona' ? { kind, email: personEmailFromInput(email, users) } : { kind };
     const ok = await onAction({ action: 'agregar', entry, reason }, view.open ? 'Alcance ampliado: las personas nuevas recibieron su tarea de lectura.' : 'Alcance de divulgación actualizado.');
     if (ok) {
       setTarget(null);
@@ -55,7 +55,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
     }
   };
 
-  const ready = reason.trim().length >= 5 && (kind === 'empresa' || (kind === 'persona' ? email.includes('@') : Boolean(target)));
+  const ready = reason.trim().length >= 5 && (kind === 'empresa' || (kind === 'persona' ? isPersonEmail(email, users) : Boolean(target)));
 
   return (
     <Card shadow='sm' p='xl' radius='md' withBorder mt='6' data-testid='sgc-divulgacion'>
