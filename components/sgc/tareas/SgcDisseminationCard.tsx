@@ -13,9 +13,9 @@ import { formatDateCO } from './format';
  * DIVULGACIÓN de la solicitud (Sprint 4, paso 4): alcance (toda la empresa,
  * departamentos, cargos o personas), cobertura de lectura (quién leyó, quién
  * falta), recordatorios, exclusión justificada y cierre por Calidad. Lo ven
- * el solicitante, el elaborador y Calidad; el alcance lo define el
- * elaborador o Calidad antes de la divulgación y durante ella solo Calidad
- * lo amplía.
+ * el solicitante, el elaborador y Calidad; el alcance lo define solo
+ * Aseguramiento de Calidad, nunca quien solicita o elabora (2026-10-05), y
+ * durante la divulgación Calidad lo amplía.
  */
 export interface SgcDisseminationCardProps {
   idCompany: number;

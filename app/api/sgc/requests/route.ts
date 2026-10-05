@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * creó o elabora (Calidad: todas las de la empresa).
  * POST /api/sgc/requests — crea una solicitud documental (gestión o Calidad):
  * { company, requestType, subject, description, idDocument? | idProcess + idDocumentType,
- *   elaboratorEmail?, formValues? }.
+ *   elaboratorEmail?, assignmentProposal? (sugerencia libre, 2026-10-05), formValues? }.
  */
 export async function GET(request: Request) {
   try {
@@ -44,6 +44,7 @@ export async function POST(request: Request) {
         idProcess: body.idProcess,
         idDocumentType: body.idDocumentType,
         elaboratorEmail: body.elaboratorEmail,
+        assignmentProposal: body.assignmentProposal,
         formValues: body.formValues && typeof body.formValues === 'object' ? (body.formValues as Record<string, unknown>) : {},
       },
       ctx.actor

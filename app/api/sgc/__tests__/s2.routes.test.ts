@@ -293,6 +293,8 @@ describe('Rutas S2 · solicitudes y Tareas documentales', () => {
     expect(status(await reassign.POST(req('/', { toEmail: 'b@x.co', reason: 'vacaciones' }), params({ id: '4' })))).toBe(200);
     expect(m.reassignTask.mock.calls[0][2]).toEqual(gestion);
     expect(status(await signers.POST(req('/', { stepKey: 'revision', signers: ['a@x.co'] }), params({ id: '1' })))).toBe(200);
+    // 2026-10-05: el acceso de la persona viaja al motor, que solo deja asignar a Calidad.
+    expect(m.setSigners.mock.calls[0][5]).toEqual(gestion);
     expect(status(await cancel.POST(req('/', { reason: 'ya no se necesita' }), params({ id: '1' })))).toBe(200);
     for (const bad of [decision.POST(req('/', null), params({ id: '4' })), reassign.POST(req('/', {}), params({ id: 'x' })), signers.POST(req('/', 1), params({ id: '1' })), cancel.POST(req('/', {}), params({ id: '0' }))]) {
       expect(status(await bad)).toBe(400);

@@ -7,8 +7,10 @@ export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/sgc/requests/<id>/signers — { stepKey, signers: [correo…] (en su
- * orden), mode: 'orden' | 'paralelo', reason } — solo el ELABORADOR. Un cambio
- * (no la asignación inicial) exige motivo; todo queda en el historial.
+ * orden), mode: 'orden' | 'paralelo', reason } — solo ASEGURAMIENTO DE CALIDAD
+ * (permiso de Calidad o grupo de la radicación), nunca quien solicita o elabora
+ * (2026-10-05). Un cambio (no la asignación inicial) exige motivo; todo queda
+ * en el historial y en la auditoría.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -17,8 +19,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const id = parseId((await params).id);
     const body = await readJson(request);
     if (!id || !body) return jsonNoStore({ error: 'Petición inválida' }, 400);
-    if (!companyAccess(ctx, await companyOfRequest(prisma, id))) return jsonNoStore({ error: 'Solicitud no encontrada' }, 404);
-    return jsonNoStore(await setSigners(prisma, sgcNotifier, id, body as never, ctx.actor));
+    const access = companyAccess(ctx, await companyOfRequest(prisma, id));
+    if (!access) return jsonNoStore({ error: 'Solicitud no encontrada' }, 404);
+    return jsonNoStore(await setSigners(prisma, sgcNotifier, id, body as never, ctx.actor, access));
   } catch (error) {
     return errorResponse(error, 'requests:firmantes');
   }

@@ -572,8 +572,9 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
         <SgcSignersPanel
           steps={data.steps}
           canEdit={permissions.canChangeSigners}
-          users={userOptions.filter((u) => u.value !== request.elaboratorEmail.toLowerCase())}
+          users={userOptions.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase())}
           suggestion={sugg.data?.suggestion ?? null}
+          proposal={data.assignmentProposal}
           onSave={async (stepKey, signers, signingMode, reason) => {
             await run(() => sgcSend(`/api/sgc/requests/${request.id}/signers`, 'POST', { stepKey, signers, mode: signingMode, reason }), 'Firmantes actualizados.');
           }}

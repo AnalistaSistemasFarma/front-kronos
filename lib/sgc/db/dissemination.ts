@@ -20,7 +20,9 @@ import { SgcError } from '../errors';
 import { SGC_NOTIFICATION_TITLES, recipients, requestUrl, taskUrl, type SgcNotification, type SgcNotifier } from '../notifications';
 import type { SgcCompanyAccess } from '../permissions';
 import { emissionStampFor } from '../watermark';
-import { getPoolMembers } from './authorizations';
+import { assertCanAssignParticipants, firstTaskPeopleOf, sgcAssignmentPolicy } from '../flows/assignment';
+import { getPoolMembers, getPoolTypeCodes } from './authorizations';
+import { loadDefinition } from './flows';
 import type { SgcActor, SgcDb } from './catalogs';
 
 /**
@@ -168,9 +170,36 @@ async function loadForScope(db: SgcDb, idRequest: number) {
 }
 
 /**
- * Agrega una entrada al alcance. Antes de la divulgación: el elaborador o
- * Calidad. Durante la divulgación: solo Calidad (AMPLIAR), y las personas
- * nuevas reciben su tarea de lectura de inmediato. Después: no se cambia.
+ * 2026-10-05: el alcance lo selecciona quien ejecuta la primera tarea y/o
+ * Aseguramiento de Calidad (SGC_ASIGNACION_PERMISO), nunca el solicitante.
+ */
+async function assertCanAssignScope(
+  db: SgcDb,
+  access: SgcCompanyAccess,
+  request: { id_request: number; id_company: number; id_flow_version: number; requester_email: string; elaborator_email: string },
+  me: string
+) {
+  const def = await loadDefinition(db, request.id_flow_version);
+  const tasks = await db.sgcTask.findMany({ where: { id_request: request.id_request }, include: { assignees: true } });
+  assertCanAssignParticipants(
+    def,
+    {
+      email: me,
+      isQuality: access.canQuality,
+      poolTypeCodes: await getPoolTypeCodes(db, request.id_company, me),
+      requesterEmail: request.requester_email,
+      elaboratorEmail: request.elaborator_email,
+      firstTaskPeople: firstTaskPeopleOf(def, tasks),
+    },
+    sgcAssignmentPolicy()
+  );
+}
+
+/**
+ * Agrega una entrada al alcance. Antes y durante la divulgación: quien
+ * ejecuta la primera tarea y/o Aseguramiento de Calidad, nunca el solicitante
+ * (2026-10-05; antes, el elaborador o Calidad). Durante la divulgación se AMPLÍA y las
+ * personas nuevas reciben su tarea de lectura de inmediato. Después: no se cambia.
  */
 export async function addScopeEntry(db: SgcDb, notifier: SgcNotifier, access: SgcCompanyAccess, idRequest: number, input: { entry?: unknown; reason?: unknown } & Record<string, unknown>, actor: SgcActor) {
   const entry = normalizeScopeEntry(input.entry ?? input);
@@ -179,9 +208,7 @@ export async function addScopeEntry(db: SgcDb, notifier: SgcNotifier, access: Sg
   const me = lower(actor.email);
   if (request.status !== 'abierta') throw new SgcError('La solicitud no está abierta: el alcance ya no cambia.', 409);
   if (disseminationStarted && !openDissemination) throw new SgcError('La divulgación ya terminó: el alcance ya no cambia.', 409);
-  if (openDissemination ? !access.canQuality : !(access.canQuality || me === lower(request.elaborator_email))) {
-    throw new SgcError(openDissemination ? 'Durante la divulgación solo Aseguramiento de Calidad amplía el alcance.' : 'Solo el elaborador o Aseguramiento de Calidad definen el alcance de divulgación.', 403);
-  }
+  await assertCanAssignScope(db, access, request, me);
   const reason = reasonOf(input.reason, 5, 'El motivo');
   if (entry.kind === 'departamento') {
     if (!(await db.department.findUnique({ where: { id_department: entry.idDepartment! } }))) throw new SgcError('El departamento no existe.');
@@ -233,7 +260,7 @@ export async function removeScopeEntry(db: SgcDb, access: SgcCompanyAccess, idRe
   const me = lower(actor.email);
   if (request.status !== 'abierta') throw new SgcError('La solicitud no está abierta: el alcance ya no cambia.', 409);
   if (disseminationStarted) throw new SgcError('La divulgación ya empezó: para dejar a alguien por fuera, Calidad excluye su lectura con justificación.', 409);
-  if (!(access.canQuality || me === lower(request.elaborator_email))) throw new SgcError('Solo el elaborador o Aseguramiento de Calidad definen el alcance de divulgación.', 403);
+  await assertCanAssignScope(db, access, request, me);
   const row = await db.sgcDisseminationScope.findUnique({ where: { id_scope: idScope } });
   if (!row || row.id_request !== idRequest) throw new SgcError('Entrada del alcance no encontrada.', 404);
   if (!row.is_active) throw new SgcError('La entrada ya estaba retirada.', 409);
@@ -380,7 +407,7 @@ export interface SgcDisseminationView {
 export async function getDisseminationView(
   db: SgcDb,
   request: { id_request: number; id_company: number; status: string; elaborator_email: string; tasks: { id_task: number; status: string; taskDef: { assignment: string } }[] },
-  viewer: { email: string; isQuality: boolean },
+  viewer: { email: string; isQuality: boolean; canAssign?: boolean },
   names: (email: string | null) => string | null
 ): Promise<SgcDisseminationView> {
   const rows = await db.sgcDisseminationScope.findMany({ where: { id_request: request.id_request }, orderBy: { id_scope: 'asc' } });
@@ -415,7 +442,8 @@ export async function getDisseminationView(
   ]);
   const started = dTasks.length > 0;
   const openTask = current && current.status === 'abierta' ? current : null;
-  const isElaborator = lower(viewer.email) === lower(request.elaborator_email);
+  // 2026-10-05: el alcance lo selecciona quien ejecuta la primera tarea y/o Calidad (nunca el solicitante).
+  const canAssign = viewer.canAssign ?? viewer.isQuality;
   return {
     scope: active.map((r) => ({ id: r.id_scope, kind: r.kind as SgcScopeKind, kindLabel: SGC_SCOPE_KIND_LABELS[r.kind as SgcScopeKind] ?? r.kind, label: labelOf(r), addedBy: names(r.added_by) ?? r.added_by, addedAt: r.added_at.toISOString(), reason: r.change_reason })),
     scopeHistory: rows.map((r) => ({ id: r.id_scope, label: labelOf(r), isActive: r.is_active, addedBy: r.added_by, addedAt: r.added_at.toISOString(), removedBy: r.removed_by, removedAt: r.removed_at?.toISOString() ?? null, removeReason: r.remove_reason })),
@@ -444,8 +472,8 @@ export async function getDisseminationView(
     started,
     open: Boolean(openTask),
     idTask: current?.id_task ?? null,
-    canEditScope: isOpen && (started ? Boolean(openTask) && viewer.isQuality : viewer.isQuality || isElaborator),
-    canRemoveScope: isOpen && !started && (viewer.isQuality || isElaborator),
+    canEditScope: isOpen && (started ? Boolean(openTask) : true) && canAssign,
+    canRemoveScope: isOpen && !started && canAssign,
     canManage: Boolean(openTask) && viewer.isQuality,
   };
 }

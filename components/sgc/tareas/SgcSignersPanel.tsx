@@ -8,9 +8,12 @@ import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import type { SgcMatrixSuggestion } from '../../../lib/sgc/flows/matrix';
 
 /**
- * Revisores y aprobadores del documento. Los asigna y cambia el ELABORADOR
- * (decisión de Nicolás del 2026-09-30); el modo de firma (en orden o en
- * paralelo) se elige en cada documento. La matriz de responsables solo
+ * Revisores y aprobadores del documento. Los selecciona quien ejecuta la
+ * primera tarea (quien crea el documento, de Aseguramiento de Calidad) y/o
+ * Calidad, nunca quien hace la solicitud: él solo deja una sugerencia libre,
+ * que aquí se muestra como propuesta (decisión de Nicolás del 2026-10-05;
+ * antes, el elaborador). El modo de firma (en orden o en paralelo) se elige en
+ * cada documento. La matriz de responsables solo
  * SUGIERE. Cada cambio pide motivo y queda en el historial.
  */
 type Step = SgcRequestDetail['steps'][number];
@@ -20,12 +23,14 @@ export interface SgcSignersPanelProps {
   canEdit: boolean;
   users: { value: string; label: string }[];
   suggestion: SgcMatrixSuggestion[] | null;
+  /** Sugerencia libre del solicitante (propuesta, no definitiva). */
+  proposal?: SgcRequestDetail['assignmentProposal'];
   onSave: (stepKey: string, signers: string[], mode: 'orden' | 'paralelo', reason: string) => Promise<void>;
 }
 
 const ROLE_OF_STEP: Record<string, 'revisor' | 'aprobador'> = { revision: 'revisor', aprobacion: 'aprobador' };
 
-function StepEditor({ step, canEdit, users, suggestion, onSave }: { step: Step } & Omit<SgcSignersPanelProps, 'steps'>) {
+function StepEditor({ step, canEdit, users, suggestion, onSave }: { step: Step } & Omit<SgcSignersPanelProps, 'steps' | 'proposal'>) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState<string[]>(step.signers.map((s) => s.email));
   const [mode, setMode] = useState<'orden' | 'paralelo'>((step.mode as 'orden' | 'paralelo') ?? 'paralelo');
@@ -140,12 +145,22 @@ export default function SgcSignersPanel(props: SgcSignersPanelProps) {
       </Title>
       <Text size='sm' c='dimmed' mb='md'>
         {props.canEdit
-          ? 'Como elaborador, usted asigna quién revisa y quién aprueba, y elige si firman en orden o en paralelo. Puede cambiarlos durante el proceso; cada cambio queda en el historial con su motivo.'
-          : 'Los asigna y cambia el elaborador del documento.'}
+          ? 'Usted selecciona quién revisa y quién aprueba, y elige si firman en orden o en paralelo. Puede cambiarlos durante el proceso; cada cambio queda en el historial con su motivo.'
+          : 'Los selecciona y cambia quien crea el documento (Aseguramiento de Calidad). Quien hace la solicitud solo deja una sugerencia.'}
       </Text>
+      {props.proposal && (
+        <Alert color='blue' variant='light' icon={<IconBulb size={16} />} mb='md' title='Propuesta del solicitante (no es definitiva)' data-testid='sgc-propuesta-solicitante'>
+          <Text size='sm' style={{ whiteSpace: 'pre-wrap' }}>
+            {props.proposal.text}
+          </Text>
+          <Text size='xs' c='dimmed' mt={4}>
+            {props.proposal.author ?? ''} · sugerencia de revisores, aprobadores y divulgación
+          </Text>
+        </Alert>
+      )}
       <Stack gap='sm'>
         {props.steps.map((s) => (
-          <StepEditor key={`${s.key}-${s.signers.map((x) => x.email).join(',')}-${s.mode}`} step={s} {...props} />
+          <StepEditor key={`${s.key}-${s.signers.map((x) => x.email).join(',')}-${s.mode}`} step={s} canEdit={props.canEdit} users={props.users} suggestion={props.suggestion} onSave={props.onSave} />
         ))}
       </Stack>
     </Card>
