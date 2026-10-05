@@ -1,6 +1,7 @@
 import { PDFDocument, PDFHexString, PDFName, PDFString, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { canonicalJson, sha256HexOf } from '../signature/record';
 import { formatBogotaDateTime, toWinAnsiSafe } from '../watermark';
+import { drawInstitutionalHeaders, type SgcInstitutionalHeaderData, type SgcRect } from './institutional';
 import { drawQr } from './qr';
 
 /**
@@ -23,6 +24,17 @@ import { drawQr } from './qr';
  * huella SHA-256 del PDF final queda en sgc.document_version: alterar un solo
  * byte invalida la verificación. La marca «COPIA CONTROLADA» del visor (S1) se
  * estampa aparte, en cada consulta.
+ *
+ * Correcciones de Calidad (2026-10-02/03):
+ *   - FIRMAS DENTRO DEL DOCUMENTO: cada firma (Elaboró/Revisó/Aprobó) se
+ *     estampa en la posición que el elaborador ubicó sobre el documento
+ *     (mecanismo de SynerLink, copia congelada). La portada solo lista las
+ *     firmas que no tenían ubicación (respaldo); el manifiesto del final queda
+ *     como REGISTRO DE TRAZABILIDAD (quién, cuándo, motivo, huellas).
+ *   - ENCABEZADO INSTITUCIONAL opcional (lib/sgc/pdf/institutional.ts).
+ *   - REVISIÓN MENOR de Calidad: el manifiesto la declara (motivo, quién,
+ *     huella anterior y nueva) y la verificación acepta las firmas hechas
+ *     sobre el contenido que esa revisión corrigió.
  */
 
 export const SGC_MANIFEST_SCHEMA = 'sgc-manifiesto-firmas/v1';
@@ -39,6 +51,26 @@ export interface SgcManifestSignature {
   authMethod: string;
   contentSha256: string;
   recordHash: string;
+}
+
+/** Firma ubicada en el documento: página del CONTENIDO (1 = primera) y caja en % (origen arriba-izquierda). */
+export interface SgcManifestPlacement {
+  uid: string;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Revisión menor de Calidad (forma o puntuación) hecha durante la aprobación. */
+export interface SgcManifestMinorRevision {
+  revision: number;
+  baseSha256: string;
+  newSha256: string;
+  reason: string;
+  by: string;
+  at: string;
 }
 
 export interface SgcManifest {
@@ -58,6 +90,19 @@ export interface SgcManifest {
   signedContent: { name: string; sha256: string };
   signatures: SgcManifestSignature[];
   verifyUrl: string;
+  /** 2026-10-03: firmas estampadas dentro del documento. */
+  placements?: SgcManifestPlacement[];
+  /** 2026-10-03: el contenido lleva el encabezado institucional del sistema. */
+  institutionalHeader?: boolean;
+  /** 2026-10-03: revisiones menores de Calidad (en orden). */
+  minorRevisions?: SgcManifestMinorRevision[];
+}
+
+/** Huellas de contenido sobre las que una firma del manifiesto es válida (el contenido final y lo que corrigieron las revisiones menores). */
+export function acceptedContentHashes(m: Pick<SgcManifest, 'signedContent' | 'minorRevisions'>): Set<string> {
+  const out = new Set([m.signedContent.sha256]);
+  for (const r of m.minorRevisions ?? []) out.add(r.baseSha256);
+  return out;
 }
 
 export function manifestSha256(manifest: SgcManifest): string {
@@ -101,6 +146,7 @@ interface Fonts {
   regular: PDFFont;
   bold: PDFFont;
   mono: PDFFont;
+  italic: PDFFont;
 }
 
 class Writer {
@@ -161,7 +207,7 @@ function colombia(iso: string): string {
 export const SGC_QR_SIZE = 86;
 const QR_RESERVE = SGC_QR_SIZE + 12;
 
-function drawCover(w: Writer, m: SgcManifest, mSha: string) {
+function drawCover(w: Writer, m: SgcManifest, mSha: string, placed: ReadonlySet<string>) {
   // Sprint 4: QR de verificación arriba a la derecha (abre la verificación de vigencia en SynerLink).
   if (m.verifyUrl) drawQr(w.page, m.verifyUrl, { x: A4[0] - MARGIN - SGC_QR_SIZE, y: A4[1] - 44 - SGC_QR_SIZE, size: SGC_QR_SIZE });
   const right = m.verifyUrl ? QR_RESERVE : 0;
@@ -183,10 +229,20 @@ function drawCover(w: Writer, m: SgcManifest, mSha: string) {
   w.row('Solicitud documental', `#${m.idRequest}`);
   if (m.changeDescription) w.row('Descripción del cambio', m.changeDescription);
   w.row('Contenido firmado', `${m.signedContent.name} · SHA-256 ${m.signedContent.sha256}`);
+  for (const r of m.minorRevisions ?? []) {
+    w.row(`Revisión menor de Calidad (${r.revision})`, `${r.by} · ${colombia(r.at)} · Motivo: ${r.reason}`);
+  }
   w.y -= 8;
-  w.text('Firmas', { size: 11, font: 'bold', gap: 4 });
-  for (const s of m.signatures) {
-    w.row(s.meaningLabel, `${s.signerName ?? s.signerEmail} (${s.signerEmail}) · ${colombia(s.signedAt)} · Motivo: ${s.reason}`);
+  // 2026-10-03: las firmas van DENTRO del documento; aquí solo las que no tenían ubicación (respaldo).
+  const unplaced = m.signatures.filter((s) => !placed.has(s.uid));
+  if (placed.size > 0) {
+    w.text('Las firmas Elaboró, Revisó y Aprobó están estampadas dentro del documento, en la posición que ubicó el elaborador. Su trazabilidad está en el registro de firmas electrónicas del final.', { size: 9, color: MUTED, gap: 6 });
+  }
+  if (unplaced.length > 0) {
+    w.text(placed.size > 0 ? 'Firmas sin ubicación en el documento' : 'Firmas', { size: 11, font: 'bold', gap: 4 });
+    for (const s of unplaced) {
+      w.row(s.meaningLabel, `${s.signerName ?? s.signerEmail} (${s.signerEmail}) · ${colombia(s.signedAt)} · Motivo: ${s.reason}`);
+    }
   }
   w.y -= 10;
   w.text(
@@ -198,7 +254,7 @@ function drawCover(w: Writer, m: SgcManifest, mSha: string) {
 }
 
 async function drawManifest(pdf: PDFDocument, w: Writer, m: SgcManifest, mSha: string, masters: Record<string, Uint8Array>) {
-  w.text('Manifiesto de firmas electrónicas', { size: 14, font: 'bold', color: BRAND, gap: 2 });
+  w.text(m.placements?.length ? 'Registro de trazabilidad de firmas electrónicas' : 'Manifiesto de firmas electrónicas', { size: 14, font: 'bold', color: BRAND, gap: 2 });
   w.text(`${m.code} · Versión ${m.versionNumber} · Solicitud #${m.idRequest}`, { size: 9.5, color: MUTED, gap: 8 });
   w.rule();
   for (const s of m.signatures) {
@@ -230,36 +286,111 @@ async function drawManifest(pdf: PDFDocument, w: Writer, m: SgcManifest, mSha: s
   w.text('La huella del PDF completo queda registrada en SynerLink; cualquier alteración del archivo invalida la verificación.', { size: 8, color: MUTED });
 }
 
+/** Estampa una firma electrónica dentro de su caja (trazo del maestro si existe, nombre, significado y fecha). */
+async function drawPlacedSignature(pdf: PDFDocument, page: PDFPage, box: SgcRect, s: SgcManifestSignature, png: Uint8Array | undefined, fonts: Fonts) {
+  page.drawRectangle({ x: box.x, y: box.y, width: box.width, height: box.height, borderColor: rgb(0.0, 0.19, 0.34), borderWidth: 0.4, opacity: 0, borderOpacity: 0.35 });
+  const size = Math.max(4, Math.min(7, box.height / 6));
+  const lines = [s.signerName ?? s.signerEmail, `${s.meaningLabel} · ${formatBogotaDateTime(new Date(s.signedAt))}`, 'Firma electrónica · SynerLink'];
+  const textH = lines.length * (size + 1.5);
+  const imgArea = box.height - textH - 3;
+  let drewImage = false;
+  if (png && imgArea > 6) {
+    try {
+      const img = await pdf.embedPng(png);
+      const scale = Math.min((box.width - 4) / img.width, imgArea / img.height);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      page.drawImage(img, { x: box.x + (box.width - w) / 2, y: box.y + textH + 2 + (imgArea - h) / 2, width: w, height: h });
+      drewImage = true;
+    } catch {
+      // Un trazo ilegible no impide la firma: la firma electrónica es el registro, no la imagen.
+    }
+  }
+  if (!drewImage && imgArea > 6) {
+    const name = toWinAnsiSafe(s.signerName ?? s.signerEmail);
+    let nsize = Math.min(imgArea * 0.7, 14);
+    while (nsize > 5 && fonts.italic.widthOfTextAtSize(name, nsize) > box.width - 4) nsize -= 0.5;
+    page.drawText(name, { x: box.x + 2, y: box.y + textH + 2 + (imgArea - nsize) / 2, size: nsize, font: fonts.italic, color: rgb(0.05, 0.15, 0.4) });
+  }
+  let y = box.y + textH - size;
+  lines.forEach((l, i) => {
+    const font = i === 0 ? fonts.bold : fonts.regular;
+    let t = toWinAnsiSafe(l);
+    while (t.length > 1 && font.widthOfTextAtSize(t, size) > box.width - 3) t = t.slice(0, -1);
+    page.drawText(t, { x: box.x + 1.5, y: y + 1, size, font, color: INK });
+    y -= size + 1.5;
+  });
+}
+
+export interface SgcControlledPdfOptions {
+  /** Encabezado institucional del sistema (si el documento lo usa). */
+  header?: SgcInstitutionalHeaderData | null;
+}
+
+/** Composición del PDF controlado que se guarda en sgc.document_version.layout_json. */
+export interface SgcControlledLayout {
+  institutionalHeader: boolean;
+  /** Recuadro «Fecha de emisión» (página ABSOLUTA del PDF controlado, en puntos). */
+  emission: (SgcRect & { page: number }) | null;
+  placements: SgcManifestPlacement[];
+}
+
 /**
  * Arma el PDF controlado a partir del PDF del contenido aprobado. Devuelve
  * los bytes finales (a los que luego se les calcula el SHA-256).
  */
-export async function buildControlledPdf(contentPdf: Uint8Array, manifest: SgcManifest, masters: Record<string, Uint8Array> = {}): Promise<Uint8Array> {
+export async function buildControlledPdf(contentPdf: Uint8Array, manifest: SgcManifest, masters: Record<string, Uint8Array> = {}, options: SgcControlledPdfOptions = {}): Promise<Uint8Array> {
+  return (await buildControlledPdfWithLayout(contentPdf, manifest, masters, options)).bytes;
+}
+
+/** Igual que buildControlledPdf, y además devuelve la composición (fecha de emisión y firmas ubicadas). */
+export async function buildControlledPdfWithLayout(contentPdf: Uint8Array, manifest: SgcManifest, masters: Record<string, Uint8Array> = {}, options: SgcControlledPdfOptions = {}): Promise<{ bytes: Uint8Array; layout: SgcControlledLayout }> {
   const content = await PDFDocument.load(contentPdf, { ignoreEncryption: true });
   const out = await PDFDocument.create();
   const fonts: Fonts = {
     regular: await out.embedFont(StandardFonts.Helvetica),
     bold: await out.embedFont(StandardFonts.HelveticaBold),
     mono: await out.embedFont(StandardFonts.Courier),
+    italic: await out.embedFont(StandardFonts.HelveticaOblique),
   };
   const mSha = manifestSha256(manifest);
-  const header = `${manifest.company} · ${manifest.code} · Versión ${manifest.versionNumber} · Documento controlado`;
+  const runningHeader = `${manifest.company} · ${manifest.code} · Versión ${manifest.versionNumber} · Documento controlado`;
 
-  drawCover(new Writer(out, fonts, header), manifest, mSha);
+  const total = content.getPageCount();
+  // Firmas DENTRO del documento: solo las cajas de firmas del manifiesto y de páginas que existen.
+  const bySignature = new Map(manifest.signatures.map((s) => [s.uid, s]));
+  const placements = (manifest.placements ?? []).filter((p) => bySignature.has(p.uid) && p.page >= 1 && p.page <= total);
+  drawCover(new Writer(out, fonts, runningHeader), manifest, mSha, new Set(placements.map((p) => p.uid)));
 
   const copied = await out.copyPages(content, content.getPageIndices());
-  const total = copied.length;
+  const header = options.header ?? null;
   copied.forEach((page, i) => {
     out.addPage(page);
     const { width, height } = page.getSize();
-    const top = toWinAnsiSafe(`${manifest.code} · Versión ${manifest.versionNumber} · ${manifest.title}`);
-    let size = 7.5;
-    while (size > 5 && fonts.regular.widthOfTextAtSize(top, size) > width - 40) size -= 0.5;
-    page.drawText(top, { x: 20, y: height - 14, size, font: fonts.regular, color: MUTED });
-    page.drawText(toWinAnsiSafe(`Documento controlado · Página ${i + 1} de ${total}`), { x: 20, y: 8, size: 7, font: fonts.regular, color: MUTED });
+    if (!header) {
+      const top = toWinAnsiSafe(`${manifest.code} · Versión ${manifest.versionNumber} · ${manifest.title}`);
+      let size = 7.5;
+      while (size > 5 && fonts.regular.widthOfTextAtSize(top, size) > width - 40) size -= 0.5;
+      page.drawText(top, { x: 20, y: height - 14, size, font: fonts.regular, color: MUTED });
+      // Con encabezado institucional, la página x de y ya va en el encabezado (y el pie lo ocupa la marca de la copia controlada).
+      page.drawText(toWinAnsiSafe(`Documento controlado · Página ${i + 1} de ${total}`), { x: 20, y: 8, size: 7, font: fonts.regular, color: MUTED });
+    }
   });
+  let emission: SgcControlledLayout['emission'] = null;
+  if (header) {
+    const drawn = await drawInstitutionalHeaders(out, copied, header, fonts);
+    // El contenido empieza en la página 2 del PDF controlado (la 1 es la portada de control).
+    if (drawn.emission) emission = { ...drawn.emission, page: 2 };
+  }
+  // Cada firma en la caja que ubicó el elaborador.
+  for (const p of placements) {
+    const page = copied[p.page - 1];
+    const { width, height } = page.getSize();
+    const box = { x: (p.x / 100) * width, y: height - ((p.y + p.height) / 100) * height, width: (p.width / 100) * width, height: (p.height / 100) * height };
+    await drawPlacedSignature(out, page, box, bySignature.get(p.uid)!, masters[p.uid], fonts);
+  }
 
-  const w = new Writer(out, fonts, header);
+  const w = new Writer(out, fonts, runningHeader);
   await drawManifest(out, w, manifest, mSha, masters);
 
   const json = canonicalJson(manifest);
@@ -277,7 +408,8 @@ export async function buildControlledPdf(contentPdf: Uint8Array, manifest: SgcMa
   out.setCreator('SynerLink — SGC documental');
   out.setCreationDate(new Date(manifest.generatedAt));
   out.setModificationDate(new Date(manifest.generatedAt));
-  return out.save({ useObjectStreams: false });
+  const bytes = await out.save({ useObjectStreams: false });
+  return { bytes, layout: { institutionalHeader: Boolean(header), emission, placements } };
 }
 
 /** Lee el manifiesto incrustado en un PDF controlado (null si no lo tiene o no es válido). */
@@ -325,13 +457,14 @@ export async function verifyControlledPdf(
   const manifestMatches = Boolean(manifest && stored && mSha === manifestSha256(stored));
   if (manifest && !manifestMatches) problems.push('El manifiesto del PDF no coincide con el registrado en SynerLink.');
   const byUid = new Map(expected.signatures.map((s) => [s.uid.trim(), s]));
+  const accepted = manifest ? acceptedContentHashes(manifest) : new Set<string>();
   const signatures = (manifest?.signatures ?? []).map((s) => {
     const db = byUid.get(s.uid);
     let problem: string | null = null;
     if (!db) problem = 'La firma no existe en el registro de firmas del SGC.';
     else if (!db.intact) problem = 'El registro de la firma fue alterado (su huella no coincide).';
     else if (db.recordHash.trim() !== s.recordHash) problem = 'El registro de la firma no coincide con el del PDF.';
-    else if (db.contentSha256.trim() !== s.contentSha256 || s.contentSha256 !== manifest!.signedContent.sha256) problem = 'La firma no corresponde al contenido del documento.';
+    else if (db.contentSha256.trim() !== s.contentSha256 || !accepted.has(s.contentSha256)) problem = 'La firma no corresponde al contenido del documento.';
     if (problem) problems.push(`${s.meaningLabel} (${s.signerEmail}): ${problem}`);
     return { uid: s.uid, meaningLabel: s.meaningLabel, signer: s.signerName ?? s.signerEmail, ok: !problem, problem };
   });

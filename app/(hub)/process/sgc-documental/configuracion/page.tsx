@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Alert, Badge, Button, Card, Checkbox, Group, Loader, Modal, NumberInput, Select, Stack, Table, Tabs, Text, TextInput, Textarea } from '@mantine/core';
+import { Alert, Badge, Button, Card, Checkbox, Group, Loader, Modal, NumberInput, Stack, Table, Tabs, Text, TextInput, Textarea } from '@mantine/core';
+import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import { IconAlertTriangle, IconCheck, IconEdit, IconPlus } from '@tabler/icons-react';
 import SgcCargoMembers from '../../../../../components/sgc/SgcCargoMembers';
+import SgcCompanySettings from '../../../../../components/sgc/SgcCompanySettings';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
 import { SGC_CODING_TOKENS, buildDocumentCode, validateCodingGuide } from '../../../../../lib/sgc/coding';
@@ -110,6 +112,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
           <Tabs.Tab value='procesos'>Procesos</Tabs.Tab>
           <Tabs.Tab value='tipos-documentales'>Tipos documentales</Tabs.Tab>
           <Tabs.Tab value='cargos'>Personas por cargo</Tabs.Tab>
+          <Tabs.Tab value='empresa'>Encabezado y divulgación</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value='guia'>
@@ -120,8 +123,8 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                 de {'{CONSECUTIVO}'}. Cambiar la guía no recodifica los documentos existentes.
               </Text>
               <Group align='flex-end' wrap='wrap'>
-                <TextInput label='Prefijo' value={String(guideForm.prefix)} onChange={(e) => setGuide({ ...guideForm, prefix: e.currentTarget.value.toUpperCase() })} w={120} />
-                <TextInput label='Patrón' value={String(guideForm.pattern)} onChange={(e) => setGuide({ ...guideForm, pattern: e.currentTarget.value })} w={380} ff='monospace' />
+                <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Prefijo' value={String(guideForm.prefix)} onChange={(e) => setGuide({ ...guideForm, prefix: e.currentTarget.value.toUpperCase() })} w={120} />
+                <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Patrón' value={String(guideForm.pattern)} onChange={(e) => setGuide({ ...guideForm, pattern: e.currentTarget.value })} w={380} ff='monospace' />
                 <NumberInput label='Dígitos' min={1} max={6} value={Number(guideForm.sequenceDigits)} onChange={(v) => setGuide({ ...guideForm, sequenceDigits: Number(v) })} w={100} />
               </Group>
               {example ? (
@@ -133,7 +136,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                   {guideErrors.join(' ')}
                 </Alert>
               )}
-              <Textarea label='Motivo del cambio' value={String(guideForm.reason ?? '')} onChange={(e) => setGuide({ ...guideForm, reason: e.currentTarget.value })} minRows={2} />
+              <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo del cambio' value={String(guideForm.reason ?? '')} onChange={(e) => setGuide({ ...guideForm, reason: e.currentTarget.value })} minRows={2} />
               {data.codingGuide?.updatedBy && (
                 <Text size='xs' c='dimmed'>
                   Último cambio: {data.codingGuide.updatedBy} · {data.codingGuide.updatedAt.slice(0, 10)}
@@ -285,13 +288,17 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
         <Tabs.Panel value='cargos'>
           <SgcCargoMembers idCompany={company.idCompany} />
         </Tabs.Panel>
+
+        <Tabs.Panel value='empresa'>
+          <SgcCompanySettings idCompany={company.idCompany} />
+        </Tabs.Panel>
       </Tabs>
 
       <Modal opened={!!editing} onClose={() => setEditing(null)} title={editing?.form.id ? 'Editar' : 'Nuevo'} centered>
         {editing && (
           <Stack>
             {editing.entity === 'processes' && (
-              <Select
+              <SgcSelect
                 label='Tipo de proceso'
                 data={data.processTypes.map((t) => ({ value: String(t.id), label: t.name }))}
                 value={editing.form.idProcessType ? String(editing.form.idProcessType) : null}
@@ -299,11 +306,11 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                 allowDeselect={false}
               />
             )}
-            <TextInput label='Código' value={String(editing.form.code ?? '')} onChange={(e) => set('code', e.currentTarget.value.toUpperCase())} ff='monospace' />
-            <TextInput label='Nombre' value={String(editing.form.name ?? '')} onChange={(e) => set('name', e.currentTarget.value)} />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Código' value={String(editing.form.code ?? '')} onChange={(e) => set('code', e.currentTarget.value.toUpperCase())} ff='monospace' />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Nombre' value={String(editing.form.name ?? '')} onChange={(e) => set('name', e.currentTarget.value)} />
             {editing.entity === 'document-types' && (
               <>
-                <TextInput label='Nombre en plural (carpeta del mapa)' value={String(editing.form.pluralName ?? '')} onChange={(e) => set('pluralName', e.currentTarget.value)} />
+                <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Nombre en plural (carpeta del mapa)' value={String(editing.form.pluralName ?? '')} onChange={(e) => set('pluralName', e.currentTarget.value)} />
                 <Group grow>
                   <NumberInput label='Revisión (meses)' min={1} max={120} value={Number(editing.form.reviewMonths)} onChange={(v) => set('reviewMonths', Number(v))} />
                   <NumberInput label='Alerta (meses antes)' min={0} max={24} value={Number(editing.form.alertMonths)} onChange={(v) => set('alertMonths', Number(v))} />
@@ -312,7 +319,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
               </>
             )}
             {editing.entity === 'processes' && (
-              <Select
+              <SgcSelect
                 label='Departamento dueño'
                 data={data.departments.map((x) => ({ value: String(x.id), label: x.name }))}
                 value={editing.form.idDepartment ? String(editing.form.idDepartment) : null}
@@ -322,11 +329,11 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
               />
             )}
             {editing.entity === 'process-types' && (
-              <Select label='Color' data={COLORS} value={String(editing.form.color ?? 'blue')} onChange={(v) => set('color', v ?? 'blue')} allowDeselect={false} />
+              <SgcSelect label='Color' data={COLORS} value={String(editing.form.color ?? 'blue')} onChange={(v) => set('color', v ?? 'blue')} allowDeselect={false} />
             )}
             <NumberInput label='Orden' min={0} max={999} value={Number(editing.form.sortOrder ?? 0)} onChange={(v) => set('sortOrder', Number(v))} />
             <Checkbox label='Activo' checked={editing.form.isActive !== false} onChange={(e) => set('isActive', e.currentTarget.checked)} />
-            <Textarea label='Motivo del cambio' description='Queda en la auditoría (control de cambios).' value={String(editing.form.reason ?? '')} onChange={(e) => set('reason', e.currentTarget.value)} minRows={2} />
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo del cambio' description='Queda en la auditoría (control de cambios).' value={String(editing.form.reason ?? '')} onChange={(e) => set('reason', e.currentTarget.value)} minRows={2} />
             <Button loading={busy} onClick={() => save(editing.entity, editing.form)}>
               Guardar
             </Button>

@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ActionIcon, Alert, Badge, Button, Card, Group, Loader, Modal, MultiSelect, SegmentedControl, Select, SimpleGrid, Stack, Switch, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Badge, Button, Card, Group, Loader, Modal, MultiSelect, SegmentedControl, SimpleGrid, Stack, Switch, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
+import SgcSelect, { sgcTouchComboboxProps } from '../SgcSelect';
 import { IconAlertTriangle, IconChevronLeft, IconChevronRight, IconFileSearch, IconFilePlus, IconSearch } from '@tabler/icons-react';
 import { sgcHref } from '../useSgcCompany';
 import { useSgcFetch } from '../useSgcFetch';
@@ -55,7 +56,9 @@ function initialMonth(): { year: number; month: number } {
 function initialView(): SgcCalendarView {
   if (typeof window === 'undefined') return 'mes';
   const v = new URLSearchParams(window.location.search).get('vista');
-  return v === 'semana' || v === 'agenda' ? v : 'mes';
+  if (v === 'semana' || v === 'agenda' || v === 'mes') return v;
+  // En celular la cuadrícula mensual (760 px) solo mostraba lunes a miércoles: se abre en «Agenda» (revisión móvil 2026-10-03).
+  return window.matchMedia?.('(max-width: 48em)').matches ? 'agenda' : 'mes';
 }
 
 function StateBadge({ state }: { state: SgcCalendarState }) {
@@ -185,12 +188,12 @@ export default function SgcReviewCalendar({ company }: { company: SgcCompanyAcce
           <Switch label='Mis vencimientos' checked={mine} onChange={(e) => setMine(e.currentTarget.checked)} data-testid='sgc-cal-mios' />
         </Group>
         <Group gap='sm' mt='sm' wrap='wrap' align='flex-end'>
-          <TextInput placeholder='Código o título' leftSection={<IconSearch size={14} />} value={text} onChange={(e) => setText(e.currentTarget.value)} w={200} data-testid='sgc-cal-buscar' />
-          <Select placeholder='Área' data={uniq(all.filter((i) => i.idDepartment).map((i) => [i.idDepartment!, i.department ?? `#${i.idDepartment}`]))} value={dept} onChange={setDept} clearable searchable w={190} />
-          <Select placeholder='Proceso' data={uniq(all.map((i) => [i.idProcess, i.process]))} value={proc} onChange={setProc} clearable searchable w={210} data-testid='sgc-cal-proceso' />
-          <Select placeholder='Tipo documental' data={uniq(all.map((i) => [i.idDocumentType, i.documentType]))} value={type} onChange={setType} clearable w={190} />
-          <Select placeholder='Responsable' data={uniq(all.flatMap((i) => i.responsibles.map((r) => [r, r] as [string, string])))} value={resp} onChange={setResp} clearable searchable w={230} />
-          <MultiSelect placeholder='Estado' data={STATES.map((s) => ({ value: s, label: SGC_CALENDAR_STATE_LABELS[s] }))} value={states} onChange={setStates} clearable w={230} />
+          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' placeholder='Código o título' leftSection={<IconSearch size={14} />} value={text} onChange={(e) => setText(e.currentTarget.value)} w={200} data-testid='sgc-cal-buscar' />
+          <SgcSelect placeholder='Área' data={uniq(all.filter((i) => i.idDepartment).map((i) => [i.idDepartment!, i.department ?? `#${i.idDepartment}`]))} value={dept} onChange={setDept} clearable searchable w={190} />
+          <SgcSelect placeholder='Proceso' data={uniq(all.map((i) => [i.idProcess, i.process]))} value={proc} onChange={setProc} clearable searchable w={210} data-testid='sgc-cal-proceso' />
+          <SgcSelect placeholder='Tipo documental' data={uniq(all.map((i) => [i.idDocumentType, i.documentType]))} value={type} onChange={setType} clearable w={190} />
+          <SgcSelect placeholder='Responsable' data={uniq(all.flatMap((i) => i.responsibles.map((r) => [r, r] as [string, string])))} value={resp} onChange={setResp} clearable searchable w={230} />
+          <MultiSelect comboboxProps={sgcTouchComboboxProps()} placeholder='Estado' data={STATES.map((s) => ({ value: s, label: SGC_CALENDAR_STATE_LABELS[s] }))} value={states} onChange={setStates} clearable w={230} />
         </Group>
         <Group gap='sm' mt='sm'>
           {counts.map(([s, n]) => (

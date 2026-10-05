@@ -16,7 +16,6 @@ import {
   Group,
   Loader,
   Modal,
-  Select,
   Stack,
   Table,
   Tabs,
@@ -27,6 +26,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
+import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import {
   IconAlertCircle,
   IconCalendarEvent,
@@ -147,16 +147,16 @@ function TypesAdmin({ company }: { company: SgcCompanyAccess }) {
         </Title>
         <Grid>
           <Grid.Col span={{ base: 12, md: 3 }}>
-            <TextInput label='Código' value={newType.code} onChange={(e) => setNewType({ ...newType, code: e.currentTarget.value.toUpperCase() })} />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Código' value={newType.code} onChange={(e) => setNewType({ ...newType, code: e.currentTarget.value.toUpperCase() })} />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 4 }}>
-            <TextInput label='Nombre' value={newType.name} onChange={(e) => setNewType({ ...newType, name: e.currentTarget.value })} />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Nombre' value={newType.name} onChange={(e) => setNewType({ ...newType, name: e.currentTarget.value })} />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 5 }}>
-            <TextInput label='Descripción' value={newType.description} onChange={(e) => setNewType({ ...newType, description: e.currentTarget.value })} />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Descripción' value={newType.description} onChange={(e) => setNewType({ ...newType, description: e.currentTarget.value })} />
           </Grid.Col>
           <Grid.Col span={12}>
-            <Textarea label='Motivo' autosize minRows={1} value={newType.reason} onChange={(e) => setNewType({ ...newType, reason: e.currentTarget.value })} />
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' autosize minRows={1} value={newType.reason} onChange={(e) => setNewType({ ...newType, reason: e.currentTarget.value })} />
           </Grid.Col>
         </Grid>
         <Group justify='flex-end' mt='sm'>
@@ -173,8 +173,8 @@ function TypesAdmin({ company }: { company: SgcCompanyAccess }) {
       <Modal opened={Boolean(grant)} onClose={() => setGrant(null)} title='Agregar persona al grupo' centered>
         {grant && (
           <Stack>
-            <TextInput label='Correo' value={grant.email} onChange={(e) => setGrant({ ...grant, email: e.currentTarget.value })} />
-            <Textarea label='Motivo' required autosize minRows={2} value={grant.reason} onChange={(e) => setGrant({ ...grant, reason: e.currentTarget.value })} />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Correo' value={grant.email} onChange={(e) => setGrant({ ...grant, email: e.currentTarget.value })} />
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' required autosize minRows={2} value={grant.reason} onChange={(e) => setGrant({ ...grant, reason: e.currentTarget.value })} />
             <Group justify='flex-end'>
               <Button
                 disabled={!grant.email || grant.reason.trim().length < 5}
@@ -191,7 +191,7 @@ function TypesAdmin({ company }: { company: SgcCompanyAccess }) {
       <Modal opened={Boolean(revoke)} onClose={() => setRevoke(null)} title='Retirar del grupo' centered>
         {revoke && (
           <Stack>
-            <Textarea label='Motivo' required autosize minRows={2} value={revoke.reason} onChange={(e) => setRevoke({ ...revoke, reason: e.currentTarget.value })} />
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' required autosize minRows={2} value={revoke.reason} onChange={(e) => setRevoke({ ...revoke, reason: e.currentTarget.value })} />
             <Group justify='flex-end'>
               <Button
                 color='red'
@@ -297,7 +297,7 @@ function AuthorizationBoard() {
             <IconFileText size={20} />
             Autorizaciones
           </Title>
-          <Select
+          <SgcSelect
             data={[
               { value: 'pendiente', label: 'Pendientes' },
               { value: 'autorizada', label: 'Autorizadas' },
@@ -489,7 +489,7 @@ function AuthorizationBoard() {
               ¿Deseas autorizar <strong>la solicitud #{authorize?.idRequest}</strong> ({authorize?.typeName})?
             </Text>
           </Group>
-          <Textarea label='Comentario (opcional)' autosize minRows={2} value={comment} onChange={(e) => setComment(e.currentTarget.value)} />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Comentario (opcional)' autosize minRows={2} value={comment} onChange={(e) => setComment(e.currentTarget.value)} />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setAuthorize(null)} disabled={busy}>
               Cancelar
@@ -535,7 +535,7 @@ function AuthorizationBoard() {
           <Text size='sm' c='dimmed'>
             Indica el motivo del rechazo. El documento vuelve a elaboración y el motivo queda en el historial.
           </Text>
-          <Textarea label='Motivo del rechazo' placeholder='Escribe el motivo...' required minRows={3} autosize value={comment} onChange={(e) => setComment(e.currentTarget.value)} data-testid='sgc-rechazo-motivo' />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo del rechazo' placeholder='Escribe el motivo...' required minRows={3} autosize value={comment} onChange={(e) => setComment(e.currentTarget.value)} data-testid='sgc-rechazo-motivo' />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setReject(null)}>
               Cancelar

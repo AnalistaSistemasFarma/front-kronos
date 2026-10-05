@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { ActionIcon, Button, Card, Grid, Group, Select, Stack, Text, TextInput, Textarea, Title } from '@mantine/core';
+import { ActionIcon, Button, Card, Grid, Group, Stack, Text, TextInput, Textarea, Title } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import { IconCheck, IconPencil, IconTag } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 
@@ -43,6 +44,7 @@ export default function SgcAdditionalInfo({ fields, canEdit, onSave }: SgcAdditi
                       variant='subtle'
                       color='blue'
                       title='Editar campo'
+                      data-testid={`sgc-campo-editar-${f.key}`}
                       onClick={() => {
                         setEditing(f.key);
                         setValue(f.value ?? '');
@@ -55,18 +57,19 @@ export default function SgcAdditionalInfo({ fields, canEdit, onSave }: SgcAdditi
                 {isEditing ? (
                   <Stack gap='xs' mt={4}>
                     {f.type === 'seleccion' || f.type === 'si_no' ? (
-                      <Select
+                      <SgcSelect
                         data={f.type === 'si_no' ? [{ value: 'si', label: 'Sí' }, { value: 'no', label: 'No' }] : f.options.map((o) => ({ value: o, label: o }))}
                         value={value || null}
                         onChange={(v) => setValue(v || '')}
                         searchable
                         clearable
                         placeholder='Seleccione una opción'
+                        data-testid={`sgc-campo-valor-${f.key}`}
                       />
                     ) : f.type === 'texto_largo' ? (
-                      <Textarea value={value} onChange={(e) => setValue(e.target.value)} autosize minRows={3} />
+                      <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' value={value} onChange={(e) => setValue(e.target.value)} autosize minRows={3} />
                     ) : (
-                      <TextInput type={f.type === 'numero' ? 'number' : f.type === 'fecha' ? 'date' : 'text'} value={value} onChange={(e) => setValue(e.target.value)} />
+                      <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' type={f.type === 'numero' ? 'number' : f.type === 'fecha' ? 'date' : 'text'} value={value} onChange={(e) => setValue(e.target.value)} />
                     )}
                     <Group justify='flex-end' gap='xs'>
                       <Button variant='outline' size='xs' onClick={() => setEditing(null)} disabled={saving}>
@@ -74,6 +77,7 @@ export default function SgcAdditionalInfo({ fields, canEdit, onSave }: SgcAdditi
                       </Button>
                       <Button
                         size='xs'
+                        data-testid={`sgc-campo-guardar-${f.key}`}
                         leftSection={<IconCheck size={14} />}
                         loading={saving}
                         onClick={async () => {

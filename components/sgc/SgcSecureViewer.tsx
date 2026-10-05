@@ -30,10 +30,14 @@ export interface SgcSecureViewerProps {
   onReachedEnd?: (pages: number) => void;
 }
 
+/** Escala inicial del visor (página al 100 % del ancho disponible). */
+const BASE_SCALE = 1.3;
+
 async function renderPdf(bytes: Uint8Array, scale: number, container: HTMLElement, isCancelled: () => boolean) {
   const pdfjs = await import('pdfjs-dist');
   pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
   const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+  if (isCancelled()) return 0;
   container.replaceChildren();
   for (let n = 1; n <= pdf.numPages; n++) {
     if (isCancelled()) return 0;
@@ -42,7 +46,11 @@ async function renderPdf(bytes: Uint8Array, scale: number, container: HTMLElemen
     const canvas = document.createElement('canvas');
     canvas.width = viewport.width;
     canvas.height = viewport.height;
-    canvas.style.width = '100%';
+    // «Acercar» debe agrandar la página también cuando el visor es angosto
+    // (celular): por encima de la escala base el ancho crece en proporción y el
+    // visor se desplaza a lo ancho. En escritorio el tope sigue siendo el
+    // tamaño natural de la página, como antes.
+    canvas.style.width = scale > BASE_SCALE ? `${Math.round((scale / BASE_SCALE) * 100)}%` : '100%';
     canvas.style.maxWidth = `${viewport.width}px`;
     canvas.style.display = 'block';
     canvas.style.margin = '0 auto 16px';
@@ -52,6 +60,8 @@ async function renderPdf(bytes: Uint8Array, scale: number, container: HTMLElemen
     const ctx = canvas.getContext('2d');
     if (!ctx) continue;
     await page.render({ canvasContext: ctx, viewport }).promise;
+    // Un dibujo más nuevo (p. ej. dos toques seguidos en «Acercar») reemplaza a este: no mezclar páginas.
+    if (isCancelled()) return 0;
     container.appendChild(canvas);
   }
   return pdf.numPages;
@@ -95,9 +105,10 @@ async function printAuthorized(url: string) {
 export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReachedEnd }: SgcSecureViewerProps) {
   const pagesRef = useRef<HTMLDivElement>(null);
   const bytesRef = useRef<Uint8Array | null>(null);
+  const renderGenRef = useRef(0);
   const endRef = useRef(false);
   const [progress, setProgress] = useState(0);
-  const [scale, setScale] = useState(1.3);
+  const [scale, setScale] = useState(BASE_SCALE);
   const [state, setState] = useState<{ tipo: 'cargando' } | { tipo: 'listo'; pages: number } | { tipo: 'error'; mensaje: string }>({
     tipo: 'cargando',
   });
@@ -128,7 +139,8 @@ export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReac
 
   const rerender = useCallback(async (nextScale: number) => {
     setScale(nextScale);
-    if (bytesRef.current && pagesRef.current) await renderPdf(bytesRef.current.slice(), nextScale, pagesRef.current, () => false);
+    const gen = ++renderGenRef.current;
+    if (bytesRef.current && pagesRef.current) await renderPdf(bytesRef.current.slice(), nextScale, pagesRef.current, () => gen !== renderGenRef.current);
   }, []);
 
   // Bloqueo de atajos de guardar e imprimir mientras el visor está abierto.

@@ -29,6 +29,9 @@ import {
 } from '@tabler/icons-react';
 import { sgcSend, useSgcFetch } from '../useSgcFetch';
 import { formatDateCO } from '../tareas/format';
+import { draftBackTarget, draftEditorHref, parseTaskParam } from '../../../lib/sgc/draft/view';
+import { SGC_PROCEDURE_TEMPLATE_HTML } from '../../../lib/sgc/draft/template';
+import { SgcImage } from './sgcImage';
 
 /**
  * EDITOR DEL BORRADOR en la app (Sprint 3). Copia adaptada del editor Tiptap
@@ -39,6 +42,13 @@ import { formatDateCO } from '../tareas/format';
  * última revisión es el borrador que se firma y del que sale el PDF
  * controlado. Quien no es el elaborador (o fuera de la elaboración) solo lo
  * consulta.
+ *
+ * 2026-10-03 (correcciones de Calidad OLP): se puede partir de la PLANTILLA
+ * INSTITUCIONAL de procedimiento (el sistema pone el encabezado y llena los
+ * campos de sistema al aprobar), el editor conserva las imágenes incrustadas
+ * (el logo de un Word ya no se pierde) y Aseguramiento de Calidad puede hacer
+ * una REVISIÓN MENOR durante la aprobación (forma o puntuación, con motivo
+ * obligatorio; queda como revisión nueva con su huella y en el historial).
  */
 
 interface DraftMeta {
@@ -46,10 +56,11 @@ interface DraftMeta {
   document: { code: string; title: string } | null;
   vigente: { versionNumber: number; hasWord: boolean } | null;
   canEdit: boolean;
-  revisions: { id: number; number: number; origin: string; originRef: string | null; sha256: string; sizeBytes: number; note: string | null; savedBy: string; savedAt: string }[];
+  canMinorRevise?: boolean;
+  revisions: { id: number; number: number; origin: string; originRef: string | null; sha256: string; sizeBytes: number; note: string | null; savedBy: string; savedAt: string; minorReason?: string | null; baseSha256?: string | null }[];
 }
 
-const ORIGIN_LABELS: Record<string, string> = { blanco: 'En blanco', vigente: 'Desde la versión vigente', word: 'Desde un Word', revision: 'Edición' };
+const ORIGIN_LABELS: Record<string, string> = { blanco: 'En blanco', vigente: 'Desde la versión vigente', word: 'Desde un Word', revision: 'Edición', plantilla: 'Desde la plantilla institucional' };
 const SKELETON = '<h1>Título del documento</h1><h2>1. Objetivo</h2><p>Escriba aquí el objetivo.</p><h2>2. Alcance</h2><p>Escriba aquí el alcance.</p>';
 
 function Tool({ label, icon, active, onClick, disabled }: { label: string; icon: React.ReactNode; active?: boolean; onClick: () => void; disabled?: boolean }) {
@@ -65,6 +76,8 @@ function Tool({ label, icon, active, onClick, disabled }: { label: string; icon:
 export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
   const search = useSearchParams();
   const viewRev = search.get('ver');
+  // Si se abrió desde una tarea (?tarea=<id>, solo un número), «Volver» regresa a esa tarea.
+  const tareaParam = search.get('tarea');
   const meta = useSgcFetch<DraftMeta>(`/api/sgc/requests/${idRequest}/draft`);
   const [origin, setOrigin] = useState<{ origin: string; originRef: string | null }>({ origin: 'revision', originRef: null });
   const [note, setNote] = useState('');
@@ -72,9 +85,11 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
   const [busy, setBusy] = useState(false);
   const [wordFile, setWordFile] = useState<File | null>(null);
   const [loaded, setLoaded] = useState<{ number: number | null; sha256: string | null } | null>(null);
-  const editable = Boolean(meta.data?.canEdit) && !viewRev;
+  const [minorReason, setMinorReason] = useState('');
+  const minorMode = Boolean(meta.data?.canMinorRevise) && !meta.data?.canEdit && !viewRev;
+  const editable = (Boolean(meta.data?.canEdit) || minorMode) && !viewRev;
 
-  const editor = useEditor({ extensions: [StarterKit, Table.configure({ resizable: true }), TableRow, TableHeader, TableCell], content: '', immediatelyRender: false, editable: false });
+  const editor = useEditor({ extensions: [StarterKit, Table.configure({ resizable: true }), TableRow, TableHeader, TableCell, SgcImage], content: '', immediatelyRender: false, editable: false });
 
   useEffect(() => {
     editor?.setEditable(editable);
@@ -82,6 +97,19 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
 
   const load = useCallback(async () => {
     if (!editor || !meta.data) return;
+    // Revisión menor de Calidad: se parte del borrador VIGENTE de la solicitud (revisión del editor o Word convertido).
+    if (meta.data.canMinorRevise && !meta.data.canEdit && !viewRev) {
+      const res = await fetch(`/api/sgc/requests/${idRequest}/draft/base?actual=1`, { cache: 'no-store' });
+      const body = await res.json();
+      if (!res.ok) {
+        setMsg({ ok: false, text: body.error || `Error ${res.status}` });
+        return;
+      }
+      editor.commands.setContent(body.html);
+      setOrigin({ origin: 'revision', originRef: body.originRef });
+      setLoaded({ number: null, sha256: body.baseSha256 });
+      return;
+    }
     const target = viewRev ?? (meta.data.revisions.length ? 'ultima' : null);
     if (!target) {
       editor.commands.setContent(meta.data.canEdit ? SKELETON : '<p></p>');
@@ -121,6 +149,12 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
     }
   };
 
+  const fromTemplate = () => {
+    editor?.commands.setContent(SGC_PROCEDURE_TEMPLATE_HTML);
+    setOrigin({ origin: 'plantilla', originRef: 'Plantilla institucional de procedimiento' });
+    setMsg({ ok: true, text: 'Se cargó la plantilla institucional de procedimiento. Complete las secciones y guarde la revisión: el encabezado (código, versión, página, elaboró, revisó, aprobó, fecha de emisión y proceso) y el historial de cambios los pone el sistema al aprobar.' });
+  };
+
   const fromWord = async () => {
     if (!wordFile) return;
     setMsg(null);
@@ -147,9 +181,21 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
     setMsg(null);
     setBusy(true);
     try {
-      const r = await sgcSend<{ number: number; sha256: string; unchanged: boolean }>(`/api/sgc/requests/${idRequest}/draft`, 'POST', { html: editor.getHTML(), note, ...origin });
-      setMsg({ ok: true, text: r.unchanged ? 'Sin cambios frente a la última revisión.' : `Revisión ${r.number} guardada (SHA-256 ${r.sha256.slice(0, 16)}…).` });
+      const r = await sgcSend<{ number: number; sha256: string; unchanged: boolean }>(
+        `/api/sgc/requests/${idRequest}/draft`,
+        'POST',
+        minorMode ? { html: editor.getHTML(), minor: true, minorReason } : { html: editor.getHTML(), note, ...origin }
+      );
+      setMsg({
+        ok: true,
+        text: r.unchanged
+          ? 'Sin cambios frente a la última revisión.'
+          : minorMode
+            ? `Revisión menor ${r.number} guardada (SHA-256 ${r.sha256.slice(0, 16)}…). Quedó en el historial y se avisó al elaborador y a quienes ya firmaron.`
+            : `Revisión ${r.number} guardada (SHA-256 ${r.sha256.slice(0, 16)}…).`,
+      });
       setNote('');
+      setMinorReason('');
       meta.reload();
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
@@ -175,7 +221,8 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
     );
   }
   const d = meta.data;
-  const back = `/process/sgc-documental/solicitudes/${idRequest}?empresa=${d.request.idCompany}`;
+  const backTarget = draftBackTarget(idRequest, d.request.idCompany, tareaParam);
+  const back = backTarget.href;
 
   return (
     <div className='app-canvas'>
@@ -186,7 +233,7 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
               Procesos
             </Anchor>
             <Anchor component={Link} href={back}>
-              Solicitud #{idRequest}
+              {backTarget.crumb}
             </Anchor>
             <Text c='dimmed'>Borrador</Text>
           </Breadcrumbs>
@@ -225,12 +272,21 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
           )}
         </Card>
 
-        {editable && (
+        {minorMode && (
+          <Alert color='orange' variant='light' mb='6' title='Revisión menor de Calidad' data-testid='sgc-revision-menor-aviso'>
+            Corrija solo la forma (una margen, una coma) sin devolver el documento. Se guarda como una revisión NUEVA del borrador con su motivo y su huella SHA-256: queda en el historial, en la auditoría y en el PDF controlado, y se avisa al elaborador y a quienes ya firmaron. Si el cambio afecta el contenido, devuelva el documento con observaciones.
+          </Alert>
+        )}
+
+        {editable && !minorMode && (
           <Card shadow='sm' p='lg' radius='md' withBorder mb='6'>
             <Text fw={600} mb='xs'>
               Punto de partida
             </Text>
             <Group align='flex-end' wrap='wrap'>
+              <Button variant='light' color='teal' onClick={fromTemplate} disabled={busy} data-testid='sgc-borrador-desde-plantilla'>
+                Partir de la plantilla institucional
+              </Button>
               {d.vigente?.hasWord && (
                 <Button variant='light' onClick={fromVigente} loading={busy} data-testid='sgc-borrador-desde-vigente'>
                   Partir de la versión vigente (V{d.vigente.versionNumber})
@@ -270,9 +326,13 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
                   <Tool label='Insertar tabla 3x3' icon={<IconTable size={16} />} onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} />
                 </Group>
                 <Group gap='xs'>
-                  <TextInput size='sm' placeholder='Nota de la revisión (opcional)' value={note} onChange={(e) => setNote(e.currentTarget.value)} w={260} data-testid='sgc-borrador-nota' />
-                  <Button leftSection={<IconDeviceFloppy size={16} />} onClick={save} loading={busy} data-testid='sgc-borrador-guardar'>
-                    Guardar revisión
+                  {minorMode ? (
+                    <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' size='sm' required placeholder='Motivo de la revisión menor (obligatorio)' value={minorReason} onChange={(e) => setMinorReason(e.currentTarget.value)} w={320} data-testid='sgc-revision-menor-motivo' />
+                  ) : (
+                    <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' size='sm' placeholder='Nota de la revisión (opcional)' value={note} onChange={(e) => setNote(e.currentTarget.value)} w={260} data-testid='sgc-borrador-nota' />
+                  )}
+                  <Button leftSection={<IconDeviceFloppy size={16} />} onClick={save} loading={busy} disabled={minorMode && minorReason.trim().length < 10} data-testid='sgc-borrador-guardar'>
+                    {minorMode ? 'Guardar revisión menor' : 'Guardar revisión'}
                   </Button>
                 </Group>
               </Group>
@@ -308,14 +368,25 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
                 {d.revisions.map((r) => (
                   <MTable.Tr key={r.id} data-testid='sgc-borrador-fila'>
                     <MTable.Td>
-                      <Anchor component={Link} href={`/process/sgc-documental/solicitudes/${idRequest}/borrador?empresa=${d.request.idCompany}&ver=${r.id}`}>
+                      <Anchor component={Link} href={draftEditorHref(idRequest, d.request.idCompany, parseTaskParam(tareaParam), r.id)}>
                         {r.number}
                       </Anchor>
                     </MTable.Td>
                     <MTable.Td>{ORIGIN_LABELS[r.origin] ?? r.origin}{r.originRef ? ` · ${r.originRef}` : ''}</MTable.Td>
                     <MTable.Td>{r.savedBy}</MTable.Td>
                     <MTable.Td>{formatDateCO(r.savedAt)}</MTable.Td>
-                    <MTable.Td>{r.note ?? ''}</MTable.Td>
+                    <MTable.Td>
+                      {r.minorReason ? (
+                        <>
+                          <Badge color='orange' variant='light' size='xs' mr={4}>
+                            Revisión menor de Calidad
+                          </Badge>
+                          {r.minorReason}
+                        </>
+                      ) : (
+                        r.note ?? ''
+                      )}
+                    </MTable.Td>
                     <MTable.Td>
                       <Code>{r.sha256.slice(0, 16)}…</Code>
                     </MTable.Td>
@@ -326,7 +397,7 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
           )}
           <Group mt='md'>
             <Button component={Link} href={back} variant='outline' leftSection={<IconArrowLeft size={16} />}>
-              Volver a la solicitud
+              {backTarget.label}
             </Button>
           </Group>
         </Card>
@@ -342,6 +413,7 @@ export default function SgcDraftEditor({ idRequest }: { idRequest: number }) {
           .sgc-editor-wrapper .ProseMirror table { border-collapse: collapse; width: 100%; margin: 0.6em 0; }
           .sgc-editor-wrapper .ProseMirror td, .sgc-editor-wrapper .ProseMirror th { border: 1px solid #ccc; padding: 6px 10px; min-width: 60px; }
           .sgc-editor-wrapper .ProseMirror th { background: #f2f2f2; font-weight: 600; }
+          .sgc-editor-wrapper .ProseMirror img { max-width: 100%; height: auto; }
         `}</style>
       </div>
     </div>

@@ -2,7 +2,8 @@
 
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Alert, Anchor, Button, Card, FileInput, Grid, Group, Loader, NumberInput, Select, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import { Alert, Anchor, Button, Card, FileInput, Grid, Group, Loader, NumberInput, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import { IconAlertTriangle, IconCheck, IconFileTypePdf, IconFileTypeDoc, IconUpload } from '@tabler/icons-react';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { sgcHref } from '../../../../../components/sgc/useSgcCompany';
@@ -141,10 +142,10 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
         </Text>
         <Grid gutter='md'>
           <Grid.Col span={{ base: 12, md: 6 }}>
-            <Select label='Proceso' placeholder='Seleccione' data={processOptions} value={idProcess} onChange={setIdProcess} searchable required />
+            <SgcSelect label='Proceso' placeholder='Seleccione' data={processOptions} value={idProcess} onChange={setIdProcess} searchable required />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 6 }}>
-            <Select
+            <SgcSelect
               label='Tipo documental'
               placeholder='Seleccione'
               data={data.documentTypes.map((t) => ({ value: String(t.id), label: `${t.code} · ${t.name}` }))}
@@ -154,10 +155,10 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
             />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 8 }}>
-            <TextInput label='Título' value={title} onChange={(e) => setTitle(e.currentTarget.value)} required />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Título' value={title} onChange={(e) => setTitle(e.currentTarget.value)} required />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 4 }}>
-            <TextInput
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
               label='Código'
               description={codePreview ? `Vacío = siguiente consecutivo: ${codePreview}` : 'Vacío = se genera con la guía'}
               value={code}
@@ -166,7 +167,7 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
             />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 4 }}>
-            <Select
+            <SgcSelect
               label='Confidencialidad'
               data={SGC_CONFIDENTIALITY_LEVELS.map((c) => ({ value: c, label: SGC_CONFIDENTIALITY_LABELS[c] }))}
               value={confidentiality}
@@ -175,7 +176,7 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
             />
           </Grid.Col>
           <Grid.Col span={{ base: 12, md: 4 }}>
-            <Select
+            <SgcSelect
               label='Departamento dueño'
               description={process?.department ? `Vacío = el del proceso (${process.department})` : 'Vacío = el del proceso'}
               data={data.departments.map((x) => ({ value: String(x.id), label: x.name }))}
@@ -189,10 +190,10 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
             <NumberInput label='Versión' min={1} max={999} value={versionNumber} onChange={setVersionNumber} />
           </Grid.Col>
           <Grid.Col span={{ base: 6, md: 2 }}>
-            <TextInput type='date' label='Vigente desde' value={effectiveDate} max={today()} onChange={(e) => setEffectiveDate(e.currentTarget.value)} />
+            <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' type='date' label='Vigente desde' value={effectiveDate} max={today()} onChange={(e) => setEffectiveDate(e.currentTarget.value)} />
           </Grid.Col>
           <Grid.Col span={12}>
-            <Textarea
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true'
               label='Descripción de la versión'
               placeholder='Carga inicial del documento vigente.'
               value={changeDescription}

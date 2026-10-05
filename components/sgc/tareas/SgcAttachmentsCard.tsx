@@ -1,10 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { ActionIcon, Badge, Button, Card, FileInput, Group, Modal, ScrollArea, Select, Stack, Table, Text, Textarea, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Button, Card, FileInput, Group, Modal, ScrollArea, Stack, Table, Text, Textarea, Title, Tooltip } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import { IconDownload, IconEye, IconTrash, IconUpload } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import { formatDateCO, formatFileSize } from './format';
+import { attachmentDraftLabel } from '../../../lib/sgc/draft/view';
 
 /**
  * «Archivos adjuntos» de la solicitud documental (copia del bloque de
@@ -16,6 +18,8 @@ type Attachment = SgcRequestDetail['attachments'][number];
 export interface SgcAttachmentsCardProps {
   requestId: number;
   attachments: Attachment[];
+  /** Borrador vigente (para marcar los adjuntos «borrador» como VIGENTE o REEMPLAZADO). */
+  currentDraft?: SgcRequestDetail['currentDraft'];
   canUploadDraft: boolean;
   canUploadSupport: boolean;
   canWithdraw: (a: Attachment) => boolean;
@@ -23,7 +27,7 @@ export interface SgcAttachmentsCardProps {
   onWithdraw: (id: number, reason: string) => Promise<void>;
 }
 
-export default function SgcAttachmentsCard({ requestId, attachments, canUploadDraft, canUploadSupport, canWithdraw, onUpload, onWithdraw }: SgcAttachmentsCardProps) {
+export default function SgcAttachmentsCard({ requestId, attachments, currentDraft = null, canUploadDraft, canUploadSupport, canWithdraw, onUpload, onWithdraw }: SgcAttachmentsCardProps) {
   const [file, setFile] = useState<File | null>(null);
   const [purpose, setPurpose] = useState<'borrador' | 'soporte'>(canUploadDraft ? 'borrador' : 'soporte');
   const [uploading, setUploading] = useState(false);
@@ -56,8 +60,15 @@ export default function SgcAttachmentsCard({ requestId, attachments, canUploadDr
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {attachments.map((a) => (
-                <Table.Tr key={a.id} style={a.withdrawnAt ? { opacity: 0.55 } : undefined} data-testid='sgc-adjunto'>
+              {attachments.map((a) => {
+                const draftLabel = attachmentDraftLabel(a, currentDraft);
+                return (
+                <Table.Tr
+                  key={a.id}
+                  style={a.withdrawnAt || draftLabel === 'reemplazado' ? { opacity: 0.55 } : draftLabel === 'vigente' ? { background: 'var(--mantine-color-blue-0)' } : undefined}
+                  data-testid='sgc-adjunto'
+                  data-borrador={draftLabel ?? undefined}
+                >
                   <Table.Td data-label='Documento'>
                     <Text size='sm' fw={700} lineClamp={2} td={a.withdrawnAt ? 'line-through' : undefined}>
                       {a.fileName}
@@ -72,9 +83,23 @@ export default function SgcAttachmentsCard({ requestId, attachments, canUploadDr
                     )}
                   </Table.Td>
                   <Table.Td data-label='Tipo'>
-                    <Badge variant='light' color={a.purpose === 'borrador' ? 'blue' : 'gray'} size='sm'>
-                      {a.purpose === 'borrador' ? 'Borrador' : 'Soporte'}
-                    </Badge>
+                    <Group gap={4} wrap='wrap'>
+                      <Badge variant='light' color={a.purpose === 'borrador' ? 'blue' : 'gray'} size='sm'>
+                        {a.purpose === 'borrador' ? 'Borrador' : 'Soporte'}
+                      </Badge>
+                      {draftLabel === 'vigente' && (
+                        <Badge variant='filled' color='blue' size='sm' data-testid='sgc-adjunto-vigente'>
+                          Vigente
+                        </Badge>
+                      )}
+                      {draftLabel === 'reemplazado' && (
+                        <Tooltip label={currentDraft?.kind === 'borrador_editor' ? `El vigente es «${currentDraft.name}»` : 'Hay un borrador más reciente: no es lo que se firma'}>
+                          <Badge variant='outline' color='gray' size='sm' data-testid='sgc-adjunto-reemplazado'>
+                            Reemplazado
+                          </Badge>
+                        </Tooltip>
+                      )}
+                    </Group>
                   </Table.Td>
                   <Table.Td data-label='Cargado por'>
                     <Text size='sm' lineClamp={1}>
@@ -100,7 +125,8 @@ export default function SgcAttachmentsCard({ requestId, attachments, canUploadDr
                     </Group>
                   </Table.Td>
                 </Table.Tr>
-              ))}
+                );
+              })}
             </Table.Tbody>
           </Table>
         </ScrollArea.Autosize>
@@ -122,7 +148,7 @@ export default function SgcAttachmentsCard({ requestId, attachments, canUploadDr
             clearable
             data-testid='sgc-adjunto-archivo'
           />
-          <Select
+          <SgcSelect
             label='Tipo'
             data={[...(canUploadDraft ? [{ value: 'borrador', label: 'Borrador del documento' }] : []), { value: 'soporte', label: 'Soporte' }]}
             value={purpose}
@@ -156,7 +182,7 @@ export default function SgcAttachmentsCard({ requestId, attachments, canUploadDr
           <Text size='sm'>
             {withdraw?.fileName} quedará tachado en el historial (no se borra).
           </Text>
-          <Textarea label='Motivo' required minRows={2} autosize value={reason} onChange={(e) => setReason(e.currentTarget.value)} />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' required minRows={2} autosize value={reason} onChange={(e) => setReason(e.currentTarget.value)} />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setWithdraw(null)}>
               Cancelar

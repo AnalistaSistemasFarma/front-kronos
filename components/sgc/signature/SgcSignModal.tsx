@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import { Alert, Anchor, Autocomplete, Button, Card, Checkbox, Code, Group, Modal, PasswordInput, ScrollArea, SegmentedControl, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import { sgcTouchComboboxProps } from '../SgcSelect';
 import { IconAlertCircle, IconLock, IconSignature } from '@tabler/icons-react';
 import type { SgcSignatureMeaning } from '../../../lib/sgc/flows/definition';
 import { SGC_SIGNATURE_LABELS } from '../../../lib/sgc/flows/definition';
@@ -12,6 +14,7 @@ import {
   SGC_SIGNATURE_REASONS,
   type SgcCheckAnswer,
 } from '../../../lib/sgc/signature/consent';
+import { looksLikeAutofilledEmail, sgcNoAutofill } from '../../../lib/sgc/autofill';
 
 /**
  * Formulario de FIRMA ELECTRÓNICA PROPIA del SGC (Sprint 3).
@@ -57,6 +60,8 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
   const [answers, setAnswers] = useState<Record<string, { answer: SgcCheckAnswer | ''; observation: string }>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { data: session } = useSession();
+  const sessionEmail = session?.user?.email ?? '';
 
   useEffect(() => {
     if (!opened) {
@@ -64,6 +69,10 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
       setError(null);
     }
   }, [opened]);
+  // Si el navegador alcanzó a rellenar el motivo con el correo, se limpia: el motivo lo escribe la persona.
+  useEffect(() => {
+    if (opened && looksLikeAutofilledEmail(reason, sessionEmail)) setReason('');
+  }, [opened, reason, sessionEmail]);
 
   const checklistComplete = checklist.every((c) => {
     const a = answers[c.key];
@@ -73,7 +82,7 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
     return true;
   });
   const anyNoCumple = checklist.some((c) => answers[c.key]?.answer === 'no_cumple');
-  const ready = Boolean(draft) && reason.trim().length >= 5 && consent && password.length > 0 && checklistComplete && !anyNoCumple;
+  const ready = Boolean(draft) && reason.trim().length >= 5 && !looksLikeAutofilledEmail(reason, sessionEmail) && consent && password.length > 0 && checklistComplete && !anyNoCumple;
 
   const submit = async () => {
     if (!ready || !draft) return;
@@ -103,6 +112,8 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
 
   return (
     <Modal opened={opened} onClose={onClose} title={title} centered size='lg' scrollAreaComponent={ScrollArea.Autosize}>
+      {/* Formulario propio (sin envío nativo) para que el gestor de contraseñas asocie la contraseña al usuario explícito, no al motivo. */}
+      <form autoComplete='off' onSubmit={(e) => e.preventDefault()} data-testid='sgc-firma-form'>
       <Stack gap='sm' data-testid='sgc-firma-modal'>
         <Group gap='xs'>
           <IconSignature size={18} />
@@ -160,7 +171,7 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
                     )}
                     <SegmentedControl size='xs' mt={4} data={data} value={a.answer || ''} onChange={(v) => setAnswers((s) => ({ ...s, [c.key]: { ...a, answer: v as SgcCheckAnswer } }))} />
                     {a.answer === 'no_cumple' && (
-                      <TextInput size='xs' mt={4} placeholder='Qué no cumple (mínimo 5 caracteres)' value={a.observation} onChange={(e) => setAnswers((s) => ({ ...s, [c.key]: { ...a, observation: e.currentTarget.value } }))} />
+                      <TextInput size='xs' mt={4} placeholder='Qué no cumple (mínimo 5 caracteres)' {...sgcNoAutofill(`chequeo-observacion-${c.key}`)} value={a.observation} onChange={(e) => setAnswers((s) => ({ ...s, [c.key]: { ...a, observation: e.currentTarget.value } }))} />
                     )}
                   </div>
                 );
@@ -174,16 +185,18 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
           </Card>
         )}
 
-        <Autocomplete
+        <Autocomplete comboboxProps={sgcTouchComboboxProps()}
           label='Motivo de la firma'
           placeholder='Escriba o elija el motivo'
           data={SGC_SIGNATURE_REASONS[meaning]}
           value={reason}
           onChange={setReason}
           required
+          id='sgc-signature-reason'
+          {...sgcNoAutofill('signature-reason')}
           data-testid='sgc-firma-motivo'
         />
-        <Textarea label='Comentario para el historial (opcional)' autosize minRows={2} value={comment} onChange={(e) => setComment(e.currentTarget.value)} data-testid='sgc-firma-comentario' />
+        <Textarea label='Comentario para el historial (opcional)' autosize minRows={2} {...sgcNoAutofill('signature-comment')} value={comment} onChange={(e) => setComment(e.currentTarget.value)} data-testid='sgc-firma-comentario' />
 
         <Card withBorder radius='md' p='sm' bg='var(--app-surface-raised)'>
           <Text fw={600} size='sm'>
@@ -195,8 +208,21 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
           <Checkbox mt='xs' checked={consent} onChange={(e) => setConsent(e.currentTarget.checked)} label={SGC_SIGNATURE_CONSENT.checkbox} data-testid='sgc-firma-consentimiento' />
         </Card>
 
+        {/* Usuario explícito para el gestor de contraseñas (solo lectura, fuera de la vista): es la persona de la sesión. */}
+        <input
+          type='email'
+          name='username'
+          autoComplete='username'
+          value={sessionEmail}
+          readOnly
+          tabIndex={-1}
+          aria-label='Usuario que firma'
+          data-testid='sgc-firma-usuario'
+          style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 }}
+        />
         <PasswordInput
           label='Contraseña de SynerLink'
+          name='current-password'
           description={SGC_SIGNATURE_AUTH_METHOD_LABEL}
           leftSection={<IconLock size={16} />}
           autoComplete='current-password'
@@ -222,6 +248,7 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
           </Button>
         </Group>
       </Stack>
+      </form>
     </Modal>
   );
 }

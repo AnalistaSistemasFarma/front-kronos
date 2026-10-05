@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Alert, Badge, Button, Card, Code, Group, Image, Modal, Select, Stack, Table, Text, TextInput, Textarea, Title } from '@mantine/core';
+import { Alert, Badge, Button, Card, Code, Group, Image, Modal, Stack, Table, Text, TextInput, Textarea, Title } from '@mantine/core';
+import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import { IconAlertCircle, IconCheck, IconSignature, IconX } from '@tabler/icons-react';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import SgcSignaturePad from '../../../../../components/sgc/signature/SgcSignaturePad';
@@ -85,8 +86,8 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
           Registrar firma (inducción)
         </Title>
         <Stack>
-          <Select label='Persona' placeholder='Elija la persona' data={options} value={email} onChange={setEmail} searchable data-testid='sgc-firmas-persona' />
-          <TextInput label='Motivo' placeholder='Inducción al SGC del 2026-10-01' value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-firmas-motivo' />
+          <SgcSelect label='Persona' placeholder='Elija la persona' data={options} value={email} onChange={setEmail} searchable data-testid='sgc-firmas-persona' />
+          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' placeholder='Inducción al SGC del 2026-10-01' value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-firmas-motivo' />
           {image ? (
             <Group>
               <Image src={image} alt='Firma dibujada' h={80} w='auto' fit='contain' radius='sm' />
@@ -175,7 +176,7 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
 
       <Modal opened={Boolean(revoke)} onClose={() => setRevoke(null)} title='Revocar firma registrada' centered>
         <Stack>
-          <Textarea label='Motivo' minRows={2} autosize value={revoke?.reason ?? ''} onChange={(e) => setRevoke((r) => (r ? { ...r, reason: e.currentTarget.value } : r))} />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' minRows={2} autosize value={revoke?.reason ?? ''} onChange={(e) => setRevoke((r) => (r ? { ...r, reason: e.currentTarget.value } : r))} />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setRevoke(null)}>
               Volver

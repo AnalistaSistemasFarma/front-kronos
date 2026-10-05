@@ -1312,6 +1312,14 @@ model SgcCompanyConfig {
   change_reason     String?  @db.NVarChar(1000)
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
+  // Correcciones de Calidad (2026-10-03): logo de la empresa para el encabezado
+  // institucional del PDF controlado (data URL PNG/JPEG, sin red), dominios de
+  // correo de las personas de la empresa (divulgación automática: solo ellas;
+  // las demás, solo por selección manual de la persona) y umbral de avance de
+  // lectura que se avisa al creador y a Calidad (por defecto 90 %).
+  logo_data_url         String? @db.NVarChar(Max)
+  dissemination_domains String? @db.NVarChar(500)
+  read_threshold_pct    Int     @default(90)
 
   company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1521,6 +1529,9 @@ model SgcDocumentVersion {
   manifest_json         String?   @db.NVarChar(Max)
   // Sprint 4: versión que la reemplazó al pasar a vigente (esta queda obsoleta).
   id_superseded_by      Int?
+  // Correcciones 2026-10-03: composición del PDF controlado (encabezado
+  // institucional, posición del campo «Fecha de emisión» y firmas ubicadas).
+  layout_json           String?   @db.NVarChar(Max)
 
   document SgcDocument @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
   // Sprint 5: avisos de vencimiento de la versión.
@@ -1830,6 +1841,9 @@ model SgcRequest {
   disseminationScopes SgcDisseminationScope[]
   readRecords         SgcReadRecord[]
   trainings           SgcTraining[]
+  // Correcciones 2026-10-03: composición del documento (firmas ubicadas) y avisos de umbral de lectura.
+  documentLayouts      SgcDocumentLayout[]
+  readThresholdNotices SgcReadThresholdNotice[]
 
   @@index([id_company, status])
   @@index([requester_email])
@@ -2168,6 +2182,10 @@ model SgcDraftRevision {
   note              String?  @db.NVarChar(500)
   saved_by          String   @db.NVarChar(255)
   saved_at          DateTime
+  // Correcciones 2026-10-03: REVISIÓN MENOR de Calidad durante la aprobación
+  // (forma, puntuación) con motivo obligatorio y la huella del contenido que corrige.
+  minor_reason      String?  @db.NVarChar(1000)
+  base_sha256       String?  @db.Char(64)
 
   request SgcRequest @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
 
@@ -2537,6 +2555,54 @@ model SgcAccessRequest {
   @@index([id_company, status])
   @@index([requester_email])
   @@map("access_request")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Correcciones de Calidad OLP (reunión 2026-10-02).
+// ---------------------------------------------------------------------------
+
+/// Composición del documento de una solicitud: encabezado institucional y
+/// ubicación de las firmas que el ELABORADOR hace sobre el documento (copia
+/// congelada del mecanismo de SynerLink). Cada guardado es una fila NUEVA
+/// (la última manda). SOLO INSERCIÓN.
+model SgcDocumentLayout {
+  id_document_layout   Int      @id @default(autoincrement())
+  id_request           Int
+  institutional_header Boolean  @default(false)
+  // [{ id, signerKey, meaning, page, x, y, width, height, label }]
+  fields_json          String   @db.NVarChar(Max)
+  // Huella del borrador sobre el que se ubicaron las firmas.
+  content_sha256       String?  @db.Char(64)
+  saved_by             String   @db.NVarChar(255)
+  saved_at             DateTime
+  change_reason        String?  @db.NVarChar(1000)
+
+  request SgcRequest @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_request])
+  @@map("document_layout")
+  @@schema("sgc")
+}
+
+/// Aviso de avance de lectura de una divulgación al llegar al umbral (sale UNA
+/// sola vez por tarea y umbral). SOLO INSERCIÓN.
+model SgcReadThresholdNotice {
+  id_read_threshold_notice Int      @id @default(autoincrement())
+  id_request               Int
+  id_task                  Int
+  threshold_pct            Int
+  percent_at               Decimal  @db.Decimal(5, 1)
+  read_count               Int
+  counted                  Int
+  recipients_json          String   @db.NVarChar(2000)
+  notified_at              DateTime
+
+  request SgcRequest @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_task, threshold_pct])
+  @@index([id_request])
+  @@map("read_threshold_notice")
   @@schema("sgc")
 }
 

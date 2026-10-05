@@ -2,8 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Alert, Badge, Button, Card, Group, Loader, Select, Table, Text, TextInput } from '@mantine/core';
-import { IconAlertTriangle, IconFileUpload, IconHierarchy2, IconSearch } from '@tabler/icons-react';
+import { Alert, Badge, Button, Card, Group, Loader, Table, Text, TextInput } from '@mantine/core';
+import SgcSelect from '../../../../../components/sgc/SgcSelect';
+import { IconAlertTriangle, IconBuildingCommunity, IconFileUpload, IconHierarchy2, IconSearch } from '@tabler/icons-react';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { SgcConfidentialityBadge, SgcDocumentCode, SgcReviewBadge, SgcStatusBadge } from '../../../../../components/sgc/SgcBadges';
 import { sgcHref } from '../../../../../components/sgc/useSgcCompany';
@@ -76,7 +77,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
   return (
     <Card withBorder radius='md' p='lg' shadow='xs'>
       <Group gap='sm' mb='md' align='flex-end' wrap='wrap'>
-        <TextInput
+        <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
           label='Buscar'
           placeholder='Código o título'
           leftSection={<IconSearch size={16} />}
@@ -85,7 +86,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
           w={260}
           data-testid='sgc-buscador'
         />
-        <Select
+        <SgcSelect
           label='Tipo de proceso'
           placeholder='Todos'
           clearable
@@ -97,7 +98,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
           }}
           w={220}
         />
-        <Select
+        <SgcSelect
           label='Proceso'
           placeholder='Todos'
           clearable
@@ -107,7 +108,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
           onChange={setProcessId}
           w={260}
         />
-        <Select
+        <SgcSelect
           label='Tipo documental'
           placeholder='Todos'
           clearable
@@ -117,7 +118,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
           w={220}
         />
         {company.canQuality && (
-          <Select label='Estado' data={STATUS_OPTIONS} value={status} onChange={(v) => setStatus(v ?? 'vigente')} allowDeselect={false} w={180} />
+          <SgcSelect label='Estado' data={STATUS_OPTIONS} value={status} onChange={(v) => setStatus(v ?? 'vigente')} allowDeselect={false} w={180} />
         )}
       </Group>
 
@@ -215,6 +216,9 @@ export default function ListadoMaestroPage() {
       subtitle='Documentos controlados vigentes, con código y versión'
       actions={(company) => (
         <Group gap='xs'>
+          <Button component={Link} href={sgcHref(`${SGC_BASE_URL}/areas`, company.idCompany)} variant='light' leftSection={<IconBuildingCommunity size={16} />}>
+            Por área
+          </Button>
           <Button component={Link} href={sgcHref(`${SGC_BASE_URL}/mapa`, company.idCompany)} variant='light' leftSection={<IconHierarchy2 size={16} />}>
             Mapa de procesos
           </Button>

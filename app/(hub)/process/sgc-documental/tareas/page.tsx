@@ -18,13 +18,13 @@ import {
   Group,
   Loader,
   LoadingOverlay,
-  Select,
   Stack,
   Table,
   Text,
   TextInput,
   Title,
 } from '@mantine/core';
+import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import {
   IconAlertCircle,
   IconBuilding,
@@ -218,19 +218,19 @@ function TaskBoard() {
             <Box mt='md'>
               <Grid>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput label='ID Solicitud' type='text' value={filters.id} onChange={(e) => handleFilterChange('id', e.target.value)} leftSection={<IconFilter size={16} />} data-testid='id-filter' />
+                  <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='ID Solicitud' type='text' value={filters.id} onChange={(e) => handleFilterChange('id', e.target.value)} leftSection={<IconFilter size={16} />} data-testid='id-filter' />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select label='Estado' placeholder='Todos los estados' clearable data={STATUS_FILTER} value={filters.status} onChange={(value) => handleFilterChange('status', value || '')} leftSection={<IconFlag size={16} />} />
+                  <SgcSelect label='Estado' placeholder='Todos los estados' clearable data={STATUS_FILTER} value={filters.status} onChange={(value) => handleFilterChange('status', value || '')} leftSection={<IconFlag size={16} />} />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select label='Empresa' placeholder='Todas las empresas' clearable data={companies} value={filters.company} onChange={(value) => handleFilterChange('company', value || '')} leftSection={<IconBuilding size={16} />} />
+                  <SgcSelect label='Empresa' placeholder='Todas las empresas' clearable data={companies} value={filters.company} onChange={(value) => handleFilterChange('company', value || '')} leftSection={<IconBuilding size={16} />} />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput label='Fecha Desde' type='date' value={filters.date_from} onChange={(e) => handleFilterChange('date_from', e.target.value)} leftSection={<IconCalendarEvent size={16} />} />
+                  <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Fecha Desde' type='date' value={filters.date_from} onChange={(e) => handleFilterChange('date_from', e.target.value)} leftSection={<IconCalendarEvent size={16} />} />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput label='Fecha Hasta' type='date' value={filters.date_to} onChange={(e) => handleFilterChange('date_to', e.target.value)} leftSection={<IconCalendarEvent size={16} />} />
+                  <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Fecha Hasta' type='date' value={filters.date_to} onChange={(e) => handleFilterChange('date_to', e.target.value)} leftSection={<IconCalendarEvent size={16} />} />
                 </Grid.Col>
               </Grid>
 

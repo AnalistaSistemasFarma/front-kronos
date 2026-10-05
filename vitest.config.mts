@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 // Solo cubrimos utilidades PURAS de `lib/` (sin dependencias de BD/red).
 // El servidor MCP tiene su propia suite en `mcp/` (no se incluye aquí).
 export default defineConfig({
+  // El tsconfig de Next usa jsx «preserve»; para la prueba de paridad (render de
+  // componentes .tsx en Node) Vitest debe transformar el JSX.
+  oxc: { jsx: { runtime: 'automatic' } },
   resolve: {
     alias: {
       // Replica el path alias "@/*" del tsconfig para que los imports funcionen.
@@ -17,7 +20,8 @@ export default defineConfig({
     environment: 'node',
     // `app/api/sgc/**`: pruebas de las rutas del SGC documental (con sesión y
     // base simuladas); son evidencia de validación del módulo.
-    include: ['lib/**/*.test.ts', 'app/api/sgc/**/*.test.ts'],
+    // `components/sgc/**`: prueba de PARIDAD de las pantallas copiadas de SynerLink (render del marcado).
+    include: ['lib/**/*.test.ts', 'app/api/sgc/**/*.test.ts', 'components/sgc/**/*.test.ts'],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
 
     // -----------------------------------------------------------------------

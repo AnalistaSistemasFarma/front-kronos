@@ -1,10 +1,11 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Alert, Autocomplete, Badge, Button, Card, Group, Modal, Progress, Select, Stack, Table, Text, Textarea, Title } from '@mantine/core';
+import { Alert, Autocomplete, Badge, Button, Card, Group, Modal, Progress, Stack, Table, Text, Textarea, Title } from '@mantine/core';
+import SgcSelect, { sgcTouchComboboxProps } from '../SgcSelect';
 import { IconBell, IconPlus, IconSpeakerphone, IconUserMinus, IconX } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
-import { SGC_SCOPE_KIND_LABELS, type SgcScopeKind } from '../../../lib/sgc/dissemination/scope';
+import { SGC_SCOPE_KIND_LABELS, isPersonEmail, personEmailFromInput, type SgcScopeKind } from '../../../lib/sgc/dissemination/scope';
 import { useSgcFetch } from '../useSgcFetch';
 import { formatDateCO } from './format';
 
@@ -45,7 +46,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
         : [];
 
   const add = async () => {
-    const entry = kind === 'departamento' ? { kind, idDepartment: Number(target) } : kind === 'cargo' ? { kind, idCargo: Number(target) } : kind === 'persona' ? { kind, email: email.trim() } : { kind };
+    const entry = kind === 'departamento' ? { kind, idDepartment: Number(target) } : kind === 'cargo' ? { kind, idCargo: Number(target) } : kind === 'persona' ? { kind, email: personEmailFromInput(email, users) } : { kind };
     const ok = await onAction({ action: 'agregar', entry, reason }, view.open ? 'Alcance ampliado: las personas nuevas recibieron su tarea de lectura.' : 'Alcance de divulgación actualizado.');
     if (ok) {
       setTarget(null);
@@ -54,7 +55,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
     }
   };
 
-  const ready = reason.trim().length >= 5 && (kind === 'empresa' || (kind === 'persona' ? email.includes('@') : Boolean(target)));
+  const ready = reason.trim().length >= 5 && (kind === 'empresa' || (kind === 'persona' ? isPersonEmail(email, users) : Boolean(target)));
 
   return (
     <Card shadow='sm' p='xl' radius='md' withBorder mt='6' data-testid='sgc-divulgacion'>
@@ -104,11 +105,21 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
           {view.withoutAccess.length} persona(s) del alcance no tienen acceso al SGC y no reciben tarea de lectura: {view.withoutAccess.join(', ')}. Otórgueles el permiso de consulta del SGC y amplíe el alcance con ellas, o deje constancia.
         </Alert>
       )}
+      {view.companyDomains && (
+        <Text size='xs' c='dimmed' mb='sm' data-testid='sgc-alcance-dominios'>
+          «Toda la empresa», departamentos y cargos solo incluyen correos de la empresa ({view.companyDomains.map((d) => `@${d}`).join(', ')}). A una persona de otra empresa se le asigna lectura solo eligiéndola como «Persona».
+        </Text>
+      )}
+      {view.outsideCompany.length > 0 && (
+        <Alert color='gray' mb='sm' data-testid='sgc-alcance-otra-empresa'>
+          {view.outsideCompany.length} persona(s) de otra empresa quedan por fuera del alcance automático: {view.outsideCompany.join(', ')}. Si alguna debe leer el documento, agréguela como «Persona».
+        </Alert>
+      )}
 
       {view.canEditScope && (
         <Card withBorder radius='md' p='md' mb='md'>
           <Group align='flex-end' wrap='wrap'>
-            <Select
+            <SgcSelect
               label='Agregar al alcance'
               data={(Object.keys(SGC_SCOPE_KIND_LABELS) as SgcScopeKind[]).map((k) => ({ value: k, label: SGC_SCOPE_KIND_LABELS[k] }))}
               value={kind}
@@ -121,10 +132,10 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
               data-testid='sgc-alcance-clase'
             />
             {(kind === 'departamento' || kind === 'cargo') && (
-              <Select label={kind === 'departamento' ? 'Departamento' : 'Cargo'} data={targetOptions} value={target} onChange={setTarget} searchable w={280} data-testid='sgc-alcance-destino' />
+              <SgcSelect label={kind === 'departamento' ? 'Departamento' : 'Cargo'} data={targetOptions} value={target} onChange={setTarget} searchable w={280} data-testid='sgc-alcance-destino' />
             )}
-            {kind === 'persona' && <Autocomplete label='Correo de la persona' data={users} value={email} onChange={setEmail} w={300} data-testid='sgc-alcance-persona' />}
-            <Textarea label='Motivo' autosize minRows={1} value={reason} onChange={(e) => setReason(e.currentTarget.value)} w={260} data-testid='sgc-alcance-motivo' />
+            {kind === 'persona' && <Autocomplete comboboxProps={sgcTouchComboboxProps()} autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Correo de la persona' data={users} value={email} onChange={setEmail} w={300} data-testid='sgc-alcance-persona' />}
+            <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' autosize minRows={1} value={reason} onChange={(e) => setReason(e.currentTarget.value)} w={260} data-testid='sgc-alcance-motivo' />
             <Button leftSection={<IconPlus size={14} />} disabled={!ready} onClick={add} data-testid='sgc-alcance-agregar'>
               Agregar
             </Button>
@@ -147,7 +158,22 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
               {c.read} de {c.total - c.excluded} leyeron ({c.percent} %) · {c.pending} pendiente(s) · {c.excluded} excluida(s)
             </Text>
           </Group>
-          <Progress value={c.percent} color={c.complete ? 'green' : 'blue'} mb='md' />
+          <Progress value={c.percent} color={c.complete ? 'green' : 'blue'} mb={4} />
+          <Text size='xs' c='dimmed' mb='md' data-testid='sgc-umbral-lectura'>
+            Aviso de avance al creador y a Calidad al llegar al {view.threshold.pct} % de lectura
+            {view.threshold.notifiedAt ? ` · avisado el ${formatDateCO(view.threshold.notifiedAt)}` : ' · aún no se ha alcanzado'}.
+          </Text>
+          {view.doubts.length > 0 && (
+            <Alert color='orange' variant='light' mb='md' title={`«No entendí» (${view.doubts.length})`} data-testid='sgc-no-entendi-lista'>
+              <Stack gap={4}>
+                {view.doubts.map((d, i) => (
+                  <Text key={i} size='sm'>
+                    <b>{d.name ?? d.email}</b> · {formatDateCO(d.at)}: {d.body.split('\n').slice(1).join(' ')}
+                  </Text>
+                ))}
+              </Stack>
+            </Alert>
+          )}
           <Table.ScrollContainer minWidth={720}>
             <Table striped highlightOnHover data-testid='sgc-lectores'>
               <Table.Thead>
@@ -225,7 +251,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
                 ? 'La persona deja de tener la lectura pendiente (no se borra: queda excluida con la justificación).'
                 : 'La entrada se retira del alcance (no se borra: queda en el historial).'}
           </Text>
-          <Textarea label={modal?.type === 'retirar' ? 'Motivo' : 'Justificación'} required autosize minRows={3} value={modalReason} onChange={(e) => setModalReason(e.currentTarget.value)} data-testid='sgc-divulgacion-motivo' />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label={modal?.type === 'retirar' ? 'Motivo' : 'Justificación'} required autosize minRows={3} value={modalReason} onChange={(e) => setModalReason(e.currentTarget.value)} data-testid='sgc-divulgacion-motivo' />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setModal(null)}>
               Volver

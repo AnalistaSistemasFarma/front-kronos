@@ -25,6 +25,33 @@ export interface SgcWatermarkInfo {
    * guardado no cambia (su SHA-256 sigue siendo el registrado).
    */
   state?: 'vigente' | 'obsoleto' | 'anulado' | 'divulgacion';
+  /**
+   * 2026-10-03: FECHA DE EMISIÓN del encabezado institucional. El PDF firmado
+   * no se modifica (su huella es la registrada): la fecha en que quedó vigente
+   * se estampa en su recuadro en cada copia controlada.
+   */
+  emission?: { page: number; x: number; y: number; width: number; height: number; text: string };
+}
+
+/** Texto y recuadro de la fecha de emisión para la copia controlada (o undefined si el PDF no tiene encabezado institucional). */
+export function emissionStampFor(version: { status: string; effective_date: Date | null; layout_json?: string | null }): SgcWatermarkInfo['emission'] {
+  type Rect = { page: number; x: number; y: number; width: number; height: number };
+  let rect: Rect | null = null;
+  try {
+    const parsed = version.layout_json ? (JSON.parse(version.layout_json) as { emission?: Rect | null }) : null;
+    rect = parsed?.emission ?? null;
+  } catch {
+    rect = null;
+  }
+  if (!rect || ![rect.page, rect.x, rect.y, rect.width, rect.height].every((n) => Number.isFinite(n))) return undefined;
+  const date = version.effective_date ? version.effective_date.toISOString().slice(0, 10) : null;
+  const text =
+    version.status === 'borrador'
+      ? 'Pendiente: en divulgación'
+      : version.status === 'anulado'
+        ? 'Anulado: no fue emitido'
+        : date ?? 'Sin fecha de vigencia';
+  return { ...rect, text };
 }
 
 const STATE_TEXT: Record<NonNullable<SgcWatermarkInfo['state']>, { diagonal: string; banner: string | null }> = {
@@ -104,6 +131,17 @@ export async function stampControlledCopy(pdfBytes: Uint8Array, info: SgcWaterma
       color: rgb(0.55, 0.1, 0.1),
       opacity: 0.85,
     });
+  }
+
+  const em = info.emission;
+  const target = em ? pdf.getPages()[em.page - 1] : undefined;
+  if (em && target) {
+    // El recuadro completo se cubre (el PDF guardado dice «Al quedar vigente») y la fecha va centrada en altura.
+    target.drawRectangle({ x: em.x, y: em.y, width: em.width, height: em.height, color: rgb(1, 1, 1) });
+    const text = toWinAnsiSafe(em.text);
+    let size = 9;
+    while (size > 5 && font.widthOfTextAtSize(text, size) > em.width - 8) size -= 0.5;
+    target.drawText(text, { x: em.x + 4, y: em.y + em.height / 2 - size / 2 + 1, size, font, color: rgb(0.1, 0.12, 0.16) });
   }
 
   pdf.setProducer('SynerLink — SGC documental (copia controlada)');

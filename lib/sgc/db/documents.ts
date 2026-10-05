@@ -95,6 +95,12 @@ function toMasterItem(doc: DocumentRow, current: { id_document_version: number; 
       name: doc.process.name,
       department: doc.process.department?.department ?? null,
     },
+    // 2026-10-03: ÁREA del documento para navegar por área → tipo (dueño del documento; si no, el del proceso).
+    area: doc.id_owner_department
+      ? { id: doc.id_owner_department, name: doc.ownerDepartment?.department ?? `Área ${doc.id_owner_department}` }
+      : doc.process.id_department
+        ? { id: doc.process.id_department, name: doc.process.department?.department ?? `Área ${doc.process.id_department}` }
+        : null,
     documentType: {
       id: doc.documentType.id_document_type,
       code: doc.documentType.code,

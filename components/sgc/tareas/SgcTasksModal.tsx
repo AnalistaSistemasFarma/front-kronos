@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { ActionIcon, Badge, Box, Button, Flex, Group, Modal, Paper, ScrollArea, Select, Stack, Text, Textarea, ThemeIcon } from '@mantine/core';
+import { ActionIcon, Badge, Box, Button, Flex, Group, Modal, Paper, ScrollArea, Stack, Text, Textarea, ThemeIcon } from '@mantine/core';
+import SgcSelect from '../SgcSelect';
 import { IconCheck, IconClock, IconEye, IconLock, IconX } from '@tabler/icons-react';
 import { sgcStatusColor } from '../../../lib/sgc/flows/engine';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
@@ -131,7 +132,7 @@ export default function SgcTasksModal({ opened, onClose, requestId, tasks, users
                                 Asignado:
                               </Text>
                               {task.canReassign ? (
-                                <Select
+                                <SgcSelect
                                   data={users}
                                   value={task.assignees.find((a) => a.status === 'pendiente')?.email ?? null}
                                   onChange={(value) => value && setPending({ idTask: task.id, toEmail: value })}
@@ -192,7 +193,7 @@ export default function SgcTasksModal({ opened, onClose, requestId, tasks, users
           <Text size='sm'>
             La tarea pasará a <strong>{users.find((u) => u.value === pending?.toEmail)?.label ?? pending?.toEmail}</strong>. El cambio queda en el historial.
           </Text>
-          <Textarea label='Motivo de la reasignación' required minRows={2} autosize value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-reasignar-motivo' />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo de la reasignación' required minRows={2} autosize value={reason} onChange={(e) => setReason(e.currentTarget.value)} data-testid='sgc-reasignar-motivo' />
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setPending(null)} disabled={saving}>
               Cancelar

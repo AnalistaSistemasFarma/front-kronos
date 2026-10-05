@@ -11,7 +11,6 @@ import {
   Group,
   Loader,
   Modal,
-  Select,
   SimpleGrid,
   Stack,
   Table,
@@ -20,6 +19,7 @@ import {
   Textarea,
   Title,
 } from '@mantine/core';
+import SgcSelect from '../../../../../../components/sgc/SgcSelect';
 import { IconAlertTriangle, IconArrowLeft, IconBan, IconCheck, IconEdit, IconEye, IconFilePlus, IconKey } from '@tabler/icons-react';
 import SgcShell from '../../../../../../components/sgc/SgcShell';
 import SgcSecureViewer from '../../../../../../components/sgc/SgcSecureViewer';
@@ -402,15 +402,15 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
 
       <Modal opened={modal === 'editar'} onClose={() => setModal(null)} title='Editar documento' centered>
         <Stack>
-          <TextInput label='Título' value={title} onChange={(e) => setTitle(e.currentTarget.value)} />
-          <Select
+          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Título' value={title} onChange={(e) => setTitle(e.currentTarget.value)} />
+          <SgcSelect
             label='Confidencialidad'
             data={SGC_CONFIDENTIALITY_LEVELS.map((c) => ({ value: c, label: SGC_CONFIDENTIALITY_LABELS[c] }))}
             value={conf}
             onChange={setConf}
             allowDeselect={false}
           />
-          <Select
+          <SgcSelect
             label='Departamento dueño'
             data={departments.map((x) => ({ value: String(x.id), label: x.name }))}
             value={owner}
@@ -418,7 +418,7 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
             clearable
             searchable
           />
-          <Textarea label='Motivo del cambio' description='Queda en la auditoría.' value={reason} onChange={(e) => setReason(e.currentTarget.value)} minRows={2} />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo del cambio' description='Queda en la auditoría.' value={reason} onChange={(e) => setReason(e.currentTarget.value)} minRows={2} />
           <Button
             loading={busy}
             onClick={() =>
@@ -444,7 +444,7 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
           <Text size='sm'>
             El documento {d.code} dejará de aparecer en el listado maestro. Nada se borra: queda anulado con su motivo en la auditoría.
           </Text>
-          <Textarea label='Motivo de la anulación' value={reason} onChange={(e) => setReason(e.currentTarget.value)} minRows={2} />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo de la anulación' value={reason} onChange={(e) => setReason(e.currentTarget.value)} minRows={2} />
           <Button color='red' loading={busy} onClick={() => run(() => sgcSend(`/api/sgc/documents/${d.idDocument}/annul`, 'POST', { reason }), 'Documento anulado.')}>
             Anular
           </Button>
@@ -453,7 +453,7 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
 
       <Modal opened={modal === 'acceso'} onClose={() => setModal(null)} title='Otorgar acceso' centered>
         <Stack>
-          <Select
+          <SgcSelect
             label='Departamento'
             data={departments.map((x) => ({ value: String(x.id), label: x.name }))}
             value={grantDept}
@@ -464,7 +464,7 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
             clearable
             searchable
           />
-          <TextInput
+          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
             label='o persona (correo)'
             value={grantEmail}
             onChange={(e) => {
@@ -477,14 +477,14 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
             <Checkbox label='Descarga (excepcional)' checked={grantDownload} onChange={(e) => setGrantDownload(e.currentTarget.checked)} />
             <Checkbox label='Impresión (excepcional)' checked={grantPrint} onChange={(e) => setGrantPrint(e.currentTarget.checked)} />
           </Group>
-          <TextInput
+          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
             type='date'
             label='Vence'
             description='Obligatorio si incluye descarga o impresión.'
             value={grantExpires}
             onChange={(e) => setGrantExpires(e.currentTarget.value)}
           />
-          <Textarea label='Motivo' value={reason} onChange={(e) => setReason(e.currentTarget.value)} minRows={2} />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' value={reason} onChange={(e) => setReason(e.currentTarget.value)} minRows={2} />
           <Button
             loading={busy}
             onClick={() =>
@@ -511,7 +511,7 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
 
       <Modal opened={revokeId !== null} onClose={() => setRevokeId(null)} title='Revocar acceso' centered>
         <Stack>
-          <Textarea label='Motivo' value={reason} onChange={(e) => setReason(e.currentTarget.value)} minRows={2} />
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' value={reason} onChange={(e) => setReason(e.currentTarget.value)} minRows={2} />
           <Button
             color='red'
             loading={busy}
