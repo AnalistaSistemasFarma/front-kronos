@@ -1322,7 +1322,10 @@ function AssetsBoard() {
             </Group>
           }
           fullScreen={!!isMobile}
-          size='xl'
+          // Mantine fija el ancho con `size` (flex-basis); un maxWidth/width en
+          // `content` no lo cambia. En escritorio: 70% del ancho, entre 780px y 1400px.
+          size={isMobile ? '100%' : 'clamp(min(780px, calc(100vw - 2rem)), 70vw, 1400px)'}
+          yOffset='2rem'
           centered={!isMobile}
           radius={isMobile ? 0 : 'md'}
           padding={isMobile ? 'md' : 'lg'}
@@ -1335,7 +1338,12 @@ function AssetsBoard() {
                   height: '100%',
                   maxHeight: '100dvh',
                 }
-              : { maxWidth: 920, width: 'min(920px, calc(100vw - 2rem))' },
+              : {
+                  display: 'flex',
+                  flexDirection: 'column',
+                  maxHeight: 'calc(100dvh - 4rem)',
+                  overflow: 'hidden',
+                },
             header: {
               flexShrink: 0,
               paddingBottom: 8,
@@ -1343,6 +1351,7 @@ function AssetsBoard() {
             },
             body: {
               flex: 1,
+              minHeight: 0,
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
@@ -1359,7 +1368,9 @@ function AssetsBoard() {
             type='auto'
             offsetScrollbars
             style={{ flex: 1, minHeight: 0 }}
-            mah={isMobile ? undefined : 'min(70vh, 640px)'}
+            // Alto disponible = viewport - márgenes (4rem) - encabezado y botones (~11rem),
+            // para que el pie con "Crear Activo" nunca tape los últimos campos.
+            mah={isMobile ? undefined : 'calc(100dvh - 15rem)'}
           >
             <Stack gap='md' pb='sm'>
               <Text fw={600} c='blue.7' tt='uppercase' size='xs'>
