@@ -41,6 +41,7 @@ import {
   isWordDraftFileName,
   nextDraftVersionLabel,
   pendingDraftValidators,
+  redactDraftForOutsider,
   resolveDraftPermissions,
   type DraftActor,
   type DraftClientReviewerInput,
@@ -411,10 +412,12 @@ export async function getOrionDraftInfo(
   // Con permiso del flujo, pero de este documento solo su preparadora (no otra ni un validador).
   const owner = elaborator && isDraftOwner(draft, params.actor, ctx?.id_requester);
   const validators = owner ? await listRequestValidators(pool, params.requestId) : [];
+  // Quien no prepara ni valida este documento solo ve el estado y el avance.
+  const participant = owner || isDraftValidator(draft, params.actor.email, params.actor.userId);
   return {
     companyId: ctx?.id_company != null ? Number(ctx.id_company) : null,
     currentUserEmail: normalizeEmail(params.actor.email),
-    draft,
+    draft: draft && !participant ? redactDraftForOutsider(draft) : draft,
     permissions: draft
       ? resolveDraftPermissions({
           state: draft,

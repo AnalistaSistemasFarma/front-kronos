@@ -11,9 +11,11 @@ import {
   applyDraftSubmitInternal,
   createDraftState,
   draftCorrectionRequests,
+  findDraftForOneDriveItem,
   pendingDraftValidators,
   isWordDraftFileName,
   nextDraftVersionLabel,
+  redactDraftForOutsider,
   resolveDraftPermissions,
   type DraftActor,
 } from '../draftState';
@@ -366,5 +368,38 @@ describe('preparación Word: revisión del cliente', () => {
     expect(convertido.status).toBe('CONVERTIDO_PDF');
     expect(convertido.pdfFileId).toBe('p1');
     expect(convertido.versions.at(-1)).toMatchObject({ label: 'v1.0', kind: 'pdf' });
+  });
+});
+
+describe('preparación Word: acceso de quien no participa', () => {
+  it('reconoce el Word de trabajo y las copias de versión del borrador', () => {
+    const s = applyDraftNewVersion(nuevo(), { actor: elaborador, version: version('b') });
+    const drafts = { f1: s };
+    expect(findDraftForOneDriveItem(drafts, ['f1'])?.fileId).toBe('f1');
+    expect(findDraftForOneDriveItem(drafts, ['item-a'])?.fileId).toBe('f1');
+    expect(findDraftForOneDriveItem(drafts, ['otro', 'item-b'])?.fileId).toBe('f1');
+    expect(findDraftForOneDriveItem(drafts, ['ajeno'])).toBeNull();
+    expect(findDraftForOneDriveItem(undefined, ['f1'])).toBeNull();
+    expect(findDraftForOneDriveItem(drafts, ['', null])).toBeNull();
+  });
+
+  it('a quien no participa no le llegan versiones, comentarios ni correos', () => {
+    const devuelto = applyDraftInternalDecision(
+      applyDraftSubmitInternal(nuevo(), { actor: elaborador, validators }),
+      { actor: ana, decision: 'return', comment: 'Cambiar fecha' }
+    );
+    const r = redactDraftForOutsider(devuelto);
+    expect(r).toMatchObject({ fileId: 'f1', status: devuelto.status, versionLabel: devuelto.versionLabel });
+    expect(r.versions).toEqual([]);
+    expect(r.createdByEmail).toBe('');
+    expect(r.internalReview?.returnReason).toBeUndefined();
+    expect(r.internalReview?.approvals.map((a) => [a.name, a.decision])).toEqual([
+      ['Ana', 'DEVUELTO'],
+      ['Beto', 'PENDIENTE'],
+    ]);
+    const json = JSON.stringify(r);
+    expect(json).not.toContain('item-a');
+    expect(json).not.toContain('Cambiar fecha');
+    expect(json).not.toContain('@x.com');
   });
 });

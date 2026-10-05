@@ -122,6 +122,83 @@ export function isDraftValidator(
   return (state?.internalReview?.approvals ?? []).some((a) => isSameValidator(a, email, userId));
 }
 
+/**
+ * Borrador al que pertenece un archivo de OneDrive: el Word de trabajo o cualquiera de sus
+ * copias de versión (`_versiones-word`). `itemIds`: el id pedido y el que resolvió Graph.
+ */
+export function findDraftForOneDriveItem(
+  drafts: Record<string, OrionDraftState> | null | undefined,
+  itemIds: Array<string | null | undefined>
+): { fileId: string; draft: OrionDraftState } | null {
+  const ids = new Set(itemIds.map((id) => String(id || '').trim()).filter(Boolean));
+  if (!drafts || ids.size === 0) return null;
+  for (const [fileId, draft] of Object.entries(drafts)) {
+    if (!draft) continue;
+    if (ids.has(fileId) || ids.has(String(draft.fileId || '').trim())) return { fileId, draft };
+    if ((draft.versions ?? []).some((v) => ids.has(String(v.oneDriveItemId || '').trim()))) {
+      return { fileId, draft };
+    }
+  }
+  return null;
+}
+
+/**
+ * Lo que ve de un borrador quien no es su preparadora ni su validador: el estado y el avance,
+ * sin versiones (ids de OneDrive), comentarios internos ni datos de contacto del cliente.
+ */
+export function redactDraftForOutsider(state: OrionDraftState): OrionDraftState {
+  const review = state.internalReview;
+  const client = state.clientReview;
+  return {
+    fileId: state.fileId,
+    fileName: state.fileName,
+    status: state.status,
+    versionLabel: state.versionLabel,
+    versions: [],
+    lock: null,
+    internalReview: review
+      ? {
+          status: review.status,
+          versionLabel: review.versionLabel ?? null,
+          round: review.round,
+          submittedAt: review.submittedAt ?? null,
+          approvedAt: review.approvedAt ?? null,
+          returnedAt: review.returnedAt ?? null,
+          approvals: review.approvals.map((a) => ({
+            email: '',
+            name: a.name || 'Validador',
+            jobTitle: a.jobTitle ?? null,
+            order: a.order,
+            decision: a.decision,
+            decidedAt: a.decidedAt ?? null,
+          })),
+        }
+      : null,
+    clientReview: client
+      ? {
+          mode: client.mode,
+          round: client.round,
+          versionLabel: client.versionLabel,
+          submittedAt: client.submittedAt,
+          submittedBy: '',
+          closedAt: client.closedAt ?? null,
+          reviewers: client.reviewers.map((r) => ({
+            email: '',
+            name: r.name || 'Cliente',
+            order: r.order,
+            decision: r.decision,
+            decidedAt: r.decidedAt ?? null,
+          })),
+        }
+      : null,
+    clientReviewHistory: [],
+    pdfFileId: state.pdfFileId ?? null,
+    createdByEmail: '',
+    createdAt: state.createdAt,
+    updatedAt: state.updatedAt,
+  };
+}
+
 export function createDraftState(params: {
   fileId: string;
   fileName: string;
