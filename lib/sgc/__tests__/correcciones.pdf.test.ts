@@ -173,19 +173,17 @@ describe('SGC · correcciones · encabezado institucional', () => {
 });
 
 describe('SGC · correcciones · firmas estampadas dentro del documento', () => {
-  it('[SGC-REQ-094] cada firma queda estampada en la caja que ubicó el elaborador (nombre, significado, fecha y trazo); la portada solo lista las firmas sin ubicación y el final es el registro de trazabilidad', async () => {
+  it('[SGC-REQ-094] cada firma queda estampada en la caja que ubicó el elaborador (solo el trazo, sin nombre, significado ni fecha); la portada solo lista las firmas sin ubicación y el final es el registro de trazabilidad', async () => {
     const m = manifest({ placements: [{ uid: 'u-e', page: 1, x: 10, y: 20, width: 30, height: 10 }, { uid: 'fantasma', page: 1, x: 1, y: 1, width: 20, height: 10 }, { uid: 'u-a', page: 9, x: 1, y: 1, width: 20, height: 10 }] });
     const { bytes, layout } = await buildControlledPdfWithLayout(await contentPdf(2), m, { 'u-e': PNG });
     expect(layout).toEqual({ institutionalHeader: false, emission: null, placements: [{ uid: 'u-e', page: 1, x: 10, y: 20, width: 30, height: 10 }] });
-    const page2 = await pdfText(bytes, 2);
-    const name = page2.find((t) => t.str === 'Elaboradora QA');
-    expect(name).toBeTruthy();
-    // Dentro de la caja: x entre 10 % y 40 % del ancho; y (desde abajo) entre 70 % y 80 % del alto.
-    expect(name!.x).toBeGreaterThan(595.28 * 0.1);
-    expect(name!.x).toBeLessThan(595.28 * 0.4);
-    expect(name!.y).toBeGreaterThan(841.89 * 0.7);
-    expect(name!.y).toBeLessThan(841.89 * 0.8);
-    expect(page2.map((t) => t.str).join(' ')).toContain('Elaboró · 2026-10-03 09:00');
+    // 2026-10-05: la caja lleva SOLO la representación gráfica (el trazo); nada de texto adicional.
+    const page2 = (await pdfText(bytes, 2)).map((t) => t.str).join(' ');
+    expect(page2).not.toContain('Elaboradora QA');
+    expect(page2).not.toContain('Elaboró · 2026-10-03 09:00');
+    expect(page2).not.toContain('Firma electrónica · SynerLink');
+    const reloaded = await PDFDocument.load(bytes);
+    expect(reloaded.getPage(1).node.Resources()?.toString()).toMatch(/\/Image-\d+|\/XObject/);
     const cover = await joined(bytes, 1);
     expect(cover).toContain('estampadas dentro del documento');
     expect(cover).toContain('Firmas sin ubicación en el documento');
@@ -199,7 +197,9 @@ describe('SGC · correcciones · firmas estampadas dentro del documento', () => 
     const m = manifest({ placements: [{ uid: 'u-a', page: 2, x: 50, y: 50, width: 40, height: 12 }, { uid: 'u-e', page: 1, x: 5, y: 5, width: 20, height: 3 }] });
     const bytes = await buildControlledPdf(await contentPdf(2), m, { 'u-a': new Uint8Array([9, 9, 9]) });
     const p3 = (await pdfText(bytes, 3)).map((t) => t.str);
-    expect(p3.filter((s) => s === 'calidad@onelatampharma.com').length).toBeGreaterThanOrEqual(2);
+    // Sin trazo legible: solo el nombre (aquí el correo, no hay nombre) en cursiva; sin significado ni fecha.
+    expect(p3.filter((s) => s === 'calidad@onelatampharma.com').length).toBe(1);
+    expect(p3.join(' ')).not.toContain('Aprobó ·');
     expect((await joined(bytes, 1))).not.toContain('Firmas sin ubicación');
     const plain = await buildControlledPdf(await contentPdf(1), manifest());
     const cover = await joined(plain, 1);

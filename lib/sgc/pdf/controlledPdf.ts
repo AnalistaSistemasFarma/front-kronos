@@ -286,40 +286,37 @@ async function drawManifest(pdf: PDFDocument, w: Writer, m: SgcManifest, mSha: s
   w.text('La huella del PDF completo queda registrada en SynerLink; cualquier alteración del archivo invalida la verificación.', { size: 8, color: MUTED });
 }
 
-/** Estampa una firma electrónica dentro de su caja (trazo del maestro si existe, nombre, significado y fecha). */
+/**
+ * Estampa una firma electrónica dentro de su caja: SOLO la representación
+ * gráfica (el trazo del maestro de firmas), ocupando la caja. Si la persona no
+ * tiene trazo (o es ilegible), su nombre en cursiva, grande y centrado.
+ * 2026-10-05 (pedido de Nicolás, demo PiSA): sin nombre, significado, fecha ni
+ * leyenda en la caja; esos datos siguen en el registro de trazabilidad del
+ * final y en el manifiesto incrustado.
+ */
 async function drawPlacedSignature(pdf: PDFDocument, page: PDFPage, box: SgcRect, s: SgcManifestSignature, png: Uint8Array | undefined, fonts: Fonts) {
   page.drawRectangle({ x: box.x, y: box.y, width: box.width, height: box.height, borderColor: rgb(0.0, 0.19, 0.34), borderWidth: 0.4, opacity: 0, borderOpacity: 0.35 });
-  const size = Math.max(4, Math.min(7, box.height / 6));
-  const lines = [s.signerName ?? s.signerEmail, `${s.meaningLabel} · ${formatBogotaDateTime(new Date(s.signedAt))}`, 'Firma electrónica · SynerLink'];
-  const textH = lines.length * (size + 1.5);
-  const imgArea = box.height - textH - 3;
-  let drewImage = false;
-  if (png && imgArea > 6) {
+  const pad = Math.min(2, box.width / 10, box.height / 10);
+  const areaW = box.width - pad * 2;
+  const areaH = box.height - pad * 2;
+  if (areaW <= 2 || areaH <= 2) return;
+  if (png) {
     try {
       const img = await pdf.embedPng(png);
-      const scale = Math.min((box.width - 4) / img.width, imgArea / img.height);
+      const scale = Math.min(areaW / img.width, areaH / img.height);
       const w = img.width * scale;
       const h = img.height * scale;
-      page.drawImage(img, { x: box.x + (box.width - w) / 2, y: box.y + textH + 2 + (imgArea - h) / 2, width: w, height: h });
-      drewImage = true;
+      page.drawImage(img, { x: box.x + (box.width - w) / 2, y: box.y + (box.height - h) / 2, width: w, height: h });
+      return;
     } catch {
       // Un trazo ilegible no impide la firma: la firma electrónica es el registro, no la imagen.
     }
   }
-  if (!drewImage && imgArea > 6) {
-    const name = toWinAnsiSafe(s.signerName ?? s.signerEmail);
-    let nsize = Math.min(imgArea * 0.7, 14);
-    while (nsize > 5 && fonts.italic.widthOfTextAtSize(name, nsize) > box.width - 4) nsize -= 0.5;
-    page.drawText(name, { x: box.x + 2, y: box.y + textH + 2 + (imgArea - nsize) / 2, size: nsize, font: fonts.italic, color: rgb(0.05, 0.15, 0.4) });
-  }
-  let y = box.y + textH - size;
-  lines.forEach((l, i) => {
-    const font = i === 0 ? fonts.bold : fonts.regular;
-    let t = toWinAnsiSafe(l);
-    while (t.length > 1 && font.widthOfTextAtSize(t, size) > box.width - 3) t = t.slice(0, -1);
-    page.drawText(t, { x: box.x + 1.5, y: y + 1, size, font, color: INK });
-    y -= size + 1.5;
-  });
+  const name = toWinAnsiSafe(s.signerName ?? s.signerEmail);
+  let nsize = Math.min(areaH * 0.75, 22);
+  while (nsize > 5 && fonts.italic.widthOfTextAtSize(name, nsize) > areaW) nsize -= 0.5;
+  const tw = fonts.italic.widthOfTextAtSize(name, nsize);
+  page.drawText(name, { x: box.x + Math.max(pad, (box.width - tw) / 2), y: box.y + (box.height - nsize) / 2 + nsize * 0.2, size: nsize, font: fonts.italic, color: rgb(0.05, 0.15, 0.4) });
 }
 
 export interface SgcControlledPdfOptions {
