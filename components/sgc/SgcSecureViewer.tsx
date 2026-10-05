@@ -28,6 +28,11 @@ export interface SgcSecureViewerProps {
    * documento completo cabe en pantalla). Con esto se habilita «Leído».
    */
   onReachedEnd?: (pages: number) => void;
+  /**
+   * 2026-10-05 («Ver documento» de los adjuntos de la solicitud): oculta
+   * Descargar e Imprimir aunque haya permiso excepcional (solo consulta).
+   */
+  hideDownloadPrint?: boolean;
 }
 
 /** Escala inicial del visor (página al 100 % del ancho disponible). */
@@ -102,7 +107,9 @@ async function printAuthorized(url: string) {
   setTimeout(() => frame.remove(), 60_000);
 }
 
-export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReachedEnd }: SgcSecureViewerProps) {
+export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp, canPrint: canPrintProp, onReachedEnd, hideDownloadPrint = false }: SgcSecureViewerProps) {
+  const canDownload = canDownloadProp && !hideDownloadPrint;
+  const canPrint = canPrintProp && !hideDownloadPrint;
   const pagesRef = useRef<HTMLDivElement>(null);
   const bytesRef = useRef<Uint8Array | null>(null);
   const renderGenRef = useRef(0);
