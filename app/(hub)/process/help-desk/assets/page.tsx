@@ -779,7 +779,7 @@ function AssetsBoard() {
               const clickable = card.statusId !== undefined;
               const active = clickable && filters.estado === card.statusId;
               return (
-                <Grid.Col key={card.label} span={{ base: 12, sm: 6, md: 2 }}>
+                <Grid.Col key={card.label} span={{ base: 12, xs: 6, sm: 4, lg: 2 }}>
                   <Card
                     p='md'
                     radius='md'
@@ -800,11 +800,11 @@ function AssetsBoard() {
                   >
                     <Group wrap='nowrap'>
                       <card.Icon size={24} color={`var(--mantine-color-${card.color}-light-color)`} />
-                      <div>
+                      <div style={{ minWidth: 0 }}>
                         <Text size='xs' c={`var(--mantine-color-${card.color}-light-color)`}>
                           {card.label}
                         </Text>
-                        <Text size='lg' fw={600}>
+                        <Text size='lg' fw={600} style={{ wordBreak: 'break-word' }}>
                           {card.value}
                         </Text>
                       </div>
@@ -814,7 +814,7 @@ function AssetsBoard() {
               );
             })}
 
-            <Grid.Col span={{ base: 12, sm: 6, md: 2 }}>
+            <Grid.Col span={{ base: 12, xs: 6, sm: 4, lg: 2 }}>
               <Card p='md' radius='md' withBorder style={{ height: '100%' }}>
                 <Button
                   onClick={() => exportToExcel()}
