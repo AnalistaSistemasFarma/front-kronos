@@ -15,7 +15,8 @@ import type { SgcFlowDefinition, SgcTaskDefinition } from './definition';
  *  - el solicitante nunca selecciona en su propia solicitud, aunque ejecute la
  *    primera tarea o tenga el permiso de Calidad;
  *  - ni el solicitante ni el elaborador pueden quedar como revisores ni
- *    aprobadores de su propia solicitud (lo valida normalizeSigners).
+ *    aprobadores de su propia solicitud (lo valida normalizeSigners); el
+ *    revisor sí puede ser también aprobador (acuerdo del 2026-09-30).
  */
 
 export const SGC_ASSIGNMENT_POLICIES = ['tarea', 'calidad', 'tarea_o_calidad', 'tarea_y_calidad'] as const;
@@ -157,46 +158,20 @@ export function firstTaskPeopleOf(
 }
 
 // ---------------------------------------------------------------------------
-// Papeles excluyentes y aprobador de Calidad (PIC/S PE 009 cap. 6.6.4 y
-// 21 CFR 211.22, investigación normativa del 2026-10-05)
+// Segregación y aprobador de Calidad (2026-10-05). Decisión de Nicolás: el
+// revisor SÍ puede ser también aprobador (acuerdo del 2026-09-30); el
+// solicitante y el elaborador nunca firman lo suyo.
 // ---------------------------------------------------------------------------
 
 /**
- * (1) Una misma persona no tiene dos papeles en la misma solicitud:
- * elaborador, revisor y aprobador se excluyen entre sí, y el solicitante no
- * revisa ni aprueba. Devuelve el choque de quien se quiere poner como firmante
- * del paso `stepKey` con un firmante activo de OTRO paso de firmantes, o null.
- * (El elaborador y el solicitante los rechaza normalizeSigners.)
- */
-export function exclusiveRoleClash(
-  desired: readonly { email: string }[],
-  stepKey: string,
-  otherActive: readonly { email: string; stepKey: string }[]
-): { email: string; stepKey: string } | null {
-  for (const d of desired) {
-    const hit = otherActive.find((o) => o.stepKey !== stepKey && o.email.toLowerCase() === d.email.toLowerCase());
-    if (hit) return { email: d.email, stepKey: hit.stepKey };
-  }
-  return null;
-}
-
-/**
  * Para tomar un cupo de GRUPO dentro de un paso de firmantes (p. ej. la
- * verificación de Calidad de la aprobación): no puede ser el solicitante, el
- * elaborador ni un firmante de OTRO paso (sería revisor y aprobador a la vez).
- * Devuelve el motivo o null.
+ * verificación de Calidad de la aprobación): nunca el solicitante ni el
+ * elaborador. Un revisor sí puede. Devuelve el motivo o null.
  */
-export function poolSlotRoleDenial(
-  me: string,
-  stepKey: string,
-  ctx: { requesterEmail: string; elaboratorEmail: string; signers: readonly { email: string; stepKey: string }[] }
-): string | null {
+export function poolSlotRoleDenial(me: string, ctx: { requesterEmail: string; elaboratorEmail: string }): string | null {
   const m = me.toLowerCase();
   if (m === ctx.requesterEmail.toLowerCase()) return 'Quien hizo la solicitud no revisa ni aprueba su propia solicitud.';
   if (m === ctx.elaboratorEmail.toLowerCase()) return 'El elaborador no puede revisar ni aprobar su propio documento.';
-  if (ctx.signers.some((s) => s.stepKey !== stepKey && s.email.toLowerCase() === m)) {
-    return 'Usted ya tiene otro papel en esta solicitud (revisor o aprobador): elaborador, revisor y aprobador son excluyentes. Otra persona del grupo debe tomar este cupo.';
-  }
   return null;
 }
 

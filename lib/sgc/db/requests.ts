@@ -13,7 +13,6 @@ import {
   assignmentGaps,
   canAssignParticipants,
   canSuggestParticipants,
-  exclusiveRoleClash,
   firstTaskPeopleOf,
   firstWorkTask,
   isPendingSuggestion,
@@ -551,11 +550,11 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     if (input.idAssignee && input.idAssignee !== chosen.id) {
       throw new SgcError('Esa autorización no es la que le corresponde decidir ahora (firma en orden).', 409);
     }
-    // 2026-10-05: papeles excluyentes también en el cupo de GRUPO de un paso de firmantes (verificación de Calidad).
+    // 2026-10-05: el solicitante y el elaborador nunca toman el cupo de GRUPO de un paso de firmantes
+    // (verificación de Calidad). Un revisor SÍ puede tomarlo (revisor = aprobador permitido, 2026-09-30).
     const chosenRow = task.assignees.find((a) => a.id_task_assignee === chosen.id);
     if (taskDef.assignment === 'firmantes' && chosenRow && !chosenRow.user_email) {
-      const signers = (await tx.sgcRequestSigner.findMany({ where: { id_request: request.id_request, is_active: true }, select: { user_email: true, step_key: true } })).map((x) => ({ email: lower(x.user_email), stepKey: x.step_key }));
-      const denial = poolSlotRoleDenial(me, task.task_key, { requesterEmail: request.requester_email, elaboratorEmail: request.elaborator_email, signers });
+      const denial = poolSlotRoleDenial(me, { requesterEmail: request.requester_email, elaboratorEmail: request.elaborator_email });
       if (denial) throw new SgcError(denial, 403);
     }
     // Las condiciones previas de «enviar» se validan antes de registrar la decisión.
@@ -732,23 +731,6 @@ export async function setSigners(db: SgcDb, notifier: SgcNotifier, idRequest: nu
     }
     const eligible = new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email));
     const desired = normalizeSigners(input.signers, { stepName: stepDef.name, elaboratorEmail: request.elaborator_email, requesterEmail: request.requester_email, eligibleEmails: eligible });
-    // 2026-10-05: elaborador, revisor y aprobador son papeles excluyentes en la misma solicitud.
-    // Una sugerencia tampoco puede darle a alguien dos papeles: se cruza también con lo sugerido en otros pasos.
-    const otherActive = (
-      await tx.sgcRequestSigner.findMany({ where: { id_request: idRequest, step_key: { not: stepKey }, OR: [{ is_active: true }, ...(suggesting ? [SGC_PENDING_SUGGESTION] : [])] }, select: { user_email: true, step_key: true } })
-    ).map((x) => ({ email: lower(x.user_email), stepKey: x.step_key }));
-    // Quien ya decidió un cupo de GRUPO de otro paso de firmantes (p. ej. la verificación de Calidad) también tiene ese papel.
-    const poolDecided = (
-      await tx.sgcTaskAssignee.findMany({
-        where: { user_email: null, status: 'aprobado', decided_by: { not: null }, task: { id_request: idRequest, task_key: { not: stepKey }, taskDef: { assignment: 'firmantes' } } },
-        select: { decided_by: true, task: { select: { task_key: true } } },
-      })
-    ).map((x) => ({ email: lower(x.decided_by), stepKey: x.task.task_key }));
-    const clash = exclusiveRoleClash(desired, stepKey, [...otherActive, ...poolDecided]);
-    if (clash) {
-      const other = def.tasks.find((t) => t.key === clash.stepKey)?.name ?? clash.stepKey;
-      throw new SgcError(`${clash.email} ya es firmante de «${other}»: una misma persona no puede tener dos papeles (elaborador, revisor, aprobador) en la misma solicitud.`, 409);
-    }
     const modes = parseSigningModes(request.signing_modes_json);
     const currentMode = signingModeFor(stepDef, modes);
     const newMode = input.mode === 'orden' || input.mode === 'paralelo' ? input.mode : currentMode;
@@ -903,8 +885,8 @@ async function suggestSigners(
 /**
  * «Aprobar la sugerencia» con un clic: quien ejecuta la primera tarea y/o
  * Calidad confirma TODO lo sugerido (firmantes de cada paso y alcance). Se
- * vuelve a validar la segregación (nadie solicitante/elaborador como
- * firmante, un solo papel por persona) y queda en el historial y la auditoría.
+ * vuelve a validar la segregación (ni el solicitante ni el elaborador como
+ * firmantes; el revisor sí puede ser aprobador) y queda en el historial y la auditoría.
  */
 export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idRequest: number, actor: SgcActor, access: SgcCompanyAccess | null) {
   const me = lower(actor.email);
@@ -924,14 +906,11 @@ export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idReq
       list.push({ email: lower(r.user_email), stepKey: r.step_key });
       finalByStep.set(r.step_key, list);
     }
-    const all = [...finalByStep.values()].flat();
     for (const [stepKey, list] of finalByStep) {
       const stepDef = def.tasks.find((t) => t.key === stepKey && t.assignment === 'firmantes');
       if (!stepDef) throw new SgcError(`El paso ${stepKey} no admite firmantes.`, 409);
       if (await tx.sgcTask.findFirst({ where: { id_request: idRequest, task_key: stepKey, status: 'abierta' } })) throw new SgcError(`«${stepDef.name}» ya está en curso: reasigne a las personas en lugar de confirmar.`, 409);
       normalizeSigners(list.map((x) => x.email), { stepName: stepDef.name, elaboratorEmail: request.elaborator_email, requesterEmail: request.requester_email, eligibleEmails: eligible });
-      const clash = exclusiveRoleClash(list, stepKey, all);
-      if (clash) throw new SgcError(`${clash.email} quedaría en «${stepDef.name}» y en «${def.tasks.find((t) => t.key === clash.stepKey)?.name ?? clash.stepKey}»: una misma persona no puede tener dos papeles. Reasigne antes de confirmar.`, 409);
     }
     const now = new Date();
     // El orden de lo confirmado sigue al de lo que ya estaba activo.

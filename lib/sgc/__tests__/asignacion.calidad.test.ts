@@ -36,7 +36,6 @@ import {
   firstTaskPeopleOf,
   firstWorkTask,
   approvalStepsWithoutQualityPool,
-  exclusiveRoleClash,
   poolSlotRoleDenial,
   parseAssignmentPolicy,
   sgcAssignmentPolicy,
@@ -285,10 +284,12 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
       expect(JSON.stringify(created(f, 'sgcAuditLog'))).toMatch(/confirmado/);
     });
 
-    it('al confirmar se vuelve a validar la segregación: la misma persona sugerida en revisión y aprobación no se confirma (409)', async () => {
-      const f = confirmDb([pendingRows[0], { ...pendingRows[1], user_email: REV }], []);
-      await expect(confirmSuggestions(f.db, notifier, 7, actor(ELAB), access(true))).rejects.toThrow(/dos papeles/);
-      expect(f.writes('sgcRequestSigner')).toEqual([]);
+    it('al confirmar se vuelve a validar la segregación: el solicitante sugerido como firmante no se confirma (400); revisor = aprobador sí se confirma', async () => {
+      const bad = confirmDb([pendingRows[0], { ...pendingRows[1], user_email: SOL }], []);
+      await expect(confirmSuggestions(bad.db, notifier, 7, actor(ELAB), access(true))).rejects.toThrow(/Quien hizo la solicitud no puede ser firmante/);
+      expect(bad.writes('sgcRequestSigner')).toEqual([]);
+      const same = confirmDb([pendingRows[0], { ...pendingRows[1], user_email: REV }], []);
+      expect(await confirmSuggestions(same.db, notifier, 7, actor(ELAB), access(true))).toEqual({ confirmed: 2, confirmedScope: 0 });
     });
 
     it('sin nada sugerido no hay qué confirmar (409)', async () => {
@@ -339,65 +340,56 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
   });
 });
 
-describe('SGC · papeles excluyentes y aprobador de Calidad (PIC/S 6.6.4, 21 CFR 211.22)', () => {
+describe('SGC · segregación y aprobador de Calidad (revisor = aprobador permitido, acuerdo del 2026-09-30)', () => {
   beforeEach(() => {
     h.def = V3;
     h.pools = [];
   });
 
-  it('(1) reglas puras: revisor y aprobador se excluyen; el cupo de Calidad no lo toma quien ya tiene otro papel', () => {
-    expect(exclusiveRoleClash([{ email: APR }], 'aprobacion', [{ email: APR, stepKey: 'revision' }])).toEqual({ email: APR, stepKey: 'revision' });
-    expect(exclusiveRoleClash([{ email: 'REV@x.co' }], 'revision', [{ email: 'rev@x.co', stepKey: 'aprobacion' }])).toEqual({ email: 'REV@x.co', stepKey: 'aprobacion' });
-    // Cambiar el MISMO paso (reordenar o reemplazar) no es un segundo papel.
-    expect(exclusiveRoleClash([{ email: REV }], 'revision', [{ email: REV, stepKey: 'revision' }])).toBeNull();
-    const ctx = { requesterEmail: SOL, elaboratorEmail: ELAB, signers: [{ email: REV, stepKey: 'revision' }, { email: APR, stepKey: 'aprobacion' }] };
-    expect(poolSlotRoleDenial(SOL, 'aprobacion', ctx)).toMatch(/Quien hizo la solicitud no revisa ni aprueba/);
-    expect(poolSlotRoleDenial(ELAB, 'aprobacion', ctx)).toMatch(/elaborador no puede revisar ni aprobar/);
-    expect(poolSlotRoleDenial(REV, 'aprobacion', ctx)).toMatch(/otro papel/);
-    expect(poolSlotRoleDenial(APR, 'aprobacion', ctx)).toBeNull();
-    expect(poolSlotRoleDenial(CAL, 'aprobacion', ctx)).toBeNull();
+  it('(1) reglas puras del cupo de Calidad: nunca el solicitante ni el elaborador; un revisor sí', () => {
+    const ctx = { requesterEmail: SOL, elaboratorEmail: ELAB };
+    expect(poolSlotRoleDenial(SOL, ctx)).toMatch(/Quien hizo la solicitud no revisa ni aprueba/);
+    expect(poolSlotRoleDenial('JUAN.MORA@x.co', ctx)).toMatch(/elaborador no puede revisar ni aprobar/);
+    expect(poolSlotRoleDenial(REV, ctx)).toBeNull();
+    expect(poolSlotRoleDenial(CAL, ctx)).toBeNull();
   });
 
-  it('(1) setSigners rechaza poner como aprobador a quien ya es revisor (y al revés), sin escribir nada', async () => {
+  it('(1) setSigners permite que el revisor sea también aprobador, sin motivo adicional', async () => {
     const f = fakeDb({
       sgcRequest: { findUniqueOrThrow: () => requestRow },
       subprocessUserCompany: { findMany: () => eligibleRows },
-      sgcRequestSigner: {
-        findMany: (args) => ((args as { where: { step_key?: unknown } }).where.step_key && typeof (args as { where: { step_key?: unknown } }).where.step_key === 'object' ? [{ user_email: REV, step_key: 'revision' }] : []),
-      },
+      sgcRequestSigner: { findMany: (args) => (typeof (args as { where: { step_key?: unknown } }).where.step_key === 'object' ? [{ user_email: REV, step_key: 'revision' }] : []) },
     });
-    await expect(setSigners(f.db, notifier, 7, { stepKey: 'aprobacion', signers: [APR, REV] }, actor(ELAB), access(true))).rejects.toThrow(/ya es firmante de «Revisión»: una misma persona no puede tener dos papeles/);
-    expect(f.writes('sgcRequestSigner')).toEqual([]);
+    expect(await setSigners(f.db, notifier, 7, { stepKey: 'aprobacion', signers: [APR, REV] }, actor(ELAB), access(true))).toEqual({ changed: true });
+    expect(f.writes('sgcRequestSigner').map((c) => (c.args as { data: { user_email: string } }).data.user_email)).toEqual([APR, REV]);
   });
 
-  it('(1) setSigners rechaza como revisor a quien ya tomó la verificación de Calidad de la aprobación', async () => {
-    const f = fakeDb({
+  const poolTask = {
+    id_task: 20,
+    task_key: 'aprobacion',
+    name: 'Aprobación',
+    status: 'abierta',
+    signing_mode: 'orden',
+    assignees: [{ id_task_assignee: 31, user_email: null, pool_type_code: SGC_AUTH_TYPE_QUALITY, sign_order: 1, status: 'pendiente', signature_meaning: 'aprobo', signature_status: 'pendiente_s3' }],
+    taskDef: { assignment: 'firmantes' },
+  };
+  const poolDb = () =>
+    fakeDb({
+      sgcTask: { findUnique: () => ({ id_request: 7 }), findUniqueOrThrow: () => poolTask },
       sgcRequest: { findUniqueOrThrow: () => requestRow },
-      subprocessUserCompany: { findMany: () => eligibleRows },
-      sgcTaskAssignee: { findMany: () => [{ decided_by: CAL, task: { task_key: 'aprobacion' } }] },
+      sgcRequestSigner: { findMany: () => [{ user_email: REV, step_key: 'revision' }] },
     });
-    await expect(setSigners(f.db, notifier, 7, { stepKey: 'revision', signers: [CAL] }, actor(ELAB), access(true))).rejects.toThrow(/ya es firmante de «Aprobación»/);
-  });
 
-  it('(1) un revisor no puede tomar el cupo del grupo de Calidad en la aprobación (403)', async () => {
+  it('(1) un revisor SÍ puede tomar el cupo de Calidad de la aprobación (llega hasta pedir la firma)', async () => {
     h.pools = [SGC_AUTH_TYPE_QUALITY];
-    const taskRow = {
-      id_task: 20,
-      task_key: 'aprobacion',
-      name: 'Aprobación',
-      status: 'abierta',
-      signing_mode: 'orden',
-      assignees: [{ id_task_assignee: 31, user_email: null, pool_type_code: SGC_AUTH_TYPE_QUALITY, sign_order: 1, status: 'pendiente', signature_meaning: 'aprobo', signature_status: 'pendiente_s3' }],
-      taskDef: { assignment: 'firmantes' },
-    };
-    const f = fakeDb({
-      sgcTask: { findUnique: () => ({ id_request: 7 }), findUniqueOrThrow: () => taskRow },
-      sgcRequest: { findUniqueOrThrow: () => requestRow },
-      sgcRequestSigner: { findMany: () => [{ user_email: REV, step_key: 'revision' }, { user_email: APR, step_key: 'aprobacion' }] },
-    });
-    await expect(decideTask(f.db, notifier, 20, { decision: 'aprobar' }, actor(REV))).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/otro papel/) });
+    await expect(decideTask(poolDb().db, notifier, 20, { decision: 'aprobar' }, actor(REV))).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/firma electrónica/) });
+  });
+
+  it('(1) el solicitante no toma el cupo de Calidad de su propia solicitud aunque esté en el grupo (403)', async () => {
+    h.pools = [SGC_AUTH_TYPE_QUALITY];
+    const f = poolDb();
+    await expect(decideTask(f.db, notifier, 20, { decision: 'aprobar' }, actor(SOL))).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/Quien hizo la solicitud/) });
     expect(f.writes('sgcTaskAssignee')).toEqual([]);
-    expect(f.writes('sgcSignature')).toEqual([]);
   });
 
   it('(2) el flujo documental ya garantiza un aprobador de Calidad: la aprobación trae el cupo fijo del grupo SGC-VERIF-CALIDAD con firma «Aprobó»', () => {
