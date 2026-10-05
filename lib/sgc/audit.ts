@@ -86,6 +86,9 @@ export const SGC_AUDIT_ACTIONS = {
   lecturaNoEntendi: 'divulgacion.no_entendi',
   lecturaUmbral: 'divulgacion.umbral_lectura',
   empresaConfigurada: 'configuracion.empresa',
+  // Generador de documentos (2026-10-05): copia de trabajo de un vigente, sin versión ni solicitud.
+  generadorDocumento: 'generador.documento_generado',
+  generadorDescarga: 'generador.descarga',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];
