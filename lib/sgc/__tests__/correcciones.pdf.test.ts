@@ -1,6 +1,6 @@
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
-import { acceptedContentHashes, buildControlledPdf, buildControlledPdfWithLayout, verifyControlledPdf, type SgcManifest } from '../pdf/controlledPdf';
+import { acceptedContentHashes, buildControlledPdf, buildControlledPdfWithLayout, signatureInkBounds, verifyControlledPdf, type SgcManifest } from '../pdf/controlledPdf';
 import {
   applySystemFieldTokens,
   buildChangeHistoryHtml,
@@ -191,6 +191,17 @@ describe('SGC · correcciones · firmas estampadas dentro del documento', () => 
     expect(cover).not.toContain('Soy la autora.');
     const last = await joined(bytes, 4);
     expect(last).toContain('Registro de trazabilidad de firmas electrónicas');
+  });
+
+  it('[SGC-REQ-094] el trazo se recorta a la tinta para que llene la caja (lienzo blanco del pad); sin tinta o ilegible, null', async () => {
+    const UPNG = ((await import('@pdf-lib/upng')) as unknown as { default: { encode: (b: ArrayBuffer[], w: number, h: number, c: number) => ArrayBuffer } }).default;
+    const w = 100, h = 20;
+    const px = new Uint8Array(w * h * 4).fill(255);
+    for (let x = 40; x <= 59; x++) for (let y = 5; y <= 9; y++) px.set([10, 20, 90, 255], (y * w + x) * 4);
+    const ink = signatureInkBounds(new Uint8Array(UPNG.encode([px.buffer], w, h, 0)));
+    expect(ink).toEqual({ x: 38, y: 3, width: 24, height: 9 });
+    expect(signatureInkBounds(new Uint8Array(UPNG.encode([new Uint8Array(w * h * 4).fill(255).buffer], w, h, 0)))).toBeNull();
+    expect(signatureInkBounds(new Uint8Array([9, 9, 9]))).toBeNull();
   });
 
   it('[SGC-REQ-094] sin trazo del maestro (o con un trazo ilegible) la firma se estampa con el nombre; sin ubicaciones todo queda como antes (bloque en la portada)', async () => {
