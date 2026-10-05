@@ -52,6 +52,7 @@ import {
   ORION_DRAFT_STATUS_LABEL,
   activeClientReviewers,
   draftCorrectionRequests,
+  pendingDraftValidators,
 } from '../../../lib/orion/draftState';
 import { alignBlocks, countChangeRuns, diffText, type DraftBlock } from '../../../lib/orion/draftDiff';
 import DraftBoardDocument, { type DraftSelection } from './DraftBoardDocument';
@@ -141,6 +142,8 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
   const [surface, setSurface] = useState<'sheet' | 'text'>('sheet');
   const [blocksById, setBlocksById] = useState<Record<string, DraftBlock[]>>({});
   const [activeMarkId, setActiveMarkId] = useState<number | null>(null);
+  const [bubbleMarkId, setBubbleMarkId] = useState<number | null>(null);
+  const [detailMarkId, setDetailMarkId] = useState<number | null>(null);
   const [composer, setComposer] = useState<DraftComposer | null>(null);
   const [busy, setBusy] = useState(false);
   const [presence, setPresence] = useState<DraftPresence[]>([]);
@@ -294,8 +297,16 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
   }, [presence, me]);
 
   const focusMark = useCallback(
-    (id: number, opts?: { jumpToFix?: boolean }) => {
+    (id: number, opts?: { jumpToFix?: boolean; openCard?: boolean }) => {
       setActiveMarkId(id);
+      if (opts?.openCard) {
+        // "Ver detalles" en la burbuja: abre la marca completa en el panel derecho.
+        setDetailMarkId(id);
+        window.setTimeout(() => {
+          document.querySelector(`[data-card="${id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }, 60);
+        return;
+      }
       const mark = board?.marks.find((m) => m.id === id);
       if (opts?.jumpToFix && mark?.fixedIn) {
         const target = versions.find((v) => v.label === mark.fixedIn);
@@ -311,7 +322,13 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
     [board, versions]
   );
 
-  const postMarks = async (body: Record<string, unknown>, okMessage?: string) => {
+  const openBubble = useCallback((id: number) => {
+    setActiveMarkId(id);
+    setBubbleMarkId(id);
+  }, []);
+  const closeBubble = useCallback(() => setBubbleMarkId(null), []);
+
+  const postMarks = async (body: Record<string, unknown>, okMessage?: string): Promise<BoardData | null> => {
     setBusy(true);
     try {
       const res = await fetch(`${API}/marks`, {
@@ -322,11 +339,11 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast.error(data.error || 'No se pudo guardar');
-        return false;
+        return null;
       }
       setBoard(data as BoardData);
       if (okMessage) toast.success(okMessage);
-      return true;
+      return data as BoardData;
     } finally {
       setBusy(false);
     }
@@ -481,11 +498,19 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
   const clientAccepted = clientReview?.reviewers.filter((r) => r.decision === 'ACEPTADO').length ?? 0;
   const returned = draft.status === 'DEVUELTO_INTERNO' || draft.status === 'RECHAZADO_CLIENTE';
   const corrections = draftCorrectionRequests(draft);
+  const waitingValidators = pendingDraftValidators(draft);
   const myApproval = approvals.find((a) => a.email.toLowerCase() === me) ?? null;
   const commentsUrl = `${API}/file?${qs}&withComments=1`;
   const downloadUrl = `${API}/file?${qs}`;
   /** Qué sigue para la preparadora: un texto y, si aplica, el botón para hacerlo aquí mismo. */
-  const nextStep: { text: string; action?: { label: string; icon: ReactNode; color?: string; onClick: () => void } } | null =
+  type StepAction = { label: string; icon: ReactNode; color?: string; onClick: () => void };
+  const convertAction: StepAction = {
+    label: 'Convertir a PDF y pasar a firmas',
+    icon: <IconFileTypePdf size={14} />,
+    color: 'teal',
+    onClick: () => setConvertOpen(true),
+  };
+  const nextStep: { text: string; action?: StepAction; secondary?: StepAction } | null =
     !isElaborator
       ? permissions.canDecideInternal
         ? {
@@ -510,32 +535,38 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
             ? {
                 text: `${corrections.map((a) => a.name || a.email).join(', ')} ${
                   corrections.length === 1 ? 'pidió' : 'pidieron'
-                } corrección. Corrija el Word y súbalo abajo: al subir marque qué pedidos quedaron corregidos y todos vuelven a revisar.`,
+                } corrección. ${
+                  waitingValidators.length > 0
+                    ? `Cuando respondan todos (falta: ${waitingValidators
+                        .map((a) => a.name || a.email)
+                        .join(', ')}) podrá subir la versión corregida.`
+                    : 'Ya respondieron todos: corrija el Word y súbalo abajo. Al subir marque qué pedidos quedaron corregidos y todos vuelven a revisar.'
+                }`,
               }
-            : { text: 'Los validadores están revisando. Responda sus marcas y suba subversiones abajo; ellos aprueban cada una.' }
+            : {
+                text: 'Los validadores están revisando al mismo tiempo. Responda sus marcas; cuando todos respondan podrá subir la versión corregida.',
+              }
           : permissions.canSendClient
             ? {
-                text: `Todos aprobaron la ${draft.versionLabel}. Siguiente paso: enviar el borrador al cliente.`,
+                text: `Todos aprobaron la ${draft.versionLabel}. Envíe el borrador al cliente para que lo revise, o si no hace falta, conviértalo a PDF y pase a firmas.`,
                 action: {
                   label: clientReview ? 'Reenviar al cliente' : 'Enviar al cliente',
                   icon: <IconSend size={14} />,
                   onClick: openSendClient,
                 },
+                ...(permissions.canConvertPdf ? { secondary: convertAction } : {}),
               }
             : draft.status === 'EN_REVISION_CLIENTE'
               ? { text: 'Esperando al cliente. Envíe o renueve los enlaces en "Aprobadores del cliente".' }
               : permissions.canConvertPdf
                 ? {
-                    text: 'El cliente lo aprobó. Si el Word tiene comentarios o cambios sin aceptar, suba la versión limpia; luego conviértalo a PDF.',
-                    action: {
-                      label: 'Convertir a PDF para firmar',
-                      icon: <IconFileTypePdf size={14} />,
-                      color: 'teal',
-                      onClick: () => setConvertOpen(true),
-                    },
+                    text: 'El cliente lo aprobó. Si el Word tiene comentarios o cambios sin aceptar, suba la versión limpia; luego conviértalo a PDF y pase a firmas.',
+                    action: convertAction,
                   }
                 : draft.status === 'CONVERTIDO_PDF'
-                  ? { text: 'Ya pasó a firma: siga en la fila del PDF en la solicitud.' }
+                  ? {
+                      text: 'El PDF v1.0 ya está en la solicitud, debajo del Word. Ahora pasa por la validación del PDF (sus propios validadores) y luego se ubican las firmas.',
+                    }
                   : null;
 
   return (
@@ -576,16 +607,6 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
           <Badge size='lg' variant='light' color={ORION_DRAFT_STATUS_COLOR[draft.status]}>
             {ORION_DRAFT_STATUS_LABEL[draft.status]} · {draft.versionLabel}
           </Badge>
-          <Button
-            size='xs'
-            variant='default'
-            leftSection={<IconDownload size={14} />}
-            component='a'
-            href={downloadUrl}
-            onClick={() => rememberDownloadedVersion(requestId, fileId, draft.versionLabel)}
-          >
-            Descargar Word {draft.versionLabel}
-          </Button>
           <Tooltip.Group>
             <Avatar.Group>
               {presence.map((p) => (
@@ -743,17 +764,6 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
               <Text size='xs' c='dimmed'>
                 {mode === 'changes' && previous ? `Comparando ${previous.label} → ${view.label}` : `Viendo ${view.label} sin marcas de cambio`}
               </Text>
-              <Button
-                size='xs'
-                variant='subtle'
-                leftSection={<IconFileTypePdf size={14} />}
-                component='a'
-                href={`${API}/pdf?${qs}&versionId=${encodeURIComponent(view.id)}`}
-                target='_blank'
-                rel='noopener noreferrer'
-              >
-                Abrir PDF
-              </Button>
               {Object.keys(typing).length > 0 ? (
                 <Text size='xs' fw={600} c='cyan.7'>
                   {Object.entries(typing)
@@ -786,7 +796,10 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
                     previousBlocks={previousBlocks}
                     marks={marks}
                     activeMarkId={activeMarkId}
-                    onMarkClick={(id) => focusMark(id)}
+                    openMarkId={bubbleMarkId}
+                    onMarkClick={openBubble}
+                    onMarkDetails={(id) => focusMark(id, { openCard: true })}
+                    onBubbleClose={closeBubble}
                     onSelect={
                       canSelect
                         ? (sel: DraftSelection) =>
@@ -801,7 +814,10 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
                     versionLabel={view.label}
                     marks={marks}
                     activeMarkId={activeMarkId}
-                    onMarkClick={(id) => focusMark(id)}
+                    openMarkId={bubbleMarkId}
+                    onMarkClick={openBubble}
+                    onMarkDetails={(id) => focusMark(id, { openCard: true })}
+                    onBubbleClose={closeBubble}
                     onSelect={
                       canSelect
                         ? (sel: DraftSelection) =>
@@ -853,33 +869,51 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
                     {nextStep.action.label}
                   </Button>
                 ) : null}
+                {nextStep.secondary ? (
+                  <Button
+                    fullWidth
+                    mt={8}
+                    variant='light'
+                    color={nextStep.secondary.color ?? 'blue'}
+                    leftSection={nextStep.secondary.icon}
+                    disabled={busy}
+                    onClick={nextStep.secondary.onClick}
+                  >
+                    {nextStep.secondary.label}
+                  </Button>
+                ) : null}
                 {draft.status === 'CONVERTIDO_PDF' ? (
                   <Button fullWidth variant='light' component={Link} href={requestUrl}>
-                    Ir a la solicitud
+                    Ir a preparar la firma
                   </Button>
                 ) : null}
               </Paper>
             ) : null}
 
             <Paper withBorder radius='md' p='sm'>
-              <Text size='xs' fw={700} c='dimmed' tt='uppercase' mb={8} style={{ letterSpacing: 1 }}>
-                Correcciones · {marks.filter((m) => m.status !== 'confirmada').length} por cerrar
-              </Text>
               <DraftBoardMarks
                 marks={marks}
                 blocks={blocksById[latest?.id ?? ''] ?? blocks ?? []}
                 currentUserEmail={me}
                 isElaborator={isElaborator}
                 activeMarkId={activeMarkId}
+                detailMarkId={detailMarkId}
+                onDetail={setDetailMarkId}
                 composer={composer}
                 busy={busy}
                 onComposerChange={setComposer}
                 onCreate={async (c) => {
-                  const ok = await postMarks(
+                  const saved = await postMarks(
                     { action: 'create', type: c.type, quote: c.quote, suggest: c.suggest, why: c.why, blockIndex: c.blockIndex },
                     'Marca creada. Los demás la ven al instante.'
                   );
-                  if (ok) setComposer(null);
+                  if (saved) {
+                    setComposer(null);
+                    const created = [...(saved.marks ?? [])]
+                      .filter((m) => m.authorEmail === me)
+                      .sort((a, b) => b.id - a.id)[0];
+                    if (created) openBubble(created.id);
+                  }
                 }}
                 onAction={(action, markId) =>
                   void postMarks(
@@ -1030,7 +1064,7 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
                   <Text size='xs' c='dimmed'>
                     {draft.status === 'APROBADO_CLIENTE'
                       ? 'Sin comentarios ni cambios pendientes: es la que se convierte a PDF.'
-                      : 'Pueden trabajar varias personas a la vez. Al subir, Kronos compara con la subversión anterior y marca solas las correcciones aplicadas.'}
+                      : 'Al subir, Kronos compara con la subversión anterior y marca solas las correcciones aplicadas. Todos los validadores reciben aviso para revisarla.'}
                   </Text>
                 </Stack>
               </Paper>
@@ -1177,7 +1211,13 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
               Este flujo no tiene validadores configurados (Administración de flujo → Validadores).
             </Alert>
           ) : (
-            <ValidatorOrderPicker options={board.validators} value={validatorIds} onChange={setValidatorIds} disabled={busy} />
+            <ValidatorOrderPicker
+              options={board.validators}
+              value={validatorIds}
+              onChange={setValidatorIds}
+              disabled={busy}
+              parallel
+            />
           )}
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setValidatorsOpen(null)}>
@@ -1404,11 +1444,11 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
         </Stack>
       </Modal>
 
-      <Modal opened={convertOpen} onClose={() => setConvertOpen(false)} title='Convertir a PDF' centered>
+      <Modal opened={convertOpen} onClose={() => setConvertOpen(false)} title='Convertir a PDF y pasar a firmas' centered>
         <Stack gap='sm'>
           <Text size='sm'>
-            Se creará el PDF <b>v1.0</b> de {draft.fileName} como adjunto nuevo de la solicitud, listo para preparar la
-            firma. El Word queda cerrado.
+            Se creará el PDF <b>v1.0</b> de {draft.fileName} como adjunto nuevo de la solicitud, debajo del Word. El
+            Word queda cerrado. El PDF tiene su propia validación (validadores del PDF) antes de ubicar las firmas.
           </Text>
           <Text size='xs' c='dimmed'>
             Si el Word tiene comentarios o cambios sin aceptar, primero suba la versión limpia.
@@ -1422,8 +1462,7 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
               leftSection={<IconFileTypePdf size={14} />}
               loading={busy}
               onClick={async () => {
-                const data = await callDraft('convert-pdf', 'PDF creado. Ya puede preparar la firma en la solicitud.');
-                if (data) {
+                const data = await callDraft('convert-pdf', 'PDF creado. Ya puede preparar la firma en la solicitud.');                if (data) {
                   setConvertOpen(false);
                   router.push(requestUrl);
                 }

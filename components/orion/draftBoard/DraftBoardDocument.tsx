@@ -13,6 +13,7 @@ import {
   type DraftBlock,
 } from '../../../lib/orion/draftDiff';
 import type { DraftMark } from '../../../lib/orion/draftBoardDb';
+import DraftMarkBubble from './DraftMarkBubble';
 
 export type DraftSelection = { blockIndex: number; quote: string };
 
@@ -24,7 +25,11 @@ type Props = {
   /** Marcas visibles en esta subversión. */
   marks: DraftMark[];
   activeMarkId: number | null;
+  /** Marca con la burbuja abierta. */
+  openMarkId: number | null;
   onMarkClick: (id: number) => void;
+  onMarkDetails: (id: number) => void;
+  onBubbleClose: () => void;
   /** null = no se puede marcar en esta vista. */
   onSelect: ((sel: DraftSelection) => void) | null;
   /** Párrafo → quién está escribiendo ahí. */
@@ -116,14 +121,15 @@ function BlockText({
   block,
   placed,
   activeMarkId,
+  openMarkId,
   onMarkClick,
+  onMarkDetails,
+  onBubbleClose,
 }: {
   ops: DiffOp[];
   block: DraftBlock;
   placed: PlacedMark[];
-  activeMarkId: number | null;
-  onMarkClick: (id: number) => void;
-}) {
+} & Pick<Props, 'activeMarkId' | 'openMarkId' | 'onMarkClick' | 'onMarkDetails' | 'onBubbleClose'>) {
   const nodes: ReactNode[] = [];
   buildSegments(ops, block, placed).forEach((seg, k) => {
     if (seg.t === 'del') {
@@ -163,31 +169,17 @@ function BlockText({
     nodes.push(<span key={k}>{node}</span>);
     for (const p of seg.badges) {
       nodes.push(
-        <button
+        <DraftMarkBubble
           key={`b${p.mark.id}`}
-          type='button'
-          data-mark={p.mark.id}
-          onClick={() => onMarkClick(p.mark.id)}
-          aria-label={`Ver marca ${p.mark.number}`}
-          style={{
-            userSelect: 'none',
-            border: 0,
-            cursor: 'pointer',
-            verticalAlign: 'super',
-            fontFamily: 'var(--mantine-font-family)',
-            fontSize: 10,
-            fontWeight: 700,
-            lineHeight: '16px',
-            minWidth: 16,
-            padding: '0 4px',
-            marginLeft: 2,
-            borderRadius: 8,
-            color: 'var(--mantine-color-white)',
-            background: `var(--mantine-color-${p.fixed ? 'teal' : 'yellow'}-7)`,
-          }}
-        >
-          {p.mark.number}
-        </button>
+          mark={p.mark}
+          fixed={p.fixed}
+          open={openMarkId === p.mark.id}
+          size='sm'
+          onOpen={() => onMarkClick(p.mark.id)}
+          onClose={onBubbleClose}
+          onDetails={() => onMarkDetails(p.mark.id)}
+          style={{ marginLeft: 4, position: 'relative', top: -1 }}
+        />
       );
     }
   });
@@ -201,7 +193,10 @@ export default function DraftBoardDocument({
   versionLabel,
   marks,
   activeMarkId,
+  openMarkId,
   onMarkClick,
+  onMarkDetails,
+  onBubbleClose,
   onSelect,
   typing,
 }: Props) {
@@ -351,7 +346,10 @@ export default function DraftBoardDocument({
                   block={row.block}
                   placed={inBlock}
                   activeMarkId={activeMarkId}
+                  openMarkId={openMarkId}
                   onMarkClick={onMarkClick}
+                  onMarkDetails={onMarkDetails}
+                  onBubbleClose={onBubbleClose}
                 />
               </div>
             );

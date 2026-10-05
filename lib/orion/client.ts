@@ -801,6 +801,84 @@ export async function fetchOrionDraftReviewUrl(params: {
   return { ok: true, status: res.status, reviewUrl, expiresAt: res.data?.expiresAt ?? null };
 }
 
+export type OrionDraftReviewDecisionRow = {
+  email: string;
+  name?: string | null;
+  reviewOrder?: number | null;
+  decision: 'ACEPTADO' | 'RECHAZADO';
+  comment?: string | null;
+  decidedAt?: string | null;
+};
+
+/**
+ * Decisiones registradas en Orion para un borrador (respaldo del webhook: si el aviso no llegó,
+ * Kronos las consulta). Orion con GET /embed/review-url; si no lo tiene, se leen de la hoja de vida.
+ */
+export async function fetchOrionDraftReviewDecisions(
+  orionDocumentId: string
+): Promise<{ ok: boolean; decisions: OrionDraftReviewDecisionRow[]; error?: string }> {
+  const id = encodeURIComponent(orionDocumentId);
+  const signal = AbortSignal.timeout(8000);
+  const direct = await orionFetch<{ reviewers?: Array<Partial<OrionDraftReviewDecisionRow> & { status?: string }> }>(
+    `/api/integrations/synerlink/embed/review-url?docId=${id}`,
+    { method: 'GET', signal }
+  );
+  if (direct.ok) {
+    const decisions = (direct.data?.reviewers ?? [])
+      .filter((r) => r.email && (r.decision === 'ACEPTADO' || r.decision === 'RECHAZADO'))
+      .map((r) => ({
+        email: String(r.email).trim().toLowerCase(),
+        name: r.name ?? null,
+        reviewOrder: r.reviewOrder ?? null,
+        decision: r.decision as 'ACEPTADO' | 'RECHAZADO',
+        comment: r.comment ?? null,
+        decidedAt: r.decidedAt ?? null,
+      }));
+    return { ok: true, decisions };
+  }
+  if (direct.status !== 404 && direct.status !== 405) {
+    return { ok: false, decisions: [], error: direct.error };
+  }
+
+  // Orion sin la consulta: los hitos BORRADOR_ACEPTADO / BORRADOR_RECHAZADO de la hoja de vida.
+  const timeline = await orionFetch<{
+    events?: Array<{
+      documentId?: string | null;
+      type?: string;
+      actorEmail?: string | null;
+      actorName?: string | null;
+      detail?: string | null;
+      occurredAt?: string | null;
+    }>;
+  }>(`/api/integrations/synerlink/documents/timeline?orionDocumentId=${id}`, {
+    method: 'GET',
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!timeline.ok) return { ok: false, decisions: [], error: timeline.error };
+  const decisions = (timeline.data?.events ?? [])
+    .filter(
+      (e) =>
+        e.documentId === orionDocumentId &&
+        e.actorEmail &&
+        (e.type === 'BORRADOR_ACEPTADO' || e.type === 'BORRADOR_RECHAZADO')
+    )
+    .map((e) => {
+      const rejected = e.type === 'BORRADOR_RECHAZADO';
+      // Orion guarda el rechazo como "Nombre: descripción".
+      const detail = String(e.detail || '');
+      const sep = detail.indexOf(': ');
+      return {
+        email: String(e.actorEmail).trim().toLowerCase(),
+        name: e.actorName ?? null,
+        reviewOrder: null,
+        decision: (rejected ? 'RECHAZADO' : 'ACEPTADO') as 'ACEPTADO' | 'RECHAZADO',
+        comment: rejected ? (sep >= 0 ? detail.slice(sep + 2) : detail) || null : null,
+        decidedAt: e.occurredAt ?? null,
+      };
+    });
+  return { ok: true, decisions };
+}
+
 /** Contrato v3: anula enlaces de revisión pendientes (otro aprobador rechazó). */
 export async function revokeOrionDraftReviewUrls(params: {
   orionDocumentId: string;

@@ -1,6 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import {
+  clampFieldSize,
   normalizeValidatorFields,
   splitValidatorFields,
   toOrionSignatureFields,
@@ -104,5 +105,17 @@ describe('visto bueno en el PDF', () => {
     const withSignature = await stampValidatorMarks(bytes, marks, { 'ana@x.com': png });
     const reloaded = await PDFDocument.load(withSignature);
     expect(reloaded.getPageCount()).toBe(1);
+  });
+
+  it('acepta un visto bueno diminuto (2% × 1%) y lo estampa sin texto', async () => {
+    const tiny = clampFieldSize({ ...approvalField, width: 0.5, height: 0.2 });
+    expect(tiny).toMatchObject({ width: 2, height: 1 });
+
+    const pdf = await PDFDocument.create();
+    pdf.addPage([595, 842]);
+    const bytes = await pdf.save();
+    const marks = buildValidatorMarks(approvedState).map((m) => ({ ...m, field: { ...m.field, width: 2, height: 1 } }));
+    const withCheck = await stampValidatorMarks(bytes, marks);
+    expect(withCheck.byteLength).toBeGreaterThan(bytes.byteLength);
   });
 });
