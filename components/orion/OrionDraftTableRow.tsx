@@ -314,10 +314,15 @@ export default function OrionDraftTableRow({
           : { text: 'Devuelto a la preparadora para corregir.' };
       case 'EN_VALIDACION_INTERNA':
         if (perms?.canDecideInternal) return { text: 'Le toca revisarlo: marque, comente y apruebe en el tablero.', strong: true };
-        if (iAskedCorrection) return { text: 'Pidió corrección. Le tocará revisar cuando suban la subversión corregida.' };
+        if (iAskedCorrection) return { text: 'Pidió corrección. Le llegará un aviso cuando envíen la versión corregida.' };
         if (iApproved) return { text: `Ya aprobó. Faltan ${review!.approvals.length - approvedCount} de ${review!.approvals.length}.` };
         if (isElaborator && corrections.length > 0) {
-          return { text: `${correctionNames} ${corrections.length === 1 ? 'pidió' : 'pidieron'} corrección: corríjalo en el tablero.`, strong: true };
+          return pendingValidators.length > 0
+            ? { text: `${correctionNames} ${corrections.length === 1 ? 'pidió' : 'pidieron'} corrección. Espere a que respondan todos.` }
+            : {
+                text: `Le toca corregir: suba la versión corregida, marque lo corregido y envíela a los validadores (en el tablero).`,
+                strong: true,
+              };
         }
         if (isElaborator) return { text: `En validación (${approvedCount} de ${review?.approvals.length ?? 0}). Responda las marcas en el tablero.` };
         return { text: `En validación: aprobaron ${approvedCount} de ${review?.approvals.length ?? 0}.` };
@@ -332,7 +337,7 @@ export default function OrionDraftTableRow({
           ? { text: 'El cliente lo aprobó. Conviértalo a PDF.', strong: true }
           : { text: 'Aprobado por el cliente. Falta convertirlo a PDF.' };
       case 'CONVERTIDO_PDF':
-        return { text: 'Sigue en el PDF, aquí debajo.' };
+        return { text: 'Sigue en el PDF, aquí debajo (ya validado en el Word).' };
       default:
         return null;
     }

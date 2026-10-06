@@ -47,6 +47,11 @@ type Props = {
   blocks: DraftBlock[];
   currentUserEmail: string;
   isElaborator: boolean;
+  /**
+   * Orden de la corrección: la preparadora todavía no puede marcar ni responder (los validadores
+   * siguen revisando o falta subir la versión corregida). Texto que explica qué falta.
+   */
+  elaboratorLockedReason?: string | null;
   activeMarkId: number | null;
   /** Marca con el detalle abierto ("Ver detalles" en la burbuja). */
   detailMarkId: number | null;
@@ -148,18 +153,26 @@ function Composer({
   onCreate: Props['onCreate'];
 }) {
   const [error, setError] = useState<string | null>(null);
+  /** Sugerencia sin "Debe decir": se avisa una vez y se puede guardar igual. */
+  const [missingSuggest, setMissingSuggest] = useState(false);
   const s = MARK_STYLE[composer.type];
 
-  const submit = () => {
+  const submit = (opts: { skipSuggestWarning?: boolean } = {}) => {
     if (!composer.why.trim()) {
       setError(composer.type === 'pregunta' ? 'Escriba la pregunta.' : 'Explique por qué se necesita el cambio.');
       return;
     }
     if (composer.type === 'correccion' && !composer.suggest.trim()) {
-      setError('Escriba cómo debe quedar el texto.');
+      setError('Escriba en "Debe decir" cómo debe quedar el texto.');
+      return;
+    }
+    if (composer.type === 'sugerencia' && !composer.suggest.trim() && !opts.skipSuggestWarning) {
+      setError(null);
+      setMissingSuggest(true);
       return;
     }
     setError(null);
+    setMissingSuggest(false);
     onCreate(composer);
   };
 
@@ -213,14 +226,40 @@ function Composer({
         {composer.type !== 'pregunta' ? (
           <Textarea
             label='Debe decir'
+            description='Escriba el texto exacto como debe quedar: así la preparadora sabe qué cambiar.'
             placeholder='Texto como debe quedar'
             autosize
             minRows={2}
             maxLength={2000}
             value={composer.suggest}
-            onChange={(e) => onChange({ ...composer, suggest: e.currentTarget.value })}
+            onChange={(e) => {
+              if (e.currentTarget.value.trim()) setMissingSuggest(false);
+              onChange({ ...composer, suggest: e.currentTarget.value });
+            }}
             styles={textareaStyles(material)}
+            withAsterisk={composer.type === 'correccion'}
           />
+        ) : null}
+        {missingSuggest && composer.type === 'sugerencia' ? (
+          <div
+            role='alert'
+            style={{
+              fontSize: 12.5,
+              lineHeight: 1.45,
+              padding: '8px 10px',
+              borderRadius: 10,
+              color: '#92400e',
+              background: 'color-mix(in srgb, #f59e0b 16%, transparent)',
+            }}
+          >
+            No escribió el <b>&quot;Debe decir&quot;</b>. Sin él la preparadora tiene que adivinar el cambio. Escríbalo
+            arriba, o guarde igual si de verdad no aplica.
+            <div style={{ marginTop: 6 }}>
+              <MacButton variant='plain' color='#92400e' disabled={busy} onClick={() => submit({ skipSuggestWarning: true })}>
+                Guardar sin &quot;Debe decir&quot;
+              </MacButton>
+            </div>
+          </div>
         ) : null}
         <Textarea
           label={composer.type === 'pregunta' ? 'Pregunta' : 'Por qué'}
@@ -238,7 +277,7 @@ function Composer({
           <MacButton variant='plain' color={material.secondary} onClick={() => onChange(null)}>
             Cancelar
           </MacButton>
-          <MacButton disabled={busy} onClick={submit} icon={<IconSend size={14} stroke={2} />}>
+          <MacButton disabled={busy} onClick={() => submit()} icon={<IconSend size={14} stroke={2} />}>
             {busy ? 'Guardando…' : 'Guardar marca'}
           </MacButton>
         </div>
@@ -252,6 +291,7 @@ function MarkDetail({
   blocks,
   me,
   isElaborator,
+  elaboratorLockedReason,
   busy,
   material,
   position,
@@ -267,6 +307,7 @@ function MarkDetail({
   blocks: DraftBlock[];
   me: string;
   isElaborator: boolean;
+  elaboratorLockedReason?: string | null;
   busy: boolean;
   material: Material;
   position: number;
@@ -280,6 +321,7 @@ function MarkDetail({
 }) {
   const [reply, setReply] = useState('');
   const isAuthor = mark.authorEmail.toLowerCase() === me;
+  const locked = isElaborator && Boolean(elaboratorLockedReason);
   const fixed = Boolean(mark.fixedIn);
   const s = markStyle({ fixed, type: mark.type });
   const status = STATUS_LABEL[mark.status] ?? STATUS_LABEL.abierta;
@@ -445,6 +487,20 @@ function MarkDetail({
           </div>
         ) : null}
 
+        {locked ? (
+          <div
+            style={{
+              fontSize: 12.5,
+              lineHeight: 1.45,
+              padding: '8px 10px',
+              borderRadius: 10,
+              background: material.well,
+              color: material.secondary,
+            }}
+          >
+            {elaboratorLockedReason}
+          </div>
+        ) : (
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -492,8 +548,9 @@ function MarkDetail({
             <IconArrowUp size={16} stroke={2.6} />
           </button>
         </form>
+        )}
 
-        {isAuthor || (isElaborator && mark.status === 'abierta') ? (
+        {isAuthor || (isElaborator && !locked && mark.status === 'abierta') ? (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {isAuthor && (mark.status === 'corregida' || mark.status === 'respondida') ? (
               <MacButton color={SYSTEM_GREEN} disabled={busy} icon={<IconCheck size={14} stroke={2.4} />} onClick={() => onAction('confirm', mark.id)}>
@@ -505,7 +562,7 @@ function MarkDetail({
                 Reabrir
               </MacButton>
             ) : null}
-            {isElaborator && mark.status === 'abierta' ? (
+            {isElaborator && !locked && mark.status === 'abierta' ? (
               <MacButton variant='tinted' disabled={busy} icon={<IconCheck size={14} stroke={2.4} />} onClick={() => onAction('mark-fixed', mark.id)}>
                 {mark.type === 'correccion' ? 'Ya la corregí' : 'Marcar como respondida'}
               </MacButton>
@@ -565,6 +622,7 @@ export default function DraftBoardMarks({
   blocks,
   currentUserEmail,
   isElaborator,
+  elaboratorLockedReason,
   detailMarkId,
   onDetail,
   composer,
@@ -623,6 +681,7 @@ export default function DraftBoardMarks({
           blocks={blocks}
           me={me}
           isElaborator={isElaborator}
+          elaboratorLockedReason={elaboratorLockedReason}
           busy={busy}
           material={material}
           position={index + 1}
