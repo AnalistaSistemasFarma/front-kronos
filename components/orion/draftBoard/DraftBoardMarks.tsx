@@ -1,23 +1,38 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
+import { Textarea } from '@mantine/core';
 import {
-  Alert,
-  Avatar,
-  Badge,
-  Button,
-  Group,
-  Paper,
-  SegmentedControl,
-  Select,
-  Stack,
-  Text,
-  TextInput,
-  Textarea,
-} from '@mantine/core';
-import { IconCheck, IconLink, IconRefresh, IconSend } from '@tabler/icons-react';
-import type { DraftMark, DraftMarkStatus, DraftMarkType } from '../../../lib/orion/draftBoardDb';
+  IconArrowUp,
+  IconCheck,
+  IconChevronLeft,
+  IconChevronRight,
+  IconHighlight,
+  IconLink,
+  IconMessageCircle,
+  IconRefresh,
+  IconSend,
+  IconX,
+} from '@tabler/icons-react';
+import type { DraftMark, DraftMarkType } from '../../../lib/orion/draftBoardDb';
 import type { DraftBlock } from '../../../lib/orion/draftDiff';
+import {
+  EASE,
+  MARK_STYLE,
+  MacAvatar,
+  MacButton,
+  MacIconButton,
+  MacPill,
+  STATUS_LABEL,
+  SYSTEM_BLUE,
+  SYSTEM_GREEN,
+  markStyle,
+  relativeTime,
+  sectionLabel,
+  surface,
+  useMaterial,
+  type Material,
+} from './macUi';
 
 export type DraftComposer = {
   blockIndex: number;
@@ -33,6 +48,9 @@ type Props = {
   currentUserEmail: string;
   isElaborator: boolean;
   activeMarkId: number | null;
+  /** Marca con el detalle abierto ("Ver detalles" en la burbuja). */
+  detailMarkId: number | null;
+  onDetail: (markId: number | null) => void;
   composer: DraftComposer | null;
   busy: boolean;
   onComposerChange: (next: DraftComposer | null) => void;
@@ -42,42 +60,6 @@ type Props = {
   onFocus: (markId: number, opts?: { jumpToFix?: boolean }) => void;
 };
 
-const STATUS: Record<DraftMarkStatus, { label: string; color: string }> = {
-  abierta: { label: 'Abierta', color: 'red' },
-  corregida: { label: 'Por confirmar', color: 'orange' },
-  respondida: { label: 'Respondida', color: 'orange' },
-  confirmada: { label: 'Confirmada', color: 'teal' },
-};
-const TYPE: Record<DraftMarkType, { label: string; color: string }> = {
-  correccion: { label: 'Corrección', color: 'red' },
-  sugerencia: { label: 'Sugerencia', color: 'blue' },
-  pregunta: { label: 'Pregunta', color: 'orange' },
-};
-const FILTERS = [
-  { value: 'todas', label: 'Todas', test: () => true },
-  { value: 'abiertas', label: 'Abiertas', test: (m: DraftMark) => m.status === 'abierta' },
-  {
-    value: 'confirmar',
-    label: 'Por confirmar',
-    test: (m: DraftMark) => m.status === 'corregida' || m.status === 'respondida',
-  },
-  { value: 'confirmadas', label: 'Confirmadas', test: (m: DraftMark) => m.status === 'confirmada' },
-] as const;
-
-function initials(name: string): string {
-  return name
-    .split(/[\s@.]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]!.toUpperCase())
-    .join('');
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' });
-}
-
 /** Nombre corto del párrafo: el título en negrilla ("PRIMERA. OBJETO.") o su inicio. */
 export function blockLabel(block: DraftBlock | undefined, index: number): string {
   if (!block) return `Párrafo ${index + 1}`;
@@ -85,195 +67,90 @@ export function blockLabel(block: DraftBlock | undefined, index: number): string
   return block.text.length > 42 ? `${block.text.slice(0, 42)}…` : block.text;
 }
 
-function MarkCard({
-  mark,
-  blocks,
-  me,
-  isElaborator,
-  active,
-  busy,
-  onAction,
-  onReply,
-  onFocus,
+const TYPE_OPTIONS: Array<{ value: DraftMarkType; label: string }> = [
+  { value: 'correccion', label: 'Corrección' },
+  { value: 'sugerencia', label: 'Sugerencia' },
+  { value: 'pregunta', label: 'Pregunta' },
+];
+
+function card(m: Material): CSSProperties {
+  return {
+    ...surface(m),
+    borderRadius: 14,
+    color: m.text,
+    boxShadow: '0 1px 2px rgba(0,0,0,.06), 0 6px 20px rgba(0,0,0,.06)',
+    overflow: 'hidden',
+  };
+}
+
+const textareaStyles = (m: Material) => ({
+  label: { fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.6, color: m.secondary, marginBottom: 4 },
+  input: { background: m.well, border: 0, borderRadius: 10, color: m.text, fontSize: 13 },
+});
+
+/** Control segmentado tipo iOS. */
+function IosSegmented<T extends string>({
+  value,
+  options,
+  onChange,
+  material,
 }: {
-  mark: DraftMark;
-  blocks: DraftBlock[];
-  me: string;
-  isElaborator: boolean;
-  active: boolean;
-  busy: boolean;
-  onAction: Props['onAction'];
-  onReply: Props['onReply'];
-  onFocus: Props['onFocus'];
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (v: T) => void;
+  material: Material;
 }) {
-  const [reply, setReply] = useState('');
-  const isAuthor = mark.authorEmail.toLowerCase() === me;
-  const status = STATUS[mark.status];
-  const type = TYPE[mark.type];
   return (
-    <Paper
-      withBorder
-      p='sm'
-      radius='md'
-      data-card={mark.id}
-      onClick={(e) => {
-        if ((e.target as HTMLElement).closest('button, input, textarea')) return;
-        onFocus(mark.id);
-      }}
-      style={{
-        cursor: 'pointer',
-        borderColor: active ? 'var(--mantine-color-blue-6)' : undefined,
-        boxShadow: active ? '0 0 0 2px var(--mantine-color-blue-light)' : undefined,
-      }}
-    >
-      <Stack gap={8}>
-        <Group gap={6} wrap='nowrap'>
-          <Badge circle size='md' color={mark.fixedIn ? 'teal' : 'yellow'} variant='filled'>
-            {mark.number}
-          </Badge>
-          <Text size='xs' fw={700} tt='uppercase' c={type.color} style={{ letterSpacing: 0.5 }}>
-            {type.label}
-          </Text>
-          <Text size='xs' c='dimmed' lineClamp={1} style={{ flex: 1, minWidth: 0 }}>
-            {mark.authorName || mark.authorEmail} · {blockLabel(blocks[mark.blockIndex], mark.blockIndex)}
-          </Text>
-          <Badge size='sm' variant='light' color={status.color}>
-            {status.label}
-          </Badge>
-        </Group>
-
-        <Stack gap={2}>
-          <Text size='xs' c='dimmed'>
-            Dice
-          </Text>
-          <Text size='sm' ff='Georgia, serif'>
-            “{mark.quote}”
-          </Text>
-          {mark.suggest ? (
-            <>
-              <Text size='xs' c='dimmed' mt={4}>
-                Debe decir
-              </Text>
-              <Text size='sm' ff='Georgia, serif'>
-                “{mark.suggest}”
-              </Text>
-            </>
-          ) : null}
-          <Text size='xs' c='dimmed' mt={4}>
-            {mark.type === 'pregunta' ? 'Pregunta' : 'Por qué'}
-          </Text>
-          <Text size='sm'>{mark.why}</Text>
-        </Stack>
-
-        {mark.fixedIn ? (
-          <Alert color='teal' variant='light' p={8} radius='sm'>
-            <Stack gap={4}>
-              <Text size='xs'>
-                {mark.autoDetected
-                  ? `Detectado solo: “${mark.quote}” ya no está y apareció “${mark.fixedQuote}” en la ${mark.fixedIn}.`
-                  : `La preparadora indicó que quedó resuelto en la ${mark.fixedIn}.`}
-              </Text>
-              <Button
-                size='compact-xs'
-                variant='subtle'
-                color='teal'
-                leftSection={<IconLink size={12} />}
-                onClick={() => onFocus(mark.id, { jumpToFix: true })}
-                style={{ alignSelf: 'flex-start' }}
-              >
-                Ver el cambio en {mark.fixedIn}
-              </Button>
-            </Stack>
-          </Alert>
-        ) : null}
-
-        {mark.replies.length > 0 ? (
-          <Stack gap={6} pl={8} style={{ borderLeft: '2px solid var(--mantine-color-default-border)' }}>
-            {mark.replies.map((r) => (
-              <Group key={r.id} gap={6} wrap='nowrap' align='flex-start'>
-                <Avatar size={20} radius='xl' color='initials' name={r.authorName || r.authorEmail}>
-                  {initials(r.authorName || r.authorEmail)}
-                </Avatar>
-                <div style={{ minWidth: 0 }}>
-                  <Text size='xs' c='dimmed'>
-                    {r.authorName || r.authorEmail} · {formatDate(r.createdAt)}
-                  </Text>
-                  <Text size='sm'>{r.text}</Text>
-                </div>
-              </Group>
-            ))}
-          </Stack>
-        ) : null}
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!reply.trim()) return;
-            onReply(mark.id, reply.trim());
-            setReply('');
-          }}
-        >
-          <Group gap={6} wrap='nowrap'>
-            <TextInput
-              size='xs'
-              placeholder='Responder…'
-              value={reply}
-              onChange={(e) => setReply(e.currentTarget.value)}
-              style={{ flex: 1 }}
-              aria-label={`Responder a la marca ${mark.number}`}
-            />
-            <Button size='xs' variant='default' type='submit' disabled={!reply.trim() || busy}>
-              Enviar
-            </Button>
-          </Group>
-        </form>
-
-        {isAuthor || (isElaborator && mark.status === 'abierta') ? (
-          <Group gap={6}>
-            {isAuthor && (mark.status === 'corregida' || mark.status === 'respondida') ? (
-              <Button size='xs' color='teal' leftSection={<IconCheck size={14} />} disabled={busy} onClick={() => onAction('confirm', mark.id)}>
-                Confirmar
-              </Button>
-            ) : null}
-            {isAuthor && mark.status !== 'abierta' ? (
-              <Button size='xs' variant='default' leftSection={<IconRefresh size={14} />} disabled={busy} onClick={() => onAction('reopen', mark.id)}>
-                Reabrir
-              </Button>
-            ) : null}
-            {isElaborator && mark.status === 'abierta' ? (
-              <Button size='xs' variant='light' disabled={busy} onClick={() => onAction('mark-fixed', mark.id)}>
-                {mark.type === 'correccion' ? 'Ya la corregí' : 'Marcar como respondida'}
-              </Button>
-            ) : null}
-          </Group>
-        ) : null}
-      </Stack>
-    </Paper>
+    <div role='radiogroup' style={{ display: 'flex', padding: 2, borderRadius: 9, background: material.well, gap: 2 }}>
+      {options.map((o) => {
+        const on = o.value === value;
+        return (
+          <button
+            key={o.value}
+            type='button'
+            role='radio'
+            aria-checked={on}
+            onClick={() => onChange(o.value)}
+            style={{
+              flex: 1,
+              height: 28,
+              border: 0,
+              borderRadius: 7,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              fontSize: 12.5,
+              fontWeight: on ? 600 : 500,
+              color: material.text,
+              background: on ? material.bg : 'transparent',
+              boxShadow: on ? '0 1px 3px rgba(0,0,0,.12), 0 0 0 0.5px rgba(0,0,0,.04)' : 'none',
+              transition: `background .18s ${EASE}, box-shadow .18s ${EASE}`,
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
-/** Panel derecho del tablero: nueva marca y lista de correcciones con su estado. */
-export default function DraftBoardMarks({
-  marks,
-  blocks,
-  currentUserEmail,
-  isElaborator,
-  activeMarkId,
+function Composer({
   composer,
   busy,
-  onComposerChange,
+  material,
+  onChange,
   onCreate,
-  onAction,
-  onReply,
-  onFocus,
-}: Props) {
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]['value']>('todas');
+}: {
+  composer: DraftComposer;
+  busy: boolean;
+  material: Material;
+  onChange: Props['onComposerChange'];
+  onCreate: Props['onCreate'];
+}) {
   const [error, setError] = useState<string | null>(null);
-  const me = currentUserEmail.toLowerCase();
-  const visible = marks.filter(FILTERS.find((f) => f.value === filter)!.test);
+  const s = MARK_STYLE[composer.type];
 
   const submit = () => {
-    if (!composer) return;
     if (!composer.why.trim()) {
       setError(composer.type === 'pregunta' ? 'Escriba la pregunta.' : 'Explique por qué se necesita el cambio.');
       return;
@@ -287,105 +164,479 @@ export default function DraftBoardMarks({
   };
 
   return (
-    <Stack gap='sm' style={{ minWidth: 0, overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-      {composer ? (
-        <Paper withBorder p='sm' radius='md' style={{ borderStyle: 'dashed', borderColor: 'var(--mantine-color-blue-6)' }} bg='var(--mantine-color-blue-light)'>
-          <Stack gap={8}>
-            <Text size='sm' fw={700}>
-              Nueva marca
-            </Text>
-            <Select
-              size='xs'
-              label='Tipo'
-              value={composer.type}
-              allowDeselect={false}
-              onChange={(v) => onComposerChange({ ...composer, type: (v as DraftMarkType) || 'correccion' })}
-              data={[
-                { value: 'correccion', label: 'Corrección' },
-                { value: 'sugerencia', label: 'Sugerencia' },
-                { value: 'pregunta', label: 'Pregunta' },
-              ]}
-            />
-            <div>
-              <Text size='xs' c='dimmed'>
-                Dice
-              </Text>
-              <Paper withBorder p={6} radius='sm' mah={140} style={{ overflowY: 'auto' }}>
-                <Text size='sm' ff='Georgia, serif'>
-                  “{composer.quote}”
-                </Text>
-              </Paper>
+    <div style={{ ...card(material), boxShadow: `0 0 0 2px color-mix(in srgb, ${SYSTEM_BLUE} 35%, transparent), 0 8px 24px rgba(0,0,0,.08)` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px 10px' }}>
+        <span
+          aria-hidden
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 9,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            background: `linear-gradient(145deg, color-mix(in srgb, ${s.solid} 60%, #fff), ${s.solid})`,
+          }}
+        >
+          <IconHighlight size={16} stroke={2} />
+        </span>
+        <div style={{ flex: 1, fontSize: 15, fontWeight: 600 }}>Nueva marca</div>
+        <MacIconButton label='Cancelar' material={material} onClick={() => onChange(null)}>
+          <IconX size={13} stroke={2.4} />
+        </MacIconButton>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '0 14px 14px' }}>
+        <IosSegmented
+          value={composer.type}
+          options={TYPE_OPTIONS}
+          material={material}
+          onChange={(type) => onChange({ ...composer, type })}
+        />
+        <div>
+          <div style={sectionLabel(material)}>Dice</div>
+          <div
+            style={{
+              fontSize: 13,
+              lineHeight: 1.5,
+              padding: '8px 10px',
+              borderRadius: 10,
+              background: material.well,
+              borderLeft: `3px solid ${s.solid}`,
+              maxHeight: 140,
+              overflowY: 'auto',
+            }}
+          >
+            “{composer.quote}”
+          </div>
+        </div>
+        {composer.type !== 'pregunta' ? (
+          <Textarea
+            label='Debe decir'
+            placeholder='Texto como debe quedar'
+            autosize
+            minRows={2}
+            maxLength={2000}
+            value={composer.suggest}
+            onChange={(e) => onChange({ ...composer, suggest: e.currentTarget.value })}
+            styles={textareaStyles(material)}
+          />
+        ) : null}
+        <Textarea
+          label={composer.type === 'pregunta' ? 'Pregunta' : 'Por qué'}
+          placeholder='Explique la razón para que la preparadora entienda el cambio'
+          autosize
+          minRows={2}
+          maxLength={2000}
+          value={composer.why}
+          onChange={(e) => onChange({ ...composer, why: e.currentTarget.value })}
+          styles={textareaStyles(material)}
+          autoFocus
+        />
+        {error ? <div style={{ fontSize: 12.5, color: '#dc2626' }}>{error}</div> : null}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <MacButton variant='plain' color={material.secondary} onClick={() => onChange(null)}>
+            Cancelar
+          </MacButton>
+          <MacButton disabled={busy} onClick={submit} icon={<IconSend size={14} stroke={2} />}>
+            {busy ? 'Guardando…' : 'Guardar marca'}
+          </MacButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MarkDetail({
+  mark,
+  blocks,
+  me,
+  isElaborator,
+  busy,
+  material,
+  position,
+  total,
+  onPrev,
+  onNext,
+  onClose,
+  onAction,
+  onReply,
+  onFocus,
+}: {
+  mark: DraftMark;
+  blocks: DraftBlock[];
+  me: string;
+  isElaborator: boolean;
+  busy: boolean;
+  material: Material;
+  position: number;
+  total: number;
+  onPrev: (() => void) | null;
+  onNext: (() => void) | null;
+  onClose: () => void;
+  onAction: Props['onAction'];
+  onReply: Props['onReply'];
+  onFocus: Props['onFocus'];
+}) {
+  const [reply, setReply] = useState('');
+  const isAuthor = mark.authorEmail.toLowerCase() === me;
+  const fixed = Boolean(mark.fixedIn);
+  const s = markStyle({ fixed, type: mark.type });
+  const status = STATUS_LABEL[mark.status] ?? STATUS_LABEL.abierta;
+  const author = mark.authorName || mark.authorEmail;
+  const label = sectionLabel(material);
+
+  const sendReply = () => {
+    if (!reply.trim() || busy) return;
+    onReply(mark.id, reply.trim());
+    setReply('');
+  };
+
+  return (
+    <div data-card={mark.id} style={card(material)}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 12px', borderBottom: `0.5px solid ${material.hairline}` }}>
+        <MacIconButton label='Marca anterior' material={material} onClick={onPrev ?? undefined} disabled={!onPrev}>
+          <IconChevronLeft size={14} stroke={2.4} />
+        </MacIconButton>
+        <MacIconButton label='Marca siguiente' material={material} onClick={onNext ?? undefined} disabled={!onNext}>
+          <IconChevronRight size={14} stroke={2.4} />
+        </MacIconButton>
+        <div style={{ flex: 1, textAlign: 'center', fontSize: 12.5, fontWeight: 600, color: material.secondary }}>
+          Marca {position} de {total}
+        </div>
+        <MacIconButton label='Cerrar detalle' material={material} onClick={onClose}>
+          <IconX size={13} stroke={2.4} />
+        </MacIconButton>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '14px 14px 10px' }}>
+        <MacAvatar name={author} color={s.solid} size={40} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {author}
+          </div>
+          <div style={{ fontSize: 12, color: material.secondary, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {[relativeTime(mark.createdAt), `en ${mark.createdVersion}`, blockLabel(blocks[mark.blockIndex], mark.blockIndex)]
+              .filter(Boolean)
+              .join(' · ')}
+          </div>
+        </div>
+        <span
+          style={{
+            alignSelf: 'flex-start',
+            fontSize: 12,
+            fontWeight: 700,
+            color: s.solid,
+            padding: '2px 8px',
+            borderRadius: 999,
+            background: `color-mix(in srgb, ${s.solid} 12%, transparent)`,
+          }}
+        >
+          #{mark.number}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '0 14px 12px' }}>
+        <MacPill label={s.label} color={s.solid} />
+        <MacPill label={status.label} color={status.color} />
+        {mark.autoDetected ? <MacPill label='Detectada sola' color={material.secondary} /> : null}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '0 14px 14px' }}>
+        <div>
+          <div style={label}>Dice</div>
+          <div
+            style={{
+              fontSize: 13.5,
+              lineHeight: 1.55,
+              padding: '9px 11px',
+              borderRadius: 10,
+              background: material.well,
+              borderLeft: `3px solid ${s.solid}`,
+              maxHeight: 220,
+              overflowY: 'auto',
+            }}
+          >
+            “{mark.quote}”
+          </div>
+        </div>
+        {mark.suggest ? (
+          <div>
+            <div style={label}>Debe decir</div>
+            <div
+              style={{
+                fontSize: 13.5,
+                lineHeight: 1.55,
+                fontWeight: 500,
+                padding: '9px 11px',
+                borderRadius: 10,
+                color: SYSTEM_GREEN,
+                background: `color-mix(in srgb, ${SYSTEM_GREEN} 9%, transparent)`,
+              }}
+            >
+              “{mark.suggest}”
             </div>
-            {composer.type !== 'pregunta' ? (
-              <Textarea
-                size='xs'
-                label='Debe decir'
-                placeholder='Texto como debe quedar'
-                autosize
-                minRows={2}
-                maxLength={2000}
-                value={composer.suggest}
-                onChange={(e) => onComposerChange({ ...composer, suggest: e.currentTarget.value })}
-              />
+          </div>
+        ) : null}
+        {mark.why ? (
+          <div>
+            <div style={label}>{mark.type === 'pregunta' ? 'Pregunta' : 'Por qué'}</div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.55 }}>{mark.why}</div>
+          </div>
+        ) : null}
+
+        {mark.fixedIn ? (
+          <div
+            style={{
+              padding: '10px 12px',
+              borderRadius: 12,
+              background: `color-mix(in srgb, ${SYSTEM_GREEN} 10%, transparent)`,
+              fontSize: 12.5,
+              lineHeight: 1.5,
+            }}
+          >
+            {mark.autoDetected
+              ? `Detectado solo: “${mark.quote}” ya no está y apareció “${mark.fixedQuote}” en la ${mark.fixedIn}.`
+              : `La preparadora indicó que quedó resuelto en la ${mark.fixedIn}.`}
+            <div style={{ marginTop: 6 }}>
+              <MacButton
+                variant='tinted'
+                color={SYSTEM_GREEN}
+                icon={<IconLink size={13} stroke={2} />}
+                onClick={() => onFocus(mark.id, { jumpToFix: true })}
+              >
+                Ver el cambio en {mark.fixedIn}
+              </MacButton>
+            </div>
+          </div>
+        ) : null}
+
+        {mark.replies.length > 0 ? (
+          <div>
+            <div style={label}>Conversación</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {mark.replies.map((r) => {
+                const mine = r.authorEmail.toLowerCase() === me;
+                return (
+                  <div key={r.id} style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
+                    <div style={{ fontSize: 11, color: material.secondary, margin: '0 6px 2px' }}>
+                      {mine ? 'Usted' : r.authorName || r.authorEmail} · {relativeTime(r.createdAt)}
+                    </div>
+                    <div
+                      style={{
+                        maxWidth: '85%',
+                        padding: '7px 12px',
+                        borderRadius: 18,
+                        borderBottomRightRadius: mine ? 6 : 18,
+                        borderBottomLeftRadius: mine ? 18 : 6,
+                        fontSize: 13.5,
+                        lineHeight: 1.45,
+                        color: mine ? '#fff' : material.text,
+                        background: mine ? SYSTEM_BLUE : material.well,
+                        overflowWrap: 'anywhere',
+                      }}
+                    >
+                      {r.text}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            sendReply();
+          }}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 3, borderRadius: 20, background: material.well }}
+        >
+          <input
+            value={reply}
+            onChange={(e) => setReply(e.currentTarget.value)}
+            placeholder='Responder…'
+            aria-label={`Responder a la marca ${mark.number}`}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              height: 32,
+              padding: '0 12px',
+              border: 0,
+              outline: 'none',
+              background: 'transparent',
+              color: material.text,
+              fontFamily: 'inherit',
+              fontSize: 13.5,
+            }}
+          />
+          <button
+            type='submit'
+            aria-label='Enviar respuesta'
+            disabled={!reply.trim() || busy}
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: '50%',
+              border: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: reply.trim() && !busy ? 'pointer' : 'default',
+              color: '#fff',
+              background: reply.trim() && !busy ? SYSTEM_BLUE : material.secondary,
+              opacity: reply.trim() && !busy ? 1 : 0.4,
+              transition: `background .15s ${EASE}, opacity .15s`,
+            }}
+          >
+            <IconArrowUp size={16} stroke={2.6} />
+          </button>
+        </form>
+
+        {isAuthor || (isElaborator && mark.status === 'abierta') ? (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {isAuthor && (mark.status === 'corregida' || mark.status === 'respondida') ? (
+              <MacButton color={SYSTEM_GREEN} disabled={busy} icon={<IconCheck size={14} stroke={2.4} />} onClick={() => onAction('confirm', mark.id)}>
+                Confirmar
+              </MacButton>
             ) : null}
-            <Textarea
-              size='xs'
-              label={composer.type === 'pregunta' ? 'Pregunta (obligatorio)' : 'Por qué (obligatorio)'}
-              placeholder='Explique la razón para que la preparadora entienda el cambio'
-              autosize
-              minRows={2}
-              maxLength={2000}
-              value={composer.why}
-              onChange={(e) => onComposerChange({ ...composer, why: e.currentTarget.value })}
-              autoFocus
-            />
-            {error ? (
-              <Text size='xs' c='red'>
-                {error}
-              </Text>
+            {isAuthor && mark.status !== 'abierta' ? (
+              <MacButton variant='tinted' color={material.secondary} disabled={busy} icon={<IconRefresh size={14} stroke={2} />} onClick={() => onAction('reopen', mark.id)}>
+                Reabrir
+              </MacButton>
             ) : null}
-            <Group gap={6}>
-              <Button size='xs' leftSection={<IconSend size={14} />} loading={busy} onClick={submit}>
-                Guardar marca
-              </Button>
-              <Button size='xs' variant='default' onClick={() => onComposerChange(null)}>
-                Cancelar
-              </Button>
-            </Group>
-          </Stack>
-        </Paper>
+            {isElaborator && mark.status === 'abierta' ? (
+              <MacButton variant='tinted' disabled={busy} icon={<IconCheck size={14} stroke={2.4} />} onClick={() => onAction('mark-fixed', mark.id)}>
+                {mark.type === 'correccion' ? 'Ya la corregí' : 'Marcar como respondida'}
+              </MacButton>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ material, hasMarks }: { material: Material; hasMarks: boolean }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        textAlign: 'center',
+        gap: 8,
+        padding: '22px 16px',
+        borderRadius: 14,
+        background: material.well,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: '50%',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: material.bg,
+          color: SYSTEM_BLUE,
+          boxShadow: '0 1px 3px rgba(0,0,0,.08)',
+        }}
+      >
+        <IconMessageCircle size={22} stroke={1.8} />
+      </span>
+      <div style={{ fontSize: 14, fontWeight: 600, color: material.text }}>
+        {hasMarks ? 'Ninguna marca abierta' : 'Todavía no hay marcas'}
+      </div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.5, color: material.secondary, maxWidth: 260 }}>
+        {hasMarks
+          ? 'Toque la burbuja de una marca en el documento y luego “Ver detalles” para verla completa aquí.'
+          : 'Seleccione texto del documento para subrayarlo y dejar la primera marca.'}
+      </div>
+    </div>
+  );
+}
+
+/** Panel derecho del tablero: nueva marca y el detalle de la marca elegida en el documento. */
+export default function DraftBoardMarks({
+  marks,
+  blocks,
+  currentUserEmail,
+  isElaborator,
+  detailMarkId,
+  onDetail,
+  composer,
+  busy,
+  onComposerChange,
+  onCreate,
+  onAction,
+  onReply,
+  onFocus,
+}: Props) {
+  const material = useMaterial();
+  const me = currentUserEmail.toLowerCase();
+  const ordered = [...marks].sort((a, b) => a.number - b.number);
+  const index = ordered.findIndex((m) => m.id === detailMarkId);
+  const detail = index >= 0 ? ordered[index] : null;
+
+  // La marca abierta ya no existe (se borró o cambió la subversión): se cierra el detalle.
+  useEffect(() => {
+    if (detailMarkId != null && index < 0) onDetail(null);
+  }, [detailMarkId, index, onDetail]);
+
+  const go = (target: DraftMark | undefined) => {
+    if (!target) return;
+    onDetail(target.id);
+    onFocus(target.id);
+  };
+
+  const open = marks.filter((m) => m.status === 'abierta').length;
+  const toConfirm = marks.filter((m) => m.status === 'corregida' || m.status === 'respondida').length;
+  const confirmed = marks.filter((m) => m.status === 'confirmada').length;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, overflowWrap: 'anywhere' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: material.text }}>Correcciones</div>
+        <div style={{ fontSize: 12, color: material.secondary }}>
+          {open + toConfirm} por cerrar
+        </div>
+      </div>
+      {marks.length > 0 ? (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <MacPill label={`Abiertas ${open}`} color={STATUS_LABEL.abierta.color} />
+          <MacPill label={`Por confirmar ${toConfirm}`} color={STATUS_LABEL.corregida.color} />
+          <MacPill label={`Confirmadas ${confirmed}`} color={STATUS_LABEL.confirmada.color} />
+        </div>
       ) : null}
 
-      <SegmentedControl
-        size='xs'
-        value={filter}
-        onChange={(v) => setFilter(v as typeof filter)}
-        data={FILTERS.map((f) => ({ value: f.value, label: `${f.label} ${marks.filter(f.test).length}` }))}
-        fullWidth
-      />
+      {composer ? (
+        <Composer composer={composer} busy={busy} material={material} onChange={onComposerChange} onCreate={onCreate} />
+      ) : null}
 
-      {visible.length === 0 ? (
-        <Text size='sm' c='dimmed'>
-          {marks.length === 0
-            ? 'Todavía no hay marcas. Seleccione texto del documento para crear la primera.'
-            : 'No hay marcas en este filtro.'}
-        </Text>
-      ) : (
-        visible.map((mark) => (
-          <MarkCard
-            key={mark.id}
-            mark={mark}
-            blocks={blocks}
-            me={me}
-            isElaborator={isElaborator}
-            active={activeMarkId === mark.id}
-            busy={busy}
-            onAction={onAction}
-            onReply={onReply}
-            onFocus={onFocus}
-          />
-        ))
-      )}
-    </Stack>
+      {detail ? (
+        <MarkDetail
+          key={detail.id}
+          mark={detail}
+          blocks={blocks}
+          me={me}
+          isElaborator={isElaborator}
+          busy={busy}
+          material={material}
+          position={index + 1}
+          total={ordered.length}
+          onPrev={index > 0 ? () => go(ordered[index - 1]) : null}
+          onNext={index < ordered.length - 1 ? () => go(ordered[index + 1]) : null}
+          onClose={() => onDetail(null)}
+          onAction={onAction}
+          onReply={onReply}
+          onFocus={onFocus}
+        />
+      ) : !composer ? (
+        <EmptyState material={material} hasMarks={marks.length > 0} />
+      ) : null}
+    </div>
   );
 }

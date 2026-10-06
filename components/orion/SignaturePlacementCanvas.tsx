@@ -438,6 +438,8 @@ export default function SignaturePlacementCanvas({
                   const person = participants.find((p) => p.order === field.signerOrder);
                   const isActive = field.signerOrder === activeOrder;
                   const isApproval = normalizeFieldKind(field.kind) === 'approval';
+                  // Visto bueno diminuto: solo el chulito y el control de tamaño por fuera.
+                  const tiny = isApproval && (field.width < 8 || field.height < 3);
                   return (
                     <Box
                       key={field.id}
@@ -453,13 +455,13 @@ export default function SignaturePlacementCanvas({
                           : isApproval
                             ? '2px dashed var(--mantine-color-teal-6)'
                             : '2px dashed var(--mantine-color-green-6)',
-                        borderRadius: 6,
+                        borderRadius: tiny ? 2 : 6,
                         background: 'color-mix(in srgb, var(--app-surface) 88%, transparent)',
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        overflow: 'hidden',
+                        overflow: tiny ? 'visible' : 'hidden',
                         cursor: interacting ? 'grabbing' : 'grab',
                         boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
                         boxSizing: 'border-box',
@@ -468,8 +470,13 @@ export default function SignaturePlacementCanvas({
                     >
                       {isApproval ? (
                         <IconCircleCheckFilled
-                          size={14}
-                          style={{ color: 'var(--mantine-color-teal-6)', flexShrink: 0, pointerEvents: 'none' }}
+                          size={tiny ? '80%' : 14}
+                          style={{
+                            color: 'var(--mantine-color-teal-6)',
+                            flexShrink: 0,
+                            maxHeight: '100%',
+                            pointerEvents: 'none',
+                          }}
                         />
                       ) : person?.signatureDataUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -486,32 +493,34 @@ export default function SignaturePlacementCanvas({
                           draggable={false}
                         />
                       ) : null}
-                      <Text
-                        size='10px'
-                        c='dimmed'
-                        ta='center'
-                        px={4}
-                        fw={600}
-                        style={{ lineHeight: 1.2, marginTop: 2, pointerEvents: 'none' }}
-                      >
-                        {(
-                          field.label ||
-                          (normalizeFieldKind(field.kind) === 'fingerprint'
-                            ? 'Huella'
-                            : normalizeFieldKind(field.kind) === 'validation'
-                              ? 'Validación'
-                              : person?.name) ||
-                          'Firmante'
-                        ).toUpperCase()}
-                      </Text>
+                      {tiny ? null : (
+                        <Text
+                          size='10px'
+                          c='dimmed'
+                          ta='center'
+                          px={4}
+                          fw={600}
+                          style={{ lineHeight: 1.2, marginTop: 2, pointerEvents: 'none' }}
+                        >
+                          {(
+                            field.label ||
+                            (normalizeFieldKind(field.kind) === 'fingerprint'
+                              ? 'Huella'
+                              : normalizeFieldKind(field.kind) === 'validation'
+                                ? 'Validación'
+                                : person?.name) ||
+                            'Firmante'
+                          ).toUpperCase()}
+                        </Text>
+                      )}
                       <Box
                         onPointerDown={(e) => startResize(e, field, page.page)}
                         style={{
                           position: 'absolute',
-                          right: 2,
-                          bottom: 2,
-                          width: 14,
-                          height: 14,
+                          right: tiny ? -9 : 2,
+                          bottom: tiny ? -9 : 2,
+                          width: tiny ? 10 : 14,
+                          height: tiny ? 10 : 14,
                           borderRadius: 2,
                           background: isActive
                             ? 'var(--mantine-color-blue-6)'

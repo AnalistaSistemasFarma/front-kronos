@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import { listDraftEventsSince, listDraftPresence, maxDraftEventId } from '@/lib/orion/draftBoardDb';
-import { getOrionDraftInfo } from '@/lib/orion/draftService';
+import { getOrionDraftInfo, syncOrionDraftClientReview } from '@/lib/orion/draftService';
 import { getDraftSessionActor, readDraftTarget } from '@/lib/orion/draftRouteAuth';
 
 export const dynamic = 'force-dynamic';
@@ -10,6 +10,7 @@ export const runtime = 'nodejs';
 const POLL_MS = 1500;
 const PRESENCE_EVERY = 2; // cada 2 vueltas (3 s)
 const HEARTBEAT_MS = 20000;
+const CLIENT_SYNC_EVERY = 14; // ~21 s
 
 /**
  * SSE del tablero del documento. Producción corre en varios procesos (pm2 cluster), así que
@@ -69,6 +70,10 @@ export async function GET(req: NextRequest) {
             }
             if (tick % PRESENCE_EVERY === 0) {
               send({ type: 'presence', presence: await listDraftPresence(pool, target.requestId, target.fileId) });
+            }
+            // Esperando al cliente: respaldo del webhook (la consulta a Orion se limita a cada 20 s).
+            if (tick % CLIENT_SYNC_EVERY === 0) {
+              await syncOrionDraftClientReview(pool, target);
             }
           });
         } catch {

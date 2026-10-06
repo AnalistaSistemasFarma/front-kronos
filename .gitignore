@@ -55,3 +55,4 @@ dbconfig.js
 /logs/
 
 CLAUDE.md
+.gitignore

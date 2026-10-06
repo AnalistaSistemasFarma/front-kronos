@@ -111,6 +111,7 @@ import OrionSignaturePanel from '../../../../../components/orion/OrionSignatureP
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
 import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableRow';
+import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
 import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
 import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
@@ -2940,8 +2941,8 @@ function ViewRequestPage() {
                         <Table.Th>Documento</Table.Th>
                         <Table.Th className='doc-col--secondary'>Departamento</Table.Th>
                         <Table.Th>Estado</Table.Th>
-                        <Table.Th className='doc-col--secondary'>Firmantes</Table.Th>
-                        <Table.Th className='doc-col--secondary'>Responsable</Table.Th>
+                        <Table.Th className='doc-col--secondary'>Validadores / firmantes</Table.Th>
+                        <Table.Th className='doc-col--secondary'>Le toca a</Table.Th>
                         <Table.Th>Acciones</Table.Th>
                       </>
                     ) : (
@@ -2953,14 +2954,21 @@ function ViewRequestPage() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {attachmentRows.map((file: FolderFile, fileIndex: number) => {
+                  {nestDraftPdfRows(attachmentRows, (f: FolderFile) =>
+                    showOrionPanel && /\.pdf$/i.test(f.name)
+                      ? getOrionDocForFile(String(f.id), f.name).sourceDraftFileId
+                      : null
+                  ).map(({ file, rowNumber, nested }) => {
                     const fileId = String(file.id);
                     const openUrl =
                       resolveAttachmentDownloadUrl(file) ?? file.webUrl ?? '#';
                     const sizeLabel = [
                       file.size ? formatFileSize(file.size) : null,
                       file.lastModifiedDateTime
-                        ? new Date(file.lastModifiedDateTime).toLocaleDateString('es-CO')
+                        ? new Date(file.lastModifiedDateTime).toLocaleString('es-CO', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })
                         : null,
                     ]
                       .filter(Boolean)
@@ -2980,7 +2988,7 @@ function ViewRequestPage() {
                       return (
                         <OrionAttachmentTableRow
                           key={file.id}
-                          rowNumber={fileIndex + 1}
+                          rowNumber={rowNumber}
                           requestId={request.id}
                           fileId={fileId}
                           fileName={file.name}
@@ -3013,6 +3021,7 @@ function ViewRequestPage() {
                           onDocumentsUpdate={handleOrionDocumentsChange}
                           canDeleteAttachment={canDeleteAttachments}
                           onDeleteAttachment={requestDeleteAttachment}
+                          nestedUnderWord={nested}
                           forceSignerUi={(() => {
                             const me = currentUserEmailNorm;
                             if (!me) return false;
@@ -3054,7 +3063,7 @@ function ViewRequestPage() {
                       return (
                         <OrionDraftTableRow
                           key={file.id}
-                          rowNumber={fileIndex + 1}
+                          rowNumber={rowNumber}
                           requestId={request.id}
                           fileId={fileId}
                           fileName={file.name}
@@ -3068,6 +3077,11 @@ function ViewRequestPage() {
                             orionActionParam === 'review' &&
                             String(orionFileIdParam || '') === fileId
                           }
+                          onConverted={async () => {
+                            // El PDF nuevo sale debajo del Word: adjuntos + estado de firma.
+                            await Promise.all([fetchFolderContents(), fetchFormValues(request.id)]);
+                            refreshAttachmentsAfterUpload();
+                          }}
                         />
                       );
                     }
@@ -3078,7 +3092,7 @@ function ViewRequestPage() {
                           <>
                             <Table.Td data-label='N.º'>
                               <Text size='sm' c='dimmed'>
-                                {fileIndex + 1}
+                                {rowNumber}
                               </Text>
                             </Table.Td>
                             <Table.Td data-label='Documento'>

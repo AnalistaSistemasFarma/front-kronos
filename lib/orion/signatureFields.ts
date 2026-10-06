@@ -119,7 +119,8 @@ export function sizeBoundsForKind(kind?: SignatureFieldKind | null): {
 } {
   const k = normalizeFieldKind(kind);
   if (k === 'validation') return { minW: 6, maxW: 28, minH: 3, maxH: 14 };
-  if (k === 'approval') return { minW: 8, maxW: 30, minH: 3, maxH: 14 };
+  // Visto bueno: puede quedar tan pequeño como una inicial (en el PDF queda solo el chulito/firma).
+  if (k === 'approval') return { minW: 2, maxW: 30, minH: 1, maxH: 14 };
   if (k === 'fingerprint') return { minW: 8, maxW: 28, minH: 10, maxH: 32 };
   return {
     minW: MIN_FIELD_WIDTH,
