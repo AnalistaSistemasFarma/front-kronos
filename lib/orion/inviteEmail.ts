@@ -8,7 +8,8 @@
  * Remitente: notificador@gsslatam.com (forzado).
  */
 
-const DEFAULT_LOGO = 'https://farmalogica.com.co/imagenes/logos/logo20.png';
+/** Logo de GSS servido por Kronos (public/portal-th/logo-gss.png), igual que el portal TH. */
+const GSS_LOGO_PATH = '/portal-th/logo-gss.png';
 /** Remitente corporativo GSS — no usar farmalogica. */
 const FROM_EMAIL = 'notificador@gsslatam.com';
 const FROM_DISPLAY = `GSS LATAM <${FROM_EMAIL}>`;
@@ -38,6 +39,23 @@ function resolvePublicBaseUrl(): string {
     process.env.NEXTAUTH_URL ||
     '';
   return String(raw).trim().replace(/\/+$/, '');
+}
+
+/**
+ * El correo sale a nombre de GSS: siempre el logo de GSS, nunca el de una empresa del grupo
+ * (antes caía en el de Farmalógica). ORION_INVITE_LOGO solo si apunta a otro logo que no sea ese.
+ */
+function resolveGssLogoUrl(): string {
+  const notGroupCompany = (url?: string) => {
+    const v = String(url || '').trim();
+    return v && !/farmalogica/i.test(v) ? v : '';
+  };
+  const base = resolvePublicBaseUrl();
+  return (
+    notGroupCompany(process.env.ORION_INVITE_LOGO) ||
+    (base ? `${base}${GSS_LOGO_PATH}` : '') ||
+    notGroupCompany(process.env.PORTAL_TH_LOGO)
+  );
 }
 
 function footerLink(href: string, label: string): string {
@@ -190,8 +208,7 @@ export async function sendExternalSignerInviteEmail(params: {
       })()
     : null;
 
-  const logoUrl =
-    process.env.ORION_INVITE_LOGO || process.env.PORTAL_TH_LOGO || DEFAULT_LOGO;
+  const logoUrl = resolveGssLogoUrl();
   const fromOverride = String(process.env.ORION_INVITE_FROM || '')
     .trim()
     .toLowerCase();

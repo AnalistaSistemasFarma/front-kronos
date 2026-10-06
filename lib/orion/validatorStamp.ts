@@ -179,20 +179,26 @@ export async function stampValidatorMarks(
     // Visto bueno discreto: tamaños acotados aunque la caja sea grande.
     const nameSize = Math.min(5.5, Math.max(3.5, bh * 0.14));
     const dateSize = Math.max(3, nameSize - 1.3);
-    const textHeight = nameSize + dateSize + 2;
-    const graphicHeight = Math.min(16, Math.max(4, bh - textHeight - 2));
-    const graphicTop = by + textHeight + graphicHeight + 1;
+    // Caja muy pequeña: sin nombre ni fecha, el chulito/firma ocupa toda la caja.
+    const withText = bh >= nameSize + dateSize + 8 && bw >= 24;
+    const textHeight = withText ? nameSize + dateSize + 2 : 0;
+    const graphicHeight = withText ? Math.min(16, Math.max(4, bh - textHeight - 2)) : Math.max(1, bh - 1);
+    const graphicTop = withText ? by + textHeight + graphicHeight + 1 : by + bh - 0.5;
 
     const dataUrl = signatures?.[mark.email];
     const image = dataUrl ? await embedDataUrl(pdf, dataUrl) : null;
     if (image) {
-      const scale = Math.min((bw - 2) / image.width, graphicHeight / image.height);
+      const scale = Math.min(Math.max(1, bw - 2) / image.width, graphicHeight / image.height);
       const w = image.width * scale;
       const h = image.height * scale;
       page.drawImage(image, { x: bx + (bw - w) / 2, y: graphicTop - h, width: w, height: h });
     } else {
-      const size = Math.min(graphicHeight, bw * 0.3, 8);
+      const size = withText ? Math.min(graphicHeight, bw * 0.3, 8) : Math.min(graphicHeight, bw - 1, 8);
       drawCheck(page, bx + (bw - size) / 2, graphicTop - size - (graphicHeight - size) / 2, size);
+    }
+    if (!withText) {
+      stamped = true;
+      continue;
     }
 
     const maxWidth = bw - 2;
