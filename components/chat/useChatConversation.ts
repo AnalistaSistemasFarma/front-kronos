@@ -16,6 +16,7 @@ import {
   type ChatStatusDto,
 } from '../../lib/chat/client';
 import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
+import type { AgentMetricsDto } from '../../lib/chat/agent-metrics';
 import { avisarMensajeEntrante, mensajeFresco } from '../../lib/chat/message-sound';
 
 /**
@@ -122,6 +123,11 @@ export interface ChatThreadState {
   status: ChatStatusDto | null;
   /** Un estado por agente. En un grupo es lo que se pinta; en directo trae uno. */
   statuses: ChatAgentStatusDto[];
+  /**
+   * Métricas del mod (contexto, tokens, modelo). undefined = el usuario no las
+   * ve; null = las ve pero el agente no ha reportado nada en este hilo.
+   */
+  metrics: AgentMetricsDto | null | undefined;
   loading: boolean;
   sending: boolean;
   error: string | null;
@@ -183,6 +189,7 @@ export function useChatConversation(
   const [statuses, setStatuses] = useState<ChatAgentStatusDto[]>(
     inicial?.conversation.agentStatuses ?? []
   );
+  const [metrics, setMetrics] = useState<AgentMetricsDto | null | undefined>(undefined);
   const [loading, setLoading] = useState(target !== null && !inicial);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -254,6 +261,7 @@ export function useChatConversation(
       setMessages(reales);
       setStatus(enCache.conversation.agentStatus);
       setStatuses(enCache.conversation.agentStatuses ?? []);
+      setMetrics(undefined);
       setHasOlder(enCache.hasOlder);
     } else {
       conversationIdRef.current = null;
@@ -263,6 +271,7 @@ export function useChatConversation(
       setMessages([]);
       setStatus(null);
       setStatuses([]);
+      setMetrics(undefined);
       setHasOlder(false);
     }
     setError(null);
@@ -493,6 +502,8 @@ export function useChatConversation(
       // Un sondeo viejo (o un front por delante de la API) no trae el
       // desglose: se deja lo que había en vez de vaciar el encabezado.
       if (data.statuses) setStatuses(data.statuses);
+      // Sin el campo, el usuario no ve métricas (o la API es vieja): se oculta.
+      setMetrics(data.metrics);
 
       // ⬅️ La cadencia la ordena el servidor.
       scheduleNext(data.nextPollMs);
@@ -732,6 +743,7 @@ export function useChatConversation(
     messages,
     status,
     statuses,
+    metrics,
     loading,
     sending,
     error,
