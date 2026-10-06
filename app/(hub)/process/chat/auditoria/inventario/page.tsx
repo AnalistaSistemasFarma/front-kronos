@@ -109,6 +109,8 @@ type Respuesta = {
   ultimoEscaneo: Solicitud | null;
   solicitudPendiente: Solicitud | null;
   agentes: Agente[];
+  /** Re-escanear recorre toda la flota: solo con alcance total (administración). */
+  puedeEscanear: boolean;
 };
 type Aviso = {
   color: 'green' | 'yellow' | 'red';
@@ -715,17 +717,19 @@ export default function AuditoriaInventarioPage() {
                 { value: 'sin-escanear', label: 'Sin escanear' },
               ]}
             />
-            <Group mt={20} gap='xs'>
-              <Button
-                size='xs'
-                leftSection={<IconRefresh size={14} />}
-                loading={pidiendo}
-                disabled={Boolean(pendiente)}
-                onClick={() => void reescanear()}
-              >
-                Re-escanear
-              </Button>
-            </Group>
+            {datos?.puedeEscanear && (
+              <Group mt={20} gap='xs'>
+                <Button
+                  size='xs'
+                  leftSection={<IconRefresh size={14} />}
+                  loading={pidiendo}
+                  disabled={Boolean(pendiente)}
+                  onClick={() => void reescanear()}
+                >
+                  Re-escanear
+                </Button>
+              </Group>
+            )}
           </SimpleGrid>
         </Card>
 

@@ -50,6 +50,10 @@ import {
  * entrega (body = null) y aquí no se pinta la columna "Mensaje" ni el filtro
  * por texto. La vista general queda con agentes y métricas.
  *
+ * ALCANCE POR EMPRESA (2026-10-06): fuera de la administración, el endpoint
+ * ya entrega solo lo de las empresas del usuario; aquí el selector de empresa
+ * se arma con esas mismas y se dice cuáles se están viendo.
+ *
  * EL TEXTO VIENE RECORTADO EN LA TABLA y se abre a pedido. Una auditoría se
  * lee de arriba hacia abajo buscando algo raro; con los mensajes completos
  * desplegados no se alcanza a ver ni diez filas.
@@ -90,6 +94,8 @@ type ConsumoConversacion = {
 
 type Respuesta = {
   verConversaciones: boolean;
+  /** Empresas que puede ver: todas (administración) o las de su permiso. */
+  alcance: { todas: boolean; empresas: { idCompany: number; nombre: string }[] };
   page: number;
   porPagina: number;
   total: number;
@@ -190,9 +196,15 @@ function FilaMensaje({ m, verTexto }: { m: MensajeAuditoria; verTexto: boolean }
       </Table.Td>
       {verTexto && (
         <Table.Td style={{ verticalAlign: 'top', minWidth: 320 }}>
-          <Text size='xs' style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {texto}
-          </Text>
+          {m.body === null ? (
+            <Text size='xs' c='dimmed'>
+              Sin permiso de conversaciones en esta empresa.
+            </Text>
+          ) : (
+            <Text size='xs' style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {texto}
+            </Text>
+          )}
           {m.adjuntos.length > 0 && (
             <Text size='xs' c='dimmed' mt={4}>
               📎 {m.adjuntos.join(', ')}
@@ -220,6 +232,7 @@ export default function AuditoriaAgentesPage() {
   const [desde, setDesde] = useState(inicial.desde);
   const [hasta, setHasta] = useState(inicial.hasta);
   const [agente, setAgente] = useState<string | null>(null);
+  const [empresa, setEmpresa] = useState<string | null>(null);
   const [usuario, setUsuario] = useState('');
   const [conversacion, setConversacion] = useState('');
   const [q, setQ] = useState('');
@@ -239,6 +252,7 @@ export default function AuditoriaAgentesPage() {
       if (desde) sp.set('desde', desde);
       if (hasta) sp.set('hasta', hasta);
       if (agente) sp.set('agente', agente);
+      if (empresa) sp.set('empresa', empresa);
       if (usuario.trim()) sp.set('usuario', usuario.trim());
       if (conversacion.trim()) sp.set('conversacion', conversacion.trim());
       if (q.trim()) sp.set('q', q.trim());
@@ -261,7 +275,7 @@ export default function AuditoriaAgentesPage() {
         setCargando(false);
       }
     },
-    [desde, hasta, agente, usuario, conversacion, q, conIp]
+    [desde, hasta, agente, empresa, usuario, conversacion, q, conIp]
   );
 
   useEffect(() => {
@@ -411,6 +425,18 @@ export default function AuditoriaAgentesPage() {
                 label: a.displayName,
               }))}
             />
+            <Select
+              label='Empresa'
+              size='xs'
+              placeholder={datos?.alcance.todas === false ? 'Todas las de su alcance' : 'Todas'}
+              clearable
+              value={empresa}
+              onChange={setEmpresa}
+              data={(datos?.alcance.empresas ?? []).map((e) => ({
+                value: String(e.idCompany),
+                label: e.nombre,
+              }))}
+            />
             <TextInput
               label='Persona (nombre o correo)'
               size='xs'
@@ -468,6 +494,15 @@ export default function AuditoriaAgentesPage() {
         {error && (
           <Alert color='red' radius='md' icon={<IconAlertCircle size={18} />} mb='md'>
             {error}
+          </Alert>
+        )}
+
+        {datos && !datos.alcance.todas && (
+          <Alert color='gray' radius='md' icon={<IconLock size={18} />} mb='md'>
+            {datos.alcance.empresas.length > 0
+              ? `Está viendo solo los agentes de: ${datos.alcance.empresas.map((e) => e.nombre).join(', ')}.`
+              : 'No tiene empresas asignadas en este módulo.'}{' '}
+            El alcance lo dan las empresas donde tiene el permiso «Auditoría de agentes».
           </Alert>
         )}
 

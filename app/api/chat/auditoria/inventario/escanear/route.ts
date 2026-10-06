@@ -1,5 +1,5 @@
 import { prisma } from '../../../../../../lib/prisma';
-import { canAuditAgents } from '../../../../../../lib/chat/audit-access';
+import { canAuditAgents, getAuditScope } from '../../../../../../lib/chat/audit-access';
 import {
   jsonNoStore,
   resolveSessionUser,
@@ -22,6 +22,9 @@ export const dynamic = 'force-dynamic';
  * Una sola solicitud viva a la vez: si ya hay una pendiente o en curso, se
  * devuelve esa en vez de encolar otra (evita que varios clics disparen varios
  * escaneos por SSH a toda la flota).
+ *
+ * Solo con alcance total (administración): el escaneo recorre TODA la flota,
+ * no solo las empresas de quien lo pide (2026-10-06).
  */
 export async function POST() {
   try {
@@ -33,6 +36,13 @@ export async function POST() {
         {
           error: 'La auditoría de agentes está reservada a la administración.',
         },
+        { status: 403 }
+      );
+    }
+
+    if (!(await getAuditScope(user.email)).all) {
+      return jsonNoStore(
+        { error: 'Re-escanear recorre toda la flota: está reservado a la administración.' },
         { status: 403 }
       );
     }

@@ -1,4 +1,8 @@
-import { canConfigureAgents } from '../../../../../../../lib/chat/audit-access';
+import {
+  agentCodeInScope,
+  canConfigureAgents,
+  getAuditScope,
+} from '../../../../../../../lib/chat/audit-access';
 import {
   badRequest,
   jsonNoStore,
@@ -20,7 +24,8 @@ export const dynamic = 'force-dynamic';
  *
  * Solo con el permiso de configurar (subproceso /process/chat/auditoria/
  * configurar, con nombre propio; ser administrador no alcanza). Cada cambio
- * queda en la línea de tiempo con el correo de quien lo hizo.
+ * queda en la línea de tiempo con el correo de quien lo hizo. Fuera de la
+ * administración, solo agentes de las empresas del usuario (getAuditScope).
  */
 export async function PUT(request: Request, { params }: { params: Promise<{ code: string }> }) {
   try {
@@ -41,7 +46,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ code
       throw err;
     }
     const { code } = await params;
-    const r = await guardarPerfil(decodeURIComponent(code).toLowerCase(), entrada, user.email);
+    const codigo = decodeURIComponent(code).toLowerCase();
+    if (!(await agentCodeInScope(await getAuditScope(user.email), codigo))) {
+      return jsonNoStore(
+        { error: 'Ese agente está fuera de las empresas que usted puede auditar.' },
+        { status: 403 }
+      );
+    }
+    const r = await guardarPerfil(codigo, entrada, user.email);
     if (!r) return jsonNoStore({ error: 'No existe ese agente.' }, { status: 404 });
     return jsonNoStore({ ok: true, cambios: r.cambios });
   } catch (error) {

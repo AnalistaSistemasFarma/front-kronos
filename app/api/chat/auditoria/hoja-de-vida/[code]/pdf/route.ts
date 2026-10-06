@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
-import { canAuditAgents } from '../../../../../../../lib/chat/audit-access';
+import {
+  agentCodeInScope,
+  canAuditAgents,
+  getAuditScope,
+} from '../../../../../../../lib/chat/audit-access';
 import {
   jsonNoStore,
   NO_STORE,
@@ -23,7 +27,8 @@ export const runtime = 'nodejs';
  *
  * Usa el mismo Chrome headless del SGC (puppeteer, ya instalado: sin
  * dependencias nuevas), con JavaScript apagado y sin red. El HTML se arma en
- * el servidor escapando todo el texto (lib/agent-audit/cv-pdf.ts).
+ * el servidor escapando todo el texto (lib/agent-audit/cv-pdf.ts). Mismo
+ * alcance por empresa que la hoja de vida en pantalla.
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ code: string }> }) {
   try {
@@ -36,7 +41,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cod
       );
     }
     const { code } = await params;
-    const ficha = await leerHojaDeVida(decodeURIComponent(code).toLowerCase());
+    const codigo = decodeURIComponent(code).toLowerCase();
+    if (!(await agentCodeInScope(await getAuditScope(user.email), codigo))) {
+      return jsonNoStore(
+        { error: 'Ese agente está fuera de las empresas que usted puede auditar.' },
+        { status: 403 }
+      );
+    }
+    const ficha = await leerHojaDeVida(codigo);
     if (!ficha) return jsonNoStore({ error: 'No existe ese agente.' }, { status: 404 });
 
     const html = htmlHojaDeVida(ficha, {

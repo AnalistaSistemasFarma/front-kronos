@@ -1,4 +1,9 @@
-import { canAuditAgents, canConfigureAgents } from '../../../../../../lib/chat/audit-access';
+import {
+  agentCodeInScope,
+  canAuditAgents,
+  canConfigureAgents,
+  getAuditScope,
+} from '../../../../../../lib/chat/audit-access';
 import {
   jsonNoStore,
   resolveSessionUser,
@@ -18,7 +23,8 @@ export const dynamic = 'force-dynamic';
  * historial, hallazgos y resúmenes semanales. NO devuelve el texto de las
  * conversaciones: solo conteos y fechas (ver lib/agent-audit/cv-db.ts).
  * `puedeConfigurar` le dice a la pantalla si muestra el botón de editar; la
- * reja real está en PUT …/perfil.
+ * reja real está en PUT …/perfil. Fuera de la administración, solo agentes
+ * de las empresas del usuario (getAuditScope): si no, 403.
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ code: string }> }) {
   try {
@@ -31,7 +37,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cod
       );
     }
     const { code } = await params;
-    const ficha = await leerHojaDeVida(decodeURIComponent(code).toLowerCase());
+    const codigo = decodeURIComponent(code).toLowerCase();
+    if (!(await agentCodeInScope(await getAuditScope(user.email), codigo))) {
+      return jsonNoStore(
+        { error: 'Ese agente está fuera de las empresas que usted puede auditar.' },
+        { status: 403 }
+      );
+    }
+    const ficha = await leerHojaDeVida(codigo);
     if (!ficha) return jsonNoStore({ error: 'No existe ese agente.' }, { status: 404 });
     return jsonNoStore({ ...ficha, puedeConfigurar: await canConfigureAgents(user.email) });
   } catch (error) {
