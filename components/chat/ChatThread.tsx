@@ -23,6 +23,7 @@ import {
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import AgentTaskTable from './AgentTaskTable';
+import AgentMetricsBar from './AgentMetricsBar';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
@@ -1099,6 +1100,7 @@ export default function ChatThread({
         </Box>
       )}
       {enPersonas && <AvisoPrivacidadPersonas />}
+      {esHiloDirecto && <AgentMetricsBar metrics={thread.metrics} />}
       <ScrollArea
         className='chat-thread__scroll'
         viewportRef={viewportRef}

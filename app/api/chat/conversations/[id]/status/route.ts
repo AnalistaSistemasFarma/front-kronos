@@ -1,5 +1,6 @@
 import { prisma } from '../../../../../../lib/prisma';
 import { parseAgentTasks } from '../../../../../../lib/chat/status-tasks';
+import { agentMetricsForViewer } from '../../../../../../lib/chat/agent-metrics-store';
 import { guardConversation, jsonNoStore, serverError } from '../../../../../../lib/chat/http';
 
 /**
@@ -15,6 +16,11 @@ import { guardConversation, jsonNoStore, serverError } from '../../../../../../l
  * el desglose va en `statuses`, uno por agente que haya publicado algo. Se
  * devuelven las dos formas para que el cliente del hilo directo no cambie.
  *
+ * `metrics` (opcional) trae la última foto del mod synerlink-metrics: contexto,
+ * tokens, modelo y sub-agentes. Solo en el hilo directo y solo si el usuario
+ * las puede ver (lib/chat/agent-metrics-store.ts → canViewAgentMetrics); si no,
+ * el campo no viene.
+ *
  * Este endpoint es solo de LECTURA. Quien escribe el estado es el agente, por
  * su propia API (POST /api/chat/agent/status) autenticada con su llave: el
  * usuario no puede fabricar el estado de un bot.
@@ -27,10 +33,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const guard = await guardConversation(id);
     if ('response' in guard) return guard.response;
 
-    const filas = await prisma.chatAgentStatus.findMany({
-      where: { id_conversation: guard.conversationId },
-      include: { agent: { select: { display_name: true, avatar_url: true } } },
-    });
+    const [filas, metrics] = await Promise.all([
+      prisma.chatAgentStatus.findMany({
+        where: { id_conversation: guard.conversationId },
+        include: { agent: { select: { display_name: true, avatar_url: true } } },
+      }),
+      agentMetricsForViewer(guard.user.email, guard),
+    ]);
 
     const statuses = filas.map((f) => ({
       idAgent: f.id_agent,
@@ -56,6 +65,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
           }
         : null,
       statuses,
+      // Métricas del mod (solo hilo directo y solo para quien las puede ver).
+      ...(metrics !== undefined ? { metrics } : {}),
     });
   } catch (error) {
     return serverError('GET /api/chat/conversations/[id]/status', error);
