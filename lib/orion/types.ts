@@ -109,6 +109,13 @@ export type OrionReviewState = {
   returnedAt?: string | null;
   /** Ciclo de validación (1 = primera ronda; +1 por cada reenvío tras devolución). */
   round?: number;
+  /**
+   * 'word': la validación se hizo en la preparación del Word y el PDF la hereda al convertirse
+   * (una sola validación). Los validadores aprobados siguen ubicando su visto bueno en el PDF.
+   */
+  source?: 'word' | null;
+  /** Versión del Word que aprobaron (cuando source = 'word'). */
+  sourceVersionLabel?: string | null;
 };
 
 /** Documento Orion reemplazado por una subversión nueva (queda en Orion como traza). */

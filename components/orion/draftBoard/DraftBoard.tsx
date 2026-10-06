@@ -52,6 +52,7 @@ import {
   ORION_DRAFT_STATUS_LABEL,
   activeClientReviewers,
   draftCorrectionRequests,
+  draftReviewPhase,
   pendingDraftValidators,
 } from '../../../lib/orion/draftState';
 import { alignBlocks, countChangeRuns, diffText, type DraftBlock } from '../../../lib/orion/draftDiff';
@@ -157,7 +158,6 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
   /** Subversión sobre la que trabajó quien sube (la que descargó, o la vigente al abrir el modal). */
   const [uploadBase, setUploadBase] = useState<string | null>(null);
   /** Pedidos de corrección que la subversión que se sube deja resueltos ("Corregido"). */
-  const [resolvedEmails, setResolvedEmails] = useState<string[]>([]);
   const [sendClientOpen, setSendClientOpen] = useState(false);
   const [clientReviewers, setClientReviewers] = useState<DraftClientReviewerInput[]>([]);
   const [clientMode, setClientMode] = useState<'sequential' | 'parallel'>('sequential');
@@ -419,9 +419,17 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
 
   const openUpload = () => {
     setUploadBase(readDownloadedVersion(requestId, fileId) ?? board?.draft.versionLabel ?? null);
-    // Por defecto la subversión resuelve todos los pedidos de corrección; se puede desmarcar alguno.
-    setResolvedEmails(draftCorrectionRequests(board?.draft).map((a) => a.email.toLowerCase()));
     setUploadOpen(true);
+  };
+
+  /** Paso final de la corrección: los validadores reciben un solo aviso con la versión nueva. */
+  const resendCorrection = async () => {
+    const label = board?.draft.versionLabel;
+    await postDraft(
+      'resend-internal',
+      `Corrección ${label ?? ''} enviada. Los validadores recibieron el aviso para revisarla.`,
+      { baseVersion: label }
+    );
   };
 
   /** Modal único de validadores: editar durante la validación o enviar / reenviar a validación. */
@@ -444,7 +452,6 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
       form.set('file', uploadFile);
       if (uploadNote.trim()) form.set('note', uploadNote.trim());
       if (uploadBase) form.set('baseVersion', uploadBase);
-      if (board?.draft.status === 'EN_VALIDACION_INTERNA') form.set('resolvedEmails', JSON.stringify(resolvedEmails));
       const res = await fetch(`${API}/upload`, { method: 'POST', body: form });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -499,6 +506,8 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
   const returned = draft.status === 'DEVUELTO_INTERNO' || draft.status === 'RECHAZADO_CLIENTE';
   const corrections = draftCorrectionRequests(draft);
   const waitingValidators = pendingDraftValidators(draft);
+  const phase = draftReviewPhase(draft);
+  const openMarksToFix = marks.filter((m) => m.status === 'abierta').length;
   const myApproval = approvals.find((a) => a.email.toLowerCase() === me) ?? null;
   const commentsUrl = `${API}/file?${qs}&withComments=1`;
   const downloadUrl = `${API}/file?${qs}`;
@@ -516,7 +525,11 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
         ? {
             text: `Le toca revisar la ${draft.versionLabel}: seleccione texto en la hoja para subrayarlo y dejar su comentario. Cuando termine, apruebe o pida corrección en "Validadores".`,
           }
-        : null
+        : phase === 'correccion'
+          ? {
+              text: 'La preparadora está corrigiendo. Le llegará un aviso cuando envíe la versión nueva para que la valide.',
+            }
+          : null
       : permissions.canSubmitInternal
         ? {
             text: returned
@@ -531,21 +544,35 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
             },
           }
         : draft.status === 'EN_VALIDACION_INTERNA'
-          ? corrections.length > 0
-            ? {
-                text: `${corrections.map((a) => a.name || a.email).join(', ')} ${
-                  corrections.length === 1 ? 'pidió' : 'pidieron'
-                } corrección. ${
-                  waitingValidators.length > 0
-                    ? `Cuando respondan todos (falta: ${waitingValidators
-                        .map((a) => a.name || a.email)
-                        .join(', ')}) podrá subir la versión corregida.`
-                    : 'Ya respondieron todos: corrija el Word y súbalo abajo. Al subir marque qué pedidos quedaron corregidos y todos vuelven a revisar.'
-                }`,
-              }
-            : {
-                text: 'Los validadores están revisando al mismo tiempo. Responda sus marcas; cuando todos respondan podrá subir la versión corregida.',
-              }
+          ? phase === 'correccion'
+            ? permissions.canResendInternal
+              ? {
+                  text: `Paso 2 de 2: ya subió la ${draft.versionLabel}. En cada marca use "Ya la corregí" o respóndala${
+                    openMarksToFix > 0 ? ` (faltan ${openMarksToFix})` : ''
+                  } y envíe la corrección. Todos los validadores la revisan otra vez.`,
+                  action: {
+                    label: 'Enviar corrección a los validadores',
+                    icon: <IconSend size={14} />,
+                    color: 'teal',
+                    onClick: () => void resendCorrection(),
+                  },
+                }
+              : {
+                  text: `Le toca corregir. Paso 1 de 2: descargue el Word con los comentarios, corríjalo y súbalo abajo (puede subir varias veces; nadie recibe aviso todavía). ${corrections
+                    .map((a) => a.name || a.email)
+                    .join(', ')} ${corrections.length === 1 ? 'pidió' : 'pidieron'} cambios.`,
+                }
+            : corrections.length > 0
+              ? {
+                  text: `${corrections.map((a) => a.name || a.email).join(', ')} ${
+                    corrections.length === 1 ? 'pidió' : 'pidieron'
+                  } corrección. Espere a que respondan todos (falta: ${waitingValidators
+                    .map((a) => a.name || a.email)
+                    .join(', ')}); después le tocará corregir.`,
+                }
+              : {
+                  text: 'Los validadores están revisando. Cuando respondan todos: si aprueban queda validado; si piden cambios, le tocará corregir.',
+                }
           : permissions.canSendClient
             ? {
                 text: `Todos aprobaron la ${draft.versionLabel}. Envíe el borrador al cliente para que lo revise, o si no hace falta, conviértalo a PDF y pase a firmas.`,
@@ -565,7 +592,7 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
                   }
                 : draft.status === 'CONVERTIDO_PDF'
                   ? {
-                      text: 'El PDF v1.0 ya está en la solicitud, debajo del Word. Ahora pasa por la validación del PDF (sus propios validadores) y luego se ubican las firmas.',
+                      text: 'El PDF v1.0 ya está en la solicitud, debajo del Word, y queda validado (lo aprobaron aquí). Sigue ubicar las firmas y los vistos buenos de los validadores.',
                     }
                   : null;
 
@@ -896,6 +923,13 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
                 blocks={blocksById[latest?.id ?? ''] ?? blocks ?? []}
                 currentUserEmail={me}
                 isElaborator={isElaborator}
+                elaboratorLockedReason={
+                  draft.status !== 'EN_VALIDACION_INTERNA' || permissions.canMarkFixed
+                    ? null
+                    : phase === 'correccion'
+                      ? 'Primero suba la versión corregida del Word (panel "Corrección del Word"). Después podrá marcar esta corrección o responderla.'
+                      : 'Los validadores siguen revisando. Cuando respondan todos, suba la versión corregida y después atienda las marcas.'
+                }
                 activeMarkId={activeMarkId}
                 detailMarkId={detailMarkId}
                 onDetail={setDetailMarkId}
@@ -1061,10 +1095,28 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
                       {draft.status === 'APROBADO_CLIENTE' ? 'Subir versión limpia' : 'Subir subversión'}
                     </Button>
                   </Group>
+                  {permissions.canResendInternal ? (
+                    <Group gap={8} wrap='nowrap'>
+                      <Text size='xs' c='dimmed' ff='monospace'>
+                        3
+                      </Text>
+                      <Button
+                        size='xs'
+                        color='teal'
+                        leftSection={<IconSend size={14} />}
+                        disabled={busy}
+                        onClick={() => void resendCorrection()}
+                      >
+                        Enviar corrección a los validadores
+                      </Button>
+                    </Group>
+                  ) : null}
                   <Text size='xs' c='dimmed'>
                     {draft.status === 'APROBADO_CLIENTE'
                       ? 'Sin comentarios ni cambios pendientes: es la que se convierte a PDF.'
-                      : 'Al subir, Kronos compara con la subversión anterior y marca solas las correcciones aplicadas. Todos los validadores reciben aviso para revisarla.'}
+                      : permissions.canResendInternal
+                        ? `Ya subió la ${draft.versionLabel}. Marque "Ya la corregí" o responda cada marca y envíela: los validadores reciben un solo aviso.`
+                        : 'Al subir, Kronos compara con la versión anterior y marca solas las correcciones aplicadas. Los validadores no reciben aviso hasta que usted envíe la corrección.'}
                   </Text>
                 </Stack>
               </Paper>
@@ -1293,31 +1345,19 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
           {corrections.length > 0 ? (
             <Paper withBorder radius='sm' p='xs'>
               <Text size='sm' fw={600} mb={4}>
-                Corregido en esta subversión
+                Lo que pidieron los validadores
               </Text>
-              <Text size='xs' c='dimmed' mb={6}>
-                Quien quede marcado vuelve a revisar; quien no, sigue esperando su corrección.
-              </Text>
-              <Stack gap={6}>
-                {corrections.map((a) => {
-                  const email = a.email.toLowerCase();
-                  return (
-                    <Checkbox
-                      key={email}
-                      checked={resolvedEmails.includes(email)}
-                      onChange={(e) => {
-                        const on = e.currentTarget.checked;
-                        setResolvedEmails((prev) => (on ? [...prev, email] : prev.filter((x) => x !== email)));
-                      }}
-                      label={
-                        <Text size='sm'>
-                          <b>{a.name || a.email}</b>: {a.comment || 'sin detalle'}
-                        </Text>
-                      }
-                    />
-                  );
-                })}
+              <Stack gap={4} mb={6}>
+                {corrections.map((a) => (
+                  <Text key={a.email} size='sm'>
+                    <b>{a.name || a.email}</b>: {a.comment || 'sin detalle'}
+                  </Text>
+                ))}
               </Stack>
+              <Text size='xs' c='dimmed'>
+                Subir no les avisa todavía: puede subir varias veces. Después marque lo corregido en cada marca y use
+                &quot;Enviar corrección a los validadores&quot;.
+              </Text>
             </Paper>
           ) : null}
           <Textarea

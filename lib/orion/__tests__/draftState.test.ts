@@ -6,13 +6,16 @@ import {
   applyDraftEditValidators,
   applyDraftInternalDecision,
   applyDraftNewVersion,
+  applyDraftResendInternal,
   applyDraftReviewerInvite,
   applyDraftSendClient,
   applyDraftSubmitInternal,
   createDraftState,
   draftCorrectionRequests,
+  draftReviewPhase,
   findDraftForOneDriveItem,
   pendingDraftValidators,
+  pdfReviewFromDraft,
   isWordDraftFileName,
   nextDraftVersionLabel,
   redactDraftForOutsider,
@@ -23,7 +26,7 @@ import {
   parseOrionSignatureBagBag,
   serializeOrionSignatureBagBag,
 } from '../formValue';
-import type { OrionReviewValidator } from '../reviewState';
+import { resetReviewForNewVersion, type OrionReviewValidator } from '../reviewState';
 
 const elaborador: DraftActor = { userId: 'u-ela', email: 'Ela@x.com', name: 'Ela' };
 const otro: DraftActor = { userId: 'u-otro', email: 'otro@x.com', name: 'Otro' };
@@ -161,17 +164,18 @@ describe('preparación Word: validación interna', () => {
     expect(dos.internalReview?.status).toBe('APROBADO');
   });
 
-  it('no se aprueba una subversión ya reemplazada; la nueva pide aprobar otra vez', () => {
+  it('no se aprueba una versión ya reemplazada; al enviar la corrección todos validan otra vez', () => {
     const aprobado = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'approve', baseVersion: 'v0.1' });
     const respondieron = applyDraftInternalDecision(aprobado, { actor: beto, decision: 'return', comment: 'Fecha' });
     const v2 = applyDraftNewVersion(respondieron, { actor: elaborador, version: version('b') });
-    expect(v2.versionLabel).toBe('v0.2');
-    expect(() => applyDraftInternalDecision(v2, { actor: beto, decision: 'approve', baseVersion: 'v0.1' })).toThrow(
+    const enviada = applyDraftResendInternal(v2, { actor: elaborador });
+    expect(enviada.versionLabel).toBe('v0.2');
+    expect(() => applyDraftInternalDecision(enviada, { actor: beto, decision: 'approve', baseVersion: 'v0.1' })).toThrow(
       /se subió la v0\.2/
     );
-    const anaV2 = v2.internalReview?.approvals.find((a) => a.email === 'ana@x.com');
+    const anaV2 = enviada.internalReview?.approvals.find((a) => a.email === 'ana@x.com');
     expect(anaV2).toMatchObject({ decision: 'PENDIENTE', approvedVersion: 'v0.1' });
-    expect(pendingDraftValidators(v2)).toHaveLength(2);
+    expect(pendingDraftValidators(enviada)).toHaveLength(2);
   });
 
   it('pedir corrección exige comentario y solo cambia el estado de ese validador', () => {
@@ -193,24 +197,85 @@ describe('preparación Word: validación interna', () => {
     expect(() => applyDraftInternalDecision(betoAprueba, { actor: ana, decision: 'approve' })).toThrow(/Ya pidió corrección/);
   });
 
-  it('al subir la corrección, el pedido marcado vuelve a revisión y todos aprueban otra vez', () => {
+  it('orden de la corrección: primero sube, luego marca lo corregido y envía; todos validan otra vez', () => {
     let s = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'return', comment: 'Cambiar fecha' });
     s = applyDraftInternalDecision(s, { actor: beto, decision: 'approve' });
-    const v2 = applyDraftNewVersion(s, { actor: elaborador, version: version('f'), resolvedEmails: ['ana@x.com'] });
-    expect(v2.internalReview?.approvals.map((a) => [a.email, a.decision, a.correctedIn ?? null])).toEqual([
-      ['ana@x.com', 'PENDIENTE', 'v0.2'],
+    expect(draftReviewPhase(s)).toBe('correccion');
+
+    // Antes de subir: puede subir, pero todavía no marca "Ya la corregí" ni envía.
+    const antes = resolveDraftPermissions({ state: s, actorEmail: 'ela@x.com', isElaborator: true });
+    expect(antes).toMatchObject({ canUpload: true, canMarkFixed: false, canResendInternal: false });
+    expect(() => applyDraftResendInternal(s, { actor: elaborador })).toThrow(/Primero suba la versión corregida/);
+
+    // Sube (puede subir varias): los validadores no se enteran todavía.
+    const v2 = applyDraftNewVersion(s, { actor: elaborador, version: version('f') });
+    const v3 = applyDraftNewVersion(v2, { actor: elaborador, version: version('g'), baseVersion: 'v0.2' });
+    expect(v3.internalReview?.versionLabel).toBe('v0.1');
+    expect(draftCorrectionRequests(v3).map((a) => a.email)).toEqual(['ana@x.com']);
+    expect(pendingDraftValidators(v3)).toEqual([]);
+    const despues = resolveDraftPermissions({ state: v3, actorEmail: 'ela@x.com', isElaborator: true });
+    expect(despues).toMatchObject({ canMarkFixed: true, canResendInternal: true });
+
+    // Envía: todos vuelven a validar la versión nueva; Ana la ve como "corregido en v0.3".
+    const enviada = applyDraftResendInternal(v3, { actor: elaborador, baseVersion: 'v0.3' });
+    expect(draftReviewPhase(enviada)).toBe('revision');
+    expect(enviada.internalReview?.versionLabel).toBe('v0.3');
+    expect(enviada.internalReview?.round).toBe(2);
+    expect(enviada.internalReview?.approvals.map((a) => [a.email, a.decision, a.correctedIn ?? null])).toEqual([
+      ['ana@x.com', 'PENDIENTE', 'v0.3'],
       ['beto@x.com', 'PENDIENTE', null],
     ]);
-    let fin = applyDraftInternalDecision(v2, { actor: ana, decision: 'approve' });
+    let fin = applyDraftInternalDecision(enviada, { actor: ana, decision: 'approve' });
     fin = applyDraftInternalDecision(fin, { actor: beto, decision: 'approve' });
     expect(fin.status).toBe('VALIDADO_INTERNO');
   });
 
-  it('un pedido que no se marca como corregido sigue esperando', () => {
-    let s = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'return', comment: 'Anexo B' });
+  it('si todos aprueban no hay fase de corrección ni hace falta subir otra versión', () => {
+    let s = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'approve' });
+    expect(draftReviewPhase(s)).toBe('revision');
     s = applyDraftInternalDecision(s, { actor: beto, decision: 'approve' });
-    const v2 = applyDraftNewVersion(s, { actor: elaborador, version: version('g'), resolvedEmails: [] });
-    expect(draftCorrectionRequests(v2).map((a) => a.email)).toEqual(['ana@x.com']);
+    expect(s.status).toBe('VALIDADO_INTERNO');
+    expect(draftReviewPhase(s)).toBeNull();
+  });
+
+  it('en corrección los validadores ya no marcan: el turno es de la preparadora', () => {
+    let s = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'return', comment: 'Anexo B' });
+    expect(resolveDraftPermissions({ state: s, actorEmail: 'beto@x.com', isElaborator: false }).canMark).toBe(true);
+    s = applyDraftInternalDecision(s, { actor: beto, decision: 'approve' });
+    expect(resolveDraftPermissions({ state: s, actorEmail: 'ana@x.com', isElaborator: false }).canMark).toBe(false);
+  });
+});
+
+describe('una sola validación: el PDF hereda la del Word', () => {
+  function validado() {
+    let s = applyDraftSubmitInternal(nuevo(), { actor: elaborador, validators });
+    s = applyDraftInternalDecision(s, { actor: ana, decision: 'approve' });
+    return applyDraftInternalDecision(s, { actor: beto, decision: 'approve' });
+  }
+
+  it('el PDF nace aprobado con los validadores del Word (para ubicar sus vistos buenos)', () => {
+    const review = pdfReviewFromDraft(validado());
+    expect(review).toMatchObject({ status: 'APROBADO', source: 'word', sourceVersionLabel: 'v0.1' });
+    expect(review?.approvals.map((a) => [a.email, a.decision])).toEqual([
+      ['ana@x.com', 'APROBADO'],
+      ['beto@x.com', 'APROBADO'],
+    ]);
+  });
+
+  it('sin la validación del Word completa, el PDF no hereda nada', () => {
+    expect(pdfReviewFromDraft(nuevo())).toBeNull();
+    const aMedias = applyDraftInternalDecision(applyDraftSubmitInternal(nuevo(), { actor: elaborador, validators }), {
+      actor: ana,
+      decision: 'approve',
+    });
+    expect(pdfReviewFromDraft(aMedias)).toBeNull();
+  });
+
+  it('una versión corregida del PDF conserva la aprobación del Word; un PDF directo se reinicia', () => {
+    const heredada = pdfReviewFromDraft(validado())!;
+    expect(resetReviewForNewVersion(heredada, 'v1.1')).toMatchObject({ status: 'APROBADO', versionLabel: 'v1.1' });
+    const directa = { ...heredada, source: null };
+    expect(resetReviewForNewVersion(directa, 'v1.1')?.status).toBe('SIN_VALIDACION');
   });
 });
 

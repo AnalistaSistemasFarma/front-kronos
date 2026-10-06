@@ -117,12 +117,29 @@ export function markReviewReturned(
   };
 }
 
+/**
+ * PDF que viene de un Word validado: una subversión corregida del PDF conserva la aprobación del
+ * Word (una sola validación) y queda lista para firmar otra vez.
+ */
+export function keepWordApprovalForNewVersion(review: OrionReviewState, versionLabel: string): OrionReviewState {
+  return {
+    ...review,
+    status: 'APROBADO',
+    versionLabel,
+    returnReason: null,
+    returnedBy: null,
+    returnedAt: null,
+  };
+}
+
 /** Tras reemplazar el PDF (nueva subversión) las aprobaciones anteriores dejan de valer. */
 export function resetReviewForNewVersion(
   review: OrionReviewState | null | undefined,
   versionLabel: string
 ): OrionReviewState | null {
   if (!review) return null;
+  // Validado en el Word: el PDF no se vuelve a validar.
+  if (review.source === 'word') return keepWordApprovalForNewVersion(review, versionLabel);
   return {
     ...review,
     status: review.status === 'DEVUELTO_CORRECCION' ? 'DEVUELTO_CORRECCION' : 'SIN_VALIDACION',

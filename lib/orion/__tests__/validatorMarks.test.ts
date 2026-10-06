@@ -107,6 +107,30 @@ describe('visto bueno en el PDF', () => {
     expect(reloaded.getPageCount()).toBe(1);
   });
 
+  it('replica la rúbrica en todas las páginas (aunque la caja se haya ubicado en una sola)', async () => {
+    const pdf = await PDFDocument.create();
+    for (let i = 0; i < 3; i += 1) pdf.addPage([595, 842]);
+    const bytes = await pdf.save();
+    const marks = buildValidatorMarks(approvedState).map((m) => ({ ...m, field: { ...m.field, page: 1 } }));
+
+    const stamped = await PDFDocument.load(await stampValidatorMarks(bytes, marks));
+    const drawn = stamped.getPages().map((page) => {
+      const contents = page.node.Contents();
+      return contents ? 1 : 0;
+    });
+    // Cada página recibe su propio contenido dibujado (chulito, nombre y fecha).
+    expect(drawn).toEqual([1, 1, 1]);
+  });
+
+  it('una caja ubicada en una página que ya no existe igual se estampa (todas las páginas)', async () => {
+    const pdf = await PDFDocument.create();
+    pdf.addPage([595, 842]);
+    const bytes = await pdf.save();
+    const marks = buildValidatorMarks(approvedState).map((m) => ({ ...m, field: { ...m.field, page: 5 } }));
+    const stamped = await stampValidatorMarks(bytes, marks);
+    expect(stamped.byteLength).toBeGreaterThan(bytes.byteLength);
+  });
+
   it('acepta un visto bueno diminuto (2% × 1%) y lo estampa sin texto', async () => {
     const tiny = clampFieldSize({ ...approvalField, width: 0.5, height: 0.2 });
     expect(tiny).toMatchObject({ width: 2, height: 1 });

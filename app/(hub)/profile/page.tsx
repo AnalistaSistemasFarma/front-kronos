@@ -38,6 +38,7 @@ import { useTheme } from '../../../components/providers';
 import { CustomColorPicker } from '../../../components/theme/CustomColorPicker';
 import { FONTS } from '../../../lib/theme/fonts';
 import { PALETTES } from '../../../lib/theme/palettes';
+import { DUO_PALETTES } from '../../../lib/theme/duoPalettes';
 
 interface UserProfile {
   id: string;
@@ -405,6 +406,60 @@ export default function ProfileSettingsPage() {
                         </ColorSwatch>
                         <Text size='sm' fw={active ? 600 : 400}>
                           {p.label}
+                        </Text>
+                      </UnstyledButton>
+                    );
+                  })}
+                </SimpleGrid>
+              </div>
+
+              <div>
+                <Text fw={600} size='sm' mb={4}>
+                  Combinaciones de dos tonos
+                </Text>
+                <Text size='xs' c='dimmed' mb='sm'>
+                  Un tono fuerte para botones y acentos, y su pastel para el fondo y las tarjetas en lugar
+                  del blanco.
+                </Text>
+                <SimpleGrid cols={{ base: 2, xs: 4 }} spacing='sm'>
+                  {DUO_PALETTES.map((d) => {
+                    const active = palette === d.key;
+                    return (
+                      <UnstyledButton
+                        key={d.key}
+                        onClick={() => handlePaletteSelect(d.key)}
+                        aria-pressed={active}
+                        aria-label={`Combinación ${d.label}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: rem(8),
+                          padding: rem(8),
+                          borderRadius: 'var(--mantine-radius-md)',
+                          border: active
+                            ? '2px solid var(--mantine-primary-color-filled)'
+                            : '1px solid var(--app-border, var(--mantine-color-default-border))',
+                          background: active ? d.pastel : 'transparent',
+                        }}
+                      >
+                        <span
+                          aria-hidden
+                          style={{
+                            width: rem(24),
+                            height: rem(24),
+                            flex: '0 0 auto',
+                            borderRadius: '50%',
+                            background: `linear-gradient(135deg, ${d.accent} 0 50%, ${d.pastel} 50% 100%)`,
+                            boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${d.accent} 35%, transparent)`,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          {active ? <IconCheck size={14} color='#fff' style={{ filter: 'drop-shadow(0 0 1px rgba(0,0,0,.6))' }} /> : null}
+                        </span>
+                        <Text size='sm' fw={active ? 600 : 400} c={active ? d.accent : undefined}>
+                          {d.label}
                         </Text>
                       </UnstyledButton>
                     );

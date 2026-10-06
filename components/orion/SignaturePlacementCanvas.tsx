@@ -382,8 +382,8 @@ export default function SignaturePlacementCanvas({
         </Text>
         {activeIsValidator ? (
           <Text size='xs' c='dimmed' mt={2}>
-            Mientras se firma se ve un chulito; en la versión final se reemplaza por su firma
-            guardada, en pequeño.
+            Es su rúbrica: se repite en todas las páginas, en la misma posición. Mientras se firma
+            se ve un chulito; en la versión final se reemplaza por su firma guardada, en pequeño.
           </Text>
         ) : null}
         <Text size='xs' c='dimmed' mt={4}>
@@ -432,6 +432,36 @@ export default function SignaturePlacementCanvas({
                 style={{ display: 'block', width: '100%', height: 'auto', pointerEvents: 'none' }}
                 draggable={false}
               />
+              {/* La rúbrica del validador se repite en todas las páginas: copia tenue (no se mueve aquí). */}
+              {fields
+                .filter((f) => f.page !== page.page && normalizeFieldKind(f.kind) === 'approval')
+                .map((field) => (
+                  <Box
+                    key={`ghost-${field.id}`}
+                    aria-hidden
+                    title='Rúbrica del validador: se repite en todas las páginas'
+                    style={{
+                      position: 'absolute',
+                      left: `${field.x}%`,
+                      top: `${field.y}%`,
+                      width: `${field.width}%`,
+                      height: `${field.height}%`,
+                      border: '1.5px dashed color-mix(in srgb, var(--mantine-color-teal-6) 55%, transparent)',
+                      borderRadius: 4,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      opacity: 0.55,
+                      pointerEvents: 'none',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <IconCircleCheckFilled
+                      size={field.width < 8 || field.height < 3 ? '70%' : 12}
+                      style={{ color: 'var(--mantine-color-teal-6)', maxHeight: '100%' }}
+                    />
+                  </Box>
+                ))}
               {fields
                 .filter((f) => f.page === page.page)
                 .map((field) => {

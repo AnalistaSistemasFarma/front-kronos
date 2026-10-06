@@ -5,6 +5,7 @@ import type {
   OrionDraftStatus,
   OrionDraftVersion,
   OrionReviewApproval,
+  OrionReviewState,
 } from './types';
 import {
   buildPendingApprovals,
@@ -101,6 +102,30 @@ export function draftCorrectionRequests(state?: OrionDraftState | null): OrionRe
   return [...state.internalReview.approvals]
     .sort((a, b) => a.order - b.order)
     .filter((a) => a.decision === 'DEVUELTO');
+}
+
+/**
+ * Fase de la validación interna, por rondas:
+ * - `revision`: algún validador todavía está revisando la versión enviada.
+ * - `correccion`: todos respondieron y al menos uno pidió corrección. Le toca a la preparadora:
+ *   sube la versión corregida (sin avisar a nadie), marca lo corregido y la envía de nuevo.
+ */
+export type DraftReviewPhase = 'revision' | 'correccion';
+
+export function draftReviewPhase(state?: OrionDraftState | null): DraftReviewPhase | null {
+  if (!state || state.status !== 'EN_VALIDACION_INTERNA' || !state.internalReview) return null;
+  if (pendingDraftValidators(state).length > 0) return 'revision';
+  return draftCorrectionRequests(state).length > 0 ? 'correccion' : null;
+}
+
+/**
+ * En corrección, la preparadora ya subió una versión posterior a la que revisaron los
+ * validadores: recién entonces puede marcar "Ya la corregí" y enviar la corrección.
+ */
+export function draftCorrectionUploaded(state?: OrionDraftState | null): boolean {
+  if (draftReviewPhase(state) !== 'correccion') return false;
+  const reviewed = state?.internalReview?.versionLabel;
+  return Boolean(reviewed) && state!.versionLabel !== reviewed;
 }
 
 /**
@@ -240,6 +265,10 @@ export type DraftPermissions = {
   canManageClientInvites: boolean;
   /** Aprobado por el cliente: el elaborador lo convierte a PDF. */
   canConvertPdf: boolean;
+  /** En corrección y con la versión corregida ya subida: marcar "Ya la corregí" en las marcas. */
+  canMarkFixed: boolean;
+  /** En corrección y con la versión corregida ya subida: enviarla a los validadores. */
+  canResendInternal: boolean;
 };
 
 export function resolveDraftPermissions(params: {
@@ -262,6 +291,8 @@ export function resolveDraftPermissions(params: {
     canSendClient: false,
     canManageClientInvites: false,
     canConvertPdf: false,
+    canMarkFixed: false,
+    canResendInternal: false,
   };
   const isValidator = isDraftValidator(state, me, params.actorUserId);
   // Solo las personas del documento: quien lo prepara y sus validadores (ni siquiera admin).
@@ -273,21 +304,26 @@ export function resolveDraftPermissions(params: {
   const elaborating = isDraftElaborationStatus(state.status);
   const reviewing = state.status === 'EN_VALIDACION_INTERNA';
   const pendingValidator = pendingDraftValidators(state).some((a) => isSameValidator(a, me, params.actorUserId));
-  const allResponded = reviewing && pendingDraftValidators(state).length === 0;
+  const correcting = draftReviewPhase(state) === 'correccion';
+  const correctionReady = prepares && draftCorrectionUploaded(state);
   const clientApproved = state.status === 'APROBADO_CLIENTE';
 
   return {
-    // En validación, la versión corregida se sube cuando todos respondieron; tras el cliente, la limpia.
-    canUpload: prepares && (elaborating || allResponded || clientApproved),
+    // En validación, la versión corregida se sube solo en la fase de corrección (todos respondieron
+    // y alguno pidió cambios); tras el cliente, la versión limpia.
+    canUpload: prepares && (elaborating || correcting || clientApproved),
     canSubmitInternal: elaborating && prepares,
     canDecideInternal: pendingValidator,
     canViewBoard,
     // Comentan los validadores; la preparadora responde sus marcas pero no marca su propio documento.
-    canMark: reviewing && isValidator,
+    // Solo mientras se revisa: en la fase de corrección el turno es de la preparadora.
+    canMark: reviewing && draftReviewPhase(state) === 'revision' && isValidator,
     canSendClient: state.status === 'VALIDADO_INTERNO' && prepares,
     canManageClientInvites: state.status === 'EN_REVISION_CLIENTE' && prepares,
     // Sin revisión del cliente se puede pasar directo a PDF al quedar validado.
     canConvertPdf: (clientApproved || state.status === 'VALIDADO_INTERNO') && prepares,
+    canMarkFixed: correctionReady,
+    canResendInternal: correctionReady,
   };
 }
 
@@ -307,9 +343,9 @@ export function assertDraftBaseVersion(state: OrionDraftState, baseVersion?: str
 
 /**
  * Registra una versión subida por el elaborador. Tras una devolución, subir la corrección
- * vuelve el documento a "En elaboración". En validación la subversión nueva pide a todos los
- * validadores aprobarla otra vez; los pedidos de corrección que la preparadora marca como
- * resueltos vuelven a "pendiente" y los demás siguen esperando corrección.
+ * vuelve el documento a "En elaboración". En validación solo se sube en la fase de corrección
+ * y la versión queda guardada SIN avisar a los validadores: la preparadora puede subir varias
+ * hasta que quede bien y luego la envía con `applyDraftResendInternal`.
  */
 export function applyDraftNewVersion(
   state: OrionDraftState,
@@ -318,8 +354,6 @@ export function applyDraftNewVersion(
     version: Omit<OrionDraftVersion, 'label' | 'kind'>;
     /** Subversión sobre la que trabajó quien sube (si llegó otra antes, se rechaza). */
     baseVersion?: string | null;
-    /** Correos de los validadores cuyo pedido de corrección queda resuelto (sin lista: todos). */
-    resolvedEmails?: string[] | null;
   },
   now = new Date().toISOString()
 ): OrionDraftState {
@@ -337,7 +371,7 @@ export function applyDraftNewVersion(
   }
 
   if (state.status === 'EN_VALIDACION_INTERNA') {
-    // Validación asíncrona: la versión corregida se sube cuando todos respondieron.
+    // Validación por rondas: la versión corregida se sube cuando todos respondieron.
     const waiting = pendingDraftValidators(state);
     if (waiting.length > 0) {
       throw draftError(
@@ -347,27 +381,14 @@ export function applyDraftNewVersion(
         409
       );
     }
-    const review = state.internalReview;
-    const resolved = params.resolvedEmails ? new Set(params.resolvedEmails.map(normalizeEmail)) : null;
+    if (draftReviewPhase(state) !== 'correccion') {
+      throw draftError('Nadie pidió corrección: no hace falta subir otra versión.', 409);
+    }
+    // Solo se guarda la versión: los validadores siguen con lo que revisaron hasta que se envíe.
     return {
       ...state,
       versionLabel: label,
       versions: [...state.versions, { ...params.version, label, kind: 'elaboracion' }],
-      internalReview: review
-        ? {
-            ...review,
-            versionLabel: label,
-            approvals: review.approvals.map((a) => {
-              // Quien aprobó la anterior conserva el dato, pero debe aprobar la nueva.
-              if (a.decision === 'APROBADO') return { ...a, decision: 'PENDIENTE' as const };
-              // Pedido de corrección resuelto: vuelve a revisar (su comentario queda a la vista).
-              if (a.decision === 'DEVUELTO' && (!resolved || resolved.has(normalizeEmail(a.email)))) {
-                return { ...a, decision: 'PENDIENTE' as const, correctedIn: label };
-              }
-              return a;
-            }),
-          }
-        : review,
       updatedAt: now,
     };
   }
@@ -393,6 +414,41 @@ export function applyDraftNewVersion(
   throw draftError(
     `El documento está "${ORION_DRAFT_STATUS_LABEL[state.status]}": no se pueden subir versiones.`
   );
+}
+
+/**
+ * "Enviar corrección a los validadores": cierra la fase de corrección. Todos los validadores
+ * vuelven a revisar la versión nueva (quien pidió corrección la ve marcada como "Corregido en").
+ */
+export function applyDraftResendInternal(
+  state: OrionDraftState,
+  params: { actor: DraftActor; baseVersion?: string | null },
+  now = new Date().toISOString()
+): OrionDraftState {
+  if (draftReviewPhase(state) !== 'correccion' || !state.internalReview) {
+    throw draftError('El documento no está esperando una corrección.', 409);
+  }
+  if (!draftCorrectionUploaded(state)) {
+    throw draftError('Primero suba la versión corregida del Word; después la envía a los validadores.', 409);
+  }
+  assertDraftBaseVersion(state, params.baseVersion);
+  const label = state.versionLabel;
+  const review = state.internalReview;
+  return {
+    ...state,
+    internalReview: {
+      ...review,
+      status: 'EN_VALIDACION',
+      versionLabel: label,
+      round: (review.round ?? 1) + 1,
+      approvals: review.approvals.map((a) =>
+        a.decision === 'DEVUELTO'
+          ? { ...a, decision: 'PENDIENTE' as const, correctedIn: label }
+          : { ...a, decision: 'PENDIENTE' as const }
+      ),
+    },
+    updatedAt: now,
+  };
 }
 
 export function applyDraftSubmitInternal(
@@ -494,7 +550,7 @@ export function applyDraftInternalDecision(
       !mine
         ? 'Usted no es validador de este documento.'
         : mine.decision === 'DEVUELTO'
-          ? 'Ya pidió corrección: le tocará revisar cuando la preparadora suba la subversión corregida.'
+          ? 'Ya pidió corrección: le tocará revisar cuando la preparadora envíe la versión corregida.'
           : 'Ya aprobó esta subversión.',
       403
     );
@@ -535,6 +591,32 @@ export function applyDraftInternalDecision(
       ? { ...review, status: 'APROBADO', approvedAt: now }
       : review,
     updatedAt: now,
+  };
+}
+
+/**
+ * Una sola validación: el PDF convertido desde el Word hereda la aprobación del Word (no se
+ * vuelve a validar). Solo cuentan los validadores que aprobaron; ellos ubican su visto bueno
+ * en el PDF igual que antes. Sin validación del Word aprobada, el PDF queda sin validación.
+ */
+export function pdfReviewFromDraft(state: OrionDraftState, now = new Date().toISOString()): OrionReviewState | null {
+  const review = state.internalReview;
+  if (!review) return null;
+  const approvals = review.approvals.filter((a) => a.decision === 'APROBADO');
+  if (approvals.length === 0 || approvals.length !== review.approvals.length) return null;
+  return {
+    status: 'APROBADO',
+    approvals: approvals.map((a) => ({ ...a })),
+    versionLabel: review.versionLabel ?? state.versionLabel,
+    submittedAt: review.submittedAt ?? null,
+    submittedBy: review.submittedBy ?? null,
+    approvedAt: review.approvedAt ?? now,
+    returnReason: null,
+    returnedBy: null,
+    returnedAt: null,
+    round: review.round,
+    source: 'word',
+    sourceVersionLabel: review.versionLabel ?? state.versionLabel,
   };
 }
 

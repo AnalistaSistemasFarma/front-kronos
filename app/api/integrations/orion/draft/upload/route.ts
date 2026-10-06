@@ -28,17 +28,6 @@ export async function POST(req: Request) {
     const file = form.get('file');
     const note = typeof form.get('note') === 'string' ? String(form.get('note')) : null;
     const baseVersion = typeof form.get('baseVersion') === 'string' ? String(form.get('baseVersion')) : null;
-    // Pedidos de corrección que esta subversión resuelve (JSON con correos); sin el campo: todos.
-    let resolvedEmails: string[] | null = null;
-    const resolvedRaw = form.get('resolvedEmails');
-    if (typeof resolvedRaw === 'string') {
-      try {
-        const parsed = JSON.parse(resolvedRaw);
-        resolvedEmails = Array.isArray(parsed) ? parsed.map((e) => String(e)) : null;
-      } catch {
-        return NextResponse.json({ error: 'resolvedEmails inválido' }, { status: 400 });
-      }
-    }
     if (!Number.isInteger(requestId) || requestId <= 0 || !fileId) {
       return NextResponse.json({ error: 'requestId y fileId son obligatorios' }, { status: 400 });
     }
@@ -56,7 +45,7 @@ export async function POST(req: Request) {
     const content = Buffer.from(await file.arrayBuffer());
     const isAdmin = session?.user?.role === 'admin' || session?.user?.role === 'superadmin';
     const info = await withMssqlPool(async (pool) => {
-      await uploadOrionDraftVersion(pool, { requestId, fileId, actor, content, note, baseVersion, resolvedEmails });
+      await uploadOrionDraftVersion(pool, { requestId, fileId, actor, content, note, baseVersion });
       return getOrionDraftInfo(pool, { requestId, fileId, actor, isAdmin });
     });
     return NextResponse.json(info);

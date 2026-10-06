@@ -7,6 +7,7 @@ import {
   decideOrionDraftInternal,
   getOrionDraftInfo,
   orionDraftClientInvite,
+  resendOrionDraftInternal,
   sendOrionDraftToClient,
   startOrionDraft,
   submitOrionDraftInternal,
@@ -59,6 +60,7 @@ export async function GET(req: Request) {
  * - start
  * - submit-internal (validatorIds en orden) | edit-validators (validatorIds)
  * - approve (baseVersion: subversión que se aprueba) | return (comment obligatorio)
+ * - resend-internal (baseVersion): la preparadora envía la versión corregida a los validadores
  * - send-client (reviewers [{ email, name, cardCode }], mode sequential|parallel)
  * - client-invite (email, inviteAction url|send|regenerate)
  * - convert-pdf
@@ -123,6 +125,13 @@ export async function POST(req: Request) {
             fileId,
             actor,
             validatorIds: body.validatorIds,
+          });
+        case 'resend-internal':
+          return resendOrionDraftInternal(pool, {
+            requestId,
+            fileId,
+            actor,
+            baseVersion: typeof body.baseVersion === 'string' ? body.baseVersion : null,
           });
         case 'approve':
         case 'return':

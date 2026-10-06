@@ -30,13 +30,16 @@ import {
   applyDraftEditValidators,
   applyDraftInternalDecision,
   applyDraftNewVersion,
+  applyDraftResendInternal,
   applyDraftReviewerInvite,
   applyDraftSendClient,
   applyDraftSubmitInternal,
   assertDraftBaseVersion,
   createDraftState,
   currentDraftValidator,
+  draftReviewPhase,
   draftVersionFileName,
+  pdfReviewFromDraft,
   isDraftValidator,
   isWordDraftFileName,
   nextDraftVersionLabel,
@@ -502,8 +505,6 @@ export async function uploadOrionDraftVersion(
     note?: string | null;
     /** Subversión que tenía abierta quien sube. */
     baseVersion?: string | null;
-    /** Validadores cuyo pedido de corrección queda resuelto con esta subversión (null: todos). */
-    resolvedEmails?: string[] | null;
   }
 ): Promise<OrionDraftState> {
   await assertRequestOpen(pool, params.requestId);
@@ -537,7 +538,6 @@ export async function uploadOrionDraftVersion(
       actor: params.actor,
       version: pendingVersion,
       baseVersion: params.baseVersion,
-      resolvedEmails: params.resolvedEmails,
     },
     now
   );
@@ -559,15 +559,7 @@ export async function uploadOrionDraftVersion(
   assertDraftBaseVersion(fresh.draft, loaded.draft.versionLabel);
   await replaceOneDriveItemContent(token, params.fileId, params.content as unknown as BodyInit, DOCX_MIME);
 
-  const recomputed = applyDraftNewVersion(
-    fresh.draft,
-    { actor: params.actor, version: pendingVersion, resolvedEmails: params.resolvedEmails },
-    now
-  );
-  // Pedidos de corrección que quedaron resueltos con esta subversión.
-  const corrected = (recomputed.internalReview?.approvals ?? []).filter(
-    (a) => a.correctedIn === recomputed.versionLabel
-  );
+  const recomputed = applyDraftNewVersion(fresh.draft, { actor: params.actor, version: pendingVersion }, now);
   const draft: OrionDraftState = {
     ...recomputed,
     versions: recomputed.versions.map((v) =>
@@ -596,50 +588,14 @@ export async function uploadOrionDraftVersion(
     [
       `${actorDisplay(params.actor)} subió la versión ${draft.versionLabel} de ${draft.fileName}.`,
       pendingVersion.note ? `Nota: ${pendingVersion.note}` : null,
-      corrected.length ? `Atendió la corrección pedida por ${corrected.map((a) => a.name || a.email).join(', ')}.` : null,
       detected.length ? `Quedaron corregidas las marcas ${detected.join(', ')}.` : null,
     ]
       .filter(Boolean)
       .join(' '),
     params.actor
   );
-  if (loaded.draft.status === 'EN_VALIDACION_INTERNA') {
-    // Cada validador se entera SOLO de lo suyo: su pedido atendido y sus marcas corregidas.
-    // Quien no tenía nada pendiente solo recibe la tarea de volver a validar (sin lo de los demás).
-    const correctedEmails = new Set(corrected.map((a) => normalizeEmail(a.email)));
-    const detectedSet = new Set(detected);
-    const myFixedMarks = new Map<string, number[]>();
-    if (detectedSet.size > 0) {
-      const marks = await listDraftMarks(pool, params.requestId, params.fileId).catch(() => []);
-      for (const m of marks) {
-        if (!detectedSet.has(m.number)) continue;
-        const email = normalizeEmail(m.authorEmail);
-        myFixedMarks.set(email, [...(myFixedMarks.get(email) ?? []), m.number]);
-      }
-    }
-    const personal = new Set<string>();
-    for (const a of pendingDraftValidators(draft)) {
-      const email = normalizeEmail(a.email);
-      const mine = myFixedMarks.get(email) ?? [];
-      if (!correctedEmails.has(email) && mine.length === 0) continue;
-      personal.add(email);
-      const parts = [
-        correctedEmails.has(email) ? 'atendió lo que usted pidió' : null,
-        mine.length ? `corrigió ${mine.length === 1 ? 'su marca' : 'sus marcas'} ${mine.join(', ')}` : null,
-      ].filter(Boolean);
-      notify([a.email], {
-        title: `Corrección lista para revisar: ${draft.fileName}`,
-        body: `Solicitud #${params.requestId} · ${actorDisplay(params.actor)} ${parts.join(' y ')} en la ${
-          draft.versionLabel
-        }. Revísela y apruébela otra vez en el tablero.`,
-        requestId: params.requestId,
-        fileId: params.fileId,
-        tag: `orion-draft-review-${params.requestId}-${params.fileId}`,
-      });
-    }
-    // Se reabren las tareas de todos; a quien ya recibió su aviso propio, sin un segundo aviso.
-    await openDraftReviewTask(pool, params.requestId, draft, { silentFor: personal });
-  }
+  // En corrección NO se avisa a los validadores: la preparadora puede subir varias versiones y
+  // los avisa una sola vez con "Enviar corrección a los validadores" (resendOrionDraftInternal).
   await publishDraftEvent(pool, params.requestId, params.fileId, 'version_added', {
     versionLabel: draft.versionLabel,
     detected,
@@ -747,6 +703,62 @@ export async function submitOrionDraftInternal(
   return draft;
 }
 
+/**
+ * "Enviar corrección a los validadores": la preparadora ya subió la versión corregida y atendió
+ * las marcas. Todos los validadores vuelven a revisar esa versión; cada uno recibe UN aviso y
+ * se le reactiva su misma tarea (una por persona y documento).
+ */
+export async function resendOrionDraftInternal(
+  pool: SqlPool,
+  params: { requestId: number; fileId: string; actor: DraftActor; baseVersion?: string | null }
+): Promise<OrionDraftState> {
+  await assertRequestOpen(pool, params.requestId);
+  const loaded = await loadDraft(pool, params.requestId, params.fileId);
+  if (!loaded.draft) throw httpError('Este documento no está en preparación.', 404);
+  await assertDraftOwner(pool, params.requestId, params.actor, loaded.draft);
+
+  // Primero el orden de pasos (¿ya subió la versión corregida?) y después las marcas pendientes.
+  const draft = applyDraftResendInternal(loaded.draft, { actor: params.actor, baseVersion: params.baseVersion });
+  const open = (await listDraftMarks(pool, params.requestId, params.fileId)).filter((m) => m.status === 'abierta');
+  if (open.length > 0) {
+    throw httpError(
+      `Falta atender ${open.length === 1 ? 'la marca' : 'las marcas'} ${open
+        .map((m) => m.number)
+        .join(', ')}: márquelas como corregidas o respóndalas antes de enviar.`,
+      409
+    );
+  }
+
+  await saveDraft(pool, params.requestId, loaded.formFieldId, loaded.bag, draft);
+
+  await note(
+    pool,
+    params.requestId,
+    `${actorDisplay(params.actor)} envió la corrección de ${draft.fileName} (versión ${draft.versionLabel}) a los validadores.`,
+    params.actor
+  );
+  const everyone = new Set<string>();
+  for (const a of pendingDraftValidators(draft)) {
+    everyone.add(normalizeEmail(a.email));
+    notify([a.email], {
+      title: `Nueva versión para validar: ${draft.fileName}`,
+      body: `Solicitud #${params.requestId} · ${actorDisplay(params.actor)} corrigió el documento (versión ${
+        draft.versionLabel
+      }). Revíselo en el tablero y valídelo.`,
+      requestId: params.requestId,
+      fileId: params.fileId,
+      tag: `orion-draft-review-${params.requestId}-${params.fileId}`,
+    });
+  }
+  // Se reactiva la tarea de cada uno, sin un segundo aviso (ya recibieron el de arriba).
+  await openDraftReviewTask(pool, params.requestId, draft, { silentFor: everyone });
+  await publishDraftEvent(pool, params.requestId, params.fileId, 'status_changed', {
+    status: draft.status,
+    versionLabel: draft.versionLabel,
+  });
+  return draft;
+}
+
 /** La preparadora agrega o quita validadores durante la validación (quien sale pierde su tarea). */
 export async function editOrionDraftValidators(
   pool: SqlPool,
@@ -846,6 +858,11 @@ export async function decideOrionDraftInternal(
 
   const comment = String(params.comment || '').trim();
   const tag = `orion-draft-review-${params.requestId}-${params.fileId}`;
+  // Respondió el último y alguno pidió cambios: empieza el turno de la preparadora.
+  const correctionTurn = draftReviewPhase(draft) === 'correccion';
+  const turnText = correctionTurn
+    ? ' Ya respondieron todos: suba la versión corregida, marque lo corregido y envíela a los validadores.'
+    : '';
   await safeCloseReviewTasks(pool, {
     requestId: params.requestId,
     fileId: params.fileId,
@@ -863,8 +880,8 @@ export async function decideOrionDraftInternal(
       params.actor
     );
     notify([draft.internalReview?.submittedBy, draft.createdByEmail], {
-      title: `Corrección pedida: ${draft.fileName}`,
-      body: `Solicitud #${params.requestId} · ${actorDisplay(params.actor)}: ${comment}`,
+      title: correctionTurn ? `Le toca corregir: ${draft.fileName}` : `Corrección pedida: ${draft.fileName}`,
+      body: `Solicitud #${params.requestId} · ${actorDisplay(params.actor)}: ${comment}${turnText}`,
       requestId: params.requestId,
       fileId: draft.fileId,
       tag,
@@ -893,8 +910,10 @@ export async function decideOrionDraftInternal(
     const approvals = draft.internalReview?.approvals ?? [];
     const approved = approvals.filter((a) => a.decision === 'APROBADO').length;
     notifyOthers(params.actor, draftPreparers(draft), {
-      title: `${actorDisplay(params.actor)} validó ${draft.fileName}`,
-      body: `Solicitud #${params.requestId} · versión ${draft.versionLabel} · validaron ${approved} de ${approvals.length}.`,
+      title: correctionTurn
+        ? `Le toca corregir: ${draft.fileName}`
+        : `${actorDisplay(params.actor)} validó ${draft.fileName}`,
+      body: `Solicitud #${params.requestId} · versión ${draft.versionLabel} · validaron ${approved} de ${approvals.length}.${turnText}`,
       requestId: params.requestId,
       fileId: draft.fileId,
     });
@@ -1444,8 +1463,9 @@ export async function convertOrionDraftToPdf(
       note: 'PDF para firma',
     },
   });
-  // El PDF tiene su propia validación, independiente de la del Word: arranca sin validar y la
-  // preparadora elige sus validadores (los del flujo) antes de ubicar firmas.
+  // Una sola validación: el PDF hereda la aprobación del Word (no se vuelve a validar). Los
+  // validadores que aprobaron siguen ubicando su visto bueno en el PDF.
+  const inheritedReview = pdfReviewFromDraft(loaded.draft, now);
   const pdfState: OrionSignatureState = {
     fileId: pdfFileId,
     fileName: pdfFileName,
@@ -1453,7 +1473,7 @@ export async function convertOrionDraftToPdf(
     signatureIntent: 'sign',
     versionLabel: ORION_INITIAL_VERSION_LABEL,
     sourceDraftFileId: params.fileId,
-    review: null,
+    review: inheritedReview,
   };
   const bag = setOrionDocumentInBag(
     { ...loaded.bag, drafts: { ...(loaded.bag.drafts ?? {}), [draft.fileId]: draft } },
@@ -1464,7 +1484,11 @@ export async function convertOrionDraftToPdf(
   await note(
     pool,
     params.requestId,
-    `${actorDisplay(params.actor)} convirtió ${loaded.draft.fileName} a PDF (${pdfFileName}, versión ${ORION_INITIAL_VERSION_LABEL}). Sigue la validación del PDF y luego las firmas.`,
+    `${actorDisplay(params.actor)} convirtió ${loaded.draft.fileName} a PDF (${pdfFileName}, versión ${ORION_INITIAL_VERSION_LABEL}). ${
+      inheritedReview
+        ? 'Queda validado (lo aprobaron en el Word): sigue ubicar firmas y vistos buenos.'
+        : 'Sigue la validación del PDF y luego las firmas.'
+    }`,
     params.actor
   );
   await publishDraftEvent(pool, params.requestId, params.fileId, 'status_changed', { status: draft.status });
@@ -1658,6 +1682,13 @@ export async function orionDraftMarkAction(
     const text = String(input.text || '').trim().slice(0, 2000);
     if (!text) throw httpError('Escriba la respuesta.', 400);
     if (draft.status === 'CONVERTIDO_PDF') throw httpError('El documento ya se convirtió a PDF.', 409);
+    // Orden de la corrección: la preparadora responde después de subir la versión corregida.
+    if (info.isElaborator && draft.status === 'EN_VALIDACION_INTERNA' && !permissions.canMarkFixed) {
+      throw httpError(
+        'Primero espere a que respondan todos los validadores y suba la versión corregida; después responde las marcas.',
+        409
+      );
+    }
     await insertDraftMarkReply(pool, { markId: mark.id, text, author: params.actor });
     // La respuesta de la preparadora a una pregunta o sugerencia la deja lista para confirmar.
     if (info.isElaborator && mark.status === 'abierta' && mark.type !== 'correccion') {
@@ -1676,6 +1707,9 @@ export async function orionDraftMarkAction(
 
   if (input.action === 'mark-fixed') {
     if (!info.isElaborator) throw httpError('Solo la preparadora marca una corrección como hecha.', 403);
+    if (!permissions.canMarkFixed) {
+      throw httpError('Primero suba la versión corregida del Word; después marque lo que corrigió.', 409);
+    }
     if (mark.status !== 'abierta') throw httpError('La marca ya no está abierta.', 409);
     await updateDraftMark(pool, mark.id, {
       status: mark.type === 'correccion' ? 'corregida' : 'respondida',
@@ -1683,12 +1717,7 @@ export async function orionDraftMarkAction(
       fixedQuote: null,
       autoDetected: false,
     });
-    notifyOthers(params.actor, [mark.authorEmail], {
-      title: `${actorDisplay(params.actor)} corrigió la marca ${mark.number}: ${draft.fileName}`,
-      body: `Solicitud #${params.requestId} · Revísela y confírmela en el tablero.`,
-      requestId: params.requestId,
-      fileId: params.fileId,
-    });
+    // Sin aviso por marca: el validador recibe uno solo cuando la preparadora envía la corrección.
     await publishDraftEvent(pool, params.requestId, params.fileId, 'mark_updated', { markId: mark.id });
     return;
   }
