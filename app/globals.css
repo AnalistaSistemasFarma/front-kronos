@@ -2893,6 +2893,15 @@ body.chat-inmersivo .chat-page-thread--completa {
   background-color: var(--app-surface, var(--surface));
 }
 
+/* Barra de métricas del agente (AgentMetricsBar, mod synerlink-metrics F1):
+   anclada arriba del hilo directo, fuera del área que se desplaza. */
+.chat-thread__metricas {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--app-border, #e2e8f0);
+  background-color: var(--app-surface, var(--surface));
+}
+
 .chat-thread__subagentes .chat-tasks {
   margin: 0;
 }

@@ -115,6 +115,7 @@ export interface ChatAccessDto {
  */
 export type { AgentTaskDto } from './status-tasks';
 import type { AgentTaskDto } from './status-tasks';
+import type { AgentMetricsDto } from './agent-metrics';
 
 export interface ChatStatusDto {
   state: string;
@@ -265,6 +266,11 @@ export interface ChatPollDto {
   status: ChatStatusDto | null;
   /** Desglose por agente: lo que pinta el encabezado de un grupo. */
   statuses?: ChatAgentStatusDto[];
+  /**
+   * Métricas del mod synerlink-metrics (contexto, tokens, modelo, sub-agentes).
+   * Ausente = este usuario no las ve (o API vieja); null = no hay reporte.
+   */
+  metrics?: AgentMetricsDto | null;
   /** Cadencia que ORDENA el servidor. El cliente la respeta tal cual. */
   nextPollMs: number;
   serverTime: string;
