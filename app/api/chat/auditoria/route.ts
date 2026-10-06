@@ -1,6 +1,12 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../lib/prisma';
-import { canAuditAgents, canViewAuditConversations } from '../../../../lib/chat/audit-access';
+import {
+  canAuditAgents,
+  conversationInScope,
+  conversationScopeWhere,
+  getAuditScope,
+  getAuditTextScope,
+} from '../../../../lib/chat/audit-access';
 import { jsonNoStore, resolveSessionUser, serverError, unauthorized } from '../../../../lib/chat/http';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +14,7 @@ export const dynamic = 'force-dynamic';
 /**
  * AUDITORÍA DEL CHAT DE AGENTES — consulta del módulo de administración.
  *
- *   GET /api/chat/auditoria?desde=&hasta=&agente=&usuario=&conversacion=&q=&page=&porPagina=
+ *   GET /api/chat/auditoria?desde=&hasta=&agente=&empresa=&usuario=&conversacion=&q=&page=&porPagina=
  *
  * Pedido de Nicolás (2026-09-10, auditoría de permisos): saber quién le
  * escribió a cada agente, desde qué IP, a qué hora, qué le dijo, qué respondió
@@ -37,9 +43,15 @@ export const dynamic = 'force-dynamic';
  * entrega solo agentes y métricas: persona, fecha, IP y consumo. El texto del
  * mensaje, los nombres de los adjuntos, el título del hilo y el filtro por
  * texto (`q`) solo se usan si el usuario tiene ADEMÁS el permiso de
- * conversaciones (canViewAuditConversations). El filtro `q` se ignora sin ese
+ * conversaciones (getAuditTextScope). El filtro `q` se ignora sin ese
  * permiso porque, aunque no devolviera el texto, permitiría adivinarlo
  * buscando palabra por palabra.
+ *
+ * ALCANCE POR EMPRESA (2026-10-06): fuera de la administración, todo se
+ * recorta a las empresas del usuario (getAuditScope): mensajes, consumo y
+ * catálogo de agentes. Los filtros `agente`, `empresa` y `conversacion` se
+ * suman a ese recorte con AND, así que no pueden sacar nada de él. El texto,
+ * además, solo donde tenga también el permiso de conversaciones.
  */
 
 const POR_PAGINA_POR_DEFECTO = 50;
@@ -64,13 +76,16 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const verConversaciones = await canViewAuditConversations(user.email);
+    const alcance = await getAuditScope(user.email);
+    const alcanceTexto = await getAuditTextScope(user.email, alcance);
+    const verConversaciones = alcanceTexto !== null;
 
     const sp = request.nextUrl.searchParams;
     const desde = fecha(sp.get('desde'));
     const hasta = fecha(sp.get('hasta'));
     const idAgent = Number(sp.get('agente')) || null;
     const idConversation = Number(sp.get('conversacion')) || null;
+    const idCompany = Number(sp.get('empresa')) || null;
     const usuario = (sp.get('usuario') ?? '').trim();
     const texto = verConversaciones ? (sp.get('q') ?? '').trim() : '';
     const soloConIp = sp.get('conIp') === '1';
@@ -87,7 +102,18 @@ export async function GET(request: NextRequest) {
       hasta.setUTCHours(23, 59, 59, 999);
     }
 
-    const where = {
+    // Empresa de un hilo: la del grupo, o la de su agente en un hilo directo
+    // (allí `id_company` es NULL a propósito; ver el modelo).
+    const filtroEmpresa = idCompany
+      ? {
+          OR: [
+            { kind: 'group', id_company: idCompany },
+            { kind: 'direct', agent: { companies: { some: { id_company: idCompany } } } },
+          ],
+        }
+      : null;
+
+    const filtros = {
       ...(desde || hasta
         ? { created_at: { ...(desde ? { gte: desde } : {}), ...(hasta ? { lte: hasta } : {}) } }
         : {}),
@@ -117,6 +143,18 @@ export async function GET(request: NextRequest) {
         : {}),
     };
 
+    const where = {
+      AND: [
+        filtros,
+        ...(alcance.all ? [] : [{ conversation: conversationScopeWhere(alcance) }]),
+        ...(filtroEmpresa ? [{ conversation: filtroEmpresa }] : []),
+        // El texto solo se busca donde se puede leer: si no, se adivinaría.
+        ...(texto && alcanceTexto && !alcanceTexto.all
+          ? [{ conversation: conversationScopeWhere(alcanceTexto) }]
+          : []),
+      ],
+    };
+
     const [total, mensajes] = await Promise.all([
       prisma.chatMessage.count({ where }),
       prisma.chatMessage.findMany({
@@ -139,6 +177,8 @@ export async function GET(request: NextRequest) {
               id: true,
               kind: true,
               title: true,
+              id_agent: true,
+              id_company: true,
               agent: { select: { id_agent: true, code: true, display_name: true } },
               user: { select: { name: true, email: true } },
               company: { select: { company: true } },
@@ -158,15 +198,27 @@ export async function GET(request: NextRequest) {
         : {}),
       ...(idConversation ? { id_conversation: idConversation } : {}),
       ...(idAgent ? { id_agent: idAgent } : {}),
+      AND: [
+        ...(alcance.all ? [] : [{ conversation: conversationScopeWhere(alcance) }]),
+        ...(filtroEmpresa ? [{ conversation: filtroEmpresa }] : []),
+      ],
     };
 
     // Catálogo para el selector de agentes de la pantalla. Va en la misma
     // respuesta y no en un endpoint aparte: es una lista corta y así la
     // pantalla se arma con una sola llamada.
     const agentes = await prisma.agent.findMany({
-      where: { is_active: true },
+      where: { is_active: true, ...(alcance.all ? {} : { id_agent: { in: alcance.agentIds } }) },
       select: { id_agent: true, code: true, display_name: true },
       orderBy: [{ sort_order: 'asc' }, { display_name: 'asc' }],
+    });
+
+    // Empresas para el selector: todas para la administración, las del alcance
+    // para los demás (la pantalla dice cuáles está viendo).
+    const empresas = await prisma.company.findMany({
+      where: alcance.all ? {} : { id_company: { in: alcance.companyIds } },
+      select: { id_company: true, company: true },
+      orderBy: { company: 'asc' },
     });
 
     const consumoPorConversacion = await prisma.chatAgentTurnUsage.groupBy({
@@ -185,6 +237,10 @@ export async function GET(request: NextRequest) {
 
     return jsonNoStore({
       verConversaciones,
+      alcance: {
+        todas: alcance.all,
+        empresas: empresas.map((e) => ({ idCompany: e.id_company, nombre: e.company.trim() })),
+      },
       page,
       porPagina,
       total,
@@ -194,40 +250,44 @@ export async function GET(request: NextRequest) {
         code: a.code,
         displayName: a.display_name,
       })),
-      mensajes: mensajes.map((m) => ({
-        id: m.id,
-        idConversation: m.id_conversation,
-        role: m.role,
-        // null = sin el permiso de conversaciones (ver la nota de arriba).
-        body: verConversaciones ? (m.body ?? '') : null,
-        createdAt: m.created_at.toISOString(),
-        clientIp: m.client_ip,
-        userAgent: m.user_agent,
-        autor:
-          m.role === 'agent'
-            ? m.agentAuthor?.display_name ?? m.conversation.agent.display_name
-            : m.userAuthor?.name?.trim() ||
-              m.userAuthor?.email ||
-              m.conversation.user.name?.trim() ||
-              m.conversation.user.email,
-        autorEmail: m.role === 'agent' ? null : m.userAuthor?.email ?? m.conversation.user.email,
-        adjuntos: verConversaciones ? (m.attachments ?? []).map((a) => a.file_name) : [],
-        conversacion: {
-          id: m.conversation.id,
-          kind: m.conversation.kind,
-          title: verConversaciones ? m.conversation.title : null,
-          agente: {
-            idAgent: m.conversation.agent.id_agent,
-            code: m.conversation.agent.code,
-            displayName: m.conversation.agent.display_name,
+      mensajes: mensajes.map((m) => {
+        // Texto solo donde también hay permiso de conversaciones en esa empresa.
+        const conTexto = alcanceTexto !== null && conversationInScope(alcanceTexto, m.conversation);
+        return {
+          id: m.id,
+          idConversation: m.id_conversation,
+          role: m.role,
+          // null = sin el permiso de conversaciones (ver la nota de arriba).
+          body: conTexto ? (m.body ?? '') : null,
+          createdAt: m.created_at.toISOString(),
+          clientIp: m.client_ip,
+          userAgent: m.user_agent,
+          autor:
+            m.role === 'agent'
+              ? m.agentAuthor?.display_name ?? m.conversation.agent.display_name
+              : m.userAuthor?.name?.trim() ||
+                m.userAuthor?.email ||
+                m.conversation.user.name?.trim() ||
+                m.conversation.user.email,
+          autorEmail: m.role === 'agent' ? null : m.userAuthor?.email ?? m.conversation.user.email,
+          adjuntos: conTexto ? (m.attachments ?? []).map((a) => a.file_name) : [],
+          conversacion: {
+            id: m.conversation.id,
+            kind: m.conversation.kind,
+            title: conTexto ? m.conversation.title : null,
+            agente: {
+              idAgent: m.conversation.agent.id_agent,
+              code: m.conversation.agent.code,
+              displayName: m.conversation.agent.display_name,
+            },
+            usuario: {
+              name: m.conversation.user.name,
+              email: m.conversation.user.email,
+            },
+            empresa: m.conversation.company?.company ?? null,
           },
-          usuario: {
-            name: m.conversation.user.name,
-            email: m.conversation.user.email,
-          },
-          empresa: m.conversation.company?.company ?? null,
-        },
-      })),
+        };
+      }),
       consumo: consumoPorConversacion.map((c) => ({
         idConversation: c.id_conversation,
         turnos: c._count.id,

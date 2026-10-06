@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { canAuditAgents } from '../../../../../lib/chat/audit-access';
+import { agentInScope, canAuditAgents, getAuditScope } from '../../../../../lib/chat/audit-access';
 import {
   badRequest,
   jsonNoStore,
@@ -28,7 +28,9 @@ export const dynamic = 'force-dynamic';
  *
  *   GET  /api/chat/auditoria/inventario   → sesión + permiso de auditoría.
  *        El último inventario de cada agente registrado, sus hallazgos
- *        abiertos y el estado del último escaneo.
+ *        abiertos y el estado del último escaneo. Fuera de la administración,
+ *        solo los agentes de las empresas del usuario (getAuditScope), y sin
+ *        el botón de re-escanear (`puedeEscanear`), que toca toda la flota.
  *
  *   POST /api/chat/auditoria/inventario   → SOLO el recolector, con su llave
  *        (Authorization: Bearer AGENT_INVENTORY_COLLECTOR_KEY). Publica una
@@ -59,7 +61,13 @@ export async function GET() {
     }
 
     await vencerSolicitudesColgadas();
-    return jsonNoStore(await leerInventarioVigente());
+    const alcance = await getAuditScope(user.email);
+    const inventario = await leerInventarioVigente();
+    return jsonNoStore({
+      ...inventario,
+      agentes: inventario.agentes.filter((a) => agentInScope(alcance, a.idAgent)),
+      puedeEscanear: alcance.all,
+    });
   } catch (error) {
     return serverError('GET /api/chat/auditoria/inventario', error);
   }
