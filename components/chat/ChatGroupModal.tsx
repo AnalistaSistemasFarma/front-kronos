@@ -28,8 +28,10 @@ import {
 /**
  * Cuadro para CREAR UN GRUPO: nombre, empresa, asistentes y personas.
  *
- * Pedido de Nicolás (2026-09-08). Solo administradores; la reja de verdad está
- * en POST /api/chat/groups, esto es únicamente el formulario.
+ * Pedido de Nicolás (2026-09-08). Desde el 2026-10-06 lo usa cualquiera con el
+ * chat, y solo ofrece los asistentes que el propio usuario tiene asignados en
+ * la empresa elegida. La reja de verdad está en POST /api/chat/groups, esto es
+ * únicamente el formulario.
  *
  * -------------------------------------------------------------------------
  * POR QUÉ LA LISTA DE PERSONAS VIENE DEL SERVIDOR Y NO ES "TODOS LOS USUARIOS"
