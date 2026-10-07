@@ -1,7 +1,8 @@
 import 'server-only';
 import { sql } from '../mssqlPool';
 import type { DbSample } from './dbProbe';
-import type { RouteSummary } from './stats';
+import type { EarlyWarning, WarningRule, WarningSeverity, WatchDbSample, WatchSample } from './earlyWarnings';
+import type { RouteSummary, UserSummary } from './stats';
 
 /**
  * Lectura/escritura de las tablas del Monitor del sistema (prisma/manual/2026-10-05-system-metrics.sql).
@@ -126,6 +127,45 @@ export async function insertRouteSummaries(
   }
 }
 
+/** 11 parámetros por fila → 100 filas por INSERT. */
+const USER_CHUNK = 100;
+
+/** Consumo por usuario de la ventana (tabla de 2026-10-06-system-metrics-usuarios.sql). */
+export async function insertUserSummaries(
+  pool: Pool,
+  bucketAt: Date,
+  host: string,
+  instance: string,
+  rows: UserSummary[]
+): Promise<void> {
+  for (let start = 0; start < rows.length; start += USER_CHUNK) {
+    const chunk = rows.slice(start, start + USER_CHUNK);
+    const req = pool
+      .request()
+      .input('bucket_at', sql.DateTime2(0), bucketAt)
+      .input('host', sql.NVarChar(128), host.slice(0, 128))
+      .input('instance', sql.NVarChar(16), instance.slice(0, 16));
+    const values: string[] = [];
+    chunk.forEach((u, i) => {
+      req
+        .input(`em${i}`, sql.NVarChar(320), u.email.slice(0, 320))
+        .input(`nm${i}`, sql.NVarChar(200), u.name ? u.name.slice(0, 200) : null)
+        .input(`rq${i}`, sql.Int, u.requests)
+        .input(`e${i}`, sql.Int, u.errors)
+        .input(`tm${i}`, sql.BigInt, u.totalMs)
+        .input(`mx${i}`, sql.Int, Math.min(u.maxMs, 2_000_000_000))
+        .input(`p${i}`, sql.Int, Math.min(u.p95Ms, 2_000_000_000))
+        .input(`md${i}`, sql.NVarChar(80), u.topModule ? u.topModule.slice(0, 80) : null);
+      values.push(`(@bucket_at, @host, @instance, @em${i}, @nm${i}, @rq${i}, @e${i}, @tm${i}, @mx${i}, @p${i}, @md${i})`);
+    });
+    await req.query(`
+      INSERT INTO dbo.system_metric_user (
+        bucket_at, host, instance, user_email, user_name,
+        requests, errors, total_ms, max_ms, p95_ms, top_module
+      ) VALUES ${values.join(',\n')}`);
+  }
+}
+
 export async function insertDbSample(pool: Pool, sampledAt: Date, s: DbSample): Promise<void> {
   await pool
     .request()
@@ -153,20 +193,32 @@ export async function insertDbSample(pool: Pool, sampledAt: Date, s: DbSample): 
  * Borra datos viejos en lotes pequeños (no bloquea la tabla mucho tiempo). Tope de lotes por
  * corrida: si queda algo, lo termina la corrida del día siguiente.
  */
+const ALERT_RETENTION_DAYS = 90;
+
 export async function deleteOldMetrics(pool: Pool, retentionDays: number): Promise<number> {
-  const targets: Array<[string, string]> = [
-    ['dbo.system_metric_sample', 'sampled_at'],
-    ['dbo.system_metric_route', 'bucket_at'],
-    ['dbo.system_metric_db', 'sampled_at'],
+  const targets: Array<[string, string, number]> = [
+    ['dbo.system_metric_sample', 'sampled_at', retentionDays],
+    ['dbo.system_metric_route', 'bucket_at', retentionDays],
+    ['dbo.system_metric_db', 'sampled_at', retentionDays],
+    ['dbo.system_metric_user', 'bucket_at', retentionDays],
+    ['dbo.system_metric_alert', 'raised_at', Math.max(retentionDays, ALERT_RETENTION_DAYS)],
   ];
+  const optional = new Set(['dbo.system_metric_user', 'dbo.system_metric_alert']);
   let deleted = 0;
-  for (const [table, column] of targets) {
+  for (const [table, column, days] of targets) {
     for (let batch = 0; batch < 40; batch += 1) {
-      const r = await pool
-        .request()
-        .input('days', sql.Int, retentionDays)
-        .query(`DELETE TOP (5000) FROM ${table} WHERE ${column} < DATEADD(day, -@days, SYSUTCDATETIME())`);
-      const n = r.rowsAffected?.[0] ?? 0;
+      let n = 0;
+      try {
+        const r = await pool
+          .request()
+          .input('days', sql.Int, days)
+          .query(`DELETE TOP (5000) FROM ${table} WHERE ${column} < DATEADD(day, -@days, SYSUTCDATETIME())`);
+        n = r.rowsAffected?.[0] ?? 0;
+      } catch (error) {
+        // Usuarios y alertas van en scripts aparte: si su tabla no existe, se sigue con las demás.
+        if (optional.has(table) && isMissingTableError(error)) break;
+        throw error;
+      }
       deleted += n;
       if (n < 5000) break;
     }
@@ -578,6 +630,238 @@ export async function readProcessLifetimes(pool: Pool, range: RangeKey): Promise
     firstSeen: new Date(row.first_seen).toISOString(),
     lastSeen: new Date(row.last_seen).toISOString(),
   }));
+}
+
+export type UserRankingRow = {
+  email: string;
+  name: string | null;
+  requests: number;
+  errors: number;
+  totalMs: number;
+  maxMs: number;
+  avgMs: number;
+  /** Promedio ponderado de los p95 de cada ventana de 5 min (aproximado). */
+  p95Ms: number;
+  /** Módulo donde más tiempo de servidor gastó en el rango. */
+  topModule: string | null;
+  lastSeen: string;
+  /** Tiempo por módulo (aproximado: cada ventana de 5 min cuenta para su módulo principal). */
+  modules: Array<{ module: string; totalMs: number }>;
+};
+
+/** Usuarios ordenados por tiempo de servidor consumido en el rango. */
+export async function readUserRanking(pool: Pool, range: RangeKey, limit = 100): Promise<UserRankingRow[]> {
+  const { minutes } = RANGES[range];
+  const r = await pool.request().input('minutes', sql.Int, minutes).query(`
+      SELECT user_email, MAX(user_name) AS user_name, top_module,
+        SUM(CAST(requests AS BIGINT)) AS requests,
+        SUM(CAST(errors AS BIGINT)) AS errors,
+        SUM(total_ms) AS total_ms,
+        MAX(max_ms) AS max_ms,
+        SUM(CAST(p95_ms AS BIGINT) * requests) AS p95_weighted,
+        MAX(bucket_at) AS last_seen
+      FROM dbo.system_metric_user
+      WHERE bucket_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME())
+      GROUP BY user_email, top_module`);
+
+  // Llega una fila por (usuario, módulo principal de cada ventana): se junta por usuario y se
+  // queda como módulo principal el que sumó más tiempo.
+  type Acc = UserRankingRow & { p95Weighted: number; moduleMs: Map<string, number> };
+  const byUser = new Map<string, Acc>();
+  for (const row of r.recordset) {
+    const email = String(row.user_email);
+    const cur: Acc = byUser.get(email) ?? {
+      email,
+      name: null,
+      requests: 0,
+      errors: 0,
+      totalMs: 0,
+      maxMs: 0,
+      avgMs: 0,
+      p95Ms: 0,
+      topModule: null,
+      lastSeen: new Date(0).toISOString(),
+      modules: [],
+      p95Weighted: 0,
+      moduleMs: new Map<string, number>(),
+    };
+    const totalMs = Number(row.total_ms) || 0;
+    if (row.user_name) cur.name = String(row.user_name);
+    cur.requests += Number(row.requests) || 0;
+    cur.errors += Number(row.errors) || 0;
+    cur.totalMs += totalMs;
+    cur.maxMs = Math.max(cur.maxMs, Number(row.max_ms) || 0);
+    cur.p95Weighted += Number(row.p95_weighted) || 0;
+    if (row.top_module) {
+      const topMod = String(row.top_module);
+      cur.moduleMs.set(topMod, (cur.moduleMs.get(topMod) ?? 0) + totalMs);
+    }
+    const seen = new Date(row.last_seen).toISOString();
+    if (seen > cur.lastSeen) cur.lastSeen = seen;
+    byUser.set(email, cur);
+  }
+
+  return Array.from(byUser.values())
+    .map(({ p95Weighted, moduleMs, ...u }) => {
+      let topModule: string | null = null;
+      let topMs = -1;
+      for (const [module, ms] of moduleMs) {
+        if (ms > topMs) {
+          topModule = module;
+          topMs = ms;
+        }
+      }
+      return {
+        ...u,
+        avgMs: u.requests ? Math.round(u.totalMs / u.requests) : 0,
+        p95Ms: u.requests ? Math.round(p95Weighted / u.requests) : 0,
+        topModule,
+        modules: Array.from(moduleMs, ([mod, totalMs]) => ({ module: mod, totalMs })).sort(
+          (a, b) => b.totalMs - a.totalMs
+        ),
+      };
+    })
+    .sort((a, b) => b.totalMs - a.totalMs || b.requests - a.requests)
+    .slice(0, limit);
+}
+
+export type ActiveUsersSummary = {
+  /** Usuarios distintos con actividad en los últimos 15 minutos. */
+  activeNow: number;
+  /** Usuarios distintos en todo el rango. */
+  inRange: number;
+  /** Usuarios distintos en el rango anterior (para la variación). */
+  previousRange: number;
+  /** Usuarios distintos por ventana del rango (gráfica). */
+  series: Array<{ bucket: string; users: number }>;
+};
+
+export async function readActiveUsers(pool: Pool, range: RangeKey): Promise<ActiveUsersSummary> {
+  const { minutes, bucket } = RANGES[range];
+  const r = await pool
+    .request()
+    .input('minutes', sql.Int, minutes)
+    .input('bucket', sql.Int, Math.max(bucket, 5)).query(`
+      SELECT
+        (SELECT COUNT(DISTINCT user_email) FROM dbo.system_metric_user
+          WHERE bucket_at >= DATEADD(minute, -15, SYSUTCDATETIME())) AS active_now,
+        (SELECT COUNT(DISTINCT user_email) FROM dbo.system_metric_user
+          WHERE bucket_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME())) AS in_range,
+        (SELECT COUNT(DISTINCT user_email) FROM dbo.system_metric_user
+          WHERE bucket_at >= DATEADD(minute, -2 * @minutes, SYSUTCDATETIME())
+            AND bucket_at < DATEADD(minute, -@minutes, SYSUTCDATETIME())) AS previous_range;
+
+      SELECT ${bucketExpr('bucket_at')} AS bucket, COUNT(DISTINCT user_email) AS users
+      FROM dbo.system_metric_user
+      WHERE bucket_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME())
+      GROUP BY ${bucketExpr('bucket_at')}
+      ORDER BY bucket`);
+  const recordsets = r.recordsets as unknown as Array<Array<Record<string, unknown>>>;
+  const counts = recordsets[0]?.[0] ?? {};
+  return {
+    activeNow: Number(counts.active_now) || 0,
+    inRange: Number(counts.in_range) || 0,
+    previousRange: Number(counts.previous_range) || 0,
+    series: (recordsets[1] ?? []).map((row) => ({
+      bucket: new Date(row.bucket as string).toISOString(),
+      users: Number(row.users) || 0,
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Alertas tempranas (tabla de 2026-10-07-system-metrics-alertas.sql)
+// ---------------------------------------------------------------------------
+
+/** Muestras crudas (minuto a minuto, por proceso) y fotos de SQL recientes para evaluar alertas. */
+export async function readWatchWindow(
+  pool: Pool,
+  minutes: number
+): Promise<{ samples: WatchSample[]; db: WatchDbSample[] }> {
+  const r = await pool.request().input('minutes', sql.Int, minutes).query(`
+      SELECT sampled_at, host, instance, pid, host_cpu_pct, host_mem_used_pct, host_mem_total_mb, rss_mb,
+        event_loop_p99_ms, event_loop_max_ms, http_requests, http_errors, pool_pending
+      FROM dbo.system_metric_sample
+      WHERE sampled_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME())
+      ORDER BY sampled_at;
+
+      SELECT TOP 3 sampled_at, blocked_requests, longest_wait_ms, log_used_pct
+      FROM dbo.system_metric_db
+      WHERE sampled_at >= DATEADD(minute, -30, SYSUTCDATETIME())
+      ORDER BY sampled_at DESC`);
+  const recordsets = r.recordsets as unknown as Array<Array<Record<string, unknown>>>;
+  return {
+    samples: (recordsets[0] ?? []).map((row) => ({
+      sampledAt: new Date(row.sampled_at as string).toISOString(),
+      host: String(row.host),
+      instance: String(row.instance),
+      pid: Number(row.pid),
+      hostCpuPct: nullableNumber(row.host_cpu_pct),
+      hostMemUsedPct: nullableNumber(row.host_mem_used_pct),
+      hostMemTotalMb: nullableNumber(row.host_mem_total_mb),
+      rssMb: nullableNumber(row.rss_mb),
+      eventLoopP99Ms: nullableNumber(row.event_loop_p99_ms),
+      eventLoopMaxMs: nullableNumber(row.event_loop_max_ms),
+      httpRequests: Number(row.http_requests) || 0,
+      httpErrors: Number(row.http_errors) || 0,
+      poolPending: nullableNumber(row.pool_pending),
+    })),
+    db: (recordsets[1] ?? []).map((row) => ({
+      sampledAt: new Date(row.sampled_at as string).toISOString(),
+      blockedRequests: nullableNumber(row.blocked_requests),
+      longestWaitMs: nullableNumber(row.longest_wait_ms),
+      logUsedPct: nullableNumber(row.log_used_pct),
+    })),
+  };
+}
+
+export type AlertRow = EarlyWarning & { id: number; raisedAt: string; host: string; notified: number };
+
+/** Alertas disparadas en las últimas `hours` horas, la más reciente primero. */
+export async function readRecentAlerts(pool: Pool, hours: number, limit = 200): Promise<AlertRow[]> {
+  const r = await pool
+    .request()
+    .input('hours', sql.Int, hours)
+    .input('limit', sql.Int, limit).query(`
+      SELECT TOP (@limit) id, raised_at, host, alert_key, [rule], severity, title, happening, why, risk, action, notified
+      FROM dbo.system_metric_alert
+      WHERE raised_at >= DATEADD(hour, -@hours, SYSUTCDATETIME())
+      ORDER BY raised_at DESC, id DESC`);
+  return r.recordset.map((row) => ({
+    id: Number(row.id),
+    raisedAt: new Date(row.raised_at).toISOString(),
+    host: row.host,
+    key: row.alert_key,
+    rule: row.rule as WarningRule,
+    severity: row.severity as WarningSeverity,
+    title: row.title,
+    happening: row.happening,
+    why: row.why,
+    risk: row.risk,
+    action: row.action,
+    notified: Number(row.notified) || 0,
+  }));
+}
+
+export async function insertAlert(pool: Pool, raisedAt: Date, host: string, w: EarlyWarning, notified: number): Promise<void> {
+  await pool
+    .request()
+    .input('raised_at', sql.DateTime2(0), raisedAt)
+    .input('host', sql.NVarChar(128), host.slice(0, 128))
+    .input('alert_key', sql.NVarChar(120), w.key.slice(0, 120))
+    .input('rule', sql.NVarChar(40), w.rule)
+    .input('severity', sql.VarChar(10), w.severity)
+    .input('title', sql.NVarChar(300), w.title.slice(0, 300))
+    .input('happening', sql.NVarChar(1000), w.happening.slice(0, 1000))
+    .input('why', sql.NVarChar(1000), w.why.slice(0, 1000))
+    .input('risk', sql.NVarChar(1000), w.risk.slice(0, 1000))
+    .input('action', sql.NVarChar(1000), w.action.slice(0, 1000))
+    .input('notified', sql.Int, notified).query(`
+      INSERT INTO dbo.system_metric_alert (
+        raised_at, host, alert_key, [rule], severity, title, happening, why, risk, action, notified
+      ) VALUES (
+        @raised_at, @host, @alert_key, @rule, @severity, @title, @happening, @why, @risk, @action, @notified
+      )`);
 }
 
 function nullableNumber(value: unknown): number | null {
