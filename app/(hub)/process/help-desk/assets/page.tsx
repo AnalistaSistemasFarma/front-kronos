@@ -32,6 +32,7 @@ import {
   Loader,
   ScrollArea,
   SimpleGrid,
+  Tooltip,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -364,6 +365,11 @@ function AssetsBoard() {
   const [createLoading, setCreateLoading] = useState(false);
   const isSubmittingRef = useRef(false);
 
+  const [newTypeOpened, setNewTypeOpened] = useState(false);
+  const [newTypeName, setNewTypeName] = useState('');
+  const [newTypeError, setNewTypeError] = useState<string | null>(null);
+  const [newTypeSaving, setNewTypeSaving] = useState(false);
+
   useEffect(() => {
     if (status === 'loading') return;
     if (!session) {
@@ -504,6 +510,46 @@ function AssetsBoard() {
     });
     if (formErrors[field]) {
       setFormErrors((prev) => ({ ...prev, [field]: '' }));
+    }
+  };
+
+  const openNewType = () => {
+    setNewTypeName('');
+    setNewTypeError(null);
+    setNewTypeOpened(true);
+  };
+
+  const handleCreateType = async () => {
+    const name = newTypeName.trim();
+    if (!name) {
+      setNewTypeError('Escriba el nombre del tipo de activo.');
+      return;
+    }
+    if (newTypeSaving) return;
+    setNewTypeSaving(true);
+    try {
+      const response = await fetch('/api/assets/types', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setNewTypeError(data?.error || 'No se pudo crear el tipo de activo.');
+        return;
+      }
+      const type: TypeAssetRow = data.type;
+      const subtype: SubtypeAssetRow = data.subtype;
+      setTypeOptions((prev) => [...prev, type].sort((a, b) => a.tipo_activo.localeCompare(b.tipo_activo)));
+      setSubtypeOptions((prev) => [...prev, subtype]);
+      setFormData((prev) => ({ ...prev, tipo_activo: String(type.id), tipo_equipo: String(subtype.id) }));
+      setFormErrors((prev) => ({ ...prev, tipo_activo: '', tipo_equipo: '' }));
+      setNewTypeOpened(false);
+      toast.success(`Tipo de activo "${type.tipo_activo}" creado.`);
+    } catch {
+      setNewTypeError('No se pudo crear el tipo de activo. Intente de nuevo.');
+    } finally {
+      setNewTypeSaving(false);
     }
   };
 
@@ -1439,6 +1485,22 @@ function AssetsBoard() {
                   size='md'
                   leftSection={<IconDeviceLaptop size={16} />}
                   comboboxProps={{ withinPortal: true }}
+                  inputContainer={(children) => (
+                    <Group gap={6} wrap='nowrap' align='center'>
+                      <Box style={{ flex: 1, minWidth: 0 }}>{children}</Box>
+                      <Tooltip label='Crear un tipo de activo nuevo' withinPortal>
+                        <ActionIcon
+                          variant='light'
+                          size={42}
+                          radius='md'
+                          onClick={openNewType}
+                          aria-label='Crear un tipo de activo nuevo'
+                        >
+                          <IconPlus size={18} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
+                  )}
                 />
                 <Select
                   label='Tipo de equipo'
@@ -1657,6 +1719,50 @@ function AssetsBoard() {
               </Button>
             </Flex>
           </Box>
+        </Modal>
+
+        <Modal
+          opened={newTypeOpened}
+          onClose={() => !newTypeSaving && setNewTypeOpened(false)}
+          title={<Text fw={700}>Nuevo tipo de activo</Text>}
+          centered
+          radius='md'
+          size='sm'
+          zIndex={400}
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleCreateType();
+            }}
+          >
+            <Stack gap='md'>
+              <TextInput
+                label='Nombre'
+                placeholder='Ej: VEHICULOS'
+                value={newTypeName}
+                onChange={(e) => {
+                  setNewTypeName(e.target.value);
+                  if (newTypeError) setNewTypeError(null);
+                }}
+                error={newTypeError}
+                maxLength={100}
+                data-autofocus
+                required
+              />
+              <Text size='xs' c='dimmed'>
+                También se crea un tipo de equipo con el mismo nombre, para que pueda usarlo de inmediato.
+              </Text>
+              <Group justify='flex-end' gap='sm'>
+                <Button variant='default' onClick={() => setNewTypeOpened(false)} disabled={newTypeSaving}>
+                  Cancelar
+                </Button>
+                <Button type='submit' loading={newTypeSaving} leftSection={<IconPlus size={16} />}>
+                  Crear
+                </Button>
+              </Group>
+            </Stack>
+          </form>
         </Modal>
       </div>
     </div>

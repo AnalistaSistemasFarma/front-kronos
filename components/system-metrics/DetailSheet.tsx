@@ -44,6 +44,7 @@ export function DetailSheet({
       radius="lg"
       offset={8}
       overlayProps={{ backgroundOpacity: 0.25, blur: 3 }}
+      classNames={{ content: styles.sheet, header: styles.sheetHeader }}
       title={<span style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.01em' }}>{title}</span>}
     >
       <div className={styles.root} style={{ minHeight: 'auto', background: 'transparent' }}>
