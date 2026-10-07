@@ -3,6 +3,7 @@ export const ORION_INITIAL_VERSION_LABEL = 'v1.0';
 export type OrionVersionParts = { major: number; minor: number };
 
 export function parseOrionVersionLabel(label: string | null | undefined): OrionVersionParts {
+  // eslint-disable-next-line security/detect-unsafe-regex -- falso positivo: patrón anclado y lineal (`v1.0`); la entrada es una etiqueta de versión corta.
   const match = /^v?(\d+)(?:\.(\d+))?$/i.exec(String(label || '').trim());
   if (!match) return { major: 1, minor: 0 };
   const major = Number(match[1]);

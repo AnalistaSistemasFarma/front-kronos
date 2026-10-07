@@ -57,6 +57,7 @@ export function parseOrionReviewFileId(resolution?: string | null): string | nul
 }
 
 export function parseOrionReviewFileName(resolution?: string | null): string | null {
+  // eslint-disable-next-line security/detect-unsafe-regex -- falso positivo: el grupo opcional `(?:v\d+\.\d+\s*·\s*)?` no anida cuantificadores sobre el mismo texto; la entrada es la resolución corta de una tarea (texto generado por buildOrionReviewResolution).
   const match = /Validar documento:\s*(.+?)\s*\((?:v\d+\.\d+\s*·\s*)?paso\s+\d+\/\d+\)/i.exec(
     String(resolution || '')
   );
