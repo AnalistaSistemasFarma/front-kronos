@@ -9,6 +9,7 @@ import {
   Loader,
   Paper,
   ScrollArea,
+  SegmentedControl,
   SimpleGrid,
   Stack,
   Text,
@@ -21,15 +22,17 @@ import {
   IconSend,
   IconWriting,
 } from '@tabler/icons-react';
+import type { SignatureFieldPlacement, SignatureFieldKind } from '../../lib/orion/signatureFields';
+import { normalizeFieldKind, splitValidatorFields } from '../../lib/orion/signatureFields';
+import type { OrionDocumentSignatureKind, OrionSignatureState } from '../../lib/orion/types';
 import {
   emptySignerSlot,
   mergeParticipantSources,
   resizeParticipantSlots,
   type OrionParticipant,
+  type OrionParticipantType,
   type OrionUserOption,
 } from '../../lib/orion/participants';
-import type { SignatureFieldPlacement } from '../../lib/orion/signatureFields';
-import type { OrionDocumentSignatureKind, OrionSignatureState } from '../../lib/orion/types';
 import OrionEditorSteps, { editorStepSubtitle } from './OrionEditorSteps';
 import OrionSignerAssignment from './OrionSignerAssignment';
 import OrionSignersList from './OrionSignersList';
@@ -50,6 +53,8 @@ type Props = {
   availableUsers?: OrionUserOption[];
   currentUserEmail?: string;
   currentUserName?: string;
+  /** Empresa de la solicitud (búsqueda de socios externos). */
+  companyId?: number | null;
   /** Departamento del coordinador (solo visual, v1) */
   departmentLabel?: string | null;
   initialFields?: SignatureFieldPlacement[];
@@ -57,6 +62,8 @@ type Props = {
   onStateUpdate: (state: OrionSignatureState) => void;
   onClose?: () => void;
   assignmentsEditable?: boolean;
+  /** Permiso “Registrar huella”: exige/coloca cajas de huella. */
+  canUseFingerprint?: boolean;
   /** 0 = documento, 1 = firmantes, 2 = ubicar firmas */
   initialStep?: EditorStep;
   /** Cambia al reabrir el editor para resetear el paso aunque sea el mismo. */
@@ -106,12 +113,14 @@ export default function OrionDocumentEditor({
   availableUsers = [],
   currentUserEmail,
   currentUserName,
+  companyId = null,
   departmentLabel = null,
   initialFields = [],
   state,
   onStateUpdate,
   onClose,
   assignmentsEditable = true,
+  canUseFingerprint = false,
   initialStep = 0,
   openNonce = 0,
 }: Props) {
@@ -138,7 +147,18 @@ export default function OrionDocumentEditor({
   });
   const [sequential, setSequential] = useState(true);
   const [activeOrder, setActiveOrder] = useState(1);
-  const [fields, setFields] = useState<SignatureFieldPlacement[]>(initialFields);
+  const [activeFieldKind, setActiveFieldKind] = useState<SignatureFieldKind>('signature');
+  const signerInitialFields = useMemo(
+    () => splitValidatorFields(initialFields).signerFields,
+    [initialFields]
+  );
+  const [fields, setFields] = useState<SignatureFieldPlacement[]>(signerInitialFields);
+  // Los validadores ya están en el PDF (SynerLink estampa su visto bueno, ubicado o
+  // automático): aquí solo se ubican firmantes y sus cajas se conservan al guardar.
+  const preservedValidatorFields = useMemo(
+    () => (state.validatorFields ?? []) as SignatureFieldPlacement[],
+    [state.validatorFields]
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signatureKind, setSignatureKind] = useState<OrionDocumentSignatureKind>(
@@ -163,11 +183,12 @@ export default function OrionDocumentEditor({
   );
 
   useEffect(() => {
-    setFields(initialFields);
-  }, [initialFields]);
+    setFields(signerInitialFields);
+  }, [signerInitialFields]);
 
   useEffect(() => {
-    if (orderedParticipants.length && !orderedParticipants.some((p) => p.order === activeOrder)) {
+    const known = orderedParticipants.some((p) => p.order === activeOrder);
+    if (orderedParticipants.length && !known) {
       setActiveOrder(orderedParticipants[0]!.order);
     }
   }, [activeOrder, orderedParticipants]);
@@ -190,9 +211,34 @@ export default function OrionDocumentEditor({
     [orderedParticipants]
   );
 
+  const anySignerNeedsFingerprint = assignedParticipants.some((p) =>
+    Boolean(p.requireFingerprint)
+  );
+  const effectiveRequireFingerprint = canUseFingerprint && anySignerNeedsFingerprint;
+
   const allPlaced =
     assignedParticipants.length > 0 &&
-    assignedParticipants.every((p) => fields.some((f) => f.signerOrder === p.order));
+    assignedParticipants.every((p) => {
+      const hasSig = fields.some(
+        (f) => f.signerOrder === p.order && normalizeFieldKind(f.kind) === 'signature'
+      );
+      if (!hasSig) return false;
+      if (!(canUseFingerprint && p.requireFingerprint)) return true;
+      return fields.some(
+        (f) => f.signerOrder === p.order && normalizeFieldKind(f.kind) === 'fingerprint'
+      );
+    });
+
+  const placementParticipants = assignedParticipants;
+
+  const activeNeedsFingerprint =
+    canUseFingerprint &&
+    assignedParticipants.some((p) => p.order === activeOrder && p.requireFingerprint);
+
+  useEffect(() => {
+    const allowed = activeFieldKind === 'signature' || (activeFieldKind === 'fingerprint' && activeNeedsFingerprint);
+    if (!allowed) setActiveFieldKind('signature');
+  }, [activeFieldKind, activeNeedsFingerprint]);
 
   const handleSignerCountChange = useCallback((count: number) => {
     setSignerCount(count);
@@ -200,14 +246,53 @@ export default function OrionDocumentEditor({
     setFields((prev) => prev.filter((f) => f.signerOrder <= count));
   }, []);
 
-  const handleAssignSigner = useCallback((order: number, email: string, name: string) => {
+  const handleAssignSigner = useCallback(
+    (
+      order: number,
+      email: string,
+      name: string,
+      meta?: { type?: OrionParticipantType; cardCode?: string | null }
+    ) => {
+      const type = meta?.type || 'internal';
+      setOrderedParticipants((prev) =>
+        prev.map((p) =>
+          p.order === order
+            ? {
+                ...p,
+                email: normalizeEmail(email),
+                name: name.trim() || email,
+                role: 'Firmante',
+                type,
+                cardCode: meta?.cardCode ?? null,
+                // Externos: correo con link por defecto. Internos: solo tarea.
+                notifyByEmail: type === 'external',
+                requireFingerprint: Boolean(p.requireFingerprint),
+              }
+            : p
+        )
+      );
+    },
+    []
+  );
+
+  const handleToggleNotifyByEmail = useCallback((order: number, value: boolean) => {
     setOrderedParticipants((prev) =>
-      prev.map((p) =>
-        p.order === order
-          ? { ...p, email: normalizeEmail(email), name: name.trim() || email, role: 'Firmante' }
-          : p
-      )
+      prev.map((p) => (p.order === order ? { ...p, notifyByEmail: value } : p))
     );
+  }, []);
+
+  const handleToggleRequireFingerprint = useCallback((order: number, value: boolean) => {
+    setOrderedParticipants((prev) =>
+      prev.map((p) => (p.order === order ? { ...p, requireFingerprint: value } : p))
+    );
+    if (!value) {
+      setFields((prev) =>
+        prev.filter(
+          (f) =>
+            !(f.signerOrder === order && normalizeFieldKind(f.kind) === 'fingerprint')
+        )
+      );
+    }
   }, []);
 
   const handleClearSigner = useCallback((order: number) => {
@@ -235,6 +320,10 @@ export default function OrionDocumentEditor({
             email: me,
             name: currentUserName?.trim() || me,
             role: 'Firmante' as const,
+            type: 'internal' as const,
+            cardCode: null,
+            notifyByEmail: false,
+            requireFingerprint: Boolean(slot1.requireFingerprint),
           };
           const without1 = next.filter((p) => p.order !== 1);
           return reindexParticipants(
@@ -303,31 +392,106 @@ export default function OrionDocumentEditor({
             email: p.email,
             name: p.name,
             order: p.order,
-            type: 'internal',
+            type: p.type === 'external' ? 'external' : 'internal',
+            ...(p.cardCode ? { cardCode: p.cardCode } : {}),
+            notifyByEmail: Boolean(p.notifyByEmail),
+            requireFingerprint: Boolean(p.requireFingerprint),
           })),
       }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'No se pudieron asignar los firmantes');
-    if (data.state) onStateUpdate(data.state as OrionSignatureState);
-  }, [fileId, onStateUpdate, orderedParticipants, requestId, sequential, validateAssignments]);
+    if (data.state) {
+      const next = data.state as OrionSignatureState;
+      // Preserva type/cardCode/flags locales (mismo email puede repetirse → clave por orden).
+      const byOrder = new Map(
+        orderedParticipants.map((p) => [Number(p.order), p] as const)
+      );
+      const byEmail = new Map(
+        orderedParticipants.map((p) => [normalizeEmail(p.email), p] as const)
+      );
+      const signers = (next.signers ?? []).map((s) => {
+        const local =
+          byOrder.get(Number(s.order)) ?? byEmail.get(normalizeEmail(s.email));
+        if (!local) return s;
+        return {
+          ...s,
+          type: local.type || s.type || 'internal',
+          cardCode: local.cardCode ?? s.cardCode ?? null,
+          notifyByEmail: Boolean(local.notifyByEmail),
+          requireFingerprint: Boolean(local.requireFingerprint),
+        };
+      });
+      onStateUpdate({
+        ...next,
+        signers,
+        requireFingerprint: effectiveRequireFingerprint,
+        fingerprintPolicy: 'per-signer',
+      });
+    }
+  }, [
+    effectiveRequireFingerprint,
+    fileId,
+    onStateUpdate,
+    orderedParticipants,
+    requestId,
+    sequential,
+    validateAssignments,
+  ]);
 
   const persistFields = useCallback(async () => {
-    const res = await fetch('/api/integrations/orion/signature-fields', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId, fileId, signatureFields: fields }),
-    });
-    const data = await res.json().catch(() => ({}));
+    const postFields = () =>
+      fetch('/api/integrations/orion/signature-fields', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId,
+          fileId,
+          signatureFields: [...fields, ...preservedValidatorFields],
+        }),
+      });
+
+    let res = await postFields();
+    let data = await res.json().catch(() => ({}));
+
+    const tokenStale =
+      !res.ok &&
+      (res.status === 401 ||
+        res.status === 403 ||
+        /embed|token|expir|inv[aá]lid/i.test(String(data.error || '')));
+
+    if (tokenStale) {
+      // Renueva embedUrl en Orion/bag y reintenta guardar ubicaciones.
+      const refreshRes = await fetch('/api/integrations/orion/ensure-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId,
+          fileId,
+          fileName: fileName ?? undefined,
+          refresh: true,
+        }),
+      });
+      const refreshData = await refreshRes.json().catch(() => ({}));
+      if (refreshRes.ok && refreshData.state) {
+        onStateUpdate(refreshData.state as OrionSignatureState);
+      }
+      res = await postFields();
+      data = await res.json().catch(() => ({}));
+    }
+
     if (!res.ok) {
       throw new Error(data.error || 'No se guardaron las ubicaciones en Orion');
     }
     if (data.state) {
       onStateUpdate(data.state as OrionSignatureState);
     } else {
-      onStateUpdate({ ...state, signatureFields: fields });
+      onStateUpdate({
+        ...state,
+        signatureFields: fields as OrionSignatureState['signatureFields'],
+      });
     }
-  }, [fields, fileId, onStateUpdate, requestId, state]);
+  }, [fields, fileId, fileName, onStateUpdate, preservedValidatorFields, requestId, state]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -344,7 +508,9 @@ export default function OrionDocumentEditor({
 
   const handleSend = useCallback(async () => {
     if (!allPlaced) {
-      setError('Ubique la firma de cada firmante en el documento antes de enviar.');
+      setError(
+        'Ubique la firma de cada firmante antes de enviar.'
+      );
       return;
     }
     setSaving(true);
@@ -595,8 +761,9 @@ export default function OrionDocumentEditor({
 
         {editorStep === 1 && assignmentsEditable && (
           <Alert color='blue' variant='light' mb='md'>
-            Cada firmante tendrá 24 horas para firmar cuando sea su turno. Si vence, podrá solicitar
-            renovación al líder del proceso.
+            Cada firmante tendrá 24 horas para firmar cuando sea su turno. Elija por persona si
+            recibe correo con el link y si requiere huella. Al enviar a firma se crean las tareas;
+            el correo solo llega a quienes usted marque.
           </Alert>
         )}
 
@@ -610,7 +777,9 @@ export default function OrionDocumentEditor({
               availableUsers={availableUsers}
               currentUserEmail={currentUserEmail}
               currentUserName={currentUserName}
+              companyId={companyId}
               signerStatuses={signerStatuses}
+              canUseFingerprint={canUseFingerprint}
               readOnly={!assignmentsEditable}
               onSignerCountChange={handleSignerCountChange}
               onSequentialChange={setSequential}
@@ -618,7 +787,21 @@ export default function OrionDocumentEditor({
               onAssign={handleAssignSigner}
               onClear={handleClearSigner}
               onReorder={signerCount > 1 && assignmentsEditable ? reorderParticipant : undefined}
+              onToggleNotifyByEmail={
+                assignmentsEditable ? handleToggleNotifyByEmail : undefined
+              }
+              onToggleRequireFingerprint={
+                assignmentsEditable && canUseFingerprint
+                  ? handleToggleRequireFingerprint
+                  : undefined
+              }
             />
+            {assignmentsEditable && !canUseFingerprint ? (
+              <Alert mt='md' color='gray' variant='light'>
+                Para exigir o colocar huella necesita el permiso “Registrar huella” (Administración →
+                Usuarios).
+              </Alert>
+            ) : null}
           </ScrollArea>
         )}
 
@@ -658,8 +841,22 @@ export default function OrionDocumentEditor({
                   Orden de firma
                 </Text>
                 <Text size='xs' c='dimmed'>
-                  Seleccione un firmante y ubique su firma en el documento.
+                  Seleccione la persona y ubique su firma en el PDF. El visto bueno de los
+                  validadores ya queda en el documento.
                 </Text>
+                {activeNeedsFingerprint ? (
+                  <SegmentedControl
+                    mt='sm'
+                    size='xs'
+                    fullWidth
+                    value={activeFieldKind}
+                    onChange={(v) => setActiveFieldKind(v as SignatureFieldKind)}
+                    data={[
+                      { label: 'Firma', value: 'signature' },
+                      { label: 'Huella', value: 'fingerprint' },
+                    ]}
+                  />
+                ) : null}
               </Box>
               <ScrollArea style={{ flex: 1 }} offsetScrollbars type='scroll' scrollbarSize={8}>
                 <Box p='md'>
@@ -692,8 +889,9 @@ export default function OrionDocumentEditor({
               <SignaturePlacementCanvas
                 pdfSrc={sharedPdfSrc}
                 documentId={documentId}
-                participants={assignedParticipants}
+                participants={placementParticipants}
                 activeOrder={activeOrder}
+                activeKind={activeFieldKind}
                 fields={fields}
                 onChange={setFields}
               />
@@ -710,7 +908,7 @@ export default function OrionDocumentEditor({
       >
         {editorStep === 2 ? (
           <Text size='sm' c='dimmed' fw={500}>
-            {fields.length} de {assignedParticipants.length} firma(s) ubicada(s)
+            {fields.length} de {placementParticipants.length} firma(s) ubicada(s)
           </Text>
         ) : (
           <Button variant='subtle' onClick={onClose} disabled={saving}>

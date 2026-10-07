@@ -11,15 +11,91 @@ import {
   loadOrionFormBag,
   resolveOrionActorUserId,
   syncOrionDocumentState,
+  upsertOrionFormBag,
   userCanManageOrionRequest,
+  userHasOrionFingerprintPermission,
   userHasOrionSignPermission,
+  userIsOrionFlowSignatureResponsible,
 } from '@/lib/orion/service';
 import { syncOrionSignerTasks } from '@/lib/orion/signerTasks';
-import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
+import {
+  getOrionDocumentFromBag,
+  normalizeOrionFingerprintRequirements,
+} from '@/lib/orion/formValue';
+import { saveOrionSignatureFields } from '@/lib/orion/client';
+import { toOrionSignatureFields } from '@/lib/orion/signatureFields';
 import type { OrionSignatureState } from '@/lib/orion/types';
 import { resolveOrionPermissions } from '@/lib/orion/permissions';
-import { userHasPendingOrionSignerAuthBatch } from '@/lib/orion/signerAuthorizations';
+import { reconcileDuplicateOrionSignerAuths, userHasPendingOrionSignerAuthBatch } from '@/lib/orion/signerAuthorizations';
 import { getCurrentPendingSigner } from '@/lib/orion/signerStatus';
+import { assertOrionReviewApprovedForSigning, flowHasOrionValidators } from '@/lib/orion/review';
+
+function buildSignerFingerprintPrefs(state: OrionSignatureState): {
+  byEmail: Record<string, boolean>;
+  byOrder: Record<string, boolean>;
+} {
+  const byEmail: Record<string, boolean> = {};
+  const byOrder: Record<string, boolean> = {};
+  const emailCounts = new Map<string, number>();
+  for (const s of state.signers ?? []) {
+    const email = String(s.email || '')
+      .trim()
+      .toLowerCase();
+    if (!email) continue;
+    emailCounts.set(email, (emailCounts.get(email) ?? 0) + 1);
+  }
+  for (const s of state.signers ?? []) {
+    const order = Number(s.order);
+    if (Number.isFinite(order) && order > 0) {
+      byOrder[String(order)] = s.requireFingerprint === true;
+    }
+    const email = String(s.email || '')
+      .trim()
+      .toLowerCase();
+    if (!email) continue;
+    // Legacy por email solo si el correo no está duplicado.
+    if ((emailCounts.get(email) ?? 0) === 1) {
+      byEmail[email] = s.requireFingerprint === true;
+    }
+  }
+  return { byEmail, byOrder };
+}
+
+/** Migra docs actuales (huella global) en bag; opcionalmente empuja cajas/prefs a Orion. */
+async function normalizeBagFingerprintRequirements(
+  bag: { documents: Record<string, OrionSignatureState>; updatedAt?: string },
+  opts?: { pushToOrion?: boolean }
+): Promise<{
+  bag: { documents: Record<string, OrionSignatureState>; updatedAt?: string };
+  changed: boolean;
+}> {
+  let changed = false;
+  const nextDocs: Record<string, OrionSignatureState> = { ...bag.documents };
+  for (const [fid, doc] of Object.entries(bag.documents)) {
+    const normalized = normalizeOrionFingerprintRequirements(doc);
+    if (normalized === doc) continue;
+    nextDocs[fid] = normalized;
+    changed = true;
+    if (opts?.pushToOrion && normalized.orionDocumentId) {
+      try {
+        const prefs = buildSignerFingerprintPrefs(normalized);
+        await saveOrionSignatureFields({
+          orionDocumentId: String(normalized.orionDocumentId),
+          signatureFields: toOrionSignatureFields(normalized.signatureFields ?? []),
+          signerRequireFingerprint: prefs.byEmail,
+          signerRequireFingerprintByOrder: prefs.byOrder,
+        });
+      } catch (err) {
+        console.warn('[ensure-document] normalize fingerprint → Orion:', err);
+      }
+    }
+  }
+  if (!changed) return { bag, changed: false };
+  return {
+    bag: { ...bag, documents: nextDocs, updatedAt: new Date().toISOString() },
+    changed: true,
+  };
+}
 
 function readFileId(source: { get?: (k: string) => string | null } | Record<string, unknown>): string | null {
   const raw =
@@ -75,17 +151,36 @@ export async function GET(req: Request) {
           userId: sessionUserId,
           email: session.user.email,
         });
-        const [canManage, canSignPermission, loaded] = await Promise.all([
+        const [canManage, canSignPermission, canFingerprintPermission, isFlowResponsible, loaded] =
+          await Promise.all([
           actorId
             ? userCanManageOrionRequest(pool, requestId, actorId, isAdmin)
             : Promise.resolve(false),
           actorId ? userHasOrionSignPermission(pool, actorId, false) : Promise.resolve(false),
+          actorId
+            ? userHasOrionFingerprintPermission(pool, actorId, false)
+            : Promise.resolve(false),
+          actorId
+            ? userIsOrionFlowSignatureResponsible(pool, requestId, actorId)
+            : Promise.resolve(false),
           loadOrionFormBag(pool, requestId),
         ]);
+        let bag = loaded?.bag ?? { documents: {} as Record<string, OrionSignatureState> };
+        if (loaded) {
+          const normalized = await normalizeBagFingerprintRequirements(bag, {
+            pushToOrion: false,
+          });
+          if (normalized.changed) {
+            bag = normalized.bag;
+            await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
+          }
+        }
         return {
           canManage,
           canSignPermission,
-          bag: loaded?.bag ?? { documents: {} as Record<string, OrionSignatureState> },
+          canFingerprintPermission,
+          isFlowResponsible,
+          bag,
         };
       });
       const state = fileId ? getOrionDocumentFromBag(boot.bag, fileId) : {};
@@ -98,6 +193,8 @@ export async function GET(req: Request) {
           fileId: fileId || null,
           canManage: boot.canManage,
           canSignPermission: boot.canSignPermission,
+          canFingerprintPermission: boot.canFingerprintPermission,
+          isFlowResponsible: boot.isFlowResponsible,
           isAdmin,
           pendingAuthorization: false,
           embedOrigin: cfg.embedOrigin,
@@ -125,14 +222,38 @@ export async function GET(req: Request) {
       const canSignPromise = actorId
         ? userHasOrionSignPermission(pool, actorId, false)
         : Promise.resolve(false);
+      const canFingerprintPromise = actorId
+        ? userHasOrionFingerprintPermission(pool, actorId, false)
+        : Promise.resolve(false);
+      const isFlowResponsiblePromise = actorId
+        ? userIsOrionFlowSignatureResponsible(pool, requestId, actorId)
+        : Promise.resolve(false);
 
       if (softBagOnly) {
-        const [canManage, canSignPermission, loaded] = await Promise.all([
-          canManagePromise,
-          canSignPromise,
-          loadOrionFormBag(pool, requestId),
-        ]);
-        const bag = loaded?.bag ?? { documents: {} as Record<string, OrionSignatureState> };
+        const [
+          canManage,
+          canSignPermission,
+          canFingerprintPermission,
+          isFlowResponsible,
+          loaded,
+        ] = await Promise.all([
+            canManagePromise,
+            canSignPromise,
+            canFingerprintPromise,
+            isFlowResponsiblePromise,
+            loadOrionFormBag(pool, requestId),
+          ]);
+        let bag = loaded?.bag ?? { documents: {} as Record<string, OrionSignatureState> };
+        // Corrige docs actuales: quita huella forzada legacy y sincroniza Orion.
+        if (loaded) {
+          const normalized = await normalizeBagFingerprintRequirements(bag, {
+            pushToOrion: true,
+          });
+          if (normalized.changed) {
+            bag = normalized.bag;
+            await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
+          }
+        }
         const pendingAuthorizationByFile: Record<string, boolean> = {};
         if (actorId && Object.keys(bag.documents).length > 0) {
           const authTargets = Object.keys(bag.documents);
@@ -146,6 +267,11 @@ export async function GET(req: Request) {
             );
           });
           if (myTurnFiles.length > 0) {
+            await reconcileDuplicateOrionSignerAuths(pool, {
+              requestId,
+              userId: String(actorId),
+              fileIds: myTurnFiles,
+            });
             const pendingMap = await userHasPendingOrionSignerAuthBatch(pool, {
               requestId,
               userId: String(actorId),
@@ -161,6 +287,8 @@ export async function GET(req: Request) {
         return {
           canManage,
           canSignPermission,
+          canFingerprintPermission,
+          isFlowResponsible,
           payload: loaded
             ? {
                 state: {},
@@ -173,17 +301,27 @@ export async function GET(req: Request) {
         };
       }
 
-      const [canManage, canSignPermission, synced] = await Promise.all([
-        canManagePromise,
-        canSignPromise,
-        syncOrionDocumentState(pool, requestId, fileId, {
-          rebuildSigned,
-        }),
-      ]);
+      const [
+        canManage,
+        canSignPermission,
+        canFingerprintPermission,
+        isFlowResponsible,
+        synced,
+      ] = await Promise.all([
+          canManagePromise,
+          canSignPromise,
+          canFingerprintPromise,
+          isFlowResponsiblePromise,
+          syncOrionDocumentState(pool, requestId, fileId, {
+            rebuildSigned,
+          }),
+        ]);
       if (!synced) {
         return {
           canManage,
           canSignPermission,
+          canFingerprintPermission,
+          isFlowResponsible,
           payload: null as Awaited<ReturnType<typeof syncOrionDocumentState>>,
           pendingAuthorization: false,
           pendingAuthorizationByFile: {} as Record<string, boolean>,
@@ -231,6 +369,11 @@ export async function GET(req: Request) {
           );
         });
         if (myTurnFiles.length > 0) {
+          await reconcileDuplicateOrionSignerAuths(pool, {
+            requestId,
+            userId: String(actorId),
+            fileIds: myTurnFiles,
+          });
           const pendingMap = await userHasPendingOrionSignerAuthBatch(pool, {
             requestId,
             userId: String(actorId),
@@ -251,6 +394,8 @@ export async function GET(req: Request) {
       return {
         canManage,
         canSignPermission,
+        canFingerprintPermission,
+        isFlowResponsible,
         payload: synced,
         pendingAuthorization,
         pendingAuthorizationByFile,
@@ -267,6 +412,8 @@ export async function GET(req: Request) {
           fileId: fileId || null,
           canManage: result.canManage,
           canSignPermission: result.canSignPermission,
+          canFingerprintPermission: result.canFingerprintPermission,
+          isFlowResponsible: result.isFlowResponsible,
           isAdmin,
           pendingAuthorization: false,
           pendingAuthorizationByFile: {},
@@ -284,6 +431,7 @@ export async function GET(req: Request) {
       canManage: result.canManage,
       isAdmin,
       currentUserEmail: session.user.email,
+      isFlowResponsible: result.isFlowResponsible,
       state,
     });
 
@@ -295,6 +443,8 @@ export async function GET(req: Request) {
         fileId: result.payload.fileId,
         canManage: result.canManage,
         canSignPermission: result.canSignPermission,
+        canFingerprintPermission: result.canFingerprintPermission,
+        isFlowResponsible: result.isFlowResponsible,
         isAdmin,
         permissions,
         pendingAuthorization: result.pendingAuthorization,
@@ -383,6 +533,31 @@ export async function POST(req: Request) {
         }
       }
 
+      const newVersion = body.newVersion === true;
+      if (newVersion && (!pdfBase64 || !current?.orionDocumentId)) {
+        throw Object.assign(
+          new Error('Para crear una subversión adjunte el PDF corregido de un documento ya preparado'),
+          { status: 400 }
+        );
+      }
+      if (!current?.orionDocumentId || newVersion) {
+        const hasValidators = await flowHasOrionValidators(pool, requestId);
+        if (hasValidators && newVersion) {
+          throw Object.assign(
+            new Error(
+              'Este flujo tiene validadores: suba la versión corregida desde "Validación" para reiniciar la aprobación.'
+            ),
+            { status: 409 }
+          );
+        }
+        if (!current?.orionDocumentId) {
+          await assertOrionReviewApprovedForSigning(pool, {
+            requestId,
+            state: (current ?? {}) as OrionSignatureState,
+          });
+        }
+      }
+
       return ensureOrionDocumentForRequest(pool, {
         requestId,
         createdByEmail: String(body.createdByEmail || email),
@@ -391,6 +566,10 @@ export async function POST(req: Request) {
         refresh: Boolean(body.refresh),
         fileId,
         fileName: body.fileName ? String(body.fileName) : undefined,
+        newVersion,
+        versionReason:
+          typeof body.versionReason === 'string' ? body.versionReason.trim().slice(0, 500) : null,
+        actorName: session.user?.name ? String(session.user.name) : null,
       });
     });
 
@@ -398,6 +577,7 @@ export async function POST(req: Request) {
       {
         success: true,
         created: result.created,
+        newVersion: result.newVersion,
         formFieldId: result.formFieldId,
         state: result.state,
         documents: result.bag.documents,
@@ -412,6 +592,7 @@ export async function POST(req: Request) {
         ? Number((err as { status: number }).status) || 500
         : 500;
     const message = err instanceof Error ? err.message : 'Error interno';
+    if (status >= 500) console.warn('[orion/ensure-document POST]', status, message);
     return NextResponse.json({ error: message }, { status });
   }
 }

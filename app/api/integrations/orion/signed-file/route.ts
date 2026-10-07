@@ -14,8 +14,11 @@ import {
   getRequestOrionContext,
   loadOrionFormBag,
   resolveOriginalPdfBase64,
+  resolveOrionActorUserId,
+  userIsOrionFlowSignatureResponsible,
 } from '@/lib/orion/service';
 import { isOrionProtectedFileUrl, isAllowedServerPdfFetchUrl, orionDocumentHasSignedCopy } from '@/lib/orion/signedFileAccess';
+import { applyValidatorMarks } from '@/lib/orion/validatorMarks';
 
 function normalizeEmail(email?: string | null): string {
   return String(email || '')
@@ -60,6 +63,14 @@ export async function GET(req: Request) {
       try {
         const ctx = await getRequestOrionContext(pool, requestId);
         const isSigner = isOrionDocumentSigner(state, me);
+        const actorId =
+          (await resolveOrionActorUserId(pool, {
+            userId,
+            email: me,
+          })) || userId;
+        const isFlowResponsible = actorId
+          ? await userIsOrionFlowSignatureResponsible(pool, requestId, actorId)
+          : false;
         canViewVersions = canViewOrionDocumentVersions({
           isAdmin,
           currentUserId: userId,
@@ -67,6 +78,7 @@ export async function GET(req: Request) {
           currentUserEmail: me,
           requesterEmail: ctx?.requester_email ?? null,
           isSigner,
+          isFlowResponsible,
         });
       } catch {
         canViewVersions = false;
@@ -90,7 +102,11 @@ export async function GET(req: Request) {
       if (!resolved.base64) return null;
       const fileName = stateLike?.fileName || 'documento.pdf';
       const disposition = forceDownload ? 'attachment' : 'inline';
-      return new NextResponse(Buffer.from(resolved.base64, 'base64'), {
+      let pdf: Uint8Array = Buffer.from(resolved.base64, 'base64');
+      if (validatorMode !== 'none') {
+        pdf = await applyValidatorMarks(pdf, state, { final: validatorMode === 'final' });
+      }
+      return new NextResponse(Buffer.from(pdf), {
         status: 200,
         headers: {
           'Content-Type': 'application/pdf',
@@ -114,6 +130,8 @@ export async function GET(req: Request) {
     }
 
     const { state, canViewVersions } = auth;
+    /** Visto bueno de validadores: none (original), check (en firma) o final (firmas guardadas). */
+    let validatorMode: 'none' | 'check' | 'final' = 'check';
 
     // Borrador / sin firmas: no usar este endpoint (es de Orion).
     if (!versionId && !orionDocumentHasSignedCopy(state)) {
@@ -124,15 +142,17 @@ export async function GET(req: Request) {
 
     let targetUrl: string | null = null;
     let maxSignerOrder: number | null = null;
+    let wantValidated = false;
     const selectedVersion = versionId
       ? orderedVersions.find((v) => v.id === versionId) ?? null
       : null;
 
-    // Historial / original: solo quien creó el flujo (solicitante) o admin.
+    // Historial / original: solicitante, preparador documento o admin.
     if (versionId === 'original') {
+      validatorMode = 'none';
       if (!canViewVersions) {
         return NextResponse.json(
-          { error: 'Solo quien creó el flujo puede descargar el original' },
+          { error: 'Solo el solicitante o un preparador documento del flujo puede descargar el original' },
           { status: 403 }
         );
       }
@@ -143,32 +163,55 @@ export async function GET(req: Request) {
     } else if (versionId && selectedVersion) {
       if (!canViewVersions) {
         return NextResponse.json(
-          { error: 'Solo quien creó el flujo puede descargar versiones' },
+          {
+            error:
+              'Solo el solicitante o un preparador documento del flujo puede descargar versiones',
+          },
           { status: 403 }
         );
       }
 
       const signedOrdered = orderedVersions.filter((v) => v.kind !== 'original');
       targetUrl = selectedVersion.url;
-      if (selectedVersion.kind === 'partial' || selectedVersion.kind === 'final') {
+
+      if (selectedVersion.kind === 'final' || selectedVersion.kind === 'validated') {
+        validatorMode = 'final';
+      } else if (selectedVersion.kind === 'original') {
+        validatorMode = 'none';
+      }
+
+      if (selectedVersion.kind === 'validated') {
+        // Versión DOCUMENTO VALIDADO (marca de agua) — aparte del historial de firmas.
+        wantValidated = true;
+        maxSignerOrder = null;
+      } else if (selectedVersion.kind === 'partial' || selectedVersion.kind === 'final') {
+        // Igual que firma interna: acumulado hasta ese firmante, SIN watermark.
         const email = normalizeEmail(selectedVersion.signerEmail);
         const signer = (state.signers ?? []).find((s) => normalizeEmail(s.email) === email);
         const order = Number(signer?.order);
         if (Number.isFinite(order) && order > 0) {
           maxSignerOrder = order;
-        } else if (selectedVersion.kind === 'partial') {
-          const partialIdx = signedOrdered
-            .filter((v) => v.kind === 'partial')
+        } else {
+          const signedIdx = signedOrdered
+            .filter((v) => v.kind === 'partial' || v.kind === 'final')
             .findIndex((v) => v.id === selectedVersion!.id);
-          if (partialIdx >= 0) maxSignerOrder = partialIdx + 1;
+          if (signedIdx >= 0) maxSignerOrder = signedIdx + 1;
         }
-        if (selectedVersion.kind === 'final') maxSignerOrder = null;
       }
     } else if (versionId) {
       return NextResponse.json({ error: 'Versión no encontrada' }, { status: 404 });
     } else {
       targetUrl = resolveOrionPdfUrl(state, state.originalFileUrl ?? null);
-      // Vista vigente: PDF acumulado — firmantes pueden ver al firmar (sin versionId)
+      // Vista vigente sellada: preferir DOCUMENTO VALIDADO (watermark).
+      const statusUpperLive = String(state.status || '').toUpperCase();
+      if (
+        statusUpperLive === 'FIRMADO' ||
+        statusUpperLive === 'SIGNED' ||
+        statusUpperLive === 'COMPLETED'
+      ) {
+        wantValidated = true;
+        validatorMode = 'final';
+      }
     }
 
     // Sin URL Orion (p. ej. Solo ver / aún sin firmas): PDF original desde OneDrive.
@@ -190,11 +233,19 @@ export async function GET(req: Request) {
       ? 'private, max-age=60'
       : 'private, no-store';
 
-    const serveBuffer = (buffer: ArrayBuffer | Uint8Array, contentType?: string | null) => {
-      const body =
+    const serveBuffer = async (buffer: ArrayBuffer | Uint8Array, contentType?: string | null) => {
+      let body: Buffer =
         buffer instanceof ArrayBuffer
           ? Buffer.from(buffer)
           : Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+
+      const isPdf = !contentType || /pdf/i.test(contentType);
+      if (isPdf && validatorMode !== 'none') {
+        body = Buffer.from(
+          await applyValidatorMarks(body, state, { final: validatorMode === 'final' })
+        );
+      }
+
       return new NextResponse(body as unknown as BodyInit, {
         status: 200,
         headers: {
@@ -208,19 +259,15 @@ export async function GET(req: Request) {
     const tryServePublicUrl = async (url: string | null | undefined) => {
       const value = String(url || '').trim();
       if (!value || isOrionProtectedFileUrl(value)) return null;
-      // SSRF: solo OneDrive/SharePoint/Graph allowlisted, o URL ya confiable en el bag.
-      const trustedInBag =
-        value === String(state.originalFileUrl || '').trim() ||
-        (state.versions ?? []).some((v) => String(v.url || '').trim() === value);
-      if (!isAllowedServerPdfFetchUrl(value) && !trustedInBag) {
+      // SSRF: allowlist estricta (no confiar en URLs solo porque estén en el bag).
+      if (!isAllowedServerPdfFetchUrl(value)) {
         return null;
       }
       const publicRes = await fetch(value, { cache: 'no-store', redirect: 'manual' });
-      if (!publicRes.ok) return null;
-      // No seguir redirects a hosts internos.
+      if (!publicRes.ok && !(publicRes.status >= 300 && publicRes.status < 400)) return null;
       if (publicRes.status >= 300 && publicRes.status < 400) {
         const loc = publicRes.headers.get('location');
-        if (!loc || (!isAllowedServerPdfFetchUrl(loc) && !trustedInBag)) return null;
+        if (!loc || !isAllowedServerPdfFetchUrl(loc)) return null;
         const follow = await fetch(loc, { cache: 'no-store', redirect: 'error' });
         if (!follow.ok) return null;
         return serveBuffer(await follow.arrayBuffer(), follow.headers.get('content-type'));
@@ -229,10 +276,7 @@ export async function GET(req: Request) {
     };
 
     if (!isOrionProtectedFileUrl(targetUrl)) {
-      const trustedInBag =
-        targetUrl === String(state.originalFileUrl || '').trim() ||
-        (state.versions ?? []).some((v) => String(v.url || '').trim() === targetUrl);
-      if (!isAllowedServerPdfFetchUrl(targetUrl) && !trustedInBag) {
+      if (!isAllowedServerPdfFetchUrl(targetUrl)) {
         return NextResponse.json(
           { error: 'URL de archivo no permitida' },
           { status: 400 }
@@ -241,7 +285,7 @@ export async function GET(req: Request) {
       const publicRes = await fetch(targetUrl, { cache: 'no-store', redirect: 'manual' });
       if (publicRes.status >= 300 && publicRes.status < 400) {
         const loc = publicRes.headers.get('location');
-        if (loc && (isAllowedServerPdfFetchUrl(loc) || loc === targetUrl || trustedInBag)) {
+        if (loc && isAllowedServerPdfFetchUrl(loc)) {
           const follow = await fetch(loc, { cache: 'no-store', redirect: 'error' });
           if (follow.ok) {
             return serveBuffer(await follow.arrayBuffer(), follow.headers.get('content-type'));
@@ -253,6 +297,7 @@ export async function GET(req: Request) {
 
       // URL pública caída (p. ej. OneDrive liberado tras prepare antiguo).
       if (versionId === 'original') {
+        validatorMode = 'none';
         const resolved = await resolveOriginalPdfBase64({
           fileId,
           originalFileUrl: state.originalFileUrl ?? null,
@@ -277,6 +322,7 @@ export async function GET(req: Request) {
       orionDocumentId: state.orionDocumentId,
       signedFileUrl: targetUrl,
       maxSignerOrder,
+      validated: wantValidated,
     });
     if (!upstream.ok || !upstream.buffer) {
       // 409: Orion aún no tiene PDF acumulado (borrador / sin firmas) → original OneDrive

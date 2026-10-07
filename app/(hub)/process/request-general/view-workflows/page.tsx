@@ -54,6 +54,8 @@ import {
   IconChevronUp,
   IconChevronDown,
   IconEye,
+  IconFileText,
+  IconGavel,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { getFileLabelError } from '../../../../../lib/onedriveName';
@@ -65,6 +67,7 @@ import {
   type TableColumn,
 } from '../../../../../lib/requests-general/tableField';
 import TableColumnsEditor from '../_components/TableColumnsEditor';
+import WorkflowValidatorsModal from '../../../../../components/request-general/WorkflowValidatorsModal';
 import toast from 'react-hot-toast';
 
 interface WorkFlow {
@@ -222,6 +225,10 @@ function ViewWorkFlowPage() {
   const [addTaskModalOpened, setAddTaskModalOpened] = useState(false);
   const [observersModalOpened, setObserversModalOpened] = useState(false);
   const [observers, setObservers] = useState<string[]>([]);
+  const [preparersModalOpened, setPreparersModalOpened] = useState(false);
+  const [preparers, setPreparers] = useState<string[]>([]);
+  const [validatorsModalOpened, setValidatorsModalOpened] = useState(false);
+  const [validatorsCount, setValidatorsCount] = useState(0);
   const [newTaskForm, setNewTaskForm] = useState({
     task: '',
     id_assigned_user: '',
@@ -266,6 +273,27 @@ function ViewWorkFlowPage() {
       fetchTasks(workflow.id);
       fetchFiles(workflow.id);
       fetchFields(workflow.id);
+      const loadList = async (endpoint: string, key: string): Promise<string[] | null> => {
+        try {
+          const res = await fetch(
+            `/api/requests-general/${endpoint}?id_process_category=${workflow.id}`
+          );
+          if (!res.ok) return null;
+          const data = await res.json();
+          return Array.isArray(data[key]) ? data[key].map(String) : [];
+        } catch {
+          return null;
+        }
+      };
+      void loadList('assign-viewer', 'observers').then((list) => {
+        if (list) setObservers(list);
+      });
+      void loadList('assign-preparer', 'preparers').then((list) => {
+        if (list) setPreparers(list);
+      });
+      void loadList('assign-validator', 'validators').then((list) => {
+        if (list) setValidatorsCount(list.length);
+      });
     }
   }, [workflow?.id]);
 
@@ -1146,6 +1174,22 @@ function ViewWorkFlowPage() {
     }
   };
 
+  const openPreparersModal = async () => {
+    if (!workflow) return;
+    setPreparersModalOpened(true);
+    try {
+      const res = await fetch(
+        `/api/requests-general/assign-preparer?id_process_category=${workflow.id}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setPreparers(Array.isArray(data.preparers) ? data.preparers : []);
+      }
+    } catch (err) {
+      console.error('Error al cargar preparadores documento:', err);
+    }
+  };
+
   const handleAsignViewer = async () => {
     if (!workflow) return;
 
@@ -1192,6 +1236,56 @@ function ViewWorkFlowPage() {
 
       toast.success('Observadores asignados correctamente.');
       setObserversModalOpened(false);
+    } finally {
+      setCreateLoading(false);
+    }
+  };
+
+  const handleAssignPreparers = async () => {
+    if (!workflow) return;
+
+    try {
+      setCreateLoading(true);
+      setError(null);
+
+      let response: Response;
+      try {
+        response = await fetch('/api/requests-general/assign-preparer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            preparers,
+            id_process_category: workflow.id,
+          }),
+        });
+      } catch (networkErr) {
+        console.error('Error de red al asignar preparadores:', networkErr);
+        setError('No se pudo asignar preparadores documento. Intente de nuevo.');
+        toast.error('No se pudo asignar preparadores documento. Intente de nuevo.');
+        return;
+      }
+
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const errorData = await response.json();
+          detail = errorData.error || '';
+        } catch {
+        }
+        console.error('Fallo al asignar preparadores:', detail);
+        setError('No se pudo asignar preparadores documento. Intente de nuevo.');
+        toast.error('No se pudo asignar preparadores documento. Intente de nuevo.');
+        return;
+      }
+
+      toast.success(
+        preparers.length > 0
+          ? 'Preparadores documento asignados correctamente.'
+          : 'Lista de preparadores documento vaciada.'
+      );
+      setPreparersModalOpened(false);
     } finally {
       setCreateLoading(false);
     }
@@ -1345,6 +1439,24 @@ function ViewWorkFlowPage() {
                 onClick={openObserversModal}
               >
                 Observadores{observers.length > 0 ? ` (${observers.length})` : ''}
+              </Button>
+              <Button
+                variant='light'
+                color='teal'
+                leftSection={<IconFileText size={16} />}
+                onClick={openPreparersModal}
+              >
+                Preparadores documento
+                {preparers.length > 0 ? ` (${preparers.length})` : ''}
+              </Button>
+              <Button
+                variant='light'
+                color='violet'
+                leftSection={<IconGavel size={16} />}
+                onClick={() => setValidatorsModalOpened(true)}
+              >
+                Validadores documento
+                {validatorsCount > 0 ? ` (${validatorsCount})` : ''}
               </Button>
               <Badge color={getActiveColor(workflow.active)} size='lg' radius='sm' variant='light'>
                 {getActiveText(workflow.active)}
@@ -2588,6 +2700,87 @@ function ViewWorkFlowPage() {
             </Group>
           </Stack>
         </Modal>
+
+        <Modal
+          opened={preparersModalOpened}
+          onClose={() => setPreparersModalOpened(false)}
+          title={
+            <Group gap='sm'>
+              <div className='flex items-center justify-center w-10 h-10 rounded-lg bg-teal-100'>
+                <IconFileText size={20} className='text-teal-600' />
+              </div>
+              <div>
+                <Text size='lg' fw={600}>
+                  Preparadores documento
+                </Text>
+                <Text size='xs' c='dimmed'>
+                  Quién puede marcar Para firmar / Solo ver y preparar firmas en
+                  solicitudes de este flujo (además del permiso Preparar firma)
+                </Text>
+              </div>
+            </Group>
+          }
+          size='lg'
+          radius='lg'
+          overlayProps={{ blur: 4 }}
+          centered
+        >
+          <Stack gap='lg'>
+            <MultiSelect
+              label='Preparadores documento'
+              placeholder='Selecciona usuarios'
+              data={users}
+              value={preparers}
+              onChange={setPreparers}
+              leftSection={<IconUser size={16} />}
+              searchable
+              clearable
+              hidePickedOptions
+              nothingFoundMessage='No hay usuarios'
+              size='md'
+            />
+
+            {preparers.length > 0 && (
+              <Group gap={6}>
+                {preparers.map((id) => {
+                  const u = users.find((x) => x.value === id);
+                  return (
+                    <Badge
+                      key={id}
+                      variant='light'
+                      color='teal'
+                      leftSection={<IconUser size={12} />}
+                    >
+                      {u?.label ?? id}
+                    </Badge>
+                  );
+                })}
+              </Group>
+            )}
+
+            <Group justify='flex-end' gap='sm' mt='md'>
+              <Button variant='outline' onClick={() => setPreparers([])}>
+                Limpiar
+              </Button>
+              <Button
+                onClick={() => handleAssignPreparers()}
+                leftSection={<IconCheck size={16} />}
+                loading={createLoading}
+                disabled={createLoading}
+              >
+                Listo
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+
+        <WorkflowValidatorsModal
+          opened={validatorsModalOpened}
+          onClose={() => setValidatorsModalOpened(false)}
+          processCategoryId={Number(workflow.id)}
+          users={users}
+          onSaved={setValidatorsCount}
+        />
 
         {/* Modal para agregar nueva tarea */}
         <Modal

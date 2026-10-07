@@ -111,6 +111,7 @@ import { isSynerlinkWorkflowLocked } from '../../../../../lib/orion/workflowLock
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
 import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
@@ -610,20 +611,30 @@ function ViewRequestPage() {
     }, 5000);
   }, [request?.id_request_general]);
 
+  // Abre el modal de justificación; el borrado real va en handleDeleteAttachment.
+  const [pendingDelete, setPendingDelete] = useState<{
+    fileId: string;
+    fileName: string | null;
+  } | null>(null);
+  const requestDeleteAttachment = useCallback((fileId: string, fileName?: string | null) => {
+    if (!fileId) return;
+    setPendingDelete({ fileId, fileName: fileName ?? null });
+  }, []);
+
   const handleDeleteAttachment = useCallback(
-    async (fileId: string) => {
+    async (fileId: string, fileName: string | null, justification: string): Promise<boolean> => {
       const requestId = request?.id_request_general;
-      if (!requestId || !fileId) return;
+      if (!requestId || !fileId) return false;
       try {
         const res = await fetch('/api/requests-general/delete-attachment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId, fileId }),
+          body: JSON.stringify({ requestId, fileId, fileName: fileName ?? null, justification }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           toast.error(typeof data.error === 'string' ? data.error : 'No se pudo eliminar');
-          return;
+          return false;
         }
         setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
         if (requestId) removeFromAttachmentCache(requestId, fileId);
@@ -633,12 +644,18 @@ function ViewRequestPage() {
           delete next[fileId];
           return next;
         });
-        toast.success('Archivo eliminado');
+        toast.success('Documento eliminado');
         refreshAttachmentsAfterUpload();
+        void fetchFormValues(requestId);
+        void fetchTasksRG();
+        void fetchNotes();
+        return true;
       } catch {
         toast.error('Error de red al eliminar el archivo');
+        return false;
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [request?.id_request_general, refreshAttachmentsAfterUpload]
   );
 
@@ -1438,7 +1455,7 @@ function ViewRequestPage() {
 
   if (loading) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <div className='text-center'>
           <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4'></div>
           <Text size='lg'>Cargando detalles de la tarea...</Text>
@@ -1449,7 +1466,7 @@ function ViewRequestPage() {
 
   if (error) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <Card shadow='sm' p='xl' radius='md' withBorder className='max-w-md'>
           <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' mb='md'>
             {error}
@@ -1468,7 +1485,7 @@ function ViewRequestPage() {
 
   if (!request) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <Card shadow='sm' p='xl' radius='md' withBorder className='max-w-md'>
           <Text size='lg' fw={500} mb='md' className='text-center'>
             Tarea no encontrada
@@ -1579,9 +1596,9 @@ function ViewRequestPage() {
 
   return (
     <OrionSignatureProvider>
-    <div className='min-h-screen bg-gray-50'>
+    <div className='app-canvas'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -1619,7 +1636,7 @@ function ViewRequestPage() {
               p='xl'
               radius='md'
               withBorder
-              className='bg-white flex flex-col'
+              className='flex flex-col'
             >
               <Title order={3} mb='md' className='flex items-center gap-2'>
                 <IconNote size={20} />
@@ -1792,6 +1809,7 @@ function ViewRequestPage() {
                 participants={orionParticipants}
                 availableUsers={availableUsers}
                 currentUserName={session?.user?.name ?? undefined}
+                companyId={request?.id_company}
                 onDocumentsChange={handleOrionDocumentsChange}
                 workflowLocked={orionWorkflowLocked}
                 autoOpenFileId={deepLinkFileId}
@@ -1806,7 +1824,7 @@ function ViewRequestPage() {
           </div>
 
           <div className='w-full lg:w-150 order-1 lg:order-2'>
-            <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white'>
+            <Card shadow='sm' p='xl' radius='md' withBorder>
               <Title order={4} mb='md' className='flex items-center gap-2'>
                 <IconFileDescription size={18} />
                 Detalles de la Tarea
@@ -1863,7 +1881,7 @@ function ViewRequestPage() {
                   <Text size='sm' color='gray.6' fw={500}>
                     Compañia
                   </Text>
-                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
+                  <Card withBorder radius='md' p='md' mt='xs'>
                     <Group>
                       <IconBuilding size={16} />
                       <Text size='sm'>
@@ -1878,7 +1896,7 @@ function ViewRequestPage() {
                     Asunto
                   </Text>
 
-                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
+                  <Card withBorder radius='md' p='md' mt='xs'>
                     <Group>
                       <IconFileDescription size={16} />
                       <Text size='sm'>{request?.subject_request}</Text>
@@ -1891,7 +1909,7 @@ function ViewRequestPage() {
                     Descripción
                   </Text>
 
-                  <Card withBorder radius='md' p='md' bg='gray.0' mt='xs'>
+                  <Card withBorder radius='md' p='md' mt='xs'>
                     <Text size='sm' className='whitespace-pre-line text-gray-700'>
                       {request?.description}
                     </Text>
@@ -1971,7 +1989,7 @@ function ViewRequestPage() {
                   </Text>
                   <Grid>
                     <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Card withBorder radius='md' p='md' bg='gray.0'>
+                      <Card withBorder radius='md' p='md'>
                         <Group>
                           <IconTag size={16} />
                           <div>
@@ -1986,7 +2004,7 @@ function ViewRequestPage() {
                       </Card>
                     </Grid.Col>
                     <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Card withBorder radius='md' p='md' bg='gray.0'>
+                      <Card withBorder radius='md' p='md'>
                         <Group>
                           <IconProgress size={16} />
                           <div>
@@ -2023,7 +2041,7 @@ function ViewRequestPage() {
                       />
                     </Stack>
                   ) : (
-                    <Card withBorder radius='md' p='md' bg='gray.0'>
+                    <Card withBorder radius='md' p='md'>
                       <Group>
                         <IconProgress size={16} />
                         <div>
@@ -2322,7 +2340,7 @@ function ViewRequestPage() {
           </Card>
         )}
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           <Group justify='space-between' align='center' mb='md' wrap='wrap'>
             <Title order={3} className='flex items-center gap-2'>
               <IconEye size={20} />
@@ -2446,8 +2464,8 @@ function ViewRequestPage() {
                             ...orionDocuments,
                           }}
                           onDocumentsUpdate={handleOrionDocumentsChange}
-                          canDeleteAttachment={canDeleteAttachments && !isRequestCaseClosed()}
-                          onDeleteAttachment={handleDeleteAttachment}
+                          canDeleteAttachment={canDeleteAttachments}
+                          onDeleteAttachment={requestDeleteAttachment}
                           forceSignerUi={(() => {
                             const me = String(session?.user?.email || '')
                               .trim()
@@ -2626,6 +2644,8 @@ function ViewRequestPage() {
                   return [...prev, optimistic];
                 });
               }
+              const fileName = uploaded.graphItem?.name || uploaded.file.name;
+              void addSystemNote(`Documento adjunto: ${fileName}`);
               refreshAttachmentsAfterUpload();
             }}
             disabled={isRequestCaseClosed()}
@@ -2634,7 +2654,7 @@ function ViewRequestPage() {
           />
         </Card>
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           {updateMessage && (
             <Alert
               color={updateMessage.type === 'success' ? 'green' : 'red'}
@@ -2727,6 +2747,17 @@ function ViewRequestPage() {
             )}
           </Group>
         </Card>
+
+        <DeleteAttachmentModal
+          opened={pendingDelete != null}
+          fileName={pendingDelete?.fileName ?? null}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={(justification) =>
+            pendingDelete
+              ? handleDeleteAttachment(pendingDelete.fileId, pendingDelete.fileName, justification)
+              : Promise.resolve(false)
+          }
+        />
 
         <Modal
           opened={modalTasksOpened}

@@ -1,18 +1,27 @@
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../../auth/[...nextauth]/route';
-import { assignOrionSigners } from '@/lib/orion/client';
+import { assignOrionSigners, saveOrionSignatureFields } from '@/lib/orion/client';
 import { getOrionConfig } from '@/lib/orion/config';
-import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
+import {
+  getOrionDocumentFromBag,
+  setOrionDocumentInBag,
+} from '@/lib/orion/formValue';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import {
   assertUserCanEditOrionPreparation,
   getRequestOrionContext,
   loadOrionFormBag,
   syncOrionDocumentState,
+  upsertOrionFormBag,
 } from '@/lib/orion/service';
 import { syncOrionSignerTasks } from '@/lib/orion/signerTasks';
+import { toOrionSignatureFields } from '@/lib/orion/signatureFields';
 import type { OrionAssignSignersPayload } from '@/lib/orion/types';
+import { fireAndForgetOrionDocumentEvent } from '@/lib/orion/documentEvents';
+import { resolveOrionVersionLabel } from '@/lib/orion/versionLabel';
+import { orionErrorMessage } from '@/lib/orion/errorCodes';
+import { orionErrorResponse } from '@/lib/orion/httpError';
 
 /** POST /api/integrations/orion/signers — asignar firmantes vía API Orion */
 export async function POST(req: Request) {
@@ -65,17 +74,101 @@ export async function POST(req: Request) {
       const res = await assignOrionSigners(current.orionDocumentId, {
         mode: payload.mode,
         signers: payload.signers,
+        actorEmail: session.user.email,
       });
 
       if (!res.ok || !res.data) {
+        if (res.code === 'SIGNED_SIGNER_LOCKED' || res.code === 'DOCUMENT_CLOSED') {
+          throw Object.assign(new Error(orionErrorMessage(res.code, res.error)), {
+            status: 409,
+            code: res.code,
+          });
+        }
         throw Object.assign(new Error(res.error || 'Error asignando firmantes en Orion'), {
           status: res.status >= 500 ? 503 : 502,
+          code: res.code,
         });
       }
 
       const previous = current;
       const synced = await syncOrionDocumentState(pool, requestId, fileId);
-      const state = synced?.state ?? previous;
+      let bag = synced?.bag ?? loaded.bag;
+      let state = synced?.state ?? previous;
+
+      // Huella/correo por orden (mismo email en 2 slots no debe pisarse).
+      const fpByOrder = new Map<number, boolean>();
+      const notifyByOrder = new Map<number, boolean>();
+      for (const s of payload.signers) {
+        const order = Number(s.order);
+        if (!Number.isFinite(order) || order < 1) continue;
+        fpByOrder.set(order, Boolean(s.requireFingerprint));
+        if (s.notifyByEmail != null) notifyByOrder.set(order, Boolean(s.notifyByEmail));
+      }
+      const nextSigners = (state.signers ?? []).map((s, index) => {
+        const order = Number(s.order);
+        const key = Number.isFinite(order) && order > 0 ? order : index + 1;
+        return {
+          ...s,
+          requireFingerprint: fpByOrder.has(key)
+            ? fpByOrder.get(key)
+            : s.requireFingerprint,
+          notifyByEmail: notifyByOrder.has(key)
+            ? notifyByOrder.get(key)
+            : s.notifyByEmail,
+        };
+      });
+      state = {
+        ...state,
+        signers: nextSigners,
+        fingerprintPolicy: 'per-signer',
+        requireFingerprint: nextSigners.some((s) => s.requireFingerprint === true),
+      };
+      bag = setOrionDocumentInBag(bag, fileId, state);
+      await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
+
+      fireAndForgetOrionDocumentEvent(pool, {
+        requestId,
+        fileId,
+        orionDocumentId: String(current.orionDocumentId),
+        versionLabel: resolveOrionVersionLabel(state.versionLabel),
+        eventType: 'FIRMANTES_ASIGNADOS',
+        actorEmail: session.user.email,
+        actorName: session.user.name ?? null,
+        detail: nextSigners
+          .map((s) => `${s.order ?? ''}. ${s.name || s.email}`.trim())
+          .join(' · ') || null,
+      });
+
+      if (state.orionDocumentId) {
+        try {
+          const byOrder: Record<string, boolean> = {};
+          const byEmail: Record<string, boolean> = {};
+          const emailCounts = new Map<string, number>();
+          for (const s of nextSigners) {
+            const email = String(s.email || '').trim().toLowerCase();
+            if (email) emailCounts.set(email, (emailCounts.get(email) ?? 0) + 1);
+          }
+          for (const s of nextSigners) {
+            const order = Number(s.order);
+            if (Number.isFinite(order) && order > 0) {
+              byOrder[String(order)] = s.requireFingerprint === true;
+            }
+            const email = String(s.email || '').trim().toLowerCase();
+            if (email && (emailCounts.get(email) ?? 0) === 1) {
+              byEmail[email] = s.requireFingerprint === true;
+            }
+          }
+          await saveOrionSignatureFields({
+            orionDocumentId: String(state.orionDocumentId),
+            signatureFields: toOrionSignatureFields(state.signatureFields ?? []),
+            signerRequireFingerprint: byEmail,
+            signerRequireFingerprintByOrder: byOrder,
+          });
+        } catch (err) {
+          console.warn('[orion/signers] fingerprint prefs by order → Orion:', err);
+        }
+      }
+
       if (state.orionDocumentId && (state.signers?.length ?? 0) > 0) {
         const ctx = await getRequestOrionContext(pool, requestId);
         await syncOrionSignerTasks(pool, {
@@ -88,7 +181,7 @@ export async function POST(req: Request) {
           fileName: state.fileName,
         });
       }
-      return { state, documents: synced?.bag.documents ?? loaded.bag.documents, fileId };
+      return { state, documents: bag.documents, fileId };
     });
 
     return NextResponse.json(
@@ -96,11 +189,6 @@ export async function POST(req: Request) {
       { status: 200 }
     );
   } catch (err) {
-    const status =
-      err && typeof err === 'object' && 'status' in err
-        ? Number((err as { status: number }).status) || 500
-        : 500;
-    const message = err instanceof Error ? err.message : 'Error interno';
-    return NextResponse.json({ error: message }, { status });
+    return orionErrorResponse(err);
   }
 }
