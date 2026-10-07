@@ -9,6 +9,7 @@ import {
   completedApprovals,
   currentPendingApproval,
   isOrionReadyForSigning,
+  keepWordApprovalForNewVersion,
   orderDocumentValidators,
   previousReviewValidatorIds,
   type OrionReviewValidator,
@@ -191,7 +192,7 @@ async function ensureReviewTaskTemplateId(pool: SqlPool, requestId: number): Pro
   return id;
 }
 
-async function openReviewTask(
+export async function openReviewTask(
   pool: SqlPool,
   params: {
     requestId: number;
@@ -199,6 +200,8 @@ async function openReviewTask(
     fileName?: string | null;
     review: OrionReviewState;
     subject?: string | null;
+    /** false = solo crea la tarea; quien llama le manda su propio aviso (sin duplicar). */
+    notify?: boolean;
   }
 ): Promise<void> {
   const pending = currentPendingApproval(params.review);
@@ -227,19 +230,47 @@ async function openReviewTask(
     step: pending.order,
     totalSteps: params.review.approvals.length,
   });
-  const inserted = await pool
+  // Una tarea por persona y documento: si ya tuvo una (cerrada en una ronda anterior), se
+  // reactiva esa misma en vez de crear otra por cada versión o ronda.
+  const reopened = await pool
     .request()
     .input('id_request', sql.Int, params.requestId)
     .input('id_task', sql.Int, templateId)
     .input('id_user', sql.NVarChar(255), pending.userId)
+    .input('needle', sql.NVarChar(500), needle)
     .input('resolution', sql.NVarChar(sql.MAX), resolution)
     .query(`
-      INSERT INTO task_request_general (id_request_general, id_task, id_status, id_assigned, resolution)
+      UPDATE task_request_general
+      SET id_status = 4,
+          end_date = NULL,
+          date_resolution = NULL,
+          id_executor_final = NULL,
+          resolution = @resolution
       OUTPUT INSERTED.id
-      VALUES (@id_request, @id_task, 4, @id_user, @resolution)
+      WHERE id = (
+        SELECT TOP 1 id FROM task_request_general
+        WHERE id_request_general = @id_request AND id_task = @id_task AND id_assigned = @id_user
+          AND id_status IN (2, 3)
+          AND CHARINDEX(@needle, ISNULL(resolution, N'')) > 0
+        ORDER BY id DESC
+      )
     `);
-  const taskId = inserted.recordset[0]?.id;
-  if (!taskId) return;
+  let taskId = reopened.recordset[0]?.id;
+  if (!taskId) {
+    const inserted = await pool
+      .request()
+      .input('id_request', sql.Int, params.requestId)
+      .input('id_task', sql.Int, templateId)
+      .input('id_user', sql.NVarChar(255), pending.userId)
+      .input('resolution', sql.NVarChar(sql.MAX), resolution)
+      .query(`
+        INSERT INTO task_request_general (id_request_general, id_task, id_status, id_assigned, resolution)
+        OUTPUT INSERTED.id
+        VALUES (@id_request, @id_task, 4, @id_user, @resolution)
+      `);
+    taskId = inserted.recordset[0]?.id;
+  }
+  if (!taskId || params.notify === false) return;
 
   const docLabel = String(params.fileName || '').trim();
   void createAndSendNotifications([pending.email], {
@@ -253,15 +284,21 @@ async function openReviewTask(
     ]
       .filter(Boolean)
       .join(' · '),
+    // Un Word se valida en su tablero (ver, marcar, comentar y aprobar): la notificación lleva directo ahí.
     url: buildAppUrl(
-      `/process/authorization?highlight=${encodeURIComponent(String(taskId))}&orionReviewFileId=${encodeURIComponent(params.fileId)}`
+      /\.docx$/i.test(docLabel)
+        ? `/process/request-general/draft-board?${new URLSearchParams({
+            requestId: String(params.requestId),
+            fileId: params.fileId,
+          }).toString()}`
+        : `/process/authorization?highlight=${encodeURIComponent(String(taskId))}&orionReviewFileId=${encodeURIComponent(params.fileId)}`
     ),
     tag: `orion-review-${taskId}`,
   }).catch((err: unknown) => console.warn('[orion/review] Notificación falló:', err));
 }
 
 /** Cierra las tareas de validación abiertas del archivo (todas o solo las de un usuario). */
-async function closeReviewTasks(
+export async function closeReviewTasks(
   pool: SqlPool,
   params: {
     requestId: number;
@@ -625,7 +662,9 @@ export async function resubmitOrionReview(
     Array.isArray(params.validatorIds) && params.validatorIds.length > 0
       ? params.validatorIds
       : previousReviewValidatorIds(current.review);
-  const validators = resolveDocumentValidators(flowValidators, requested);
+  // Un PDF de un Word validado no vuelve a pasar por validadores (ver más abajo).
+  const validators =
+    current.review.source === 'word' ? [] : resolveDocumentValidators(flowValidators, requested);
 
   const replaced = await replaceSynerlinkAttachmentContent(params.fileId, params.pdfBase64);
   if (!replaced) {
@@ -641,18 +680,22 @@ export async function resubmitOrionReview(
     previousVersionLabel: previousLabel,
     reason,
   });
-  const review: OrionReviewState = {
-    status: 'EN_VALIDACION',
-    approvals: buildPendingApprovals(validators),
-    versionLabel,
-    submittedAt: now,
-    submittedBy: normalizeEmail(params.actor.email),
-    approvedAt: null,
-    returnReason: null,
-    returnedBy: null,
-    returnedAt: null,
-    round: (current.review.round ?? 1) + 1,
-  };
+  // PDF de un Word validado: conserva esa aprobación (una sola validación, en el Word).
+  const fromWord = current.review.source === 'word';
+  const review: OrionReviewState = fromWord
+    ? keepWordApprovalForNewVersion(current.review, versionLabel)
+    : {
+        status: 'EN_VALIDACION',
+        approvals: buildPendingApprovals(validators),
+        versionLabel,
+        submittedAt: now,
+        submittedBy: normalizeEmail(params.actor.email),
+        approvedAt: null,
+        returnReason: null,
+        returnedBy: null,
+        returnedAt: null,
+        round: (current.review.round ?? 1) + 1,
+      };
   const state: OrionSignatureState = {
     ...base,
     orionDocumentId: null,
@@ -672,6 +715,9 @@ export async function resubmitOrionReview(
     actorName: params.actor.name ?? null,
     detail: `${previousLabel} → ${versionLabel}${reason ? ` · ${reason}` : ''}`,
   });
+  if (fromWord) {
+    return { state: getOrionDocumentFromBag(bag, params.fileId), documents: bag.documents };
+  }
   fireAndForgetOrionDocumentEvent(pool, {
     requestId: params.requestId,
     fileId: params.fileId,

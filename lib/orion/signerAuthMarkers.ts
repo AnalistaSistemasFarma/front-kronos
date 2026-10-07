@@ -29,6 +29,21 @@ export function buildOrionAuthResolution(params: {
   return `${marker}${ORION_AUTH_MARKER} Autorizar firma${name} (${params.signerEmail})`.trim();
 }
 
+/** Nombre del PDF embebido en resolution (`Autorizar firma: archivo.pdf (email)`). */
+export function parseOrionFileNameFromResolution(
+  resolution?: string | null
+): string | null {
+  const match =
+    /Autorizar firma:\s*(.+?)\s*\([^)]+@[^)]+\)\s*$/i.exec(
+      String(resolution || '').trim()
+    ) ||
+    /Autorizar firma:\s*(.+?)(?:\s*\(|$)/i.exec(String(resolution || '').trim());
+  const name = String(match?.[1] || '')
+    .trim()
+    .replace(/^\[orionAuth\]\s*/i, '');
+  return name || null;
+}
+
 /**
  * Validación previa a firma. Marcador de archivo distinto a [orionFile:] para que
  * la lógica de firmantes (turnos, autorizaciones, cierre de tareas) no la toque.
@@ -56,12 +71,19 @@ export function parseOrionReviewFileId(resolution?: string | null): string | nul
   return match?.[1]?.trim() || null;
 }
 
+/**
+ * "Validar documento: Contrato.pdf (v1.2 · paso 1/3)" → "Contrato.pdf". Se busca el inicio y
+ * luego el paréntesis del paso por separado (sin repeticiones anidadas en una sola expresión).
+ */
 export function parseOrionReviewFileName(resolution?: string | null): string | null {
-  // eslint-disable-next-line security/detect-unsafe-regex -- falso positivo: el grupo opcional `(?:v\d+\.\d+\s*·\s*)?` no anida cuantificadores sobre el mismo texto; la entrada es la resolución corta de una tarea (texto generado por buildOrionReviewResolution).
-  const match = /Validar documento:\s*(.+?)\s*\((?:v\d+\.\d+\s*·\s*)?paso\s+\d+\/\d+\)/i.exec(
-    String(resolution || '')
-  );
-  return match?.[1]?.trim() || null;
+  const text = String(resolution || '');
+  const start = /Validar documento:\s*/i.exec(text);
+  if (!start) return null;
+  const rest = text.slice(start.index + start[0].length);
+  // "(paso 1/3)" o "(v1.2 · paso 1/3)": lo previo a "paso" dentro del paréntesis es libre.
+  const step = /\s*\([^()]*paso\s+\d+\/\d+\)/i.exec(rest);
+  if (!step) return null;
+  return rest.slice(0, step.index).trim() || null;
 }
 
 export function isOrionSignerAuthResolution(resolution?: string | null): boolean {
