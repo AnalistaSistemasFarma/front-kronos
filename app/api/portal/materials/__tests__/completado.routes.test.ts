@@ -140,6 +140,35 @@ describe('apertura — POST /api/portal/materials/:id/vista', () => {
     expect(marcarMaterialCompletado).toHaveBeenCalledWith({ materialId: 8, correo: ESTUDIANTE, origen: 'AUTO' });
   });
 
+  it.each([
+    ['PDF', 'application/pdf'],
+    ['imagen', 'image/jpeg'],
+    ['Word', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ])('un %s queda completado AL ABRIRLO, sin tiempo mínimo', async (_nombre, mime) => {
+    prisma.portalCourseMaterial.findFirst.mockResolvedValue({
+      id: 9,
+      type: 'DOCUMENT',
+      mime,
+      sp_drive_item_id: 'X',
+      file_size: BigInt(10),
+      course: { active: true },
+    });
+    const res = await abrir(req('/api/portal/materials/9/vista'), p('9'));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.completado).toBe(true);
+    expect(data.regla.segundosMinimos).toBe(0);
+    expect(marcarMaterialCompletado).toHaveBeenCalledWith({ materialId: 9, correo: ESTUDIANTE, origen: 'AUTO' });
+    // Sin tiempo por página, ya no hace falta descargar el PDF para contar páginas.
+    expect(contarPaginasPdf).not.toHaveBeenCalled();
+  });
+
+  it('un VIDEO no se marca solo por abrirlo', async () => {
+    const res = await abrir(req('/api/portal/materials/7/vista'), p('7'));
+    expect((await res.json()).completado).toBe(false);
+    expect(marcarMaterialCompletado).not.toHaveBeenCalled();
+  });
+
   it('curso no publicado: 404 para un estudiante', async () => {
     prisma.portalCourseMaterial.findFirst.mockResolvedValue({
       id: 7,
@@ -191,18 +220,22 @@ describe('reporte — POST /api/portal/materials/:id/vista/:token', () => {
     expect(marcarMaterialCompletado).not.toHaveBeenCalled();
   });
 
-  it('PDF: exige el tiempo proporcional a sus páginas', async () => {
-    prisma.portalMaterialVista.findUnique.mockResolvedValue(
-      vistaAbierta(20, { paginas: 10, material: { type: 'DOCUMENT', mime: 'application/pdf', eliminado_at: null } })
+  it('video visto al 90 %: el servidor lo marca', async () => {
+    prisma.portalMaterialVista.findUnique.mockResolvedValue(vistaAbierta(110));
+    const res = await reportar(
+      req(`/api/portal/materials/7/vista/${TOKEN}`, { body: { segundosVistos: 108, duracion: 120 } }),
+      pt('7')
     );
-    const corto = await reportar(req(`/api/portal/materials/7/vista/${TOKEN}`, { body: { segundosVistos: 60 } }), pt('7'));
-    expect(corto.status).toBe(422);
+    expect(res.status).toBe(200);
+    expect(marcarMaterialCompletado).toHaveBeenCalled();
+  });
 
+  it('documento: el servidor ya NO valida el tiempo transcurrido', async () => {
     prisma.portalMaterialVista.findUnique.mockResolvedValue(
-      vistaAbierta(65, { paginas: 10, material: { type: 'DOCUMENT', mime: 'application/pdf', eliminado_at: null } })
+      vistaAbierta(1, { paginas: 10, material: { type: 'DOCUMENT', mime: 'application/pdf', eliminado_at: null } })
     );
-    const bien = await reportar(req(`/api/portal/materials/7/vista/${TOKEN}`, { body: { segundosVistos: 60 } }), pt('7'));
-    expect(bien.status).toBe(200);
+    const res = await reportar(req(`/api/portal/materials/7/vista/${TOKEN}`, { body: { segundosVistos: 0 } }), pt('7'));
+    expect(res.status).toBe(200);
   });
 
   it('el token de OTRA persona no sirve: 404', async () => {

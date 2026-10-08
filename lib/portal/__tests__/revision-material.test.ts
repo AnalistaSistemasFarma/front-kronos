@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { leerReporte, reglaDeRevision, tipoDeRevision, validarRevision } from '../revision-material';
+import {
+  leerReporte,
+  pdfRequierePaginas,
+  reglaDeRevision,
+  seMarcaAlAbrir,
+  tipoDeRevision,
+  validarRevision,
+} from '../revision-material';
 
-// Reglas de "material revisado" (Cristian, 2026-10-08).
+// Reglas de "material revisado" (Cristian, 2026-10-08) con el ajuste del
+// mismo día: documentos SIN tiempo mínimo (se marcan al abrir); video igual.
 const env = {} as NodeJS.ProcessEnv;
 const video = { type: 'DOCUMENT', mime: 'video/mp4' };
 const pdf = { type: 'DOCUMENT', mime: 'application/pdf' };
+const imagen = { type: 'DOCUMENT', mime: 'image/png' };
+const word = { type: 'DOCUMENT', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
 
 describe('tipoDeRevision', () => {
   it('clasifica por tipo y mime', () => {
@@ -17,29 +27,61 @@ describe('tipoDeRevision', () => {
 });
 
 describe('reglaDeRevision', () => {
-  it('PDF: tiempo proporcional a las páginas, con piso y techo', () => {
-    expect(reglaDeRevision(pdf, 1, env).segundosMinimos).toBe(15);
-    expect(reglaDeRevision(pdf, 10, env).segundosMinimos).toBe(60);
-    expect(reglaDeRevision(pdf, 500, env).segundosMinimos).toBe(300);
-    expect(reglaDeRevision(pdf, null, env).segundosMinimos).toBe(300);
+  it('documentos sin tiempo mínimo por defecto (PDF, imagen, Office)', () => {
+    expect(reglaDeRevision(pdf, 1, env).segundosMinimos).toBe(0);
+    expect(reglaDeRevision(pdf, 500, env).segundosMinimos).toBe(0);
+    expect(reglaDeRevision(pdf, null, env).segundosMinimos).toBe(0);
+    expect(reglaDeRevision(imagen, null, env).segundosMinimos).toBe(0);
+    expect(reglaDeRevision(word, null, env).segundosMinimos).toBe(0);
+    expect(pdfRequierePaginas(env)).toBe(false);
   });
 
-  it('se configura por entorno', () => {
-    const otro = { PORTAL_TH_REVISION_VIDEO_PCT: '95', PORTAL_TH_REVISION_DOC_SEG: '45' } as unknown as NodeJS.ProcessEnv;
+  it('video: 90 % por defecto', () => {
+    expect(reglaDeRevision(video, null, env).fraccionVideo).toBe(0.9);
+  });
+
+  it('se sigue pudiendo configurar por entorno', () => {
+    const otro = {
+      PORTAL_TH_REVISION_VIDEO_PCT: '95',
+      PORTAL_TH_REVISION_DOC_SEG: '45',
+      PORTAL_TH_REVISION_PDF_SEG_POR_PAGINA: '6',
+      PORTAL_TH_REVISION_PDF_MIN_SEG: '15',
+      PORTAL_TH_REVISION_PDF_MAX_SEG: '300',
+    } as unknown as NodeJS.ProcessEnv;
     expect(reglaDeRevision(video, null, otro).fraccionVideo).toBe(0.95);
-    expect(reglaDeRevision({ type: 'DOCUMENT', mime: 'application/msword' }, null, otro).segundosMinimos).toBe(45);
+    expect(reglaDeRevision(word, null, otro).segundosMinimos).toBe(45);
+    expect(reglaDeRevision(pdf, 10, otro).segundosMinimos).toBe(60);
+    expect(pdfRequierePaginas(otro)).toBe(true);
     expect(reglaDeRevision(video, null, { PORTAL_TH_REVISION_VIDEO_PCT: 'x' } as unknown as NodeJS.ProcessEnv).fraccionVideo).toBe(0.9);
+  });
+});
+
+describe('seMarcaAlAbrir', () => {
+  it('apertura → marca de inmediato: enlace, PDF, imagen y Office', () => {
+    expect(seMarcaAlAbrir(reglaDeRevision({ type: 'LINK', mime: null }, null, env))).toBe(true);
+    expect(seMarcaAlAbrir(reglaDeRevision(pdf, 40, env))).toBe(true);
+    expect(seMarcaAlAbrir(reglaDeRevision(imagen, null, env))).toBe(true);
+    expect(seMarcaAlAbrir(reglaDeRevision(word, null, env))).toBe(true);
+  });
+
+  it('el video NUNCA se marca solo por abrirlo', () => {
+    expect(seMarcaAlAbrir(reglaDeRevision(video, null, env))).toBe(false);
+  });
+
+  it('si se configura un mínimo > 0, el documento ya no se marca al abrir', () => {
+    const otro = { PORTAL_TH_REVISION_DOC_SEG: '30' } as unknown as NodeJS.ProcessEnv;
+    expect(seMarcaAlAbrir(reglaDeRevision(word, null, otro))).toBe(false);
   });
 });
 
 describe('validarRevision', () => {
   const reglaVideo = reglaDeRevision(video, null, env);
 
-  it('video visto ≥ 90 % en tiempo real: aceptado', () => {
-    expect(validarRevision(reglaVideo, { segundosVistos: 95, duracion: 100 }, 96)).toEqual({ ok: true });
+  it('video visto al 90 % en tiempo real: aceptado', () => {
+    expect(validarRevision(reglaVideo, { segundosVistos: 90, duracion: 100 }, 96)).toEqual({ ok: true });
   });
 
-  it('video con menos del 90 % visto: rechazado', () => {
+  it('video visto al 50 %: rechazado', () => {
     expect(validarRevision(reglaVideo, { segundosVistos: 50, duracion: 100 }, 60).ok).toBe(false);
   });
 
@@ -53,11 +95,12 @@ describe('validarRevision', () => {
     expect(validarRevision(reglaVideo, { segundosVistos: 500, duracion: 100 }, 600).ok).toBe(false);
   });
 
-  it('documento: exige el mínimo en el reporte y en el reloj del servidor', () => {
-    const regla = reglaDeRevision(pdf, 10, env); // 60 s
-    expect(validarRevision(regla, { segundosVistos: 60 }, 61)).toEqual({ ok: true });
-    expect(validarRevision(regla, { segundosVistos: 30 }, 61).ok).toBe(false);
-    expect(validarRevision(regla, { segundosVistos: 60 }, 20).ok).toBe(false);
+  it('documento: sin validación de tiempo transcurrido en el servidor', () => {
+    expect(validarRevision(reglaDeRevision(pdf, 10, env), { segundosVistos: 0 }, 0)).toEqual({ ok: true });
+    const conMinimo = reglaDeRevision(word, null, { PORTAL_TH_REVISION_DOC_SEG: '30' } as unknown as NodeJS.ProcessEnv);
+    // Con mínimo configurado se exige el reporte del visor, pero no el reloj del servidor.
+    expect(validarRevision(conMinimo, { segundosVistos: 30 }, 1)).toEqual({ ok: true });
+    expect(validarRevision(conMinimo, { segundosVistos: 10 }, 60).ok).toBe(false);
   });
 
   it('enlace: abrirlo basta', () => {

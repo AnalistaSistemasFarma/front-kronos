@@ -5,7 +5,8 @@ import { expect, test, type Page } from '@playwright/test';
  *
  * Sin sesión real ni SharePoint: las APIs del portal se simulan con
  * `page.route`. Se prueba que el estudiante vea las casillas bloqueadas con
- * su ayuda, que al revisar un material la casilla quede marcada con
+ * su ayuda, que al abrir un documento (sin tiempo mínimo desde el ajuste del
+ * 2026-10-08) la casilla quede marcada con
  * "Completado" a la derecha, y que un administrador/formador las tenga
  * editables. Además, que las rutas reales exijan sesión.
  *
@@ -55,11 +56,20 @@ async function simular(page: Page, opciones: { puedeMarcarManual: boolean; compl
     })
   );
   await page.route('**/api/portal/courses/3', (r) => r.fulfill({ json: detalle() }));
-  await page.route('**/api/portal/materials/*/vista', (r) =>
-    r.fulfill({
-      json: { token: '11111111-2222-4333-8444-555555555555', regla: { tipo: 'pdf', segundosMinimos: 2, fraccionVideo: 0.9 }, completado: false },
-    })
-  );
+  // Documento sin tiempo mínimo (ajuste 2026-10-08): el servidor lo marca al abrirlo.
+  await page.route('**/api/portal/materials/*/vista', (r) => {
+    const id = Number(r.request().url().split('/materials/')[1].split('/')[0]);
+    estado.completados.add(id);
+    return r.fulfill({
+      json: {
+        token: '11111111-2222-4333-8444-555555555555',
+        regla: { tipo: 'pdf', segundosMinimos: 0, fraccionVideo: 0.9 },
+        completado: true,
+        porcentaje: detalle().porcentaje,
+        certificado: null,
+      },
+    });
+  });
   await page.route('**/api/portal/materials/*/vista/*', (r) => {
     const id = Number(r.request().url().split('/materials/')[1].split('/')[0]);
     estado.completados.add(id);
@@ -98,11 +108,10 @@ test.describe('Portal TH · Formación · completado automático', () => {
     await expect(page.getByTestId('insignia-completado')).toHaveCount(0);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/1-estudiante-casillas-bloqueadas.png`, fullPage: true });
 
-    // Abre el PDF en el visor: el tiempo corre y el servidor (simulado) lo marca.
+    // Abre el PDF en el visor: sin tiempo mínimo, el servidor (simulado) lo marca al abrirlo.
     await page.getByRole('button', { name: 'Reglamento interno' }).click();
     const visor = page.getByTestId('visor-material');
-    await expect(visor.getByTestId('estado-revision')).toContainText('Revisando');
-    await expect(visor.getByTestId('estado-revision')).toContainText('Completado', { timeout: 10_000 });
+    await expect(visor.getByTestId('estado-revision')).toContainText('Completado', { timeout: 5_000 });
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/2-visor-material-completado.png` });
     await page.keyboard.press('Escape');
 

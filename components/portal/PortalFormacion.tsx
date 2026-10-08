@@ -428,10 +428,11 @@ function mmss(segundos: number): string {
  * y, al cumplir la regla, se reporta. Es el servidor quien marca.
  *
  * - Video: solo suma el tiempo reproducido de verdad; no deja adelantar más
- *   allá de lo ya visto y fija la velocidad en 1×.
- * - PDF e imagen: el tiempo corre con la ventana abierta y la pestaña visible.
- * - Word/Excel/PowerPoint: se abren o descargan desde aquí; el tiempo corre
- *   con la ventana abierta.
+ *   allá de lo ya visto y fija la velocidad en 1×. Se marca al 90 % visto.
+ * - PDF, imagen, Word/Excel/PowerPoint: SIN tiempo mínimo (ajuste de
+ *   Cristian, 2026-10-08): el servidor los marca al registrar la apertura y la
+ *   persona cierra cuando quiera. Si por entorno se configurara un mínimo > 0,
+ *   el tiempo corre con la ventana abierta y se reporta al cumplirlo.
  */
 function VisorMaterial({
   cursoId,
@@ -465,7 +466,11 @@ function VisorMaterial({
         if (!vivo) return;
         setToken(String(data.token));
         setRegla(data.regla as unknown as ReglaRevision);
-        if (data.completado === true) setCompletado(true);
+        if (data.completado === true) {
+          setCompletado(true);
+          // Documento sin tiempo mínimo: quedó marcado al abrirlo.
+          if (material.completadoEl === null) await onCompletado();
+        }
       } catch (e) {
         if (vivo) setError((e as Error).message);
       }
@@ -473,6 +478,7 @@ function VisorMaterial({
     return () => {
       vivo = false;
     };
+    // Solo al abrir; `onCompletado` y `completadoEl` no deben reabrir la vista.
   }, [material.id]);
 
   useEffect(() => {

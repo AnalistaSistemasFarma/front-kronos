@@ -8,7 +8,12 @@ import {
   marcarMaterialCompletado,
   recalcularProgresoDeMaterial,
 } from '../../../../../../lib/portal/formacion';
-import { reglaDeRevision, tipoDeRevision } from '../../../../../../lib/portal/revision-material';
+import {
+  pdfRequierePaginas,
+  reglaDeRevision,
+  seMarcaAlAbrir,
+  tipoDeRevision,
+} from '../../../../../../lib/portal/revision-material';
 
 function idDesdeParametro(valor: string): number | null {
   const n = Number(valor);
@@ -25,7 +30,11 @@ function idDesdeParametro(valor: string): number | null {
  * navegador reporta después lo que vio en `POST .../vista/:token` y es el
  * servidor quien decide si marca el material.
  *
- * Un ENLACE se da por revisado al abrirlo: se marca aquí mismo.
+ * Un ENLACE se da por revisado al abrirlo: se marca aquí mismo. Desde el
+ * ajuste de Cristian (2026-10-08, "que el usuario lo pueda abrir y él mismo
+ * decida cuándo cerrarlo") lo mismo aplica a PDF, imagen y demás documentos:
+ * sin tiempo mínimo, se marcan al registrar la apertura. El VIDEO sigue
+ * exigiendo el 90 % visto (se reporta en `POST .../vista/:token`).
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ materialId: string }> }) {
   const quien = await identificar(request);
@@ -52,7 +61,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     let paginas: number | null = null;
-    if (tipoDeRevision(material) === 'pdf') {
+    // Las páginas solo importan si se configuró un tiempo por página para PDF.
+    if (tipoDeRevision(material) === 'pdf' && pdfRequierePaginas()) {
       // Solo materiales viejos (antes de SharePoint) tienen los bytes en la base.
       const conBytes = material.sp_drive_item_id
         ? null
@@ -71,7 +81,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       select: { id: true },
     });
 
-    if (regla.tipo === 'enlace') {
+    if (seMarcaAlAbrir(regla)) {
       await marcarMaterialCompletado({ materialId, correo: quien.correo, origen: 'AUTO' });
       await prisma.portalMaterialVista.update({
         where: { token },
