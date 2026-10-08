@@ -9,14 +9,18 @@ import { useId, type CSSProperties } from 'react';
  * trazos de acento y el degradado de la base), dibujado en línea para poder
  * animar cada pieza por separado y para no pedir un archivo de 400 KB.
  *
- * Capas (todo SVG + CSS, sin librerías; ver `.sl-pensando` en globals.css):
- *   - halo    : resplandor radial que "respira" detrás del logo.
- *   - órbita  : arco con degradado y un satélite que gira alrededor.
- *   - marca   : el isotipo, con pulso de escala suave.
- *   - acentos : los dos trazos azules destellan a destiempo, como chispazos.
+ * Idea de Nicolás: como la pinza de OpenClaw, que se mueve mientras piensa, una
+ * PARTE del logo se mueve con personalidad. La S de SynerLink tiene dos
+ * extremos que hacen de tenazas:
+ *   - pinza alta : el gancho de arriba a la derecha.
+ *   - pinza baja : el bucle de abajo a la izquierda (el del degradado).
+ * Cada uno se recorta del isotipo con un clipPath y gira sobre el punto donde
+ * se une al cuerpo: se abren despacio, se cierran de golpe ("agarran"), rebotan
+ * un poco y sueltan. La S entera se inclina un poquito en el agarre, como si
+ * levantara algo. Atrás quedan un halo suave y un arco que orbita.
  *
- * `variante` = 'tool' (ejecutando herramienta/comando) gira más rápido y con
- * el arco más largo; 'thinking' es el ritmo pausado por defecto.
+ * `variante` = 'tool' (ejecutando herramienta/comando) agarra el doble de
+ * rápido y con dos mordiscos por ciclo; 'thinking' va a ritmo pausado.
  *
  * Solo se anima con `transform` y `opacity` (composición, sin relayout) y la
  * caja tiene tamaño fijo: no mueve el renglón del estado. Con
@@ -40,6 +44,18 @@ const MARCA_DEGRADADO =
 /** Recorte cuadrado (centrado) del isotipo dentro del viewBox original. */
 const MARCA_VIEWBOX = '80 194 380 380';
 
+/*
+ * Zonas de las pinzas (los dos lacitos de la S), en coordenadas de
+ * Logo_Principal.svg. El corte sigue la unión diagonal de cada lazo con el
+ * cuerpo, y la zona de la pinza se solapa ~2 unidades con el hueco que se le
+ * quita al cuerpo para que al girar no se vea costura. Los puntos de giro (en
+ * globals.css, como % de la caja del isotipo) caen en el centro de esa unión.
+ */
+const ZONA_PINZA_ALTA = 'M320,194H460V267H334L320,239Z';
+const ZONA_PINZA_BAJA = 'M80,420H203L201,483L163,519H80Z';
+const ZONA_CUERPO =
+  'M80,194H460V574H80Z M322,194H460V265H335L322,241Z M80,420H200L198,485L165,516H80Z';
+
 /** Variante del indicador según el estado que reporta el agente. */
 export function varianteDeEstado(state: string | null | undefined): LogoPensandoVariante {
   return state === 'tool' ? 'tool' : 'thinking';
@@ -60,6 +76,10 @@ export default function LogoPensando({
   const idHalo = `${base}-halo`;
   const idArco = `${base}-arco`;
   const idBase = `${base}-base`;
+  const idMarca = `${base}-marca`;
+  const idCuerpo = `${base}-cuerpo`;
+  const idAlta = `${base}-alta`;
+  const idBaja = `${base}-baja`;
 
   return (
     <span
@@ -90,6 +110,21 @@ export default function LogoPensando({
             <stop offset='0' className='sl-pensando__stop-marca' />
             <stop offset='1' className='sl-pensando__stop-acento' />
           </linearGradient>
+          <g id={idMarca}>
+            <path className='sl-pensando__marca-base' d={MARCA_BASE} />
+            <path className='sl-pensando__acento' d={MARCA_ACENTO_ALTO} />
+            <path className='sl-pensando__acento sl-pensando__acento--bajo' d={MARCA_ACENTO_BAJO} />
+            <path d={MARCA_DEGRADADO} fill={`url(#${idBase})`} />
+          </g>
+          <clipPath id={idCuerpo}>
+            <path d={ZONA_CUERPO} clipRule='evenodd' />
+          </clipPath>
+          <clipPath id={idAlta}>
+            <path d={ZONA_PINZA_ALTA} />
+          </clipPath>
+          <clipPath id={idBaja}>
+            <path d={ZONA_PINZA_BAJA} />
+          </clipPath>
         </defs>
 
         <circle className='sl-pensando__halo' cx='50' cy='50' r='42' fill={`url(#${idHalo})`} />
@@ -109,10 +144,13 @@ export default function LogoPensando({
 
         <g className='sl-pensando__marca'>
           <svg x='18' y='18' width='64' height='64' viewBox={MARCA_VIEWBOX}>
-            <path className='sl-pensando__marca-base' d={MARCA_BASE} />
-            <path className='sl-pensando__acento' d={MARCA_ACENTO_ALTO} />
-            <path className='sl-pensando__acento sl-pensando__acento--bajo' d={MARCA_ACENTO_BAJO} />
-            <path d={MARCA_DEGRADADO} fill={`url(#${idBase})`} />
+            <use href={`#${idMarca}`} clipPath={`url(#${idCuerpo})`} />
+            <g className='sl-pensando__pinza sl-pensando__pinza--alta'>
+              <use href={`#${idMarca}`} clipPath={`url(#${idAlta})`} />
+            </g>
+            <g className='sl-pensando__pinza sl-pensando__pinza--baja'>
+              <use href={`#${idMarca}`} clipPath={`url(#${idBaja})`} />
+            </g>
           </svg>
         </g>
       </svg>

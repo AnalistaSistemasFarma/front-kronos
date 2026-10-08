@@ -1837,7 +1837,9 @@ html[data-mantine-color-scheme='dark'] .chat-bubble--user .chat-cita--burbuja {
 }
 
 /* ── Logo de SynerLink "pensando" (components/chat/LogoPensando.tsx) ──
-   Reemplaza los tres puntitos (Nicolás, 2026-10-08). Colores de marca de
+   Reemplaza los tres puntitos (Nicolás, 2026-10-08). Como la pinza de
+   OpenClaw: los dos lacitos de la S (el de arriba y el de abajo) son tenazas
+   que se abren, AGARRAN de golpe, rebotan y sueltan. Colores de marca de
    Logo_Principal.svg; en oscuro la marca va casi blanca como
    Logo_Principal_Blanco.svg. Solo transform/opacity: no hay relayout, y la
    caja es fija (el margen negativo deja el renglón con el alto del avatar). */
@@ -1846,8 +1848,11 @@ html[data-mantine-color-scheme='dark'] .chat-bubble--user .chat-cita--burbuja {
   --sl-pensando-acento: #1d70b7;
   --sl-pensando-halo: rgba(29, 112, 183, 0.28);
   --sl-pensando-pista: rgba(45, 46, 130, 0.1);
-  --sl-pensando-ritmo: 2.4s;
+  --sl-pensando-ritmo: 2.2s;
   --sl-pensando-giro: 1.6s;
+  /* Apertura de cada lazo en reposo; el signo dice hacia dónde abre. */
+  --sl-pinza-alta-abierta: -14deg;
+  --sl-pinza-baja-abierta: 14deg;
   /* arco + hueco = 100 (pathLength del círculo). */
   --sl-pensando-arco: 30;
   --sl-pensando-hueco: 70;
@@ -1868,6 +1873,7 @@ html[data-mantine-color-scheme='dark'] .sl-pensando {
 }
 
 .sl-pensando[data-variante='tool'] {
+  --sl-pensando-ritmo: 1.2s;
   --sl-pensando-giro: 1s;
   --sl-pensando-arco: 45;
   --sl-pensando-hueco: 55;
@@ -1909,10 +1915,9 @@ html[data-mantine-color-scheme='dark'] .sl-pensando {
   fill: none;
   stroke-width: 6;
   stroke-linecap: round;
-  /* pathLength=100: el arco termina justo en el satélite (las 3 en punto). */
+  /* El arco termina justo en el satélite (las 3 en punto). */
   stroke-dasharray: var(--sl-pensando-arco) var(--sl-pensando-hueco);
   stroke-dashoffset: var(--sl-pensando-arco);
-  transition: stroke-dasharray 300ms ease, stroke-dashoffset 300ms ease;
 }
 
 .sl-pensando__satelite {
@@ -1934,24 +1939,42 @@ html[data-mantine-color-scheme='dark'] .sl-pensando {
   transform-origin: 50% 50%;
 }
 
+/* Las pinzas giran sobre su unión con el cuerpo de la S. fill-box = caja del
+   isotipo completo (el recorte no la cambia), así que los % salen de ahí:
+   lazo alto ≈ (327, 252) y lazo bajo ≈ (182, 500) en coordenadas del logo. */
+.sl-pensando__pinza {
+  transform-box: fill-box;
+}
+
+.sl-pensando__pinza--alta {
+  --sl-pinza: var(--sl-pinza-alta-abierta);
+  transform-origin: 69.7% 13.9%;
+}
+
+.sl-pensando__pinza--baja {
+  --sl-pinza: var(--sl-pinza-baja-abierta);
+  transform-origin: 19.6% 81.7%;
+}
+
+.sl-pensando__pinza {
+  animation: sl-pensando-agarra var(--sl-pensando-ritmo) cubic-bezier(0.5, 0, 0.3, 1) infinite;
+}
+
+/* Ejecutando: dos mordiscos por vuelta, más cortos y secos. */
+.sl-pensando[data-variante='tool'] .sl-pensando__pinza {
+  animation-name: sl-pensando-agarra-doble;
+}
+
 .sl-pensando__orbita {
   animation: sl-pensando-giro var(--sl-pensando-giro) linear infinite;
 }
 
 .sl-pensando__marca {
-  animation: sl-pensando-respira var(--sl-pensando-ritmo) ease-in-out infinite;
+  animation: sl-pensando-levanta var(--sl-pensando-ritmo) ease-in-out infinite;
 }
 
 .sl-pensando__halo {
   animation: sl-pensando-halo var(--sl-pensando-ritmo) ease-in-out infinite;
-}
-
-.sl-pensando__acento {
-  animation: sl-pensando-chispa var(--sl-pensando-ritmo) ease-in-out infinite;
-}
-
-.sl-pensando__acento--bajo {
-  animation-delay: calc(var(--sl-pensando-ritmo) / -2);
 }
 
 @keyframes sl-pensando-giro {
@@ -1960,13 +1983,57 @@ html[data-mantine-color-scheme='dark'] .sl-pensando {
   }
 }
 
-@keyframes sl-pensando-respira {
+/* Abierta (0%) → se abre más, cogiendo impulso (28%) → AGARRA de golpe (40%)
+   → rebote (48%) → sostiene (62%) → suelta despacio (100%). */
+@keyframes sl-pensando-agarra {
   0%,
   100% {
-    transform: scale(0.9);
+    transform: rotate(var(--sl-pinza));
   }
-  50% {
-    transform: scale(1.04);
+  28% {
+    transform: rotate(calc(var(--sl-pinza) * 1.6));
+  }
+  40% {
+    transform: rotate(calc(var(--sl-pinza) * -1));
+  }
+  48% {
+    transform: rotate(calc(var(--sl-pinza) * -0.4));
+  }
+  62% {
+    transform: rotate(calc(var(--sl-pinza) * -0.6));
+  }
+}
+
+@keyframes sl-pensando-agarra-doble {
+  0%,
+  50%,
+  100% {
+    transform: rotate(var(--sl-pinza));
+  }
+  18%,
+  68% {
+    transform: rotate(calc(var(--sl-pinza) * -0.8));
+  }
+  26%,
+  76% {
+    transform: rotate(calc(var(--sl-pinza) * -0.3));
+  }
+}
+
+/* La S se agacha mientras coge impulso y se levanta un poco al agarrar. */
+@keyframes sl-pensando-levanta {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  28% {
+    transform: translateY(1.5px) rotate(3deg);
+  }
+  44% {
+    transform: translateY(-2.5px) rotate(-4deg);
+  }
+  64% {
+    transform: translateY(-1.5px) rotate(-2deg);
   }
 }
 
@@ -1974,30 +2041,21 @@ html[data-mantine-color-scheme='dark'] .sl-pensando {
   0%,
   100% {
     opacity: 0.35;
-    transform: scale(0.8);
+    transform: scale(0.85);
   }
-  50% {
+  44% {
     opacity: 1;
     transform: scale(1.08);
   }
 }
 
-@keyframes sl-pensando-chispa {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.45;
-  }
-}
-
-/* Sin movimiento: logo quieto con su arco fijo y el halo encendido. */
+/* Sin movimiento: logo quieto (lazos en su forma original), arco fijo y halo
+   encendido. */
 @media (prefers-reduced-motion: reduce) {
   .sl-pensando__orbita,
   .sl-pensando__marca,
   .sl-pensando__halo,
-  .sl-pensando__acento {
+  .sl-pensando__pinza {
     animation: none;
   }
 
