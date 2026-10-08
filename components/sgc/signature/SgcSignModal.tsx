@@ -15,6 +15,7 @@ import {
   type SgcCheckAnswer,
 } from '../../../lib/sgc/signature/consent';
 import { looksLikeAutofilledEmail, sgcNoAutofill } from '../../../lib/sgc/autofill';
+import SgcDocumentViewerModal from '../SgcDocumentViewerModal';
 
 /**
  * Formulario de FIRMA ELECTRÓNICA PROPIA del SGC (Sprint 3).
@@ -60,6 +61,9 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
   const [answers, setAnswers] = useState<Record<string, { answer: SgcCheckAnswer | ''; observation: string }>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 2026-10-05: un adjunto (borrador cargado) se VE en el visor seguro de la app; nunca se descarga ni abre otra pestaña.
+  const [viewing, setViewing] = useState(false);
+  const draftIsAttachment = Boolean(draftHref && /^\/api\/sgc\/requests\/\d+\/attachments\/\d+$/.test(draftHref));
   const { data: session } = useSession();
   const sessionEmail = session?.user?.email ?? '';
 
@@ -111,6 +115,7 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
   };
 
   return (
+    <>
     <Modal opened={opened} onClose={onClose} title={title} centered size='lg' scrollAreaComponent={ScrollArea.Autosize}>
       {/* Formulario propio (sin envío nativo) para que el gestor de contraseñas asocie la contraseña al usuario explícito, no al motivo. */}
       <form autoComplete='off' onSubmit={(e) => e.preventDefault()} data-testid='sgc-firma-form'>
@@ -128,8 +133,12 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
           {draft ? (
             <>
               <Text size='sm' fw={500} data-testid='sgc-firma-contenido'>
-                {draftHref ? (
-                  <Anchor href={draftHref} target='_blank' rel='noreferrer'>
+                {draftHref && draftIsAttachment ? (
+                  <Anchor component='button' type='button' onClick={() => setViewing(true)} data-testid='sgc-firma-ver-documento'>
+                    {draft.name}
+                  </Anchor>
+                ) : draftHref ? (
+                  <Anchor href={draftHref}>
                     {draft.name}
                   </Anchor>
                 ) : (
@@ -250,5 +259,7 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
       </Stack>
       </form>
     </Modal>
+    {draftIsAttachment && <SgcDocumentViewerModal fileUrl={opened && viewing ? draftHref! : null} title={draft?.name ?? 'Documento'} onClose={() => setViewing(false)} />}
+    </>
   );
 }

@@ -402,7 +402,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     const dl = await getAttachmentForDownload(prisma, req1, good.id, await viewer(E.rev1), actor(E.rev1));
     expect(dl).toMatchObject({ itemId: att.item_id, sha256: good.sha256 });
     await expect(getAttachmentForDownload(prisma, req1, 999999, await viewer(E.rev1), actor(E.rev1))).rejects.toMatchObject({ status: 404 });
-    expect(await prisma.sgcAuditLog.count({ where: { action: 'solicitud.adjunto_descarga', entity_id: String(good.id) } })).toBe(1);
+    expect(await prisma.sgcAuditLog.count({ where: { action: 'documento.consulta', entity: 'attachment', entity_id: String(good.id) } })).toBe(1);
   });
 
   it('[SGC-REQ-029][SGC-REQ-035][SGC-REQ-036][SGC-REQ-085] enviar abre la revisión con 2 revisores EN PARALELO; no avanza hasta que ambos aprueban', async () => {

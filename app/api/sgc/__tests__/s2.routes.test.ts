@@ -13,7 +13,7 @@ const m = vi.hoisted(() => {
     'listAuthorizationTypes', 'saveAuthorizationType', 'grantAuthorizationTypeUser', 'revokeAuthorizationTypeUser', 'listAuthorizationInbox',
     'createRequest', 'listMyRequests', 'getRequestDetail', 'addNote', 'uploadAttachment', 'getAttachmentForDownload', 'withdrawAttachment', 'setSigners', 'cancelRequest', 'saveFormValues',
     'listTaskInbox', 'getTaskDetail', 'decideTask', 'reassignTask', 'listEligibleUsers', 'companyOfRequest', 'requestOfTask', 'taskOfAuthorization', 'getRequestForm',
-    'downloadVerifiedFile', 'uploadToSgcStorage',
+    'downloadVerifiedFile', 'uploadToSgcStorage', 'downloadSgcFile', 'buildLayoutPreview', 'currentDraftInTx',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -24,7 +24,9 @@ vi.mock('../../../../lib/prisma', () => ({ prisma: {} }));
 vi.mock('../../../../lib/sgc/access', () => ({ getSgcAccessForUser: m.getSgcAccessForUser }));
 vi.mock('../../../../lib/sgc/db/documents', () => ({ getAccessSubject: m.getAccessSubject }));
 vi.mock('../../../../lib/sgc/notifications', () => ({ sgcNotifier: vi.fn() }));
-vi.mock('../../../../lib/sgc/onedrive', () => ({ downloadVerifiedFile: m.downloadVerifiedFile, uploadToSgcStorage: m.uploadToSgcStorage }));
+vi.mock('../../../../lib/sgc/onedrive', () => ({ downloadVerifiedFile: m.downloadVerifiedFile, uploadToSgcStorage: m.uploadToSgcStorage, downloadSgcFile: m.downloadSgcFile }));
+vi.mock('../../../../lib/sgc/db/layout', () => ({ buildLayoutPreview: m.buildLayoutPreview }));
+vi.mock('../../../../lib/sgc/db/signatureRecord', () => ({ currentDraftInTx: m.currentDraftInTx }));
 vi.mock('../../../../lib/sgc/db/flows', () => ({
   listFlowProcesses: m.listFlowProcesses, createFlowProcess: m.createFlowProcess, updateFlowProcess: m.updateFlowProcess, createDraftVersion: m.createDraftVersion,
   getFlowVersion: m.getFlowVersion, saveDraftDefinition: m.saveDraftDefinition, publishFlowVersion: m.publishFlowVersion, discardDraftVersion: m.discardDraftVersion, listConfigChanges: m.listConfigChanges,
@@ -329,14 +331,38 @@ describe('Rutas S2 · solicitudes y Tareas documentales', () => {
     expect(Array.from(input.bytes)).toEqual([1, 2, 3]);
     expect(status(await attachments.POST(new Request('http://x', { method: 'POST', body: new FormData() }), params({ id: '1' })))).toBe(400);
 
-    m.getAttachmentForDownload.mockResolvedValue({ itemId: 'it', fileName: 'Borrador ñ.docx', contentType: '', sha256: 'abc' });
-    m.downloadVerifiedFile.mockResolvedValue(new Uint8Array([9]));
+    // 2026-10-05 (RN «Ver documento» nunca descarga): se entrega para el visor, nunca como attachment.
+    const pdfBytes = new TextEncoder().encode('%PDF-1.4 x');
+    m.getAttachmentForDownload.mockResolvedValue({ itemId: 'it', fileName: 'Acta ñ.pdf', contentType: 'application/pdf', sha256: 'abc', purpose: 'soporte' });
+    m.downloadVerifiedFile.mockResolvedValue(pdfBytes);
     const dl = await attachmentId.GET(get('/'), params({ id: '1', attachmentId: '5' }));
     expect(dl.status).toBe(200);
-    expect(dl.headers.get('content-disposition')).toBe("attachment; filename*=UTF-8''Borrador%20%C3%B1.docx");
-    expect(dl.headers.get('content-type')).toBe('application/octet-stream');
+    expect(dl.headers.get('content-disposition')).toBe("inline; filename*=UTF-8''Acta%20%C3%B1.pdf");
+    expect(dl.headers.get('content-type')).toBe('application/pdf');
     expect(dl.headers.get('cache-control')).toContain('no-store');
     expect(m.downloadVerifiedFile).toHaveBeenCalledWith('it', 'abc');
+    expect(m.currentDraftInTx).not.toHaveBeenCalled();
+    // Formato que no se convierte (p. ej. un .doc o una imagen): 415.
+    m.getAttachmentForDownload.mockResolvedValue({ itemId: 'it', fileName: 'Viejo.doc', contentType: '', sha256: 'abc', purpose: 'soporte' });
+    m.downloadVerifiedFile.mockResolvedValue(new Uint8Array([9]));
+    const unsupported = await attachmentId.GET(get('/'), params({ id: '1', attachmentId: '5' }));
+    expect(unsupported.status).toBe(415);
+    expect(await unsupported.json()).toEqual({ error: 'Este archivo solo es visible en la app' });
+    // Abrir la URL directo en una pestaña (visor nativo con «Descargar»): no se entrega.
+    expect(status(await attachmentId.GET(new Request('http://x/', { headers: { 'sec-fetch-dest': 'document' } }), params({ id: '1', attachmentId: '5' })))).toBe(415);
+    // El borrador VIGENTE sale compuesto con el encabezado del SGC (la vista previa del documento final).
+    m.getAttachmentForDownload.mockResolvedValue({ itemId: 'it', fileName: 'Borrador.docx', contentType: '', sha256: 'abc', purpose: 'borrador' });
+    m.currentDraftInTx.mockResolvedValue({ kind: 'borrador_adjunto', ref: 'adjunto:5', format: 'docx' });
+    m.buildLayoutPreview.mockResolvedValue(pdfBytes);
+    m.downloadVerifiedFile.mockClear();
+    const draft = await attachmentId.GET(get('/'), params({ id: '1', attachmentId: '5' }));
+    expect(draft.status).toBe(200);
+    expect(draft.headers.get('content-type')).toBe('application/pdf');
+    expect(draft.headers.get('content-disposition')).toBe("inline; filename*=UTF-8''Borrador.pdf");
+    expect(m.buildLayoutPreview.mock.calls[0][3]).toMatchObject({ email: expect.any(String) });
+    expect(m.buildLayoutPreview.mock.calls[0][4]).toEqual({ runningHeader: true });
+    expect(m.downloadVerifiedFile).not.toHaveBeenCalled();
+    m.getAttachmentForDownload.mockResolvedValue({ itemId: 'it', fileName: 'Acta ñ.pdf', contentType: 'application/pdf', sha256: 'abc', purpose: 'soporte' });
     expect(status(await attachmentId.GET(get('/'), params({ id: '1', attachmentId: 'x' })))).toBe(404);
     m.downloadVerifiedFile.mockRejectedValue(new SgcError('no coincide', 409));
     expect(status(await attachmentId.GET(get('/'), params({ id: '1', attachmentId: '5' })))).toBe(409);

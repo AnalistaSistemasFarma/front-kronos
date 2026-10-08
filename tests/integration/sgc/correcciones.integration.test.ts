@@ -404,6 +404,10 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
     await expect(getVigenteBaseHtml(prisma, deps, idRequest, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/no tiene Word fuente/);
     const prev = await buildLayoutPreview(prisma, deps, idRequest, await viewer(E.elab));
     expect((await PDFDocument.load(prev)).getPageCount()).toBe(1);
+    // 2026-10-05 («Ver documento» sin descarga): sin encabezado institucional, el visor lleva la línea superior código · versión · título.
+    const conLinea = await buildLayoutPreview(prisma, deps, idRequest, await viewer(E.elab), { runningHeader: true });
+    expect((await PDFDocument.load(conLinea)).getPageCount()).toBe(1);
+    expect(Buffer.from(conLinea).equals(Buffer.from(prev))).toBe(false);
     await expect(saveDocumentLayout(prisma, idRequest, { pageCount: 1, fields: [{ signerKey: `revision:${E.rev}`, page: 2, x: 1, y: 1, width: 10, height: 5 }] }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/fuera del documento/);
     expect((await saveDocumentLayout(prisma, idRequest, { pageCount: 1, fields: [{ signerKey: `revision:${E.rev}`, page: 1, x: 1, y: 1, width: 10, height: 5 }] }, await viewer(E.elab), actor(E.elab))).saved).toBe(true);
     // Borrador alterado en el almacenamiento: no se compone ni se firma.

@@ -1465,8 +1465,9 @@ export async function getAttachmentForDownload(db: SgcDb, idRequest: number, idA
   const { row } = await assertCanView(db, idRequest, viewer);
   const att = await db.sgcAttachment.findUnique({ where: { id_attachment: idAttachment } });
   if (!att || att.id_request !== idRequest) throw new SgcError('Adjunto no encontrado.', 404);
-  await writeSgcAudit(db, { idCompany: row.id_company, actorEmail: actor.email, action: SGC_AUDIT_ACTIONS.adjuntoDescarga, entity: 'attachment', entityId: idAttachment, after: { idRequest, fileName: att.file_name }, ip: actor.ip, userAgent: actor.userAgent });
-  return { itemId: att.item_id, fileName: att.file_name, contentType: att.content_type, sha256: att.sha256 };
+  // 2026-10-05 (RN: «Ver documento» nunca descarga): el adjunto solo se VE en el visor de la app; queda como consulta.
+  await writeSgcAudit(db, { idCompany: row.id_company, actorEmail: actor.email, action: SGC_AUDIT_ACTIONS.documentoConsulta, entity: 'attachment', entityId: idAttachment, after: { idRequest, fileName: att.file_name }, detail: `Visualización del adjunto en el visor de la app (solicitud #${idRequest}).`, ip: actor.ip, userAgent: actor.userAgent });
+  return { itemId: att.item_id, fileName: att.file_name, contentType: att.content_type, sha256: att.sha256, purpose: att.purpose };
 }
 
 export async function saveFormValues(db: SgcDb, idRequest: number, input: { values: unknown }, viewer: SgcViewer, actor: SgcActor) {
