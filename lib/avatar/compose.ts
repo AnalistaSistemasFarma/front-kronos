@@ -1,5 +1,5 @@
 import { CATEGORIAS_ANIMAL, ORDEN_ANIMAL } from './parts-animal';
-import { CATEGORIAS_PERSONA, CUELLO, ORDEN_PERSONA } from './parts-persona';
+import { CATEGORIAS_PERSONA, CUELLO, ORDEN_PERSONA, OREJA } from './parts-persona';
 import type { AvatarBackground, AvatarCategory, AvatarConfig, AvatarKind } from './types';
 
 /**
@@ -11,21 +11,18 @@ import type { AvatarBackground, AvatarCategory, AvatarConfig, AvatarKind } from 
  * repositorio; de la configuración solo se leen NÚMEROS ya validados.
  */
 
-/** Fondos: los mismos colores de Avatartion (Tailwind 300 + blanco + transparente). */
+/**
+ * Fondos: solo neutros (el estilo es blanco y negro puro). El primero, gris
+ * muy claro, es el de arranque: se lee bien sobre la interfaz blanca.
+ */
 export const AVATAR_BACKGROUNDS: AvatarBackground[] = [
-  { label: 'Transparente', color: null },
+  { label: 'Gris claro', color: '#f2f2f2' },
   { label: 'Blanco', color: '#ffffff' },
-  { label: 'Rojo', color: '#fca5a5' },
-  { label: 'Amarillo', color: '#fde047' },
-  { label: 'Verde', color: '#86efac' },
-  { label: 'Azul', color: '#93c5fd' },
-  { label: 'Índigo', color: '#a5b4fc' },
-  { label: 'Morado', color: '#d8b4fe' },
-  { label: 'Rosado', color: '#f9a8d4' },
+  { label: 'Transparente', color: null },
 ];
 
-/** Fondo con el que arranca Avatartion ("bg-red-300"). */
-export const FONDO_INICIAL = 2;
+/** Fondo con el que arranca el editor. */
+export const FONDO_INICIAL = 0;
 
 export const AVATAR_KINDS: readonly AvatarKind[] = ['persona', 'animal'];
 
@@ -96,41 +93,66 @@ export function serializeAvatarConfig(config: AvatarConfig): string {
   return JSON.stringify({ v: 1, tipo: config.tipo, partes, fondo: config.fondo });
 }
 
-/** Avatar al azar, como el botón "Randomize" de Avatartion. */
+/** Elige un índice al azar respetando el `peso` de cada opción (por defecto 1). */
+function elegirConPeso(opciones: AvatarCategory['options'], rnd: () => number): number {
+  const pesos = opciones.map((o) => Math.max(0, o.peso ?? 1));
+  const total = pesos.reduce((a, b) => a + b, 0);
+  if (total <= 0) return 0;
+  let r = rnd() * total;
+  for (let i = 0; i < pesos.length; i += 1) {
+    r -= pesos[i];
+    if (r < 0) return i;
+  }
+  return pesos.length - 1;
+}
+
+/**
+ * Avatar al azar, como el botón "Randomize" de Avatartion, pero SOBRIO: cada
+ * opción sale según su `peso` (casi siempre sin barba, sin gafas y sin
+ * accesorio) y nunca salen gafas y accesorio a la vez, salvo los
+ * `combinable` (aretes).
+ */
 export function randomAvatarConfig(
   tipo: AvatarKind,
   overrides: Partial<Pick<AvatarConfig, 'fondo'>> = {},
   rnd: () => number = Math.random
 ): AvatarConfig {
+  const categorias = categoriasDe(tipo);
   const partes: Record<string, number> = {};
-  for (const cat of categoriasDe(tipo)) {
-    // En las categorías opcionales (barba, gafas, accesorios…) la mitad de las
-    // veces sale "Ninguno": si no, casi todo avatar al azar sale recargado.
-    const vacia = cat.optional ? cat.options.findIndex((o) => !o.svg && !o.back) : -1;
-    if (vacia >= 0 && rnd() < 0.5) {
-      partes[cat.id] = vacia;
-      continue;
+  for (const cat of categorias) partes[cat.id] = elegirConPeso(cat.options, rnd);
+
+  const gafas = categorias.find((c) => c.id === 'gafas');
+  const acc = categorias.find((c) => c.id === 'accesorios');
+  if (gafas && acc) {
+    const conGafas = !!gafas.options[partes.gafas]?.svg;
+    const opcionAcc = acc.options[partes.accesorios];
+    if (conGafas && opcionAcc?.svg && !opcionAcc.combinable) {
+      if (rnd() < 0.5) partes.gafas = gafas.options.findIndex((o) => !o.svg);
+      else partes.accesorios = acc.options.findIndex((o) => !o.svg);
     }
-    partes[cat.id] = Math.floor(rnd() * cat.options.length);
   }
-  return {
-    v: 1,
-    tipo,
-    partes,
-    fondo: overrides.fondo ?? Math.floor(rnd() * AVATAR_BACKGROUNDS.length),
-  };
+  return { v: 1, tipo, partes, fondo: overrides.fondo ?? FONDO_INICIAL };
 }
 
 const ABRE_GRUPO =
-  '<g fill="#fff" stroke="#000" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">';
+  '<g fill="#fff" stroke="#000" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">';
 
 function capa(config: AvatarConfig, paso: string): string {
   if (paso === 'cuello') return CUELLO;
+  if (paso === 'oreja') return OREJA;
   const [id, parte] = paso.split(':');
   const cat = categoriasDe(config.tipo).find((c) => c.id === id);
   if (!cat) return '';
   const opcion = cat.options[config.partes[id] ?? 0] ?? cat.options[0];
-  return parte === 'back' ? opcion.back ?? '' : opcion.svg;
+  const svg = parte === 'back' ? opcion.back ?? '' : opcion.svg;
+  // Panda: los ojos van sobre el antifaz negro, así que se pintan en blanco.
+  if (id === 'ojos' && config.tipo === 'animal') {
+    const animal = categoriasDe('animal').find((c) => c.id === 'animal');
+    if (animal?.options[config.partes.animal ?? 0]?.ojosBlancos) {
+      return `<g stroke="#fff">${svg.replaceAll('fill="#000"', 'fill="#fff"')}</g>`;
+    }
+  }
+  return svg;
 }
 
 /**
@@ -157,7 +179,7 @@ export function composePartThumbSvg(tipo: AvatarKind, categoriaId: string, indic
   const cat = categoriasDe(tipo).find((c) => c.id === categoriaId);
   if (!cat) return '';
   const opcion = cat.options[indice] ?? cat.options[0];
-  const cuerpo = (opcion.back ?? '') + opcion.svg;
+  const cuerpo = (cat.thumbBase ?? '') + (opcion.back ?? '') + opcion.svg;
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${cat.thumbViewBox}">` +
     ABRE_GRUPO +

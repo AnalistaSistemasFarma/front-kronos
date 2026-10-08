@@ -4,6 +4,20 @@ Editor de avatar en **Perfil → Mi avatar** y, para los asistentes de los que l
 
 ![Muestras](avatar-notion/muestras.png)
 
+## Estilo (versión 2, 2026-10-07)
+
+La primera versión (con colores de fondo, pecas y tramas) se descartó. El estilo vigente:
+
+- **Blanco y negro puro**: el dibujo solo usa `#000` y `#fff` (lo verifica una prueba). Los fondos son neutros: gris claro, blanco o transparente.
+- **Trazo grueso y parejo** (6 px en el lienzo de 300) con puntas redondas.
+- **Persona en 3/4**: mira un poco a la derecha, con una sola oreja visible (capa fija encima del cabello) y la nariz como un bulto del perfil.
+- **Cara mínima**: ojos de punto y sonrisa corta.
+- **Rellenos negros sólidos** en cabello, barba, gafas de sol y ropa oscura.
+- **Máximo un accesorio**: el aleatorio nunca junta gafas con accesorio (salvo los aretes).
+- **Asistentes**: animales de cabeza grande, con camiseta negra por defecto y gafas de sol opcionales.
+
+![Selector](avatar-notion/selector-cabello.png)
+
 ## Origen y licencia
 
 - **Interfaz**: calco del comportamiento y la disposición de [Avatartion](https://github.com/wilmerterrero/Avatartion) (código bajo licencia **MIT**, © 2022 Wilmer Terrero). No se copió código fuente literal: se reescribió con Mantine y CSS Modules.

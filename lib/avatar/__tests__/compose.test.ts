@@ -15,7 +15,7 @@ import {
 
 describe('parseAvatarConfig', () => {
   it('acepta una configuración válida y la devuelve limpia', () => {
-    const c = parseAvatarConfig({ v: 1, tipo: 'persona', partes: { cara: 2, cabello: 4 }, fondo: 3 });
+    const c = parseAvatarConfig({ v: 1, tipo: 'persona', partes: { cara: 2, cabello: 4 }, fondo: 1 });
     expect(c).not.toBeNull();
     expect(c!.partes.cara).toBe(2);
     expect(c!.partes.cabello).toBe(4);
@@ -75,17 +75,31 @@ describe('composeAvatarSvg', () => {
   });
 
   it('pinta el fondo cuando no es transparente y escapa el título', () => {
-    const c = randomAvatarConfig('persona', { fondo: 2 });
+    const c = randomAvatarConfig('persona', { fondo: 0 });
     const svg = composeAvatarSvg(c, { size: 64, title: '<b>Ana & "Luis"</b>' });
-    expect(svg).toContain('fill="#fca5a5"');
+    expect(svg).toContain('<rect width="300" height="300" fill="#f2f2f2"/>');
     expect(svg).toContain('width="64"');
     expect(svg).toContain('&lt;b&gt;Ana &amp; &quot;Luis&quot;&lt;/b&gt;');
-    expect(composeAvatarSvg({ ...c, fondo: 0 })).not.toContain('<rect width="300"');
+    const transparente = AVATAR_BACKGROUNDS.findIndex((f) => f.color === null);
+    expect(composeAvatarSvg({ ...c, fondo: transparente })).not.toContain('<rect width="300"');
+  });
+
+  it('el dibujo es blanco y negro puro (sin otros colores que el fondo)', () => {
+    for (const tipo of ['persona', 'animal'] as const) {
+      for (const cat of categoriasDe(tipo)) {
+        cat.options.forEach((_o, i) => {
+          const c = randomAvatarConfig(tipo, {}, () => 0);
+          c.partes[cat.id] = i;
+          const colores = composeAvatarSvg({ ...c, fondo: 1 }).match(/#[0-9a-f]{3,6}\b/gi) ?? [];
+          for (const color of colores) expect(['#000', '#fff', '#ffffff']).toContain(color.toLowerCase());
+        });
+      }
+    }
   });
 
   it('las categorías tienen claves únicas y los ids no cambian de nombre', () => {
     expect(categoriasDe('persona').map((c) => c.id)).toEqual([
-      'cara', 'cabello', 'ojos', 'cejas', 'nariz', 'boca', 'ropa', 'barba', 'gafas', 'accesorios', 'detalles',
+      'cara', 'cabello', 'ojos', 'boca', 'ropa', 'cejas', 'nariz', 'barba', 'gafas', 'accesorios',
     ]);
     expect(categoriasDe('animal').map((c) => c.id)).toEqual(['animal', 'ojos', 'boca', 'ropa', 'gafas', 'accesorios']);
   });
@@ -96,6 +110,21 @@ describe('randomAvatarConfig', () => {
     for (let i = 0; i < 200; i += 1) {
       const tipo = i % 2 ? 'persona' : 'animal';
       expect(parseAvatarConfig(randomAvatarConfig(tipo))).not.toBeNull();
+    }
+  });
+
+  it('nunca junta gafas con un accesorio (salvo los combinables)', () => {
+    let semilla = 7;
+    const rnd = () => ((semilla = (semilla * 16807) % 2147483647) / 2147483647);
+    for (const tipo of ['persona', 'animal'] as const) {
+      const cats = categoriasDe(tipo);
+      const gafas = cats.find((c) => c.id === 'gafas')!;
+      const acc = cats.find((c) => c.id === 'accesorios')!;
+      for (let i = 0; i < 500; i += 1) {
+        const c = randomAvatarConfig(tipo, {}, rnd);
+        const opcionAcc = acc.options[c.partes.accesorios];
+        if (gafas.options[c.partes.gafas].svg && opcionAcc.svg) expect(opcionAcc.combinable).toBe(true);
+      }
     }
   });
 });

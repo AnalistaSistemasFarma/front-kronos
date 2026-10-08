@@ -18,6 +18,16 @@ export interface AvatarOption {
    * cuerpo (p. ej. el cabello largo cae por detrás de los hombros).
    */
   back?: string;
+  /**
+   * Peso al generar un avatar ALEATORIO (por defecto 1; 0 = nunca sale al
+   * azar, solo a mano). Sirve para que lo aleatorio salga sobrio: casi
+   * siempre sin barba, sin gafas y sin accesorios.
+   */
+  peso?: number;
+  /** Animales con antifaz negro (panda): los ojos se pintan en blanco. */
+  ojosBlancos?: boolean;
+  /** Accesorio que puede ir junto con gafas (p. ej. aretes). */
+  combinable?: boolean;
 }
 
 /** Una categoría de partes (Cara, Cabello, Ojos…). */
@@ -34,6 +44,11 @@ export interface AvatarCategory {
    * vive la parte, igual que Avatartion amplía cada pieza en su botón.
    */
   thumbViewBox: string;
+  /**
+   * Marcado que se pinta DEBAJO de la opción solo en la miniatura, para dar
+   * contexto (p. ej. la nariz de perfil se entiende sobre el borde de la cara).
+   */
+  thumbBase?: string;
   /** Se puede dejar vacía (índice de "Ninguno") al generar al azar. */
   optional?: boolean;
 }

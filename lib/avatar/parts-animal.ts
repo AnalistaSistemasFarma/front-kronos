@@ -1,166 +1,264 @@
 import type { AvatarCategory, AvatarOption } from './types';
-import { ACCESORIOS_ANIMAL, GAFAS, OJOS_OPCIONES, ROPA_OPCIONES } from './parts-persona';
 
 /**
- * CATÁLOGO DE PARTES — ANIMALES (avatares de los agentes del chat).
+ * CATÁLOGO DE PARTES — ANIMALES (avatares de los asistentes del chat).
  *
- * Mismo trazo y mismo lienzo que las personas (ver parts-persona.ts) para que
- * un agente y una persona se vean de la misma familia en la bandeja del chat.
- * Cada animal trae su cabeza, orejas, hocico y nariz; los ojos, la boca, las
- * gafas, los accesorios y la ropa son capas aparte, así que el mismo animal
- * cambia de expresión sin redibujarlo. Por eso TODOS los animales dejan libre
- * la zona de los ojos —(128, 142) y (172, 142)— y la de la boca (y≈182–198).
+ * Mismo lenguaje que las personas: blanco y negro puro, trazo grueso y parejo,
+ * pocas líneas. Cabeza grande y redondeada, de frente, que se monta sobre un
+ * cuerpo con camiseta; orejas con contorno y una línea interior; bigotes de
+ * trazo; nariz y boca diminutas.
  *
- * ⚠️ NO reordenar ni borrar opciones: la base guarda ÍNDICES.
+ * Rejilla (300×300): cabeza centrada en (150, 140), entre x 72–228 y y 70–208.
+ * Ojos en (122, 138) y (178, 138). Nariz en (150, 158) —la trae cada animal—
+ * y boca justo debajo (y≈162–176). Hombros desde y≈190 hasta el borde.
+ *
+ * Contrato: la base guarda ÍNDICES; las opciones nuevas van al final.
  */
 
 const NEGRO = 'fill="#000"';
 const SIN_RELLENO = 'fill="none"';
 const SIN_TRAZO = 'stroke="none"';
-const trazo = (d: string, ancho = 3) => `<path d="${d}" ${SIN_RELLENO} stroke-width="${ancho}"/>`;
-const elipse = (cx: number, cy: number, rx: number, ry: number, extra = '') =>
-  `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" ${extra}/>`;
-const circulo = (cx: number, cy: number, r: number, extra = '') => `<circle cx="${cx}" cy="${cy}" r="${r}" ${extra}/>`;
+const linea = (d: string, ancho = 6) => `<path d="${d}" ${SIN_RELLENO} stroke-width="${ancho}"/>`;
+const mancha = (d: string, ancho = 6) => `<path d="${d}" ${NEGRO} stroke-width="${ancho}"/>`;
+const punto = (x: number, y: number, r: number, color = '#000') =>
+  `<circle cx="${x}" cy="${y}" r="${r}" fill="${color}" ${SIN_TRAZO}/>`;
 
-/** Bigotes de gato/conejo, a lado y lado del hocico. */
-const BIGOTES = trazo('M118 168 L90 162 M118 176 L90 178 M182 168 L210 162 M182 176 L210 178');
+/** Cabeza base: redonda, un poco más ancha en los cachetes. */
+const CABEZA = 'M150 68 C200 68 234 96 236 140 C238 184 200 212 150 212 C100 212 62 184 64 140 C66 96 100 68 150 68 Z';
+const cabeza = (d = CABEZA, extra = '') => `<path d="${d}" ${extra}/>`;
 
-/** Melena del león: estrella de 18 puntas alrededor de la cabeza. */
-function melena(): string {
-  const puntos: string[] = [];
-  const n = 18;
-  for (let i = 0; i < n * 2; i += 1) {
-    const r = i % 2 === 0 ? 92 : 74;
-    const a = (Math.PI * i) / n - Math.PI / 2;
-    puntos.push(`${(150 + r * Math.cos(a)).toFixed(1)} ${(146 + r * Math.sin(a)).toFixed(1)}`);
-  }
-  return `<path d="M${puntos.join(' L')} Z" ${NEGRO}/>`;
-}
+/** Nariz de gato/conejo: triangulito redondeado, y el trazo hasta la boca. */
+const NARIZ_PEQUENA = mancha('M143 154 Q150 151 157 154 Q154 160 150 161 Q146 160 143 154 Z', 3);
+/** Nariz de perro/oso: óvalo negro. */
+const NARIZ_GRANDE = `<ellipse cx="150" cy="156" rx="11" ry="7.5" ${NEGRO} stroke-width="3"/>`;
+
+const BIGOTES = linea('M80 152 L36 146 M80 168 L40 176 M220 152 L264 146 M220 168 L260 176', 6);
 
 const ANIMALES: AvatarOption[] = [
   {
     label: 'Gato',
     svg:
-      '<path d="M98 120 L100 68 L138 96 Z"/><path d="M202 120 L200 68 L162 96 Z"/>' +
-      trazo('M106 104 L107 82 L126 96 M194 104 L193 82 L174 96') +
-      elipse(150, 146, 62, 56) +
-      `<path d="M143 163 L157 163 L150 171 Z" ${NEGRO} stroke-width="3"/>` +
-      BIGOTES,
+      '<path d="M78 122 L88 36 L142 80 Z"/><path d="M222 122 L212 36 L158 80 Z"/>' +
+      linea('M98 60 L104 96 M202 60 L196 96', 6) +
+      cabeza() + NARIZ_PEQUENA + BIGOTES,
   },
   {
     label: 'Perro',
     svg:
-      elipse(150, 144, 58, 62) +
-      `<path d="M102 96 C74 94 64 140 78 178 C90 188 102 168 104 148 Z" ${NEGRO}/>` +
-      `<path d="M198 96 C226 94 236 140 222 178 C210 188 198 168 196 148 Z" ${NEGRO}/>` +
-      elipse(150, 178, 28, 22, 'stroke-width="4"') +
-      elipse(150, 166, 11, 8, `${NEGRO} stroke-width="3"`),
+      // Orejas caídas DETRÁS de la cabeza: solo asoman a los lados.
+      mancha('M100 82 C62 76 38 128 46 180 C52 202 80 202 88 180 Z') +
+      mancha('M200 82 C238 76 262 128 254 180 C248 202 220 202 212 180 Z') +
+      cabeza() +
+      `<ellipse cx="150" cy="166" rx="32" ry="24" stroke-width="5"/>` + NARIZ_GRANDE,
   },
   {
     label: 'Zorro',
     svg:
-      '<path d="M150 206 C120 206 92 180 86 150 C84 128 96 108 112 100 L104 62 L134 92 Q150 88 166 92 L196 62 L188 100 C204 108 216 128 214 150 C208 180 180 206 150 206 Z"/>' +
-      `<path d="M112 88 L109 72 L126 88 Z" ${NEGRO} stroke-width="3"/><path d="M188 88 L191 72 L174 88 Z" ${NEGRO} stroke-width="3"/>` +
-      trazo('M88 150 Q118 156 134 178 M212 150 Q182 156 166 178') +
-      elipse(150, 170, 9, 6, `${NEGRO} stroke-width="3"`),
+      '<path d="M84 122 L84 40 L138 86 Z"/><path d="M216 122 L216 40 L162 86 Z"/>' +
+      mancha('M90 62 L92 92 L112 82 Z', 3) + mancha('M210 62 L208 92 L188 82 Z', 3) +
+      cabeza('M150 76 C194 76 226 100 228 136 C230 166 190 200 150 210 C110 200 70 166 72 136 C74 100 106 76 150 76 Z') +
+      linea('M76 150 C104 146 128 152 142 170 M224 150 C196 146 172 152 158 170', 5) +
+      NARIZ_PEQUENA,
   },
   {
     label: 'Búho',
     svg:
-      '<path d="M102 102 L94 64 L126 88 Z"/><path d="M198 102 L206 64 L174 88 Z"/>' +
-      '<path d="M150 82 C190 82 214 108 214 148 C214 184 186 210 150 210 C114 210 86 184 86 148 C86 108 110 82 150 82 Z"/>' +
-      circulo(128, 142, 21, 'stroke-width="4"') + circulo(172, 142, 21, 'stroke-width="4"') +
-      `<path d="M143 158 L157 158 L150 174 Z" ${NEGRO} stroke-width="3"/>` +
-      trazo('M128 200 l5 5 l5 -5 M146 202 l4 4 l4 -4 M162 200 l5 5 l5 -5'),
+      '<path d="M88 104 L84 56 L124 82 Z"/><path d="M212 104 L216 56 L176 82 Z"/>' +
+      cabeza() +
+      `<circle cx="122" cy="138" r="24" stroke-width="5"/><circle cx="178" cy="138" r="24" stroke-width="5"/>` +
+      mancha('M142 156 L158 156 L150 172 Z', 4) +
+      linea('M138 72 Q150 84 162 72', 5),
   },
   {
     label: 'Oso',
     svg:
-      circulo(102, 96, 21) + circulo(198, 96, 21) +
-      circulo(102, 96, 9, `${NEGRO} ${SIN_TRAZO}`) + circulo(198, 96, 9, `${NEGRO} ${SIN_TRAZO}`) +
-      elipse(150, 146, 64, 60) +
-      elipse(150, 178, 30, 22, 'stroke-width="4"') +
-      elipse(150, 166, 11, 8, `${NEGRO} stroke-width="3"`),
+      '<circle cx="88" cy="84" r="25"/><circle cx="212" cy="84" r="25"/>' +
+      linea('M80 94 Q80 76 96 74 M220 94 Q220 76 204 74', 5) +
+      cabeza() +
+      `<ellipse cx="150" cy="164" rx="30" ry="22" stroke-width="5"/>` + NARIZ_GRANDE,
   },
   {
     label: 'Conejo',
     svg:
-      '<path d="M122 102 C104 42 110 18 124 20 C138 22 142 60 138 100 Z"/>' +
-      '<path d="M178 102 C196 42 190 18 176 20 C162 22 158 60 162 100 Z"/>' +
-      trazo('M126 88 C116 56 118 38 124 36 M174 88 C184 56 182 38 176 36') +
-      elipse(150, 148, 58, 56) +
-      `<path d="M145 164 L155 164 L150 170 Z" ${NEGRO} stroke-width="3"/>` +
-      trazo('M120 170 L96 166 M120 177 L96 180 M180 170 L204 166 M180 177 L204 180'),
+      '<path d="M114 96 C98 46 104 12 122 12 C140 12 144 50 138 92 Z"/>' +
+      '<path d="M186 96 C202 46 196 12 178 12 C160 12 156 50 162 92 Z"/>' +
+      linea('M122 34 L126 80 M178 34 L174 80', 5) +
+      cabeza() + NARIZ_PEQUENA + linea('M84 156 L50 152 M84 168 L54 174 M216 156 L250 152 M216 168 L246 174', 5),
   },
   {
     label: 'Panda',
+    ojosBlancos: true,
     svg:
-      circulo(104, 98, 19, NEGRO) + circulo(196, 98, 19, NEGRO) +
-      elipse(150, 146, 64, 58) +
-      elipse(126, 144, 17, 21, `${NEGRO} ${SIN_TRAZO} transform="rotate(25 126 144)"`) +
-      elipse(174, 144, 17, 21, `${NEGRO} ${SIN_TRAZO} transform="rotate(-25 174 144)"`) +
-      circulo(128, 142, 10, `fill="#fff" ${SIN_TRAZO}`) + circulo(172, 142, 10, `fill="#fff" ${SIN_TRAZO}`) +
-      elipse(150, 168, 9, 6, `${NEGRO} stroke-width="3"`),
+      `<circle cx="88" cy="84" r="24" ${NEGRO}/><circle cx="212" cy="84" r="24" ${NEGRO}/>` +
+      cabeza() +
+      `<ellipse cx="120" cy="140" rx="20" ry="26" ${NEGRO} ${SIN_TRAZO} transform="rotate(28 120 140)"/>` +
+      `<ellipse cx="180" cy="140" rx="20" ry="26" ${NEGRO} ${SIN_TRAZO} transform="rotate(-28 180 140)"/>` +
+      NARIZ_GRANDE,
   },
   {
     label: 'León',
     svg:
-      melena() +
-      circulo(108, 104, 14) + circulo(192, 104, 14) +
-      elipse(150, 148, 58, 56) +
-      elipse(150, 178, 26, 19, 'stroke-width="4"') +
-      `<path d="M142 163 L158 163 L150 172 Z" ${NEGRO} stroke-width="3"/>`,
+      mancha(
+        'M150 40 C176 40 188 56 200 58 C222 60 236 80 238 100 C252 118 254 150 242 170 C240 196 220 218 196 222 C182 236 118 236 104 222 C80 218 60 196 58 170 C46 150 48 118 62 100 C64 80 78 60 100 58 C112 56 124 40 150 40 Z'
+      ) +
+      '<circle cx="104" cy="94" r="14"/><circle cx="196" cy="94" r="14"/>' +
+      cabeza('M150 82 C190 82 214 104 216 140 C218 176 190 200 150 200 C110 200 82 176 84 140 C86 104 110 82 150 82 Z') +
+      `<ellipse cx="150" cy="166" rx="26" ry="19" stroke-width="5"/>` +
+      mancha('M141 153 L159 153 L150 162 Z', 3),
   },
   {
     label: 'Pingüino',
     svg:
-      elipse(150, 146, 66, 64, NEGRO) +
-      `<path d="M150 104 C160 92 192 96 197 124 C203 156 184 194 150 202 C116 194 97 156 103 124 C108 96 140 92 150 104 Z" ${SIN_TRAZO}/>` +
-      '<path d="M138 162 L162 162 L150 177 Z" fill="#FFD166" stroke-width="4"/>',
+      cabeza(CABEZA, NEGRO) +
+      `<path d="M150 104 C162 90 202 92 206 128 C210 166 184 196 150 200 C116 196 90 166 94 128 C98 92 138 90 150 104 Z" fill="#fff" ${SIN_TRAZO}/>` +
+      '<path d="M138 152 L162 152 L150 166 Z" stroke-width="4"/>',
   },
   {
     label: 'Koala',
     svg:
-      circulo(94, 114, 31) + circulo(206, 114, 31) +
-      circulo(94, 116, 16, `${SIN_RELLENO} stroke-width="3"`) + circulo(206, 116, 16, `${SIN_RELLENO} stroke-width="3"`) +
-      elipse(150, 150, 60, 56) +
-      elipse(150, 162, 11, 15, `${NEGRO} stroke-width="3"`),
+      '<circle cx="80" cy="106" r="34"/><circle cx="220" cy="106" r="34"/>' +
+      linea('M66 118 Q66 92 88 88 M234 118 Q234 92 212 88', 5) +
+      cabeza() +
+      `<ellipse cx="150" cy="152" rx="13" ry="19" ${NEGRO} stroke-width="3"/>`,
   },
   {
     label: 'Mono',
     svg:
-      circulo(90, 146, 18) + circulo(210, 146, 18) +
-      circulo(91, 146, 9, `${SIN_RELLENO} stroke-width="3"`) + circulo(209, 146, 9, `${SIN_RELLENO} stroke-width="3"`) +
-      elipse(150, 142, 58, 62) +
-      `<path d="M150 118 C162 102 196 106 192 140 C190 160 184 166 182 176 C180 200 164 206 150 206 C136 206 120 200 118 176 C116 166 110 160 108 140 C104 106 138 102 150 118 Z" ${SIN_RELLENO} stroke-width="3"/>` +
-      circulo(146, 167, 2.5, `${NEGRO} ${SIN_TRAZO}`) + circulo(154, 167, 2.5, `${NEGRO} ${SIN_TRAZO}`) +
-      trazo('M140 84 Q148 66 154 84 Q162 70 168 86', 4),
+      '<circle cx="62" cy="142" r="22"/><circle cx="238" cy="142" r="22"/>' +
+      linea('M58 132 Q50 142 58 152 M242 132 Q250 142 242 152', 5) +
+      cabeza() +
+      `<path d="M150 112 C164 96 204 100 200 136 C198 152 190 158 190 170 C188 196 168 202 150 202 C132 202 112 196 110 170 C110 158 102 152 100 136 C96 100 136 96 150 112 Z" ${SIN_RELLENO} stroke-width="5"/>` +
+      punto(145, 157, 3) + punto(155, 157, 3),
   },
 ];
 
-/** Bocas pensadas para el hocico de los animales (más arriba y más pequeñas). */
-const BOCAS_ANIMAL: AvatarOption[] = [
-  { label: 'Gatuna', svg: trazo('M138 182 Q144 190 150 182 Q156 190 162 182', 4) },
-  { label: 'Sonrisa', svg: trazo('M136 183 Q150 196 164 183', 4) },
-  { label: 'Abierta', svg: `<path d="M137 182 Q150 204 163 182 Z" ${NEGRO} stroke-width="4"/>` },
+/* ──────────────────────────────── Ojos ──────────────────────────────── */
+
+const OJOS_ANIMAL: AvatarOption[] = [
+  { label: 'Puntos', peso: 4, svg: punto(122, 138, 6.5) + punto(178, 138, 6.5) },
   {
-    label: 'Lengua',
-    svg:
-      `<path d="M137 182 Q150 200 163 182 Z" ${NEGRO} stroke-width="4"/>` +
-      '<path d="M144 190 Q150 205 156 190 Z" fill="#F7A1B5" stroke-width="3"/>',
+    label: 'Brillantes',
+    peso: 1,
+    svg: punto(122, 138, 9) + punto(178, 138, 9) + punto(125, 135, 3, '#fff') + punto(181, 135, 3, '#fff'),
   },
-  { label: 'Neutral', svg: trazo('M142 187 L158 187', 4) },
-  { label: 'Sorpresa', svg: elipse(150, 189, 5, 7, `${NEGRO} ${SIN_TRAZO}`) },
+  { label: 'Felices', peso: 1, svg: linea('M112 141 Q122 129 132 141 M168 141 Q178 129 188 141', 5) },
+  { label: 'Cerrados', peso: 1, svg: linea('M112 136 Q122 145 132 136 M168 136 Q178 145 188 136', 5) },
 ];
 
-/** Categorías del editor de ANIMAL (agentes). */
+/* ──────────────────────────────── Boca ──────────────────────────────── */
+
+const BOCAS_ANIMAL: AvatarOption[] = [
+  { label: 'Gatuna', peso: 3, svg: linea('M150 161 L150 166 M138 168 Q144 174 150 166 Q156 174 162 168', 5) },
+  { label: 'Sonrisa', peso: 2, svg: linea('M150 161 L150 166 M138 168 Q150 180 162 168', 5) },
+  { label: 'Neutral', peso: 1, svg: linea('M150 161 L150 168 M142 170 L158 170', 5) },
+  { label: 'Abierta', peso: 1, svg: '<path d="M139 166 Q150 186 161 166 Z" fill="#000" stroke-width="4"/>' },
+];
+
+/* ──────────────────────────────── Ropa ──────────────────────────────── */
+
+/** Cuerpo: hombros anchos y brazos que asoman abajo, como un busto. */
+const CUERPO = 'M62 312 L66 238 C70 208 104 194 150 194 C196 194 230 208 234 238 L238 312 Z';
+const BRAZOS = '<path d="M60 266 L54 312 L84 312 L86 270 Z" stroke-width="6"/><path d="M240 266 L246 312 L216 312 L214 270 Z" stroke-width="6"/>';
+const cuerpo = (extra = '', relleno = '') => `<path d="${CUERPO}" ${relleno}/>${extra}`;
+
+const ROPA_ANIMAL: AvatarOption[] = [
+  { label: 'Camiseta negra', peso: 4, svg: cuerpo(BRAZOS, NEGRO) },
+  {
+    label: 'Camiseta blanca',
+    peso: 1,
+    svg: cuerpo(BRAZOS + linea('M88 250 L90 312 M212 250 L210 312')),
+  },
+  {
+    label: 'Buzo con capota',
+    peso: 1,
+    svg: cuerpo(
+      linea('M88 250 L90 312 M212 250 L210 312') +
+        '<path d="M100 206 C110 186 190 186 200 206 C186 218 114 218 100 206 Z"/>' +
+        linea('M138 214 L136 250 M162 214 L164 250', 4) + punto(136, 252, 4) + punto(164, 252, 4)
+    ),
+  },
+  {
+    label: 'Bata',
+    peso: 1,
+    svg: cuerpo(
+      linea('M88 250 L90 312 M212 250 L210 312') +
+        '<path d="M116 200 L104 226 L150 280 Z" stroke-width="5"/><path d="M184 200 L196 226 L150 280 Z" stroke-width="5"/>' +
+        linea('M150 280 L150 312', 5) +
+        '<path d="M98 254 L126 254 L126 280 L98 280 Z" stroke-width="5"/>'
+    ),
+  },
+  {
+    label: 'Corbatín',
+    peso: 1,
+    svg: cuerpo(
+      BRAZOS +
+        mancha('M150 212 L126 200 L126 226 Z', 4) + mancha('M150 212 L174 200 L174 226 Z', 4) +
+        punto(150, 212, 6) +
+        `<path d="M150 212 L126 200 L126 226 Z M150 212 L174 200 L174 226 Z" ${SIN_RELLENO} stroke="#fff" stroke-width="3"/>`,
+      NEGRO
+    ),
+  },
+];
+
+/* ──────────────────────────────── Gafas ──────────────────────────────── */
+
+const GAFAS_ANIMAL: AvatarOption[] = [
+  { label: 'Ninguna', peso: 3, svg: '' },
+  {
+    label: 'De sol',
+    peso: 1,
+    svg:
+      mancha('M90 126 L146 126 C146 148 134 160 118 160 C100 160 90 146 90 126 Z', 5) +
+      mancha('M154 126 L210 126 C210 146 200 160 182 160 C166 160 154 148 154 126 Z', 5) +
+      linea('M84 126 L216 126', 7) + linea('M216 128 L232 136', 6),
+  },
+  {
+    label: 'Redondas',
+    peso: 1,
+    svg:
+      `<circle cx="122" cy="138" r="21" ${SIN_RELLENO} stroke-width="5"/><circle cx="178" cy="138" r="21" ${SIN_RELLENO} stroke-width="5"/>` +
+      linea('M143 136 Q150 130 157 136', 5),
+  },
+];
+
+/* ───────────────────────────── Accesorios ───────────────────────────── */
+
+const ACCESORIOS_ANIMAL: AvatarOption[] = [
+  { label: 'Ninguno', peso: 4, svg: '' },
+  {
+    label: 'Sombrero',
+    peso: 1,
+    svg:
+      '<ellipse cx="150" cy="80" rx="86" ry="14" stroke-width="5"/>' +
+      '<path d="M104 80 C102 36 198 36 196 80 Z" stroke-width="5"/>' +
+      mancha('M105 62 C130 58 170 58 195 62 L196 74 C170 70 130 70 104 74 Z', 4),
+  },
+  {
+    label: 'Gorra',
+    peso: 1,
+    svg:
+      '<path d="M90 100 C88 58 120 38 150 38 C180 38 212 58 210 100 C170 90 130 90 90 100 Z" stroke-width="5"/>' +
+      '<path d="M90 100 C120 88 180 88 210 100 C200 114 100 114 90 100 Z" stroke-width="5"/>' +
+      linea('M150 40 L150 90', 4) + punto(150, 38, 4.5),
+  },
+  {
+    label: 'Audífonos',
+    peso: 1,
+    svg:
+      linea('M78 128 C70 40 230 40 222 128', 9) +
+      `<rect x="62" y="118" width="26" height="46" rx="12" ${NEGRO} stroke-width="5"/>` +
+      `<rect x="212" y="118" width="26" height="46" rx="12" ${NEGRO} stroke-width="5"/>`,
+  },
+];
+
+/** Categorías del editor de ANIMAL (asistentes). */
 export const CATEGORIAS_ANIMAL: AvatarCategory[] = [
-  { id: 'animal', label: 'Animal', title: 'Animales', options: ANIMALES, thumbViewBox: '50 14 200 210' },
-  { id: 'ojos', label: 'Ojos', title: 'Ojos', options: OJOS_OPCIONES, thumbViewBox: '106 120 88 44' },
-  { id: 'boca', label: 'Boca', title: 'Bocas', options: BOCAS_ANIMAL, thumbViewBox: '126 168 48 48' },
-  { id: 'ropa', label: 'Ropa', title: 'Ropa', options: ROPA_OPCIONES, thumbViewBox: '50 200 200 100' },
-  { id: 'gafas', label: 'Gafas', title: 'Gafas', options: GAFAS, thumbViewBox: '90 110 120 60', optional: true },
-  { id: 'accesorios', label: 'Accesorios', title: 'Accesorios', options: ACCESORIOS_ANIMAL, thumbViewBox: '40 20 220 260', optional: true },
+  { id: 'animal', label: 'Animal', title: 'Animales', options: ANIMALES, thumbViewBox: '30 4 240 240' },
+  { id: 'ojos', label: 'Ojos', title: 'Ojos', options: OJOS_ANIMAL, thumbViewBox: '96 116 108 44' },
+  { id: 'boca', label: 'Boca', title: 'Bocas', options: BOCAS_ANIMAL, thumbViewBox: '126 150 48 40' },
+  { id: 'ropa', label: 'Ropa', title: 'Ropa', options: ROPA_ANIMAL, thumbViewBox: '40 180 220 130' },
+  { id: 'gafas', label: 'Gafas', title: 'Gafas', options: GAFAS_ANIMAL, thumbViewBox: '76 100 160 72', optional: true },
+  { id: 'accesorios', label: 'Accesorios', title: 'Accesorios', options: ACCESORIOS_ANIMAL, thumbViewBox: '50 20 200 160', optional: true },
 ];
 
-export const ORDEN_ANIMAL = ['cuello', 'ropa', 'animal', 'ojos', 'boca', 'gafas', 'accesorios'] as const;
+export const ORDEN_ANIMAL = ['ropa', 'animal', 'ojos', 'boca', 'gafas', 'accesorios'] as const;
