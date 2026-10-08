@@ -106,6 +106,9 @@ export const SGC_AUDIT_ACTIONS = {
   aprobadorAutorizado: 'aprobador.autorizado',
   aprobadorRevocado: 'aprobador.revocado',
   firmanteSustituido: 'firmante.sustituido',
+  // Sprint 13: firma propia.
+  firmaPropiaRegistrada: 'firma.propia_registrada',
+  firmaPropiaValidada: 'firma.propia_validada',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];
