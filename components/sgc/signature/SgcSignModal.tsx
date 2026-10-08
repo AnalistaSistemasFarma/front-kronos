@@ -7,6 +7,7 @@ import { sgcTouchComboboxProps } from '../SgcSelect';
 import { IconAlertCircle, IconLock, IconSignature } from '@tabler/icons-react';
 import type { SgcSignatureMeaning } from '../../../lib/sgc/flows/definition';
 import { SGC_SIGNATURE_LABELS } from '../../../lib/sgc/flows/definition';
+import { sgcSignaturePasswordProps } from '../../../lib/sgc/autofill';
 import {
   SGC_CHECK_ANSWER_LABELS,
   SGC_SIGNATURE_AUTH_METHOD_LABEL,
@@ -66,12 +67,14 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
   const draftIsAttachment = Boolean(draftHref && /^\/api\/sgc\/requests\/\d+\/attachments\/\d+$/.test(draftHref));
   const { data: session } = useSession();
   const sessionEmail = session?.user?.email ?? '';
+  // La contraseña queda de solo lectura hasta que la persona la toca: el navegador no rellena campos de solo lectura.
+  const [passwordUnlocked, setPasswordUnlocked] = useState(false);
 
   useEffect(() => {
-    if (!opened) {
-      setPassword('');
-      setError(null);
-    }
+    // Al abrir y al cerrar: la contraseña arranca vacía y bloqueada (si el navegador alcanzó a rellenarla, se borra).
+    setPassword('');
+    setPasswordUnlocked(false);
+    if (!opened) setError(null);
   }, [opened]);
   // Si el navegador alcanzó a rellenar el motivo con el correo, se limpia: el motivo lo escribe la persona.
   useEffect(() => {
@@ -231,10 +234,12 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
         />
         <PasswordInput
           label='Contraseña de SynerLink'
-          name='current-password'
           description={SGC_SIGNATURE_AUTH_METHOD_LABEL}
           leftSection={<IconLock size={16} />}
-          autoComplete='current-password'
+          {...sgcSignaturePasswordProps()}
+          readOnly={!passwordUnlocked}
+          onFocus={() => setPasswordUnlocked(true)}
+          onPointerDown={() => setPasswordUnlocked(true)}
           value={password}
           onChange={(e) => setPassword(e.currentTarget.value)}
           onKeyDown={(e) => {
