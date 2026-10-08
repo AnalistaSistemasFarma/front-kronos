@@ -3665,6 +3665,64 @@ body.chat-inmersivo .chat-page-thread--completa {
   font-weight: 600;
 }
 
+/* ── Extensiones Corporativas (Cristian, 2026-10-08) ─────────────────────────
+   Misma tabla que Correos, con buscador arriba que se queda fijo al bajar. */
+.portal-th__extensiones {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  border-top: 1px solid var(--pth-linea);
+  padding-top: 12px;
+}
+
+/* Fijo arriba mientras se recorre la lista: -20px compensa el padding del
+   contenedor que hace scroll (.portal-th__contactos). */
+.portal-th__extensiones-buscar {
+  position: sticky;
+  top: -20px;
+  z-index: 1;
+  margin: -12px -20px 0;
+  padding: 12px 20px 8px;
+  background-color: #fff;
+}
+
+.portal-th__buscador {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 10px;
+  background-color: var(--pth-azul-50);
+  /* 16 px: por debajo Safari en iPhone hace zoom al enfocar (ver .portal-th__ingreso input). */
+  font-size: 16px;
+  color: var(--pth-tinta);
+}
+
+.portal-th__buscador:focus {
+  outline: none;
+  border-color: var(--pth-azul);
+  background-color: #fff;
+}
+
+.portal-th__extensiones-tabla td:last-child,
+.portal-th__extensiones-tabla th:last-child {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.portal-th__extensiones-tabla td:last-child {
+  font-weight: 600;
+  color: var(--pth-azul);
+}
+
+.portal-th__extensiones-conteo {
+  margin-top: 4px;
+  font-size: 0.78rem;
+}
+
 /* Un anuncio se ve entero y centrado, sin recortarse ni estirarse. El fondo
    oscuro es a propósito: una imagen con fondo blanco sobre blanco no deja ver
    dónde termina. */
