@@ -3,6 +3,7 @@ import path from 'node:path';
 import bcrypt from 'bcryptjs';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { addMatrixEntry } from '../../../lib/sgc/db/matrix';
 import { PrismaClient } from '../../../app/generated/prisma';
 import { getSgcAccessForUser } from '../../../lib/sgc/access';
 import { SGC_PROCESS_NAME, SGC_SUBPROCESS_NAMES, SGC_SUBPROCESS_URLS } from '../../../lib/sgc/constants';
@@ -99,7 +100,7 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
 
   async function newRequest(subject: string, file: { fileName: string; contentType: string; bytes: Uint8Array } = docx(subject)) {
     // Documento NUEVO en cada solicitud (un documento vigente solo admite una solicitud en curso).
-    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject, description: `Cambio de prueba: ${subject}.`, idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol));
+    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject, description: `Cambio de prueba: ${subject}.`, idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } }, actor(E.sol));
     await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'orden' }, actor(E.elab), await accessOf(E.elab));
     await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab), await accessOf(E.elab));
     await uploadAttachment(prisma, upload, idRequest, { purpose: 'borrador', ...file }, await viewer(E.elab), actor(E.elab));
@@ -150,6 +151,9 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
     const cat = await getCatalogs(prisma, CO);
     procGC = cat.processes.find((p) => p.code === 'GC')!.id;
     typePR = cat.documentTypes.find((t) => t.code === 'PR')!.id;
+    // 2026-10-05 (#536): el elaborador sale de la matriz de responsables (proceso × tipo); una fila
+    // por persona deja determinista quién elabora (el elaborador de Calidad de la prueba).
+    await addMatrixEntry(prisma, CO, { role: 'elaborador', idProcess: procGC, idDocumentType: typePR, userEmail: E.elab, reason: 'Elaborador de Calidad de la prueba' }, actor(E.cal));
     const calType = (await listAuthorizationTypes(prisma, CO)).find((t) => t.code === 'SGC-VERIF-CALIDAD')!;
     await grantAuthorizationTypeUser(prisma, CO, calType.id, { email: E.cal, reason: 'Calidad de la prueba de correcciones' }, actor('ci@x.co'));
     const doc = await createInitialDocument(prisma, upload, { idCompany: CO, idProcess: procGC, idDocumentType: typePR, title: 'Control de documentos (correcciones)', confidentiality: 'publica', versionNumber: 1, effectiveDate: '2026-01-15', pdf: { bytes: await pdfOf('vigente V1'), fileName: 'v1.pdf' } }, actor(E.cal));
@@ -234,7 +238,7 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
   });
 
   it('[SGC-REQ-096] partir de la plantilla institucional deja el encabezado del sistema; la vista previa de un documento NUEVO muestra el código provisional y el cargo de quien elabora', async () => {
-    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Procedimiento nuevo desde la plantilla', description: 'Documento nuevo para la prueba de la plantilla institucional.', idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol));
+    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Procedimiento nuevo desde la plantilla', description: 'Documento nuevo para la prueba de la plantilla institucional.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } }, actor(E.sol));
     const html = '<p><strong>Nombre del documento:</strong> {{NOMBRE_DOCUMENTO}}</p><h2>1. OBJETIVO</h2><p>Establecer el objetivo del procedimiento de prueba.</p><h2>10. HISTORIAL DE CAMBIOS</h2><p>{{HISTORIAL_CAMBIOS}}</p>';
     await saveDraftRevision(prisma, idRequest, { html, origin: 'plantilla', originRef: 'Plantilla institucional de procedimiento' }, await viewer(E.elab), actor(E.elab));
     const layout = await latestLayout(prisma, idRequest);
@@ -391,7 +395,7 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
 
   it('[SGC-REQ-094][SGC-REQ-096][SGC-REQ-102][SGC-REQ-103] bordes: vista previa de una nueva versión con borrador PDF, historial agregado sin la marca, borrador alterado, revisión menor sobre un PDF y logo válido', async () => {
     // Validaciones y acciones del motor que la composición no cambia (formulario, reorden de firmantes, devolución en paralelo).
-    await expect(createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Valor no permitido', description: 'Prueba de validación del formulario.', idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Inexistente' } }, actor(E.sol))).rejects.toThrow(/no permitida/);
+    await expect(createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Valor no permitido', description: 'Prueba de validación del formulario.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Inexistente' } }, actor(E.sol))).rejects.toThrow(/no permitida/);
     const r5 = await newRequest('Reorden y devolución en paralelo');
     await setSigners(prisma, notifier, r5, { stepKey: 'revision', signers: [E.rev, E.apr], mode: 'paralelo', reason: 'Se agrega otro revisor' }, actor(E.elab), await accessOf(E.elab));
     await setSigners(prisma, notifier, r5, { stepKey: 'revision', signers: [E.apr, E.rev], mode: 'paralelo', reason: 'Cambia el orden' }, actor(E.elab), await accessOf(E.elab));
@@ -401,7 +405,7 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
     await decideTask(prisma, notifier, (await taskOf(r5, 'revision')).id_task, { decision: 'devolver', comment: 'Ajustar el alcance antes de seguir.' }, actor(E.rev));
     expect((await taskOf(r5, 'elaboracion')).status).toBe('abierta');
     // Nueva versión del vigente con borrador PDF: la vista previa es el mismo PDF (sin encabezado) y valida páginas.
-    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nueva_version', subject: 'Nueva versión con borrador PDF', description: 'Cambio de prueba con borrador PDF.', idDocument: idDoc, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol));
+    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nueva_version', subject: 'Nueva versión con borrador PDF', description: 'Cambio de prueba con borrador PDF.', idDocument: idDoc, formValues: { urgencia: 'Normal' } }, actor(E.sol));
     await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'paralelo' }, actor(E.elab), await accessOf(E.elab));
     await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab), await accessOf(E.elab));
     await uploadAttachment(prisma, upload, idRequest, { purpose: 'borrador', ...(await pdfFile('nueva versión en pdf')) }, await viewer(E.elab), actor(E.elab));

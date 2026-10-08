@@ -1,22 +1,21 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSession } from 'next-auth/react';
 import { Alert, Button, Card, Grid, Group, Stack, Text, TextInput, Textarea, Title } from '@mantine/core';
 import SgcSelect from '../../../../../../components/sgc/SgcSelect';
-import { IconAlertCircle, IconBulb, IconFilePlus, IconSend } from '@tabler/icons-react';
+import { IconAlertCircle, IconFilePlus, IconSend } from '@tabler/icons-react';
 import SgcShell from '../../../../../../components/sgc/SgcShell';
 import { sgcSend, useSgcFetch } from '../../../../../../components/sgc/useSgcFetch';
 import type { SgcCatalogs } from '../../../../../../lib/sgc/db/catalogs';
 import type { SgcCompanyAccess } from '../../../../../../lib/sgc/permissions';
 import type { SgcFormFieldDefinition } from '../../../../../../lib/sgc/flows/definition';
-import type { SgcMatrixSuggestion } from '../../../../../../lib/sgc/flows/matrix';
 
 /**
  * Solicitud documental (paso 0 del flujo): nuevo documento, nueva versión o
- * modificación de un vigente, con su justificación. Quien la crea elige al
- * elaborador (por defecto, él mismo); la matriz solo sugiere.
+ * modificación de un vigente, con su justificación. Quien la crea NO elige al
+ * elaborador (2026-10-05): lo asigna el servidor según la matriz de
+ * responsables del proceso o, por respaldo, Aseguramiento de Calidad.
  */
 interface FormInfo {
   flow: { code: string; name: string; version: number };
@@ -27,13 +26,10 @@ interface FormInfo {
 
 function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const router = useRouter();
-  const { data: session } = useSession();
-  const me = (session?.user?.email ?? '').toLowerCase();
   const id = company.idCompany;
   const form = useSgcFetch<FormInfo>(`/api/sgc/requests/form?company=${id}`);
   const catalogs = useSgcFetch<SgcCatalogs>(`/api/sgc/catalogs?company=${id}`);
   const docs = useSgcFetch<{ documents: { idDocument: number; code: string; title: string; versionNumber: number | null }[] }>(`/api/sgc/documents?company=${id}`);
-  const users = useSgcFetch<{ users: { email: string; name: string | null }[] }>(`/api/sgc/users?company=${id}`);
   // Sprint 5: «Iniciar nueva versión» desde el calendario o la ficha llega con ?tipo=nueva_version&documento=<id>.
   const [prefill] = useState(() => {
     if (typeof window === 'undefined') return { tipo: null as string | null, documento: null as string | null };
@@ -47,7 +43,6 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const [idDocument, setIdDocument] = useState<string | null>(prefill.tipo ? prefill.documento : null);
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
-  const [elaborator, setElaborator] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,11 +50,6 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const selectedDoc = docs.data?.documents.find((d) => String(d.idDocument) === idDocument);
   const [subjectTouched, setSubjectTouched] = useState(false);
   const suggestedSubject = selectedDoc && requestType === 'nueva_version' ? `Nueva versión de ${selectedDoc.code} (V${(selectedDoc.versionNumber ?? 0) + 1})` : '';
-  const suggestUrl =
-    requestType === 'nuevo' && idProcess && idDocumentType ? `/api/sgc/matrix?company=${id}&process=${idProcess}&documentType=${idDocumentType}` : null;
-  const sugg = useSgcFetch<{ suggestion: SgcMatrixSuggestion[] }>(suggestUrl);
-  const elabHint = sugg.data?.suggestion.find((s) => s.role === 'elaborador');
-  const userOptions = useMemo(() => (users.data?.users ?? []).map((u) => ({ value: u.email, label: u.name ? `${u.name} (${u.email})` : u.email })), [users.data]);
 
   if (!company.canManage && !company.canQuality) {
     return (
@@ -81,7 +71,6 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         idProcess: requestType === 'nuevo' ? Number(idProcess) : undefined,
         idDocumentType: requestType === 'nuevo' ? Number(idDocumentType) : undefined,
         idDocument: requestType !== 'nuevo' ? Number(idDocument) : undefined,
-        elaboratorEmail: elaborator ?? undefined,
         formValues: values,
       });
       router.push(`/process/sgc-documental/solicitudes/${res.idRequest}?empresa=${id}`);
@@ -157,23 +146,6 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
           data-testid='sgc-nueva-asunto'
         />
         <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Justificación' required minRows={3} autosize value={description} onChange={(e) => setDescription(e.currentTarget.value)} data-testid='sgc-nueva-justificacion' />
-        <SgcSelect
-          label='Elaborador'
-          description='Quien crea el documento (Aseguramiento de Calidad). Confirma o reasigna los revisores, los aprobadores y la divulgación que usted sugiera.'
-          required
-          searchable
-          data={userOptions.filter((u) => u.value !== me)}
-          value={elaborator}
-          onChange={setElaborator}
-          data-testid='sgc-nueva-elaborador'
-        />
-        {elabHint && (elabHint.people.length > 0 || elabHint.cargos.length > 0) && (
-          <Alert color='blue' variant='light' icon={<IconBulb size={16} />} p='xs'>
-            <Text size='xs'>
-              La matriz sugiere como elaborador{elabHint.fromExample ? ' (datos de ejemplo)' : ''}: {[...elabHint.people, ...elabHint.cargos.map((c) => `cargo ${c}`)].join(', ')}.
-            </Text>
-          </Alert>
-        )}
         {(form.data?.fields ?? []).map((f) =>
           f.type === 'seleccion' || f.type === 'si_no' ? (
             <SgcSelect

@@ -41,7 +41,7 @@ import {
   sgcAssignmentPolicy,
   type SgcAssignerInput,
 } from '../flows/assignment';
-import { assertAssignmentComplete, confirmSuggestions, createRequest, decideTask, setSigners } from '../db/requests';
+import { assertAssignmentComplete, confirmSuggestions, createRequest, decideTask, reassignTask, setSigners } from '../db/requests';
 import { addScopeEntry, removeScopeEntry } from '../db/dissemination';
 import type { SgcCompanyAccess } from '../permissions';
 
@@ -318,24 +318,118 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
     expect(created(g, 'sgcDisseminationScope')[0].is_active).toBe(true);
   });
 
-  describe('createRequest', () => {
+  describe('createRequest · el elaborador sale de la configuración del proceso, nunca del solicitante (2026-10-05)', () => {
     const input = { idCompany: 1, requestType: 'nuevo', subject: 'Procedimiento nuevo', description: 'Justificación de la prueba.', idProcess: 5, idDocumentType: 6, formValues: { urgencia: 'Normal' } };
-    const createDb = (qualityCount = 1) =>
-      fakeDb({
-        subprocessUserCompany: { findMany: () => eligibleRows, count: () => qualityCount },
+    type MatrixRow = { role: string; process?: number | null; type?: number | null; email?: string | null; cargo?: string | null; example?: boolean; order?: number };
+    const matrixRow = (r: MatrixRow, i: number) => ({
+      id_responsible: i + 1, id_company: 1, role: r.role, id_process_map: r.process ?? null, id_document_type: r.type ?? null, user_email: r.email ?? null, cargo_name: r.cargo ?? null,
+      sort_order: r.order ?? 0, is_active: true, is_example: r.example ?? false, updated_by: 'x', updated_at: new Date(0),
+      process: r.process ? { code: 'GC', name: 'Gestión de calidad' } : null, documentType: r.type ? { code: 'PR', name: 'Procedimiento' } : null,
+    });
+    const createDb = (o: { matrix?: MatrixRow[]; quality?: string[]; load?: Record<string, number>; cargoMembers?: { id_cargo: number; user_email: string }[] } = {}) => {
+      let created: Record<string, unknown> = {};
+      const quality = o.quality ?? [ELAB, CAL];
+      return fakeDb({
+        subprocessUserCompany: {
+          findMany: (a) => {
+            const url = (a as { where: { subprocess: { subprocess_url: unknown } } }).where.subprocess.subprocess_url;
+            return typeof url === 'string' ? quality.map((email) => ({ companyUser: { user: { email } } })) : eligibleRows;
+          },
+        },
         sgcProcessMap: { findFirst: () => ({ id_process_map: 5 }) },
         sgcDocumentType: { findFirst: () => ({ id_document_type: 6 }) },
+        sgcResponsibleMatrix: { findMany: () => (o.matrix ?? []).map(matrixRow) },
+        cargo: { findMany: (a) => ((a as { where: { nombre_normalizado: { in: string[] } } }).where.nombre_normalizado.in.map((n, i) => ({ id_cargo: 40 + i, nombre_normalizado: n }))) },
+        sgcCargoMember: { findMany: () => o.cargoMembers ?? [] },
+        sgcRequest: {
+          groupBy: () => Object.entries(o.load ?? {}).map(([elaborator_email, n]) => ({ elaborator_email, _count: { _all: n } })),
+          create: (a) => ((created = (a as { data: Record<string, unknown> }).data), { id_request: 9 }),
+          findUniqueOrThrow: () => ({ ...created, id_request: 9, documentType: null, signing_modes_json: null }),
+        },
+        sgcFlowTaskDef: { findUnique: () => ({ id_flow_task_def: 2 }), findUniqueOrThrow: () => ({ id_flow_task_def: 1 }) },
       });
+    };
+    const createdData = (f: ReturnType<typeof fakeDb>, model: string) => f.calls.filter((c) => c.model === model && c.method === 'create').map((c) => (c.args as { data: Record<string, unknown> }).data);
+    const elaboratorOf = (f: ReturnType<typeof fakeDb>) => createdData(f, 'sgcRequest')[0]?.elaborator_email;
 
-    it('quien solicita no puede nombrarse elaborador (sería quien confirma sus propios firmantes)', async () => {
-      const f = createDb();
-      await expect(createRequest(f.db, notifier, access(true), { ...input, elaboratorEmail: SOL }, actor(SOL))).rejects.toThrow(/Elija como elaborador a quien crea el documento/);
-      await expect(createRequest(f.db, notifier, access(true), input, actor(SOL))).rejects.toThrow(/Elija como elaborador/);
-      expect(f.writes('sgcRequest')).toEqual([]);
+    it('[SGC-REQ-028] si la API recibe elaboratorEmail lo IGNORA: el elaborador sale de la matriz y el intento queda en la auditoría', async () => {
+      const f = createDb({ matrix: [{ role: 'elaborador', process: 5, type: 6, email: ELAB }] });
+      expect(await createRequest(f.db, notifier, access(true), { ...input, elaboratorEmail: REV }, actor(SOL))).toEqual({ idRequest: 9 });
+      expect(elaboratorOf(f)).toBe(ELAB);
+      const audit = JSON.stringify(createdData(f, 'sgcAuditLog'));
+      expect(audit).toMatch(/elaboratorRequestedIgnored[^,]*revisora@x\.co/);
+      expect(audit).toMatch(/"elaboratorSource\\?":\\?"matriz/);
+      expect(createdData(f, 'sgcTaskAssignee')[0]).toMatchObject({ user_email: ELAB });
     });
 
-    it('con la política por defecto, el elaborador debe tener el permiso de Calidad', async () => {
-      await expect(createRequest(createDb(0).db, notifier, access(true), { ...input, elaboratorEmail: ELAB }, actor(SOL))).rejects.toThrow(/no tiene el permiso de Aseguramiento de Calidad/);
+    it('el solicitante nunca queda como elaborador, aunque se envíe a sí mismo o la matriz lo nombre', async () => {
+      const f = createDb({ matrix: [{ role: 'elaborador', process: 5, email: SOL }], quality: [SOL, CAL] });
+      await createRequest(f.db, notifier, access(true), { ...input, elaboratorEmail: SOL }, actor(SOL));
+      expect(elaboratorOf(f)).toBe(CAL);
+      const note = createdData(f, 'sgcInteraction').find((i) => /Elaborador asignado/.test(String(i.body)))!;
+      expect(note.body).toMatch(/por respaldo: Aseguramiento de Calidad/);
+      expect(note.body).toMatch(/solicitante@x\.co \(es quien hace la solicitud\)/);
+    });
+
+    it('la fila más específica de la matriz gana (proceso × tipo sobre la general); las filas de ejemplo no asignan', async () => {
+      const f = createDb({ matrix: [{ role: 'elaborador', email: CAL }, { role: 'elaborador', process: 5, type: 6, email: ELAB }, { role: 'elaborador', process: 5, type: 6, email: APR, example: true }] });
+      await createRequest(f.db, notifier, access(true), input, actor(SOL));
+      expect(elaboratorOf(f)).toBe(ELAB);
+      expect(createdData(f, 'sgcInteraction').find((i) => /Elaborador asignado/.test(String(i.body)))!.body).toMatch(/según la matriz de responsables \(proceso GC × tipo PR\): juan\.mora@x\.co/);
+    });
+
+    it('fila por cargo: toma a las personas registradas en el cargo; entre varias, a la de menor carga', async () => {
+      const f = createDb({ matrix: [{ role: 'elaborador', process: 5, cargo: 'Analista de Aseguramiento de Calidad' }], cargoMembers: [{ id_cargo: 40, user_email: ELAB }, { id_cargo: 40, user_email: CAL }], load: { [ELAB]: 3, [CAL]: 1 } });
+      await createRequest(f.db, notifier, access(true), input, actor(SOL));
+      expect(elaboratorOf(f)).toBe(CAL);
+    });
+
+    it('sin matriz: respaldo en Aseguramiento de Calidad (menor carga, sin el solicitante); queda en el historial', async () => {
+      const f = createDb({ quality: [SOL, ELAB, CAL], load: { [CAL]: 2, [ELAB]: 0 } });
+      await createRequest(f.db, notifier, access(true), input, actor(SOL));
+      expect(elaboratorOf(f)).toBe(ELAB);
+      expect(JSON.stringify(createdData(f, 'sgcAuditLog'))).toMatch(/calidad/);
+    });
+
+    it('con tarea_y_calidad, una persona de la matriz sin permiso de Calidad no elabora (cae al respaldo)', async () => {
+      const f = createDb({ matrix: [{ role: 'elaborador', process: 5, email: REV }], quality: [CAL] });
+      await createRequest(f.db, notifier, access(true), input, actor(SOL));
+      expect(elaboratorOf(f)).toBe(CAL);
+      vi.stubEnv('SGC_ASIGNACION_PERMISO', 'tarea_o_calidad');
+      const g = createDb({ matrix: [{ role: 'elaborador', process: 5, email: REV }], quality: [CAL] });
+      await createRequest(g.db, notifier, access(true), input, actor(SOL));
+      expect(elaboratorOf(g)).toBe(REV);
+    });
+
+    it('si nadie distinto del solicitante puede elaborar, la solicitud no nace (409) y no se escribe nada', async () => {
+      const f = createDb({ quality: [SOL] });
+      await expect(createRequest(f.db, notifier, access(true), input, actor(SOL))).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/No hay quién elabore/) });
+      expect(f.writes('sgcRequest')).toEqual([]);
+    });
+  });
+
+  describe('reasignar la elaboración (mecanismo existente)', () => {
+    const elabTask = (assignment = 'elaborador') => ({ id_task: 4, id_request: 7, name: 'Elaboración', status: 'abierta', taskDef: { multi_assignee: false, assignment }, assignees: [{ id_task_assignee: 30, user_email: ELAB, status: 'pendiente', sign_order: 1, signature_status: 'pendiente', signature_meaning: 'elaboro' }] });
+    const reassignDb = (assignment?: string) =>
+      fakeDb({
+        sgcTask: { findUnique: () => ({ id_request: 7 }), findUniqueOrThrow: () => elabTask(assignment) },
+        sgcRequest: { findUniqueOrThrow: () => requestRow },
+        subprocessUserCompany: { findMany: () => eligibleRows },
+      });
+
+    it('el solicitante no reasigna la elaboración (ni con permiso de Calidad): 403', async () => {
+      const f = reassignDb();
+      await expect(reassignTask(f.db, notifier, access(true), 4, { toEmail: CAL, reason: 'Quiero a otra persona' }, actor(SOL))).rejects.toMatchObject({ status: 403 });
+      expect(f.writes('sgcTaskAssignee')).toEqual([]);
+    });
+
+    it('Calidad la redirige a otra persona con motivo (historial y auditoría), pero nunca al solicitante', async () => {
+      await expect(reassignTask(reassignDb().db, notifier, access(true), 4, { toEmail: SOL, reason: 'Que la haga quien pidió' }, actor(CAL))).rejects.toThrow(/no puede quedar como elaborador/);
+      const f = reassignDb();
+      await reassignTask(f.db, notifier, access(true), 4, { toEmail: APR, reason: 'Carga de trabajo' }, actor(CAL));
+      expect(f.calls.find((c) => c.model === 'sgcRequest' && c.method === 'update' && (c.args as { data: Record<string, unknown> }).data.elaborator_email)!.args).toMatchObject({ data: { elaborator_email: APR } });
+      expect(f.calls.filter((c) => c.model === 'sgcInteraction' && c.method === 'create').map((c) => (c.args as { data: { body: string } }).data.body).join('\n')).toMatch(/Reasignó «Elaboración» de juan\.mora@x\.co a aprobadora@x\.co/);
+      expect(f.calls.some((c) => c.model === 'sgcAuditLog' && c.method === 'create')).toBe(true);
     });
   });
 });
