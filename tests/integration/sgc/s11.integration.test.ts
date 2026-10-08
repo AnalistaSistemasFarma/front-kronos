@@ -169,7 +169,9 @@ describe.skipIf(!url)('SGC · Sprint 11 con SQL Server', () => {
     // Un documento que cambia de versión deja sin efecto la copia de la versión anterior.
     await prisma.sgcDocument.update({ where: { id_document: fo }, data: { status: 'obsoleto' } });
     await expect(consumeUncontrolledCopy(prisma, t.idCopyRequest, 'impresion', actor(E.ana))).rejects.toMatchObject({ status: 409 });
-    await expect(requestUncontrolledCopy(prisma, notifier, ana, await subjectOf(E.ana), { idDocument: fo, justification: 'Copia de un formato obsoleto', destination: 'interno' }, actor(E.ana))).rejects.toThrow(/VIGENTE/);
+    // Quien solo consulta ya no ve el formato obsoleto (404); Calidad sí lo ve, pero tampoco pide copia (solo de un VIGENTE).
+    await expect(requestUncontrolledCopy(prisma, notifier, ana, await subjectOf(E.ana), { idDocument: fo, justification: 'Copia de un formato obsoleto', destination: 'interno' }, actor(E.ana))).rejects.toMatchObject({ status: 404 });
+    await expect(requestUncontrolledCopy(prisma, notifier, await accessOf(E.cal), await subjectOf(E.cal), { idDocument: fo, justification: 'Copia de un formato obsoleto', destination: 'interno' }, actor(E.cal))).rejects.toThrow(/VIGENTE/);
     await prisma.sgcDocument.update({ where: { id_document: fo }, data: { status: 'vigente' } });
     // Rechazada: no se imprime.
     const otroCopy = await requestUncontrolledCopy(prisma, notifier, await accessOf(E.otro), await subjectOf(E.otro), { idDocument: fo, justification: 'Copia para la reunión con el proveedor', destination: 'interno' }, actor(E.otro));
