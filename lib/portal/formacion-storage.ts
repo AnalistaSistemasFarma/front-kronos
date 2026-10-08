@@ -359,6 +359,122 @@ export async function subirArchivoFormacion(
   throw new FormacionStorageError('La subida terminó sin que Graph confirmara el archivo.');
 }
 
+/* ───────────── Subida DIRECTA del navegador (sin tope de tamaño) ─────────────
+ * Pedido de Cristian Baldión (2026-10-08): "quita ese límite de peso en los
+ * archivos, recuerda que todo queda en el sitio de Talento Humano".
+ *
+ * Para que un video de cientos de MB no pase por Next ni por IIS/ARR (que en
+ * producción corta en ~30 MB y tiene timeouts), el servidor solo ABRE una
+ * upload session de Graph en la ruta correcta y le entrega al navegador la
+ * `uploadUrl`. Esa URL ya viene preautorizada por Graph, es temporal y sirve
+ * SOLO para ese archivo: el token de la app nunca sale del servidor. El
+ * navegador sube por trozos (`lib/portal/subida-por-trozos.ts`) y, al
+ * terminar, el servidor comprueba el archivo resultante con
+ * `obtenerArchivoSubidoEnCarpeta` antes de registrarlo.
+ */
+
+export interface SesionSubida {
+  /** URL preautorizada de Graph para subir los trozos. Sin Bearer. */
+  uploadUrl: string;
+  /** Hasta cuándo vale la sesión (ISO), si Graph lo informa. */
+  expiracion: string | null;
+  /** Nombre (ya saneado) con el que se pidió el archivo. */
+  nombre: string;
+}
+
+/**
+ * Abre una upload session en `FORMACION/<curso>/<subcarpeta>/<nombre>` con
+ * `conflictBehavior=rename` (si ya existe uno con ese nombre, SharePoint le
+ * agrega " 1", " 2"… en vez de pisarlo). Devuelve SOLO lo que el navegador
+ * necesita.
+ */
+export async function crearSesionSubida(
+  params: { carpetaCurso: string; subcarpeta: SubcarpetaFormacion; nombreArchivo: string },
+  deps: { config?: ConfigFormacionSharePoint; fetch?: Fetch } = {}
+): Promise<SesionSubida> {
+  const cfg = deps.config ?? leerConfigFormacion();
+  const f = deps.fetch ?? fetch;
+  const nombre = nombreArchivoSeguro(params.nombreArchivo);
+  const ruta = rutaDentroDeFormacion(cfg.carpetaBase, params.carpetaCurso, params.subcarpeta, nombre);
+  const token = await obtenerToken(cfg, f);
+  const res = await f(
+    `${GRAPH}/sites/${encodeURIComponent(cfg.siteId)}/drive/root:/${codificarRuta(ruta)}:/createUploadSession`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } }),
+    }
+  );
+  const datos = (await res.json().catch(() => null)) as { uploadUrl?: string; expirationDateTime?: string } | null;
+  if (!res.ok || !datos?.uploadUrl) {
+    throw new FormacionStorageError(`No se pudo abrir la sesión de subida (${res.status}).`, res.status);
+  }
+  // Defensa: la URL que se le entrega al navegador tiene que ser https.
+  if (!/^https:\/\//i.test(datos.uploadUrl)) {
+    throw new FormacionStorageError('Graph devolvió una URL de subida no válida.');
+  }
+  return { uploadUrl: datos.uploadUrl, expiracion: datos.expirationDateTime ?? null, nombre };
+}
+
+/** El driveItem que se quiere registrar no está en la carpeta del curso. */
+export class ArchivoFueraDeCarpeta extends FormacionStorageError {
+  constructor() {
+    super('El archivo no está en la carpeta del curso.', 403);
+    this.name = 'ArchivoFueraDeCarpeta';
+  }
+}
+
+interface DriveItemConPadre extends DriveItemGraph {
+  parentReference?: { path?: string };
+}
+
+/** `/drives/x/root:/FORMACION/a%20b/materiales` → `FORMACION/a b/materiales`. */
+function rutaDelPadre(path: string | undefined): string | null {
+  const m = /root:(.*)$/.exec(path ?? '');
+  if (!m) return null;
+  let ruta = m[1];
+  try {
+    ruta = decodeURIComponent(ruta);
+  } catch {
+    // Graph ya la entregó decodificada.
+  }
+  return ruta.replace(/^\/+|\/+$/g, '');
+}
+
+/**
+ * Lee el archivo que el navegador acaba de subir y COMPRUEBA que esté justo
+ * en `FORMACION/<curso>/<subcarpeta>` y sea un archivo (no una carpeta). Así
+ * nadie puede registrar como material un driveItemId de otra carpeta del
+ * sitio. Lanza `FormacionStorageError` si no cumple.
+ */
+export async function obtenerArchivoSubidoEnCarpeta(
+  params: { driveItemId: string; carpetaCurso: string; subcarpeta: SubcarpetaFormacion; mime: string },
+  deps: { config?: ConfigFormacionSharePoint; fetch?: Fetch } = {}
+): Promise<ArchivoEnSharePoint> {
+  if (!/^[A-Za-z0-9!._-]{1,200}$/.test(params.driveItemId)) throw new FormacionStorageError('Id de archivo no válido.');
+  const cfg = deps.config ?? leerConfigFormacion();
+  const f = deps.fetch ?? fetch;
+  const esperada = [cfg.carpetaBase, params.carpetaCurso, params.subcarpeta];
+  for (const s of esperada) {
+    if (!esSegmentoValido(s)) throw new Error(`Segmento de ruta no válido: "${s}"`);
+  }
+  const token = await obtenerToken(cfg, f);
+  const res = await f(
+    `${GRAPH}/sites/${encodeURIComponent(cfg.siteId)}/drive/items/${encodeURIComponent(params.driveItemId)}` +
+      '?$select=id,name,size,webUrl,file,parentReference',
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) throw new FormacionStorageError(`Graph no encontró el archivo subido (${res.status}).`, res.status);
+  const item = (await res.json()) as DriveItemConPadre;
+  if (!item.file) throw new FormacionStorageError('El elemento subido no es un archivo.');
+  const padre = rutaDelPadre(item.parentReference?.path);
+  if (!padre || padre.toLowerCase() !== esperada.join('/').toLowerCase()) {
+    throw new ArchivoFueraDeCarpeta();
+  }
+  if (!item.size || item.size <= 0) throw new FormacionStorageError('El archivo subido está vacío.');
+  return aReferencia(item, params.mime, item.size);
+}
+
 /**
  * Descarga un archivo por su driveItemId para servirlo por el portal (proxy):
  * el navegador nunca ve una URL de SharePoint.

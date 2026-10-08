@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { leerJson } from './PortalContenido';
+import {
+  SubidaCancelada,
+  formatearBytes,
+  subirMaterialDirecto,
+  type ArchivoSubidoAlCurso,
+} from '../../lib/portal/subida-por-trozos';
 
 /**
  * FORMACIÓN — sección "tipo Moodle" al final del portal de Talento Humano.
@@ -149,6 +155,31 @@ function BarraProgreso({ porcentaje }: { porcentaje: number }) {
     <div className='portal-th__curso-progreso' role='progressbar' aria-valuenow={porcentaje} aria-valuemin={0} aria-valuemax={100}>
       <div className='portal-th__curso-progreso-barra' style={{ width: `${Math.min(100, Math.max(0, porcentaje))}%` }} />
       <span>{porcentaje}%</span>
+    </div>
+  );
+}
+
+/** Avance de una subida directa a SharePoint, con botón para cancelar. */
+interface EstadoSubida {
+  nombre: string;
+  subidos: number;
+  total: number;
+}
+
+function ProgresoSubida({ subida, onCancelar }: { subida: EstadoSubida; onCancelar: () => void }) {
+  const porcentaje = subida.total > 0 ? Math.floor((subida.subidos / subida.total) * 100) : 0;
+  return (
+    <div className='portal-th__subida' role='status' aria-live='polite' data-testid='progreso-subida'>
+      <div className='portal-th__subida-texto'>
+        <strong>Subiendo a SharePoint:</strong> {subida.nombre}
+        <span>
+          {formatearBytes(subida.subidos)} de {formatearBytes(subida.total)} ({porcentaje}%)
+        </span>
+      </div>
+      <BarraProgreso porcentaje={porcentaje} />
+      <button type='button' className='portal-th__boton-secundario' onClick={onCancelar}>
+        Cancelar subida
+      </button>
     </div>
   );
 }
@@ -399,6 +430,40 @@ function VistaCursoFormador({
     void cargar();
   }, [cargar]);
 
+  // ── Subida DIRECTA a SharePoint (sin tope de peso; Cristian, 2026-10-08) ──
+  // El archivo va del navegador a la carpeta FORMACION por trozos; el
+  // servidor solo abre la sesión y después registra el material.
+  const [subida, setSubida] = useState<EstadoSubida | null>(null);
+  const cancelarSubidaRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!subida) return;
+    // Cerrar la pestaña a mitad de un video de 500 MB lo deja a medias.
+    const alSalir = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', alSalir);
+    return () => window.removeEventListener('beforeunload', alSalir);
+  }, [subida]);
+
+  const subirDirecto = async (archivo: File): Promise<ArchivoSubidoAlCurso> => {
+    const control = new AbortController();
+    cancelarSubidaRef.current = control;
+    setSubida({ nombre: archivo.name, subidos: 0, total: archivo.size });
+    try {
+      return await subirMaterialDirecto(cursoId, archivo, {
+        signal: control.signal,
+        onProgreso: (subidos, total) => setSubida({ nombre: archivo.name, subidos, total }),
+      });
+    } finally {
+      cancelarSubidaRef.current = null;
+      setSubida(null);
+    }
+  };
+
+  const mensajeDeSubida = (e: unknown, porDefecto: string) =>
+    e instanceof SubidaCancelada ? 'Subida cancelada. No se agregó nada al curso.' : (e as Error)?.message || porDefecto;
+
   const [tipoNuevo, setTipoNuevo] = useState<'DOCUMENT' | 'LINK'>('DOCUMENT');
   const [tituloNuevo, setTituloNuevo] = useState('');
   const [urlNueva, setUrlNueva] = useState('');
@@ -414,14 +479,19 @@ function VistaCursoFormador({
     setSubiendo(true);
     setErrorAccion(null);
     try {
-      const form = new FormData();
-      form.append('type', tipoNuevo);
-      form.append('title', tituloNuevo);
-      form.append('required', String(obligatorioNuevo));
-      if (tipoNuevo === 'LINK') form.append('url', urlNueva);
-      else if (archivoNuevo) form.append('file', archivoNuevo);
+      const cuerpo: Record<string, unknown> = {
+        type: tipoNuevo,
+        title: tituloNuevo,
+        required: String(obligatorioNuevo),
+      };
+      if (tipoNuevo === 'LINK') cuerpo.url = urlNueva;
+      else if (archivoNuevo) Object.assign(cuerpo, await subirDirecto(archivoNuevo));
 
-      const res = await fetch(`/api/portal/courses/${cursoId}/materials`, { method: 'POST', body: form });
+      const res = await fetch(`/api/portal/courses/${cursoId}/materials`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cuerpo),
+      });
       const data = await leerJson(res);
       if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo agregar el material.'));
 
@@ -431,7 +501,7 @@ function VistaCursoFormador({
       setObligatorioNuevo(true);
       await cargar();
     } catch (e) {
-      setErrorAccion((e as Error).message);
+      setErrorAccion(mensajeDeSubida(e, 'No se pudo agregar el material.'));
     } finally {
       setSubiendo(false);
     }
@@ -478,17 +548,17 @@ function VistaCursoFormador({
   const reemplazarArchivo = async (materialId: number, archivo: File): Promise<boolean> => {
     setErrorAccion(null);
     try {
-      const form = new FormData();
-      form.append('file', archivo);
+      const subido = await subirDirecto(archivo);
       const res = await fetch(`/api/portal/courses/${cursoId}/materials/${materialId}/file`, {
         method: 'PUT',
-        body: form,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(subido),
       });
       const data = await leerJson(res);
       if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo reemplazar el archivo.'));
       return true;
     } catch (e) {
-      setErrorAccion((e as Error).message);
+      setErrorAccion(mensajeDeSubida(e, 'No se pudo reemplazar el archivo.'));
       return false;
     }
   };
@@ -563,6 +633,7 @@ function VistaCursoFormador({
           {errorAccion}
         </p>
       )}
+      {subida && <ProgresoSubida subida={subida} onCancelar={() => cancelarSubidaRef.current?.abort()} />}
       {editandoCurso ? (
         <div className='portal-th__formacion-crear portal-th__formacion-editar'>
           <input
@@ -671,7 +742,7 @@ function VistaCursoFormador({
           Obligatorio para completar el curso
         </label>
         <button type='button' onClick={() => void agregarMaterial()} disabled={subiendo}>
-          {subiendo ? 'Agregando…' : '+ Agregar material'}
+          {subiendo ? (subida ? 'Subiendo…' : 'Agregando…') : '+ Agregar material'}
         </button>
       </div>
 
