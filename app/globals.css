@@ -1836,45 +1836,173 @@ html[data-mantine-color-scheme='dark'] .chat-bubble--user .chat-cita--burbuja {
   color: var(--app-text-muted, #64748b);
 }
 
-.chat-typing {
+/* ── Logo de SynerLink "pensando" (components/chat/LogoPensando.tsx) ──
+   Reemplaza los tres puntitos (Nicolás, 2026-10-08). Colores de marca de
+   Logo_Principal.svg; en oscuro la marca va casi blanca como
+   Logo_Principal_Blanco.svg. Solo transform/opacity: no hay relayout, y la
+   caja es fija (el margen negativo deja el renglón con el alto del avatar). */
+.sl-pensando {
+  --sl-pensando-marca: #2d2e82;
+  --sl-pensando-acento: #1d70b7;
+  --sl-pensando-halo: rgba(29, 112, 183, 0.28);
+  --sl-pensando-pista: rgba(45, 46, 130, 0.1);
+  --sl-pensando-ritmo: 2.4s;
+  --sl-pensando-giro: 1.6s;
+  /* arco + hueco = 100 (pathLength del círculo). */
+  --sl-pensando-arco: 30;
+  --sl-pensando-hueco: 70;
+
   display: inline-flex;
-  gap: 3px;
-  align-items: center;
+  flex: none;
+  width: var(--sl-pensando-size, 28px);
+  height: var(--sl-pensando-size, 28px);
+  margin-block: -2px;
+  contain: layout paint;
 }
 
-.chat-typing i {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background-color: var(--app-accent, #2563eb);
-  animation: chat-typing-bounce 1.1s infinite ease-in-out;
+html[data-mantine-color-scheme='dark'] .sl-pensando {
+  --sl-pensando-marca: #eef3ff;
+  --sl-pensando-acento: #4ea3e6;
+  --sl-pensando-halo: rgba(78, 163, 230, 0.32);
+  --sl-pensando-pista: rgba(238, 243, 255, 0.12);
 }
 
-.chat-typing i:nth-child(2) {
-  animation-delay: 0.15s;
+.sl-pensando[data-variante='tool'] {
+  --sl-pensando-giro: 1s;
+  --sl-pensando-arco: 45;
+  --sl-pensando-hueco: 55;
 }
 
-.chat-typing i:nth-child(3) {
-  animation-delay: 0.3s;
+.sl-pensando svg {
+  overflow: visible;
 }
 
-@keyframes chat-typing-bounce {
-  0%,
-  60%,
-  100% {
-    transform: translateY(0);
-    opacity: 0.45;
+.sl-pensando__stop-marca {
+  stop-color: var(--sl-pensando-marca);
+}
+
+.sl-pensando__stop-acento {
+  stop-color: var(--sl-pensando-acento);
+}
+
+.sl-pensando__stop-cola {
+  stop-color: var(--sl-pensando-acento);
+  stop-opacity: 0;
+}
+
+.sl-pensando__halo-centro {
+  stop-color: var(--sl-pensando-halo);
+}
+
+.sl-pensando__halo-borde {
+  stop-color: var(--sl-pensando-halo);
+  stop-opacity: 0;
+}
+
+.sl-pensando__pista {
+  fill: none;
+  stroke: var(--sl-pensando-pista);
+  stroke-width: 5;
+}
+
+.sl-pensando__arco {
+  fill: none;
+  stroke-width: 6;
+  stroke-linecap: round;
+  /* pathLength=100: el arco termina justo en el satélite (las 3 en punto). */
+  stroke-dasharray: var(--sl-pensando-arco) var(--sl-pensando-hueco);
+  stroke-dashoffset: var(--sl-pensando-arco);
+  transition: stroke-dasharray 300ms ease, stroke-dashoffset 300ms ease;
+}
+
+.sl-pensando__satelite {
+  fill: var(--sl-pensando-acento);
+}
+
+.sl-pensando__marca-base {
+  fill: var(--sl-pensando-marca);
+}
+
+.sl-pensando__acento {
+  fill: var(--sl-pensando-acento);
+}
+
+.sl-pensando__orbita,
+.sl-pensando__marca,
+.sl-pensando__halo {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+}
+
+.sl-pensando__orbita {
+  animation: sl-pensando-giro var(--sl-pensando-giro) linear infinite;
+}
+
+.sl-pensando__marca {
+  animation: sl-pensando-respira var(--sl-pensando-ritmo) ease-in-out infinite;
+}
+
+.sl-pensando__halo {
+  animation: sl-pensando-halo var(--sl-pensando-ritmo) ease-in-out infinite;
+}
+
+.sl-pensando__acento {
+  animation: sl-pensando-chispa var(--sl-pensando-ritmo) ease-in-out infinite;
+}
+
+.sl-pensando__acento--bajo {
+  animation-delay: calc(var(--sl-pensando-ritmo) / -2);
+}
+
+@keyframes sl-pensando-giro {
+  to {
+    transform: rotate(360deg);
   }
-  30% {
-    transform: translateY(-4px);
+}
+
+@keyframes sl-pensando-respira {
+  0%,
+  100% {
+    transform: scale(0.9);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+@keyframes sl-pensando-halo {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes sl-pensando-chispa {
+  0%,
+  100% {
     opacity: 1;
   }
+  50% {
+    opacity: 0.45;
+  }
 }
 
+/* Sin movimiento: logo quieto con su arco fijo y el halo encendido. */
 @media (prefers-reduced-motion: reduce) {
-  .chat-typing i {
+  .sl-pensando__orbita,
+  .sl-pensando__marca,
+  .sl-pensando__halo,
+  .sl-pensando__acento {
     animation: none;
-    opacity: 0.8;
+  }
+
+  .sl-pensando__halo {
+    opacity: 0.6;
   }
 }
 
