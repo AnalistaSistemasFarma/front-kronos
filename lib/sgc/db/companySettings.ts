@@ -36,7 +36,7 @@ export async function isHeaderMandatory(db: Pick<SgcDb, 'sgcCompanyConfig'>, idC
  */
 export async function isViewerProtected(db: Pick<SgcDb, 'sgcCompanyConfig'>, idCompany: number | null | undefined): Promise<boolean> {
   if (!idCompany) return true;
-  const c = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { viewer_protection: true } });
+  const c = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { viewer_protection: true, approver_list_enforced: true } });
   return c?.viewer_protection ?? true;
 }
 
@@ -55,12 +55,14 @@ export interface SgcCompanySettings {
   /** Sprint 11: copias no controladas (tipos, días por defecto y máximo) y protección del visor. */
   uncontrolledCopies: { types: string[]; days: number; maxDays: number };
   viewerProtection: boolean;
+  /** Sprint 12: lista de aprobadores autorizados activa (aplica cuando hay al menos uno registrado). */
+  approverListEnforced: boolean;
 }
 
 export async function getCompanySettings(db: SgcDb, idCompany: number): Promise<SgcCompanySettings> {
   const c = await db.sgcCompanyConfig.findUnique({
     where: { id_company: idCompany },
-    select: { logo_data_url: true, dissemination_domains: true, read_threshold_pct: true, header_mandatory: true, initial_load_open: true, initial_load_closed_by: true, initial_load_closed_at: true, initial_load_close_reason: true, email_mode: true, uncontrolled_copy_types: true, uncontrolled_copy_days: true, uncontrolled_copy_max_days: true, viewer_protection: true },
+    select: { logo_data_url: true, dissemination_domains: true, read_threshold_pct: true, header_mandatory: true, initial_load_open: true, initial_load_closed_by: true, initial_load_closed_at: true, initial_load_close_reason: true, email_mode: true, uncontrolled_copy_types: true, uncontrolled_copy_days: true, uncontrolled_copy_max_days: true, viewer_protection: true, approver_list_enforced: true },
   });
   if (!c) throw new SgcError('La empresa no tiene el SGC activo.', 404);
   return {
@@ -74,6 +76,7 @@ export async function getCompanySettings(db: SgcDb, idCompany: number): Promise<
     emailMode: c.email_mode,
     uncontrolledCopies: copyConfigOf(c),
     viewerProtection: c.viewer_protection,
+    approverListEnforced: c.approver_list_enforced,
   };
 }
 
@@ -83,12 +86,12 @@ function logoSummary(dataUrl: string | null): { bytes: number; sha256: string } 
   return { bytes: d.bytes.length, sha256: sha256HexOf(d.bytes) };
 }
 
-export async function saveCompanySettings(db: SgcDb, idCompany: number, input: { logoDataUrl?: unknown; removeLogo?: unknown; disseminationDomains?: unknown; readThresholdPct?: unknown; emailMode?: unknown; uncontrolledCopyTypes?: unknown; uncontrolledCopyDays?: unknown; uncontrolledCopyMaxDays?: unknown; viewerProtection?: unknown; reason?: unknown }, actor: SgcActor): Promise<SgcCompanySettings> {
+export async function saveCompanySettings(db: SgcDb, idCompany: number, input: { logoDataUrl?: unknown; removeLogo?: unknown; disseminationDomains?: unknown; readThresholdPct?: unknown; emailMode?: unknown; uncontrolledCopyTypes?: unknown; uncontrolledCopyDays?: unknown; uncontrolledCopyMaxDays?: unknown; viewerProtection?: unknown; approverListEnforced?: unknown; reason?: unknown }, actor: SgcActor): Promise<SgcCompanySettings> {
   const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
   if (reason.length < 10) throw new SgcError('Explique el motivo del cambio (mínimo 10 caracteres): queda en el control de cambios.');
-  const current = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { logo_data_url: true, dissemination_domains: true, read_threshold_pct: true, email_mode: true, uncontrolled_copy_types: true, uncontrolled_copy_days: true, uncontrolled_copy_max_days: true, viewer_protection: true } });
+  const current = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { logo_data_url: true, dissemination_domains: true, read_threshold_pct: true, email_mode: true, uncontrolled_copy_types: true, uncontrolled_copy_days: true, uncontrolled_copy_max_days: true, viewer_protection: true, approver_list_enforced: true } });
   if (!current) throw new SgcError('La empresa no tiene el SGC activo.', 404);
-  const data: { logo_data_url?: string | null; dissemination_domains?: string | null; read_threshold_pct?: number; email_mode?: string; uncontrolled_copy_types?: string; uncontrolled_copy_days?: number; uncontrolled_copy_max_days?: number; viewer_protection?: boolean } = {};
+  const data: { logo_data_url?: string | null; dissemination_domains?: string | null; read_threshold_pct?: number; email_mode?: string; uncontrolled_copy_types?: string; uncontrolled_copy_days?: number; uncontrolled_copy_max_days?: number; viewer_protection?: boolean; approver_list_enforced?: boolean } = {};
   if (input.removeLogo === true) data.logo_data_url = null;
   else if (input.logoDataUrl !== undefined) {
     const err = getLogoDataUrlError(input.logoDataUrl);
@@ -128,6 +131,7 @@ export async function saveCompanySettings(db: SgcDb, idCompany: number, input: {
   if (days !== current.uncontrolled_copy_days) data.uncontrolled_copy_days = days;
   if (maxDays !== current.uncontrolled_copy_max_days) data.uncontrolled_copy_max_days = maxDays;
   if (typeof input.viewerProtection === 'boolean' && input.viewerProtection !== current.viewer_protection) data.viewer_protection = input.viewerProtection;
+  if (typeof input.approverListEnforced === 'boolean' && input.approverListEnforced !== current.approver_list_enforced) data.approver_list_enforced = input.approverListEnforced;
   if (Object.keys(data).length === 0) throw new SgcError('No hay cambios para guardar.');
   await db.$transaction(async (tx) => {
     await tx.sgcCompanyConfig.update({ where: { id_company: idCompany }, data: { ...data, updated_at: new Date() } });
@@ -137,7 +141,7 @@ export async function saveCompanySettings(db: SgcDb, idCompany: number, input: {
       action: SGC_AUDIT_ACTIONS.empresaConfigurada,
       entity: 'company_config',
       entityId: idCompany,
-      before: { logo: logoSummary(current.logo_data_url), disseminationDomains: current.dissemination_domains, readThresholdPct: current.read_threshold_pct, emailMode: current.email_mode, uncontrolledCopies: { types: current.uncontrolled_copy_types, days: current.uncontrolled_copy_days, maxDays: current.uncontrolled_copy_max_days }, viewerProtection: current.viewer_protection },
+      before: { logo: logoSummary(current.logo_data_url), disseminationDomains: current.dissemination_domains, readThresholdPct: current.read_threshold_pct, emailMode: current.email_mode, uncontrolledCopies: { types: current.uncontrolled_copy_types, days: current.uncontrolled_copy_days, maxDays: current.uncontrolled_copy_max_days }, viewerProtection: current.viewer_protection, approverListEnforced: current.approver_list_enforced },
       after: {
         logo: 'logo_data_url' in data ? logoSummary(data.logo_data_url ?? null) : logoSummary(current.logo_data_url),
         disseminationDomains: 'dissemination_domains' in data ? data.dissemination_domains : current.dissemination_domains,
@@ -145,6 +149,7 @@ export async function saveCompanySettings(db: SgcDb, idCompany: number, input: {
         emailMode: data.email_mode ?? current.email_mode,
         uncontrolledCopies: { types: data.uncontrolled_copy_types ?? current.uncontrolled_copy_types, days, maxDays },
         viewerProtection: data.viewer_protection ?? current.viewer_protection,
+        approverListEnforced: data.approver_list_enforced ?? current.approver_list_enforced,
       },
       detail: reason.slice(0, 1000),
       ip: actor.ip,
