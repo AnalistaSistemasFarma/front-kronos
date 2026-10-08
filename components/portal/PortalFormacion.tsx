@@ -8,6 +8,14 @@ import {
   subirMaterialDirecto,
   type ArchivoSubidoAlCurso,
 } from '../../lib/portal/subida-por-trozos';
+import {
+  contadorVideo,
+  posicionPermitida,
+  progresoLectura,
+  reloj,
+  segundosQueSuman,
+  videoCompleto,
+} from '../../lib/portal/visor-revision';
 
 /**
  * FORMACIÓN — sección "tipo Moodle" al final del portal de Talento Humano.
@@ -368,8 +376,8 @@ function VistaCursoEstudiante({
       </ul>
       {!puedeMarcar && detalle.materiales.length > 0 && (
         <p className='portal-th__estado'>
-          Las casillas se marcan automáticamente cuando revisa cada material: los videos hasta el final y los documentos
-          abiertos aquí durante el tiempo indicado.
+          Las casillas se marcan automáticamente cuando revisa cada material: los videos hasta el final, los PDF hasta la
+          última página y los demás documentos y enlaces al abrirlos.
         </p>
       )}
 
@@ -415,24 +423,25 @@ interface ReglaRevision {
   tipo: 'video' | 'pdf' | 'imagen' | 'documento' | 'enlace';
   segundosMinimos: number;
   fraccionVideo: number;
-}
-
-function mmss(segundos: number): string {
-  const s = Math.max(0, Math.floor(segundos));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  paginas?: number | null;
 }
 
 /**
- * Abre un material DENTRO del portal y mide la revisión (Cristian,
- * 2026-10-08). El servidor registra la apertura; aquí se cuenta lo que se ve
- * y, al cumplir la regla, se reporta. Es el servidor quien marca.
+ * Abre un material DENTRO del portal, en la ventana de vista previa, y mide la
+ * revisión (Cristian, 2026-10-08). El servidor registra la apertura; aquí se
+ * mide lo que se ve y, al cumplir la regla, se reporta. Es el servidor quien
+ * marca.
  *
- * - Video: solo suma el tiempo reproducido de verdad; no deja adelantar más
- *   allá de lo ya visto y fija la velocidad en 1×. Se marca al 90 % visto.
- * - PDF, imagen, Word/Excel/PowerPoint: SIN tiempo mínimo (ajuste de
- *   Cristian, 2026-10-08): el servidor los marca al registrar la apertura y la
- *   persona cierra cuando quiera. Si por entorno se configurara un mínimo > 0,
- *   el tiempo corre con la ventana abierta y se reporta al cumplirlo.
+ * - Video: sin la barra nativa (no hay cómo saltar), velocidad fija en 1× y
+ *   un contador "visto / duración" que solo corre mientras el video se
+ *   reproduce de verdad (no en pausa, no con la pestaña oculta: al ocultarla
+ *   se pausa). Se puede retroceder 10 s, no adelantar. Se marca al llegar al
+ *   100 %.
+ * - PDF: una página a la vez con "Página anterior" / "Página siguiente" y una
+ *   barra de lectura (página máxima alcanzada entre el total). Se marca al
+ *   llegar a la última página; el de una sola página, al abrirlo.
+ * - Imagen y Word/Excel/PowerPoint: sin tiempo mínimo, el servidor los marca
+ *   al registrar la apertura y la persona cierra cuando quiera.
  */
 function VisorMaterial({
   cursoId,
@@ -453,7 +462,10 @@ function VisorMaterial({
   const [aviso, setAviso] = useState<string | null>(null);
   const [segundos, setSegundos] = useState(0);
   const [duracion, setDuracion] = useState(0);
+  const [reproduciendo, setReproduciendo] = useState(false);
+  const [pdf, setPdf] = useState<{ pagina: number; maxima: number; total: number }>({ pagina: 1, maxima: 1, total: 0 });
   const reportado = useRef(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const video = useRef({ maximo: 0, acumulado: 0, ultimo: 0 });
 
   useEffect(() => {
@@ -468,7 +480,7 @@ function VisorMaterial({
         setRegla(data.regla as unknown as ReglaRevision);
         if (data.completado === true) {
           setCompletado(true);
-          // Documento sin tiempo mínimo: quedó marcado al abrirlo.
+          // Quedó marcado al abrirlo (imagen, Office, PDF de una página).
           if (material.completadoEl === null) await onCompletado();
         }
       } catch (e) {
@@ -490,14 +502,14 @@ function VisorMaterial({
   }, [onCerrar]);
 
   const reportar = useCallback(
-    async (segundosVistos: number, duracionVideo?: number) => {
+    async (cuerpo: { segundosVistos: number; duracion?: number; paginaMaxima?: number; paginasTotales?: number }) => {
       if (!token || reportado.current) return;
       reportado.current = true;
       try {
         const res = await fetch(`/api/portal/materials/${material.id}/vista/${token}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ segundosVistos, duracion: duracionVideo ?? null }),
+          body: JSON.stringify({ duracion: null, ...cuerpo }),
         });
         const data = await leerJson(res);
         if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo registrar la revisión.'));
@@ -505,7 +517,7 @@ function VisorMaterial({
         setAviso(null);
         await onCompletado();
       } catch (e) {
-        // Se puede volver a intentar con la misma apertura (p. ej. si faltó tiempo).
+        // Se puede volver a intentar con la misma apertura.
         reportado.current = false;
         setAviso((e as Error).message);
       }
@@ -513,51 +525,88 @@ function VisorMaterial({
     [material.id, token, onCompletado]
   );
 
-  // Documentos: cuenta el tiempo con la ventana abierta.
-  const esDocumento = regla !== null && regla.tipo !== 'video' && regla.tipo !== 'enlace';
+  // Imagen y Office con un mínimo configurado por entorno (por defecto no hay):
+  // cuenta el tiempo con la ventana abierta.
+  const conTiempo =
+    regla !== null && (regla.tipo === 'imagen' || regla.tipo === 'documento') && regla.segundosMinimos > 0;
   useEffect(() => {
-    if (!esDocumento || completado || !regla) return;
-    const exigeVisible = regla.tipo !== 'documento';
-    const reloj = window.setInterval(() => {
-      if (exigeVisible && document.visibilityState !== 'visible') return;
-      setSegundos((s) => s + 1);
-    }, 1000);
+    if (!conTiempo || completado) return;
+    const reloj = window.setInterval(() => setSegundos((s) => s + 1), 1000);
     return () => window.clearInterval(reloj);
-  }, [esDocumento, completado, regla]);
-
+  }, [conTiempo, completado]);
   useEffect(() => {
-    if (esDocumento && !completado && regla && segundos >= regla.segundosMinimos) void reportar(segundos);
-  }, [esDocumento, completado, regla, segundos, reportar]);
+    if (conTiempo && !completado && regla && segundos >= regla.segundosMinimos) void reportar({ segundosVistos: segundos });
+  }, [conTiempo, completado, regla, segundos, reportar]);
 
-  // Video: solo cuenta lo reproducido de verdad.
+  // Video: con la pestaña oculta se pausa (el contador tampoco corre).
+  useEffect(() => {
+    const alCambiarVisibilidad = () => {
+      if (document.visibilityState !== 'visible') videoRef.current?.pause();
+    };
+    document.addEventListener('visibilitychange', alCambiarVisibilidad);
+    return () => document.removeEventListener('visibilitychange', alCambiarVisibilidad);
+  }, []);
+
   const alAvanzarVideo = (v: HTMLVideoElement) => {
     const estado = video.current;
-    const delta = v.currentTime - estado.ultimo;
-    if (delta > 0 && delta <= 1.5 && v.playbackRate === 1) estado.acumulado += delta;
-    if (v.currentTime > estado.maximo) estado.maximo = v.currentTime;
+    estado.acumulado += segundosQueSuman(v.currentTime - estado.ultimo, {
+      velocidad: v.playbackRate,
+      visible: document.visibilityState === 'visible',
+      pausado: v.paused && !v.ended,
+    });
+    if (v.currentTime > estado.maximo && v.currentTime <= estado.maximo + 1.5) estado.maximo = v.currentTime;
     estado.ultimo = v.currentTime;
-    const vistos = Math.min(estado.acumulado, estado.maximo);
+    const vistos = Math.min(estado.acumulado, Math.max(estado.maximo, v.ended ? v.duration : 0));
     setSegundos(vistos);
-    if (regla && !completado && v.duration > 0 && vistos >= v.duration * regla.fraccionVideo) {
-      void reportar(vistos, v.duration);
+    if (regla && !completado && videoCompleto(vistos, v.duration, regla.fraccionVideo)) {
+      void reportar({ segundosVistos: vistos, duracion: v.duration });
     }
   };
   const alBuscarVideo = (v: HTMLVideoElement) => {
     // No se puede saltar hacia adelante de lo ya visto (sí volver atrás).
-    if (!completado && v.currentTime > video.current.maximo + 1) v.currentTime = video.current.maximo;
+    const permitida = posicionPermitida(v.currentTime, video.current.maximo);
+    if (permitida !== v.currentTime) v.currentTime = permitida;
     video.current.ultimo = v.currentTime;
   };
+  const alternarVideo = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) void v.play().catch(() => undefined);
+    else v.pause();
+  };
+  const retrocederVideo = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = Math.max(0, v.currentTime - 10);
+  };
+
+  // PDF: avanza solo con el botón; al llegar a la última página se reporta.
+  const alCargarPdf = useCallback((total: number) => setPdf({ pagina: 1, maxima: 1, total }), []);
+  const irAPagina = (pagina: number) => {
+    setPdf((p) => {
+      const siguiente = Math.max(1, Math.min(p.total, pagina));
+      return { ...p, pagina: siguiente, maxima: Math.max(p.maxima, siguiente) };
+    });
+  };
+  useEffect(() => {
+    if (regla?.tipo !== 'pdf' || completado || pdf.total < 1) return;
+    if (pdf.maxima >= pdf.total) {
+      void reportar({ segundosVistos: 0, paginaMaxima: pdf.maxima, paginasTotales: pdf.total });
+    }
+  }, [regla, completado, pdf, reportar]);
 
   const mime = (material.mime ?? '').toLowerCase();
   const tipo = regla?.tipo ?? (mime.startsWith('video/') ? 'video' : null);
+  const lectura = progresoLectura(pdf.maxima, pdf.total);
 
   let estadoTexto = 'Preparando…';
   if (completado) estadoTexto = '✓ Completado';
   else if (regla?.tipo === 'video') {
-    const pct = duracion > 0 ? Math.min(100, Math.floor((segundos / duracion) * 100)) : 0;
-    estadoTexto = `Visto ${pct} % · se marca al llegar al ${Math.round(regla.fraccionVideo * 100)} %`;
-  } else if (regla) {
-    estadoTexto = `Revisando… ${mmss(Math.min(segundos, regla.segundosMinimos))} de ${mmss(regla.segundosMinimos)}`;
+    estadoTexto = 'Vea el video completo: se marca cuando el contador llega a la duración.';
+  } else if (regla?.tipo === 'pdf') {
+    estadoTexto = pdf.total > 1 ? `Avance con "Página siguiente" hasta la última página · ${lectura} % leído` : 'Cargando documento…';
+  } else if (conTiempo && regla) {
+    estadoTexto = `Revisando… ${reloj(Math.min(segundos, regla.segundosMinimos))} de ${reloj(regla.segundosMinimos)}`;
   }
 
   return (
@@ -575,7 +624,8 @@ function VisorMaterial({
         <header className='portal-th__visor-barra'>
           <strong>{material.titulo}</strong>
           <div className='portal-th__visor-acciones'>
-            {tipo !== 'video' && (
+            {/* Video y PDF se revisan aquí; abrirlos aparte saltaría el control. */}
+            {tipo !== 'video' && tipo !== 'pdf' && (
               <a href={url} target='_blank' rel='noopener noreferrer'>
                 Abrir aparte
               </a>
@@ -603,36 +653,179 @@ function VisorMaterial({
           </p>
         )}
         {tipo === 'video' ? (
-          <video
-            className='portal-th__visor-video'
-            src={url}
-            controls
-            controlsList='nodownload noplaybackrate'
-            disablePictureInPicture
-            playsInline
-            preload='metadata'
-            onLoadedMetadata={(e) => setDuracion(e.currentTarget.duration || 0)}
-            onTimeUpdate={(e) => alAvanzarVideo(e.currentTarget)}
-            onSeeking={(e) => alBuscarVideo(e.currentTarget)}
-            onRateChange={(e) => {
-              if (e.currentTarget.playbackRate !== 1) e.currentTarget.playbackRate = 1;
-            }}
-          />
+          <>
+            {/* Sin `controls`: la barra nativa permite saltar. */}
+            <video
+              ref={videoRef}
+              className='portal-th__visor-video'
+              src={url}
+              disablePictureInPicture
+              playsInline
+              preload='metadata'
+              data-testid='video-material'
+              onClick={alternarVideo}
+              onContextMenu={(e) => e.preventDefault()}
+              onLoadedMetadata={(e) => setDuracion(e.currentTarget.duration || 0)}
+              onPlay={() => {
+                video.current.ultimo = videoRef.current?.currentTime ?? 0;
+                setReproduciendo(true);
+              }}
+              onPause={() => setReproduciendo(false)}
+              onEnded={(e) => {
+                setReproduciendo(false);
+                alAvanzarVideo(e.currentTarget);
+              }}
+              onTimeUpdate={(e) => alAvanzarVideo(e.currentTarget)}
+              onSeeking={(e) => alBuscarVideo(e.currentTarget)}
+              onRateChange={(e) => {
+                if (e.currentTarget.playbackRate !== 1) e.currentTarget.playbackRate = 1;
+              }}
+            />
+            <div className='portal-th__visor-controles'>
+              <button type='button' onClick={alternarVideo}>
+                {reproduciendo ? '❚❚ Pausar' : '▶ Reproducir'}
+              </button>
+              <button type='button' onClick={retrocederVideo} aria-label='Retroceder 10 segundos'>
+                ↺ 10 s
+              </button>
+              <div
+                className='portal-th__visor-avance'
+                role='progressbar'
+                aria-label='Tiempo visto del video'
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={duracion > 0 ? Math.min(100, Math.floor((segundos / duracion) * 100)) : 0}
+              >
+                <span style={{ width: `${duracion > 0 ? Math.min(100, (segundos / duracion) * 100) : 0}%` }} />
+              </div>
+              <span className='portal-th__visor-contador' data-testid='contador-video'>
+                {contadorVideo(segundos, duracion)}
+              </span>
+            </div>
+          </>
         ) : tipo === 'imagen' ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img className='portal-th__visor-imagen' src={url} alt={material.titulo} />
         ) : tipo === 'pdf' ? (
-          <iframe src={url} title={material.titulo} />
+          <>
+            <PdfPaginado url={url} pagina={pdf.pagina} onCargado={alCargarPdf} onError={setError} />
+            {pdf.total > 1 && (
+              <div className='portal-th__visor-controles'>
+                <button type='button' onClick={() => irAPagina(pdf.pagina - 1)} disabled={pdf.pagina <= 1}>
+                  ← Página anterior
+                </button>
+                <span className='portal-th__visor-contador' data-testid='pagina-pdf'>
+                  Página {pdf.pagina} de {pdf.total}
+                </span>
+                <button type='button' onClick={() => irAPagina(pdf.pagina + 1)} disabled={pdf.pagina >= pdf.total}>
+                  Página siguiente →
+                </button>
+                <div
+                  className='portal-th__visor-avance'
+                  role='progressbar'
+                  aria-label='Lectura del documento'
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={lectura}
+                  data-testid='lectura-pdf'
+                >
+                  <span style={{ width: `${lectura}%` }} />
+                </div>
+                <span className='portal-th__visor-contador'>{lectura} %</span>
+              </div>
+            )}
+          </>
         ) : tipo === 'documento' ? (
           <div className='portal-th__visor-documento'>
             <p>Este documento se abre con su programa (Word, Excel o PowerPoint).</p>
             <a className='portal-th__certificado-boton' href={url} target='_blank' rel='noopener noreferrer'>
               Abrir documento
             </a>
-            <p className='portal-th__estado'>Mantenga esta ventana abierta mientras lo revisa.</p>
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Pinta UNA página del PDF en un lienzo con pdf.js (el mismo `pdfjs-dist` y
+ * el mismo worker que usan Orión y el SGC; no hay dependencia nueva). Sin
+ * barra de desplazamiento ni salto directo: la página la decide el visor con
+ * sus botones.
+ */
+function PdfPaginado({
+  url,
+  pagina,
+  onCargado,
+  onError,
+}: {
+  url: string;
+  pagina: number;
+  onCargado: (total: number) => void;
+  onError: (mensaje: string) => void;
+}) {
+  const lienzo = useRef<HTMLCanvasElement | null>(null);
+  const marco = useRef<HTMLDivElement | null>(null);
+  const [documento, setDocumento] = useState<import('pdfjs-dist').PDFDocumentProxy | null>(null);
+  const [pintada, setPintada] = useState(0);
+
+  useEffect(() => {
+    let vivo = true;
+    void (async () => {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('No se pudo cargar el documento.');
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        const pdfjs = await import('pdfjs-dist');
+        pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+        const doc = await pdfjs.getDocument({ data: bytes }).promise;
+        if (!vivo) return;
+        setDocumento(doc);
+        onCargado(doc.numPages);
+      } catch (e) {
+        if (vivo) onError((e as Error).message || 'No se pudo mostrar el documento.');
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [url, onCargado, onError]);
+
+  useEffect(() => {
+    if (!documento || !lienzo.current) return;
+    let tarea: { cancel: () => void } | null = null;
+    let vivo = true;
+    void (async () => {
+      const p = await documento.getPage(pagina);
+      if (!vivo || !lienzo.current) return;
+      const base = p.getViewport({ scale: 1 });
+      // La página completa a la vista: se ajusta al ancho y al alto del visor.
+      const ancho = Math.max(240, (marco.current?.clientWidth ?? 900) - 24);
+      const alto = Math.max(240, (marco.current?.clientHeight ?? 700) - 24);
+      const escala = Math.min(ancho / base.width, alto / base.height) * (window.devicePixelRatio || 1);
+      const vista = p.getViewport({ scale: escala });
+      const c = lienzo.current;
+      c.width = vista.width;
+      c.height = vista.height;
+      c.style.width = `${vista.width / (window.devicePixelRatio || 1)}px`;
+      const ctx = c.getContext('2d');
+      if (!ctx) return;
+      const render = p.render({ canvasContext: ctx, viewport: vista, canvas: c } as Parameters<typeof p.render>[0]);
+      tarea = render;
+      await render.promise.catch(() => undefined);
+      if (vivo) setPintada(pagina);
+    })();
+    return () => {
+      vivo = false;
+      tarea?.cancel();
+    };
+  }, [documento, pagina]);
+
+  return (
+    <div className='portal-th__visor-pdf' ref={marco} data-testid='pdf-material' data-pagina-pintada={pintada}>
+      {!documento && <p className='portal-th__estado'>Cargando documento…</p>}
+      <canvas ref={lienzo} aria-label={`Página ${pagina}`} />
     </div>
   );
 }

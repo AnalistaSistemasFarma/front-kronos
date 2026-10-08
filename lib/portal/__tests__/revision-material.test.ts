@@ -1,28 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import {
-  leerReporte,
-  pdfRequierePaginas,
-  reglaDeRevision,
-  seMarcaAlAbrir,
-  tipoDeRevision,
-  validarRevision,
-} from '../revision-material';
+import { leerReporte, reglaDeRevision, seMarcaAlAbrir, tipoDeRevision, validarRevision } from '../revision-material';
 
-// Reglas de "material revisado" (Cristian, 2026-10-08) con el ajuste del
-// mismo día: documentos SIN tiempo mínimo (se marcan al abrir); video igual.
+// Reglas de "material revisado" (Cristian, 2026-10-08) con los ajustes del
+// mismo día: documentos SIN tiempo mínimo (se marcan al abrir), video al
+// 100 % sin adelantar y PDF de varias páginas hasta la última.
 const env = {} as NodeJS.ProcessEnv;
 const video = { type: 'DOCUMENT', mime: 'video/mp4' };
 const pdf = { type: 'DOCUMENT', mime: 'application/pdf' };
 const imagen = { type: 'DOCUMENT', mime: 'image/png' };
 const word = { type: 'DOCUMENT', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+const enlace = { type: 'LINK', mime: null };
 
 describe('tipoDeRevision', () => {
   it('clasifica por tipo y mime', () => {
-    expect(tipoDeRevision({ type: 'LINK', mime: null })).toBe('enlace');
+    expect(tipoDeRevision(enlace)).toBe('enlace');
     expect(tipoDeRevision(video)).toBe('video');
     expect(tipoDeRevision(pdf)).toBe('pdf');
-    expect(tipoDeRevision({ type: 'DOCUMENT', mime: 'image/png' })).toBe('imagen');
-    expect(tipoDeRevision({ type: 'DOCUMENT', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })).toBe('documento');
+    expect(tipoDeRevision(imagen)).toBe('imagen');
+    expect(tipoDeRevision(word)).toBe('documento');
   });
 });
 
@@ -33,11 +28,15 @@ describe('reglaDeRevision', () => {
     expect(reglaDeRevision(pdf, null, env).segundosMinimos).toBe(0);
     expect(reglaDeRevision(imagen, null, env).segundosMinimos).toBe(0);
     expect(reglaDeRevision(word, null, env).segundosMinimos).toBe(0);
-    expect(pdfRequierePaginas(env)).toBe(false);
   });
 
-  it('video: 90 % por defecto', () => {
-    expect(reglaDeRevision(video, null, env).fraccionVideo).toBe(0.9);
+  it('PDF lleva las páginas que contó el servidor', () => {
+    expect(reglaDeRevision(pdf, 5, env).paginas).toBe(5);
+    expect(reglaDeRevision(pdf, null, env).paginas).toBeNull();
+  });
+
+  it('video: 100 % por defecto', () => {
+    expect(reglaDeRevision(video, null, env).fraccionVideo).toBe(1);
   });
 
   it('se sigue pudiendo configurar por entorno', () => {
@@ -51,17 +50,21 @@ describe('reglaDeRevision', () => {
     expect(reglaDeRevision(video, null, otro).fraccionVideo).toBe(0.95);
     expect(reglaDeRevision(word, null, otro).segundosMinimos).toBe(45);
     expect(reglaDeRevision(pdf, 10, otro).segundosMinimos).toBe(60);
-    expect(pdfRequierePaginas(otro)).toBe(true);
-    expect(reglaDeRevision(video, null, { PORTAL_TH_REVISION_VIDEO_PCT: 'x' } as unknown as NodeJS.ProcessEnv).fraccionVideo).toBe(0.9);
+    expect(reglaDeRevision(video, null, { PORTAL_TH_REVISION_VIDEO_PCT: 'x' } as unknown as NodeJS.ProcessEnv).fraccionVideo).toBe(1);
   });
 });
 
 describe('seMarcaAlAbrir', () => {
-  it('apertura → marca de inmediato: enlace, PDF, imagen y Office', () => {
-    expect(seMarcaAlAbrir(reglaDeRevision({ type: 'LINK', mime: null }, null, env))).toBe(true);
-    expect(seMarcaAlAbrir(reglaDeRevision(pdf, 40, env))).toBe(true);
+  it('apertura → marca de inmediato: enlace, imagen, Office y PDF de 1 página', () => {
+    expect(seMarcaAlAbrir(reglaDeRevision(enlace, null, env))).toBe(true);
     expect(seMarcaAlAbrir(reglaDeRevision(imagen, null, env))).toBe(true);
     expect(seMarcaAlAbrir(reglaDeRevision(word, null, env))).toBe(true);
+    expect(seMarcaAlAbrir(reglaDeRevision(pdf, 1, env))).toBe(true);
+  });
+
+  it('PDF de varias páginas (o sin contar) NO se marca al abrir', () => {
+    expect(seMarcaAlAbrir(reglaDeRevision(pdf, 5, env))).toBe(false);
+    expect(seMarcaAlAbrir(reglaDeRevision(pdf, null, env))).toBe(false);
   });
 
   it('el video NUNCA se marca solo por abrirlo', () => {
@@ -74,18 +77,28 @@ describe('seMarcaAlAbrir', () => {
   });
 });
 
-describe('validarRevision', () => {
+describe('validarRevision — video', () => {
   const reglaVideo = reglaDeRevision(video, null, env);
 
-  it('video visto al 90 % en tiempo real: aceptado', () => {
-    expect(validarRevision(reglaVideo, { segundosVistos: 90, duracion: 100 }, 96)).toEqual({ ok: true });
+  it('video al 100 % en tiempo real: aceptado', () => {
+    expect(validarRevision(reglaVideo, { segundosVistos: 100, duracion: 100 }, 101)).toEqual({ ok: true });
+    // Redondeo del reproductor: una fracción de segundo por debajo también vale.
+    expect(validarRevision(reglaVideo, { segundosVistos: 99.6, duracion: 100 }, 100)).toEqual({ ok: true });
   });
 
-  it('video visto al 50 %: rechazado', () => {
+  it('video al 95 %: rechazado', () => {
+    expect(validarRevision(reglaVideo, { segundosVistos: 95, duracion: 100 }, 120)).toEqual({
+      ok: false,
+      error: 'Aún no ha visto el video completo.',
+    });
+  });
+
+  it('video al 50 %: rechazado', () => {
     expect(validarRevision(reglaVideo, { segundosVistos: 50, duracion: 100 }, 60).ok).toBe(false);
   });
 
-  it('video "visto" en menos tiempo del que dura: implausible', () => {
+  it('el reloj del servidor debe llegar a la duración (con pocos segundos de tolerancia)', () => {
+    expect(validarRevision(reglaVideo, { segundosVistos: 100, duracion: 100 }, 96).ok).toBe(true);
     const r = validarRevision(reglaVideo, { segundosVistos: 100, duracion: 100 }, 10);
     expect(r).toEqual({ ok: false, error: expect.stringMatching(/menos tiempo/) });
   });
@@ -94,23 +107,53 @@ describe('validarRevision', () => {
     expect(validarRevision(reglaVideo, { segundosVistos: 10, duracion: 0 }, 100).ok).toBe(false);
     expect(validarRevision(reglaVideo, { segundosVistos: 500, duracion: 100 }, 600).ok).toBe(false);
   });
+});
+
+describe('validarRevision — PDF y otros documentos', () => {
+  it('PDF de 5 páginas: no marca hasta la página 5', () => {
+    const regla = reglaDeRevision(pdf, 5, env);
+    for (const pagina of [1, 2, 3, 4]) {
+      expect(validarRevision(regla, { segundosVistos: 0, paginaMaxima: pagina }, 30).ok).toBe(false);
+    }
+    expect(validarRevision(regla, { segundosVistos: 0, paginaMaxima: 5 }, 30)).toEqual({ ok: true });
+  });
+
+  it('PDF: no vale reportar más páginas de las que tiene, ni engañar con el total del visor', () => {
+    const regla = reglaDeRevision(pdf, 5, env);
+    expect(validarRevision(regla, { segundosVistos: 0, paginaMaxima: 9 }, 30).ok).toBe(false);
+    // Las páginas del servidor mandan sobre las que diga el navegador.
+    expect(validarRevision(regla, { segundosVistos: 0, paginaMaxima: 2, paginasTotales: 2 }, 30).ok).toBe(false);
+  });
+
+  it('PDF sin páginas contadas por el servidor: usa el total del visor', () => {
+    const regla = reglaDeRevision(pdf, null, env);
+    expect(validarRevision(regla, { segundosVistos: 0, paginaMaxima: 3, paginasTotales: 3 }, 1).ok).toBe(true);
+    expect(validarRevision(regla, { segundosVistos: 0, paginaMaxima: 2, paginasTotales: 3 }, 1).ok).toBe(false);
+    expect(validarRevision(regla, { segundosVistos: 0 }, 1).ok).toBe(false);
+  });
 
   it('documento: sin validación de tiempo transcurrido en el servidor', () => {
-    expect(validarRevision(reglaDeRevision(pdf, 10, env), { segundosVistos: 0 }, 0)).toEqual({ ok: true });
+    expect(validarRevision(reglaDeRevision(word, null, env), { segundosVistos: 0 }, 0)).toEqual({ ok: true });
     const conMinimo = reglaDeRevision(word, null, { PORTAL_TH_REVISION_DOC_SEG: '30' } as unknown as NodeJS.ProcessEnv);
-    // Con mínimo configurado se exige el reporte del visor, pero no el reloj del servidor.
     expect(validarRevision(conMinimo, { segundosVistos: 30 }, 1)).toEqual({ ok: true });
     expect(validarRevision(conMinimo, { segundosVistos: 10 }, 60).ok).toBe(false);
   });
 
   it('enlace: abrirlo basta', () => {
-    expect(validarRevision(reglaDeRevision({ type: 'LINK', mime: null }, null, env), { segundosVistos: 0 }, 0).ok).toBe(true);
+    expect(validarRevision(reglaDeRevision(enlace, null, env), { segundosVistos: 0 }, 0).ok).toBe(true);
   });
 });
 
 describe('leerReporte', () => {
   it('valida el cuerpo', () => {
-    expect(leerReporte({ segundosVistos: 12.5, duracion: 30 })).toEqual({ segundosVistos: 12.5, duracion: 30 });
+    expect(leerReporte({ segundosVistos: 12.5, duracion: 30 })).toEqual({
+      segundosVistos: 12.5,
+      duracion: 30,
+      paginaMaxima: null,
+      paginasTotales: null,
+    });
+    expect(leerReporte({ segundosVistos: 0, paginaMaxima: 5, paginasTotales: 5 })).toMatchObject({ paginaMaxima: 5, paginasTotales: 5 });
+    expect(leerReporte({ segundosVistos: 0, paginaMaxima: 2.5 })).toBeNull();
     expect(leerReporte({ segundosVistos: -1 })).toBeNull();
     expect(leerReporte({ segundosVistos: 'mucho' })).toBeNull();
     expect(leerReporte(null)).toBeNull();

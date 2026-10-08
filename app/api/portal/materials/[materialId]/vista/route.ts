@@ -9,7 +9,6 @@ import {
   recalcularProgresoDeMaterial,
 } from '../../../../../../lib/portal/formacion';
 import {
-  pdfRequierePaginas,
   reglaDeRevision,
   seMarcaAlAbrir,
   tipoDeRevision,
@@ -30,11 +29,12 @@ function idDesdeParametro(valor: string): number | null {
  * navegador reporta después lo que vio en `POST .../vista/:token` y es el
  * servidor quien decide si marca el material.
  *
- * Un ENLACE se da por revisado al abrirlo: se marca aquí mismo. Desde el
- * ajuste de Cristian (2026-10-08, "que el usuario lo pueda abrir y él mismo
- * decida cuándo cerrarlo") lo mismo aplica a PDF, imagen y demás documentos:
- * sin tiempo mínimo, se marcan al registrar la apertura. El VIDEO sigue
- * exigiendo el 90 % visto (se reporta en `POST .../vista/:token`).
+ * Un ENLACE se da por revisado al abrirlo: se marca aquí mismo. Desde los
+ * ajustes de Cristian (2026-10-08, "que el usuario lo pueda abrir y él mismo
+ * decida cuándo cerrarlo") lo mismo aplica a la imagen, a los documentos de
+ * Office y al PDF de UNA página: sin tiempo mínimo, se marcan al registrar la
+ * apertura. El PDF de varias páginas se completa al llegar a la última y el
+ * VIDEO al verlo al 100 % (ambos se reportan en `POST .../vista/:token`).
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ materialId: string }> }) {
   const quien = await identificar(request);
@@ -61,8 +61,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     let paginas: number | null = null;
-    // Las páginas solo importan si se configuró un tiempo por página para PDF.
-    if (tipoDeRevision(material) === 'pdf' && pdfRequierePaginas()) {
+    // PDF: el servidor cuenta las páginas; con una sola se marca al abrir y con
+    // varias el visor debe llegar a la última (ver revision-material.ts).
+    if (tipoDeRevision(material) === 'pdf') {
       // Solo materiales viejos (antes de SharePoint) tienen los bytes en la base.
       const conBytes = material.sp_drive_item_id
         ? null
