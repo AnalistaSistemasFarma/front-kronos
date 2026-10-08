@@ -39,6 +39,7 @@ import OrionDocumentLifecycleModal from './OrionDocumentLifecycleModal';
 import OrionReviewPanel from './OrionReviewPanel';
 import { knownReadyForSigning } from '../../lib/orion/reviewState';
 import { esEstadoFinalOrion } from '../../lib/orion/deletePolicy';
+import DocStageTrack from './DocStageTrack';
 
 type RowProps = OrionAttachmentSignActionsProps & {
   rowNumber?: number | string;
@@ -51,7 +52,12 @@ type RowProps = OrionAttachmentSignActionsProps & {
   onDeleteAttachment?: (fileId: string, fileName?: string | null) => void | Promise<void>;
   /** Llegó desde Autorizaciones a validar este documento: abre el modal de validación. */
   autoOpenReview?: boolean;
+  /** PDF que salió de un Word en preparación: se muestra como sub-fila debajo de ese Word. */
+  nestedUnderWord?: boolean;
 };
+
+/** Etapas del PDF para firmar (su validación es independiente de la del Word del que salió). */
+const PDF_STAGES = ['Validación PDF', 'Ubicar firmas', 'Firmas'] as const;
 
 function ActionLink({
   icon,
@@ -119,6 +125,7 @@ export default function OrionAttachmentTableRow({
   canDeleteAttachment = false,
   onDeleteAttachment,
   autoOpenReview = false,
+  nestedUnderWord = false,
   ...props
 }: RowProps) {
   void previewUrl; // OneDrive webUrl no se usa: Ver en línea va por proxy SynerLink.
@@ -264,7 +271,14 @@ export default function OrionAttachmentTableRow({
 
   return (
     <>
-    <Table.Tr className={isClosed ? 'doc-row doc-row--closed' : 'doc-row'}>
+    <Table.Tr
+      className={isClosed ? 'doc-row doc-row--closed' : 'doc-row'}
+      style={
+        nestedUnderWord
+          ? { background: 'color-mix(in srgb, var(--mantine-color-teal-light) 45%, transparent)' }
+          : undefined
+      }
+    >
       <Table.Td data-label='N.º' className='doc-cell doc-cell--mono doc-col--secondary' style={{ width: 56, whiteSpace: 'nowrap' }}>
         <Text size='sm' c='dimmed'>
           {rowNumber ?? '—'}
@@ -273,6 +287,12 @@ export default function OrionAttachmentTableRow({
 
       <Table.Td data-label='Documento' className='doc-cell doc-cell--file' style={{ minWidth: 140, maxWidth: 280 }}>
         <Group gap={6} wrap='nowrap' align='flex-start'>
+          {nestedUnderWord ? (
+            // Conector "└" hacia el Word de arriba: este PDF salió de ese documento.
+            <Text size='sm' c='teal.7' fw={700} aria-hidden style={{ flexShrink: 0, lineHeight: 1.4, paddingLeft: 4 }}>
+              └
+            </Text>
+          ) : null}
           <div style={{ minWidth: 0, flex: 1 }}>
             <Text size='sm' fw={700} lineClamp={2}>
               {props.fileName}
@@ -281,6 +301,18 @@ export default function OrionAttachmentTableRow({
               <Text size='xs' c='dimmed' mt={2}>
                 {fileSizeLabel}
               </Text>
+            ) : null}
+            {d.state.sourceDraftFileId ? (
+              <Tooltip
+                label='Se preparó en Word. Este PDF tiene su propia validación antes de firmar.'
+                multiline
+                maw={260}
+                withArrow
+              >
+                <Badge size='xs' variant='light' color='teal' mt={4} styles={{ label: { textTransform: 'none' } }}>
+                  Viene del Word
+                </Badge>
+              </Tooltip>
             ) : null}
           </div>
           {viewOnlineHref ? (
@@ -374,6 +406,13 @@ export default function OrionAttachmentTableRow({
               —
             </Text>
           )}
+          {d.forSigning ? (
+            <DocStageTrack
+              stages={PDF_STAGES}
+              stage={isClosed ? 3 : d.signers.length > 0 ? 2 : validationComplete ? 1 : 0}
+              doneLabel='Listo: firmado'
+            />
+          ) : null}
         </Stack>
       </Table.Td>
 

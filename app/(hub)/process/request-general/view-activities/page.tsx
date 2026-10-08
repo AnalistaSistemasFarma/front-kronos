@@ -41,6 +41,7 @@ import {
   Table,
   UnstyledButton,
   Tooltip,
+  Progress,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -111,9 +112,13 @@ import { isSynerlinkWorkflowLocked } from '../../../../../lib/orion/workflowLock
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableRow';
+import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
+import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
 import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
+import { partitionTasksForDisplay } from '@/lib/orion/taskProgress';
 import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
 
 interface Request {
@@ -974,6 +979,22 @@ function ViewRequestPage() {
     ]
   );
 
+  const { businessTasks: modalBusinessTasks, orionByFile: modalOrionByFile } = useMemo(
+    () => partitionTasksForDisplay(taskRQ),
+    [taskRQ]
+  );
+
+  const modalTimelineTasks = useMemo(
+    () =>
+      [...modalBusinessTasks].sort((a, b) => {
+        const da = a.display_order ?? 0;
+        const db = b.display_order ?? 0;
+        if (da !== db) return da - db;
+        return a.id_task - b.id_task;
+      }),
+    [modalBusinessTasks]
+  );
+
   async function CheckOrCreateFolderAndUpload(
     folderName: string,
     files: { file: File }[],
@@ -1509,8 +1530,11 @@ function ViewRequestPage() {
   const taskOrionFileId = parseOrionFileIdFromResolution(request?.resolution);
   const taskPendingOrionAuth = isOrionSignerAuthResolution(request?.resolution);
   const hasPdfAttachments = attachmentRows.some((f) => /\.pdf$/i.test(f.name));
+  // Word en preparación (etapa previa a la firma): también usa la tabla de firma.
+  const hasWordAttachments = attachmentRows.some((f) => isWordDraftFileName(f.name));
   const showOrionPanel =
     hasPdfAttachments ||
+    hasWordAttachments ||
     hasOrionSignatureField ||
     hasOrionDocuments ||
     Boolean(taskOrionFileId) ||
@@ -1809,7 +1833,7 @@ function ViewRequestPage() {
                 participants={orionParticipants}
                 availableUsers={availableUsers}
                 currentUserName={session?.user?.name ?? undefined}
-                companyId={request?.id_company}
+                companyId={request?.id_company ?? null}
                 onDocumentsChange={handleOrionDocumentsChange}
                 workflowLocked={orionWorkflowLocked}
                 autoOpenFileId={deepLinkFileId}
@@ -2034,9 +2058,10 @@ function ViewRequestPage() {
                         placeholder='Selecciona estado'
                         data={statusOptions}
                         value={resolutionData.estado}
-                        onChange={(val) =>
-                          setResolutionData({ ...resolutionData, estado: val || '' })
-                        }
+                        onChange={(val) => {
+                          setResolutionData({ ...resolutionData, estado: val || '' });
+                          if (val === '2') setShowResolution(true);
+                        }}
                         error={formErrors.estado}
                       />
                     </Stack>
@@ -2075,7 +2100,7 @@ function ViewRequestPage() {
                     )}
                   </Group>
 
-                  {isEditing && showResolution && (
+                  {isEditing && (showResolution || resolutionData.estado === '2') && (
                     <Stack>
                       {/* Validación: solo permitir resolución si el estado es 2 */}
                       {resolutionData.resolucion && resolutionData.estado !== '2' && !resolutionData.estado ? (
@@ -2401,14 +2426,21 @@ function ViewRequestPage() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {attachmentRows.map((file: FolderFile, fileIndex: number) => {
+                  {nestDraftPdfRows(attachmentRows, (f: FolderFile) =>
+                    showOrionPanel && /\.pdf$/i.test(f.name)
+                      ? getOrionDocForFile(String(f.id), f.name).sourceDraftFileId
+                      : null
+                  ).map(({ file, rowNumber, nested }) => {
                     const fileId = String(file.id || taskOrionFileId || '');
                     const openUrl =
                       resolveAttachmentDownloadUrl(file) ?? file.webUrl ?? '#';
                     const sizeLabel = [
                       file.size ? formatFileSize(file.size) : null,
                       file.lastModifiedDateTime
-                        ? new Date(file.lastModifiedDateTime).toLocaleDateString('es-CO')
+                        ? new Date(file.lastModifiedDateTime).toLocaleString('es-CO', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })
                         : null,
                     ]
                       .filter(Boolean)
@@ -2434,7 +2466,7 @@ function ViewRequestPage() {
                       return (
                         <OrionAttachmentTableRow
                           key={file.id}
-                          rowNumber={fileIndex + 1}
+                          rowNumber={rowNumber}
                           requestId={request.id_request_general}
                           fileId={fileId || 'pdf'}
                           fileName={file.name}
@@ -2466,6 +2498,7 @@ function ViewRequestPage() {
                           onDocumentsUpdate={handleOrionDocumentsChange}
                           canDeleteAttachment={canDeleteAttachments}
                           onDeleteAttachment={requestDeleteAttachment}
+                          nestedUnderWord={nested}
                           forceSignerUi={(() => {
                             const me = String(session?.user?.email || '')
                               .trim()
@@ -2504,13 +2537,43 @@ function ViewRequestPage() {
                       );
                     }
 
+                    if (showOrionPanel && request.id_request_general && isWordDraftFileName(file.name)) {
+                      return (
+                        <OrionDraftTableRow
+                          key={file.id}
+                          rowNumber={rowNumber}
+                          requestId={request.id_request_general}
+                          fileId={String(file.id)}
+                          fileName={file.name}
+                          fileSizeLabel={sizeLabel}
+                          processName={request?.process || request?.category || null}
+                          requesterName={request?.name_requester || null}
+                          openUrl={openUrl}
+                          canDeleteAttachment={canDeleteAttachments}
+                          onDeleteAttachment={requestDeleteAttachment}
+                          autoOpenReview={
+                            searchParams.get('orionAction') === 'review' &&
+                            String(orionFileIdParam || '') === String(file.id)
+                          }
+                          onConverted={async () => {
+                            // El PDF nuevo sale debajo del Word: adjuntos + estado de firma.
+                            await Promise.all([
+                              fetchFolderContents(),
+                              fetchFormValues(request.id_request_general),
+                            ]);
+                            refreshAttachmentsAfterUpload();
+                          }}
+                        />
+                      );
+                    }
+
                     return (
                       <Table.Tr key={file.id}>
                         {showOrionPanel ? (
                           <>
                             <Table.Td data-label='N.º'>
                               <Text size='sm' c='dimmed'>
-                                {fileIndex + 1}
+                                {rowNumber}
                               </Text>
                             </Table.Td>
                             <Table.Td data-label='Documento'>
@@ -2777,15 +2840,48 @@ function ViewRequestPage() {
             </div>
           ) : taskRQ.length > 0 ? (
 <ScrollArea.Autosize mah="65vh" offsetScrollbars>
+              <Stack gap="md">
+              {modalOrionByFile.length > 0 ? (
+                <Stack gap="sm">
+                  <Text size="sm" fw={600}>
+                    Firmas por documento
+                  </Text>
+                  {modalOrionByFile.map((group) => (
+                    <Paper key={group.fileId} withBorder p="sm" radius="md">
+                      <Group justify="space-between" align="flex-start" wrap="nowrap" mb={8}>
+                        <Box style={{ flex: 1, minWidth: 0 }}>
+                          <Text fw={600} lineClamp={1}>
+                            Firma · {group.label}
+                          </Text>
+                          <Text size="xs" c="dimmed" mt={2}>
+                            {group.completedSignTasks}/{group.totalSignTasks} firmas
+                            {group.totalAuthTasks > 0
+                              ? ` · ${group.completedAuthTasks}/${group.totalAuthTasks} autorizaciones`
+                              : ''}
+                          </Text>
+                        </Box>
+                        <Badge
+                          color={group.allDone ? 'green' : 'blue'}
+                          variant="light"
+                          size="sm"
+                        >
+                          {group.allDone ? 'Resuelto' : `${group.percent}%`}
+                        </Badge>
+                      </Group>
+                      <Progress
+                        value={group.percent}
+                        color={group.allDone ? 'green' : 'blue'}
+                        size="sm"
+                        radius="xl"
+                      />
+                    </Paper>
+                  ))}
+                </Stack>
+              ) : null}
+
+              {modalTimelineTasks.length > 0 ? (
               <Stack gap={0}>
-              {[...taskRQ]
-                .sort((a, b) => {
-                  const da = a.display_order ?? 0;
-                  const db = b.display_order ?? 0;
-                  if (da !== db) return da - db;
-                  return a.id_task - b.id_task;
-                })
-                .map((task, index, arr) => {
+              {modalTimelineTasks.map((task, index, arr) => {
                   const isLast = index === arr.length - 1;
                   const statusLower = task.status?.toLowerCase();
                   const isResolved = task.id_status === 2 || statusLower === 'resuelto';
@@ -2884,7 +2980,7 @@ function ViewRequestPage() {
                           <Text size="sm" c="dimmed">
                             Asignado:
                           </Text>
-                          <Text size="sm">{task.name}</Text>
+                          <Text size="sm">{task.name || 'Sin asignar'}</Text>
                         </Group>
                         <Group gap="lg">
                           <Text size="xs" c="dimmed">
@@ -2914,6 +3010,8 @@ function ViewRequestPage() {
                     </Flex>
                   );
                 })}
+              </Stack>
+              ) : null}
               </Stack>
             </ScrollArea.Autosize>
           ) : (

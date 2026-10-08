@@ -1,7 +1,7 @@
 'use client';
 
-import { Suspense, useMemo, useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useMemo, useState, useEffect, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import {
@@ -57,7 +57,9 @@ import {
   isFirmaAuthorizationItem,
   isOrionReviewResolution,
   parseOrionFileIdFromAuthResolution,
+  parseOrionFileNameFromResolution,
   parseOrionReviewFileId,
+  parseOrionReviewFileName,
 } from '../../../../lib/orion/signerAuthMarkers';
 import { formatDbDateTime } from '../../../../lib/dbDate';
 
@@ -168,9 +170,31 @@ const resolvedDateLabel = (status: AuthorizationRequest['status']) => {
   }
 };
 
+/** Punto verde: Word que le toca validar ahora (al tocarlo abre el tablero del documento). */
+function DraftTurnDot() {
+    return (
+        <Tooltip label='Le toca validar este Word: ábralo para revisarlo en el tablero' withArrow>
+            <span
+                aria-label='Le toca validar'
+                style={{
+                    display: 'inline-block',
+                    width: 10,
+                    height: 10,
+                    borderRadius: '50%',
+                    flexShrink: 0,
+                    background: 'var(--mantine-color-green-6)',
+                    boxShadow: '0 0 0 3px var(--mantine-color-green-light)',
+                }}
+            />
+        </Tooltip>
+    );
+}
+
 function AuthorizationBoard() {
     const { data: session, status } = useSession();
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const deepLinkHandledRef = useRef(false);
     const isMobile = useMediaQuery('(max-width: 768px)');
 
     const [loading, setLoading] = useState(false);
@@ -409,6 +433,12 @@ function AuthorizationBoard() {
     };
 
     const openAuthorizeModal = (target: number | null) => {
+        // Validar un Word = revisarlo en su tablero: se abre directo, sin modal de confirmación.
+        const row = target != null ? requests.find((r) => r.id === target) : null;
+        if (row && isDraftReviewRow(row)) {
+            openDraftBoard(row);
+            return;
+        }
         setActionTarget(target);
         setAuthorizeModalOpened(true);
     };
@@ -462,6 +492,67 @@ function AuthorizationBoard() {
 
     const isReviewRow = (row: AuthorizationRequest) => isOrionReviewResolution(row.resolution);
 
+    /** Validación de un Word: se revisa, comenta y aprueba en el tablero del documento. */
+    const isDraftReviewRow = (row: AuthorizationRequest) =>
+        isReviewRow(row) && /\.docx$/i.test(parseOrionReviewFileName(row.resolution) || '');
+
+    const openDraftBoard = (row: AuthorizationRequest) => {
+        const fileId = parseOrionReviewFileId(row.resolution);
+        if (!row.id_request_general || !fileId) {
+            toast.error('La tarea no indica el documento a validar');
+            return;
+        }
+        setOpeningSignDocument('review');
+        const qs = new URLSearchParams({ requestId: String(row.id_request_general), fileId });
+        router.push(`/process/request-general/draft-board?${qs.toString()}`);
+    };
+
+    // Enlace de notificación (?highlight=&orionReviewFileId=): la validación de un Word va directo al tablero.
+    useEffect(() => {
+        if (deepLinkHandledRef.current || requests.length === 0) return;
+        const highlight = Number(searchParams.get('highlight'));
+        const reviewFileId = String(searchParams.get('orionReviewFileId') || '').trim();
+        if (!highlight && !reviewFileId) return;
+        const row =
+            requests.find((r) => highlight > 0 && r.id === highlight) ??
+            requests.find((r) => reviewFileId && parseOrionReviewFileId(r.resolution) === reviewFileId);
+        if (!row) return;
+        deepLinkHandledRef.current = true;
+        // Se quita el enlace de la URL: al volver del tablero (ya aprobado) no se reabre nada.
+        try {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('highlight');
+            url.searchParams.delete('orionReviewFileId');
+            window.history.replaceState(window.history.state, '', url.toString());
+        } catch {
+            /* sin cambio de URL: el ref igual evita repetirlo en esta visita */
+        }
+        if (row.status === 'pendiente' && isDraftReviewRow(row)) openDraftBoard(row);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [requests, searchParams]);
+
+    /** Rechazar desde aquí un Word = devolverlo a la preparadora con el motivo escrito. */
+    const returnDraftReview = async (
+        row: AuthorizationRequest,
+        comment: string
+    ): Promise<{ ok: boolean; error?: string }> => {
+        const fileId = parseOrionReviewFileId(row.resolution);
+        if (!fileId) return { ok: false, error: 'La tarea no indica el documento a validar' };
+        try {
+            const res = await fetch('/api/integrations/orion/draft', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'return', requestId: row.id_request_general, fileId, comment }),
+            });
+            const data = await res.json().catch(() => ({}));
+            return res.ok
+                ? { ok: true }
+                : { ok: false, error: typeof data.error === 'string' ? data.error : `Error ${res.status}` };
+        } catch {
+            return { ok: false, error: 'Error de red al devolver el documento' };
+        }
+    };
+
     /** Validación de documento: la decisión la aplica el servicio de revisión (bag + siguiente validador). */
     const decideReview = async (
         row: AuthorizationRequest,
@@ -496,6 +587,10 @@ function AuthorizationBoard() {
      */
     const goToRelatedRequest = (req: AuthorizationRequest) => {
         if (!req.id_request_general) return;
+        if (isDraftReviewRow(req)) {
+            openDraftBoard(req);
+            return;
+        }
         // Validación de documento: solo vista previa (solicitud + PDF). Se aprueba o devuelve
         // desde este listado; nunca se abre la firma desde aquí.
         if (isReviewRow(req)) {
@@ -523,7 +618,11 @@ function AuthorizationBoard() {
         isReviewRow(req) || (isFirmaAuthorizationRow(req) && req.status === 'pendiente');
 
     const relatedLinkLabel = (req: AuthorizationRequest) =>
-        opensPreview(req) ? 'Ver solicitud' : 'Ir a la solicitud';
+        isDraftReviewRow(req)
+            ? 'Abrir el tablero del documento'
+            : opensPreview(req)
+              ? 'Ver solicitud'
+              : 'Ir a la solicitud';
 
     /**
      * Tras autorizar una auth de FIRMA: ir a la misma solicitud para firmar.
@@ -559,6 +658,10 @@ function AuthorizationBoard() {
             const row = reviewRows[0];
             setAuthorizeModalOpened(false);
             setSelectedIds(new Set());
+            if (isDraftReviewRow(row)) {
+                openDraftBoard(row);
+                return;
+            }
             redirectToSignDocument({
                 requestId: row.id_request_general,
                 fileId: parseOrionReviewFileId(row.resolution),
@@ -568,7 +671,7 @@ function AuthorizationBoard() {
         }
         if (reviewRows.length > 0) {
             toast(
-                'Las validaciones de documentos se autorizan una por una: se abre la solicitud para revisar el PDF.',
+                'Las validaciones de documentos se autorizan una por una: se abre la solicitud (o el tablero, si es un Word) para revisarlo.',
                 { icon: 'ℹ️' }
             );
         }
@@ -681,9 +784,11 @@ function AuthorizationBoard() {
         const results = await Promise.all(
             ids.map((id) => {
                 const row = requests.find((r) => r.id === id);
-                return row && isReviewRow(row)
-                    ? decideReview(row, 'return', reason)
-                    : updateActivityStatus(id, 3, reason);
+                return row && isDraftReviewRow(row)
+                    ? returnDraftReview(row, reason)
+                    : row && isReviewRow(row)
+                      ? decideReview(row, 'return', reason)
+                      : updateActivityStatus(id, 3, reason);
             })
         );
         const ok = results.filter((r) => r.ok).length;
@@ -736,6 +841,11 @@ function AuthorizationBoard() {
         const isFirma = isFirmaAuthorizationRow(req);
         const isReview = isReviewRow(req);
         const isLinked = isFirma || isReview;
+        const docName = isReview
+            ? parseOrionReviewFileName(req.resolution)
+            : isFirma
+              ? parseOrionFileNameFromResolution(req.resolution)
+              : null;
         return (
         <Table.Tr
             key={`auth-row-${req.id}-${req.id_request_general}-${index}`}
@@ -756,9 +866,12 @@ function AuthorizationBoard() {
                     style={{ display: 'block' }}
                     aria-label={`Abrir solicitud ${req.id_request_general}`}
                 >
-                    <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
-                        #{req.id_request_general}
-                    </Text>
+                    <Group gap={6} wrap='nowrap'>
+                        {isPending && isDraftReviewRow(req) ? <DraftTurnDot /> : null}
+                        <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
+                            #{req.id_request_general}
+                        </Text>
+                    </Group>
                 </UnstyledButton>
             ) : (
                 <Text size='sm' fw={700}>
@@ -770,6 +883,14 @@ function AuthorizationBoard() {
             <Text size='sm' fw={500} lineClamp={2}>
                 {req.subject}
             </Text>
+            {docName ? (
+                <Group gap={4} wrap='nowrap' mt={4}>
+                    <IconFileText size={13} className='text-gray-400' style={{ flexShrink: 0 }} />
+                    <Text size='xs' c='violet' fw={600} lineClamp={1} title={docName}>
+                        {docName}
+                    </Text>
+                </Group>
+            ) : null}
             </Table.Td>
             <Table.Td>
             <Group gap={4} wrap='nowrap'>
@@ -790,7 +911,7 @@ function AuthorizationBoard() {
                     </Badge>
                 ) : isReview ? (
                     <Badge variant='outline' color='grape' size='xs'>
-                        Validación
+                        {isDraftReviewRow(req) ? 'Validación · Word' : 'Validación'}
                     </Badge>
                 ) : null}
             </Group>
@@ -880,6 +1001,11 @@ function AuthorizationBoard() {
         const isFirma = isFirmaAuthorizationRow(req);
         const isReview = isReviewRow(req);
         const isLinked = isFirma || isReview;
+        const docName = isReview
+            ? parseOrionReviewFileName(req.resolution)
+            : isFirma
+              ? parseOrionFileNameFromResolution(req.resolution)
+              : null;
         return (
         <Card
             key={`auth-card-${req.id}-${req.id_request_general}-${index}`}
@@ -901,9 +1027,12 @@ function AuthorizationBoard() {
                 />
                 {isLinked ? (
                 <UnstyledButton onClick={() => goToRelatedRequest(req)}>
-                <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
-                    #{req.id_request_general}
-                </Text>
+                <Group gap={6} wrap='nowrap'>
+                    {isPending && isDraftReviewRow(req) ? <DraftTurnDot /> : null}
+                    <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
+                        #{req.id_request_general}
+                    </Text>
+                </Group>
                 </UnstyledButton>
                 ) : (
                 <Text size='sm' fw={700}>
@@ -919,6 +1048,15 @@ function AuthorizationBoard() {
             <Text size='sm' fw={500} lineClamp={2}>
                 {req.subject}
             </Text>
+
+            {docName ? (
+                <Group gap={6} wrap='nowrap'>
+                    <IconFileText size={14} className='text-gray-400' style={{ flexShrink: 0 }} />
+                    <Text size='sm' c='violet' fw={600} lineClamp={2} title={docName}>
+                        {docName}
+                    </Text>
+                </Group>
+            ) : null}
 
             <Group gap={6} wrap='nowrap'>
                 <IconBuilding size={14} className='text-gray-400' />

@@ -7,7 +7,8 @@ import {
   applyOrionWebhookToRequest,
   getRequestOrionContext,
 } from '@/lib/orion/service';
-import type { OrionWebhookPayload } from '@/lib/orion/types';
+import { applyOrionDraftReviewWebhook } from '@/lib/orion/draftService';
+import type { OrionDraftReviewWebhookPayload, OrionWebhookPayload } from '@/lib/orion/types';
 
 const TAG = '[integrations/orion/document-status]';
 
@@ -24,6 +25,33 @@ export async function POST(req: NextRequest) {
     }
 
     const body = (await req.json().catch(() => null)) as OrionWebhookPayload | null;
+
+    // Contrato v3: decisión del cliente sobre un borrador (no es un documento de firma).
+    const draftPayload = body as unknown as OrionDraftReviewWebhookPayload | null;
+    if (draftPayload?.purpose === 'DRAFT_REVIEW') {
+      if (!draftPayload.orionDocumentId) {
+        return NextResponse.json({ error: 'orionDocumentId es obligatorio' }, { status: 400 });
+      }
+      const fromDraftBody = Number(draftPayload.synerlinkRequestId);
+      const draftRequestId =
+        Number.isInteger(fromDraftBody) && fromDraftBody > 0
+          ? fromDraftBody
+          : parseRequestIdFromExternalRef(draftPayload.externalRef);
+      if (draftRequestId == null || draftRequestId <= 0) {
+        return NextResponse.json(
+          { error: 'synerlinkRequestId o externalRef válido es obligatorio' },
+          { status: 400 }
+        );
+      }
+      const result = await withMssqlPool((pool) =>
+        applyOrionDraftReviewWebhook(pool, { requestId: draftRequestId, payload: draftPayload })
+      );
+      if (!result.handled) {
+        return NextResponse.json({ error: 'Borrador no encontrado en la solicitud' }, { status: 404 });
+      }
+      return NextResponse.json({ success: true, synerlinkRequestId: draftRequestId, ...result });
+    }
+
     if (!body?.orionDocumentId || !body?.status) {
       return NextResponse.json(
         { error: 'orionDocumentId y status son obligatorios' },
