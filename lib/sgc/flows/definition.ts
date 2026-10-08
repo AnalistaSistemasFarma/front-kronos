@@ -11,7 +11,8 @@ import { SgcError } from '../errors';
  * del administrador antes de tocar la base.
  */
 
-export const SGC_FLOW_ROLES = ['solicitante', 'elaborador', 'revisor', 'aprobador', 'calidad', 'alcance', 'capacitacion'] as const;
+// Sprint 10: «material» = Calidad prepara el material de la capacitación (video y evaluación) ANTES de la divulgación.
+export const SGC_FLOW_ROLES = ['solicitante', 'elaborador', 'revisor', 'aprobador', 'calidad', 'alcance', 'capacitacion', 'material'] as const;
 export type SgcFlowRole = (typeof SGC_FLOW_ROLES)[number];
 
 /**
@@ -41,7 +42,8 @@ export type SgcFieldType = (typeof SGC_FIELD_TYPES)[number];
  * Condiciones que el motor sabe evaluar (catálogo cerrado: el administrador
  * elige de aquí; nada de expresiones libres en un sistema validado).
  */
-export const SGC_CONDITION_KEYS = ['tipo_exige_capacitacion', 'solicitud_es_nueva', 'solicitud_sobre_documento'] as const;
+// Sprint 10: «requiere_capacitacion» = la bandera de la SOLICITUD (sugerida por el solicitante y confirmada por quien crea el documento o Calidad; por defecto, la del tipo documental).
+export const SGC_CONDITION_KEYS = ['tipo_exige_capacitacion', 'solicitud_es_nueva', 'solicitud_sobre_documento', 'requiere_capacitacion'] as const;
 export type SgcConditionKey = (typeof SGC_CONDITION_KEYS)[number];
 
 export const SGC_FLOW_CATEGORIES = ['documental', 'control_cambios', 'desviaciones', 'capa', 'capacitacion', 'auditorias', 'otro'] as const;
@@ -54,6 +56,7 @@ export const SGC_ROLE_LABELS: Record<SgcFlowRole, string> = {
   calidad: 'Aseguramiento de Calidad',
   alcance: 'Personas del alcance',
   capacitacion: 'Capacitación',
+  material: 'Material de capacitación',
 };
 
 export const SGC_ASSIGNMENT_LABELS: Record<SgcFlowAssignment, string> = {
@@ -91,6 +94,7 @@ export const SGC_CONDITION_LABELS: Record<SgcConditionKey, string> = {
   tipo_exige_capacitacion: 'Solo si el tipo documental exige capacitación',
   solicitud_es_nueva: 'Solo si es un documento nuevo',
   solicitud_sobre_documento: 'Solo si es sobre un documento existente',
+  requiere_capacitacion: 'Solo si la solicitud requiere capacitación',
 };
 
 export interface SgcTaskDefinition {

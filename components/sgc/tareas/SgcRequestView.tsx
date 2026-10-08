@@ -56,6 +56,7 @@ import SgcSignaturesCard from '../signature/SgcSignaturesCard';
 import SgcDisseminationCard from './SgcDisseminationCard';
 import SgcReadingPanel from './SgcReadingPanel';
 import SgcTrainingCard from './SgcTrainingCard';
+import SgcTrainingFlagCard from './SgcTrainingFlagCard';
 import SgcCurrentDraftCard from './SgcCurrentDraftCard';
 import SgcDocumentLayoutCard from './SgcDocumentLayoutCard';
 import { draftEditorHref } from '../../../lib/sgc/draft/view';
@@ -551,9 +552,15 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           <SgcDisseminationCard idCompany={request.idCompany} view={data.dissemination} users={userOptions} onAction={onDisseminationAction} />
         )}
 
+        {/* Sprint 10: capacitación opcional por solicitud (sugerida por el solicitante, confirmada por quien crea el documento o Calidad). */}
+        {!data.readerOnly && request.trainingFlag && (
+          <SgcTrainingFlagCard flag={request.trainingFlag} onSet={(requiresTraining, reason) => run(() => sgcSend(`/api/sgc/requests/${request.id}/training-flag`, 'PUT', { requiresTraining, reason }), 'Capacitación de la solicitud confirmada.')} />
+        )}
+
         {data.training && (
           <SgcTrainingCard
             view={data.training}
+            onRetrain={(body) => run(() => sgcSend(`/api/sgc/requests/${request.id}/training/retraining`, 'POST', body), 'Recapacitación registrada.')}
             onSave={(body) => run(() => sgcSend(`/api/sgc/requests/${request.id}/training`, 'POST', body), 'Capacitación registrada.')}
             onUpload={(file) =>
               run(async () => {

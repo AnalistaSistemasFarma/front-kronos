@@ -54,7 +54,8 @@ export interface SgcPendingRow {
 /** Grupo del tablero de una tarea pendiente de la persona. */
 export function pendingGroupOf(row: Pick<SgcPendingRow, 'role' | 'taskKey' | 'isAuthorization'>): SgcPendingGroup {
   if (row.role === 'alcance' || row.taskKey === 'divulgacion') return 'lecturas';
-  if (row.role === 'capacitacion' || row.taskKey === 'capacitacion') return 'capacitaciones';
+  // Sprint 10: la preparación del material (role «material») también es de capacitación.
+  if (row.role === 'capacitacion' || row.role === 'material' || row.taskKey === 'capacitacion') return 'capacitaciones';
   if (row.isAuthorization) return 'autorizaciones';
   return 'tareas';
 }

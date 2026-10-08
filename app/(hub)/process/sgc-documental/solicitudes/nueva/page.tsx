@@ -43,6 +43,8 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const [idDocumentType, setIdDocumentType] = useState<string | null>(null);
   const [idDocument, setIdDocument] = useState<string | null>(prefill.tipo ? prefill.documento : null);
   const [idParentDocument, setIdParentDocument] = useState<string | null>(null);
+  // Sprint 10: el solicitante SUGIERE si requiere capacitación (la confirma quien crea el documento o Calidad).
+  const [requiresTraining, setRequiresTraining] = useState<string>('tipo');
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [values, setValues] = useState<Record<string, string>>({});
@@ -78,6 +80,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         idDocumentType: requestType === 'nuevo' ? Number(idDocumentType) : undefined,
         idDocument: requestType !== 'nuevo' ? Number(idDocument) : undefined,
         idParentDocument: inherits && idParentDocument ? Number(idParentDocument) : undefined,
+        requiresTraining: requiresTraining === 'tipo' ? undefined : requiresTraining,
         formValues: values,
       });
       router.push(`/process/sgc-documental/solicitudes/${res.idRequest}?empresa=${id}`);
@@ -156,6 +159,19 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
             data-testid='sgc-nueva-documento'
           />
         )}
+        <SgcSelect
+          label='¿Requiere capacitación?'
+          description='Su sugerencia: la confirma quien crea el documento o Calidad. Los formatos y los manuales de uso suelen requerirla.'
+          data={[
+            { value: 'tipo', label: 'Según el tipo documental' },
+            { value: 'si', label: 'Sí, requiere capacitación' },
+            { value: 'no', label: 'No requiere capacitación' },
+          ]}
+          value={requiresTraining}
+          onChange={(v) => setRequiresTraining(v ?? 'tipo')}
+          allowDeselect={false}
+          data-testid='sgc-nueva-capacitacion'
+        />
         <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
           label='Asunto'
           required
