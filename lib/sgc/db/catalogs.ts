@@ -1,6 +1,6 @@
 import type { PrismaClient } from '../../../app/generated/prisma';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
-import { getMasterCodeError, validateCodingGuide } from '../coding';
+import { getMasterCodeError, parseChildTypeCodes, validateCodingGuide } from '../coding';
 import { SgcError, isUniqueViolation } from '../errors';
 
 /**
@@ -22,7 +22,17 @@ export interface SgcActor {
 export interface SgcCatalogs {
   idCompany: number;
   storageRoot: string;
-  codingGuide: { prefix: string; pattern: string; sequenceDigits: number; updatedBy: string | null; updatedAt: string } | null;
+  codingGuide: {
+    prefix: string;
+    pattern: string;
+    sequenceDigits: number;
+    /** Sprint 8: herencia del número del documento padre (null = sin herencia). */
+    childPattern: string | null;
+    childTypeCodes: string[];
+    childSequenceDigits: number | null;
+    updatedBy: string | null;
+    updatedAt: string;
+  } | null;
   processTypes: { id: number; code: string; name: string; color: string; sortOrder: number; isActive: boolean }[];
   processes: {
     id: number;
@@ -73,6 +83,9 @@ export async function getCatalogs(db: SgcDb, idCompany: number, includeInactive 
           prefix: guide.prefix,
           pattern: guide.pattern,
           sequenceDigits: guide.sequence_digits,
+          childPattern: guide.child_pattern ?? null,
+          childTypeCodes: parseChildTypeCodes(guide.child_type_codes ?? ''),
+          childSequenceDigits: guide.child_sequence_digits ?? null,
           updatedBy: guide.updated_by,
           updatedAt: guide.updated_at.toISOString(),
         }
@@ -183,10 +196,15 @@ export async function saveCatalogEntry(
         });
 
       if (entity === 'coding-guide') {
+        // Sprint 8: herencia del número del padre (opcional; patrón vacío = sin herencia).
+        const childPattern = typeof body.childPattern === 'string' && body.childPattern.trim() ? body.childPattern.trim() : null;
         const guide = {
           prefix: typeof body.prefix === 'string' ? body.prefix.trim().toUpperCase() : '',
           pattern: typeof body.pattern === 'string' ? body.pattern.trim() : '',
           sequenceDigits: Number(body.sequenceDigits),
+          childPattern,
+          childTypeCodes: childPattern ? parseChildTypeCodes(body.childTypeCodes as string | string[] | null) : [],
+          childSequenceDigits: childPattern ? Number(body.childSequenceDigits ?? 2) : null,
         };
         const errors = validateCodingGuide(guide);
         if (errors.length) throw new SgcError(errors.join(' '));
@@ -195,6 +213,9 @@ export async function saveCatalogEntry(
           prefix: guide.prefix,
           pattern: guide.pattern,
           sequence_digits: guide.sequenceDigits,
+          child_pattern: guide.childPattern,
+          child_type_codes: guide.childPattern ? guide.childTypeCodes.join(',') : null,
+          child_sequence_digits: guide.childSequenceDigits,
           updated_by: actor.email,
           change_reason: reason,
         };

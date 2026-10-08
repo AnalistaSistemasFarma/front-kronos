@@ -104,6 +104,9 @@ try {
     // Correcciones de Calidad (2026-10-03).
     ['document_layout', 'change_reason'],
     ['read_threshold_notice', 'recipients_json'],
+    // Sprint 8: historial del listado maestro.
+    ['master_list_import', 'file_name'],
+    ['master_list_import_row', 'errors'],
   ]) {
     if (!tables.has(table)) continue;
     const tx = new sql.Transaction(pool);

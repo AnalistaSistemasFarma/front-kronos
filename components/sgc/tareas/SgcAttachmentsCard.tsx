@@ -23,12 +23,14 @@ export interface SgcAttachmentsCardProps {
   currentDraft?: SgcRequestDetail['currentDraft'];
   canUploadDraft: boolean;
   canUploadSupport: boolean;
+  /** Sprint 8: formatos del borrador (con el encabezado obligatorio, solo Word). */
+  draftFormats?: readonly string[];
   canWithdraw: (a: Attachment) => boolean;
   onUpload: (file: File, purpose: 'borrador' | 'soporte') => Promise<void>;
   onWithdraw: (id: number, reason: string) => Promise<void>;
 }
 
-export default function SgcAttachmentsCard({ requestId, attachments, currentDraft = null, canUploadDraft, canUploadSupport, canWithdraw, onUpload, onWithdraw }: SgcAttachmentsCardProps) {
+export default function SgcAttachmentsCard({ requestId, attachments, currentDraft = null, canUploadDraft, canUploadSupport, draftFormats = ['docx', 'doc', 'pdf'], canWithdraw, onUpload, onWithdraw }: SgcAttachmentsCardProps) {
   const [file, setFile] = useState<File | null>(null);
   const [purpose, setPurpose] = useState<'borrador' | 'soporte'>(canUploadDraft ? 'borrador' : 'soporte');
   const [uploading, setUploading] = useState(false);
@@ -145,7 +147,8 @@ export default function SgcAttachmentsCard({ requestId, attachments, currentDraf
             placeholder='Seleccione el archivo'
             value={file}
             onChange={setFile}
-            accept={purpose === 'borrador' ? '.docx,.doc,.pdf' : undefined}
+            accept={purpose === 'borrador' ? draftFormats.map((f) => `.${f}`).join(',') : undefined}
+            description={purpose === 'borrador' && !draftFormats.includes('pdf') ? 'El borrador va en Word (.docx): el sistema le pone el encabezado institucional.' : undefined}
             style={{ flex: 1, minWidth: 240 }}
             clearable
             data-testid='sgc-adjunto-archivo'

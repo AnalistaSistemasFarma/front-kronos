@@ -1320,6 +1320,18 @@ model SgcCompanyConfig {
   logo_data_url         String? @db.NVarChar(Max)
   dissemination_domains String? @db.NVarChar(500)
   read_threshold_pct    Int     @default(90)
+  // Sprint 8 (socialización con Calidad OLP, 2026-10-07): el encabezado
+  // institucional es OBLIGATORIO en documento nuevo y nueva versión (el
+  // borrador va en Word o en el editor; un PDF se rechaza). Es configuración
+  // por empresa (por defecto sí) para poder revertirlo sin tocar el código.
+  header_mandatory          Boolean   @default(true)
+  // Carga inicial de vigentes ABIERTA: solo mientras está abierta se cargan
+  // documentos vigentes sin el encabezado del sistema (uno a uno o desde el
+  // listado maestro en Excel). Calidad la cierra con motivo (Sprint 9).
+  initial_load_open         Boolean   @default(true)
+  initial_load_closed_by    String?   @db.NVarChar(255)
+  initial_load_closed_at    DateTime?
+  initial_load_close_reason String?   @db.NVarChar(1000)
 
   company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1351,6 +1363,9 @@ model SgcCompanyConfig {
   icalTokens         SgcIcalToken[]
   accessRequests     SgcAccessRequest[]
 
+  // Sprint 8: importaciones del listado maestro (Excel de Calidad).
+  masterListImports SgcMasterListImport[]
+
   @@map("company_config")
   @@schema("sgc")
 }
@@ -1370,6 +1385,14 @@ model SgcCodingGuide {
   prefix          String   @db.NVarChar(10)
   pattern         String   @db.NVarChar(200)
   sequence_digits Int      @default(3)
+  // Sprint 8: HERENCIA del número del documento padre (codificación de OLP:
+  // los formatos e instructivos heredan el número de su procedimiento). Sin
+  // child_pattern no hay herencia. Marcas: las del patrón más {CODIGO_PADRE} y
+  // {NUMERO_PADRE}; child_type_codes son los tipos documentales que heredan
+  // (códigos separados por coma). Ver lib/sgc/coding.ts.
+  child_pattern         String? @db.NVarChar(200)
+  child_type_codes      String? @db.NVarChar(200)
+  child_sequence_digits Int?
   updated_by      String?  @db.NVarChar(255)
   change_reason   String?  @db.NVarChar(1000)
   created_at      DateTime @default(now())
@@ -1494,6 +1517,9 @@ model SgcDocument {
   reviewAlertConfigs SgcReviewAlertConfig[]
   reviewAlerts       SgcReviewAlert[]
   accessRequests     SgcAccessRequest[]
+  // Sprint 8: solicitudes de documentos que heredan su número y filas del listado maestro que lo crearon.
+  childRequests      SgcRequest[]                @relation("SgcRequestParent")
+  importRows         SgcMasterListImportRow[]
 
   @@unique([id_company, code])
   @@index([id_company, status])
@@ -1821,11 +1847,14 @@ model SgcRequest {
   // pendiente | generado | error
   controlled_pdf_status String?   @db.NVarChar(20)
   controlled_pdf_error  String?   @db.NVarChar(1000)
+  // Sprint 8: documento padre del que hereda el número (formato o instructivo de un procedimiento).
+  id_parent_document    Int?
 
   companyConfig  SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   process        SgcFlowProcess     @relation(fields: [id_flow_process], references: [id_flow_process], onDelete: NoAction, onUpdate: NoAction)
   version        SgcFlowVersion     @relation(fields: [id_flow_version], references: [id_flow_version], onDelete: NoAction, onUpdate: NoAction)
   document       SgcDocument?       @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  parentDocument SgcDocument?       @relation("SgcRequestParent", fields: [id_parent_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
   processMap     SgcProcessMap?     @relation(fields: [id_process_map], references: [id_process_map], onDelete: NoAction, onUpdate: NoAction)
   documentType   SgcDocumentType?   @relation(fields: [id_document_type], references: [id_document_type], onDelete: NoAction, onUpdate: NoAction)
   tasks          SgcTask[]
@@ -2603,6 +2632,62 @@ model SgcReadThresholdNotice {
   @@unique([id_task, threshold_pct])
   @@index([id_request])
   @@map("read_threshold_notice")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 8: importación del LISTADO MAESTRO (Excel de
+// Calidad). Cada importación confirmada deja su encabezado y una fila por
+// cada fila del Excel (cargada o con su error). SOLO INSERCIÓN (trigger).
+// Los documentos se crean en estado «pendiente de archivo» con su código; la
+// versión y la fecha de vigencia del listado quedan en la fila y se usan al
+// cargar el PDF (Sprint 9).
+// ---------------------------------------------------------------------------
+model SgcMasterListImport {
+  id_master_list_import Int      @id @default(autoincrement())
+  id_company            Int
+  file_name             String   @db.NVarChar(260)
+  // Huella SHA-256 de las filas recibidas (JSON canónico).
+  rows_sha256           String   @db.Char(64)
+  rows_total            Int
+  rows_loaded           Int
+  rows_error            Int
+  imported_by           String   @db.NVarChar(255)
+  imported_at           DateTime
+  ip                    String?  @db.NVarChar(64)
+
+  companyConfig SgcCompanyConfig         @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  rows          SgcMasterListImportRow[]
+
+  @@index([id_company, imported_at])
+  @@map("master_list_import")
+  @@schema("sgc")
+}
+
+model SgcMasterListImportRow {
+  id_master_list_import_row Int       @id @default(autoincrement())
+  id_master_list_import     Int
+  row_number                Int
+  code                      String?   @db.NVarChar(60)
+  title                     String?   @db.NVarChar(300)
+  document_type_code        String?   @db.NVarChar(10)
+  process_code              String?   @db.NVarChar(10)
+  version_number            Int?
+  effective_date            DateTime? @db.Date
+  confidentiality           String?   @db.NVarChar(20)
+  parent_code               String?   @db.NVarChar(60)
+  // cargada | error
+  status                    String    @db.NVarChar(20)
+  errors                    String?   @db.NVarChar(2000)
+  warnings                  String?   @db.NVarChar(2000)
+  id_document               Int?
+
+  import   SgcMasterListImport @relation(fields: [id_master_list_import], references: [id_master_list_import], onDelete: NoAction, onUpdate: NoAction)
+  document SgcDocument?        @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_master_list_import])
+  @@index([id_document])
+  @@map("master_list_import_row")
   @@schema("sgc")
 }
 

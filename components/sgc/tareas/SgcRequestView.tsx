@@ -424,7 +424,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                             <Text size='sm'>
                               {request.document
                                 ? `${request.document.code} · ${request.document.title}`
-                                : `Nuevo · ${request.process?.code ?? ''} ${request.process?.name ?? ''} · ${request.documentType?.name ?? ''}`}
+                                : `Nuevo · ${request.process?.code ?? ''} ${request.process?.name ?? ''} · ${request.documentType?.name ?? ''}${request.parentDocument ? ` · hereda el número de ${request.parentDocument.code}` : ''}`}
                             </Text>
                           </div>
                         </Group>
@@ -615,6 +615,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           currentDraft={data.currentDraft}
           canUploadDraft={permissions.canUploadDraft}
           canUploadSupport={permissions.canUploadSupport}
+          draftFormats={request.draftFormats}
           canWithdraw={(a) => request.status === 'abierta' && (a.uploadedByEmail.toLowerCase() === me || permissions.isElaborator || permissions.isQuality)}
           onUpload={async (file, purpose) => {
             let duplicateOf: { id: number; fileName: string }[] = [];

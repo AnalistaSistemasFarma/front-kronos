@@ -52,6 +52,9 @@ import type { SgcUploader } from './documents';
 import { getCurrentFlowVersion, loadDefinition } from './flows';
 import { resolveElaboratorFor } from './elaborator';
 import { describeElaboratorChoice } from '../flows/elaborator';
+import { isHeaderMandatory } from './companySettings';
+import { guideInputOf, loadParentDocument } from './coding';
+import { inheritsParentNumber } from '../coding';
 import { activateReaders, checkReadThreshold, getDisseminationView, getMyReading } from './dissemination';
 import { getTrainingView } from './training';
 import { annulUnpublishedVersion, publishApprovedVersion, type SgcPublishResult } from './vigencia';
@@ -315,6 +318,8 @@ export interface SgcCreateRequestInput {
   idDocument?: unknown;
   idProcess?: unknown;
   idDocumentType?: unknown;
+  /** Sprint 8: documento padre de un formato o instructivo que hereda su número (guía de codificación). */
+  idParentDocument?: unknown;
   /** IGNORADO desde el 2026-10-05: el elaborador sale de la configuración (resolveElaboratorFor). */
   elaboratorEmail?: unknown;
   formValues?: Record<string, unknown>;
@@ -380,6 +385,7 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
   let idDocument: number | null = null;
   let idProcess: number | null = null;
   let idDocumentType: number | null = null;
+  let idParentDocument: number | null = null;
   if (requestType === 'nuevo') {
     idProcess = Number(input.idProcess);
     idDocumentType = Number(input.idDocumentType);
@@ -389,6 +395,15 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
     ]);
     if (!proc) throw new SgcError('Seleccione un proceso activo de la empresa.');
     if (!type) throw new SgcError('Seleccione un tipo documental activo de la empresa.');
+    // Sprint 8: si el tipo hereda el número de su documento padre (guía de codificación), el padre es obligatorio.
+    const guide = await db.sgcCodingGuide.findUnique({ where: { id_company: idCompany } });
+    if (guide && inheritsParentNumber(guideInputOf(guide), type.code)) {
+      const raw = Number(input.idParentDocument);
+      if (!input.idParentDocument || !Number.isInteger(raw)) {
+        throw new SgcError(`Un documento de tipo ${type.name} hereda el número de su documento padre: seleccione el documento padre (por ejemplo, el procedimiento).`);
+      }
+      idParentDocument = (await loadParentDocument(db, idCompany, raw)).idDocument;
+    }
   } else {
     idDocument = Number(input.idDocument);
     const doc = Number.isInteger(idDocument) ? await db.sgcDocument.findFirst({ where: { id_document: idDocument, id_company: idCompany } }) : null;
@@ -432,6 +447,7 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
         id_document: idDocument,
         id_process_map: idProcess,
         id_document_type: idDocumentType,
+        id_parent_document: idParentDocument,
         requester_email: lower(actor.email),
         elaborator_email: elaborator,
         status: 'abierta',
@@ -465,6 +481,7 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
         idDocument,
         idProcess,
         idDocumentType,
+        ...(idParentDocument ? { idParentDocument } : {}),
         elaborator,
         elaboratorSource: resolved.choice!.source,
         elaboratorMatrix: resolved.matrixLabel,
@@ -1173,6 +1190,8 @@ const detailInclude = {
   document: { include: { versions: { select: { id_document_version: true, version_number: true } } } },
   processMap: true,
   documentType: true,
+  // Sprint 8: documento padre del que hereda el número.
+  parentDocument: { select: { id_document: true, code: true, title: true } },
   tasks: { include: { assignees: { orderBy: { sign_order: 'asc' } }, taskDef: true }, orderBy: [{ id_task: 'asc' }] },
   signers: { orderBy: [{ step_key: 'asc' }, { sign_order: 'asc' }] },
   formValues: { include: { field: true } },
@@ -1423,6 +1442,9 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       document: row.document ? { id: row.document.id_document, code: row.document.code, title: row.document.title, status: row.document.status } : null,
       process: row.processMap ? { id: row.processMap.id_process_map, code: row.processMap.code, name: row.processMap.name } : null,
       documentType: row.documentType ? { id: row.documentType.id_document_type, code: row.documentType.code, name: row.documentType.name } : null,
+      // Sprint 8: documento padre (hereda su número) y formatos admitidos para el borrador.
+      parentDocument: row.parentDocument ? { id: row.parentDocument.id_document, code: row.parentDocument.code, title: row.parentDocument.title } : null,
+      draftFormats: row.companyConfig.header_mandatory ? ['docx', 'doc'] : ['docx', 'doc', 'pdf'],
     },
     focusTaskId: focusTaskId ?? null,
     tasks,
@@ -1671,6 +1693,11 @@ export async function uploadAttachment(
     if (!DRAFT_EXT.test(fileName)) throw new SgcError('El borrador debe ser Word (.docx, .doc) o PDF.');
     // Sprint 6: el contenido debe ser de verdad un Word o un PDF (firma del archivo, no solo la extensión).
     if (!(isPdf(input.bytes) || isWord(input.bytes, fileName))) throw new SgcError('El borrador no es un Word o PDF válido.');
+    // Sprint 8 (Calidad OLP, 2026-10-07; memoria rn-sgc-borrador-solo-word): con el encabezado institucional
+    // obligatorio, el borrador de un documento nuevo o de una nueva versión va en Word o en el editor.
+    if (isPdf(input.bytes) && (await isHeaderMandatory(db, row.id_company))) {
+      throw new SgcError('El borrador va en Word (.docx) o en el editor de la app: un PDF no admite el encabezado institucional ni los campos del sistema. El PDF solo se usa en la carga inicial de documentos vigentes.', 415);
+    }
   } else if (BLOCKED_SUPPORT_EXT.test(fileName)) {
     throw new SgcError('Ese tipo de archivo no se admite como soporte (ejecutables, scripts o páginas web).');
   }
