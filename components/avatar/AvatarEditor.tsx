@@ -1,86 +1,78 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Button, Group, Modal, SegmentedControl, Tooltip } from '@mantine/core';
-import { IconBan, IconDownload, IconRefresh } from '@tabler/icons-react';
+import { Button, Group, Modal, Tooltip } from '@mantine/core';
+import { IconBan, IconDownload, IconFlipVertical, IconRefresh } from '@tabler/icons-react';
 import {
-  AVATAR_BACKGROUNDS,
-  FONDO_INICIAL,
-  categoriasDe,
+  CATEGORIAS_EDITOR,
   composeAvatarSvg,
-  esTipoAvatar,
-  etiquetaTipo,
   composePartThumbSvg,
+  etiquetaOpcion,
   randomAvatarConfig,
   svgToDataUri,
+  type CategoriaEditor,
 } from '../../lib/avatar/compose';
-import type { AvatarCategory, AvatarConfig, AvatarKind } from '../../lib/avatar/types';
+import type { AvatarConfig } from '../../lib/avatar/types';
 import classes from './avatarEditor.module.css';
 
 /**
- * EDITOR DE AVATAR ESTILO NOTION — mismo aspecto y comportamiento que
- * Avatartion (github.com/wilmerterrero/Avatartion, licencia MIT):
+ * EDITOR DE AVATAR ESTILO NOTION con DiceBear + Lorelei. Misma interfaz que
+ * Avatartion (github.com/wilmerterrero/Avatartion, MIT; solo la idea, ningún
+ * dibujo):
  *
- *   - lienzo al centro con el avatar y su color de fondo;
- *   - a un lado, un círculo por parte con su miniatura y la flecha ↕; al
- *     tocarlo se abre una ventana con la cuadrícula de opciones (8 por
- *     página, paginación en píldoras) y al elegir una se cierra sola;
- *   - al otro lado, "Aleatorio" y "Descargar" (SVG o PNG).
+ *   - lienzo al centro con el avatar y su fondo;
+ *   - a un lado, un círculo por opción de Lorelei (cabello, cara, ojos, cejas,
+ *     boca, nariz, lentes, barba, aretes, pecas, accesorio y colores) con su
+ *     miniatura y la flecha ↕; al tocarlo se abre la cuadrícula de opciones
+ *     (8 por página) y al elegir una se cierra sola;
+ *   - al otro lado, "Aleatorio", "Voltear" y "Descargar" (SVG o PNG).
  *
- * Los dibujos: personas con las piezas de "Noto avatar" (CC0, las mismas de
- * notion-avatar); animales, planetas y constelaciones propios de SynerLink.
- * Nada de Avatartion: sus ilustraciones son de DrawKit y su licencia no
- * permite incluirlas en un creador de avatares. Ver docs/avatar-notion.md.
- *
+ * La vista previa usa createAvatar(lorelei, …) en el navegador con el MISMO
+ * código (lib/avatar/compose.ts) que usa el servidor para servir la imagen.
  * Este componente NO guarda nada: avisa con `onChange` y el padre decide.
  */
 
 const POR_PAGINA = 8;
-const FONDO_ID = '__fondo';
 
 interface Props {
   config: AvatarConfig;
   onChange: (config: AvatarConfig) => void;
-  /** Tipos que se pueden elegir (agentes: animal, planeta, constelación y persona). */
-  tiposPermitidos?: AvatarKind[];
   /** Nombre base del archivo descargado. */
   nombreArchivo?: string;
 }
 
-type Selector = { cat: AvatarCategory } | { fondo: true };
-
-export default function AvatarEditor({ config, onChange, tiposPermitidos = ['persona'], nombreArchivo = 'avatar' }: Props) {
-  const [abierto, setAbierto] = useState<Selector | null>(null);
+export default function AvatarEditor({ config, onChange, nombreArchivo = 'avatar' }: Props) {
+  const [abierto, setAbierto] = useState<CategoriaEditor | null>(null);
   const [pagina, setPagina] = useState(1);
   const [descarga, setDescarga] = useState(false);
 
-  const categorias = categoriasDe(config.tipo);
   const svg = useMemo(() => composeAvatarSvg(config), [config]);
 
-  // Igual que Avatartion: dos columnas de partes; la segunda termina con el fondo.
-  const mitad = Math.ceil((categorias.length + 1) / 2);
-  const columnas: Array<Array<AvatarCategory | 'fondo'>> = [
-    categorias.slice(0, mitad),
-    [...categorias.slice(mitad), 'fondo'],
-  ];
+  const mitad = Math.ceil(CATEGORIAS_EDITOR.length / 2);
+  const columnas = [CATEGORIAS_EDITOR.slice(0, mitad), CATEGORIAS_EDITOR.slice(mitad)];
 
-  const abrir = (s: Selector) => {
-    setPagina(1);
-    setAbierto(s);
+  const abrir = (cat: CategoriaEditor) => {
+    const actual = cat.opciones.indexOf(config[cat.id] ?? null);
+    setPagina(actual >= 0 ? Math.floor(actual / POR_PAGINA) + 1 : 1);
+    setAbierto(cat);
   };
 
-  const elegir = (catId: string, indice: number) => {
-    if (catId === FONDO_ID) onChange({ ...config, fondo: indice });
-    else onChange({ ...config, partes: { ...config.partes, [catId]: indice } });
+  const elegir = (cat: CategoriaEditor, valor: string | null) => {
+    onChange({ ...config, [cat.id]: valor } as AvatarConfig);
     setAbierto(null);
   };
 
-  const aleatorio = () => onChange(randomAvatarConfig(config.tipo));
+  // Aleatorio: partes nuevas (azar de DiceBear) conservando los colores elegidos.
+  const aleatorio = () =>
+    onChange(
+      randomAvatarConfig({
+        hairColor: config.hairColor,
+        skinColor: config.skinColor,
+        backgroundColor: config.backgroundColor,
+      })
+    );
 
-  const cambiarTipo = (tipo: string) => {
-    if (!esTipoAvatar(tipo) || tipo === config.tipo) return;
-    onChange(randomAvatarConfig(tipo, { fondo: config.fondo }));
-  };
+  const voltear = () => onChange({ ...config, flip: !config.flip });
 
   const descargar = async (formato: 'SVG' | 'PNG') => {
     setDescarga(false);
@@ -110,25 +102,24 @@ export default function AvatarEditor({ config, onChange, tiposPermitidos = ['per
     liberar?.();
   };
 
-  const fondoActual = AVATAR_BACKGROUNDS[config.fondo];
-
   return (
     <div className={classes.editor}>
-      {tiposPermitidos.length > 1 && (
-        <SegmentedControl
-          value={config.tipo}
-          onChange={cambiarTipo}
-          fullWidth
-          aria-label='Tipo de avatar'
-          data={tiposPermitidos.map((t) => ({ value: t, label: etiquetaTipo(t) }))}
-        />
-      )}
-
       <div className={classes.stage}>
         <div className={classes.actions}>
           <Tooltip label='Aleatorio' color='dark' withArrow>
             <button type='button' className={classes.circle} onClick={aleatorio} aria-label='Generar un avatar aleatorio'>
               <IconRefresh size={24} stroke={2} />
+            </button>
+          </Tooltip>
+          <Tooltip label='Voltear' color='dark' withArrow>
+            <button
+              type='button'
+              className={classes.circle}
+              onClick={voltear}
+              aria-pressed={config.flip}
+              aria-label='Voltear el avatar horizontalmente'
+            >
+              <IconFlipVertical size={24} stroke={2} />
             </button>
           </Tooltip>
           <Tooltip label='Descargar' color='dark' withArrow>
@@ -147,45 +138,28 @@ export default function AvatarEditor({ config, onChange, tiposPermitidos = ['per
         <div className={classes.pickerColumns}>
           {columnas.map((col, i) => (
             <div key={i} className={classes.pickerColumn}>
-              {col.map((item) =>
-                item === 'fondo' ? (
-                  <div key='fondo' className={classes.pickerRow}>
-                    <Tooltip label='Fondo' color='dark' withArrow>
-                      <button
-                        type='button'
-                        className={classes.circle}
-                        onClick={() => abrir({ fondo: true })}
-                        aria-label={`Fondo: ${fondoActual?.label ?? ''}`}
-                      >
-                        <Muestra color={fondoActual?.color ?? null} />
-                      </button>
-                    </Tooltip>
-                    <Flecha onClick={() => abrir({ fondo: true })} />
-                  </div>
-                ) : (
-                  <div key={item.id} className={classes.pickerRow}>
-                    <Tooltip label={item.label} color='dark' withArrow>
-                      <button
-                        type='button'
-                        className={classes.circle}
-                        onClick={() => abrir({ cat: item })}
-                        aria-label={`${item.label}: ${item.options[config.partes[item.id] ?? 0]?.label ?? ''}`}
-                      >
-                        <Miniatura tipo={config.tipo} catId={item.id} indice={config.partes[item.id] ?? 0} />
-                      </button>
-                    </Tooltip>
-                    <Flecha onClick={() => abrir({ cat: item })} />
-                  </div>
-                )
-              )}
+              {col.map((cat) => (
+                <div key={cat.id} className={classes.pickerRow}>
+                  <Tooltip label={cat.label} color='dark' withArrow>
+                    <button
+                      type='button'
+                      className={classes.circle}
+                      onClick={() => abrir(cat)}
+                      aria-label={`${cat.label}: ${etiquetaOpcion(cat.id, config[cat.id] ?? null)}`}
+                    >
+                      <Miniatura config={config} cat={cat} valor={config[cat.id] ?? null} />
+                    </button>
+                  </Tooltip>
+                  <Flecha onClick={() => abrir(cat)} />
+                </div>
+              ))}
             </div>
           ))}
         </div>
       </div>
 
       <SelectorModal
-        abierto={abierto}
-        tipo={config.tipo}
+        cat={abierto}
         config={config}
         pagina={pagina}
         onPagina={setPagina}
@@ -207,22 +181,22 @@ export default function AvatarEditor({ config, onChange, tiposPermitidos = ['per
   );
 }
 
-function Miniatura({ tipo, catId, indice }: { tipo: AvatarKind; catId: string; indice: number }) {
-  const src = useMemo(() => svgToDataUri(composePartThumbSvg(tipo, catId, indice)), [tipo, catId, indice]);
-  const opcion = categoriasDe(tipo).find((c) => c.id === catId)?.options[indice];
-  // "Ninguno": un círculo vacío no dice nada; se marca con el símbolo de vacío.
-  if (opcion && !opcion.svg) return <IconBan size={22} stroke={1.5} color='#9ca3af' aria-hidden />;
+function Miniatura({ config, cat, valor, enCuadricula = false }: { config: AvatarConfig; cat: CategoriaEditor; valor: string | null; enCuadricula?: boolean }) {
+  const src = useMemo(() => svgToDataUri(composePartThumbSvg(config, cat.id, valor)), [config, cat.id, valor]);
+  if (cat.esColor) return <Muestra color={valor ?? 'transparent'} />;
+  // "Ninguno" en el círculo: se marca con el símbolo de vacío.
+  if (valor === null && !enCuadricula) return <IconBan size={22} stroke={1.5} color='#9ca3af' aria-hidden />;
   // eslint-disable-next-line @next/next/no-img-element -- data: URI generado en el navegador
   return <img src={src} alt='' />;
 }
 
-function Muestra({ color }: { color: string | null }) {
+function Muestra({ color }: { color: string }) {
   return (
     <span
       className={classes.swatch}
       style={
-        color
-          ? { background: color }
+        color !== 'transparent'
+          ? { background: `#${color}` }
           : {
               backgroundImage:
                 'linear-gradient(45deg,#d1d5db 25%,transparent 25%),linear-gradient(-45deg,#d1d5db 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#d1d5db 75%),linear-gradient(-45deg,transparent 75%,#d1d5db 75%)',
@@ -246,35 +220,31 @@ function Flecha({ onClick }: { onClick: () => void }) {
 }
 
 function SelectorModal({
-  abierto,
-  tipo,
+  cat,
   config,
   pagina,
   onPagina,
   onElegir,
   onCerrar,
 }: {
-  abierto: Selector | null;
-  tipo: AvatarKind;
+  cat: CategoriaEditor | null;
   config: AvatarConfig;
   pagina: number;
   onPagina: (p: number) => void;
-  onElegir: (catId: string, indice: number) => void;
+  onElegir: (cat: CategoriaEditor, valor: string | null) => void;
   onCerrar: () => void;
 }) {
-  const esFondo = !!abierto && 'fondo' in abierto;
-  const cat = abierto && 'cat' in abierto ? abierto.cat : null;
-  const total = esFondo ? AVATAR_BACKGROUNDS.length : cat?.options.length ?? 0;
+  const total = cat?.opciones.length ?? 0;
   const paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
   const inicio = (pagina - 1) * POR_PAGINA;
-  const indices = Array.from({ length: Math.min(POR_PAGINA, total - inicio) }, (_, i) => inicio + i);
-  const actual = esFondo ? config.fondo : cat ? config.partes[cat.id] ?? 0 : -1;
+  const valores = cat ? cat.opciones.slice(inicio, inicio + POR_PAGINA) : [];
+  const actual = cat ? config[cat.id] ?? null : undefined;
 
   return (
     <Modal
-      opened={!!abierto}
+      opened={!!cat}
       onClose={onCerrar}
-      title={esFondo ? 'Fondos' : cat?.title}
+      title={cat?.title}
       centered
       radius='lg'
       size='md'
@@ -282,36 +252,27 @@ function SelectorModal({
     >
       <p className={classes.modalHint}>Haga clic en una opción para seleccionarla y cerrar esta ventana</p>
       <p className={classes.modalCount}>
-        {esFondo ? 'Colores disponibles' : 'Opciones disponibles'}: {total}
+        {cat?.esColor ? 'Colores disponibles' : 'Opciones disponibles'}: {total}
       </p>
       <div className={classes.grid}>
-        {indices.map((i) =>
-          esFondo ? (
-            <button
-              key={i}
-              type='button'
-              className={classes.option}
-              aria-pressed={actual === i}
-              aria-label={AVATAR_BACKGROUNDS[i].label}
-              onClick={() => onElegir(FONDO_ID, i)}
-            >
-              <Muestra color={AVATAR_BACKGROUNDS[i].color} />
-            </button>
-          ) : cat ? (
-            <button
-              key={i}
-              type='button'
-              className={classes.option}
-              aria-pressed={actual === i}
-              aria-label={cat.options[i].label}
-              title={cat.options[i].label}
-              onClick={() => onElegir(cat.id, i)}
-            >
-              <Miniatura tipo={tipo} catId={cat.id} indice={i} />
-              <span className={classes.optionLabel}>{cat.options[i].label}</span>
-            </button>
-          ) : null
-        )}
+        {cat &&
+          valores.map((valor) => {
+            const etiqueta = etiquetaOpcion(cat.id, valor);
+            return (
+              <button
+                key={valor ?? 'ninguno'}
+                type='button'
+                className={classes.option}
+                aria-pressed={actual === valor}
+                aria-label={etiqueta}
+                title={etiqueta}
+                onClick={() => onElegir(cat, valor)}
+              >
+                <Miniatura config={config} cat={cat} valor={valor} enCuadricula />
+                <span className={classes.optionLabel}>{etiqueta}</span>
+              </button>
+            );
+          })}
       </div>
       {paginas > 1 && (
         <nav aria-label='Páginas de opciones'>
@@ -336,6 +297,6 @@ function SelectorModal({
 }
 
 /** Configuración con la que arranca el editor cuando no hay nada guardado. */
-export function configInicial(tipo: AvatarKind): AvatarConfig {
-  return randomAvatarConfig(tipo, { fondo: FONDO_INICIAL });
+export function configInicial(): AvatarConfig {
+  return randomAvatarConfig();
 }

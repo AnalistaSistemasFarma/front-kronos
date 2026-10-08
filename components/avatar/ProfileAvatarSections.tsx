@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Avatar, Badge, Button, Card, Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { IconAlertTriangle, IconMoodSmile, IconRobot } from '@tabler/icons-react';
-import { AVATAR_KINDS, parseAvatarConfig, sugerenciaParaAgente } from '../../lib/avatar/compose';
+import { parseAvatarConfig, sugerenciaParaAgente } from '../../lib/avatar/compose';
 import type { AvatarConfig } from '../../lib/avatar/types';
 import { agentAvatarSrc, agentInitials } from '../../lib/chat/client';
 import AvatarEditor, { configInicial } from './AvatarEditor';
@@ -50,10 +50,10 @@ export function MiAvatarSection({
         const previa = parseAvatarConfig(data.config);
         setDisponible(data.disponible);
         setGuardada(previa);
-        setConfig(previa ?? configInicial('persona'));
+        setConfig(previa ?? configInicial());
       } catch (e) {
         if (!vivo) return;
-        setConfig(configInicial('persona'));
+        setConfig(configInicial());
         onResultado({ tipo: 'error', mensaje: e instanceof Error ? e.message : 'No se pudo cargar su avatar.' });
       } finally {
         if (vivo) setCargando(false);
@@ -113,7 +113,7 @@ export function MiAvatarSection({
         </Group>
       </Title>
       <Text size='sm' c='dimmed' mb='md'>
-        Arme su avatar estilo Notion parte por parte o genere uno aleatorio. Al guardarlo reemplaza su foto de perfil
+        Arme su avatar estilo Notion (DiceBear · Lorelei) parte por parte o genere uno aleatorio. Al guardarlo reemplaza su foto de perfil
         en el encabezado y en el chat; puede quitarlo cuando quiera y volver a la foto anterior.
       </Text>
 
@@ -182,7 +182,8 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
 
   const abrir = (a: AgenteGestionable) => {
     setEditando(a.code);
-    setConfig(parseAvatarConfig(a.config) ?? sugerenciaParaAgente(a.displayName) ?? configInicial('animal'));
+    // Sin avatar guardado: Lorelei con la semilla del nombre del asistente.
+    setConfig(parseAvatarConfig(a.config) ?? sugerenciaParaAgente(a.displayName));
   };
 
   const actualizar = (code: string, cambios: Partial<AgenteGestionable>) =>
@@ -234,8 +235,9 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
         </Group>
       </Title>
       <Text size='sm' c='dimmed' mb='md'>
-        Asistentes del chat de los que usted es responsable. Su avatar puede ser un animal, un planeta, una constelación
-        o una persona, estilo Notion; el cambio lo ve toda la empresa.
+        Asistentes del chat de los que usted es responsable (o todos, si es administrador). Su avatar es un retrato
+        estilo Notion (DiceBear · Lorelei); si aún no tiene, el editor arranca con el que sale de su nombre. El cambio lo
+        ve toda la empresa.
       </Text>
 
       <Stack gap='md'>
@@ -262,12 +264,7 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
 
             {editando === a.code && config && (
               <Stack gap='md' mt='md'>
-                <AvatarEditor
-                  config={config}
-                  onChange={setConfig}
-                  tiposPermitidos={[...AVATAR_KINDS]}
-                  nombreArchivo={`avatar-${a.code}`}
-                />
+                <AvatarEditor config={config} onChange={setConfig} nombreArchivo={`avatar-${a.code}`} />
                 <Group justify='flex-end'>
                   <Button variant='subtle' color='gray' onClick={() => setEditando(null)} disabled={!!ocupado}>
                     Cancelar

@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AVATAR_BACKGROUNDS,
-  AVATAR_STYLES,
-  AVATAR_KINDS,
+  CATALOGO,
+  CATEGORIAS_EDITOR,
+  MAX_CONFIG_JSON,
+  PALETAS,
   agentAvatarNotionUrl,
-  categoriasDe,
   composeAvatarSvg,
   composePartThumbSvg,
+  configDesdeSemilla,
+  etiquetaOpcion,
   isNotionAvatarUrl,
   notionAvatarVersion,
+  opcionesLorelei,
   parseAvatarConfig,
   randomAvatarConfig,
   serializeAvatarConfig,
@@ -16,231 +19,140 @@ import {
   userAvatarUrl,
 } from '../compose';
 
-describe('parseAvatarConfig', () => {
-  it('acepta una configuración válida y la devuelve limpia', () => {
-    const c = parseAvatarConfig({ v: 1, tipo: 'persona', partes: { cara: 2, cabello: 4 }, fondo: 1 });
-    expect(c).not.toBeNull();
-    expect(c!.partes.cara).toBe(2);
-    expect(c!.partes.cabello).toBe(4);
-    // Las categorías que faltan quedan en 0 (compatibilidad hacia adelante).
-    expect(c!.partes.ojos).toBe(0);
+const base = () => configDesdeSemilla('prueba');
+
+describe('catálogo desde el esquema de Lorelei', () => {
+  it('trae las partes de la versión instalada', () => {
+    expect(CATALOGO.hair.length).toBeGreaterThanOrEqual(48);
+    expect(CATALOGO.eyes.length).toBeGreaterThanOrEqual(24);
+    expect(CATALOGO.mouth).toContain('happy01');
+    expect(CATALOGO.mouth).toContain('sad01');
+    expect(CATALOGO.hairAccessories).toEqual(['flowers']);
+    // Ordenado: variant01 primero.
+    expect(CATALOGO.hair[0]).toBe('variant01');
   });
 
-  it('acepta el JSON como texto', () => {
-    const texto = JSON.stringify({ v: 1, tipo: 'animal', partes: { animal: 5 }, fondo: 0 });
-    expect(parseAvatarConfig(texto)?.partes.animal).toBe(5);
+  it('el editor tiene una categoría por parte y por color, sin repetir', () => {
+    const ids = CATEGORIAS_EDITOR.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(expect.arrayContaining(['hair', 'eyes', 'mouth', 'glasses', 'beard', 'hairColor', 'skinColor', 'backgroundColor']));
+    expect(CATEGORIAS_EDITOR.find((c) => c.id === 'glasses')!.opciones[0]).toBeNull();
+    expect(etiquetaOpcion('mouth', 'sad03')).toBe('Seria 3');
+    expect(etiquetaOpcion('hair', 'variant07')).toBe('Cabello 7');
+    expect(etiquetaOpcion('glasses', null)).toBe('Ninguno');
+  });
+});
+
+describe('parseAvatarConfig', () => {
+  it('acepta una configuración válida (objeto o texto) y la devuelve limpia', () => {
+    const c = base();
+    expect(parseAvatarConfig(c)).toEqual(c);
+    expect(parseAvatarConfig(serializeAvatarConfig(c))).toEqual(c);
+  });
+
+  it('cabe holgado en la columna NVARCHAR(1000)', () => {
+    const c = { ...base(), seed: 'x'.repeat(64), glasses: 'variant01', beard: 'variant01', earrings: 'variant01', freckles: 'variant01', hairAccessories: 'flowers' };
+    expect(serializeAvatarConfig(c).length).toBeLessThan(MAX_CONFIG_JSON / 2);
   });
 
   it.each([
-    ['versión desconocida', { v: 2, tipo: 'persona', partes: {}, fondo: 0 }],
-    ['tipo desconocido', { v: 1, tipo: 'robot', partes: {}, fondo: 0 }],
-    ['categoría ajena al tipo', { v: 1, tipo: 'animal', partes: { cabello: 1 }, fondo: 0 }],
-    ['índice fuera del catálogo', { v: 1, tipo: 'persona', partes: { cara: 999 }, fondo: 0 }],
-    ['índice negativo', { v: 1, tipo: 'persona', partes: { cara: -1 }, fondo: 0 }],
-    ['índice decimal', { v: 1, tipo: 'persona', partes: { cara: 1.5 }, fondo: 0 }],
-    ['índice como texto', { v: 1, tipo: 'persona', partes: { cara: '1' }, fondo: 0 }],
-    ['fondo fuera de rango', { v: 1, tipo: 'persona', partes: {}, fondo: AVATAR_BACKGROUNDS.length }],
-    ['partes no es objeto', { v: 1, tipo: 'persona', partes: [1, 2], fondo: 0 }],
-  ])('rechaza: %s', (_n, raw) => {
-    expect(parseAvatarConfig(raw)).toBeNull();
+    ['versión 1 (motor de piezas anterior)', { v: 1, tipo: 'persona', partes: {}, fondo: 0 }],
+    ['estilo desconocido', { estilo: 'avataaars' }],
+    ['clave desconocida', { extra: '<script>' }],
+    ['variante inexistente', { hair: 'variant999' }],
+    ['variante como número', { eyes: 3 }],
+    ['parte fija vacía', { mouth: null }],
+    ['opcional inexistente', { glasses: 'variant99' }],
+    ['color con #', { hairColor: '#000000' }],
+    ['color con inyección', { skinColor: 'fff" onload="x' }],
+    ['transparente fuera del fondo', { hairColor: 'transparent' }],
+    ['flip no booleano', { flip: 'si' }],
+    ['semilla larga', { seed: 'x'.repeat(65) }],
+  ])('rechaza: %s', (_n, cambios) => {
+    expect(parseAvatarConfig({ ...base(), ...cambios })).toBeNull();
   });
 
-  it('rechaza JSON roto, nulos y textos demasiado largos', () => {
+  it('rechaza JSON roto, nulos, arreglos y textos demasiado largos', () => {
     expect(parseAvatarConfig('{no es json')).toBeNull();
     expect(parseAvatarConfig(null)).toBeNull();
+    expect(parseAvatarConfig([1, 2])).toBeNull();
     expect(parseAvatarConfig('x'.repeat(5000))).toBeNull();
   });
 
-  it('ida y vuelta: serializar y volver a leer da lo mismo', () => {
-    for (const tipo of AVATAR_KINDS) {
-      const c = randomAvatarConfig(tipo);
-      expect(parseAvatarConfig(serializeAvatarConfig(c))).toEqual(c);
-    }
+  it('el fondo admite transparente', () => {
+    expect(parseAvatarConfig({ ...base(), backgroundColor: 'transparent' })).not.toBeNull();
   });
 });
 
-describe('composeAvatarSvg', () => {
-  it('compone todas las opciones de todas las categorías sin romper el SVG', () => {
-    for (const tipo of AVATAR_KINDS) {
-      for (const cat of categoriasDe(tipo)) {
-        cat.options.forEach((_o, i) => {
-          const c = randomAvatarConfig(tipo, {}, () => 0);
-          c.partes[cat.id] = i;
-          const svg = composeAvatarSvg(c);
-          expect(svg.startsWith('<svg')).toBe(true);
-          expect(svg.endsWith('</svg>')).toBe(true);
-          // Nada de scripts ni manejadores: el catálogo es solo dibujo.
-          expect(svg).not.toMatch(/<script|on[a-z]+=|javascript:|href=/i);
-          expect(composePartThumbSvg(tipo, cat.id, i)).toContain('viewBox');
-        });
-      }
+describe('configDesdeSemilla / sugerencias', () => {
+  it('es determinista: misma semilla, mismo avatar', () => {
+    expect(configDesdeSemilla('Orión')).toEqual(configDesdeSemilla('Orión'));
+    expect(composeAvatarSvg(configDesdeSemilla('Vega'))).toBe(composeAvatarSvg(configDesdeSemilla('Vega')));
+  });
+
+  it('semillas distintas dan avatares distintos', () => {
+    const svgs = ['Atlas', 'Galileo', 'Kepler', 'Mercurio', 'Orión', 'Sirio', 'Vega'].map((n) =>
+      serializeAvatarConfig({ ...sugerenciaParaAgente(n), seed: '' })
+    );
+    expect(new Set(svgs).size).toBe(svgs.length);
+  });
+
+  it('siempre da una configuración válida y en blanco y negro por defecto', () => {
+    for (let i = 0; i < 30; i += 1) {
+      const c = randomAvatarConfig();
+      expect(parseAvatarConfig(c)).toEqual(c);
+      expect(c.hairColor).toBe('000000');
+      expect(c.skinColor).toBe('ffffff');
     }
   });
 
-  it('pinta el fondo cuando no es transparente y escapa el título', () => {
-    const c = randomAvatarConfig('persona', { fondo: 0 });
-    const svg = composeAvatarSvg(c, { size: 64, title: '<b>Ana & "Luis"</b>' });
-    expect(svg).toContain('<rect width="300" height="300" fill="#f2f2f2"/>');
+  it('el aleatorio conserva los colores pedidos', () => {
+    const c = randomAvatarConfig({ hairColor: PALETAS.hairColor[3].color, backgroundColor: 'transparent' });
+    expect(c.hairColor).toBe(PALETAS.hairColor[3].color);
+    expect(c.backgroundColor).toBe('transparent');
+  });
+
+  it('lo que elige DiceBear con la semilla es lo mismo que se dibuja con las opciones explícitas', async () => {
+    const { createAvatar } = await import('@dicebear/core');
+    const lorelei = await import('@dicebear/lorelei');
+    const c = configDesdeSemilla('Kepler');
+    const porSemilla = createAvatar(lorelei, { seed: 'Kepler', backgroundColor: ['f2f2f2'] }).toString();
+    expect(composeAvatarSvg(c)).toBe(porSemilla);
+  });
+});
+
+describe('composeAvatarSvg (createAvatar de DiceBear)', () => {
+  it('produce un SVG de Lorelei con su atribución CC0', () => {
+    const svg = composeAvatarSvg(base());
+    expect(svg.startsWith('<svg')).toBe(true);
+    expect(svg).toContain('Lisa Wischofsky');
+    expect(svg).toContain('creativecommons.org/publicdomain/zero/1.0');
+    expect(svg).not.toMatch(/<script|on[a-z]+=|href=/i);
+  });
+
+  it('escapa el título y respeta el tamaño', () => {
+    const svg = composeAvatarSvg(base(), { size: 64, title: '<b>Ana & "Luis"</b>' });
+    expect(svg).toContain('<title>&lt;b&gt;Ana &amp; &quot;Luis&quot;&lt;/b&gt;</title>');
     expect(svg).toContain('width="64"');
-    expect(svg).toContain('&lt;b&gt;Ana &amp; &quot;Luis&quot;&lt;/b&gt;');
-    const transparente = AVATAR_BACKGROUNDS.findIndex((f) => f.color === null);
-    expect(composeAvatarSvg({ ...c, fondo: transparente })).not.toContain('<rect width="300"');
   });
 
-  it('el dibujo es blanco y negro puro (sin otros colores que el fondo)', () => {
-    for (const tipo of AVATAR_KINDS) {
-      for (const cat of categoriasDe(tipo)) {
-        cat.options.forEach((_o, i) => {
-          const c = randomAvatarConfig(tipo, {}, () => 0);
-          c.partes[cat.id] = i;
-          const colores = composeAvatarSvg({ ...c, fondo: 1 }).match(/#[0-9a-f]{3,6}\b/gi) ?? [];
-          for (const color of colores) expect(['#000', '#fff', '#ffffff']).toContain(color.toLowerCase());
-        });
-      }
-    }
+  it('cada opción opcional aparece o desaparece según la configuración', () => {
+    const sin = { ...base(), glasses: null };
+    const con = { ...base(), glasses: CATALOGO.glasses[0] };
+    expect(opcionesLorelei(sin).glassesProbability).toBe(0);
+    expect(opcionesLorelei(con).glassesProbability).toBe(100);
+    expect(composeAvatarSvg(con)).not.toBe(composeAvatarSvg(sin));
   });
 
-  it('las categorías tienen claves únicas y los ids no cambian de nombre', () => {
-    expect(categoriasDe('persona').map((c) => c.id)).toEqual([
-      'cara', 'cabello', 'ojos', 'cejas', 'nariz', 'boca', 'barba', 'gafas', 'accesorios', 'detalles',
-    ]);
-    expect(categoriasDe('animal').map((c) => c.id)).toEqual(['animal', 'ojos', 'cejas', 'boca', 'ropa', 'gafas', 'accesorios']);
-    expect(categoriasDe('planeta').map((c) => c.id)).toEqual(['planeta', 'carita', 'ojos', 'cejas', 'boca', 'accesorios', 'decorado']);
-    expect(categoriasDe('constelacion').map((c) => c.id)).toEqual(['constelacion', 'estrella', 'marco', 'cielo']);
+  it('flip y fondo cambian el dibujo', () => {
+    const c = base();
+    expect(composeAvatarSvg({ ...c, flip: true })).not.toBe(composeAvatarSvg(c));
+    expect(composeAvatarSvg({ ...c, backgroundColor: 'b6e3f4' })).toContain('#b6e3f4');
   });
 
-  it('el catálogo no se reordena: nombres en su índice', () => {
-    // Si alguna de estas falla, se reordenó el catálogo y los avatares
-    // guardados cambiarían de dibujo. Lo nuevo va AL FINAL.
-    const nombres = (tipo: Parameters<typeof categoriasDe>[0], id: string) =>
-      categoriasDe(tipo).find((c) => c.id === id)!.options.map((o) => o.label);
-    expect(nombres('planeta', 'planeta').slice(0, 11)).toEqual([
-      'Mercurio', 'Venus', 'Tierra', 'Marte', 'Júpiter', 'Saturno', 'Urano', 'Neptuno', 'Luna', 'Sol', 'Plutón',
-    ]);
-    expect(nombres('constelacion', 'constelacion').slice(0, 12)).toEqual([
-      'Orión', 'Osa Mayor', 'Casiopea', 'Escorpio', 'Lira (Vega)', 'Can Mayor (Sirio)', 'Cruz del Sur', 'Leo',
-      'Cisne', 'Osa Menor', 'Pléyades (Atlas)', 'Géminis',
-    ]);
-    expect(nombres('animal', 'animal').slice(0, 11)).toEqual([
-      'Gato', 'Perro', 'Zorro', 'Búho', 'Oso', 'Conejo', 'Panda', 'León', 'Pingüino', 'Koala', 'Mono',
-    ]);
-    // Persona: piezas de Noto avatar (CC0), una por archivo 0.svg, 1.svg…
-    const conteo = Object.fromEntries(categoriasDe('persona').map((c) => [c.id, c.options.length]));
-    expect(conteo).toEqual({
-      cara: 16, cabello: 59, ojos: 14, cejas: 16, nariz: 14, boca: 20, barba: 17, gafas: 15, accesorios: 15, detalles: 14,
-    });
-  });
-});
-
-describe('estilo a lápiz', () => {
-  const c = randomAvatarConfig('persona', { fondo: 0 }, () => 0.3);
-
-  it('por defecto es el plano de siempre (sin turbulencia)', () => {
-    expect(composeAvatarSvg(c)).toBe(composeAvatarSvg(c, { style: 'plano' }));
-    expect(composeAvatarSvg(c)).not.toContain('feTurbulence');
-  });
-
-  it('es determinista: misma configuración, mismo SVG (servidor = cliente)', () => {
-    for (const style of AVATAR_STYLES) {
-      expect(composeAvatarSvg(c, { style })).toBe(composeAvatarSvg({ ...c, partes: { ...c.partes } }, { style }));
-    }
-  });
-
-  it('la semilla depende del avatar: dos avatares distintos tiemblan distinto', () => {
-    const otro = { ...c, partes: { ...c.partes, cabello: (c.partes.cabello + 1) % 59 } };
-    const semilla = (svg: string) => svg.match(/seed="(\d+)"/)?.[1];
-    expect(semilla(composeAvatarSvg(c, { style: 'lapiz' }))).not.toBe(semilla(composeAvatarSvg(otro, { style: 'lapiz' })));
-  });
-
-  it('sigue en blanco y negro puro y sin nada ejecutable, en todos los tipos', () => {
-    for (const tipo of AVATAR_KINDS) {
-      for (const style of ['lapiz', 'grafito'] as const) {
-        const svg = composeAvatarSvg({ ...randomAvatarConfig(tipo, {}, () => 0.5), fondo: 1 }, { style });
-        expect(svg).toContain('feDisplacementMap');
-        expect(svg).not.toMatch(/<script|on[a-z]+=|javascript:|href=/i);
-        const colores = svg.match(/#[0-9a-f]{3,6}\b/gi) ?? [];
-        for (const color of colores) expect(['#000', '#fff', '#ffffff']).toContain(color.toLowerCase());
-      }
-    }
-  });
-
-  it('afina el trazo y solo grafito lleva grano', () => {
-    expect(composeAvatarSvg(c, { style: 'lapiz' })).not.toContain('result="motas"');
-    expect(composeAvatarSvg(c, { style: 'grafito' })).toContain('result="motas"');
-    const grosores = (svg: string) => [...svg.matchAll(/stroke-width="([\d.]+)"/g)].map((m) => Number(m[1]));
-    const plano = grosores(composeAvatarSvg(c));
-    const lapiz = grosores(composeAvatarSvg(c, { style: 'lapiz' }));
-    expect(lapiz.length).toBe(plano.length);
-    lapiz.forEach((w, i) => expect(w).toBeLessThanOrEqual(plano[i]));
-  });
-});
-
-describe('randomAvatarConfig', () => {
-  it('siempre produce configuraciones válidas', () => {
-    for (let i = 0; i < 200; i += 1) {
-      const tipo = AVATAR_KINDS[i % AVATAR_KINDS.length];
-      expect(parseAvatarConfig(randomAvatarConfig(tipo))).not.toBeNull();
-    }
-  });
-
-  it('nunca junta gafas con un accesorio (salvo los combinables)', () => {
-    let semilla = 7;
-    const rnd = () => ((semilla = (semilla * 16807) % 2147483647) / 2147483647);
-    for (const tipo of ['persona', 'animal'] as const) {
-      const cats = categoriasDe(tipo);
-      const gafas = cats.find((c) => c.id === 'gafas')!;
-      const acc = cats.find((c) => c.id === 'accesorios')!;
-      for (let i = 0; i < 500; i += 1) {
-        const c = randomAvatarConfig(tipo, {}, rnd);
-        const opcionAcc = acc.options[c.partes.accesorios];
-        if (gafas.options[c.partes.gafas].svg && opcionAcc.svg) expect(opcionAcc.combinable).toBe(true);
-      }
-    }
-  });
-});
-
-describe('carita y figuras oscuras', () => {
-  it('"Sin carita" quita ojos, cejas y boca del planeta', () => {
-    const con = randomAvatarConfig('planeta', {}, () => 0);
-    con.partes.carita = 0;
-    const sin = { ...con, partes: { ...con.partes, carita: 1 } };
-    expect(composeAvatarSvg(sin).length).toBeLessThan(composeAvatarSvg(con).length);
-  });
-
-  it('sobre Marte (planeta negro) la carita se pinta en blanco', () => {
-    const c = randomAvatarConfig('planeta', {}, () => 0);
-    c.partes.planeta = categoriasDe('planeta')[0].options.findIndex((o) => o.label === 'Marte');
-    c.partes.carita = 0;
-    const svg = composeAvatarSvg(c);
-    expect(svg).toContain('<g stroke="#fff" fill="#000">');
-  });
-
-  it('con "Cielo negro" la constelación se invierte (líneas y estrellas blancas)', () => {
-    const c = randomAvatarConfig('constelacion', {}, () => 0);
-    c.partes.marco = categoriasDe('constelacion').find((x) => x.id === 'marco')!.options.findIndex((o) => o.label === 'Cielo negro');
-    expect(composeAvatarSvg(c)).toContain('<g stroke="#fff" fill="#000">');
-  });
-});
-
-describe('sugerencias para los asistentes de OLP', () => {
-  it.each([
-    ['Orión', 'constelacion', 'Orión'],
-    ['Vega', 'constelacion', 'Lira (Vega)'],
-    ['Sirio', 'constelacion', 'Can Mayor (Sirio)'],
-    ['Atlas', 'constelacion', 'Pléyades (Atlas)'],
-    ['Mercurio', 'planeta', 'Mercurio'],
-    ['Galileo', 'planeta', 'Júpiter'],
-    ['Kepler', 'planeta', 'Marte'],
-  ])('%s arranca con %s (%s)', (nombre, tipo, figura) => {
-    const c = sugerenciaParaAgente(nombre);
-    expect(c?.tipo).toBe(tipo);
-    const cat = categoriasDe(c!.tipo)[0];
-    expect(cat.options[c!.partes[cat.id]].label).toBe(figura);
-  });
-
-  it('un nombre sin sugerencia devuelve null', () => {
-    expect(sugerenciaParaAgente('Horus')).toBeNull();
-    expect(sugerenciaParaAgente('ORION')?.tipo).toBe('constelacion');
+  it('la miniatura recorta el lienzo a la zona de la parte', () => {
+    const svg = composePartThumbSvg(base(), 'eyes', CATALOGO.eyes[0]);
+    expect(svg).not.toContain('viewBox="0 0 980 980"');
   });
 });
 

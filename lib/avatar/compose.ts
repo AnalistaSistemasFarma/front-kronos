@@ -1,79 +1,99 @@
-import { CATEGORIAS_ANIMAL, ORDEN_ANIMAL, capaAnimal } from './parts-animal';
-import { CATEGORIAS_CONSTELACION, ORDEN_CONSTELACION, capaConstelacion } from './parts-constelacion';
-import { CATEGORIAS_PERSONA, ORDEN_PERSONA } from './parts-persona';
-import { CATEGORIAS_PLANETA, ORDEN_PLANETA, capaPlaneta } from './parts-planeta';
-import { sugerenciaCruda } from './sugerencias';
-import type { AvatarBackground, AvatarCategory, AvatarConfig, AvatarKind } from './types';
+import { createAvatar } from '@dicebear/core';
+import * as lorelei from '@dicebear/lorelei';
+import type { AvatarConfig, ColorAvatar, ParteFija, ParteOpcional } from './types';
 
 /**
- * Composición del avatar estilo Notion: de una configuración (índices) a SVG.
+ * Avatar estilo Notion con DiceBear + Lorelei.
  *
- * Es código PURO (sin React, sin base de datos) para que lo usen igual el
- * editor del navegador y el endpoint que sirve la imagen, y para poder
- * probarlo con Vitest. Todo el marcado sale de los catálogos de este
- * repositorio; de la configuración solo se leen NÚMEROS ya validados.
+ * - Librería: @dicebear/core (MIT) y @dicebear/lorelei (código MIT; diseño
+ *   "Lorelei" de Lisa Wischofsky, CC0 1.0). El SVG generado lleva la
+ *   atribución en su <metadata>.
+ * - Código PURO (sin React ni base de datos): lo usan igual el editor del
+ *   navegador (vista previa) y los endpoints /api/avatar/... (imagen servida),
+ *   y se prueba con Vitest.
+ * - Los catálogos (variantes de cada parte) salen del ESQUEMA de la versión
+ *   instalada de Lorelei, no de una lista copiada a mano.
  */
 
-/**
- * Fondos: solo neutros (el estilo es blanco y negro puro). El primero, gris
- * muy claro, es el de arranque: se lee bien sobre la interfaz blanca.
- */
-export const AVATAR_BACKGROUNDS: AvatarBackground[] = [
-  { label: 'Gris claro', color: '#f2f2f2' },
-  { label: 'Blanco', color: '#ffffff' },
-  { label: 'Transparente', color: null },
-];
+/* ───────────────────────────── Catálogo ───────────────────────────── */
 
-/** Fondo con el que arranca el editor. */
-export const FONDO_INICIAL = 0;
+type EsquemaPropiedad = { items?: { enum?: string[] } };
+const propiedades = (lorelei.schema.properties ?? {}) as Record<string, EsquemaPropiedad>;
 
-interface DefTipo {
-  label: string;
-  categorias: AvatarCategory[];
-  /** Capas de atrás hacia adelante (ids de categoría). */
-  orden: readonly string[];
-  /** Ajuste de una capa según el resto de la configuración (posición, color). */
-  capa?: (config: AvatarConfig, id: string, svg: string) => string;
+/** Variantes de una parte, ordenadas (variant01, variant02… / happy01…, sad01…). */
+function variantes(parte: string): readonly string[] {
+  const lista = [...(propiedades[parte]?.items?.enum ?? [])];
+  return lista.sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
 }
 
-const TIPOS: Record<AvatarKind, DefTipo> = {
-  persona: { label: 'Persona', categorias: CATEGORIAS_PERSONA, orden: ORDEN_PERSONA },
-  animal: { label: 'Animal', categorias: CATEGORIAS_ANIMAL, orden: ORDEN_ANIMAL, capa: capaAnimal },
-  planeta: { label: 'Planeta', categorias: CATEGORIAS_PLANETA, orden: ORDEN_PLANETA, capa: capaPlaneta },
-  constelacion: {
-    label: 'Constelación',
-    categorias: CATEGORIAS_CONSTELACION,
-    orden: ORDEN_CONSTELACION,
-    capa: capaConstelacion,
-  },
+export const PARTES_FIJAS: readonly ParteFija[] = ['hair', 'head', 'eyes', 'eyebrows', 'mouth', 'nose'];
+export const PARTES_OPCIONALES: readonly ParteOpcional[] = ['glasses', 'beard', 'earrings', 'freckles', 'hairAccessories'];
+export const COLORES: readonly ColorAvatar[] = ['hairColor', 'skinColor', 'backgroundColor'];
+
+export const CATALOGO: Readonly<Record<ParteFija | ParteOpcional, readonly string[]>> = Object.fromEntries(
+  [...PARTES_FIJAS, ...PARTES_OPCIONALES].map((p) => [p, variantes(p)])
+) as Record<ParteFija | ParteOpcional, readonly string[]>;
+
+/**
+ * Paletas. Por defecto el avatar queda en blanco y negro (piel blanca, cabello
+ * negro, fondo gris claro): el mismo estilo de línea de Notion. El resto son
+ * opciones para quien quiera color.
+ */
+export const PALETAS: Readonly<Record<ColorAvatar, ReadonlyArray<{ label: string; color: string }>>> = {
+  hairColor: [
+    { label: 'Negro', color: '000000' },
+    { label: 'Castaño oscuro', color: '4a312c' },
+    { label: 'Castaño', color: '724133' },
+    { label: 'Cobrizo', color: 'a55728' },
+    { label: 'Rubio', color: 'd6b370' },
+    { label: 'Canoso', color: 'b1b1b1' },
+    { label: 'Azul', color: '2c1b8f' },
+  ],
+  skinColor: [
+    { label: 'Blanco (línea)', color: 'ffffff' },
+    { label: 'Claro', color: 'f8d9ce' },
+    { label: 'Trigueño claro', color: 'f2d3b1' },
+    { label: 'Trigueño', color: 'ecad80' },
+    { label: 'Moreno', color: 'd08b5b' },
+    { label: 'Moreno oscuro', color: 'ae5d29' },
+    { label: 'Oscuro', color: '614335' },
+  ],
+  backgroundColor: [
+    { label: 'Gris claro', color: 'f2f2f2' },
+    { label: 'Blanco', color: 'ffffff' },
+    { label: 'Transparente', color: 'transparent' },
+    { label: 'Azul cielo', color: 'b6e3f4' },
+    { label: 'Lavanda', color: 'c0aede' },
+    { label: 'Pervinca', color: 'd1d4f9' },
+    { label: 'Rosa', color: 'ffd5dc' },
+    { label: 'Durazno', color: 'ffdfbf' },
+  ],
 };
 
-/** Todos los tipos, en el orden en que se muestran en el editor de agentes. */
-export const AVATAR_KINDS: readonly AvatarKind[] = ['animal', 'planeta', 'constelacion', 'persona'];
+/** Colores con los que arranca un avatar nuevo (blanco y negro, fondo gris). */
+export const COLORES_INICIALES: Readonly<Record<ColorAvatar, string>> = {
+  hairColor: '000000',
+  skinColor: 'ffffff',
+  backgroundColor: 'f2f2f2',
+};
 
-export const esTipoAvatar = (t: unknown): t is AvatarKind => typeof t === 'string' && t in TIPOS;
-
-export function etiquetaTipo(tipo: AvatarKind): string {
-  return TIPOS[tipo].label;
-}
-
-export function categoriasDe(tipo: AvatarKind): AvatarCategory[] {
-  return TIPOS[tipo].categorias;
-}
-
-/** Tope del JSON guardado. Una configuración válida ocupa ~150 caracteres. */
+/** Tope del JSON guardado (columna NVARCHAR(1000)). Una configuración ocupa ~330. */
 export const MAX_CONFIG_JSON = 1000;
+const MAX_SEED = 64;
 
-const esEnteroEnRango = (n: unknown, max: number): n is number =>
-  typeof n === 'number' && Number.isInteger(n) && n >= 0 && n < max;
+/* ───────────────────────── Validación ───────────────────────── */
+
+const HEX = /^[0-9a-f]{6}$/;
+const esColorValido = (c: unknown, admiteTransparente: boolean): c is string =>
+  typeof c === 'string' && (HEX.test(c) || (admiteTransparente && c === 'transparent'));
 
 /**
  * Valida una configuración que llega de afuera (cuerpo de la petición o la
  * base). Devuelve una copia LIMPIA o null. Estricta a propósito:
- *   - solo la versión 1 y los tipos conocidos;
- *   - solo las categorías del tipo (una clave desconocida invalida todo);
- *   - índices enteros dentro del catálogo. Una categoría que falte toma el
- *     índice 0, para que agregar categorías nuevas no rompa lo ya guardado.
+ *   - solo la versión 2 / estilo 'lorelei';
+ *   - solo claves conocidas (una clave desconocida invalida todo);
+ *   - cada parte debe existir en el esquema de Lorelei instalado;
+ *   - colores hexadecimales de 6 dígitos (minúsculas).
  */
 export function parseAvatarConfig(raw: unknown): AvatarConfig | null {
   let valor: unknown = raw;
@@ -87,229 +107,236 @@ export function parseAvatarConfig(raw: unknown): AvatarConfig | null {
   }
   if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return null;
   const o = valor as Record<string, unknown>;
-  if (o.v !== 1) return null;
-  if (!esTipoAvatar(o.tipo)) return null;
-  const tipo = o.tipo;
-  if (!esEnteroEnRango(o.fondo, AVATAR_BACKGROUNDS.length)) return null;
-  if (!o.partes || typeof o.partes !== 'object' || Array.isArray(o.partes)) return null;
+  if (o.v !== 2 || o.estilo !== 'lorelei') return null;
 
-  const partesIn = o.partes as Record<string, unknown>;
-  const categorias = categoriasDe(tipo);
-  const ids = new Set(categorias.map((c) => c.id));
-  for (const clave of Object.keys(partesIn)) {
-    if (!ids.has(clave)) return null;
-  }
+  const permitidas = new Set<string>(['v', 'estilo', 'seed', 'flip', ...PARTES_FIJAS, ...PARTES_OPCIONALES, ...COLORES]);
+  for (const clave of Object.keys(o)) if (!permitidas.has(clave)) return null;
 
-  const partes: Record<string, number> = {};
-  for (const cat of categorias) {
-    const v = partesIn[cat.id];
-    if (v === undefined) {
-      partes[cat.id] = 0;
-      continue;
-    }
-    if (!esEnteroEnRango(v, cat.options.length)) return null;
-    partes[cat.id] = v;
+  if (typeof o.seed !== 'string' || o.seed.length > MAX_SEED) return null;
+  if (typeof o.flip !== 'boolean') return null;
+
+  const limpia: Record<string, unknown> = { v: 2, estilo: 'lorelei', seed: o.seed, flip: o.flip };
+  for (const p of PARTES_FIJAS) {
+    const v = o[p];
+    if (typeof v !== 'string' || !CATALOGO[p].includes(v)) return null;
+    limpia[p] = v;
   }
-  return { v: 1, tipo, partes, fondo: o.fondo as number };
+  for (const p of PARTES_OPCIONALES) {
+    const v = o[p] ?? null;
+    if (v !== null && (typeof v !== 'string' || !CATALOGO[p].includes(v))) return null;
+    limpia[p] = v;
+  }
+  for (const c of COLORES) {
+    if (!esColorValido(o[c], c === 'backgroundColor')) return null;
+    limpia[c] = o[c];
+  }
+  return limpia as unknown as AvatarConfig;
 }
 
 /** JSON compacto para guardar (orden de claves estable). */
 export function serializeAvatarConfig(config: AvatarConfig): string {
-  const partes: Record<string, number> = {};
-  for (const cat of categoriasDe(config.tipo)) partes[cat.id] = config.partes[cat.id] ?? 0;
-  return JSON.stringify({ v: 1, tipo: config.tipo, partes, fondo: config.fondo });
+  const salida: Record<string, unknown> = { v: 2, estilo: 'lorelei', seed: config.seed };
+  for (const p of PARTES_FIJAS) salida[p] = config[p];
+  for (const p of PARTES_OPCIONALES) salida[p] = config[p] ?? null;
+  for (const c of COLORES) salida[c] = config[c];
+  salida.flip = config.flip;
+  return JSON.stringify(salida);
 }
 
-/** Elige un índice al azar respetando el `peso` de cada opción (por defecto 1). */
-function elegirConPeso(opciones: AvatarCategory['options'], rnd: () => number): number {
-  const pesos = opciones.map((o) => Math.max(0, o.peso ?? 1));
-  const total = pesos.reduce((a, b) => a + b, 0);
-  if (total <= 0) return 0;
-  let r = rnd() * total;
-  for (let i = 0; i < pesos.length; i += 1) {
-    r -= pesos[i];
-    if (r < 0) return i;
+/* ───────────────────────── DiceBear ───────────────────────── */
+
+/** Configuración → opciones de createAvatar(lorelei, …). Todo explícito. */
+export function opcionesLorelei(config: AvatarConfig): Record<string, unknown> {
+  const op: Record<string, unknown> = {
+    seed: config.seed,
+    flip: config.flip,
+    hairColor: [config.hairColor],
+    skinColor: [config.skinColor],
+    backgroundColor: [config.backgroundColor],
+  };
+  for (const p of PARTES_FIJAS) op[p] = [config[p]];
+  for (const p of PARTES_OPCIONALES) {
+    const v = config[p];
+    op[p] = [v ?? CATALOGO[p][0]];
+    op[`${p}Probability`] = v ? 100 : 0;
   }
-  return pesos.length - 1;
+  return op;
 }
 
 /**
- * Avatar al azar, como el botón "Randomize" de Avatartion, pero SOBRIO: cada
- * opción sale según su `peso` (casi siempre sin barba, sin gafas y sin
- * accesorio) y nunca salen gafas y accesorio a la vez, salvo los
- * `combinable` (aretes).
+ * Avatar a partir de una SEMILLA, con el azar propio de DiceBear (incluidas
+ * sus probabilidades: gafas 10 %, barba 5 %, aretes 10 %…). Lo que DiceBear
+ * elige se vuelve configuración explícita (toJson().extra), así que lo que se
+ * ve en el editor es exactamente lo que se guarda y lo que sirve el endpoint.
  */
-export function randomAvatarConfig(
-  tipo: AvatarKind,
-  overrides: Partial<Pick<AvatarConfig, 'fondo'>> = {},
-  rnd: () => number = Math.random
-): AvatarConfig {
-  const categorias = categoriasDe(tipo);
-  const partes: Record<string, number> = {};
-  for (const cat of categorias) partes[cat.id] = elegirConPeso(cat.options, rnd);
+export function configDesdeSemilla(seed: string, colores: Partial<Record<ColorAvatar, string>> = {}): AvatarConfig {
+  const semilla = seed.slice(0, MAX_SEED);
+  const base = { ...COLORES_INICIALES, ...colores };
+  const extra = createAvatar(lorelei, {
+    seed: semilla,
+    hairColor: [base.hairColor],
+    skinColor: [base.skinColor],
+    backgroundColor: [base.backgroundColor],
+  }).toJson().extra as Record<string, unknown>;
 
-  const gafas = categorias.find((c) => c.id === 'gafas');
-  const acc = categorias.find((c) => c.id === 'accesorios');
-  if (gafas && acc) {
-    const conGafas = !!gafas.options[partes.gafas]?.svg;
-    const opcionAcc = acc.options[partes.accesorios];
-    if (conGafas && opcionAcc?.svg && !opcionAcc.combinable) {
-      if (rnd() < 0.5) partes.gafas = gafas.options.findIndex((o) => !o.svg);
-      else partes.accesorios = acc.options.findIndex((o) => !o.svg);
-    }
+  const config: Record<string, unknown> = { v: 2, estilo: 'lorelei', seed: semilla, flip: false, ...base };
+  for (const p of PARTES_FIJAS) {
+    const v = extra[p];
+    config[p] = typeof v === 'string' && CATALOGO[p].includes(v) ? v : CATALOGO[p][0];
   }
-  return { v: 1, tipo, partes, fondo: overrides.fondo ?? FONDO_INICIAL };
+  for (const p of PARTES_OPCIONALES) {
+    const v = extra[p];
+    config[p] = typeof v === 'string' && CATALOGO[p].includes(v) ? v : null;
+  }
+  return config as unknown as AvatarConfig;
 }
 
-const ABRE_GRUPO =
-  '<g fill="#fff" stroke="#000" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" filter="url(#halo)">';
-
-/**
- * Halo blanco alrededor de todo el dibujo (como notion-avatar): lo despega
- * del fondo y lo hace legible sobre cualquier color, incluso a 28 px.
- */
-const HALO =
-  '<defs><filter id="halo" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">' +
-  '<feMorphology operator="dilate" radius="5" in="SourceAlpha" result="borde"/>' +
-  '<feFlood flood-color="#fff" result="blanco"/>' +
-  '<feComposite in="blanco" in2="borde" operator="in" result="halo"/>' +
-  '<feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
-
-/**
- * ESTILO "A LÁPIZ" (prototipo, 2026-10-08). Mismos dibujos (Noto CC0 y
- * propios); solo cambia CÓMO se traza, con un filtro SVG dentro del mismo
- * filtro del halo (un solo paso de filtro por avatar):
- *   1. Temblor lento (turbulencia de baja frecuencia): la línea se ondula como
- *      hecha a pulso.
- *   2. Temblor medio: los dos bordes del trazo se mueven distinto, así que el
- *      GROSOR varía a lo largo de la línea (tinta/lápiz, no plumón parejo).
- *   3. Desenfoque mínimo + contraste: feDisplacementMap muestrea sin
- *      interpolar y deja bordes dentados; esto los vuelve orgánicos.
- *   4. (solo 'grafito') Grano: motas blancas muy escasas SOLO dentro de lo
- *      negro, como un relleno de grafito.
- * Todo va en unidades del lienzo (300), así que a 40 o 28 px el efecto se
- * reduce en proporción y no ensucia la miniatura del chat.
- *
- * DETERMINISTA: la semilla de la turbulencia sale de la configuración (hash
- * FNV-1a), así que el mismo avatar se ve igual en el servidor, en el editor y
- * en cada recarga; dos avatares distintos tiemblan distinto.
- *
- * Blanco y negro: el SVG sigue declarando solo #000 y #fff. Los grises que
- * aparecen al rasterizar (antialias del borde y, en 'grafito', el promedio
- * del grano a tamaño pequeño) son del dibujado, no colores del catálogo.
- */
-export type AvatarStyle = 'plano' | 'lapiz' | 'grafito';
-export const AVATAR_STYLES: readonly AvatarStyle[] = ['plano', 'lapiz', 'grafito'];
-
-interface ParamsLapiz {
-  /** Factor sobre el grosor de trazo del catálogo. */
-  grosor: number;
-  /** Ondulación lenta: frecuencia y amplitud (unidades del lienzo). */
-  lenta: [number, number];
-  /** Variación de grosor: frecuencia y amplitud. */
-  media: [number, number];
-  /** Grano de grafito (frecuencia x/y), o null. */
-  grano: string | null;
+/** Semilla aleatoria (no criptográfica: solo elige un dibujo). */
+export function semillaAleatoria(): string {
+  return Math.random().toString(36).slice(2, 12);
 }
 
-const ESTILOS: Record<Exclude<AvatarStyle, 'plano'>, ParamsLapiz> = {
-  lapiz: { grosor: 0.85, lenta: [0.012, 7], media: [0.04, 2.6], grano: null },
-  grafito: { grosor: 0.8, lenta: [0.012, 6], media: [0.04, 3], grano: '0.6 0.1' },
+/** Avatar aleatorio; conserva los colores que se le pasen (p. ej. los ya elegidos). */
+export function randomAvatarConfig(colores: Partial<Record<ColorAvatar, string>> = {}): AvatarConfig {
+  return configDesdeSemilla(semillaAleatoria(), colores);
+}
+
+/**
+ * Avatar SUGERIDO para un asistente: Lorelei con la semilla de su nombre
+ * (Atlas, Galileo, Kepler…). Siempre el mismo para el mismo nombre. Solo es un
+ * punto de partida; nada se guarda hasta pulsar "Guardar".
+ */
+export function sugerenciaParaAgente(nombre: string): AvatarConfig {
+  return configDesdeSemilla(nombre.trim() || 'asistente');
+}
+
+/**
+ * SVG completo del avatar con createAvatar(lorelei, …). `size` fija
+ * width/height; sin él se estira a su contenedor. `title` agrega <title>
+ * (escapado) para accesibilidad.
+ */
+export function composeAvatarSvg(config: AvatarConfig, opts: { size?: number; title?: string } = {}): string {
+  const op = opcionesLorelei(config);
+  if (opts.size) op.size = opts.size;
+  const svg = createAvatar(lorelei, op).toString();
+  if (!opts.title) return svg;
+  return svg.replace(/^<svg([^>]*)>/, (m) => `${m}<title>${escapeXml(opts.title as string)}</title>`);
+}
+
+/**
+ * Recortes (viewBox sobre el lienzo de 980 de Lorelei) para las miniaturas
+ * del editor: cada botón muestra solo la zona de su parte.
+ */
+export const RECORTES: Readonly<Record<ParteFija | ParteOpcional | ColorAvatar, string>> = {
+  hair: '60 20 860 860',
+  hairAccessories: '100 0 720 720',
+  head: '150 220 680 680',
+  eyes: '360 380 360 200',
+  eyebrows: '360 290 360 200',
+  glasses: '330 300 420 260',
+  nose: '470 440 200 200',
+  mouth: '440 520 230 190',
+  beard: '250 420 580 440',
+  earrings: '100 360 380 380',
+  freckles: '300 420 360 220',
+  hairColor: '60 20 860 860',
+  skinColor: '150 220 680 680',
+  backgroundColor: '0 0 980 980',
 };
 
-/** Semilla estable (1…997) a partir de la configuración. */
-function semillaDe(config: AvatarConfig): number {
-  let h = 2166136261;
-  for (const c of serializeAvatarConfig(config)) {
-    h ^= c.charCodeAt(0);
-    h = Math.imul(h, 16777619);
-  }
-  return ((h >>> 0) % 997) + 1;
-}
-
-/** Multiplica los stroke-width del catálogo (trazo algo más fino, como lápiz). */
-function afinarTrazo(svg: string, factor: number): string {
-  if (factor === 1) return svg;
-  return svg.replace(/stroke-width="([\d.]+)"/g, (_m, w: string) => `stroke-width="${Math.round(Number(w) * factor * 100) / 100}"`);
-}
-
-function filtroLapiz(p: ParamsLapiz, semilla: number): string {
-  const k = 3; // contraste tras el desenfoque: borde nítido pero suave
-  const lineal = `type="linear" slope="${k}" intercept="${-(k - 1) / 2}"`;
-  const grano = p.grano
-    ? `<feTurbulence type="fractalNoise" baseFrequency="${p.grano}" numOctaves="2" seed="${semilla + 13}" result="ruido"/>` +
-      // alfa = ruido; solo las motas por encima del 83 % quedan
-      '<feColorMatrix in="ruido" type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 1 0 0 0 0" result="ra"/>' +
-      '<feComponentTransfer in="ra" result="motas"><feFuncA type="discrete" tableValues="0 0 0 0 0 1"/></feComponentTransfer>' +
-      // máscara de lo negro: alfa = A − R (blanco y transparente dan 0)
-      '<feColorMatrix in="trazo" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 1 0" result="oscuro"/>' +
-      '<feComposite in="motas" in2="oscuro" operator="in" result="brillo"/>'
-    : '';
-  return (
-    '<defs><filter id="halo" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">' +
-    `<feTurbulence type="fractalNoise" baseFrequency="${p.lenta[0]}" numOctaves="1" seed="${semilla}" result="r1"/>` +
-    `<feDisplacementMap in="SourceGraphic" in2="r1" scale="${p.lenta[1]}" xChannelSelector="R" yChannelSelector="G" result="t1"/>` +
-    `<feTurbulence type="fractalNoise" baseFrequency="${p.media[0]}" numOctaves="1" seed="${semilla + 7}" result="r2"/>` +
-    `<feDisplacementMap in="t1" in2="r2" scale="${p.media[1]}" xChannelSelector="G" yChannelSelector="R" result="t2"/>` +
-    '<feGaussianBlur in="t2" stdDeviation="0.9" result="t3"/>' +
-    `<feComponentTransfer in="t3" result="trazo"><feFuncR ${lineal}/><feFuncG ${lineal}/><feFuncB ${lineal}/><feFuncA ${lineal}/></feComponentTransfer>` +
-    grano +
-    '<feMorphology operator="dilate" radius="5" in="trazo" result="borde"/>' +
-    '<feFlood flood-color="#fff" result="blanco"/>' +
-    '<feComposite in="blanco" in2="borde" operator="in" result="halo"/>' +
-    `<feMerge><feMergeNode in="halo"/><feMergeNode in="trazo"/>${p.grano ? '<feMergeNode in="brillo"/>' : ''}</feMerge></filter></defs>`
-  );
-}
-
-function capa(config: AvatarConfig, id: string): string {
-  const def = TIPOS[config.tipo];
-  const cat = def.categorias.find((c) => c.id === id);
-  if (!cat) return '';
-  const opcion = cat.options[config.partes[id] ?? 0] ?? cat.options[0];
-  const svg = opcion.svg;
-  return def.capa ? def.capa(config, id, svg) : svg;
-}
-
-/**
- * SVG completo del avatar (300×300). `size` fija width/height; sin él, el
- * SVG se estira a su contenedor. `style` (por defecto 'plano', el de
- * siempre) permite el trazo a lápiz; ver AvatarStyle.
- */
-export function composeAvatarSvg(
+/** Miniatura: el avatar actual con UNA parte cambiada, recortado a su zona. */
+export function composePartThumbSvg(
   config: AvatarConfig,
-  opts: { size?: number; title?: string; style?: AvatarStyle } = {}
+  parte: ParteFija | ParteOpcional | ColorAvatar,
+  valor: string | null
 ): string {
-  const fondo = AVATAR_BACKGROUNDS[config.fondo]?.color ?? null;
-  const medidas = opts.size ? ` width="${opts.size}" height="${opts.size}"` : '';
-  const titulo = opts.title ? `<title>${escapeXml(opts.title)}</title>` : '';
-  const estilo = opts.style ?? 'plano';
-  let capas = TIPOS[config.tipo].orden.map((id) => capa(config, id)).join('');
-  if (estilo !== 'plano') capas = afinarTrazo(capas, ESTILOS[estilo].grosor);
-  const defs = estilo === 'plano' ? HALO : filtroLapiz(ESTILOS[estilo], semillaDe(config));
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300"${medidas}>` +
-    titulo +
-    defs +
-    (fondo ? `<rect width="300" height="300" fill="${fondo}"/>` : '') +
-    ABRE_GRUPO +
-    capas +
-    '</g></svg>'
-  );
+  const variante = { ...config, [parte]: valor, backgroundColor: 'transparent' } as AvatarConfig;
+  if (parte === 'backgroundColor') variante.backgroundColor = valor ?? 'transparent';
+  const svg = composeAvatarSvg(variante);
+  return svg.replace(/viewBox="[^"]*"/, `viewBox="${RECORTES[parte]}"`);
 }
 
-/** Miniatura de UNA opción de una categoría, recortada a su zona. */
-export function composePartThumbSvg(tipo: AvatarKind, categoriaId: string, indice: number): string {
-  const cat = categoriasDe(tipo).find((c) => c.id === categoriaId);
-  if (!cat) return '';
-  const opcion = cat.options[indice] ?? cat.options[0];
-  const cuerpo = (cat.thumbBase ?? '') + opcion.svg;
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${cat.thumbViewBox}">` +
-    ABRE_GRUPO.replace(' filter="url(#halo)"', '') +
-    cuerpo +
-    '</g></svg>'
-  );
+
+/* ───────────────────────── Editor ───────────────────────── */
+
+export type CategoriaId = ParteFija | ParteOpcional | ColorAvatar;
+
+/** Una categoría del editor (un círculo con su selector). */
+export interface CategoriaEditor {
+  id: CategoriaId;
+  /** Texto del botón (singular). */
+  label: string;
+  /** Título del selector (plural). */
+  title: string;
+  /** Valores posibles; null = "Ninguno". */
+  opciones: ReadonlyArray<string | null>;
+  esColor: boolean;
 }
+
+const NUMERO = /(\d+)$/;
+const numero = (v: string) => Number(NUMERO.exec(v)?.[1] ?? 0);
+
+/** Nombre visible (español) de un valor de una categoría. */
+export function etiquetaOpcion(cat: CategoriaId, valor: string | null): string {
+  if (valor === null) return 'Ninguno';
+  if (cat === 'hairColor' || cat === 'skinColor' || cat === 'backgroundColor') {
+    return PALETAS[cat].find((p) => p.color === valor)?.label ?? `#${valor}`;
+  }
+  if (cat === 'mouth') return `${valor.startsWith('sad') ? 'Seria' : 'Sonrisa'} ${numero(valor)}`;
+  if (cat === 'hairAccessories') return 'Flores';
+  const nombres: Record<string, string> = {
+    hair: 'Cabello',
+    head: 'Cara',
+    eyes: 'Ojos',
+    eyebrows: 'Cejas',
+    nose: 'Nariz',
+    glasses: 'Lentes',
+    beard: 'Barba',
+    earrings: 'Aretes',
+    freckles: 'Pecas',
+  };
+  return `${nombres[cat] ?? cat} ${numero(valor)}`;
+}
+
+const fija = (id: ParteFija, label: string, title: string): CategoriaEditor => ({
+  id,
+  label,
+  title,
+  opciones: CATALOGO[id],
+  esColor: false,
+});
+const opcional = (id: ParteOpcional, label: string, title: string): CategoriaEditor => ({
+  id,
+  label,
+  title,
+  opciones: [null, ...CATALOGO[id]],
+  esColor: false,
+});
+const color = (id: ColorAvatar, label: string, title: string): CategoriaEditor => ({
+  id,
+  label,
+  title,
+  opciones: PALETAS[id].map((p) => p.color),
+  esColor: true,
+});
+
+/** Categorías del editor, en el orden de los círculos. */
+export const CATEGORIAS_EDITOR: readonly CategoriaEditor[] = [
+  fija('hair', 'Cabello', 'Cabellos'),
+  fija('head', 'Cara', 'Caras'),
+  fija('eyes', 'Ojos', 'Ojos'),
+  fija('eyebrows', 'Cejas', 'Cejas'),
+  fija('mouth', 'Boca', 'Bocas'),
+  fija('nose', 'Nariz', 'Narices'),
+  opcional('glasses', 'Lentes', 'Lentes'),
+  opcional('beard', 'Barba', 'Barbas'),
+  opcional('earrings', 'Aretes', 'Aretes'),
+  opcional('freckles', 'Pecas', 'Pecas'),
+  opcional('hairAccessories', 'Accesorio', 'Accesorios del cabello'),
+  color('hairColor', 'Color de cabello', 'Colores de cabello'),
+  color('skinColor', 'Color de piel', 'Colores de piel'),
+  color('backgroundColor', 'Fondo', 'Fondos'),
+];
 
 /** data: URI para usar el SVG en un <img> (sin inyectarlo en el DOM). */
 export function svgToDataUri(svg: string): string {
@@ -329,12 +356,3 @@ export {
   notionAvatarVersion,
   userAvatarUrl,
 } from './urls';
-
-/**
- * Avatar sugerido para un asistente por su nombre (Orión → constelación de
- * Orión, Mercurio → planeta Mercurio…), ya validado. Null si no hay.
- */
-export function sugerenciaParaAgente(nombre: string): AvatarConfig | null {
-  const s = sugerenciaCruda(nombre);
-  return s ? parseAvatarConfig({ ...s, fondo: FONDO_INICIAL }) : null;
-}

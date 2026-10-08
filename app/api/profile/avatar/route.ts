@@ -37,7 +37,6 @@ export async function PUT(request: NextRequest) {
     const body = (await request.json().catch(() => null)) as { config?: unknown } | null;
     const config = parseAvatarConfig(body?.config);
     if (!config) return badRequest('La configuración del avatar no es válida.');
-    if (config.tipo !== 'persona') return badRequest('El avatar de una persona debe ser de tipo persona.');
 
     const image = await saveUserAvatar(user.id, user.email, config);
     return jsonNoStore({ ok: true, image, config });

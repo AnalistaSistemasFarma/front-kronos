@@ -14,7 +14,7 @@ import {
 /**
  * AVATAR ESTILO NOTION DE UN AGENTE.
  *
- *   PUT    /api/profile/avatar/agents/<code>  → guarda { config } (animal o persona)
+ *   PUT    /api/profile/avatar/agents/<code>  → guarda { config } (opciones de Lorelei)
  *   DELETE /api/profile/avatar/agents/<code>  → vuelve a la imagen anterior
  *
  * La reja de verdad es findManagedAgent (responsable o administrador): que el
