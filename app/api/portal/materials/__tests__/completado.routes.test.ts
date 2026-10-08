@@ -140,6 +140,60 @@ describe('apertura — POST /api/portal/materials/:id/vista', () => {
     expect(marcarMaterialCompletado).toHaveBeenCalledWith({ materialId: 8, correo: ESTUDIANTE, origen: 'AUTO' });
   });
 
+  it.each([
+    ['imagen', 'image/jpeg'],
+    ['Word', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ])('un %s queda completado AL ABRIRLO, sin tiempo mínimo', async (_nombre, mime) => {
+    prisma.portalCourseMaterial.findFirst.mockResolvedValue({
+      id: 9,
+      type: 'DOCUMENT',
+      mime,
+      sp_drive_item_id: 'X',
+      file_size: BigInt(10),
+      course: { active: true },
+    });
+    const res = await abrir(req('/api/portal/materials/9/vista'), p('9'));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.completado).toBe(true);
+    expect(data.regla.segundosMinimos).toBe(0);
+    expect(marcarMaterialCompletado).toHaveBeenCalledWith({ materialId: 9, correo: ESTUDIANTE, origen: 'AUTO' });
+    expect(contarPaginasPdf).not.toHaveBeenCalled();
+  });
+
+  const materialPdf = {
+    id: 9,
+    type: 'DOCUMENT',
+    mime: 'application/pdf',
+    sp_drive_item_id: 'X',
+    file_size: BigInt(10),
+    course: { active: true },
+  };
+
+  it('PDF de 1 página: marca al abrir', async () => {
+    prisma.portalCourseMaterial.findFirst.mockResolvedValue(materialPdf);
+    contarPaginasPdf.mockResolvedValue(1);
+    const data = await (await abrir(req('/api/portal/materials/9/vista'), p('9'))).json();
+    expect(data.completado).toBe(true);
+    expect(marcarMaterialCompletado).toHaveBeenCalledWith({ materialId: 9, correo: ESTUDIANTE, origen: 'AUTO' });
+  });
+
+  it('PDF de 5 páginas: NO marca al abrir y devuelve las páginas', async () => {
+    prisma.portalCourseMaterial.findFirst.mockResolvedValue(materialPdf);
+    contarPaginasPdf.mockResolvedValue(5);
+    const data = await (await abrir(req('/api/portal/materials/9/vista'), p('9'))).json();
+    expect(data.completado).toBe(false);
+    expect(data.regla.paginas).toBe(5);
+    expect(marcarMaterialCompletado).not.toHaveBeenCalled();
+    expect(prisma.portalMaterialVista.create).toHaveBeenCalledWith({ data: expect.objectContaining({ paginas: 5 }) });
+  });
+
+  it('un VIDEO no se marca solo por abrirlo', async () => {
+    const res = await abrir(req('/api/portal/materials/7/vista'), p('7'));
+    expect((await res.json()).completado).toBe(false);
+    expect(marcarMaterialCompletado).not.toHaveBeenCalled();
+  });
+
   it('curso no publicado: 404 para un estudiante', async () => {
     prisma.portalCourseMaterial.findFirst.mockResolvedValue({
       id: 7,
@@ -154,10 +208,10 @@ describe('apertura — POST /api/portal/materials/:id/vista', () => {
 });
 
 describe('reporte — POST /api/portal/materials/:id/vista/:token', () => {
-  it('video visto completo en tiempo real: el SERVIDOR lo marca (AUTO)', async () => {
+  it('video visto al 100 % en tiempo real: el SERVIDOR lo marca (AUTO)', async () => {
     prisma.portalMaterialVista.findUnique.mockResolvedValue(vistaAbierta(125));
     const res = await reportar(
-      req(`/api/portal/materials/7/vista/${TOKEN}`, { body: { segundosVistos: 118, duracion: 120 } }),
+      req(`/api/portal/materials/7/vista/${TOKEN}`, { body: { segundosVistos: 120, duracion: 120 } }),
       pt('7')
     );
     expect(res.status).toBe(200);
@@ -191,18 +245,42 @@ describe('reporte — POST /api/portal/materials/:id/vista/:token', () => {
     expect(marcarMaterialCompletado).not.toHaveBeenCalled();
   });
 
-  it('PDF: exige el tiempo proporcional a sus páginas', async () => {
-    prisma.portalMaterialVista.findUnique.mockResolvedValue(
-      vistaAbierta(20, { paginas: 10, material: { type: 'DOCUMENT', mime: 'application/pdf', eliminado_at: null } })
+  it('video al 95 %: 422 y no marca', async () => {
+    prisma.portalMaterialVista.findUnique.mockResolvedValue(vistaAbierta(300));
+    const res = await reportar(
+      req(`/api/portal/materials/7/vista/${TOKEN}`, { body: { segundosVistos: 114, duracion: 120 } }),
+      pt('7')
     );
-    const corto = await reportar(req(`/api/portal/materials/7/vista/${TOKEN}`, { body: { segundosVistos: 60 } }), pt('7'));
-    expect(corto.status).toBe(422);
+    expect(res.status).toBe(422);
+    expect(marcarMaterialCompletado).not.toHaveBeenCalled();
+  });
 
-    prisma.portalMaterialVista.findUnique.mockResolvedValue(
-      vistaAbierta(65, { paginas: 10, material: { type: 'DOCUMENT', mime: 'application/pdf', eliminado_at: null } })
+  it('PDF de 5 páginas: no marca hasta la página 5', async () => {
+    const vistaPdf = () =>
+      vistaAbierta(30, { paginas: 5, material: { type: 'DOCUMENT', mime: 'application/pdf', eliminado_at: null } });
+    prisma.portalMaterialVista.findUnique.mockResolvedValue(vistaPdf());
+    const enLa4 = await reportar(
+      req(`/api/portal/materials/7/vista/${TOKEN}`, { body: { segundosVistos: 0, paginaMaxima: 4, paginasTotales: 5 } }),
+      pt('7')
     );
-    const bien = await reportar(req(`/api/portal/materials/7/vista/${TOKEN}`, { body: { segundosVistos: 60 } }), pt('7'));
-    expect(bien.status).toBe(200);
+    expect(enLa4.status).toBe(422);
+    expect(marcarMaterialCompletado).not.toHaveBeenCalled();
+
+    prisma.portalMaterialVista.findUnique.mockResolvedValue(vistaPdf());
+    const enLa5 = await reportar(
+      req(`/api/portal/materials/7/vista/${TOKEN}`, { body: { segundosVistos: 0, paginaMaxima: 5, paginasTotales: 5 } }),
+      pt('7')
+    );
+    expect(enLa5.status).toBe(200);
+    expect(marcarMaterialCompletado).toHaveBeenCalledWith({ materialId: 7, correo: ESTUDIANTE, origen: 'AUTO' });
+  });
+
+  it('documento: el servidor ya NO valida el tiempo transcurrido', async () => {
+    prisma.portalMaterialVista.findUnique.mockResolvedValue(
+      vistaAbierta(1, { material: { type: 'DOCUMENT', mime: 'application/msword', eliminado_at: null } })
+    );
+    const res = await reportar(req(`/api/portal/materials/7/vista/${TOKEN}`, { body: { segundosVistos: 0 } }), pt('7'));
+    expect(res.status).toBe(200);
   });
 
   it('el token de OTRA persona no sirve: 404', async () => {

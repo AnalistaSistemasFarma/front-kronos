@@ -15,10 +15,11 @@ const TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * FORMACIÓN — el navegador REPORTA que el estudiante revisó el material.
  *
  *   POST /api/portal/materials/:materialId/vista/:token
- *        JSON `{ segundosVistos, duracion? }`
+ *        JSON `{ segundosVistos, duracion?, paginaMaxima?, paginasTotales? }`
  *
- * El servidor valida el reporte contra la regla del material y contra el
- * tiempo REAL transcurrido desde la apertura que él mismo registró (ver
+ * El servidor valida el reporte contra la regla del material: el video, contra
+ * el tiempo REAL transcurrido desde la apertura que él mismo registró; el PDF,
+ * contra las páginas que él mismo contó (ver
  * `lib/portal/revision-material.ts`). Si es suficiente y plausible, marca el
  * material (origen AUTO) y recalcula el curso — con certificado si llega al
  * 100 %, igual que antes. Si no, responde 422 con el motivo y no marca nada.

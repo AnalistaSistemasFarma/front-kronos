@@ -3061,6 +3061,42 @@ body.chat-inmersivo .chat-page-thread--completa {
   padding: 20px 16px 40px;
 }
 
+/* Portal principal (/portal y el módulo /process/portal-th). Pedido de
+   Cristian (2026-10-08): "déjame los botones alineados al lado izquierdo" y
+   TODO el ancho de la pantalla: el menú pegado a la izquierda con un margen
+   normal y el contenido usando el resto del ancho, sin tope. En celular se
+   conserva el comportamiento de siempre (padding de 16 px). La página de
+   Formación sigue con su columna centrada. */
+.portal-th__cuerpo--ancho {
+  max-width: none;
+  margin: 0;
+}
+
+@media (min-width: 760px) {
+  .portal-th__cuerpo--ancho {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  /* El contenido ocupa todo el resto del ancho, al lado del menú. */
+  .portal-th__cuerpo--ancho .portal-th__contenido {
+    flex: 1;
+  }
+
+  /* El contenedor del carrusel ocupa todo el ancho; para que no se estire de
+     más en pantallas grandes se limita la ALTURA y la imagen se ajusta dentro
+     (sin recortar el texto de los anuncios). */
+  .portal-th__cuerpo--ancho .portal-th__carrusel-marco {
+    max-width: none;
+    max-height: 62vh;
+    background-color: var(--pth-azul-50);
+  }
+
+  .portal-th__cuerpo--ancho .portal-th__carrusel-imagen {
+    object-fit: contain;
+  }
+}
+
 /* ── Panel de navegación ─────────────────────────────────────────────────────
    Pedido de Cristian (2026-09-10): botones al lado izquierdo que lleven a
    cada sección del portal. En escritorio es una columna fija; en celular —la
@@ -4589,6 +4625,79 @@ body.chat-inmersivo .chat-page-thread--completa {
   width: 100%;
   min-height: 0;
   background-color: #000;
+}
+
+/* Controles propios del visor (ajustes de Cristian, 2026-10-08): el video no
+   lleva la barra nativa —permite saltar— y el PDF avanza solo con botones. */
+.portal-th__visor-controles {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--pth-linea);
+  background-color: #fff;
+}
+
+.portal-th__visor-controles button {
+  border: 1px solid var(--pth-azul);
+  border-radius: 8px;
+  padding: 7px 12px;
+  background-color: var(--pth-azul);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.portal-th__visor-controles button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.portal-th__visor-avance {
+  flex: 1;
+  min-width: 120px;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background-color: var(--pth-linea);
+}
+
+.portal-th__visor-avance > span {
+  display: block;
+  height: 100%;
+  background-color: var(--pth-azul);
+  transition: width 200ms ease;
+}
+
+.portal-th__visor-contador {
+  font-size: 0.84rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--pth-azul-700);
+  white-space: nowrap;
+}
+
+.portal-th__visor-pdf {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  /* La página se ve completa si cabe; si es más alta que la ventana se puede
+     bajar DENTRO de la página, pero no hay forma de saltar a otra. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+  background-color: var(--pth-azul-50);
+}
+
+.portal-th__visor-pdf canvas {
+  max-width: 100%;
+  height: auto;
+  box-shadow: 0 2px 10px rgba(15, 26, 44, 0.15);
+  background-color: #fff;
 }
 
 .portal-th__visor-documento {

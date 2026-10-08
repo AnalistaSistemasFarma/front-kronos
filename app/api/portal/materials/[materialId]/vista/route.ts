@@ -8,7 +8,11 @@ import {
   marcarMaterialCompletado,
   recalcularProgresoDeMaterial,
 } from '../../../../../../lib/portal/formacion';
-import { reglaDeRevision, tipoDeRevision } from '../../../../../../lib/portal/revision-material';
+import {
+  reglaDeRevision,
+  seMarcaAlAbrir,
+  tipoDeRevision,
+} from '../../../../../../lib/portal/revision-material';
 
 function idDesdeParametro(valor: string): number | null {
   const n = Number(valor);
@@ -25,7 +29,12 @@ function idDesdeParametro(valor: string): number | null {
  * navegador reporta después lo que vio en `POST .../vista/:token` y es el
  * servidor quien decide si marca el material.
  *
- * Un ENLACE se da por revisado al abrirlo: se marca aquí mismo.
+ * Un ENLACE se da por revisado al abrirlo: se marca aquí mismo. Desde los
+ * ajustes de Cristian (2026-10-08, "que el usuario lo pueda abrir y él mismo
+ * decida cuándo cerrarlo") lo mismo aplica a la imagen, a los documentos de
+ * Office y al PDF de UNA página: sin tiempo mínimo, se marcan al registrar la
+ * apertura. El PDF de varias páginas se completa al llegar a la última y el
+ * VIDEO al verlo al 100 % (ambos se reportan en `POST .../vista/:token`).
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ materialId: string }> }) {
   const quien = await identificar(request);
@@ -52,6 +61,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     let paginas: number | null = null;
+    // PDF: el servidor cuenta las páginas; con una sola se marca al abrir y con
+    // varias el visor debe llegar a la última (ver revision-material.ts).
     if (tipoDeRevision(material) === 'pdf') {
       // Solo materiales viejos (antes de SharePoint) tienen los bytes en la base.
       const conBytes = material.sp_drive_item_id
@@ -71,7 +82,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       select: { id: true },
     });
 
-    if (regla.tipo === 'enlace') {
+    if (seMarcaAlAbrir(regla)) {
       await marcarMaterialCompletado({ materialId, correo: quien.correo, origen: 'AUTO' });
       await prisma.portalMaterialVista.update({
         where: { token },
