@@ -37,7 +37,10 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
   const prisma = new PrismaClient({ datasources: { db: { url: url ?? '' } } });
   const CO = 71;
   const PW = 'Clave-Cal-ci#2026';
+  // 2026-10-05: el solicitante (sol) solo SUGIERE firmantes y alcance; el elaborador (elab) es de
+  // Aseguramiento de Calidad y es quien los confirma o asigna (SGC_ASIGNACION_PERMISO = tarea_y_calidad).
   const E = {
+    sol: 'sol.cal@onelatampharma.com',
     elab: 'elab.cal@onelatampharma.com',
     rev: 'rev.cal@onelatampharma.com',
     apr: 'apr.cal@onelatampharma.com',
@@ -96,9 +99,9 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
 
   async function newRequest(subject: string, file: { fileName: string; contentType: string; bytes: Uint8Array } = docx(subject)) {
     // Documento NUEVO en cada solicitud (un documento vigente solo admite una solicitud en curso).
-    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.elab), { idCompany: CO, requestType: 'nuevo', subject, description: `Cambio de prueba: ${subject}.`, idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'orden' }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab));
+    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject, description: `Cambio de prueba: ${subject}.`, idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'orden' }, actor(E.elab), await accessOf(E.elab));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab), await accessOf(E.elab));
     await uploadAttachment(prisma, upload, idRequest, { purpose: 'borrador', ...file }, await viewer(E.elab), actor(E.elab));
     return idRequest;
   }
@@ -127,7 +130,8 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
     }
     const hash = bcrypt.hashSync(PW, 4);
     const grants: [string, string[]][] = [
-      [E.elab, ['gestion']],
+      [E.sol, ['gestion']],
+      [E.elab, ['gestion', 'calidad']],
       [E.rev, ['gestion']],
       [E.apr, ['gestion']],
       [E.cal, ['calidad']],
@@ -230,7 +234,7 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
   });
 
   it('[SGC-REQ-096] partir de la plantilla institucional deja el encabezado del sistema; la vista previa de un documento NUEVO muestra el código provisional y el cargo de quien elabora', async () => {
-    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.elab), { idCompany: CO, requestType: 'nuevo', subject: 'Procedimiento nuevo desde la plantilla', description: 'Documento nuevo para la prueba de la plantilla institucional.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } }, actor(E.elab));
+    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Procedimiento nuevo desde la plantilla', description: 'Documento nuevo para la prueba de la plantilla institucional.', idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol));
     const html = '<p><strong>Nombre del documento:</strong> {{NOMBRE_DOCUMENTO}}</p><h2>1. OBJETIVO</h2><p>Establecer el objetivo del procedimiento de prueba.</p><h2>10. HISTORIAL DE CAMBIOS</h2><p>{{HISTORIAL_CAMBIOS}}</p>';
     await saveDraftRevision(prisma, idRequest, { html, origin: 'plantilla', originRef: 'Plantilla institucional de procedimiento' }, await viewer(E.elab), actor(E.elab));
     const layout = await latestLayout(prisma, idRequest);
@@ -387,19 +391,19 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
 
   it('[SGC-REQ-094][SGC-REQ-096][SGC-REQ-102][SGC-REQ-103] bordes: vista previa de una nueva versión con borrador PDF, historial agregado sin la marca, borrador alterado, revisión menor sobre un PDF y logo válido', async () => {
     // Validaciones y acciones del motor que la composición no cambia (formulario, reorden de firmantes, devolución en paralelo).
-    await expect(createRequest(prisma, notifier, await accessOf(E.elab), { idCompany: CO, requestType: 'nuevo', subject: 'Valor no permitido', description: 'Prueba de validación del formulario.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Inexistente' } }, actor(E.elab))).rejects.toThrow(/no permitida/);
+    await expect(createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Valor no permitido', description: 'Prueba de validación del formulario.', idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Inexistente' } }, actor(E.sol))).rejects.toThrow(/no permitida/);
     const r5 = await newRequest('Reorden y devolución en paralelo');
-    await setSigners(prisma, notifier, r5, { stepKey: 'revision', signers: [E.rev, E.apr], mode: 'paralelo', reason: 'Se agrega otro revisor' }, actor(E.elab));
-    await setSigners(prisma, notifier, r5, { stepKey: 'revision', signers: [E.apr, E.rev], mode: 'paralelo', reason: 'Cambia el orden' }, actor(E.elab));
+    await setSigners(prisma, notifier, r5, { stepKey: 'revision', signers: [E.rev, E.apr], mode: 'paralelo', reason: 'Se agrega otro revisor' }, actor(E.elab), await accessOf(E.elab));
+    await setSigners(prisma, notifier, r5, { stepKey: 'revision', signers: [E.apr, E.rev], mode: 'paralelo', reason: 'Cambia el orden' }, actor(E.elab), await accessOf(E.elab));
     expect((await latestLayout(prisma, r5)).fields).toEqual([]);
     expect((await getDocumentLayout(prisma, r5, await viewer(E.elab))).participants.filter((p) => p.meaning === 'reviso').map((p) => p.email)).toEqual([E.apr, E.rev]);
     await signTask(prisma, deps, (await taskOf(r5, 'elaboracion')).id_task, firma('elaboro'), actor(E.elab));
     await decideTask(prisma, notifier, (await taskOf(r5, 'revision')).id_task, { decision: 'devolver', comment: 'Ajustar el alcance antes de seguir.' }, actor(E.rev));
     expect((await taskOf(r5, 'elaboracion')).status).toBe('abierta');
     // Nueva versión del vigente con borrador PDF: la vista previa es el mismo PDF (sin encabezado) y valida páginas.
-    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.elab), { idCompany: CO, requestType: 'nueva_version', subject: 'Nueva versión con borrador PDF', description: 'Cambio de prueba con borrador PDF.', idDocument: idDoc, formValues: { urgencia: 'Normal' } }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'paralelo' }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab));
+    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nueva_version', subject: 'Nueva versión con borrador PDF', description: 'Cambio de prueba con borrador PDF.', idDocument: idDoc, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'paralelo' }, actor(E.elab), await accessOf(E.elab));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab), await accessOf(E.elab));
     await uploadAttachment(prisma, upload, idRequest, { purpose: 'borrador', ...(await pdfFile('nueva versión en pdf')) }, await viewer(E.elab), actor(E.elab));
     await expect(getVigenteBaseHtml(prisma, deps, idRequest, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/no tiene Word fuente/);
     const prev = await buildLayoutPreview(prisma, deps, idRequest, await viewer(E.elab));

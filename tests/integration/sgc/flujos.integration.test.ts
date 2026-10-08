@@ -34,6 +34,7 @@ import {
   addNote,
   cancelRequest,
   companyOfRequest,
+  confirmSuggestions,
   createRequest,
   decideTask,
   getAttachmentForDownload,
@@ -74,7 +75,11 @@ const url = process.env.SGC_IT_DATABASE_URL;
 describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQL Server', () => {
   const prisma = new PrismaClient({ datasources: { db: { url: url ?? '' } } });
   const CO = 50;
+  // 2026-10-05: el solicitante (sol) solo SUGIERE firmantes y alcance; el elaborador (elab) es de
+  // Aseguramiento de Calidad y es quien los confirma o asigna (SGC_ASIGNACION_PERMISO = tarea_y_calidad).
   const E = {
+    sol: 'sol.s2@onelatampharma.com',
+    otro: 'otro.s2@onelatampharma.com',
     elab: 'elab.s2@onelatampharma.com',
     elab2: 'elab2.s2@onelatampharma.com',
     rev1: 'rev1.s2@onelatampharma.com',
@@ -127,8 +132,10 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
       sub[perm] = (await prisma.subprocess.create({ data: { subprocess: SGC_SUBPROCESS_NAMES[perm], subprocess_url: SGC_SUBPROCESS_URLS[perm], id_process: proc.id_process } })).id_subprocess;
     }
     const grants: [string, string[]][] = [
-      [E.elab, ['gestion']],
-      [E.elab2, ['gestion']],
+      [E.sol, ['gestion']],
+      [E.otro, ['gestion']],
+      [E.elab, ['gestion', 'calidad']],
+      [E.elab2, ['gestion', 'calidad']],
       [E.rev1, ['gestion']],
       [E.rev2, ['gestion']],
       [E.apr1, ['gestion']],
@@ -326,23 +333,29 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     expect(form.fields.map((f) => f.key)).toEqual(['referencia_cambio', 'urgencia']);
     expect(form.steps.filter((s) => !s.isEnabled).map((s) => s.key)).toEqual(['divulgacion', 'capacitacion']);
     expect((await listEligibleUsers(prisma, CO)).map((u) => u.email)).not.toContain(E.lector);
-    const base = { idCompany: CO, requestType: 'nuevo', subject: 'Procedimiento de control de documentos', description: 'Se requiere el procedimiento para la radicación INVIMA.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Alta' } };
+    // 2026-10-05: la solicitud la hace el solicitante y el elaborador es una persona de Calidad.
+    const base = { idCompany: CO, requestType: 'nuevo', subject: 'Procedimiento de control de documentos', description: 'Se requiere el procedimiento para la radicación INVIMA.', idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Alta' } };
     await expect(createRequest(prisma, notifier, await accessOf(E.lector), base, actor(E.lector))).rejects.toMatchObject({ status: 403 });
-    const elabAccess = await accessOf(E.elab);
-    await expect(createRequest(prisma, notifier, elabAccess, { ...base, requestType: 'anulacion' }, actor(E.elab))).rejects.toThrow(/Tipo de solicitud/);
-    await expect(createRequest(prisma, notifier, elabAccess, { ...base, subject: 'x' }, actor(E.elab))).rejects.toThrow(/asunto/);
-    await expect(createRequest(prisma, notifier, elabAccess, { ...base, description: 'corta' }, actor(E.elab))).rejects.toThrow(/justificación/);
-    await expect(createRequest(prisma, notifier, elabAccess, { ...base, formValues: {} }, actor(E.elab))).rejects.toThrow(/Prioridad/);
-    await expect(createRequest(prisma, notifier, elabAccess, { ...base, formValues: { urgencia: 'Inventada' } }, actor(E.elab))).rejects.toThrow(/opción no permitida/);
-    await expect(createRequest(prisma, notifier, elabAccess, { ...base, idProcess: 999999 }, actor(E.elab))).rejects.toThrow(/proceso activo/);
-    await expect(createRequest(prisma, notifier, elabAccess, { ...base, idDocumentType: 'x' }, actor(E.elab))).rejects.toThrow(/tipo documental activo/);
-    await expect(createRequest(prisma, notifier, elabAccess, { ...base, elaboratorEmail: E.lector }, actor(E.elab))).rejects.toThrow(/no tiene permiso/);
-    await expect(createRequest(prisma, notifier, elabAccess, { ...base, requestType: 'nueva_version', idDocument: 999999 }, actor(E.elab))).rejects.toThrow(/documento vigente/);
+    const solAccess = await accessOf(E.sol);
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, requestType: 'anulacion' }, actor(E.sol))).rejects.toThrow(/Tipo de solicitud/);
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, subject: 'x' }, actor(E.sol))).rejects.toThrow(/asunto/);
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, description: 'corta' }, actor(E.sol))).rejects.toThrow(/justificación/);
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, formValues: {} }, actor(E.sol))).rejects.toThrow(/Prioridad/);
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, formValues: { urgencia: 'Inventada' } }, actor(E.sol))).rejects.toThrow(/opción no permitida/);
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, idProcess: 999999 }, actor(E.sol))).rejects.toThrow(/proceso activo/);
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, idDocumentType: 'x' }, actor(E.sol))).rejects.toThrow(/tipo documental activo/);
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, elaboratorEmail: E.lector }, actor(E.sol))).rejects.toThrow(/no tiene permiso/);
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, requestType: 'nueva_version', idDocument: 999999 }, actor(E.sol))).rejects.toThrow(/documento vigente/);
+    // 2026-10-05 (decisión de Nicolás): con la política por defecto (tarea_y_calidad) quien solicita no se
+    // nombra elaborador (sería quien confirma sus propios firmantes) y el elaborador debe ser de Calidad.
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, elaboratorEmail: undefined }, actor(E.sol))).rejects.toThrow(/Elija como elaborador a quien crea el documento/);
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, elaboratorEmail: E.sol }, actor(E.sol))).rejects.toThrow(/Elija como elaborador a quien crea el documento/);
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, elaboratorEmail: E.rev1 }, actor(E.sol))).rejects.toThrow(/no tiene el permiso de Aseguramiento de Calidad/);
 
-    const { idRequest } = await createRequest(prisma, notifier, elabAccess, { ...base, formValues: { urgencia: 'Alta', referencia_cambio: 'CC-2026-010' } }, actor(E.elab));
+    const { idRequest } = await createRequest(prisma, notifier, solAccess, { ...base, formValues: { urgencia: 'Alta', referencia_cambio: 'CC-2026-010' } }, actor(E.sol));
     req1 = idRequest;
     const r = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest }, include: { version: true, tasks: true, formValues: true } });
-    expect(r).toMatchObject({ status: 'abierta', requester_email: E.elab, elaborator_email: E.elab, current_task_key: 'elaboracion', request_type: 'nuevo' });
+    expect(r).toMatchObject({ status: 'abierta', requester_email: E.sol, elaborator_email: E.elab, current_task_key: 'elaboracion', request_type: 'nuevo' });
     expect(r.version.version_number).toBe(1);
     expect(r.tasks.map((t) => [t.task_key, t.status])).toEqual([
       ['solicitud', 'resuelta'],
@@ -353,26 +366,48 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(companyOfRequest(prisma, 999999)).rejects.toMatchObject({ status: 404 });
   });
 
-  it('[SGC-REQ-030] solo el ELABORADOR asigna revisores y aprobadores (no a sí mismo, solo personas habilitadas) y elige el modo de firma', async () => {
-    await expect(setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.rev1] }, actor(E.rev1))).rejects.toMatchObject({ status: 403 });
-    await expect(setSigners(prisma, notifier, req1, { stepKey: 'elaboracion', signers: [E.rev1] }, actor(E.elab))).rejects.toThrow(/no admite firmantes/);
-    await expect(setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.elab] }, actor(E.elab))).rejects.toThrow(/elaborador no puede/);
-    await expect(setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.lector] }, actor(E.elab))).rejects.toThrow(/no tiene permiso/);
-    expect(await setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.rev1, E.rev2], mode: 'paralelo' }, actor(E.elab))).toEqual({ changed: true });
-    expect(await setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.rev1, E.rev2], mode: 'paralelo', reason: 'sin cambios reales' }, actor(E.elab))).toEqual({ changed: false });
-    await setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.apr1, E.rev2], mode: 'orden' }, actor(E.elab));
-    await expect(setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.apr1] }, actor(E.elab))).rejects.toThrow(/motivo del cambio/);
+  it('[SGC-REQ-030] el solicitante SUGIERE; el elaborador de Calidad confirma o asigna revisores y aprobadores (nunca a sí mismo ni al solicitante, solo personas habilitadas) y elige el modo de firma', async () => {
+    // 2026-10-05 (decisión de Nicolás): antes «solo el ELABORADOR asigna»; ahora el solicitante solo sugiere
+    // (queda pendiente, is_active = 0) y quien ejecuta la primera tarea con el permiso de Calidad confirma o reasigna.
+    const elabAccess = await accessOf(E.elab);
+    await expect(setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.rev2] }, actor(E.rev1), await accessOf(E.rev1))).rejects.toMatchObject({ status: 403 });
+    await expect(setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.sol] }, actor(E.sol), await accessOf(E.sol))).rejects.toThrow(/Quien hizo la solicitud no puede/);
+    expect(await setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.rev1, E.rev2], mode: 'paralelo' }, actor(E.sol), await accessOf(E.sol))).toEqual({ changed: true, suggested: true });
+    const pend = await prisma.sgcRequestSigner.findMany({ where: { id_request: req1 }, orderBy: { sign_order: 'asc' } });
+    expect(pend.map((p) => [p.step_key, p.user_email, p.is_active, p.removed_at])).toEqual([
+      ['revision', E.rev1, false, null],
+      ['revision', E.rev2, false, null],
+    ]);
+    // Lo sugerido no cuenta: la elaboración no se completa mientras esté pendiente; el solicitante no confirma lo suyo.
+    await expect(confirmSuggestions(prisma, notifier, req1, actor(E.sol), await accessOf(E.sol))).rejects.toMatchObject({ status: 403 });
+    // Sin el permiso de Calidad, el elaborador tampoco confirma (política tarea_y_calidad).
+    await expect(confirmSuggestions(prisma, notifier, req1, actor(E.elab), null)).rejects.toMatchObject({ status: 403 });
+    expect(await confirmSuggestions(prisma, notifier, req1, actor(E.elab), elabAccess)).toEqual({ confirmed: 2, confirmedScope: 0 });
+    await expect(confirmSuggestions(prisma, notifier, req1, actor(E.elab), elabAccess)).rejects.toMatchObject({ status: 409 });
+    // Ya confirmados, el solicitante no los cambia.
+    await expect(setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.rev1] }, actor(E.sol), await accessOf(E.sol))).rejects.toMatchObject({ status: 403 });
+    await expect(setSigners(prisma, notifier, req1, { stepKey: 'elaboracion', signers: [E.rev1] }, actor(E.elab), elabAccess)).rejects.toThrow(/no admite firmantes/);
+    await expect(setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.elab] }, actor(E.elab), elabAccess)).rejects.toThrow(/elaborador no puede/);
+    await expect(setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.sol] }, actor(E.elab), elabAccess)).rejects.toThrow(/Quien hizo la solicitud no puede/);
+    await expect(setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.lector] }, actor(E.elab), elabAccess)).rejects.toThrow(/no tiene permiso/);
+    expect(await setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.rev1, E.rev2], mode: 'paralelo', reason: 'sin cambios reales' }, actor(E.elab), elabAccess)).toEqual({ changed: true });
+    expect(await setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.rev1, E.rev2], mode: 'paralelo', reason: 'sin cambios reales' }, actor(E.elab), elabAccess)).toEqual({ changed: false });
+    // El revisor puede ser también aprobador (acuerdo del 2026-09-30).
+    await setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.apr1, E.rev2], mode: 'orden' }, actor(E.elab), elabAccess);
+    await expect(setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.apr1] }, actor(E.elab), elabAccess)).rejects.toThrow(/motivo del cambio/);
     const r = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: req1 }, include: { signers: { orderBy: [{ step_key: 'asc' }, { sign_order: 'asc' }] } } });
     expect(JSON.parse(r.signing_modes_json)).toEqual({ revision: 'paralelo', aprobacion: 'orden' });
-    expect(r.signers.map((s) => [s.step_key, s.user_email, s.sign_order, s.added_by])).toEqual([
-      ['aprobacion', E.apr1, 1, E.elab],
-      ['aprobacion', E.rev2, 2, E.elab],
-      ['revision', E.rev1, 1, E.elab],
-      ['revision', E.rev2, 2, E.elab],
+    expect(r.signers.map((s) => [s.step_key, s.user_email, s.sign_order, s.added_by, s.is_active])).toEqual([
+      ['aprobacion', E.apr1, 1, E.elab, true],
+      ['aprobacion', E.rev2, 2, E.elab, true],
+      ['revision', E.rev1, 1, E.sol, true],
+      ['revision', E.rev2, 2, E.sol, true],
     ]);
-    const hist = await prisma.sgcInteraction.findMany({ where: { id_request: req1, kind: 'firmantes' } });
-    expect(hist).toHaveLength(2);
-    expect(hist[1].body).toContain('Modo de firma: en orden');
+    const hist = await prisma.sgcInteraction.findMany({ where: { id_request: req1, kind: 'firmantes' }, orderBy: { id_interaction: 'asc' } });
+    expect(hist.map((h) => h.author_email)).toEqual([E.sol, E.elab, E.elab, E.elab]);
+    expect(hist[0].body).toContain('SUGERIDO');
+    expect(hist[1].body).toContain('Confirmó la sugerencia');
+    expect(hist[3].body).toContain('Modo de firma: en orden');
   });
 
   it('[SGC-REQ-032] adjuntos en la carpeta propia con SHA-256: el borrador solo lo carga el elaborador; nada se borra, se retira', async () => {
@@ -477,9 +512,9 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
   });
 
   it('[SGC-REQ-030] el elaborador cambia un aprobador en pleno proceso: queda registrado quién, cuándo y por qué; lo decidido no se retira', async () => {
-    await expect(setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.rev2], reason: 'quitar a quien ya aprobó' }, actor(E.elab))).rejects.toMatchObject({ status: 409 });
+    await expect(setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.rev2], reason: 'quitar a quien ya aprobó' }, actor(E.elab), await accessOf(E.elab))).rejects.toMatchObject({ status: 409 });
     sent.length = 0;
-    await setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.apr1, E.rev1], reason: 'Rev2 sale a vacaciones' }, actor(E.elab));
+    await setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.apr1, E.rev1], reason: 'Rev2 sale a vacaciones' }, actor(E.elab), await accessOf(E.elab));
     const apr = await taskOf(req1, 'aprobacion');
     expect(apr.assignees.map((a) => [a.user_email ?? a.pool_type_code, a.status, a.sign_order])).toEqual([
       [E.apr1, 'aprobado', 1],
@@ -496,9 +531,9 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     const audit = await prisma.sgcAuditLog.findFirstOrThrow({ where: { action: 'solicitud.firmantes', entity_id: String(req1) }, orderBy: { id_audit_log: 'desc' } });
     expect(audit).toMatchObject({ actor_email: E.elab, detail: 'Rev2 sale a vacaciones' });
     // Cambiar el modo en pleno paso también queda registrado.
-    await setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.apr1, E.rev1], mode: 'paralelo', reason: 'Se acelera la aprobación' }, actor(E.elab));
+    await setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.apr1, E.rev1], mode: 'paralelo', reason: 'Se acelera la aprobación' }, actor(E.elab), await accessOf(E.elab));
     expect((await taskOf(req1, 'aprobacion')).signing_mode).toBe('paralelo');
-    await setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.apr1, E.rev1], mode: 'orden', reason: 'Vuelve a orden por Calidad' }, actor(E.elab));
+    await setSigners(prisma, notifier, req1, { stepKey: 'aprobacion', signers: [E.apr1, E.rev1], mode: 'orden', reason: 'Vuelve a orden por Calidad' }, actor(E.elab), await accessOf(E.elab));
   });
 
   it('[SGC-REQ-029][SGC-REQ-033][SGC-REQ-027] con la verificación de Calidad (grupo) la aprobación termina y la solicitud queda en espera de divulgación (S4)', async () => {
@@ -524,7 +559,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
 
   it('[SGC-REQ-037][SGC-REQ-032] la solicitud solo la ven los involucrados y Calidad (a los demás, 404); la vista trae historial, firmantes y permisos', async () => {
     await expect(getRequestDetail(prisma, req1, await viewer(E.lector))).rejects.toMatchObject({ status: 404 });
-    await expect(getRequestDetail(prisma, req1, await viewer(E.elab2))).rejects.toMatchObject({ status: 404 });
+    await expect(getRequestDetail(prisma, req1, await viewer(E.otro))).rejects.toMatchObject({ status: 404 });
     await expect(getRequestDetail(prisma, req1, { email: E.elab, access: [] })).rejects.toMatchObject({ status: 404 });
     await expect(getRequestDetail(prisma, 999999, await viewer(E.elab))).rejects.toMatchObject({ status: 404 });
     const cal = await getRequestDetail(prisma, req1, await viewer(E.cal));
@@ -545,7 +580,9 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     ]);
     expect(d.formFields.find((f) => f.key === 'urgencia')!.value).toBe('Alta');
     expect(d.attachments.filter((a) => a.withdrawnAt)).toHaveLength(1);
-    expect(d.permissions).toMatchObject({ isElaborator: true, isRequester: true, canCancel: false, canUploadDraft: false });
+    // 2026-10-05: el elaborador (Calidad) ya no es quien solicita.
+    expect(d.permissions).toMatchObject({ isElaborator: true, isRequester: false, canUploadDraft: false, canChangeSigners: false });
+    expect((await getRequestDetail(prisma, req1, await viewer(E.sol))).permissions).toMatchObject({ isElaborator: false, isRequester: true, canCancel: false, canChangeSigners: false });
     expect(d.interactions.length).toBeGreaterThan(8);
     const mine = await listMyRequests(prisma, E.elab, await getSgcAccessForUser(prisma, E.elab), { idCompany: CO });
     expect(mine.find((x) => x.id === req1)).toMatchObject({ statusLabel: 'En espera', currentTask: 'Divulgación' });
@@ -571,15 +608,16 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     );
     docId = doc.idDocument;
     const access = await accessOf(E.elab);
-    const { idRequest } = await createRequest(prisma, notifier, access, { idCompany: CO, requestType: 'nueva_version', subject: 'Actualizar control de registros', description: 'Cambio de formato por auditoría interna.', idDocument: docId, formValues: { urgencia: 'Normal' } }, actor(E.elab));
+    const solAccess = await accessOf(E.sol);
+    const { idRequest } = await createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'nueva_version', subject: 'Actualizar control de registros', description: 'Cambio de formato por auditoría interna.', idDocument: docId, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol));
     await expect(
-      createRequest(prisma, notifier, access, { idCompany: CO, requestType: 'modificacion', subject: 'Otra solicitud', description: 'Segunda solicitud sobre el mismo documento.', idDocument: docId, formValues: { urgencia: 'Normal' } }, actor(E.elab))
+      createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'modificacion', subject: 'Otra solicitud', description: 'Segunda solicitud sobre el mismo documento.', idDocument: docId, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol))
     ).rejects.toMatchObject({ status: 409 });
     const r = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest } });
     expect(r).toMatchObject({ id_document: docId, id_process_map: procGC, id_document_type: typePR });
 
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev1], mode: 'orden' }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr1] }, actor(E.elab));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev1], mode: 'orden' }, actor(E.elab), await accessOf(E.elab));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr1] }, actor(E.elab), await accessOf(E.elab));
     await uploadAttachment(prisma, upload, idRequest, { purpose: 'borrador', ...word('v2') }, await viewer(E.elab), actor(E.elab));
     await saveFormValues(prisma, idRequest, { values: { resumen_cambios: 'Se agrega el campo de firma' } }, await viewer(E.elab), actor(E.elab));
     await expect(saveFormValues(prisma, idRequest, { values: { urgencia: 'Otra' } }, await viewer(E.elab), actor(E.elab))).rejects.toThrow(/opción no permitida/);
@@ -614,9 +652,9 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
       [E.elab, 'reemplazado'],
       [E.elab2, 'pendiente'],
     ]);
-    // El nuevo elaborador es quien ahora cambia a los firmantes.
-    await expect(setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev2], reason: 'cambio de revisor' }, actor(E.elab))).rejects.toMatchObject({ status: 403 });
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev2], reason: 'Cambio de revisor' }, actor(E.elab2));
+    // El nuevo elaborador (de Calidad) es quien ahora cambia a los firmantes; el anterior ya no, aunque sea de Calidad.
+    await expect(setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev2], reason: 'cambio de revisor' }, actor(E.elab), await accessOf(E.elab))).rejects.toMatchObject({ status: 403 });
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev2], reason: 'Cambio de revisor' }, actor(E.elab2), await accessOf(E.elab2));
 
     await addNote(prisma, notifier, idRequest, { body: 'Por favor revisar el anexo', notifyEmails: [E.rev2, E.elab2] }, await viewer(E.elab2), actor(E.elab2));
     expect(sent.at(-1)).toMatchObject({ emails: [E.rev2], payload: { title: 'Nueva nota en solicitud documental · SynerLink' } });
@@ -638,17 +676,17 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(cancelRequest(prisma, notifier, access, idRequest, { reason: 'otra vez cancelar' }, actor(E.elab))).rejects.toMatchObject({ status: 409 });
     await expect(addNote(prisma, notifier, idRequest, { body: 'tarde' }, await viewer(E.elab), actor(E.elab))).rejects.toMatchObject({ status: 409 });
     await expect(uploadAttachment(prisma, upload, idRequest, { purpose: 'soporte', ...word() }, await viewer(E.elab), actor(E.elab))).rejects.toMatchObject({ status: 409 });
-    await expect(setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev1], reason: 'cerrada ya' }, actor(E.elab2))).rejects.toMatchObject({ status: 409 });
+    await expect(setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev1], reason: 'cerrada ya' }, actor(E.elab2), await accessOf(E.elab2))).rejects.toMatchObject({ status: 409 });
     // Con la anterior cancelada, el documento admite una nueva solicitud.
-    const again = await createRequest(prisma, notifier, access, { idCompany: CO, requestType: 'modificacion', subject: 'Modificar control de registros', description: 'Modificación menor del formato.', idDocument: docId, formValues: { urgencia: 'Normal' } }, actor(E.elab));
+    const again = await createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'modificacion', subject: 'Modificar control de registros', description: 'Modificación menor del formato.', idDocument: docId, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol));
     expect(again.idRequest).toBeGreaterThan(idRequest);
     await expect(cancelRequest(prisma, notifier, await accessOf(E.cal), again.idRequest, { reason: 'Calidad cancela por duplicidad' }, actor(E.cal))).resolves.toEqual({ status: 'cancelada' });
   });
 
   it('[SGC-REQ-025] una instancia en curso conserva la versión del flujo con la que arrancó; las nuevas usan la vigente', async () => {
-    const access = await accessOf(E.elab);
-    const base = { idCompany: CO, requestType: 'nuevo', subject: 'Instructivo de limpieza de áreas', description: 'Nuevo instructivo solicitado por producción.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } };
-    const old = await createRequest(prisma, notifier, access, base, actor(E.elab));
+    const access = await accessOf(E.sol);
+    const base = { idCompany: CO, requestType: 'nuevo', subject: 'Instructivo de limpieza de áreas', description: 'Nuevo instructivo solicitado por producción.', idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } };
+    const old = await createRequest(prisma, notifier, access, base, actor(E.sol));
     const doc = (await listFlowProcesses(prisma, CO)).find((f) => f.code === 'DOC')!;
     const who = actor(E.flujos);
     const draft = await createDraftVersion(prisma, CO, doc.id, { reason: 'Revisión en 3 días (piloto)' }, who);
@@ -658,7 +696,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await saveDraftDefinition(prisma, CO, draft.idFlowVersion, { definition: def, reason: 'Revisión en 3 días y sin prioridad' }, who);
     await publishFlowVersion(prisma, CO, draft.idFlowVersion, { reason: 'Publica DOC v2' }, who);
 
-    const fresh = await createRequest(prisma, notifier, access, { ...base, formValues: {} }, actor(E.elab));
+    const fresh = await createRequest(prisma, notifier, access, { ...base, formValues: {} }, actor(E.sol));
     const [oldReq, newReq] = await Promise.all([
       prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: old.idRequest }, include: { version: true } }),
       prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: fresh.idRequest }, include: { version: true } }),
@@ -666,8 +704,8 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     expect(oldReq.version.version_number).toBe(1);
     expect(newReq.version.version_number).toBe(2);
     // La vieja sigue con la v1 al avanzar: su revisión nace de la definición v1 (5 días) y conserva la prioridad.
-    await setSigners(prisma, notifier, old.idRequest, { stepKey: 'revision', signers: [E.rev1] }, actor(E.elab));
-    await setSigners(prisma, notifier, old.idRequest, { stepKey: 'aprobacion', signers: [E.apr1] }, actor(E.elab));
+    await setSigners(prisma, notifier, old.idRequest, { stepKey: 'revision', signers: [E.rev1] }, actor(E.elab), await accessOf(E.elab));
+    await setSigners(prisma, notifier, old.idRequest, { stepKey: 'aprobacion', signers: [E.apr1] }, actor(E.elab), await accessOf(E.elab));
     await uploadAttachment(prisma, upload, old.idRequest, { purpose: 'borrador', ...word('instructivo') }, await viewer(E.elab), actor(E.elab));
     const elabOld = (await taskOf(old.idRequest, 'elaboracion')).id_task;
     await decideTask(prisma, notifier, elabOld, { decision: 'aprobar', signature: await sig(elabOld) }, actor(E.elab));
