@@ -350,6 +350,10 @@ async function prepareInitialLoad(db: SgcDb, input: SgcInitialLoadInput, now: Da
     db.sgcDocumentType.findFirst({ where: { id_document_type: input.idDocumentType, id_company: input.idCompany, is_active: true } }),
   ]);
   if (!config || !config.is_active) throw new SgcError('La empresa no está activa en el SGC.', 403);
+  // Sprint 9: cerrada la carga inicial, ya no se suben vigentes sin el encabezado del sistema.
+  if (!config.initial_load_open) {
+    throw new SgcError('La carga inicial de documentos vigentes está cerrada: los documentos nuevos entran por una solicitud documental (con el encabezado institucional).', 409);
+  }
   if (!process) throw new SgcError('Seleccione un proceso activo de la empresa.');
   if (!docType) throw new SgcError('Seleccione un tipo documental activo de la empresa.');
 

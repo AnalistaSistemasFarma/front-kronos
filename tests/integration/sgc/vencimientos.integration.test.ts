@@ -87,7 +87,9 @@ describe.skipIf(!url)('SGC · Sprint 5 · relaciones, vencimientos y accesos con
           source_module NVARCHAR(50) NULL, created_by NVARCHAR(1000) NULL, created_at DATETIME NOT NULL DEFAULT GETDATE());`);
     // Sprint 8: esta suite usa borradores PDF y el encabezado opcional (modo configurable header_mandatory = 0);
     // el encabezado OBLIGATORIO se prueba en tests/integration/sgc/s8.integration.test.ts.
-    await prisma.sgcCompanyConfig.upsert({ where: { id_company: CO }, create: { id_company: CO, is_active: true, header_mandatory: false, storage_root: 'SGC/S5', activated_by: 'ci', activated_at: new Date() }, update: { is_active: true, header_mandatory: false } });
+    // Sprint 9: esta suite prueba el correo de los avisos, así que la empresa usa la política «vencimientos»
+    // (por defecto es «nunca»; la política se prueba en tests/integration/sgc/s9.integration.test.ts).
+    await prisma.sgcCompanyConfig.upsert({ where: { id_company: CO }, create: { id_company: CO, is_active: true, header_mandatory: false, email_mode: 'vencimientos', storage_root: 'SGC/S5', activated_by: 'ci', activated_at: new Date() }, update: { is_active: true, header_mandatory: false, email_mode: 'vencimientos' } });
     const proc = await prisma.process.create({ data: { process: `${SGC_PROCESS_NAME} (S5 CI)` } });
     const sub: Record<string, number> = {};
     for (const perm of ['lectura', 'gestion', 'calidad', 'flujos'] as const) {
