@@ -1,10 +1,10 @@
 /**
- * Tipos del avatar estilo Notion, dibujado con DiceBear 10 (estilo "Lorelei"
- * de @dicebear/styles).
+ * Tipos del avatar estilo Notion, dibujado con DiceBear 9 (estilo "Lorelei",
+ * @dicebear/lorelei).
  *
  * Un avatar NO es una imagen guardada: es una CONFIGURACIÓN pequeña (las
  * opciones de Lorelei elegidas) que se convierte en SVG al vuelo con
- * `new Avatar(lorelei, opciones)`. Todos los avatares —personas y asistentes
+ * `createAvatar(lorelei, opciones)`. Todos los avatares —personas y asistentes
  * del chat— son personas Lorelei; no hay otros tipos.
  */
 
@@ -16,9 +16,6 @@ export type ParteOpcional = 'glasses' | 'earrings' | 'beard' | 'freckles' | 'hai
 
 /** Colores que se pueden elegir en el editor. */
 export type ColorAvatar = 'hairColor' | 'skinColor' | 'backgroundColor';
-
-/** Valores de la opción `flip` de DiceBear 10. */
-export type FlipAvatar = 'none' | 'horizontal' | 'vertical' | 'both';
 
 /** Dueño del avatar: cambia las reglas (los asistentes solo sonríen). */
 export type AvatarOwner = 'user' | 'agent';
@@ -40,5 +37,6 @@ export interface AvatarConfig
   v: 3;
   estilo: 'lorelei';
   seed: string;
-  flip: FlipAvatar;
+  /** Opción `flip` de DiceBear 9 (booleano: espejo horizontal). */
+  flip: boolean;
 }

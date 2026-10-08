@@ -35,10 +35,10 @@ jobs:
           # Historial completo para poder calcular el diff contra la base.
           fetch-depth: 0
 
-      - name: Configurar Node 22
+      - name: Configurar Node 20
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
           cache: npm
 
       - name: Instalar dependencias (front)

@@ -2,14 +2,14 @@
   PASE MANUAL — Avatar estilo Notion (Perfil de la persona y avatar de los asistentes del chat).
 
   QUÉ ES: una tabla nueva, sin tocar ninguna existente.
-    - dbo.avatar_config  la CONFIGURACIÓN del avatar (opciones de DiceBear 10/Lorelei en JSON, ~340 caracteres)
+    - dbo.avatar_config  la CONFIGURACIÓN del avatar (opciones de DiceBear 9/Lorelei en JSON, ~340 caracteres)
                          de una persona (owner_type = 'user', owner_id = user.id) o de un agente
                          (owner_type = 'agent', owner_id = agent.id_agent como texto).
                          previous_image guarda la foto que había ANTES del primer avatar, para que
                          "Quitar avatar" la devuelva tal cual.
 
   La imagen NO se guarda: GET /api/avatar/user/<id> y /api/avatar/agent/<code> la generan en SVG
-  con DiceBear 10 (new Avatar(lorelei, opciones)).
+  con DiceBear 9 (createAvatar(lorelei, opciones)).
   Al guardar, la aplicación apunta dbo.[user].image / dbo.agent.avatar_url a esa URL (columnas que
   ya existen); por eso NO hay cambio de schema.prisma ni `prisma generate` en el pase.
 

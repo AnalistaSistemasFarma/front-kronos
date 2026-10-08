@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { Avatar, Style } from '@dicebear/core';
-import loreleiDef from '@dicebear/styles/lorelei.json';
+import { createAvatar } from '@dicebear/core';
+import * as lorelei from '@dicebear/lorelei';
 import {
   BOCAS_ASISTENTE,
   CATALOGO,
@@ -10,6 +10,7 @@ import {
   avatarDataUri,
   categoriasEditor,
   composeAvatarSvg,
+  conValor,
   configDesdeSemilla,
   etiquetaOpcion,
   isNotionAvatarUrl,
@@ -21,12 +22,13 @@ import {
   sugerenciaParaAgente,
   thumbDataUri,
   userAvatarUrl,
+  valorCategoria,
 } from '../compose';
 
 const base = () => configDesdeSemilla('prueba');
 const OLP = ['Atlas', 'Galileo', 'Kepler', 'Mercurio', 'Orión', 'Sirio', 'Vega'];
 
-describe('catálogo desde la definición de Lorelei (DiceBear 10)', () => {
+describe('catálogo desde el esquema de Lorelei (DiceBear 9)', () => {
   it('trae exactamente las opciones de Lorelei', () => {
     expect(CATALOGO.hair).toHaveLength(48);
     expect(CATALOGO.eyes).toHaveLength(24);
@@ -56,7 +58,11 @@ describe('catálogo desde la definición de Lorelei (DiceBear 10)', () => {
     expect(categoriasEditor().find((c) => c.id === 'glasses')!.opciones[0]).toBeNull();
     expect(etiquetaOpcion('mouth', 'sad03')).toBe('Seria 3');
     expect(etiquetaOpcion('hair', 'variant07')).toBe('Cabello 7');
-    expect(etiquetaOpcion('flip', 'horizontal')).toBe('Horizontal');
+    expect(categoriasEditor().find((c) => c.id === 'flip')!.opciones).toEqual(['normal', 'volteado']);
+    expect(etiquetaOpcion('flip', 'volteado')).toBe('Volteado');
+    expect(valorCategoria(base(), 'flip')).toBe('normal');
+    expect(conValor(base(), 'flip', 'volteado').flip).toBe(true);
+    expect(valorCategoria(conValor(base(), 'flip', 'volteado'), 'flip')).toBe('volteado');
   });
 });
 
@@ -85,8 +91,8 @@ describe('parseAvatarConfig', () => {
     ['color con #', { hairColor: '#000000' }],
     ['color con inyección', { skinColor: 'fff" onload="x' }],
     ['transparente fuera del fondo', { hairColor: 'transparent' }],
-    ['flip booleano', { flip: true }],
-    ['flip desconocido', { flip: 'diagonal' }],
+    ['flip de texto (DiceBear 10)', { flip: 'horizontal' }],
+    ['flip numérico', { flip: 1 }],
     ['semilla larga', { seed: 'x'.repeat(65) }],
   ])('rechaza: %s', (_n, cambios) => {
     expect(parseAvatarConfig({ ...base(), ...cambios })).toBeNull();
@@ -137,7 +143,7 @@ describe('semillas, aleatorio y asistentes', () => {
       expect(parseAvatarConfig(c)).toEqual(c);
       expect(c.hairColor).toBe('000000');
       expect(c.skinColor).toBe('ffffff');
-      expect(c.flip).toBe('none');
+      expect(c.flip).toBe(false);
     }
   });
 
@@ -148,22 +154,21 @@ describe('semillas, aleatorio y asistentes', () => {
   });
 
   it('lo que elige DiceBear con la semilla es lo mismo que se dibuja con las opciones explícitas', () => {
-    const style = new Style(loreleiDef as ConstructorParameters<typeof Style>[0]);
     const c = configDesdeSemilla('Kepler');
-    const porSemilla = new Avatar(style, { seed: 'Kepler', hairColor: '000000', skinColor: 'ffffff', backgroundColor: 'f2f2f2' }).toString();
+    const porSemilla = createAvatar(lorelei, { seed: 'Kepler', hairColor: ['000000'], skinColor: ['ffffff'], backgroundColor: ['f2f2f2'] }).toString();
     expect(composeAvatarSvg(c)).toBe(porSemilla);
   });
 });
 
-describe('composeAvatarSvg / data URI (new Avatar de DiceBear 10)', () => {
+describe('composeAvatarSvg / data URI (createAvatar de DiceBear 9)', () => {
   it('produce un SVG de Lorelei con su atribución CC0 y sin nada ejecutable', () => {
     const svg = composeAvatarSvg(base());
     expect(svg.startsWith('<svg')).toBe(true);
     expect(svg).toContain('Lisa Wischofsky');
     expect(svg).toContain('creativecommons.org/publicdomain/zero/1.0');
     expect(svg).not.toMatch(/<script|<foreignObject|\son[a-z]+=/i);
-    // DiceBear 10 reutiliza piezas con <use href="#…">: solo referencias internas.
-    expect(svg.match(/href="[^"]*"/g)?.every((h) => h.startsWith('href="#'))).toBe(true);
+    // Si hay referencias (href), solo internas.
+    expect((svg.match(/href="[^"]*"/g) ?? []).every((h) => h.startsWith('href="#'))).toBe(true);
   });
 
   it('el data URI es lo que pinta el <img> del editor', () => {
@@ -187,7 +192,7 @@ describe('composeAvatarSvg / data URI (new Avatar de DiceBear 10)', () => {
 
   it('flip y fondo cambian el dibujo', () => {
     const c = base();
-    expect(composeAvatarSvg({ ...c, flip: 'horizontal' })).not.toBe(composeAvatarSvg(c));
+    expect(composeAvatarSvg({ ...c, flip: true })).not.toBe(composeAvatarSvg(c));
     expect(composeAvatarSvg({ ...c, backgroundColor: 'b6e3f4' }).toLowerCase()).toContain('b6e3f4');
   });
 });

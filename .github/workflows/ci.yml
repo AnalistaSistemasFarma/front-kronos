@@ -33,10 +33,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configurar Node 22
+      - name: Configurar Node 20
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
           cache: npm
 
       - name: Instalar dependencias (front)
@@ -200,10 +200,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configurar Node 22
+      - name: Configurar Node 20
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
           cache: npm
 
       - name: Instalar dependencias
@@ -282,10 +282,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configurar Node 22
+      - name: Configurar Node 20
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
           cache: npm
           cache-dependency-path: mcp/package-lock.json
 

@@ -1,36 +1,37 @@
-import { Avatar, Style } from '@dicebear/core';
-import loreleiDef from '@dicebear/styles/lorelei.json';
-import type { AvatarConfig, AvatarOwner, ColorAvatar, FlipAvatar, ParteFija, ParteOpcional } from './types';
+import { createAvatar } from '@dicebear/core';
+import * as lorelei from '@dicebear/lorelei';
+import type { AvatarConfig, AvatarOwner, ColorAvatar, ParteFija, ParteOpcional } from './types';
 
 /**
- * Avatar estilo Notion con DiceBear 10 + Lorelei (@dicebear/styles).
+ * Avatar estilo Notion con DiceBear 9 + Lorelei.
  *
- * - @dicebear/core 10.7.0 (MIT) y @dicebear/styles 10.6.0; el diseño
- *   "Lorelei" es de Lisa Wischofsky, CC0 1.0. El SVG lleva la atribución en
- *   su <metadata>.
+ * - @dicebear/core 9.4.3 y @dicebear/lorelei 9.4.3 (código MIT; diseño
+ *   "Lorelei" de Lisa Wischofsky, CC0 1.0). Versión 9 a propósito: la 10
+ *   exige Node 22 y los servidores (.230 y serfarma05) corren Node 20. El SVG
+ *   lleva la atribución en su <metadata>.
  * - Código PURO (sin React ni base de datos): lo usan igual el editor del
  *   navegador (vista previa, como <img src="data:…">) y los endpoints
  *   /api/avatar/... (imagen servida), y se prueba con Vitest.
- * - El catálogo (variantes de cada parte) se lee de la DEFINICIÓN de Lorelei
- *   instalada, no de una lista copiada a mano.
+ * - El catálogo (variantes de cada parte) se lee del ESQUEMA de la versión
+ *   instalada de Lorelei, no de una lista copiada a mano.
  */
-
-const lorelei = new Style(loreleiDef as ConstructorParameters<typeof Style>[0]);
 
 /* ───────────────────────────── Catálogo ───────────────────────────── */
 
-type Definicion = { components?: Record<string, { variants?: Record<string, unknown>; probability?: number }> };
-const componentes = (loreleiDef as Definicion).components ?? {};
+type EsquemaPropiedad = { items?: { enum?: string[] } };
+const propiedades = (lorelei.schema.properties ?? {}) as Record<string, EsquemaPropiedad>;
 
-/** Variantes de un componente, ordenadas (variant01… / happy01…, sad01…). */
+/** Variantes de una parte, ordenadas (variant01, variant02… / happy01…, sad01…). */
 function variantes(parte: string): readonly string[] {
-  return Object.keys(componentes[parte]?.variants ?? {}).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+  const lista = [...(propiedades[parte]?.items?.enum ?? [])];
+  return lista.sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
 }
 
 export const PARTES_FIJAS: readonly ParteFija[] = ['hair', 'head', 'eyes', 'eyebrows', 'mouth', 'nose'];
 export const PARTES_OPCIONALES: readonly ParteOpcional[] = ['glasses', 'earrings', 'beard', 'freckles', 'hairAccessories'];
 export const COLORES: readonly ColorAvatar[] = ['hairColor', 'skinColor', 'backgroundColor'];
-export const FLIPS: readonly FlipAvatar[] = ['none', 'horizontal', 'vertical', 'both'];
+/** Valores del selector "Voltear" del editor (en DiceBear 9 `flip` es un booleano). */
+export const FLIP_OPCIONES = ['normal', 'volteado'] as const;
 
 export const CATALOGO: Readonly<Record<ParteFija | ParteOpcional, readonly string[]>> = Object.fromEntries(
   [...PARTES_FIJAS, ...PARTES_OPCIONALES].map((p) => [p, variantes(p)])
@@ -123,7 +124,7 @@ export function parseAvatarConfig(raw: unknown, owner: AvatarOwner = 'user'): Av
   for (const clave of Object.keys(o)) if (!permitidas.has(clave)) return null;
 
   if (typeof o.seed !== 'string' || o.seed.length > MAX_SEED) return null;
-  if (typeof o.flip !== 'string' || !FLIPS.includes(o.flip as FlipAvatar)) return null;
+  if (typeof o.flip !== 'boolean') return null;
 
   const limpia: Record<string, unknown> = { v: 3, estilo: 'lorelei', seed: o.seed, flip: o.flip };
   for (const p of PARTES_FIJAS) {
@@ -158,19 +159,19 @@ export function serializeAvatarConfig(config: AvatarConfig): string {
 
 type Opciones = Record<string, unknown>;
 
-/** Configuración → opciones de `new Avatar(lorelei, …)`. Todo explícito. */
+/** Configuración → opciones de `createAvatar(lorelei, …)`. Todo explícito. */
 export function opcionesLorelei(config: AvatarConfig): Opciones {
   const op: Opciones = {
     seed: config.seed,
     flip: config.flip,
-    hairColor: config.hairColor,
-    skinColor: config.skinColor,
-    backgroundColor: config.backgroundColor === 'transparent' ? [] : config.backgroundColor,
+    hairColor: [config.hairColor],
+    skinColor: [config.skinColor],
+    backgroundColor: [config.backgroundColor],
   };
-  for (const p of PARTES_FIJAS) op[`${p}Variant`] = config[p];
+  for (const p of PARTES_FIJAS) op[p] = [config[p]];
   for (const p of PARTES_OPCIONALES) {
     const v = config[p];
-    op[`${p}Variant`] = v ?? CATALOGO[p][0];
+    op[p] = [v ?? CATALOGO[p][0]];
     op[`${p}Probability`] = v ? 100 : 0;
   }
   return op;
@@ -181,7 +182,7 @@ const sinNumeral = (c: unknown) => (typeof c === 'string' ? c.replace(/^#/, '').
 /**
  * Avatar a partir de una SEMILLA, con el azar propio de DiceBear (incluidas
  * las probabilidades de Lorelei: gafas 10 %, aretes 10 %, barba 5 %…). Lo que
- * DiceBear elige (toJSON().options) se vuelve configuración explícita, así que
+ * DiceBear elige (toJson().extra) se vuelve configuración explícita, así que
  * lo que se ve en el editor es lo que se guarda y lo que sirve el endpoint.
  * En los asistentes la boca sale solo de las sonrientes (happy*).
  */
@@ -194,26 +195,26 @@ export function configDesdeSemilla(
   const base = { ...COLORES_INICIALES, ...colores };
   const op: Opciones = {
     seed: semilla,
-    hairColor: base.hairColor,
-    skinColor: base.skinColor,
-    backgroundColor: base.backgroundColor === 'transparent' ? [] : base.backgroundColor,
+    hairColor: [base.hairColor],
+    skinColor: [base.skinColor],
+    backgroundColor: [base.backgroundColor],
   };
-  if (owner === 'agent') op.mouthVariant = [...BOCAS_ASISTENTE];
-  const elegidas = new Avatar(lorelei, op).toJSON().options as Record<string, unknown>;
+  if (owner === 'agent') op.mouth = [...BOCAS_ASISTENTE];
+  const elegidas = createAvatar(lorelei, op).toJson().extra as Record<string, unknown>;
 
-  const config: Record<string, unknown> = { v: 3, estilo: 'lorelei', seed: semilla, flip: 'none', ...base };
+  const config: Record<string, unknown> = { v: 3, estilo: 'lorelei', seed: semilla, flip: false, ...base };
   for (const p of PARTES_FIJAS) {
-    const v = elegidas[`${p}Variant`];
+    const v = elegidas[p];
     const validos = p === 'mouth' ? bocasPara(owner) : CATALOGO[p];
     config[p] = typeof v === 'string' && validos.includes(v) ? v : validos[0];
   }
   for (const p of PARTES_OPCIONALES) {
-    const v = elegidas[`${p}Variant`];
+    const v = elegidas[p];
     config[p] = typeof v === 'string' && CATALOGO[p].includes(v) ? v : null;
   }
   // DiceBear devuelve los colores como "#rrggbb"; se guardan sin "#".
   for (const c of ['hairColor', 'skinColor'] as const) {
-    const v = sinNumeral((elegidas[c] as unknown[] | undefined)?.[0]);
+    const v = sinNumeral(elegidas[c]);
     if (v && HEX.test(v)) config[c] = v;
   }
   return config as unknown as AvatarConfig;
@@ -243,18 +244,19 @@ export function sugerenciaParaAgente(nombre: string): AvatarConfig {
 
 /**
  * SVG completo del avatar. `size` fija width/height; sin él se estira a su
- * contenedor. `title` lo agrega DiceBear como <title> (escapado).
+ * contenedor. `title` agrega <title> (escapado) para accesibilidad.
  */
 export function composeAvatarSvg(config: AvatarConfig, opts: { size?: number; title?: string } = {}): string {
   const op = opcionesLorelei(config);
   if (opts.size) op.size = opts.size;
-  if (opts.title) op.title = opts.title;
-  return new Avatar(lorelei, op).toString();
+  const svg = createAvatar(lorelei, op).toString();
+  if (!opts.title) return svg;
+  return svg.replace(/^<svg([^>]*)>/, (m) => `${m}<title>${escapeXml(opts.title as string)}</title>`);
 }
 
 /** data: URI del avatar, para pintarlo con <img src> (nunca SVG en línea). */
 export function avatarDataUri(config: AvatarConfig): string {
-  return new Avatar(lorelei, opcionesLorelei(config)).toDataUri();
+  return createAvatar(lorelei, opcionesLorelei(config)).toDataUri();
 }
 
 /**
@@ -281,7 +283,7 @@ export const RECORTES: Readonly<Record<CategoriaId, string>> = {
 
 /** Miniatura (data: URI): el avatar actual con UNA opción cambiada, recortado a su zona. */
 export function thumbDataUri(config: AvatarConfig, cat: CategoriaId, valor: string | null): string {
-  const variante = { ...config, [cat]: valor } as AvatarConfig;
+  const variante = conValor(config, cat, valor);
   if (cat !== 'backgroundColor') variante.backgroundColor = 'transparent';
   const svg = composeAvatarSvg(variante).replace(/viewBox="[^"]*"/, `viewBox="${RECORTES[cat]}"`);
   return svgToDataUri(svg);
@@ -316,17 +318,27 @@ const NOMBRES: Record<string, string> = {
   earrings: 'Aretes',
   freckles: 'Pecas',
 };
-const FLIP_ETIQUETAS: Record<FlipAvatar, string> = {
-  none: 'Sin voltear',
-  horizontal: 'Horizontal',
-  vertical: 'Vertical',
-  both: 'Ambos',
+const FLIP_ETIQUETAS: Record<(typeof FLIP_OPCIONES)[number], string> = {
+  normal: 'Sin voltear',
+  volteado: 'Volteado',
 };
+
+/** Valor que muestra el editor para una categoría (`flip` se ve como 'normal' / 'volteado'). */
+export function valorCategoria(config: AvatarConfig, cat: CategoriaId): string | null {
+  if (cat === 'flip') return config.flip ? 'volteado' : 'normal';
+  return config[cat] ?? null;
+}
+
+/** Copia de la configuración con UNA categoría cambiada al valor elegido en el editor. */
+export function conValor(config: AvatarConfig, cat: CategoriaId, valor: string | null): AvatarConfig {
+  if (cat === 'flip') return { ...config, flip: valor === 'volteado' };
+  return { ...config, [cat]: valor } as AvatarConfig;
+}
 
 /** Nombre visible (español) de un valor de una categoría. */
 export function etiquetaOpcion(cat: CategoriaId, valor: string | null): string {
   if (valor === null) return 'Ninguno';
-  if (cat === 'flip') return FLIP_ETIQUETAS[valor as FlipAvatar] ?? valor;
+  if (cat === 'flip') return FLIP_ETIQUETAS[valor as (typeof FLIP_OPCIONES)[number]] ?? valor;
   if (cat === 'hairColor' || cat === 'skinColor' || cat === 'backgroundColor') {
     return PALETAS[cat].find((p) => p.color === valor)?.label ?? `#${valor}`;
   }
@@ -378,13 +390,19 @@ export function categoriasEditor(owner: AvatarOwner = 'user'): readonly Categori
     color('hairColor', 'Color de cabello', 'Colores de cabello'),
     color('skinColor', 'Color de piel', 'Colores de piel'),
     color('backgroundColor', 'Fondo', 'Fondos'),
-    { id: 'flip', label: 'Voltear', title: 'Voltear', opciones: FLIPS, esColor: false },
+    { id: 'flip', label: 'Voltear', title: 'Voltear', opciones: FLIP_OPCIONES, esColor: false },
   ];
 }
 
 /** data: URI para usar un SVG en un <img> (sin inyectarlo en el DOM). */
 export function svgToDataUri(svg: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function escapeXml(texto: string): string {
+  return texto.replace(/[<>&"']/g, (c) =>
+    c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '&' ? '&amp;' : c === '"' ? '&quot;' : '&apos;'
+  );
 }
 
 export {

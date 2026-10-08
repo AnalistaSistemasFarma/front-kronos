@@ -7,16 +7,18 @@ import {
   avatarDataUri,
   categoriasEditor,
   composeAvatarSvg,
+  conValor,
   etiquetaOpcion,
   randomAvatarConfig,
   thumbDataUri,
+  valorCategoria,
   type CategoriaEditor,
 } from '../../lib/avatar/compose';
 import type { AvatarConfig, AvatarOwner } from '../../lib/avatar/types';
 import classes from './avatarEditor.module.css';
 
 /**
- * EDITOR DE AVATAR ESTILO NOTION con DiceBear 10 + Lorelei (@dicebear/styles). Misma interfaz que
+ * EDITOR DE AVATAR ESTILO NOTION con DiceBear 9 + Lorelei (@dicebear/lorelei). Misma interfaz que
  * Avatartion (github.com/wilmerterrero/Avatartion, MIT; solo la idea, ningún
  * dibujo):
  *
@@ -58,13 +60,13 @@ export default function AvatarEditor({ config, onChange, owner = 'user', semilla
   const columnas = [categorias.slice(0, mitad), categorias.slice(mitad)];
 
   const abrir = (cat: CategoriaEditor) => {
-    const actual = cat.opciones.indexOf(config[cat.id] ?? null);
+    const actual = cat.opciones.indexOf(valorCategoria(config, cat.id));
     setPagina(actual >= 0 ? Math.floor(actual / POR_PAGINA) + 1 : 1);
     setAbierto(cat);
   };
 
   const elegir = (cat: CategoriaEditor, valor: string | null) => {
-    onChange({ ...config, [cat.id]: valor } as AvatarConfig);
+    onChange(conValor(config, cat.id, valor));
     setAbierto(null);
   };
 
@@ -139,9 +141,9 @@ export default function AvatarEditor({ config, onChange, owner = 'user', semilla
                       type='button'
                       className={classes.circle}
                       onClick={() => abrir(cat)}
-                      aria-label={`${cat.label}: ${etiquetaOpcion(cat.id, config[cat.id] ?? null)}`}
+                      aria-label={`${cat.label}: ${etiquetaOpcion(cat.id, valorCategoria(config, cat.id))}`}
                     >
-                      <Miniatura config={config} cat={cat} valor={config[cat.id] ?? null} />
+                      <Miniatura config={config} cat={cat} valor={valorCategoria(config, cat.id)} />
                     </button>
                   </Tooltip>
                   <Flecha onClick={() => abrir(cat)} />
@@ -232,7 +234,7 @@ function SelectorModal({
   const paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
   const inicio = (pagina - 1) * POR_PAGINA;
   const valores = cat ? cat.opciones.slice(inicio, inicio + POR_PAGINA) : [];
-  const actual = cat ? config[cat.id] ?? null : undefined;
+  const actual = cat ? valorCategoria(config, cat.id) : undefined;
 
   return (
     <Modal
