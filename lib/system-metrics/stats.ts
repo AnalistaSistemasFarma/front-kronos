@@ -137,6 +137,113 @@ export class RouteAccumulator {
   }
 }
 
+/** Tope de usuarios distintos por ventana (de sobra para Kronos; evita crecer sin límite). */
+const MAX_USERS = 2000;
+
+type UserBucket = {
+  email: string;
+  name: string | null;
+  requests: number;
+  errors: number;
+  totalMs: number;
+  maxMs: number;
+  timed: number;
+  samples: number[];
+  moduleMs: Map<string, number>;
+};
+
+export type UserSummary = {
+  email: string;
+  name: string | null;
+  requests: number;
+  /** Respuestas 5xx o fallas. */
+  errors: number;
+  totalMs: number;
+  maxMs: number;
+  p95Ms: number;
+  /** Módulo en el que más tiempo de servidor gastó en la ventana. */
+  topModule: string | null;
+};
+
+/** Consumo por usuario: peticiones y tiempo de servidor que generó cada persona. */
+export class UserAccumulator {
+  private users = new Map<string, UserBucket>();
+
+  constructor(private readonly random: () => number = Math.random) {}
+
+  record(input: {
+    email: string;
+    name: string | null;
+    module: string;
+    durationMs: number | null;
+    status: number | null;
+  }): void {
+    let user = this.users.get(input.email);
+    if (!user) {
+      if (this.users.size >= MAX_USERS) return;
+      user = {
+        email: input.email,
+        name: input.name,
+        requests: 0,
+        errors: 0,
+        totalMs: 0,
+        maxMs: 0,
+        timed: 0,
+        samples: [],
+        moduleMs: new Map(),
+      };
+      this.users.set(input.email, user);
+    }
+    if (input.name) user.name = input.name;
+    user.requests += 1;
+    const status = input.status ?? 0;
+    if (status === 0 || status >= 500) user.errors += 1;
+
+    const ms = input.durationMs;
+    if (ms == null || !Number.isFinite(ms) || ms < 0) return;
+    user.timed += 1;
+    user.totalMs += ms;
+    if (ms > user.maxMs) user.maxMs = ms;
+    user.moduleMs.set(input.module, (user.moduleMs.get(input.module) ?? 0) + ms);
+    if (user.samples.length < MAX_SAMPLES_PER_KEY) user.samples.push(ms);
+    else {
+      const slot = Math.floor(this.random() * user.timed);
+      if (slot < MAX_SAMPLES_PER_KEY) user.samples[slot] = ms;
+    }
+  }
+
+  get size(): number {
+    return this.users.size;
+  }
+
+  drain(): UserSummary[] {
+    const out: UserSummary[] = [];
+    for (const u of this.users.values()) {
+      let topModule: string | null = null;
+      let topMs = -1;
+      for (const [module, ms] of u.moduleMs) {
+        if (ms > topMs) {
+          topModule = module;
+          topMs = ms;
+        }
+      }
+      const sorted = [...u.samples].sort((a, b) => a - b);
+      out.push({
+        email: u.email,
+        name: u.name,
+        requests: u.requests,
+        errors: u.errors,
+        totalMs: Math.round(u.totalMs),
+        maxMs: Math.round(u.maxMs),
+        p95Ms: Math.round(percentile(sorted, 95)),
+        topModule,
+      });
+    }
+    this.users.clear();
+    return out;
+  }
+}
+
 /**
  * Acumulador simple de duraciones (todas las peticiones entrantes de la ventana) para el
  * p95 global del proceso.

@@ -6,6 +6,12 @@ const insertProcessSample = vi.fn(async (..._args: unknown[]) => {});
 const insertRouteSummaries = vi.fn(async (..._args: unknown[]) => {});
 const insertDbSample = vi.fn(async () => {});
 const deleteOldMetrics = vi.fn(async () => 0);
+const insertUserSummaries = vi.fn(async (..._args: unknown[]) => {});
+
+// La sesión de prueba: el "token" es el correo, para no cifrar un JWT de verdad.
+vi.mock('next-auth/jwt', () => ({
+  decode: vi.fn(async ({ token }: { token: string }) => (token === 'malo' ? null : { email: token, name: 'Persona ' + token })),
+}));
 
 vi.mock('../../mssqlPool', () => ({ getPool: vi.fn(async () => ({})) }));
 vi.mock('../dbProbe', () => ({
@@ -15,6 +21,7 @@ vi.mock('../store', () => ({
   insertProcessSample,
   insertRouteSummaries,
   insertDbSample,
+  insertUserSummaries,
   deleteOldMetrics,
   isMissingTableError: (e: { number?: number }) => e?.number === 208,
 }));
@@ -25,6 +32,7 @@ describe('collector (peticiones reales, base simulada)', () => {
 
   beforeAll(async () => {
     process.env.SYSTEM_METRICS_ENABLED = 'true';
+    process.env.NEXTAUTH_SECRET ??= 'secreto-de-prueba';
     globalThis.__kronosSystemMetrics = undefined;
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
 
@@ -48,9 +56,10 @@ describe('collector (peticiones reales, base simulada)', () => {
   });
 
   it('cuenta peticiones entrantes y salientes y guarda el resumen', async () => {
-    await fetch(`${baseUrl}/api/demo/123?x=1`);
-    await fetch(`${baseUrl}/api/demo/456`);
-    await fetch(`${baseUrl}/api/falla`);
+    const as = (email: string) => ({ headers: { cookie: `theme=dark; next-auth.session-token=${email}` } });
+    await fetch(`${baseUrl}/api/demo/123?x=1`, as('ana@gss.com'));
+    await fetch(`${baseUrl}/api/demo/456`, as('ana@gss.com'));
+    await fetch(`${baseUrl}/api/falla`, as('beto@gss.com'));
 
     // Un minuto: se guarda la muestra del proceso.
     await vi.advanceTimersByTimeAsync(60_000);
@@ -70,6 +79,17 @@ describe('collector (peticiones reales, base simulada)', () => {
     expect(rows.find((r) => r.direction === 'in' && r.key === 'GET /api/falla')).toMatchObject({ errors: 1 });
     const out = rows.find((r) => r.direction === 'out');
     expect(out).toMatchObject({ key: new URL(baseUrl).host, requests: 3, errors: 1 });
+
+    // Y el consumo por persona (sacada de la cookie de sesión).
+    expect(insertUserSummaries).toHaveBeenCalledTimes(1);
+    const userRows = insertUserSummaries.mock.calls[0][4] as unknown as Array<Record<string, unknown>>;
+    expect(userRows.find((u) => u.email === 'ana@gss.com')).toMatchObject({
+      name: 'Persona ana@gss.com',
+      requests: 2,
+      errors: 0,
+      topModule: 'demo',
+    });
+    expect(userRows.find((u) => u.email === 'beto@gss.com')).toMatchObject({ requests: 1, errors: 1 });
 
     // La instancia principal también toma la foto de SQL.
     expect(insertDbSample).toHaveBeenCalled();

@@ -93,13 +93,43 @@ describe('buildInsights', () => {
   it('SQL: bloqueos, log y Query Store', () => {
     const insights = buildInsights(
       base({
-        db: [{ hasServerState: true, sqlCpuPct: 10, blockedRequests: 2, longestWaitMs: 4000, logUsedPct: 79 }],
+        db: [{ hasServerState: true, sqlCpuPct: 10, blockedRequests: 2, longestWaitMs: 4000, logUsedPct: 88 }],
         dbLive: { hasServerState: true, queryStore: 'OFF', sqlServerStartedAt: null, connections: [], topQueries: [] },
       })
     );
     expect(insights.find((i) => i.id === 'blocked')?.severity).toBe('warning');
-    expect(insights.find((i) => i.id === 'log-used')?.title).toContain('79 %');
+    expect(insights.find((i) => i.id === 'log-used')?.title).toContain('88 %');
     expect(insights.find((i) => i.id === 'query-store')).toBeDefined();
+  });
+
+  it('log: usa la foto en vivo y su contexto (misma regla que los mapas)', () => {
+    const insights = buildInsights(
+      base({
+        db: [{ hasServerState: true, sqlCpuPct: 10, blockedRequests: 0, longestWaitMs: 0, logUsedPct: 80 }],
+        dbLive: {
+          hasServerState: true,
+          queryStore: 'READ_WRITE',
+          sqlServerStartedAt: null,
+          connections: [],
+          topQueries: [],
+          logUsedPct: 96.9,
+          log: {
+            database: 'KRONOSDB',
+            recoveryModel: 'FULL',
+            reuseWait: 'LOG_BACKUP',
+            sizeMb: 264,
+            canGrow: true,
+            roomMb: 385_000,
+            volumeFreeMb: 385_000,
+            lastLogBackupHours: null,
+            backupHistoryKnown: true,
+          },
+        },
+      })
+    );
+    const log = insights.find((i) => i.id === 'log-used');
+    expect(log?.severity).toBe('warning');
+    expect(log?.title).toContain('falta el respaldo del log');
   });
 
   it('caso real: consulta del chat muy frecuente y conexiones de Prisma', () => {
