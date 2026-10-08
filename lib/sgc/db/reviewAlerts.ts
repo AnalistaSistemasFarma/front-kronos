@@ -26,6 +26,8 @@ import {
 import type { SgcActor, SgcDb } from './catalogs';
 import { listVisibleDocuments } from './documents';
 import { colombiaToday } from './vigencia';
+import { runPendingDigest } from './pendings';
+import { alertEmailsAllowed } from '../pendings';
 
 /**
  * VENCIMIENTOS del SGC (Sprint 5): calendario, configuración de avisos
@@ -300,6 +302,8 @@ export interface SgcAlertRunSummary {
   emails: number;
   emailErrors: number;
   readingReminders: number;
+  /** Sprint 9: correos del resumen diario de pendientes. */
+  digests?: number;
 }
 
 type RecipientRole = 'dueno' | 'elaborador' | 'calidad' | 'adicional';
@@ -360,9 +364,9 @@ export async function runReviewAlerts(
   const source = opts.source ?? 'programador';
   const runDate = colombiaToday(now);
   const summary: SgcAlertRunSummary = { runDate: formatCalendarDate(runDate)!, companies: 0, documents: 0, sent: 0, omitted: 0, notified: 0, emails: 0, emailErrors: 0, readingReminders: 0 };
-  const companies = await db.sgcCompanyConfig.findMany({ where: { is_active: true, ...(opts.idCompany ? { id_company: opts.idCompany } : {}) }, select: { id_company: true } });
+  const companies = await db.sgcCompanyConfig.findMany({ where: { is_active: true, ...(opts.idCompany ? { id_company: opts.idCompany } : {}) }, select: { id_company: true, email_mode: true } });
 
-  for (const { id_company: idCompany } of companies) {
+  for (const { id_company: idCompany, email_mode: emailMode } of companies) {
     summary.companies += 1;
     const configs = await listAlertConfigs(db, idCompany);
     const docs = await db.sgcDocument.findMany({
@@ -385,7 +389,8 @@ export async function runReviewAlerts(
     for (const doc of withDue) {
       const version = versionById.get(doc.current_version_id!)!;
       const due = toCalendarDate(version.review_due_date!);
-      const cfg = resolveAlertConfig(configs, { idDocumentType: doc.id_document_type, idDocument: doc.id_document });
+      // Sprint 9: la POLÍTICA DE CORREO de la empresa manda (por defecto «nunca»: solo campana y tablero).
+      const cfg = { ...resolveAlertConfig(configs, { idDocumentType: doc.id_document_type, idDocument: doc.id_document }), ...(alertEmailsAllowed(emailMode) ? {} : { emailEnabled: false }) };
       const plan = planReviewAlert({ idVersion: version.id_document_version, dueDate: due, today: runDate, offsets: cfg.offsets, overdueEveryDays: cfg.overdueEveryDays, already });
       if (!plan.send && plan.omit.length === 0) continue;
       summary.documents += 1;
@@ -554,6 +559,8 @@ export async function runReadingReminders(db: SgcDb, notifier: SgcNotifier, opts
 export async function runDailySgcJob(db: SgcDb, deps: SgcAlertDeps, opts: { now?: Date; idCompany?: number | null; source?: 'programador' | 'manual'; actorEmail?: string | null } = {}): Promise<SgcAlertRunSummary> {
   const summary = await runReviewAlerts(db, deps, opts);
   summary.readingReminders = await runReadingReminders(db, deps.notifier, opts);
+  // Sprint 9: resumen diario de pendientes por correo (solo empresas con esa política; una vez al día).
+  summary.digests = (await runPendingDigest(db, deps, opts)).emails;
   if (opts.idCompany) {
     // Corrida manual de Calidad para su empresa (la del programador queda en scheduled_job_run).
     await writeSgcAudit(db, {

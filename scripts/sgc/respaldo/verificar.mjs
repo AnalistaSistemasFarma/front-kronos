@@ -107,6 +107,9 @@ try {
     // Sprint 8: historial del listado maestro.
     ['master_list_import', 'file_name'],
     ['master_list_import_row', 'errors'],
+    // Sprint 9: carga masiva de los PDF del listado.
+    ['bulk_upload', 'ip'],
+    ['bulk_upload_item', 'warning'],
   ]) {
     if (!tables.has(table)) continue;
     const tx = new sql.Transaction(pool);

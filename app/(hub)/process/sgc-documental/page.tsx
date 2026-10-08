@@ -19,6 +19,7 @@ import {
   IconShieldCheck,
 } from '@tabler/icons-react';
 import SgcModuleCard, { type SgcModuleCardProps } from '../../../../components/sgc/SgcModuleCard';
+import SgcPendingBoard from '../../../../components/sgc/SgcPendingBoard';
 import SgcShell from '../../../../components/sgc/SgcShell';
 import { sgcHref } from '../../../../components/sgc/useSgcCompany';
 import { SGC_BASE_URL } from '../../../../lib/sgc/constants';
@@ -178,6 +179,8 @@ export default function SgcDocumentalPage() {
           </Tabs.List>
 
           <Tabs.Panel value='documentos'>
+            {/* Sprint 9: «Mis pendientes del SGC» (avisos dentro de la app en lugar de correos). */}
+            <SgcPendingBoard idCompany={company.idCompany} />
             <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing='lg'>
               {accesosDocumentos(company).map((a) => (
                 <SgcModuleCard key={a.title} {...a} />

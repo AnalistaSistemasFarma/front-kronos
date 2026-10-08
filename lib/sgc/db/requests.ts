@@ -1532,6 +1532,9 @@ export interface SgcInboxRow {
   assigned: string;
   isPool: boolean;
   isAuthorization: boolean;
+  /** Sprint 9: clave y rol del paso (para el tablero «Mis pendientes»). */
+  taskKey: string;
+  role: string;
 }
 
 /**
@@ -1590,6 +1593,8 @@ export async function listTaskInbox(
       assigned: r.user_email ? names.get(lower(r.user_email)) ?? r.user_email : `Grupo ${r.pool_type_code}`,
       isPool: !r.user_email,
       isAuthorization: t.taskDef.is_authorization || !r.user_email,
+      taskKey: t.task_key,
+      role: t.taskDef.role,
     });
   }
   return out;
