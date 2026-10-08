@@ -250,7 +250,7 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     // Lo sugerido sin confirmar no deja completar la primera tarea (la elaboración).
     await expect(decideTask(prisma, notifier, (await taskOf(reqA, 'elaboracion')).id_task, { decision: 'aprobar' }, actor(E.elab))).rejects.toThrow(/SUGERIDOS sin confirmar/);
     await expect(confirmSuggestions(prisma, notifier, reqA, actor(E.sol), await accessOf(E.sol))).rejects.toMatchObject({ status: 403 });
-    expect(await confirmSuggestions(prisma, notifier, reqA, actor(E.elab), await accessOf(E.elab))).toEqual({ confirmed: 0, confirmedScope: 1 });
+    expect(await confirmSuggestions(prisma, notifier, reqA, actor(E.elab), await accessOf(E.elab))).toEqual({ confirmed: 0, confirmedScope: 1, confirmedTraining: false });
     const tmp = await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'persona', email: E.ajeno }, reason: 'Por error' }, actor(E.elab));
     await expect(addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'departamento', idDepartment: dept }, reason: 'Repetido' }, actor(E.elab))).rejects.toMatchObject({ status: 409 });
     await expect(addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'departamento', idDepartment: 999999 }, reason: 'No existe' }, actor(E.elab))).rejects.toThrow(/no existe/);
