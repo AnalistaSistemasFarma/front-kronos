@@ -310,6 +310,33 @@ jobs:
           migra 20261008150000_sgc_s13_firma_propia_registro
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-08-sgc-s8-guia-codificacion-olp.sql
 
+      - name: Portal TH — formulario propio (migración, siembra y reversa)
+        # 20261008160000_portal_formacion_formulario_propio: idempotente sobre
+        # el esquema de db push, siembra UNA vez el SST-01-FR-001 (40
+        # preguntas), su reversa es idempotente y la migración vuelve a crear
+        # todo desde cero.
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          M=prisma/migrations/20261008160000_portal_formacion_formulario_propio/migration.sql
+          R=prisma/manual/2026-10-08-portal-formulario-propio-reversa.sql
+          cat > /tmp/verifica-sst.sql <<'SQL'
+          DECLARE @f INT = (SELECT COUNT(*) FROM dbo.portal_formulario WHERE codigo = N'SST-01-FR-001');
+          DECLARE @v INT = (SELECT COUNT(*) FROM dbo.portal_formulario_version v JOIN dbo.portal_formulario f ON f.id = v.formulario_id WHERE f.codigo = N'SST-01-FR-001');
+          DECLARE @p INT = (SELECT COUNT(*) FROM dbo.portal_formulario_version v JOIN dbo.portal_formulario f ON f.id = v.formulario_id CROSS APPLY OPENJSON(v.definicion, N'$.preguntas') WHERE f.codigo = N'SST-01-FR-001');
+          IF @f <> 1 OR @v <> 1 OR @p <> 40 THROW 50000, N'La siembra del SST-01-FR-001 no quedó como se esperaba (1 formulario, 1 versión, 40 preguntas).', 1;
+          IF COL_LENGTH(N'dbo.portal_course_material', N'formulario_id') IS NULL THROW 50001, N'Falta portal_course_material.formulario_id.', 1;
+          SQL
+          cat > /tmp/verifica-reversa.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.portal_formulario', N'U') IS NOT NULL OR COL_LENGTH(N'dbo.portal_course_material', N'formulario_id') IS NOT NULL
+            THROW 50002, N'La reversa del formulario propio no quitó todo.', 1;
+          SQL
+          x() { npx prisma db execute --schema prisma/schema.prisma --file "$1"; }
+          x "$M"; x "$M"; x /tmp/verifica-sst.sql
+          x "$R"; x "$R"; x /tmp/verifica-reversa.sql
+          x "$M"; x "$M"; x /tmp/verifica-sst.sql
+
       - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
         if: always()
         env:
