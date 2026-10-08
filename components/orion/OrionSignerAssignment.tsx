@@ -72,7 +72,7 @@ function statusFor(
   return { label: 'Sin asignar', color: 'gray', done: false };
 }
 
-type PartnerOption = {
+export type PartnerOption = {
   value: string;
   label: string;
   cardCode: string;
@@ -83,7 +83,7 @@ type PartnerOption = {
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-function PartnerSearch({
+export function PartnerSearch({
   companyId,
   disabled,
   onPick,

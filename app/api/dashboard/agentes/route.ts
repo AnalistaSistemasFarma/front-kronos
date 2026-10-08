@@ -1,6 +1,10 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../lib/prisma';
-import { canAuditAgents } from '../../../../lib/chat/audit-access';
+import {
+  canAuditAgents,
+  conversationScopeWhere,
+  getAuditScope,
+} from '../../../../lib/chat/audit-access';
 import { formatDateLocal } from '../../../../lib/dashboard/dateRange';
 import { jsonNoStore, resolveSessionUser, serverError, unauthorized, forbidden } from '../../../../lib/chat/http';
 
@@ -24,7 +28,10 @@ export const dynamic = 'force-dynamic';
  *
  * Misma reja que el módulo de auditoría (lib/chat/audit-access.ts): esto
  * expone quién usa cada agente y cuánto, así que es información reservada a
- * administración, no un dashboard general.
+ * administración, no un dashboard general. Y el mismo ALCANCE POR EMPRESA
+ * (2026-10-06): fuera de la administración, solo los agentes y grupos de las
+ * empresas del usuario, también en el comparativo por empresa (la empresa
+ * principal de un agente se elige entre las del alcance).
  *
  * DE DÓNDE SALE CADA COSA:
  *   - actividad (ranking de usuarios, tendencia diaria, ranking de agentes por
@@ -54,6 +61,8 @@ export async function GET(request: NextRequest) {
       return forbidden('La analítica de agentes está reservada a la administración.');
     }
 
+    const alcance = await getAuditScope(user.email);
+
     const sp = request.nextUrl.searchParams;
     const desde = fecha(sp.get('desde'));
     const hasta = fecha(sp.get('hasta'));
@@ -74,7 +83,11 @@ export async function GET(request: NextRequest) {
         : {}),
       // Los hilos entre personas NO son uso de un agente (su `id_agent` es el
       // centinela técnico): se dejan fuera de la analítica de la flota.
-      conversation: { kind: { not: 'people' }, ...(idAgent ? { id_agent: idAgent } : {}) },
+      conversation: {
+        kind: { not: 'people' },
+        ...(idAgent ? { id_agent: idAgent } : {}),
+        ...conversationScopeWhere(alcance),
+      },
     } as const;
 
     const rangoUsage = {
@@ -82,11 +95,12 @@ export async function GET(request: NextRequest) {
         ? { created_at: { ...(desde ? { gte: desde } : {}), ...(hasta ? { lte: hasta } : {}) } }
         : {}),
       ...(idAgent ? { id_agent: idAgent } : {}),
+      ...(alcance.all ? {} : { conversation: conversationScopeWhere(alcance) }),
     } as const;
 
     const [agentes, mensajes, usagePorAgente, agentCompanies, companies] = await Promise.all([
       prisma.agent.findMany({
-        where: { is_active: true },
+        where: { is_active: true, ...(alcance.all ? {} : { id_agent: { in: alcance.agentIds } }) },
         select: { id_agent: true, code: true, display_name: true },
         orderBy: [{ sort_order: 'asc' }, { display_name: 'asc' }],
       }),
@@ -114,6 +128,7 @@ export async function GET(request: NextRequest) {
         _count: { id: true },
       }),
       prisma.agentCompany.findMany({
+        where: alcance.all ? {} : { id_company: { in: alcance.companyIds } },
         select: { id_agent: true, id_company: true, is_primary: true },
         orderBy: [{ is_primary: 'desc' }],
       }),

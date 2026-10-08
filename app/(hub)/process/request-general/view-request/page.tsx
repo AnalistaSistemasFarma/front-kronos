@@ -110,6 +110,10 @@ import { buildOrionParticipants } from '../../../../../lib/orion/participants';
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableRow';
+import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
+import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
+import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import TableFieldInput from '../create-request/TableFieldInput';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
@@ -1133,19 +1137,34 @@ function ViewRequestPage() {
     }, 5000);
   }, [request?.id]);
 
+  // Abre el modal de justificación; el borrado real va en handleDeleteAttachment.
+  const [pendingDelete, setPendingDelete] = useState<{
+    fileId: string;
+    fileName: string | null;
+  } | null>(null);
+  const requestDeleteAttachment = useCallback((fileId: string, fileName?: string | null) => {
+    if (!fileId) return;
+    setPendingDelete({ fileId, fileName: fileName ?? null });
+  }, []);
+
   const handleDeleteAttachment = useCallback(
-    async (fileId: string, fileName?: string | null) => {
-      if (!request?.id || !fileId) return;
+    async (fileId: string, fileName: string | null, justification: string): Promise<boolean> => {
+      if (!request?.id || !fileId) return false;
       try {
         const res = await fetch('/api/requests-general/delete-attachment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId: request.id, fileId, fileName: fileName ?? null }),
+          body: JSON.stringify({
+            requestId: request.id,
+            fileId,
+            fileName: fileName ?? null,
+            justification,
+          }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           toast.error(typeof data.error === 'string' ? data.error : 'No se pudo eliminar');
-          return;
+          return false;
         }
         setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
         removeFromAttachmentCache(request.id, fileId);
@@ -1156,18 +1175,14 @@ function ViewRequestPage() {
           return next;
         });
         toast.success('Documento eliminado');
-        if (data.orionStopped === false) {
-          toast.error(
-            'No se pudo detener la firma en GSS Firma. Recházela allí para que nadie siga firmando.',
-            { duration: 8000 }
-          );
-        }
         refreshAttachmentsAfterUpload();
         void fetchFormValues(request.id);
         void fetchTasksRG(request.id);
         void fetchNotes(request.id);
+        return true;
       } catch {
         toast.error('Error de red al eliminar el archivo');
+        return false;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2125,9 +2140,11 @@ function ViewRequestPage() {
   );
   const hasOrionDocuments = Object.keys(orionInitialDocuments).length > 0;
   const hasPdfAttachments = attachmentRows.some((f) => /\.pdf$/i.test(f.name));
+  // Word en preparación (etapa previa a la firma): también usa la tabla de firma.
+  const hasWordAttachments = attachmentRows.some((f) => isWordDraftFileName(f.name));
   // Firma en solicitud normal: basta con PDFs adjuntos (o bag Orion).
   const showOrionPanel =
-    hasPdfAttachments || hasOrionSignatureField || hasOrionDocuments;
+    hasPdfAttachments || hasWordAttachments || hasOrionSignatureField || hasOrionDocuments;
   const currentUserEmailNorm = String(session?.user?.email || '')
     .trim()
     .toLowerCase();
@@ -2928,8 +2945,8 @@ function ViewRequestPage() {
                         <Table.Th>Documento</Table.Th>
                         <Table.Th className='doc-col--secondary'>Departamento</Table.Th>
                         <Table.Th>Estado</Table.Th>
-                        <Table.Th className='doc-col--secondary'>Firmantes</Table.Th>
-                        <Table.Th className='doc-col--secondary'>Responsable</Table.Th>
+                        <Table.Th className='doc-col--secondary'>Validadores / firmantes</Table.Th>
+                        <Table.Th className='doc-col--secondary'>Le toca a</Table.Th>
                         <Table.Th>Acciones</Table.Th>
                       </>
                     ) : (
@@ -2941,14 +2958,21 @@ function ViewRequestPage() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {attachmentRows.map((file: FolderFile, fileIndex: number) => {
+                  {nestDraftPdfRows(attachmentRows, (f: FolderFile) =>
+                    showOrionPanel && /\.pdf$/i.test(f.name)
+                      ? getOrionDocForFile(String(f.id), f.name).sourceDraftFileId
+                      : null
+                  ).map(({ file, rowNumber, nested }) => {
                     const fileId = String(file.id);
                     const openUrl =
                       resolveAttachmentDownloadUrl(file) ?? file.webUrl ?? '#';
                     const sizeLabel = [
                       file.size ? formatFileSize(file.size) : null,
                       file.lastModifiedDateTime
-                        ? new Date(file.lastModifiedDateTime).toLocaleDateString('es-CO')
+                        ? new Date(file.lastModifiedDateTime).toLocaleString('es-CO', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })
                         : null,
                     ]
                       .filter(Boolean)
@@ -2968,7 +2992,7 @@ function ViewRequestPage() {
                       return (
                         <OrionAttachmentTableRow
                           key={file.id}
-                          rowNumber={fileIndex + 1}
+                          rowNumber={rowNumber}
                           requestId={request.id}
                           fileId={fileId}
                           fileName={file.name}
@@ -3000,7 +3024,8 @@ function ViewRequestPage() {
                           workflowLocked={orionWorkflowLocked}
                           onDocumentsUpdate={handleOrionDocumentsChange}
                           canDeleteAttachment={canDeleteAttachments}
-                          onDeleteAttachment={handleDeleteAttachment}
+                          onDeleteAttachment={requestDeleteAttachment}
+                          nestedUnderWord={nested}
                           forceSignerUi={(() => {
                             const me = currentUserEmailNorm;
                             if (!me) return false;
@@ -3038,13 +3063,40 @@ function ViewRequestPage() {
                       );
                     }
 
+                    if (showOrionPanel && isWordDraftFileName(file.name)) {
+                      return (
+                        <OrionDraftTableRow
+                          key={file.id}
+                          rowNumber={rowNumber}
+                          requestId={request.id}
+                          fileId={fileId}
+                          fileName={file.name}
+                          fileSizeLabel={sizeLabel}
+                          processName={request?.process || request?.category || null}
+                          requesterName={request?.requester || null}
+                          openUrl={openUrl}
+                          canDeleteAttachment={canDeleteAttachments}
+                          onDeleteAttachment={requestDeleteAttachment}
+                          autoOpenReview={
+                            orionActionParam === 'review' &&
+                            String(orionFileIdParam || '') === fileId
+                          }
+                          onConverted={async () => {
+                            // El PDF nuevo sale debajo del Word: adjuntos + estado de firma.
+                            await Promise.all([fetchFolderContents(), fetchFormValues(request.id)]);
+                            refreshAttachmentsAfterUpload();
+                          }}
+                        />
+                      );
+                    }
+
                     return (
                       <Table.Tr key={file.id}>
                         {showOrionPanel ? (
                           <>
                             <Table.Td data-label='N.º'>
                               <Text size='sm' c='dimmed'>
-                                {fileIndex + 1}
+                                {rowNumber}
                               </Text>
                             </Table.Td>
                             <Table.Td data-label='Documento'>
@@ -3120,11 +3172,7 @@ function ViewRequestPage() {
                                       color='red'
                                       size='sm'
                                       aria-label={`Eliminar ${file.name}`}
-                                      onClick={() => {
-                                        if (window.confirm(`¿Eliminar “${file.name}”? Esta acción no se puede deshacer.`)) {
-                                          void handleDeleteAttachment(fileId, file.name);
-                                        }
-                                      }}
+                                      onClick={() => requestDeleteAttachment(fileId, file.name)}
                                     >
                                       <IconTrash size={16} />
                                     </ActionIcon>
@@ -3165,11 +3213,7 @@ function ViewRequestPage() {
                                   color='red'
                                   size='sm'
                                   aria-label={`Eliminar ${file.name}`}
-                                  onClick={() => {
-                                    if (window.confirm(`¿Eliminar “${file.name}”? Esta acción no se puede deshacer.`)) {
-                                      void handleDeleteAttachment(fileId, file.name);
-                                    }
-                                  }}
+                                  onClick={() => requestDeleteAttachment(fileId, file.name)}
                                 >
                                   <IconTrash size={16} />
                                 </ActionIcon>
@@ -3329,6 +3373,17 @@ function ViewRequestPage() {
             )}
           </Group>
         </Card>
+
+        <DeleteAttachmentModal
+          opened={pendingDelete != null}
+          fileName={pendingDelete?.fileName ?? null}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={(justification) =>
+            pendingDelete
+              ? handleDeleteAttachment(pendingDelete.fileId, pendingDelete.fileName, justification)
+              : Promise.resolve(false)
+          }
+        />
 
         <Modal
           opened={reopenModalOpened}

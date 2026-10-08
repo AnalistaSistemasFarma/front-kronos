@@ -63,7 +63,11 @@ columnas indexadas (no solo en `metadata` JSON).
 
 Tipos: `DOCUMENTO_CARGADO`, `NUEVA_SUBVERSION`, `ENVIADO_VALIDACION`, `VALIDACION_APROBADA`,
 `VALIDACION_DEVUELTA`, `APROBADO_PARA_FIRMA`, `FIRMANTES_ASIGNADOS`, `ENVIADO_A_FIRMA`,
-`FIRMA_REGISTRADA`, `DEVUELTO_POR_FIRMANTE`, `RECHAZADO`, `FIRMADO`.
+`FIRMA_REGISTRADA`, `DEVUELTO_POR_FIRMANTE`, `RECHAZADO`, `FIRMADO`, `ELIMINADO`.
+
+`ELIMINADO`: un administrador (con el permiso “Eliminar adjuntos”) eliminó el documento en
+SynerLink. Solo ocurre antes de la firma; si el flujo estaba activo, SynerLink ya lo rechazó en
+Orion (`/reject`) y solo elimina cuando Orion lo confirma. La hoja de vida no se borra.
 
 - Respuesta esperada: `201 { id }`. Debe ser **idempotente** por
   `(orionDocumentId, type, occurredAt, actorEmail)`: SynerLink reenvía (replay) los eventos

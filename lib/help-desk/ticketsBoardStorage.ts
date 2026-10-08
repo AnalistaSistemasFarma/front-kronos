@@ -61,9 +61,59 @@ export function saveTicketsBoardState(
       tickets: partial.tickets ?? current?.tickets,
       savedAt: Date.now(),
     };
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Con "Todos" el listado completo puede pasar la cuota de sessionStorage
+      // (~5 MB por origen): se guardan al menos filtros y scroll; los casos se
+      // vuelven a pedir al regresar.
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ ...next, tickets: undefined }));
+    }
   } catch {
     /* ignore quota / private mode */
+  }
+}
+
+/** Máximo de casos que se guardan para "anterior/siguiente" si el listado no cabe. */
+export const TICKETS_LIST_FALLBACK_WINDOW = 100;
+
+/**
+ * Guarda en sesión el listado para navegar entre casos desde el detalle.
+ * Nunca lanza: si el listado completo no cabe en sessionStorage (QuotaExceeded,
+ * KRONOS-SYNERLINK-7), guarda una ventana de casos alrededor del abierto; si
+ * tampoco cabe, no guarda nada y el detalle abre igual (sin anterior/siguiente).
+ */
+export function saveTicketsListForNavigation(
+  tickets: HelpDeskCaseListItem[],
+  currentIdCase: number
+): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    sessionStorage.removeItem('ticketsList');
+    sessionStorage.setItem('ticketsList', JSON.stringify(tickets));
+    return;
+  } catch {
+    /* no cabe completo: se intenta con una ventana */
+  }
+
+  try {
+    const idx = Math.max(
+      0,
+      tickets.findIndex((t) => t.id_case === currentIdCase)
+    );
+    const half = Math.floor(TICKETS_LIST_FALLBACK_WINDOW / 2);
+    const start = Math.max(0, Math.min(idx - half, tickets.length - TICKETS_LIST_FALLBACK_WINDOW));
+    sessionStorage.setItem(
+      'ticketsList',
+      JSON.stringify(tickets.slice(start, start + TICKETS_LIST_FALLBACK_WINDOW))
+    );
+  } catch {
+    try {
+      sessionStorage.removeItem('ticketsList');
+    } catch {
+      /* ignore */
+    }
   }
 }
 

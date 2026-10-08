@@ -8,7 +8,7 @@ import { canStartPeopleChats } from '../../../../lib/chat/people';
 
 /**
  * Qué agentes puede ver el usuario de la sesión y en qué empresas.
- * Mismo patrón que /api/document-management/access.
+ * Mismo patrón que /api/organigrama/access.
  *
  * Seguridad: valida sesión con getServerSession(authOptions) y resuelve TODO
  * a partir del correo de la sesión — el cliente no manda ningún identificador
@@ -27,14 +27,14 @@ export async function GET() {
     // verdad viven en POST /api/chat/broadcast y POST /api/chat/groups: una
     // interfaz que esconde un botón no protege nada.
     //
-    // Las dos salen del MISMO criterio (checkAdminPrivileges) y se calculan de
-    // una sola vez: dos consultas para la misma pregunta es como se
-    // desincronizan.
-    const esAdministrador = access.canUseChat
+    // El mensaje masivo sigue siendo de administradores (checkAdminPrivileges).
+    // Crear grupos, desde el 2026-10-06 (decisión de Nicolás), es de cualquiera
+    // con el chat que tenga al menos un agente asignado: un grupo necesita un
+    // asistente y solo puede llevar los propios.
+    const canBroadcast = access.canUseChat
       ? await checkAdminPrivileges(session.user.email)
       : false;
-    const canBroadcast = esAdministrador;
-    const canCreateGroups = esAdministrador;
+    const canCreateGroups = access.canUseChat && access.agents.length > 0;
     // Piloto "Personas" (D2): solo pinta la sección con su buscador. La reja
     // de verdad está en /api/chat/people/*.
     let canMessagePeople = false;

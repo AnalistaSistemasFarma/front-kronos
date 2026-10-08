@@ -12,6 +12,9 @@ import { withMssqlPool } from '@/lib/mssqlPool';
 import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
 import { loadOrionFormBag } from '@/lib/orion/service';
 import { applyValidatorMarks } from '@/lib/orion/validatorMarks';
+import { getOrionDraftInfo } from '@/lib/orion/draftService';
+import { findDraftForOneDriveItem } from '@/lib/orion/draftState';
+import { getDraftSessionActor } from '@/lib/orion/draftRouteAuth';
 
 function safePathSegment(value: string, fallback: string): string {
   const v = String(value || '').trim();
@@ -34,6 +37,29 @@ async function withValidatorMarks(
     return await applyValidatorMarks(pdf, state, { final: status === 'FIRMADO' });
   } catch {
     return pdf;
+  }
+}
+
+/**
+ * Mensaje de bloqueo si el adjunto es un Word en preparación (o una copia de sus versiones) y
+ * quien pide no es su preparadora. Ante un error se bloquea: no se entrega el Word sin verificar.
+ */
+async function draftDownloadBlocked(requestId: number, itemIds: string[]): Promise<string | null> {
+  const blockedMessage =
+    'Este Word está en preparación: solo quien lo prepara puede descargarlo. Revíselo en el tablero del documento.';
+  try {
+    const loaded = await withMssqlPool((pool) => loadOrionFormBag(pool, requestId));
+    const found = findDraftForOneDriveItem(loaded?.bag.drafts, itemIds);
+    if (!found || found.draft.status === 'CONVERTIDO_PDF') return null;
+    const auth = await getDraftSessionActor();
+    if (!auth) return 'No autorizado';
+    const info = await withMssqlPool((pool) =>
+      getOrionDraftInfo(pool, { requestId, fileId: found.fileId, ...auth })
+    );
+    return info.isElaborator ? null : blockedMessage;
+  } catch (err) {
+    console.error('[attachment-file] verificación de Word en preparación', err);
+    return blockedMessage;
   }
 }
 
@@ -88,6 +114,14 @@ export async function GET(req: Request) {
     }
     if (!inFolder) {
       return NextResponse.json({ error: 'Documento no encontrado' }, { status: 404 });
+    }
+
+    // Word en preparación: solo su preparadora lo descarga (los validadores revisan en el tablero).
+    // Se decide por pertenencia al borrador (Word o copia de versión), sin importar storagePath.
+    // Solo .docx: los PDF e imágenes no pagan esta consulta.
+    if (/\.docx$/i.test(String(meta.name || ''))) {
+      const blocked = await draftDownloadBlocked(requestId, [fileId, meta.id]);
+      if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
     }
 
     const downloaded = await downloadOneDriveItemContent(token, fileId, meta);

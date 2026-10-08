@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import {
   ActionIcon,
   Alert,
@@ -22,6 +23,7 @@ import {
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import AgentTaskTable from './AgentTaskTable';
+import AgentMetricsBar from './AgentMetricsBar';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
@@ -37,7 +39,8 @@ import {
   type ChatMessageDto,
   type ChatParticipantDto,
 } from '../../lib/chat/client';
-import { formatBytes } from '../../lib/chat/attachments';
+import { esImagenAdjunta, formatBytes } from '../../lib/chat/attachments';
+import { ChatImageThumb, ChatImageViewer, type ImagenAdjunta } from './ChatImageViewer';
 import {
   efectoZumbido,
   marcarZumbidoMostrado,
@@ -46,6 +49,7 @@ import {
   sacudirHilo,
   zumbidoFresco,
 } from '../../lib/chat/nudge-fx';
+import { registrarHiloAbierto, soltarHiloAbierto } from '../../lib/chat/message-sound';
 import type { ChatReplyToDto } from '../../lib/chat/client';
 
 /**
@@ -70,8 +74,14 @@ import type { ChatReplyToDto } from '../../lib/chat/client';
  * ahí se vuelve a comprobar el permiso en cada descarga. Mientras el mensaje
  * está en vuelo el id todavía no existe, así que la ficha se muestra sin
  * enlace en vez de ofrecer una descarga que daría 404.
+ *
+ * Las IMÁGENES (2026-10-01) llevan además una miniatura encima de su ficha,
+ * pedida a la misma ruta con `?inline=1`; al tocarla se abre el visor con
+ * Descargar. El estado del visor vive aquí, no en el hilo: abrirlo no
+ * re-renderiza las demás burbujas (MessageBubble está en `memo`).
  */
 function MessageAttachments({ message }: { message: ChatMessageDto }) {
+  const [visor, setVisor] = useState<ImagenAdjunta | null>(null);
   if (message.attachments.length === 0) return null;
 
   return (
@@ -99,7 +109,7 @@ function MessageAttachments({ message }: { message: ChatMessageDto }) {
           );
         }
 
-        return (
+        const ficha = (
           <a
             key={attachment.id}
             href={attachment.downloadUrl}
@@ -110,7 +120,17 @@ function MessageAttachments({ message }: { message: ChatMessageDto }) {
             {content}
           </a>
         );
+
+        if (!esImagenAdjunta(attachment)) return ficha;
+
+        return (
+          <Stack key={attachment.id} gap={4}>
+            <ChatImageThumb imagen={attachment} onAbrir={setVisor} />
+            {ficha}
+          </Stack>
+        );
       })}
+      {visor && <ChatImageViewer imagen={visor} onClose={() => setVisor(null)} />}
     </Stack>
   );
 }
@@ -659,6 +679,16 @@ export default function ChatThread({
     onZumbido: enPersonas ? alZumbido : undefined,
   });
 
+  // Sonido de mensaje nuevo: este hilo está a la vista, así que lo que llegue
+  // aquí no suena mientras la ventana tenga el foco (ver message-sound.ts).
+  const idHiloAbierto = thread.conversation?.id ?? null;
+  useEffect(() => {
+    if (idHiloAbierto === null || !active) return;
+    prepararAudioZumbido();
+    registrarHiloAbierto(idHiloAbierto);
+    return () => soltarHiloAbierto(idHiloAbierto);
+  }, [idHiloAbierto, active]);
+
   /* ─────────────────────────── Citar y responder ───────────────────────── */
 
   const [cita, setCita] = useState<ChatReplyToDto | null>(null);
@@ -716,6 +746,13 @@ export default function ChatThread({
     : person
       ? `persona:${person.idConversation}`
       : `agente:${agent?.idAgent ?? 0}`;
+
+  // Clave del BORRADOR del compositor: persona + hilo. Sin saber quién es la
+  // persona (sesión cargando) o sin hilo, no se guarda borrador.
+  const { data: sesionBorrador } = useSession();
+  const miIdBorrador = currentUserId ?? sesionBorrador?.user?.id ?? null;
+  const claveBorrador =
+    miIdBorrador && (group || person || agent) ? `${miIdBorrador}:${claveHilo}` : null;
 
   const participantes = thread.conversation?.participants ?? group?.participants;
   // Memorizado: es prop del compositor (en `memo`) y un arreglo nuevo en cada
@@ -1063,6 +1100,7 @@ export default function ChatThread({
         </Box>
       )}
       {enPersonas && <AvisoPrivacidadPersonas />}
+      {esHiloDirecto && <AgentMetricsBar metrics={thread.metrics} />}
       <ScrollArea
         className='chat-thread__scroll'
         viewportRef={viewportRef}
@@ -1169,6 +1207,7 @@ export default function ChatThread({
           onSend={alEnviar}
           cita={cita}
           onQuitarCita={quitarCita}
+          draftKey={claveBorrador}
           sending={thread.sending}
           disabled={composerDisabled}
           placeholder={

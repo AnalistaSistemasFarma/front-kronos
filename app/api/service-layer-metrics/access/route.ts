@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { hasServiceLayerMetricsAccess } from '../../../../lib/service-layer-metrics/access';
 
-/** Mismo patrón que /api/organigrama/access y /api/document-management/access. */
+/** Mismo patrón que /api/organigrama/access. */
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);

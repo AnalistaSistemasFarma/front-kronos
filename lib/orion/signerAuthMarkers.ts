@@ -71,11 +71,19 @@ export function parseOrionReviewFileId(resolution?: string | null): string | nul
   return match?.[1]?.trim() || null;
 }
 
+/**
+ * "Validar documento: Contrato.pdf (v1.2 · paso 1/3)" → "Contrato.pdf". Se busca el inicio y
+ * luego el paréntesis del paso por separado (sin repeticiones anidadas en una sola expresión).
+ */
 export function parseOrionReviewFileName(resolution?: string | null): string | null {
-  const match = /Validar documento:\s*(.+?)\s*\((?:v\d+\.\d+\s*·\s*)?paso\s+\d+\/\d+\)/i.exec(
-    String(resolution || '')
-  );
-  return match?.[1]?.trim() || null;
+  const text = String(resolution || '');
+  const start = /Validar documento:\s*/i.exec(text);
+  if (!start) return null;
+  const rest = text.slice(start.index + start[0].length);
+  // "(paso 1/3)" o "(v1.2 · paso 1/3)": lo previo a "paso" dentro del paréntesis es libre.
+  const step = /\s*\([^()]*paso\s+\d+\/\d+\)/i.exec(rest);
+  if (!step) return null;
+  return rest.slice(0, step.index).trim() || null;
 }
 
 export function isOrionSignerAuthResolution(resolution?: string | null): boolean {

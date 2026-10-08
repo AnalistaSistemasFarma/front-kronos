@@ -11,7 +11,6 @@ import toast from 'react-hot-toast';
 import {
   showClosureNotification,
 } from '../../../../../lib/notifications/showClosureNotification';
-import { DOCUMENT_WORKFLOW_PROCESS_NAME } from '../../../../../lib/document-management/workflowStates';
 import {
   Title,
   Paper,
@@ -113,6 +112,10 @@ import { isSynerlinkWorkflowLocked } from '../../../../../lib/orion/workflowLock
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableRow';
+import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
+import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
+import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
 import { partitionTasksForDisplay } from '@/lib/orion/taskProgress';
@@ -145,8 +148,6 @@ interface Request {
   date_resolution?: string;
   start_date?:string;
   executor_final: string;
-  /** Solo presente cuando la tarea pertenece al flujo de Gestión Documental. */
-  id_document?: number | null;
 }
 
 interface Option {
@@ -615,20 +616,30 @@ function ViewRequestPage() {
     }, 5000);
   }, [request?.id_request_general]);
 
+  // Abre el modal de justificación; el borrado real va en handleDeleteAttachment.
+  const [pendingDelete, setPendingDelete] = useState<{
+    fileId: string;
+    fileName: string | null;
+  } | null>(null);
+  const requestDeleteAttachment = useCallback((fileId: string, fileName?: string | null) => {
+    if (!fileId) return;
+    setPendingDelete({ fileId, fileName: fileName ?? null });
+  }, []);
+
   const handleDeleteAttachment = useCallback(
-    async (fileId: string, fileName?: string | null) => {
+    async (fileId: string, fileName: string | null, justification: string): Promise<boolean> => {
       const requestId = request?.id_request_general;
-      if (!requestId || !fileId) return;
+      if (!requestId || !fileId) return false;
       try {
         const res = await fetch('/api/requests-general/delete-attachment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId, fileId, fileName: fileName ?? null }),
+          body: JSON.stringify({ requestId, fileId, fileName: fileName ?? null, justification }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           toast.error(typeof data.error === 'string' ? data.error : 'No se pudo eliminar');
-          return;
+          return false;
         }
         setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
         if (requestId) removeFromAttachmentCache(requestId, fileId);
@@ -639,18 +650,14 @@ function ViewRequestPage() {
           return next;
         });
         toast.success('Documento eliminado');
-        if (data.orionStopped === false) {
-          toast.error(
-            'No se pudo detener la firma en GSS Firma. Recházela allí para que nadie siga firmando.',
-            { duration: 8000 }
-          );
-        }
         refreshAttachmentsAfterUpload();
         void fetchFormValues(requestId);
         void fetchTasksRG();
         void fetchNotes();
+        return true;
       } catch {
         toast.error('Error de red al eliminar el archivo');
+        return false;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1128,17 +1135,6 @@ function ViewRequestPage() {
     }
     */}
 
-    // Candado de Gestión Documental: defensa en profundidad — el backend ya rechaza esto
-    // con 400, pero ni siquiera se debería poder llegar aquí porque el control de estado
-    // está deshabilitado para estas tareas (ver isDocumentManagementTask más abajo).
-    if (isDocumentManagementTask) {
-      setUpdateMessage({
-        type: 'error',
-        text: 'Esta tarea es parte del flujo de Gestión Documental y no se puede resolver desde aquí. Use las acciones de transición en la página del documento.',
-      });
-      return;
-    }
-
     // Tareas secuenciales: si esta tarea está bloqueada (la anterior no está cerrada), no permitir
     const lockedNow = taskRQ.find((t) => t.id === request?.id)?.locked;
     if (lockedNow) {
@@ -1283,18 +1279,6 @@ function ViewRequestPage() {
 
   // Tarea actual bloqueada por secuencia (la anterior no está cerrada)
   const currentTaskLocked = taskRQ.find((t) => t.id === request?.id)?.locked ?? false;
-
-  // Candado de Gestión Documental (bug reportado por Nicolás el 2026-09-02): esta pantalla
-  // genérica de "Cambiar Estado de la Tarea" solo ofrece los 2 estados genéricos (En
-  // progreso/Resuelto) y avanza por display_order — no conoce el grafo de 14 estados de
-  // lib/document-management/workflowStates.ts. Resolver una tarea del flujo documental desde
-  // acá rompe el flujo en silencio (ver el mismo candado en el backend,
-  // app/api/requests-general/update-activities/route.js). Por eso, para estas tareas, se
-  // deshabilita la edición del estado y se enlaza a las acciones reales del documento.
-  const isDocumentManagementTask = request?.process === DOCUMENT_WORKFLOW_PROCESS_NAME;
-  const documentManagementUrl = request?.id_document
-    ? `/process/document-management/${request.id_document}`
-    : '/process/document-management';
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -1546,8 +1530,11 @@ function ViewRequestPage() {
   const taskOrionFileId = parseOrionFileIdFromResolution(request?.resolution);
   const taskPendingOrionAuth = isOrionSignerAuthResolution(request?.resolution);
   const hasPdfAttachments = attachmentRows.some((f) => /\.pdf$/i.test(f.name));
+  // Word en preparación (etapa previa a la firma): también usa la tabla de firma.
+  const hasWordAttachments = attachmentRows.some((f) => isWordDraftFileName(f.name));
   const showOrionPanel =
     hasPdfAttachments ||
+    hasWordAttachments ||
     hasOrionSignatureField ||
     hasOrionDocuments ||
     Boolean(taskOrionFileId) ||
@@ -2064,33 +2051,17 @@ function ViewRequestPage() {
                     Cambiar Estado de la Tarea
                   </Title>
 
-                  {isDocumentManagementTask ? (
-                    <Stack>
-                      <Alert color='blue' icon={<IconLock size={16} />} title='Tarea del flujo de Gestión Documental'>
-                        {`El estado real de esta tarea es "${request.task}" — no se puede cambiar desde esta pantalla genérica, `}
-                        porque no respeta las reglas de aprobar/rechazar/reelaborar/reasignar del flujo documental.
-                        Use las acciones de transición en la página del documento.
-                      </Alert>
-                      <Button
-                        component={Link}
-                        href={documentManagementUrl}
-                        variant='light'
-                        color='blue'
-                        leftSection={<IconFileDescription size={16} />}
-                      >
-                        Ir a la página del documento
-                      </Button>
-                    </Stack>
-                  ) : isEditing ? (
+                  {isEditing ? (
                     <Stack>
                       <Select
                         label='Estado de la Tarea'
                         placeholder='Selecciona estado'
                         data={statusOptions}
                         value={resolutionData.estado}
-                        onChange={(val) =>
-                          setResolutionData({ ...resolutionData, estado: val || '' })
-                        }
+                        onChange={(val) => {
+                          setResolutionData({ ...resolutionData, estado: val || '' });
+                          if (val === '2') setShowResolution(true);
+                        }}
                         error={formErrors.estado}
                       />
                     </Stack>
@@ -2129,7 +2100,7 @@ function ViewRequestPage() {
                     )}
                   </Group>
 
-                  {isEditing && showResolution && (
+                  {isEditing && (showResolution || resolutionData.estado === '2') && (
                     <Stack>
                       {/* Validación: solo permitir resolución si el estado es 2 */}
                       {resolutionData.resolucion && resolutionData.estado !== '2' && !resolutionData.estado ? (
@@ -2184,7 +2155,7 @@ function ViewRequestPage() {
                           color='blue'
                           onClick={handleStartEditing}
                           leftSection={<IconTicket size={16} />}
-                          disabled={isRequestResolved() || currentTaskLocked || isDocumentManagementTask}
+                          disabled={isRequestResolved() || currentTaskLocked}
                         >
                           Editar Tarea
                         </Button>
@@ -2455,14 +2426,21 @@ function ViewRequestPage() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {attachmentRows.map((file: FolderFile, fileIndex: number) => {
+                  {nestDraftPdfRows(attachmentRows, (f: FolderFile) =>
+                    showOrionPanel && /\.pdf$/i.test(f.name)
+                      ? getOrionDocForFile(String(f.id), f.name).sourceDraftFileId
+                      : null
+                  ).map(({ file, rowNumber, nested }) => {
                     const fileId = String(file.id || taskOrionFileId || '');
                     const openUrl =
                       resolveAttachmentDownloadUrl(file) ?? file.webUrl ?? '#';
                     const sizeLabel = [
                       file.size ? formatFileSize(file.size) : null,
                       file.lastModifiedDateTime
-                        ? new Date(file.lastModifiedDateTime).toLocaleDateString('es-CO')
+                        ? new Date(file.lastModifiedDateTime).toLocaleString('es-CO', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })
                         : null,
                     ]
                       .filter(Boolean)
@@ -2488,7 +2466,7 @@ function ViewRequestPage() {
                       return (
                         <OrionAttachmentTableRow
                           key={file.id}
-                          rowNumber={fileIndex + 1}
+                          rowNumber={rowNumber}
                           requestId={request.id_request_general}
                           fileId={fileId || 'pdf'}
                           fileName={file.name}
@@ -2519,7 +2497,8 @@ function ViewRequestPage() {
                           }}
                           onDocumentsUpdate={handleOrionDocumentsChange}
                           canDeleteAttachment={canDeleteAttachments}
-                          onDeleteAttachment={handleDeleteAttachment}
+                          onDeleteAttachment={requestDeleteAttachment}
+                          nestedUnderWord={nested}
                           forceSignerUi={(() => {
                             const me = String(session?.user?.email || '')
                               .trim()
@@ -2558,13 +2537,43 @@ function ViewRequestPage() {
                       );
                     }
 
+                    if (showOrionPanel && request.id_request_general && isWordDraftFileName(file.name)) {
+                      return (
+                        <OrionDraftTableRow
+                          key={file.id}
+                          rowNumber={rowNumber}
+                          requestId={request.id_request_general}
+                          fileId={String(file.id)}
+                          fileName={file.name}
+                          fileSizeLabel={sizeLabel}
+                          processName={request?.process || request?.category || null}
+                          requesterName={request?.name_requester || null}
+                          openUrl={openUrl}
+                          canDeleteAttachment={canDeleteAttachments}
+                          onDeleteAttachment={requestDeleteAttachment}
+                          autoOpenReview={
+                            searchParams.get('orionAction') === 'review' &&
+                            String(orionFileIdParam || '') === String(file.id)
+                          }
+                          onConverted={async () => {
+                            // El PDF nuevo sale debajo del Word: adjuntos + estado de firma.
+                            await Promise.all([
+                              fetchFolderContents(),
+                              fetchFormValues(request.id_request_general),
+                            ]);
+                            refreshAttachmentsAfterUpload();
+                          }}
+                        />
+                      );
+                    }
+
                     return (
                       <Table.Tr key={file.id}>
                         {showOrionPanel ? (
                           <>
                             <Table.Td data-label='N.º'>
                               <Text size='sm' c='dimmed'>
-                                {fileIndex + 1}
+                                {rowNumber}
                               </Text>
                             </Table.Td>
                             <Table.Td data-label='Documento'>
@@ -2738,7 +2747,7 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
-                  disabled={isRequestResolved() || currentTaskLocked || isDocumentManagementTask}
+                  disabled={isRequestResolved() || currentTaskLocked}
                 >
                   Editar Tarea
                 </Button>
@@ -2801,6 +2810,17 @@ function ViewRequestPage() {
             )}
           </Group>
         </Card>
+
+        <DeleteAttachmentModal
+          opened={pendingDelete != null}
+          fileName={pendingDelete?.fileName ?? null}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={(justification) =>
+            pendingDelete
+              ? handleDeleteAttachment(pendingDelete.fileId, pendingDelete.fileName, justification)
+              : Promise.resolve(false)
+          }
+        />
 
         <Modal
           opened={modalTasksOpened}

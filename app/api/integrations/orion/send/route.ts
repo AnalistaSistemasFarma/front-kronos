@@ -123,7 +123,7 @@ export async function POST(req: Request) {
       });
       nextState = ensured.state;
 
-      let bag = setOrionDocumentInBag(synced?.bag ?? loaded.bag, fileId, nextState);
+      const bag = setOrionDocumentInBag(synced?.bag ?? loaded.bag, fileId, nextState);
       await upsertOrionFormBag(pool, requestId, loaded.field.id_form_field, bag);
 
       const ctx = await getRequestOrionContext(pool, requestId);

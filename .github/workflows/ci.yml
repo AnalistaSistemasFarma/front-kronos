@@ -104,8 +104,29 @@ jobs:
       - name: Pruebas unitarias + cobertura (vitest)
         # Corre la suite con cobertura. Los umbrales (piso "ratchet") están en
         # vitest.config.ts; si la cobertura baja del piso, este paso FALLA y la
-        # compuerta se pone en rojo.
-        run: npm test -- --coverage
+        # compuerta se pone en rojo. El reporte JUnit alimenta la evidencia de
+        # validación del SGC documental (matriz de trazabilidad).
+        run: npm test -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/vitest/junit.xml
+
+      - name: Instalar navegador para e2e (Playwright)
+        run: npx playwright install --with-deps chromium
+
+      - name: Pruebas e2e de humo (Playwright)
+        # Levanta `next start` sobre el build de arriba (sin base real: las
+        # pruebas de humo no llegan a la base) y corre e2e/. Las pruebas con
+        # sesión se omiten mientras no haya usuario de pruebas en CI.
+        env:
+          NEXTAUTH_SECRET: ci-e2e-secret-no-real
+          NEXTAUTH_URL: http://127.0.0.1:3100
+          DATABASE_URL: sqlserver://127.0.0.1:1;database=ci;user=ci;password=ci;trustServerCertificate=true
+        run: npm run test:e2e
+
+      - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
+        if: always()
+        env:
+          # En un PR, github.sha es el merge temporal: se sella con el commit real de la rama.
+          EVIDENCIA_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/evidencia/sgc-evidencia.mjs
 
       - name: Publicar resumen de cobertura
         # Vuelca el resumen de cobertura al summary del job (no bloqueante).
@@ -135,6 +156,121 @@ jobs:
           path: coverage/
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Archivar evidencia de pruebas (SGC documental)
+        # Reportes JUnit, cobertura, reporte HTML de Playwright (capturas y
+        # trazas), manifiesto y matriz de trazabilidad, sellados con número de
+        # corrida y commit. Se conservan 90 días; para el expediente de
+        # validación se copian a SharePoint "Auditoría SynerLink/SGC-OLP".
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencia-sgc-front-${{ github.run_number }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            reports/
+            coverage/
+          if-no-files-found: ignore
+          retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  # SGC documental: integración contra un SQL Server EFÍMERO (contenedor
+  # oficial de Microsoft). Crea la base desde el esquema de Prisma (incluido el
+  # esquema SQL `sgc`), aplica las migraciones del Sprint 0 (deben ser
+  # idempotentes) y prueba el acceso real contra la base.
+  # ---------------------------------------------------------------------------
+  sgc-integracion:
+    name: SGC — integración (SQL Server efímero)
+    runs-on: ubuntu-latest
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: 'Y'
+          MSSQL_SA_PASSWORD: Ci_Sgc_2026!Efimero
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'Ci_Sgc_2026!Efimero' -Q 'SELECT 1' -b"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      SGC_IT_DATABASE_URL: sqlserver://localhost:1433;database=kronos_ci;user=sa;password=Ci_Sgc_2026!Efimero;trustServerCertificate=true;encrypt=true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci || npm install
+
+      - name: Generar cliente Prisma
+        run: npx prisma generate
+
+      - name: Crear la base efímera
+        run: |
+          node -e "
+            const sql = require('mssql');
+            (async () => {
+              const pool = await sql.connect({ server: 'localhost', port: 1433, user: 'sa', password: 'Ci_Sgc_2026!Efimero', database: 'master', options: { encrypt: true, trustServerCertificate: true } });
+              await pool.request().batch(\"IF DB_ID('kronos_ci') IS NULL CREATE DATABASE kronos_ci;\");
+              await pool.close();
+              console.log('Base kronos_ci lista');
+            })().catch((e) => { console.error(e); process.exit(1); });
+          "
+
+      - name: Aplicar esquema de Prisma (dbo + sgc)
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: npx prisma db push --skip-generate --accept-data-loss
+
+      - name: Aplicar migraciones del SGC (idempotencia)
+        # Sobre el esquema ya creado por db push: deben pasar sin error (cada
+        # bloque verifica si el objeto existe) y agregar lo que db push no crea
+        # (trigger de auditoría de solo inserción y restricciones CHECK del S1).
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930100000_sgc_s0_retiro_gestion_documental/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930110000_sgc_esquema_base/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930150000_sgc_s1_repositorio/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930150000_sgc_s1_repositorio/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930200000_sgc_s2_flujos_tareas_autorizaciones/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930200000_sgc_s2_flujos_tareas_autorizaciones/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930230000_sgc_s3_firma_pdf_calidad/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260930230000_sgc_s3_firma_pdf_calidad/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261001000000_sgc_s4_divulgacion_capacitacion_vigencia/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261001000000_sgc_s4_divulgacion_capacitacion_vigencia/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261001100000_sgc_s5_relaciones_vencimientos_accesos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261001100000_sgc_s5_relaciones_vencimientos_accesos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261001200000_sgc_s6_endurecimiento/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261001200000_sgc_s6_endurecimiento/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261003120000_sgc_correcciones_calidad/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261003120000_sgc_correcciones_calidad/migration.sql
+
+      - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
+        run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
+
+      - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
+        if: always()
+        env:
+          # En un PR, github.sha es el merge temporal: se sella con el commit real de la rama.
+          EVIDENCIA_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/evidencia/sgc-evidencia.mjs
+
+      - name: Archivar evidencia de integración (SGC documental)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencia-sgc-integracion-${{ github.run_number }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 90
 
   # ---------------------------------------------------------------------------
   # MCP (mcp/): build (tsc) + pruebas unitarias (vitest)

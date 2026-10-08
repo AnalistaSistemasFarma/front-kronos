@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
-import { checkAdminPrivileges } from '../../../../../lib/access-control';
 import { CHAT_MODULE_URL, getChatAccess } from '../../../../../lib/chat/access';
 import {
   badRequest,
@@ -23,20 +22,18 @@ import {
  * se descubre días después y por queja.
  *
  * Las personas que salen son las que tienen el subproceso del módulo
- * (`/process/chat`) EN ESA EMPRESA y están activas. Los asistentes, los que el
- * propio administrador puede usar en esa empresa.
+ * (`/process/chat`) EN ESA EMPRESA y están activas. Los asistentes, SOLO los
+ * que quien pregunta tiene asignados en esa empresa: nunca los de otro.
  *
- * Solo administradores, el mismo criterio de POST /api/chat/groups: si esta
- * lista fuera abierta, sería un directorio de quién tiene qué habilitado.
+ * Desde el 2026-10-06 (decisión de Nicolás) cualquiera con el chat crea
+ * grupos, así que esta lista ya no es solo de administradores. Sigue sin ser
+ * un directorio abierto: hay que tener el módulo EN ESA EMPRESA para pedirla,
+ * y solo muestra personas de esa misma empresa.
  */
 export async function GET(request: NextRequest) {
   try {
     const user = await resolveSessionUser();
     if (!user) return unauthorized();
-
-    if (!(await checkAdminPrivileges(user.email))) {
-      return jsonNoStore({ error: 'Solo los administradores crean grupos.' }, { status: 403 });
-    }
 
     const idCompany = Number(request.nextUrl.searchParams.get('idCompany'));
     if (!Number.isInteger(idCompany) || idCompany <= 0) {

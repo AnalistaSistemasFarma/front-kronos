@@ -8,23 +8,16 @@ import {
   cleanupObsoleteTicketNotifications,
   filterNotificationsForUser,
 } from '../../../lib/notificationEvents.js';
-import { maybeRunScheduler } from '../../../lib/scheduler/runner.js';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
   try {
-    // Respaldo oportunista del scheduler: la campana se consulta cada 30s por todo
-    // usuario logueado; con throttle en memoria (10 min) + claim atómico en BD es
-    // barato e idempotente. Sin await: no retrasa la respuesta.
-    maybeRunScheduler();
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
-    // status=unread (por defecto): consulta ligera para el polling recurrente.
-    // status=read: solo bajo demanda cuando el usuario pide ver las leídas.
     const { searchParams } = new URL(request.url);
     const statusFilter = searchParams.get('status') === 'read' ? 'read' : 'unread';
 
@@ -32,6 +25,9 @@ export async function GET(request) {
       .trim()
       .toLowerCase();
 
+    // Los avisos del CHAT no van en la campana (2026-10-01): el chat tiene su
+    // propio contador. Desde entonces ya no se crean (solo push); las filas
+    // viejas no se borran, se ocultan aquí por la URL del chat.
     return await withMssqlPool(async (pool) => {
       if (statusFilter === 'read') {
         const readResult = await pool
@@ -41,6 +37,7 @@ export async function GET(request) {
             `SELECT TOP 50 id, title, body, url, read_at, created_at
            FROM notifications
            WHERE LOWER(LTRIM(RTRIM(email))) = @email AND read_at IS NOT NULL
+             AND (url IS NULL OR url NOT LIKE '/process/chat%')
            ORDER BY read_at DESC`
           );
 
@@ -67,6 +64,7 @@ export async function GET(request) {
           `SELECT TOP 50 id, title, body, url, read_at, created_at
          FROM notifications
          WHERE LOWER(LTRIM(RTRIM(email))) = @email AND read_at IS NULL
+           AND (url IS NULL OR url NOT LIKE '/process/chat%')
          ORDER BY created_at DESC`
         );
 
