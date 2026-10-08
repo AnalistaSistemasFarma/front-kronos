@@ -324,6 +324,8 @@ export async function openReadingFile(db: SgcDb, idAssignee: number, viewer: { e
     state: version.status === 'vigente' ? ('vigente' as const) : version.status === 'obsoleto' ? ('obsoleto' as const) : version.status === 'anulado' ? ('anulado' as const) : ('divulgacion' as const),
     // 2026-10-03: fecha de emisión del encabezado institucional (se estampa en la copia).
     emission: emissionStampFor(version),
+    // Sprint 11: empresa (protección del visor por configuración).
+    idCompany: rec.request.id_company,
   };
 }
 

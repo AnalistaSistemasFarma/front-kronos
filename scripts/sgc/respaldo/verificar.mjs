@@ -112,6 +112,8 @@ try {
     ['bulk_upload_item', 'warning'],
     // Sprint 10: recapacitaciones.
     ['retraining', 'notes'],
+    // Sprint 11: cada impresión o descarga de una copia no controlada.
+    ['uncontrolled_copy_event', 'user_agent'],
   ]) {
     if (!tables.has(table)) continue;
     const tx = new sql.Transaction(pool);

@@ -31,6 +31,27 @@ export interface SgcWatermarkInfo {
    * se estampa en su recuadro en cada copia controlada.
    */
   emission?: { page: number; x: number; y: number; width: number; height: number; text: string };
+  /**
+   * Sprint 11 (bloqueo de capturas, R10): marca de agua EN MOSAICO sobre toda
+   * la página con el correo, la fecha y hora y la IP de quien consulta. No
+   * impide una captura, pero toda captura identifica a quién se le filtró.
+   */
+  tiled?: boolean;
+  ip?: string | null;
+}
+
+/** Texto del mosaico: correo · fecha y hora (Colombia) · IP. */
+export function tiledWatermarkText(info: Pick<SgcWatermarkInfo, 'viewerEmail' | 'at' | 'ip'>): string {
+  return toWinAnsiSafe([info.viewerEmail, `${formatBogotaDateTime(info.at)} (hora Colombia)`, info.ip ? `IP ${info.ip}` : null].filter(Boolean).join('  ·  '));
+}
+
+/** Posiciones del mosaico (filas y columnas desplazadas) para una página. */
+export function tilePositions(width: number, height: number, stepX = 230, stepY = 110): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  for (let row = 0, y = -stepY / 2; y < height + stepY; row++, y += stepY) {
+    for (let x = row % 2 ? -stepX / 2 : 0; x < width + stepX; x += stepX) out.push({ x, y });
+  }
+  return out;
 }
 
 /** Texto y recuadro de la fecha de emisión para la copia controlada (o undefined si el PDF no tiene encabezado institucional). */
@@ -121,6 +142,13 @@ export async function stampControlledCopy(pdfBytes: Uint8Array, info: SgcWaterma
       rotate: degrees((angle * 180) / Math.PI),
     });
 
+    if (info.tiled) {
+      const tile = tiledWatermarkText(info);
+      for (const p of tilePositions(width, height)) {
+        page.drawText(tile, { x: p.x, y: p.y, size: 6.5, font: small, color: rgb(0.35, 0.35, 0.4), opacity: 0.1, rotate: degrees(25) });
+      }
+    }
+
     let footerSize = 7;
     while (footerSize > 4 && small.widthOfTextAtSize(footer, footerSize) > width - 24) footerSize -= 0.5;
     page.drawText(footer, {
@@ -145,5 +173,66 @@ export async function stampControlledCopy(pdfBytes: Uint8Array, info: SgcWaterma
   }
 
   pdf.setProducer('SynerLink — SGC documental (copia controlada)');
+  return pdf.save();
+}
+
+export interface SgcUncontrolledCopyInfo {
+  code: string;
+  versionNumber: number;
+  requesterEmail: string;
+  authorizedBy: string;
+  authorizedAt: Date;
+  expiresAt: Date;
+  /** Momento de la impresión o descarga. */
+  at: Date;
+  mode: 'impresion' | 'descarga';
+  destination?: string | null;
+  ip?: string | null;
+}
+
+/** Textos de la copia NO controlada (Sprint 11): la diagonal y el pie de cada página. */
+export function buildUncontrolledCopyLines(info: SgcUncontrolledCopyInfo): { diagonal: string; footer: string; header: string } {
+  const footer = [
+    'COPIA NO CONTROLADA',
+    `${info.code} V${info.versionNumber}`,
+    `Solicitó ${info.requesterEmail}`,
+    `Autorizó ${info.authorizedBy} el ${formatBogotaDateTime(info.authorizedAt)}`,
+    `Vence ${formatBogotaDateTime(info.expiresAt).slice(0, 10)}`,
+    `${info.mode === 'descarga' ? 'Descargada' : 'Impresa'} ${formatBogotaDateTime(info.at)} (hora Colombia)`,
+  ].join(' · ');
+  const header = `COPIA NO CONTROLADA: la compañía no responde por su contenido ni por sus cambios. Consulte siempre la versión vigente en SynerLink.${info.destination ? ` Destino: ${info.destination}.` : ''}`;
+  return { diagonal: 'COPIA NO CONTROLADA', footer: toWinAnsiSafe(footer), header: toWinAnsiSafe(header) };
+}
+
+/** Estampa la copia NO controlada: diagonal, encabezado de advertencia y pie en todas las páginas. */
+export async function stampUncontrolledCopy(pdfBytes: Uint8Array, info: SgcUncontrolledCopyInfo): Promise<Uint8Array> {
+  const pdf = await PDFDocument.load(pdfBytes, { ignoreEncryption: true, updateMetadata: false });
+  const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const small = await pdf.embedFont(StandardFonts.Helvetica);
+  const { diagonal, footer, header } = buildUncontrolledCopyLines(info);
+  for (const page of pdf.getPages()) {
+    const { width, height } = page.getSize();
+    const size = Math.min(width, height) / 11;
+    const textWidth = font.widthOfTextAtSize(diagonal, size);
+    const angle = Math.atan2(height, width);
+    page.drawText(diagonal, {
+      x: width / 2 - (Math.cos(angle) * textWidth) / 2,
+      y: height / 2 - (Math.sin(angle) * textWidth) / 2,
+      size,
+      font,
+      color: rgb(0.8, 0.35, 0),
+      opacity: 0.22,
+      rotate: degrees((angle * 180) / Math.PI),
+    });
+    for (const [text, y, color] of [
+      [header, height - 12, rgb(0.8, 0.35, 0)],
+      [footer, 8, rgb(0.55, 0.25, 0)],
+    ] as const) {
+      let fs = 7;
+      while (fs > 4 && small.widthOfTextAtSize(text, fs) > width - 24) fs -= 0.5;
+      page.drawText(text, { x: 12, y, size: fs, font: small, color, opacity: 0.9 });
+    }
+  }
+  pdf.setProducer('SynerLink — SGC documental (copia NO controlada)');
   return pdf.save();
 }

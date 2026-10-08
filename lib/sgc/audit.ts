@@ -98,6 +98,10 @@ export const SGC_AUDIT_ACTIONS = {
   // Sprint 10: capacitación opcional por solicitud, material previo y recapacitación.
   capacitacionBandera: 'capacitacion.bandera',
   capacitacionRecapacitacion: 'capacitacion.recapacitacion',
+  // Sprint 11: copias no controladas y protección del visor.
+  copiaNoControladaSolicitada: 'copia_no_controlada.solicitada',
+  copiaNoControladaDecidida: 'copia_no_controlada.decidida',
+  visorEvento: 'documento.visor_evento',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];
