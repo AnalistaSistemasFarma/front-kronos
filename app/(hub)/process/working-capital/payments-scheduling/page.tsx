@@ -401,10 +401,10 @@ function PaymentSchedulingBoard() {
         }
     };
 
-    const fetchDepartments = async (userIdParam?: string) => {
+    const fetchDepartments = async (_userIdParam?: string) => {
         try {
-        const idUser = userIdParam || '';
-        const url = `/api/authorization/authorization-departments?userId=${idUser}`;
+        // El servidor toma el usuario de la sesión; no se envía ningún id.
+        const url = `/api/authorization/authorization-departments`;
 
         const response = await fetch(url);
         const data = await response.json();
