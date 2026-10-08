@@ -132,6 +132,9 @@ export async function recordSignature(
   const current = await signedContentInTx(tx, p.request.id_request, p.idTask, p.idTaskAssignee, s.verifiedDraft);
   const email = p.actor.email.trim().toLowerCase();
   const master = await activeMaster(tx, p.request.id_company, email);
+  // Sprint 12: si el cupo es de un sustituto, la firma queda «en sustitución de» el titular.
+  const slot = await tx.sgcTaskAssignee.findUnique({ where: { id_task_assignee: p.idTaskAssignee }, select: { on_behalf_of: true } });
+  const onBehalfOf = slot?.on_behalf_of?.trim().toLowerCase() || null;
   const payload = buildSignaturePayload({
     idCompany: p.request.id_company,
     idRequest: p.request.id_request,
@@ -146,6 +149,7 @@ export async function recordSignature(
     masterSha256: master?.image_sha256?.trim() ?? null,
     ip: p.actor.ip ?? null,
     userAgent: p.actor.userAgent ?? null,
+    onBehalfOf,
   });
   const config = await tx.sgcCompanyConfig.findUniqueOrThrow({ where: { id_company: p.request.id_company } });
   const segments = evidenceFolderSegments(config.storage_root, p.request.id_request);
@@ -182,6 +186,7 @@ export async function recordSignature(
       evidence_sha256: evidenceSha,
       prev_record_hash: prev,
       record_hash: recordHash,
+      on_behalf_of: payload.onBehalfOf ?? null,
     },
   });
   await writeSgcAudit(tx, {
@@ -190,7 +195,7 @@ export async function recordSignature(
     action: SGC_AUDIT_ACTIONS.firmaRegistrada,
     entity: 'signature',
     entityId: row.id_signature,
-    after: { uid: payload.uid, idRequest: payload.idRequest, idTask: payload.idTask, meaning: payload.meaning, contentSha256: payload.content.sha256, recordHash, evidencePath, authMethod: payload.authMethod },
+    after: { uid: payload.uid, idRequest: payload.idRequest, idTask: payload.idTask, meaning: payload.meaning, contentSha256: payload.content.sha256, recordHash, evidencePath, authMethod: payload.authMethod, ...(payload.onBehalfOf ? { onBehalfOf: payload.onBehalfOf } : {}) },
     detail: payload.reason,
     ip: payload.ip,
     userAgent: payload.userAgent,

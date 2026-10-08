@@ -1378,6 +1378,9 @@ model SgcCompanyConfig {
   // Sprint 11: protección del VISOR (marca de agua en mosaico, ocultar sin foco
   // y registrar «Imprimir pantalla»). Encendida por defecto; reversible.
   viewer_protection          Boolean   @default(true)
+  // Sprint 12: APROBADORES AUTORIZADOS — con la lista activa (y al menos una
+  // persona autorizada en la empresa), solo ellos quedan como aprobadores.
+  approver_list_enforced     Boolean   @default(true)
 
   company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1415,6 +1418,9 @@ model SgcCompanyConfig {
   bulkUploads       SgcBulkUpload[]
   // Sprint 11: copias no controladas.
   uncontrolledCopies SgcUncontrolledCopyRequest[]
+  // Sprint 12: aprobadores autorizados y firmantes sustitutos.
+  approverAuthorizations SgcApproverAuthorization[]
+  signerSubstitutions    SgcSignerSubstitution[]
 
   @@map("company_config")
   @@schema("sgc")
@@ -1494,6 +1500,8 @@ model SgcProcessMap {
   // Sprint 2
   responsibles  SgcResponsibleMatrix[]
   requests      SgcRequest[]
+  // Sprint 12: aprobadores autorizados del proceso.
+  approverAuthorizations SgcApproverAuthorization[]
 
   @@unique([id_company, code])
   @@map("process_map")
@@ -2018,6 +2026,8 @@ model SgcTaskAssignee {
   created_at        DateTime  @default(now())
   // Sprint 3: firma electrónica con la que se decidió el cupo (sgc.signature).
   id_signature      Int?
+  // Sprint 12: el cupo es de un SUSTITUTO que firma en nombre de esta persona (ausente).
+  on_behalf_of      String?   @db.NVarChar(255)
 
   task           SgcTask            @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
   authorizations SgcAuthorization[]
@@ -2206,6 +2216,8 @@ model SgcSignature {
   prev_record_hash    String?  @db.Char(64)
   record_hash         String   @unique @db.Char(64)
   created_at          DateTime @default(now())
+  // Sprint 12: firma de un SUSTITUTO «en sustitución de» esta persona (entra al registro encadenado).
+  on_behalf_of        String?  @db.NVarChar(255)
 
   request  SgcRequest      @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
   assignee SgcTaskAssignee @relation(fields: [id_task_assignee], references: [id_task_assignee], onDelete: NoAction, onUpdate: NoAction)
@@ -3140,5 +3152,59 @@ model SgcUncontrolledCopyEvent {
 
   @@index([id_copy_request])
   @@map("uncontrolled_copy_event")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 12: APROBADORES AUTORIZADOS por persona y proceso
+// (decisión D9), con vigencia y motivo; los administra Aseguramiento de
+// Calidad. No se borran: se revocan con motivo.
+// ---------------------------------------------------------------------------
+model SgcApproverAuthorization {
+  id_approver_authorization Int       @id @default(autoincrement())
+  id_company                Int
+  user_email                String    @db.NVarChar(255)
+  // NULL = todos los procesos de la empresa.
+  id_process_map            Int?
+  valid_from                DateTime  @db.Date
+  valid_to                  DateTime? @db.Date
+  reason                    String    @db.NVarChar(1000)
+  granted_by                String    @db.NVarChar(255)
+  granted_at                DateTime
+  revoked_by                String?   @db.NVarChar(255)
+  revoked_at                DateTime?
+  revoke_reason             String?   @db.NVarChar(1000)
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  process       SgcProcessMap?   @relation(fields: [id_process_map], references: [id_process_map], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_company, user_email])
+  @@map("approver_authorization")
+  @@schema("sgc")
+}
+
+// Sprint 12: FIRMANTE SUSTITUTO que asigna solo el grupo SGC-SUSTITUTOS (María
+// Camila y su suplente, D8) sobre un cupo pendiente, con motivo y periodo de
+// ausencia. SOLO INSERCIÓN.
+model SgcSignerSubstitution {
+  id_signer_substitution    Int       @id @default(autoincrement())
+  id_company                Int
+  id_request                Int
+  id_task                   Int
+  step_key                  String    @db.NVarChar(40)
+  id_task_assignee_original Int
+  id_task_assignee_new      Int
+  original_email            String    @db.NVarChar(255)
+  substitute_email          String    @db.NVarChar(255)
+  reason                    String    @db.NVarChar(1000)
+  absence_from              DateTime? @db.Date
+  absence_to                DateTime? @db.Date
+  assigned_by               String    @db.NVarChar(255)
+  assigned_at               DateTime
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_request])
+  @@map("signer_substitution")
   @@schema("sgc")
 }

@@ -324,7 +324,17 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
     const signerRows = await db.sgcTaskAssignee.findMany({ where: { id_task_assignee: { in: signatures.map((s) => s.id_task_assignee) } }, select: { id_task_assignee: true, user_email: true, pool_type_code: true, task: { select: { task_key: true } } } });
     const keyOfAssignee = new Map(signerRows.map((a) => [a.id_task_assignee, sgcSignerKey(a.task.task_key, a.user_email, a.pool_type_code)]));
     const cargos = await cargoOf(db, request.id_company, signatures.map((s) => s.signer_email));
-    const namesFor = (m: SgcPlacedMeaning) => [...new Set(signatures.filter((s) => s.meaning === m).map((s) => personLabel(s.signer_name, s.signer_email, cargos.get(s.signer_email.trim().toLowerCase()))))];
+    // Sprint 12: la firma de un sustituto queda «en sustitución de» el titular también en el encabezado.
+    const namesFor = (m: SgcPlacedMeaning) => [
+      ...new Set(
+        signatures
+          .filter((s) => s.meaning === m)
+          .map((s) => {
+            const label = personLabel(s.signer_name, s.signer_email, cargos.get(s.signer_email.trim().toLowerCase()));
+            return s.on_behalf_of ? `${label} (en sustitución de ${s.on_behalf_of.trim()})` : label;
+          })
+      ),
+    ];
     const approvedAt = approvals.at(-1)!.signed_at;
     const composed = await composeContent(db, deps, {
       idCompany: request.id_company,
@@ -392,6 +402,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
         authMethod: s.auth_method,
         contentSha256: s.content_sha256.trim(),
         recordHash: s.record_hash.trim(),
+        ...(s.on_behalf_of?.trim() ? { onBehalfOf: s.on_behalf_of.trim() } : {}),
       })),
       // Sprint 4: el QR de la portada abre esta verificación de vigencia de la versión.
       verifyUrl: buildVerifyUrl(deps.appUrl, request.id_company, code, versionNumber),
@@ -588,6 +599,7 @@ const SIGNATURE_ROW_SELECT = {
   master_sha256: true,
   ip: true,
   user_agent: true,
+  on_behalf_of: true,
   evidence_sha256: true,
   prev_record_hash: true,
   record_hash: true,

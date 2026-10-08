@@ -114,6 +114,8 @@ try {
     ['retraining', 'notes'],
     // Sprint 11: cada impresión o descarga de una copia no controlada.
     ['uncontrolled_copy_event', 'user_agent'],
+    // Sprint 12: cada sustitución de firmante.
+    ['signer_substitution', 'reason'],
   ]) {
     if (!tables.has(table)) continue;
     const tx = new sql.Transaction(pool);
