@@ -135,6 +135,7 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     await expect(p3.getByTestId('sgc-firma-significado')).toHaveText('Leyó');
     await p3.getByTestId('sgc-firma-motivo').fill('Leí el documento completo y entiendo su contenido.');
     await p3.getByTestId('sgc-firma-consentimiento').check();
+    await p3.getByTestId('sgc-firma-contrasena').click();
     await p3.getByTestId('sgc-firma-contrasena').fill(PW3);
     await p3.getByTestId('sgc-firma-confirmar').click();
     await expect(p3.getByTestId('sgc-mensaje')).toContainText('Lectura firmada', { timeout: 60_000 });

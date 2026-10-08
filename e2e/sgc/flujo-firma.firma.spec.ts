@@ -53,7 +53,15 @@ async function fillSignature(page: Page, password: string, reason: string, check
   await page.getByTestId('sgc-firma-motivo').fill(reason);
   await expect(page.getByTestId('sgc-firma-confirmar')).toBeDisabled();
   await page.getByTestId('sgc-firma-consentimiento').check();
-  await page.getByTestId('sgc-firma-contrasena').fill(password);
+  // S7 (SGC-REQ-110): la contraseña de la firma no se autocompleta — arranca vacía, de solo lectura y con new-password.
+  const pw = page.getByTestId('sgc-firma-contrasena');
+  await expect(pw).toHaveAttribute('autocomplete', 'new-password');
+  await expect(pw).not.toHaveAttribute('name', /^(password|current-password)$/);
+  await expect(pw).toHaveValue('');
+  await expect(pw).toHaveAttribute('readonly', '');
+  await pw.click();
+  await expect(pw).not.toHaveAttribute('readonly', '');
+  await pw.fill(password);
 }
 
 async function signInTask(page: Page, idTask: number, option: RegExp, password: string, reason: string) {
@@ -108,7 +116,7 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     }
   });
 
-  test('[SGC-REQ-038][SGC-REQ-039][SGC-REQ-040] firmar «Elaboró» exige reautenticación: con contraseña errada NO se firma; con la correcta sí', async ({ page }) => {
+  test('[SGC-REQ-038][SGC-REQ-039][SGC-REQ-040][SGC-REQ-110] firmar «Elaboró» exige reautenticación: con contraseña errada NO se firma; con la correcta sí', async ({ page }) => {
     const elab = await taskRow(page.request, idRequest, /^Elaboración/);
     // Sin firma no se aprueba; sin contraseña, 401.
     expect((await page.request.post(`/api/sgc/tasks/${elab!.idTask}/decision`, { data: { decision: 'aprobar' } })).status()).toBe(409);
@@ -122,6 +130,7 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     await page.getByTestId('sgc-firma-confirmar').click();
     await expect(page.getByTestId('sgc-firma-error')).toContainText('Contraseña incorrecta');
     expect((await taskRow(page.request, idRequest, /^Elaboración/))?.status).toBe('abierta');
+    await page.getByTestId('sgc-firma-contrasena').click();
     await page.getByTestId('sgc-firma-contrasena').fill(PW1);
     await page.getByTestId('sgc-firma-confirmar').click();
     await expect(page.getByTestId('sgc-mensaje')).toContainText('Firma registrada', { timeout: 60_000 });
