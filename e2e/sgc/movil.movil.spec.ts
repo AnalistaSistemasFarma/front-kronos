@@ -200,6 +200,7 @@ test.describe.serial('SGC documental · celular', () => {
     expect(await body.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
     await page.getByTestId('sgc-firma-motivo').fill('Soy el autor y lo envío a revisión desde el celular (e2e).');
     await page.getByTestId('sgc-firma-consentimiento').check();
+    await page.getByTestId('sgc-firma-contrasena').click();
     await page.getByTestId('sgc-firma-contrasena').fill(PW1);
     const confirm = page.getByTestId('sgc-firma-confirmar');
     await confirm.scrollIntoViewIfNeeded();
@@ -216,6 +217,7 @@ test.describe.serial('SGC documental · celular', () => {
         if (await page.getByTestId('sgc-mensaje').filter({ hasText: 'Firma registrada' }).count()) return true;
         const err = page.getByTestId('sgc-firma-error');
         if ((await err.count()) && /otra firma suya en curso/.test(await err.innerText())) {
+          await page.getByTestId('sgc-firma-contrasena').click();
           await page.getByTestId('sgc-firma-contrasena').fill(PW1);
           if (await confirm.isEnabled()) await confirm.click();
         }
