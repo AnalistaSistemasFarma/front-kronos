@@ -13,9 +13,9 @@ import { formatDateCO } from './format';
  * DIVULGACIÓN de la solicitud (Sprint 4, paso 4): alcance (toda la empresa,
  * departamentos, cargos o personas), cobertura de lectura (quién leyó, quién
  * falta), recordatorios, exclusión justificada y cierre por Calidad. Lo ven
- * el solicitante, el elaborador y Calidad; el alcance lo define el
- * elaborador o Calidad antes de la divulgación y durante ella solo Calidad
- * lo amplía.
+ * el solicitante, el elaborador y Calidad. El solicitante SUGIERE el alcance
+ * (queda marcado «Sugerido») y quien ejecuta la primera tarea y/o Calidad lo
+ * confirma o reasigna (2026-10-05); durante la divulgación Calidad lo amplía.
  */
 export interface SgcDisseminationCardProps {
   idCompany: number;
@@ -87,6 +87,11 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
             <Group key={s.id} justify='space-between' wrap='nowrap'>
               <Text size='sm'>
                 {s.label}{' '}
+                {s.suggested && (
+                  <Badge variant='light' color='orange' size='xs' data-testid='sgc-alcance-sugerido'>
+                    Sugerido
+                  </Badge>
+                )}{' '}
                 <Text span size='xs' c='dimmed'>
                   · {s.addedBy} · {formatDateCO(s.addedAt)}
                 </Text>
