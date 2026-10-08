@@ -6,8 +6,10 @@
  * el veredicto general y estos hallazgos; los gráficos quedan como evidencia.
  *
  * Es una función PURA (sin SQL ni fetch) para poder probar cada regla. Los umbrales viven en
- * THRESHOLDS para ajustarlos en un solo lugar.
+ * THRESHOLDS para ajustarlos en un solo lugar (el log de transacciones, en logHealth.ts).
  */
+
+import { judgeLog, type LogContext } from './logHealth';
 
 export type Severity = 'critical' | 'warning' | 'info' | 'ok';
 export type InsightArea = 'servidor' | 'trafico' | 'base' | 'externos';
@@ -26,7 +28,6 @@ export const THRESHOLDS = {
   eventLoopMs: { warning: 100, critical: 500 },
   errorPct: { warning: 1, critical: 5 },
   sqlCpu: { warning: 60, critical: 85 },
-  logUsedPct: { warning: 75, critical: 90 },
   blocked: { warning: 1, critical: 5 },
   /** Variación de latencia frente al periodo anterior para avisar. */
   slowerPct: 50,
@@ -74,9 +75,12 @@ type OutboundRow = { key: string; label?: string; requests: number; errors: numb
 type DbLive = {
   hasServerState: boolean;
   queryStore: string | null;
+  databaseName?: string | null;
   sqlServerStartedAt: string | null;
   connections: Array<{ programName: string; sessions: number }>;
   topQueries: Array<{ statement: string; executions: number; totalCpuMs: number }>;
+  logUsedPct?: number | null;
+  log?: LogContext | null;
 };
 
 type Lifetime = { host: string; instance: string; pid: number; firstSeen: string };
@@ -319,16 +323,14 @@ export function buildInsights(input: InsightInput): Insight[] {
     });
   }
 
-  const logUsed = lastValue(input.db, (r) => r.logUsedPct);
-  const logLevel = level(logUsed, THRESHOLDS.logUsedPct);
-  if (logLevel && logUsed != null) {
+  const logVerdict = judgeLog(input.dbLive?.logUsedPct ?? lastValue(input.db, (r) => r.logUsedPct), input.dbLive?.log ?? null);
+  if (logVerdict) {
     add({
       id: 'log-used',
-      severity: logLevel,
+      severity: logVerdict.severity,
       area: 'base',
-      title: `El log de transacciones de la base está al ${fmt(logUsed)} %`,
-      detail:
-        'Si se llena, SQL Server deja de aceptar escrituras. Confirme con el DBA que los respaldos de log se estén ejecutando.',
+      title: logVerdict.title,
+      detail: `${logVerdict.happening} ${logVerdict.risk} ${logVerdict.action}`,
     });
   }
 
@@ -379,7 +381,7 @@ export function buildInsights(input: InsightInput): Insight[] {
       id: 'query-store',
       severity: 'info',
       area: 'base',
-      title: 'Query Store está apagado',
+      title: live.databaseName ? `Query Store está apagado en ${live.databaseName}` : 'Query Store está apagado',
       detail:
         'Sin él, el historial de consultas se pierde cada vez que SQL Server reinicia o limpia su caché. Activarlo permite comparar "antes y después" de un cambio.',
     });

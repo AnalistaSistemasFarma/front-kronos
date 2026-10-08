@@ -1,5 +1,7 @@
 /** Tipos de las respuestas de /api/system-metrics/* (lado cliente). */
 
+import type { LogContext } from '../../lib/system-metrics/logHealth';
+
 export type RangeKey = '1h' | '6h' | '24h' | '7d';
 
 /** `long` va en títulos ("Las últimas 6 horas…"); `span` completa frases ("…en 6 horas"). */
@@ -92,6 +94,29 @@ export type CollectorStatus = {
 
 export type ProcessLifetime = { host: string; instance: string; pid: number; firstSeen: string; lastSeen: string };
 
+export type UserRow = {
+  email: string;
+  name: string | null;
+  requests: number;
+  errors: number;
+  totalMs: number;
+  maxMs: number;
+  avgMs: number;
+  p95Ms: number;
+  topModule: string | null;
+  topModuleLabel: string | null;
+  lastSeen: string;
+  /** Tiempo por módulo (aproximado: cada ventana de 5 min se asigna a su módulo principal). */
+  modules: Array<{ module: string; label: string; totalMs: number }>;
+};
+
+export type ActiveUsers = {
+  activeNow: number;
+  inRange: number;
+  previousRange: number;
+  series: Array<{ bucket: string; users: number }>;
+};
+
 export type MetricsResponse = {
   range: RangeKey;
   status: CollectorStatus;
@@ -104,14 +129,52 @@ export type MetricsResponse = {
   summary: { current: PeriodSummary; previous: PeriodSummary } | null;
   moduleSeries: ModuleSeriesRow[];
   lifetimes: ProcessLifetime[];
+  users: UserRow[];
+  activeUsers: ActiveUsers | null;
+  /** Falta correr prisma/manual/2026-10-06-system-metrics-usuarios.sql en esta base. */
+  usersTableMissing: boolean;
+  /** Alertas tempranas enviadas (la más reciente primero). Puede faltar en respuestas viejas. */
+  alerts?: AlertRow[];
+  /** Falta correr prisma/manual/2026-10-07-system-metrics-alertas.sql en esta base. */
+  alertsTableMissing?: boolean;
+  alertHistoryHours?: number;
+};
+
+export type AlertRow = {
+  id: number;
+  raisedAt: string;
+  host: string;
+  key: string;
+  rule: string;
+  severity: 'warning' | 'critical';
+  title: string;
+  happening: string;
+  why: string;
+  risk: string;
+  action: string;
+  notified: number;
 };
 
 export type DbLive = {
   hasServerState: boolean;
   queryStore: string | null;
+  databaseName?: string | null;
   sqlServerStartedAt: string | null;
   cachedAt: string;
+  logUsedPct?: number | null;
+  log?: LogContext | null;
   connections: Array<{ hostName: string; programName: string; loginName: string; sessions: number; running: number }>;
+  /** Todo lo conectado al servidor SQL (todas las bases). Puede faltar en respuestas viejas en caché. */
+  origins?: Array<{
+    hostName: string;
+    programName: string;
+    loginName: string;
+    databaseName: string;
+    sessions: number;
+    running: number;
+    cpuMs: number;
+    lastActivity: string | null;
+  }>;
   blocked: Array<{
     sessionId: number;
     blockingSessionId: number;

@@ -5,15 +5,17 @@ import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { getPool } from '../mssqlPool';
 import { probeDatabase } from './dbProbe';
 import { normalizeOutboundHost, normalizeRoutePath } from './routeKey';
-import { DurationWindow, hostCpuPercent, round2, RouteAccumulator } from './stats';
+import { DurationWindow, hostCpuPercent, round2, RouteAccumulator, UserAccumulator } from './stats';
 import {
   deleteOldMetrics,
   insertDbSample,
   insertProcessSample,
   insertRouteSummaries,
+  insertUserSummaries,
   isMissingTableError,
   type ProcessSample,
 } from './store';
+import { sessionTokenFromCookie, UserIdentityCache } from './userIdentity';
 
 /**
  * Colector del Monitor del sistema. Se arranca una vez por proceso desde instrumentation.ts.
@@ -28,8 +30,9 @@ import {
  * SYSTEM_METRICS_ENABLED=true (si no, cada máquina de desarrollo escribiría en la base
  * compartida). SYSTEM_METRICS_ENABLED=false lo apaga también en producción.
  *
- * Bajo pm2 cluster cada instancia guarda sus propias filas; la foto de SQL Server y la limpieza
- * de datos viejos solo las hace la instancia 0 (mismo criterio que el scheduler).
+ * Bajo pm2 cluster cada instancia guarda sus propias filas; la foto de SQL Server, la limpieza
+ * de datos viejos y las alertas tempranas solo las hace la instancia 0 (mismo criterio que el
+ * scheduler).
  */
 
 const TICK_MS = 60_000;
@@ -49,11 +52,13 @@ export type SystemMetricsStatus = {
   pausedReason: string | null;
   lastFlushAt: string | null;
   lastError: string | null;
+  /** Falta la tabla de consumo por usuario (script 2026-10-06-system-metrics-usuarios.sql). */
+  usersTableMissing: boolean;
   /** Última muestra de ESTE proceso (sirve aunque las tablas no existan). */
   latest: ProcessSample | null;
 };
 
-type InboundStart = { t: number; url: string; method: string };
+type InboundStart = { t: number; url: string; method: string; sessionToken: string | null };
 type OutboundStart = { t: number; host: string };
 
 type CollectorState = {
@@ -103,6 +108,7 @@ export function getSystemMetricsStatus(): SystemMetricsStatus {
       pausedReason: null,
       lastFlushAt: null,
       lastError: null,
+      usersTableMissing: false,
       latest: null,
     }
   );
@@ -120,6 +126,7 @@ export function startSystemMetrics(): void {
     pausedReason: null,
     lastFlushAt: null,
     lastError: null,
+    usersTableMissing: false,
     latest: null,
   };
   const state: CollectorState = { status };
@@ -134,18 +141,26 @@ export function startSystemMetrics(): void {
   const routes = new RouteAccumulator();
   const inbound = new DurationWindow();
   const outbound = new DurationWindow();
+  const users = new UserAccumulator();
+  const identities = new UserIdentityCache(async (token) => {
+    const secret = process.env.NEXTAUTH_SECRET;
+    if (!secret) return null;
+    const { decode } = await import('next-auth/jwt');
+    return (await decode({ token, secret })) as { email?: unknown; name?: unknown } | null;
+  });
 
   // --- Peticiones que ENTRAN a Kronos -------------------------------------------------
   const inboundStarts = new WeakMap<object, InboundStart>();
   dc.subscribe('http.server.request.start', (message) => {
     const { request, response } = message as {
-      request: { url?: string; method?: string };
+      request: { url?: string; method?: string; headers?: { cookie?: string } };
       response: object;
     };
     inboundStarts.set(response, {
       t: performance.now(),
       url: request?.url ?? '/',
       method: request?.method ?? 'GET',
+      sessionToken: sessionTokenFromCookie(request?.headers?.cookie),
     });
   });
   dc.subscribe('http.server.response.finish', (message) => {
@@ -170,6 +185,18 @@ export function startSystemMetrics(): void {
       status: statusCode,
     });
     inbound.add(durationMs, statusCode);
+
+    // Consumo por usuario: solo peticiones con sesión y que no sean archivos estáticos.
+    if (start.sessionToken && info.module !== 'estaticos') {
+      const entry = { module: info.module, durationMs, status: statusCode };
+      const known = identities.peek(start.sessionToken);
+      if (known) users.record({ ...entry, email: known.email, name: known.name });
+      else if (known === undefined) {
+        void identities.resolve(start.sessionToken).then((user) => {
+          if (user) users.record({ ...entry, email: user.email, name: user.name });
+        });
+      }
+    }
   });
 
   // --- Llamadas que SALEN de Kronos (Graph, Orion, SAP, IA…) ------------------------------
@@ -227,6 +254,41 @@ export function startSystemMetrics(): void {
   let flushing = false;
   let pausedUntil = 0;
   let lastCleanupAt = Date.now() - CLEANUP_EVERY_MS + FIRST_CLEANUP_DELAY_MS;
+  let alerting = false;
+  let alertsPausedUntil = 0;
+  let alertsTableWarned = false;
+
+  // Alertas tempranas (alertJob.ts). Import diferido: trae Prisma y las notificaciones.
+  const runAlerts = async (pool: Awaited<ReturnType<typeof getPool>>) => {
+    if (alerting || Date.now() < alertsPausedUntil) return;
+    alerting = true;
+    try {
+      const job = await import('./alertJob');
+      if (!job.isEarlyWarningEnabled()) {
+        alertsPausedUntil = Number.POSITIVE_INFINITY;
+        return;
+      }
+      const { notified } = await job.runEarlyWarnings(pool, status.host, await job.defaultAlertDeps());
+      alertsTableWarned = false;
+      if (notified.length) {
+        console.warn(`[system-metrics] Alertas tempranas enviadas: ${notified.map((w) => w.key).join(', ')}`);
+      }
+    } catch (error) {
+      if (isMissingTableError(error)) {
+        alertsPausedUntil = Date.now() + PAUSE_WHEN_TABLE_MISSING_MS;
+        if (!alertsTableWarned) {
+          console.warn(
+            '[system-metrics] Falta la tabla system_metric_alert (prisma/manual/2026-10-07-system-metrics-alertas.sql); alertas en pausa'
+          );
+        }
+        alertsTableWarned = true;
+      } else {
+        console.warn('[system-metrics] Alertas tempranas:', errorMessage(error));
+      }
+    } finally {
+      alerting = false;
+    }
+  };
 
   const collectSample = (): ProcessSample => {
     const now = performance.now();
@@ -288,6 +350,7 @@ export function startSystemMetrics(): void {
     const flushRoutes = tick % ROUTE_FLUSH_EVERY_TICKS === 0;
     // Se vacía siempre (aunque no se pueda guardar) para que la memoria no crezca.
     const routeRows = flushRoutes ? routes.drain() : [];
+    const userRows = flushRoutes ? users.drain() : [];
     const routeBucket = routeWindowStart;
     if (flushRoutes) routeWindowStart = floorToMinute(new Date());
 
@@ -298,6 +361,19 @@ export function startSystemMetrics(): void {
       await insertProcessSample(pool, sample);
       if (routeRows.length) {
         await insertRouteSummaries(pool, routeBucket, status.host, status.instance, routeRows);
+      }
+      if (userRows.length) {
+        try {
+          await insertUserSummaries(pool, routeBucket, status.host, status.instance, userRows);
+          status.usersTableMissing = false;
+        } catch (error) {
+          // La tabla de usuarios va en un script aparte: si falta, lo demás se sigue guardando.
+          if (!isMissingTableError(error)) throw error;
+          if (!status.usersTableMissing) {
+            console.warn('[system-metrics] Falta la tabla system_metric_user (prisma/manual/2026-10-06-system-metrics-usuarios.sql)');
+          }
+          status.usersTableMissing = true;
+        }
       }
       if (isPrimaryInstance() && tick % DB_PROBE_EVERY_TICKS === 1) {
         const db = await probeDatabase(pool);
@@ -311,6 +387,7 @@ export function startSystemMetrics(): void {
       status.lastFlushAt = new Date().toISOString();
       status.pausedReason = null;
       status.lastError = null;
+      if (isPrimaryInstance()) void runAlerts(pool);
     } catch (error) {
       if (isMissingTableError(error)) {
         pausedUntil = Date.now() + PAUSE_WHEN_TABLE_MISSING_MS;

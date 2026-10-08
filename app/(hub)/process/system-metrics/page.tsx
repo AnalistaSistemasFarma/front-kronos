@@ -3,17 +3,34 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
-import { ActionIcon, Alert, Anchor, Breadcrumbs, Code, Group, Loader, SegmentedControl, Switch, Text, Tooltip } from '@mantine/core';
+import {
+  ActionIcon,
+  Alert,
+  Anchor,
+  Breadcrumbs,
+  Code,
+  Group,
+  Loader,
+  SegmentedControl,
+  Switch,
+  Tabs,
+  Text,
+  Tooltip,
+} from '@mantine/core';
 import {
   IconActivity,
   IconAlertTriangle,
   IconBolt,
   IconChevronRight,
   IconClockHour4,
+  IconCloud,
   IconDatabase,
   IconGauge,
   IconInfoCircle,
+  IconLayoutDashboard,
   IconRefresh,
+  IconTopologyStar3,
+  IconUsers,
 } from '@tabler/icons-react';
 import {
   buildInsights,
@@ -23,12 +40,17 @@ import {
   type Severity,
 } from '../../../../lib/system-metrics/insights';
 import { DetailSheet } from '../../../../components/system-metrics/DetailSheet';
+import { EarlyWarnings } from '../../../../components/system-metrics/EarlyWarnings';
 import { MetricLineChart, type LineSeries } from '../../../../components/system-metrics/MetricLineChart';
+import { OverviewMap } from '../../../../components/system-metrics/OverviewMap';
+import type { SystemOverview } from '../../../../lib/system-metrics/overviewModel';
 import { ResourceRings, type RingSpec } from '../../../../components/system-metrics/ResourceRings';
 import { ServerTime } from '../../../../components/system-metrics/ServerTime';
 import { SignalTile } from '../../../../components/system-metrics/SignalTile';
 import { StatusHero, ToneChip } from '../../../../components/system-metrics/StatusHero';
 import { SystemMap, type MapData } from '../../../../components/system-metrics/SystemMap';
+import { UserBehavior } from '../../../../components/system-metrics/UserBehavior';
+import { UserConsumption } from '../../../../components/system-metrics/UserConsumption';
 import type { StatusTone } from '../../../../components/system-metrics/colors';
 import {
   formatAgo,
@@ -38,9 +60,11 @@ import {
   formatMs,
   formatValue,
   percentChange,
+  programLabel,
 } from '../../../../components/system-metrics/format';
 import {
   BUCKET_MINUTES,
+  RANGE_MINUTES,
   RANGE_OPTIONS,
   type DbLive,
   type DetailTarget,
@@ -53,9 +77,10 @@ import styles from '../../../../components/system-metrics/monitor.module.css';
 /**
  * Monitor del sistema: qué está pasando con SynerLink (Kronos), su servidor y SQL Server.
  *
- * Orden de lectura: 1) veredicto en una frase + hallazgos (lib/system-metrics/insights.ts),
- * 2) señales clave frente al periodo anterior, 3) mapa del sistema y saturación,
- * 4) qué módulo usa el servidor ("Tiempo de servidor"), 5) tendencias y detalle.
+ * Arriba, siempre visible, el veredicto en una frase + hallazgos (lib/system-metrics/insights.ts).
+ * Debajo, pestañas para no hacer una página eterna: Resumen (alertas, señales, saturación),
+ * Mapas (vista general + detalle de este Kronos), Usuarios, Rendimiento (tiempo de servidor,
+ * rutas, tendencias), Base de datos y Servicios externos. La pestaña va en el # de la URL.
  *
  * Datos: /api/system-metrics (histórico del colector), /api/system-metrics/db-live (foto de
  * SQL Server) y /api/system-metrics/route-series (hoja de detalle). Módulo restringido
@@ -63,6 +88,16 @@ import styles from '../../../../components/system-metrics/monitor.module.css';
  */
 
 const SEVERITY_RANK: Record<Severity, number> = { critical: 0, warning: 1, info: 2, ok: 3 };
+
+type TabKey = 'resumen' | 'mapas' | 'usuarios' | 'rendimiento' | 'base' | 'externos';
+const TAB_KEYS: TabKey[] = ['resumen', 'mapas', 'usuarios', 'rendimiento', 'base', 'externos'];
+/** Enlaces viejos (p. ej. las notificaciones abren #alertas) a su pestaña. */
+const HASH_ALIASES: Record<string, TabKey> = { alertas: 'resumen', 'vista-general': 'mapas', 'base-de-datos': 'base' };
+
+function tabFromHash(hash: string): TabKey | null {
+  const key = hash.replace(/^#/, '');
+  return (TAB_KEYS as string[]).includes(key) ? (key as TabKey) : HASH_ALIASES[key] ?? null;
+}
 
 function worstTone(insights: Insight[], fallback: StatusTone = 'ok'): StatusTone {
   const relevant = insights.filter((i) => i.severity === 'critical' || i.severity === 'warning');
@@ -73,20 +108,6 @@ function worstTone(insights: Insight[], fallback: StatusTone = 'ok'): StatusTone
 function instanceName(instance: string, host: string, multiHost: boolean): string {
   const base = instance === 'unica' ? 'Kronos' : `Kronos #${instance}`;
   return multiHost ? `${base} · ${host}` : base;
-}
-
-const PROGRAM_NAMES: Record<string, string> = {
-  tiberius: 'Prisma (Kronos)',
-  'node-mssql': 'mssql (Kronos)',
-  tedious: 'mssql (Kronos)',
-};
-
-function programLabel(name: string): string {
-  if (PROGRAM_NAMES[name]) return PROGRAM_NAMES[name];
-  if (name.startsWith('Microsoft SQL Server Management Studio') || name === 'SQL Server Management Studio') {
-    return 'SQL Server Management Studio';
-  }
-  return name || '(sin nombre)';
 }
 
 /** Series alineadas al mismo eje de tiempo para las gráficas de tendencia. */
@@ -180,6 +201,9 @@ export default function SystemMetricsPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
   const [dbLive, setDbLive] = useState<DbLive | null>(null);
+  const [overview, setOverview] = useState<SystemOverview | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dbLoading, setDbLoading] = useState(false);
@@ -188,6 +212,7 @@ export default function SystemMetricsPage() {
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailTarget | null>(null);
   const [showAllRoutes, setShowAllRoutes] = useState(false);
+  const [tab, setTab] = useState<TabKey>('resumen');
   const [, setClock] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -256,9 +281,25 @@ export default function SystemMetricsPage() {
     void loadMetrics(range);
   }, [hasAccess, range, loadMetrics]);
 
+  const loadOverview = useCallback(async () => {
+    setOverviewLoading(true);
+    try {
+      const res = await fetch('/api/system-metrics/overview');
+      if (!res.ok) throw new Error('No se pudo armar la vista general');
+      setOverview(await res.json());
+      setOverviewError(null);
+    } catch (err) {
+      setOverviewError(err instanceof Error ? err.message : 'Error inesperado');
+    } finally {
+      setOverviewLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (hasAccess) void loadDbLive();
-  }, [hasAccess, loadDbLive]);
+    if (!hasAccess) return;
+    void loadDbLive();
+    void loadOverview();
+  }, [hasAccess, loadDbLive, loadOverview]);
 
   useEffect(() => {
     if (!hasAccess || !autoRefresh) return;
@@ -266,9 +307,10 @@ export default function SystemMetricsPage() {
       if (document.visibilityState !== 'visible') return;
       void loadMetrics(range);
       void loadDbLive();
+      void loadOverview();
     }, 60_000);
     return () => clearInterval(id);
-  }, [hasAccess, autoRefresh, range, loadMetrics, loadDbLive]);
+  }, [hasAccess, autoRefresh, range, loadMetrics, loadDbLive, loadOverview]);
 
   // Refresca el "hace X s" del encabezado.
   useEffect(() => {
@@ -277,6 +319,26 @@ export default function SystemMetricsPage() {
   }, []);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  useEffect(() => {
+    const fromHash = tabFromHash(window.location.hash);
+    if (fromHash) setTab(fromHash);
+  }, []);
+
+  const changeTab = useCallback((value: string | null) => {
+    const next = tabFromHash(value ?? '') ?? 'resumen';
+    setTab(next);
+    window.history.replaceState(null, '', `#${next}`);
+  }, []);
+
+  // Las notificaciones de alertas abren /process/system-metrics#alertas, pero la sección solo
+  // existe cuando llegan los datos: el salto nativo del navegador ya pasó.
+  const scrolledToHashRef = useRef(false);
+  useEffect(() => {
+    if (!metrics || scrolledToHashRef.current || window.location.hash !== '#alertas') return;
+    scrolledToHashRef.current = true;
+    requestAnimationFrame(() => document.getElementById('alertas')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }, [metrics]);
 
   const rangeOption = RANGE_OPTIONS.find((r) => r.value === range) ?? RANGE_OPTIONS[1];
   const rangeLong = rangeOption.long;
@@ -331,6 +393,11 @@ export default function SystemMetricsPage() {
   const mapData = useMemo<MapData>(() => {
     const multiHost = new Set(processRows.map((r) => r.host)).size > 1;
     const hostLevel = insights.filter((i) => i.id === 'host-cpu' || i.id === 'host-mem');
+    const requestsByInstance = new Map<string, number>();
+    for (const r of processRows) {
+      const key = `${r.host}|${r.instance}`;
+      requestsByInstance.set(key, (requestsByInstance.get(key) ?? 0) + r.httpRequests);
+    }
     const instances = latest.map((r) => {
       const key = `${r.host}|${r.instance}`;
       const own = insights.filter((i) => i.id.endsWith(key));
@@ -340,9 +407,63 @@ export default function SystemMetricsPage() {
         cpuPct: r.cpuPct,
         rssMb: r.rssMb,
         eventLoopMs: r.eventLoopP99Ms,
+        reqPerMin: (requestsByInstance.get(key) ?? 0) / observedMinutes,
+        sqlInUse: r.poolBorrowed,
         tone: worstTone([...own, ...hostLevel]),
       };
     });
+
+    // Otras aplicaciones conectadas al mismo SQL Server (se excluyen las conexiones de Kronos).
+    // Kronos = sus librerías (mssql / Prisma) conectadas a SU base desde su servidor. Otras apps
+    // Node del mismo servidor (p. ej. SAPSEND) usan otras bases y quedan como "otras".
+    const kronosHosts = new Set(processRows.map((r) => r.host.toLowerCase()));
+    const kronosDb = dbLive?.databaseName ?? null;
+    const NODE_PROGRAMS = new Set(['tiberius', 'node-mssql', 'tedious']);
+    const isKronos = (o: { hostName: string; programName: string; databaseName: string }) => {
+      if (!NODE_PROGRAMS.has(o.programName) || !kronosDb || o.databaseName !== kronosDb) return false;
+      const host = o.hostName.toLowerCase();
+      if (o.programName === 'tiberius') return !host || host === '(sin nombre)' || kronosHosts.has(host);
+      return kronosHosts.has(host);
+    };
+    const otherAppLabel = (program: string) => {
+      if (program === 'tiberius') return 'Aplicación con Prisma';
+      if (program === 'node-mssql' || program === 'tedious') return 'Aplicación Node.js';
+      if (!program || program === '(sin nombre)') return 'Programa sin nombre';
+      return programLabel(program);
+    };
+    const snapshotAt = dbLive?.cachedAt ? new Date(dbLive.cachedAt).getTime() : Date.now();
+    const appMap = new Map<string, MapData['apps'][number]>();
+    for (const o of dbLive?.origins ?? []) {
+      if (isKronos(o)) continue;
+      const label = otherAppLabel(o.programName);
+      const key = `${label}|${o.hostName}`;
+      const app = appMap.get(key) ?? {
+        key,
+        label,
+        host: o.hostName === "(sin nombre)" || !o.hostName ? "máquina sin nombre" : o.hostName,
+        logins: [],
+        databases: [],
+        sessions: 0,
+        running: 0,
+        cpuMs: 0,
+        lastActivity: null,
+        active: false,
+      };
+      app.sessions += o.sessions;
+      app.running += o.running;
+      app.cpuMs += o.cpuMs;
+      if (o.loginName && !app.logins.includes(o.loginName)) app.logins.push(o.loginName);
+      if (o.databaseName && !app.databases.includes(o.databaseName)) app.databases.push(o.databaseName);
+      if (o.lastActivity && (!app.lastActivity || o.lastActivity > app.lastActivity)) app.lastActivity = o.lastActivity;
+      appMap.set(key, app);
+    }
+    const allApps = Array.from(appMap.values()).map((a) => ({
+      ...a,
+      // Activa: consultas corriendo ahora o algo terminado en los últimos 2 minutos.
+      active: a.running > 0 || (a.lastActivity != null && snapshotAt - new Date(a.lastActivity).getTime() < 2 * 60_000),
+    }));
+    allApps.sort((a, b) => Number(b.active) - Number(a.active) || b.sessions - a.sessions);
+    const MAX_APPS = 8;
 
     const byLabel = new Map<string, MapData['externals'][number]>();
     for (const o of metrics?.outbound ?? []) {
@@ -373,11 +494,18 @@ export default function SystemMetricsPage() {
         reqPerMin: signals.reqPerMin,
         p95Ms: signals.p95,
         tone: hasData ? worstTone(insights.filter((i) => i.area === 'trafico')) : 'idle',
+        activeNow: metrics?.activeUsers?.activeNow ?? null,
+        top: (metrics?.users ?? []).slice(0, 5).map((u) => ({ email: u.email, name: u.name })),
       },
+      apps: allApps.slice(0, MAX_APPS),
+      moreApps: Math.max(0, allApps.length - MAX_APPS),
       instances,
       sql: {
         tone: lastDb || dbLive ? worstTone(insights.filter((i) => i.area === 'base')) : 'idle',
-        cpuPct: lastDb?.sqlCpuPct ?? null,
+        database: dbLive?.databaseName ?? null,
+        reason: insights.find((i) => i.area === 'base' && i.severity !== 'ok')?.title ?? null,
+        // La misma lectura en vivo que muestra la Vista general; la guardada es de hace hasta 5 min.
+        cpuPct: overview?.sqlServer.sqlCpuPct ?? lastDb?.sqlCpuPct ?? null,
         sessions: lastDb?.dbSessions ?? null,
         blocked: lastDb?.blockedRequests ?? null,
         poolInUse,
@@ -385,7 +513,7 @@ export default function SystemMetricsPage() {
       },
       externals,
     };
-  }, [processRows, latest, insights, metrics, observedMinutes, signals, hasData, lastDb, dbLive]);
+  }, [processRows, latest, insights, metrics, observedMinutes, signals, hasData, lastDb, dbLive, overview]);
 
   const rings = useMemo<RingSpec[]>(() => {
     const avg = (vals: Array<number | null>) => {
@@ -478,6 +606,7 @@ export default function SystemMetricsPage() {
   }
 
   const status = metrics?.status;
+  const dbTone = worstTone(insights.filter((i) => i.area === 'base'));
   const inbound = metrics?.inbound ?? [];
   const outbound = metrics?.outbound ?? [];
   const visibleRoutes = showAllRoutes ? inbound : inbound.slice(0, 8);
@@ -522,6 +651,7 @@ export default function SystemMetricsPage() {
                 onClick={() => {
                   void loadMetrics(range);
                   void loadDbLive();
+                  void loadOverview();
                 }}
                 aria-label="Actualizar ahora"
               >
@@ -555,6 +685,51 @@ export default function SystemMetricsPage() {
         )}
 
         <StatusHero verdict={verdict} insights={insights} hasData={hasData} />
+
+        <Tabs value={tab} onChange={changeTab} keepMounted={false} variant="pills" radius="xl" className={styles.tabs}>
+          <Tabs.List className={styles.tabList} aria-label="Secciones del monitor">
+            <Tabs.Tab value="resumen" leftSection={<IconLayoutDashboard size={16} />}>
+              Resumen
+            </Tabs.Tab>
+            <Tabs.Tab value="mapas" leftSection={<IconTopologyStar3 size={16} />}>
+              Mapas
+            </Tabs.Tab>
+            <Tabs.Tab value="usuarios" leftSection={<IconUsers size={16} />}>
+              Usuarios
+            </Tabs.Tab>
+            <Tabs.Tab value="rendimiento" leftSection={<IconGauge size={16} />}>
+              Rendimiento
+            </Tabs.Tab>
+            <Tabs.Tab
+              value="base"
+              leftSection={<IconDatabase size={16} />}
+              rightSection={dbTone !== 'ok' ? <span className={`${styles.tabDot} ${styles[`tone-${dbTone}`]}`} aria-label={`Base de datos: ${dbTone === 'critical' ? 'crítico' : 'atención'}`} /> : null}
+            >
+              Base de datos
+            </Tabs.Tab>
+            {outbound.length > 0 && (
+              <Tabs.Tab value="externos" leftSection={<IconCloud size={16} />}>
+                Servicios externos
+              </Tabs.Tab>
+            )}
+          </Tabs.List>
+
+        <Tabs.Panel value="resumen">
+        {metrics && !metrics.tablesMissing && (
+          <section id="alertas" className={styles.section} aria-labelledby="sm-alerts">
+            <div className={styles.sectionHeader}>
+              <h2 id="sm-alerts" className={styles.sectionTitle}>
+                Alertas tempranas
+              </h2>
+              <span className={styles.sectionHint}>Llegan por la campana y push a quienes tienen este módulo</span>
+            </div>
+            <EarlyWarnings
+              alerts={metrics.alerts ?? []}
+              tableMissing={Boolean(metrics.alertsTableMissing)}
+              historyHours={metrics.alertHistoryHours ?? 48}
+            />
+          </section>
+        )}
 
         <section className={styles.section} aria-labelledby="sm-signals">
           <div className={styles.sectionHeader}>
@@ -605,30 +780,122 @@ export default function SystemMetricsPage() {
           </div>
         </section>
 
+        <section className={styles.section} aria-labelledby="sm-rings">
+          <div className={styles.sectionHeader}>
+            <h2 id="sm-rings" className={styles.sectionTitle}>
+              Qué tan lleno está cada recurso
+            </h2>
+            <span className={styles.sectionHint}>Último minuto registrado</span>
+          </div>
+          <div className={styles.card}>
+            <ResourceRings rings={rings} />
+          </div>
+        </section>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="mapas">
+        <section id="vista-general" className={styles.section} aria-labelledby="sm-overview">
+          <div className={styles.sectionHeader}>
+            <h2 id="sm-overview" className={styles.sectionTitle}>
+              Vista general
+            </h2>
+            <Group gap={6}>
+              <span className={styles.sectionHint}>
+                Kronos en cada entorno, Orion y las demás aplicaciones del SQL Server compartido
+                {overview ? ` · foto ${formatAgo(overview.generatedAt)}` : ''}
+              </span>
+              <ActionIcon
+                variant="subtle"
+                radius="xl"
+                loading={overviewLoading}
+                onClick={() => void loadOverview()}
+                aria-label="Actualizar la vista general"
+              >
+                <IconRefresh size={16} />
+              </ActionIcon>
+            </Group>
+          </div>
+          {overviewError && !overview && (
+            <Alert color="orange" icon={<IconAlertTriangle size={16} />} radius="lg">
+              {overviewError}
+            </Alert>
+          )}
+          {!overview && !overviewError && (
+            <div className={styles.card}>
+              <Group gap="xs">
+                <Loader size="xs" />
+                <Text size="sm" c="dimmed">
+                  Recorriendo las bases de datos…
+                </Text>
+              </Group>
+            </div>
+          )}
+          {overview && (
+            <div className={styles.card}>
+              <p className={styles.cardHint} style={{ marginTop: 0 }}>
+                Personas → aplicaciones → máquinas desde donde se conectan → SQL Server. Cada Kronos muestra el estado de
+                su propia base; el nodo SQL Server, el del servidor completo (CPU, memoria y discos).
+              </p>
+              <OverviewMap data={overview} />
+            </div>
+          )}
+        </section>
+
         <section className={styles.section} aria-labelledby="sm-map">
           <div className={styles.sectionHeader}>
             <h2 id="sm-map" className={styles.sectionTitle}>
-              Cómo fluye el trabajo
+              Detalle de este Kronos
             </h2>
-            <span className={styles.sectionHint}>Toque un servicio externo para ver su historia</span>
+            <span className={styles.sectionHint}>
+              {dbLive?.databaseName ? `${dbLive.databaseName} · ` : ''}toque un servicio externo para ver su historia
+            </span>
           </div>
-          <div className={styles.gridMap}>
-            <div className={styles.card}>
-              <h3 className={styles.cardTitle}>Mapa del sistema</h3>
-              <p className={styles.cardHint}>Usuarios → Kronos → base de datos y servicios externos, con la salud de cada pieza</p>
-              <SystemMap
-                data={mapData}
-                onSelectExternal={(key, label) => setDetail({ kind: 'route', direction: 'out', key, title: label })}
-              />
-            </div>
-            <div className={styles.card}>
-              <h3 className={styles.cardTitle}>Qué tan lleno está cada recurso</h3>
-              <p className={styles.cardHint}>Último minuto registrado</p>
-              <ResourceRings rings={rings} />
-            </div>
+          <div className={styles.card}>
+            <p className={styles.cardHint} style={{ marginTop: 0 }}>
+              Personas → procesos de Kronos → su base de datos y servicios externos, y las otras aplicaciones que comparten el
+              mismo SQL Server. Es la misma tarjeta {dbLive?.databaseName ? `"${dbLive.databaseName}"` : 'de este Kronos'} de la
+              vista general, abierta en detalle.
+            </p>
+            <SystemMap
+              data={mapData}
+              onSelectExternal={(key, label) => setDetail({ kind: 'route', direction: 'out', key, title: label })}
+            />
           </div>
         </section>
+        </Tabs.Panel>
 
+        <Tabs.Panel value="usuarios">
+        <section className={styles.section} aria-labelledby="sm-users">
+          <div className={styles.sectionHeader}>
+            <h2 id="sm-users" className={styles.sectionTitle}>
+              Usuarios
+            </h2>
+            <span className={styles.sectionHint}>Quién está usando Kronos y cuánto servidor consume cada persona</span>
+          </div>
+          {metrics?.usersTableMissing ? (
+            <Alert color="yellow" icon={<IconDatabase size={16} />} title="Falta la tabla de consumo por usuario" radius="lg">
+              Hay que correr <Code>prisma/manual/2026-10-06-system-metrics-usuarios.sql</Code> en esta base. El resto del
+              monitor funciona normal.
+            </Alert>
+          ) : (
+            <>
+              <UserConsumption
+                users={metrics?.users ?? []}
+                activeUsers={metrics?.activeUsers ?? null}
+                rangeSpan={rangeOption.span}
+              />
+              <div className={styles.card} style={{ marginTop: 16 }}>
+                <h3 className={styles.cardTitle}>Comportamiento</h3>
+                <p className={styles.cardHint}>A qué módulos va el tiempo de servidor de cada persona</p>
+                <UserBehavior users={metrics?.users ?? []} rangeMinutes={RANGE_MINUTES[range]} />
+              </div>
+            </>
+          )}
+        </section>
+
+        </Tabs.Panel>
+
+        <Tabs.Panel value="rendimiento">
         <section className={styles.section} aria-labelledby="sm-time">
           <div className={styles.sectionHeader}>
             <h2 id="sm-time" className={styles.sectionTitle}>
@@ -685,6 +952,53 @@ export default function SystemMetricsPage() {
           </section>
         )}
 
+        {hasData && (
+          <section className={styles.section} aria-labelledby="sm-trends">
+            <div className={styles.sectionHeader}>
+              <h2 id="sm-trends" className={styles.sectionTitle}>
+                Tendencias
+              </h2>
+              <span className={styles.sectionHint}>
+                <IconBolt size={13} style={{ verticalAlign: '-2px' }} /> Evidencia detrás de cada hallazgo
+              </span>
+            </div>
+            <div className={styles.grid2}>
+              <div className={styles.card}>
+                <h3 className={styles.cardTitle}>CPU</h3>
+                <p className={styles.cardHint}>Uso total del servidor y la parte de cada proceso de Kronos</p>
+                <MetricLineChart labels={charts.labels} series={charts.cpu} unit="%" suggestedMax={100} height={210} />
+              </div>
+              <div className={styles.card}>
+                <h3 className={styles.cardTitle}>Memoria de Kronos</h3>
+                <p className={styles.cardHint}>Si solo sube y nunca baja, hay una fuga</p>
+                <MetricLineChart labels={charts.labels} series={charts.rss} unit="MB" height={210} />
+              </div>
+              <div className={styles.card}>
+                <h3 className={styles.cardTitle}>Retraso interno (event loop p99)</h3>
+                <p className={styles.cardHint}>Cuánto espera Node para atender trabajo nuevo</p>
+                <MetricLineChart labels={charts.labels} series={charts.eventLoop} unit="ms" height={210} />
+              </div>
+              <div className={styles.card}>
+                <h3 className={styles.cardTitle}>Conexiones SQL de Kronos</h3>
+                <p className={styles.cardHint}>Si hay peticiones esperando, el pool se quedó corto</p>
+                <MetricLineChart labels={charts.labels} series={charts.pool} unit="" height={210} />
+              </div>
+              <div className={styles.card}>
+                <h3 className={styles.cardTitle}>Memoria del servidor</h3>
+                <p className={styles.cardHint}>Porcentaje de RAM usada en la máquina de Kronos</p>
+                <MetricLineChart labels={charts.labels} series={charts.hostMem} unit="%" suggestedMax={100} height={210} />
+              </div>
+              <div className={styles.card}>
+                <h3 className={styles.cardTitle}>Llamadas a servicios externos</h3>
+                <p className={styles.cardHint}>Por minuto, con las limitadas (429) y fallidas</p>
+                <MetricLineChart labels={charts.labels} series={charts.outbound} unit="/min" height={210} />
+              </div>
+            </div>
+          </section>
+        )}
+        </Tabs.Panel>
+
+        <Tabs.Panel value="base">
         <section className={styles.section} aria-labelledby="sm-db">
           <div className={styles.sectionHeader}>
             <h2 id="sm-db" className={styles.sectionTitle}>
@@ -840,6 +1154,9 @@ export default function SystemMetricsPage() {
           )}
         </section>
 
+        </Tabs.Panel>
+
+        <Tabs.Panel value="externos">
         {outbound.length > 0 && (
           <section className={styles.section} aria-labelledby="sm-ext">
             <div className={styles.sectionHeader}>
@@ -876,50 +1193,8 @@ export default function SystemMetricsPage() {
           </section>
         )}
 
-        {hasData && (
-          <section className={styles.section} aria-labelledby="sm-trends">
-            <div className={styles.sectionHeader}>
-              <h2 id="sm-trends" className={styles.sectionTitle}>
-                Tendencias
-              </h2>
-              <span className={styles.sectionHint}>
-                <IconBolt size={13} style={{ verticalAlign: '-2px' }} /> Evidencia detrás de cada hallazgo
-              </span>
-            </div>
-            <div className={styles.grid2}>
-              <div className={styles.card}>
-                <h3 className={styles.cardTitle}>CPU</h3>
-                <p className={styles.cardHint}>Uso total del servidor y la parte de cada proceso de Kronos</p>
-                <MetricLineChart labels={charts.labels} series={charts.cpu} unit="%" suggestedMax={100} height={210} />
-              </div>
-              <div className={styles.card}>
-                <h3 className={styles.cardTitle}>Memoria de Kronos</h3>
-                <p className={styles.cardHint}>Si solo sube y nunca baja, hay una fuga</p>
-                <MetricLineChart labels={charts.labels} series={charts.rss} unit="MB" height={210} />
-              </div>
-              <div className={styles.card}>
-                <h3 className={styles.cardTitle}>Retraso interno (event loop p99)</h3>
-                <p className={styles.cardHint}>Cuánto espera Node para atender trabajo nuevo</p>
-                <MetricLineChart labels={charts.labels} series={charts.eventLoop} unit="ms" height={210} />
-              </div>
-              <div className={styles.card}>
-                <h3 className={styles.cardTitle}>Conexiones SQL de Kronos</h3>
-                <p className={styles.cardHint}>Si hay peticiones esperando, el pool se quedó corto</p>
-                <MetricLineChart labels={charts.labels} series={charts.pool} unit="" height={210} />
-              </div>
-              <div className={styles.card}>
-                <h3 className={styles.cardTitle}>Memoria del servidor</h3>
-                <p className={styles.cardHint}>Porcentaje de RAM usada en la máquina de Kronos</p>
-                <MetricLineChart labels={charts.labels} series={charts.hostMem} unit="%" suggestedMax={100} height={210} />
-              </div>
-              <div className={styles.card}>
-                <h3 className={styles.cardTitle}>Llamadas a servicios externos</h3>
-                <p className={styles.cardHint}>Por minuto, con las limitadas (429) y fallidas</p>
-                <MetricLineChart labels={charts.labels} series={charts.outbound} unit="/min" height={210} />
-              </div>
-            </div>
-          </section>
-        )}
+        </Tabs.Panel>
+        </Tabs>
       </div>
 
       <DetailSheet

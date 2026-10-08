@@ -49,3 +49,10 @@ export const STATUS_LABEL: Record<StatusTone, string> = {
   info: 'Información',
   idle: 'Sin datos',
 };
+
+/** Color estable por persona (no cambia aunque cambie su puesto en el ranking). */
+export function avatarColor(email: string, isDark: boolean): string {
+  let hash = 0;
+  for (let i = 0; i < email.length; i += 1) hash = (hash * 31 + email.charCodeAt(i)) | 0;
+  return seriesColor(Math.abs(hash), isDark);
+}
