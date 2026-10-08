@@ -11,7 +11,7 @@ const m = vi.hoisted(() => {
     'listFlowProcesses', 'createFlowProcess', 'updateFlowProcess', 'createDraftVersion', 'getFlowVersion', 'saveDraftDefinition', 'publishFlowVersion', 'discardDraftVersion', 'listConfigChanges',
     'listMatrix', 'addMatrixEntry', 'deactivateMatrixEntry', 'suggestForTarget',
     'listAuthorizationTypes', 'saveAuthorizationType', 'grantAuthorizationTypeUser', 'revokeAuthorizationTypeUser', 'listAuthorizationInbox',
-    'createRequest', 'listMyRequests', 'getRequestDetail', 'addNote', 'uploadAttachment', 'getAttachmentForDownload', 'withdrawAttachment', 'setSigners', 'cancelRequest', 'saveFormValues',
+    'createRequest', 'listMyRequests', 'getRequestDetail', 'addNote', 'uploadAttachment', 'getAttachmentForDownload', 'withdrawAttachment', 'setSigners', 'confirmSuggestions', 'cancelRequest', 'saveFormValues',
     'listTaskInbox', 'getTaskDetail', 'decideTask', 'reassignTask', 'listEligibleUsers', 'companyOfRequest', 'requestOfTask', 'taskOfAuthorization', 'getRequestForm',
     'downloadVerifiedFile', 'uploadToSgcStorage', 'downloadSgcFile', 'buildLayoutPreview', 'currentDraftInTx',
   ] as const;
@@ -38,7 +38,7 @@ vi.mock('../../../../lib/sgc/db/authorizations', () => ({
 }));
 vi.mock('../../../../lib/sgc/db/requests', () => ({
   createRequest: m.createRequest, listMyRequests: m.listMyRequests, getRequestDetail: m.getRequestDetail, addNote: m.addNote, uploadAttachment: m.uploadAttachment,
-  getAttachmentForDownload: m.getAttachmentForDownload, withdrawAttachment: m.withdrawAttachment, setSigners: m.setSigners, cancelRequest: m.cancelRequest, saveFormValues: m.saveFormValues,
+  getAttachmentForDownload: m.getAttachmentForDownload, withdrawAttachment: m.withdrawAttachment, setSigners: m.setSigners, confirmSuggestions: m.confirmSuggestions, cancelRequest: m.cancelRequest, saveFormValues: m.saveFormValues,
   listTaskInbox: m.listTaskInbox, getTaskDetail: m.getTaskDetail, decideTask: m.decideTask, reassignTask: m.reassignTask, listEligibleUsers: m.listEligibleUsers,
   companyOfRequest: m.companyOfRequest, requestOfTask: m.requestOfTask, taskOfAuthorization: m.taskOfAuthorization, getRequestForm: m.getRequestForm,
 }));
@@ -295,6 +295,12 @@ describe('Rutas S2 · solicitudes y Tareas documentales', () => {
     expect(status(await reassign.POST(req('/', { toEmail: 'b@x.co', reason: 'vacaciones' }), params({ id: '4' })))).toBe(200);
     expect(m.reassignTask.mock.calls[0][2]).toEqual(gestion);
     expect(status(await signers.POST(req('/', { stepKey: 'revision', signers: ['a@x.co'] }), params({ id: '1' })))).toBe(200);
+    // 2026-10-05: el acceso de la persona viaja al motor, que solo deja asignar a Calidad.
+    expect(m.setSigners.mock.calls[0][5]).toEqual(gestion);
+    // «Aprobar sugerencia» con un clic va al motor con el acceso de la persona.
+    m.confirmSuggestions.mockResolvedValue({ confirmed: 2, confirmedScope: 1 });
+    expect(status(await signers.POST(req('/', { action: 'confirmar' }), params({ id: '1' })))).toBe(200);
+    expect(m.confirmSuggestions.mock.calls[0][4]).toEqual(gestion);
     expect(status(await cancel.POST(req('/', { reason: 'ya no se necesita' }), params({ id: '1' })))).toBe(200);
     for (const bad of [decision.POST(req('/', null), params({ id: '4' })), reassign.POST(req('/', {}), params({ id: 'x' })), signers.POST(req('/', 1), params({ id: '1' })), cancel.POST(req('/', {}), params({ id: '0' }))]) {
       expect(status(await bad)).toBe(400);

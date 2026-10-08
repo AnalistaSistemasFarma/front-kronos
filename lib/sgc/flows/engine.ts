@@ -190,12 +190,12 @@ export interface SgcSignerInput {
 /**
  * Normaliza la lista de firmantes de un paso: correos en minúscula, sin
  * repetidos, orden 1..n según el orden recibido. Valida que sean personas
- * habilitadas (con permiso de gestión o Calidad en la empresa) y que el
- * elaborador no se asigne a sí mismo.
+ * habilitadas (con permiso de gestión o Calidad en la empresa) y que ni el
+ * elaborador ni el solicitante queden como firmantes de su propia solicitud.
  */
 export function normalizeSigners(
   raw: unknown,
-  opts: { stepName: string; elaboratorEmail: string; eligibleEmails: ReadonlySet<string>; min?: number; max?: number }
+  opts: { stepName: string; elaboratorEmail: string; requesterEmail?: string | null; eligibleEmails: ReadonlySet<string>; min?: number; max?: number }
 ): SgcSignerInput[] {
   const list = Array.isArray(raw) ? raw : [];
   const emails = list.map((x) => String((x as { email?: unknown })?.email ?? x ?? '').trim().toLowerCase()).filter(Boolean);
@@ -209,6 +209,10 @@ export function normalizeSigners(
     seen.add(e);
     if (e === opts.elaboratorEmail.toLowerCase()) {
       throw new SgcError(`El elaborador no puede ser firmante de ${opts.stepName} de su propio documento.`);
+    }
+    // 2026-10-05: quien hizo la solicitud tampoco revisa ni aprueba lo que pidió.
+    if (opts.requesterEmail && e === opts.requesterEmail.toLowerCase()) {
+      throw new SgcError(`Quien hizo la solicitud no puede ser firmante de ${opts.stepName} de su propia solicitud.`);
     }
     if (!opts.eligibleEmails.has(e)) throw new SgcError(`${e} no tiene permiso de gestión documental en el SGC de esta empresa.`);
   }

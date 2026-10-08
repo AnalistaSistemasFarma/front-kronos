@@ -50,7 +50,10 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
   const prisma = new PrismaClient({ datasources: { db: { url: url ?? '' } } });
   const CO = 60;
   const PW = 'Clave-S3-ci#2026';
+  // 2026-10-05: el solicitante (sol) solo SUGIERE firmantes y alcance; el elaborador (elab) es de
+  // Aseguramiento de Calidad y es quien los confirma o asigna (SGC_ASIGNACION_PERMISO = tarea_y_calidad).
   const E = {
+    sol: 'sol.s3@onelatampharma.com',
     elab: 'elab.s3@onelatampharma.com',
     rev: 'rev.s3@onelatampharma.com',
     rev2: 'rev2.s3@onelatampharma.com',
@@ -123,7 +126,8 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     }
     const hash = bcrypt.hashSync(PW, 4);
     const grants: [string, string[]][] = [
-      [E.elab, ['gestion']],
+      [E.sol, ['gestion']],
+      [E.elab, ['gestion', 'calidad']],
       [E.rev, ['gestion']],
       [E.rev2, ['gestion']],
       [E.apr, ['gestion']],
@@ -176,9 +180,9 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
 
   it('[SGC-REQ-047][SGC-REQ-048] el elaborador edita el borrador en la app: cada guardado es una revisión nueva, limpia y con su SHA-256', async () => {
     const access = await accessOf(E.elab);
-    ({ idRequest: reqA } = await createRequest(prisma, notifier, access, { idCompany: CO, requestType: 'nuevo', subject: 'Procedimiento de firma electrónica S3', description: 'Documento nuevo para la prueba de la firma propia del SGC.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } }, actor(E.elab)));
-    await setSigners(prisma, notifier, reqA, { stepKey: 'revision', signers: [E.rev], mode: 'orden' }, actor(E.elab));
-    await setSigners(prisma, notifier, reqA, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab));
+    ({ idRequest: reqA } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Procedimiento de firma electrónica S3', description: 'Documento nuevo para la prueba de la firma propia del SGC.', idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol)));
+    await setSigners(prisma, notifier, reqA, { stepKey: 'revision', signers: [E.rev], mode: 'orden' }, actor(E.elab), access);
+    await setSigners(prisma, notifier, reqA, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab), access);
     const html = '<h1 onclick="x()">Procedimiento S3</h1><script>alert(1)</script><p style="x">Contenido suficiente del borrador editado.</p>';
     await expect(saveDraftRevision(prisma, reqA, { html }, await viewer(E.lector), actor(E.lector))).rejects.toMatchObject({ status: 404 });
     await expect(saveDraftRevision(prisma, reqA, { html }, await viewer(E.rev), actor(E.rev))).rejects.toMatchObject({ status: 403 });
@@ -415,9 +419,9 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
       actor(E.cal)
     );
     const access = await accessOf(E.elab);
-    const { idRequest } = await createRequest(prisma, notifier, access, { idCompany: CO, requestType: 'nueva_version', subject: 'Actualizar control de registros S3', description: 'Cambio de formato por auditoría interna (S3).', idDocument: doc.idDocument, formValues: { urgencia: 'Alta' } }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev, E.rev2], mode: 'paralelo' }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr] }, actor(E.elab));
+    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nueva_version', subject: 'Actualizar control de registros S3', description: 'Cambio de formato por auditoría interna (S3).', idDocument: doc.idDocument, elaboratorEmail: E.elab, formValues: { urgencia: 'Alta' } }, actor(E.sol));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev, E.rev2], mode: 'paralelo' }, actor(E.elab), access);
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr] }, actor(E.elab), access);
     const base = await getVigenteBaseHtml(prisma, deps, idRequest, await viewer(E.elab), actor(E.elab));
     expect(base).toMatchObject({ originRef: `${doc.code} V1`, html: expect.stringContaining('convertido') });
     expect((await listDraftRevisions(prisma, idRequest, await viewer(E.elab))).vigente).toEqual({ versionNumber: 1, hasWord: true });
@@ -468,9 +472,9 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
 
   it('[SGC-REQ-045] un borrador PDF pasa tal cual al PDF controlado; sin firmas de aprobación no se genera', async () => {
     const access = await accessOf(E.elab);
-    const { idRequest } = await createRequest(prisma, notifier, access, { idCompany: CO, requestType: 'nuevo', subject: 'Instructivo en PDF S3', description: 'Documento nuevo cargado como PDF para la prueba S3.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev] }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr] }, actor(E.elab));
+    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Instructivo en PDF S3', description: 'Documento nuevo cargado como PDF para la prueba S3.', idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev] }, actor(E.elab), access);
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr] }, actor(E.elab), access);
     await expect(generateControlledVersion(prisma, deps, idRequest, actor(E.cal))).rejects.toThrow(/firmas de aprobación/);
     expect(await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest } })).toMatchObject({ controlled_pdf_status: 'error' });
     await uploadAttachment(prisma, upload, idRequest, { purpose: 'borrador', fileName: 'Instructivo.pdf', contentType: 'application/pdf', bytes: await pdfOf('Instructivo PDF') }, await viewer(E.elab), actor(E.elab));
