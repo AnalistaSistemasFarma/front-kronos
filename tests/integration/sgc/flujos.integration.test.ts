@@ -333,8 +333,10 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     expect(form.fields.map((f) => f.key)).toEqual(['referencia_cambio', 'urgencia']);
     expect(form.steps.filter((s) => !s.isEnabled).map((s) => s.key)).toEqual(['divulgacion', 'capacitacion']);
     expect((await listEligibleUsers(prisma, CO)).map((u) => u.email)).not.toContain(E.lector);
-    // 2026-10-05: la solicitud la hace el solicitante y el elaborador es una persona de Calidad.
-    const base = { idCompany: CO, requestType: 'nuevo', subject: 'Procedimiento de control de documentos', description: 'Se requiere el procedimiento para la radicación INVIMA.', idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Alta' } };
+    // 2026-10-05: la solicitud la hace el solicitante; el elaborador NO lo elige el cliente: sale de la matriz
+    // de responsables (proceso × tipo) o, si no hay fila, de Aseguramiento de Calidad. Aquí, una fila por persona.
+    await addMatrixEntry(prisma, CO, { role: 'elaborador', idProcess: procGC, idDocumentType: typePR, userEmail: E.elab, reason: 'Elaborador de Calidad de la prueba' }, actor(E.cal));
+    const base = { idCompany: CO, requestType: 'nuevo', subject: 'Procedimiento de control de documentos', description: 'Se requiere el procedimiento para la radicación INVIMA.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Alta' } };
     await expect(createRequest(prisma, notifier, await accessOf(E.lector), base, actor(E.lector))).rejects.toMatchObject({ status: 403 });
     const solAccess = await accessOf(E.sol);
     await expect(createRequest(prisma, notifier, solAccess, { ...base, requestType: 'anulacion' }, actor(E.sol))).rejects.toThrow(/Tipo de solicitud/);
@@ -344,16 +346,16 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(createRequest(prisma, notifier, solAccess, { ...base, formValues: { urgencia: 'Inventada' } }, actor(E.sol))).rejects.toThrow(/opción no permitida/);
     await expect(createRequest(prisma, notifier, solAccess, { ...base, idProcess: 999999 }, actor(E.sol))).rejects.toThrow(/proceso activo/);
     await expect(createRequest(prisma, notifier, solAccess, { ...base, idDocumentType: 'x' }, actor(E.sol))).rejects.toThrow(/tipo documental activo/);
-    await expect(createRequest(prisma, notifier, solAccess, { ...base, elaboratorEmail: E.lector }, actor(E.sol))).rejects.toThrow(/no tiene permiso/);
     await expect(createRequest(prisma, notifier, solAccess, { ...base, requestType: 'nueva_version', idDocument: 999999 }, actor(E.sol))).rejects.toThrow(/documento vigente/);
-    // 2026-10-05 (decisión de Nicolás): con la política por defecto (tarea_y_calidad) quien solicita no se
-    // nombra elaborador (sería quien confirma sus propios firmantes) y el elaborador debe ser de Calidad.
-    await expect(createRequest(prisma, notifier, solAccess, { ...base, elaboratorEmail: undefined }, actor(E.sol))).rejects.toThrow(/Elija como elaborador a quien crea el documento/);
-    await expect(createRequest(prisma, notifier, solAccess, { ...base, elaboratorEmail: E.sol }, actor(E.sol))).rejects.toThrow(/Elija como elaborador a quien crea el documento/);
-    await expect(createRequest(prisma, notifier, solAccess, { ...base, elaboratorEmail: E.rev1 }, actor(E.sol))).rejects.toThrow(/no tiene el permiso de Aseguramiento de Calidad/);
 
-    const { idRequest } = await createRequest(prisma, notifier, solAccess, { ...base, formValues: { urgencia: 'Alta', referencia_cambio: 'CC-2026-010' } }, actor(E.sol));
+    // 2026-10-05 (decisión de Nicolás): si el cliente manda elaboratorEmail se IGNORA (y queda en la auditoría).
+    const { idRequest } = await createRequest(prisma, notifier, solAccess, { ...base, elaboratorEmail: E.rev1, formValues: { urgencia: 'Alta', referencia_cambio: 'CC-2026-010' } }, actor(E.sol));
     req1 = idRequest;
+    const origin = await prisma.sgcInteraction.findFirstOrThrow({ where: { id_request: idRequest, kind: 'sistema' } });
+    expect(origin.body).toContain(`según la matriz de responsables`);
+    expect(origin.body).toContain(E.elab);
+    const created = await prisma.sgcAuditLog.findFirstOrThrow({ where: { action: 'solicitud.creada', entity_id: String(idRequest) } });
+    expect(JSON.parse(created.after_json!)).toMatchObject({ elaborator: E.elab, elaboratorSource: 'matriz', elaboratorRequestedIgnored: E.rev1 });
     const r = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest }, include: { version: true, tasks: true, formValues: true } });
     expect(r).toMatchObject({ status: 'abierta', requester_email: E.sol, elaborator_email: E.elab, current_task_key: 'elaboracion', request_type: 'nuevo' });
     expect(r.version.version_number).toBe(1);
@@ -417,7 +419,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
       prisma,
       notifier,
       solAccess,
-      { idCompany: CO, requestType: 'nuevo', subject: 'Instructivo con firmantes sugeridos', description: 'Solicitud para probar sugerencias y reasignación.', idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } },
+      { idCompany: CO, requestType: 'nuevo', subject: 'Instructivo con firmantes sugeridos', description: 'Solicitud para probar sugerencias y reasignación.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } },
       actor(E.sol)
     );
     expect(await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr1] }, actor(E.sol), solAccess)).toEqual({ changed: true, suggested: true });
@@ -649,9 +651,9 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     docId = doc.idDocument;
     const access = await accessOf(E.elab);
     const solAccess = await accessOf(E.sol);
-    const { idRequest } = await createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'nueva_version', subject: 'Actualizar control de registros', description: 'Cambio de formato por auditoría interna.', idDocument: docId, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol));
+    const { idRequest } = await createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'nueva_version', subject: 'Actualizar control de registros', description: 'Cambio de formato por auditoría interna.', idDocument: docId, formValues: { urgencia: 'Normal' } }, actor(E.sol));
     await expect(
-      createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'modificacion', subject: 'Otra solicitud', description: 'Segunda solicitud sobre el mismo documento.', idDocument: docId, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol))
+      createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'modificacion', subject: 'Otra solicitud', description: 'Segunda solicitud sobre el mismo documento.', idDocument: docId, formValues: { urgencia: 'Normal' } }, actor(E.sol))
     ).rejects.toMatchObject({ status: 409 });
     const r = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest } });
     expect(r).toMatchObject({ id_document: docId, id_process_map: procGC, id_document_type: typePR });
@@ -679,6 +681,9 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     expect(inboxRound.find((t) => t.idTask === round2.id_task)!.task).toBe('Elaboración (ronda 2)');
 
     const reason = 'El elaborador pasa a otro proyecto';
+    // 2026-10-05: la elaboración la reasigna el elaborador actual o Calidad, nunca el solicitante, y nunca queda en él.
+    await expect(reassignTask(prisma, notifier, solAccess, round2.id_task, { toEmail: E.elab2, reason }, actor(E.sol))).rejects.toMatchObject({ status: 403 });
+    await expect(reassignTask(prisma, notifier, access, round2.id_task, { toEmail: E.sol, reason }, actor(E.elab))).rejects.toThrow(/Quien hace la solicitud no puede quedar como elaborador/);
     await expect(reassignTask(prisma, notifier, await accessOf(E.rev1), round2.id_task, { toEmail: E.elab2, reason }, actor(E.rev1))).rejects.toMatchObject({ status: 403 });
     await expect(reassignTask(prisma, notifier, access, round2.id_task, { toEmail: E.elab2, reason: 'no' }, actor(E.elab))).rejects.toThrow(/motivo/);
     await expect(reassignTask(prisma, notifier, access, round2.id_task, { toEmail: E.rev1, reason }, actor(E.elab))).rejects.toThrow(/firmante del documento/);
@@ -718,14 +723,14 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(uploadAttachment(prisma, upload, idRequest, { purpose: 'soporte', ...word() }, await viewer(E.elab), actor(E.elab))).rejects.toMatchObject({ status: 409 });
     await expect(setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev1], reason: 'cerrada ya' }, actor(E.elab2), await accessOf(E.elab2))).rejects.toMatchObject({ status: 409 });
     // Con la anterior cancelada, el documento admite una nueva solicitud.
-    const again = await createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'modificacion', subject: 'Modificar control de registros', description: 'Modificación menor del formato.', idDocument: docId, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } }, actor(E.sol));
+    const again = await createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'modificacion', subject: 'Modificar control de registros', description: 'Modificación menor del formato.', idDocument: docId, formValues: { urgencia: 'Normal' } }, actor(E.sol));
     expect(again.idRequest).toBeGreaterThan(idRequest);
     await expect(cancelRequest(prisma, notifier, await accessOf(E.cal), again.idRequest, { reason: 'Calidad cancela por duplicidad' }, actor(E.cal))).resolves.toEqual({ status: 'cancelada' });
   });
 
   it('[SGC-REQ-025] una instancia en curso conserva la versión del flujo con la que arrancó; las nuevas usan la vigente', async () => {
     const access = await accessOf(E.sol);
-    const base = { idCompany: CO, requestType: 'nuevo', subject: 'Instructivo de limpieza de áreas', description: 'Nuevo instructivo solicitado por producción.', idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } };
+    const base = { idCompany: CO, requestType: 'nuevo', subject: 'Instructivo de limpieza de áreas', description: 'Nuevo instructivo solicitado por producción.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } };
     const old = await createRequest(prisma, notifier, access, base, actor(E.sol));
     const doc = (await listFlowProcesses(prisma, CO)).find((f) => f.code === 'DOC')!;
     const who = actor(E.flujos);
