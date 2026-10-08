@@ -23,6 +23,7 @@ import {
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import AgentTaskTable from './AgentTaskTable';
+import LogoPensando, { varianteDeEstado } from './LogoPensando';
 import AgentMetricsBar from './AgentMetricsBar';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import { EsqueletoHilo } from './ChatSkeletons';
@@ -438,11 +439,7 @@ function GroupActivity({ statuses }: { statuses: ChatAgentStatusDto[] }) {
                 showStatus={false}
                 withTooltip={false}
               />
-              <span className='chat-typing' aria-hidden>
-                <i />
-                <i />
-                <i />
-              </span>
+              <LogoPensando variante={varianteDeEstado(s.state)} />
               <Text size='xs' className='chat-activity__label'>
                 <b>{s.agentName ?? 'Asistente'}</b> · {view.label}
               </Text>
@@ -476,11 +473,7 @@ function AgentActivity({
           showStatus={false}
           withTooltip={false}
         />
-        <span className='chat-typing' aria-hidden>
-          <i />
-          <i />
-          <i />
-        </span>
+        <LogoPensando variante={varianteDeEstado(status?.state)} />
         <Text size='xs' className='chat-activity__label'>
           {view.label}
         </Text>
