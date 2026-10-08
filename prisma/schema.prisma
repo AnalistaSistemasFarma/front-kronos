@@ -949,6 +949,7 @@ model PortalCourseMaterial {
   created_at DateTime    @default(now())
 
   progress PortalMaterialProgress[]
+  vistas   PortalMaterialVista[]
 
   @@index([course_id, orden])
   @@map("portal_course_material")
@@ -979,10 +980,40 @@ model PortalMaterialProgress {
   material       PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade)
   student_email  String               @db.NVarChar(255)
   completed_at   DateTime             @default(now())
+  /// 'AUTO' (el servidor validó que revisó el material) | 'MANUAL' (lo marcó
+  /// un administrador/formador del Excel de permisos). Las filas anteriores
+  /// al 2026-10-08 quedan como 'MANUAL': las marcaba el propio estudiante.
+  origen         String               @default("MANUAL") @db.NVarChar(10)
+  /// Correo de quien lo marcó a mano (solo origen MANUAL desde 2026-10-08).
+  marcado_por    String?              @db.NVarChar(255)
 
   @@unique([material_id, student_email])
   @@index([student_email])
   @@map("portal_material_progress")
+  @@schema("dbo")
+}
+
+/// APERTURA de un material por un estudiante (Cristian, 2026-10-08): la
+/// registra el SERVIDOR al abrir el material y es contra su hora que se valida
+/// el reporte de "revisado" (ver `lib/portal/revision-material.ts`). El
+/// navegador solo conoce el `token`; no puede fijar la hora de apertura.
+model PortalMaterialVista {
+  id              Int                  @id @default(autoincrement())
+  token           String               @unique @db.NVarChar(36)
+  material_id     Int
+  material        PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  student_email   String               @db.NVarChar(255)
+  abierta_at      DateTime             @default(now())
+  /// Páginas del PDF contadas por el servidor (null si no aplica o no se pudo).
+  paginas         Int?
+  reportada_at    DateTime?
+  segundos_vistos Int?
+  duracion_seg    Int?
+  /// Si el reporte se aceptó.
+  aceptada        Boolean?
+
+  @@index([material_id, student_email])
+  @@map("portal_material_vista")
   @@schema("dbo")
 }
 
