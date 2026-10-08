@@ -44,6 +44,7 @@ export default function PortalTalentoHumanoModulo() {
               banners={banners}
               puedeEditar={puedeEditar}
               onCambioEnBanners={recargar}
+              origen='hub'
             />
           )}
           {!cargando && error && <p className='portal-th__error'>{error}</p>}

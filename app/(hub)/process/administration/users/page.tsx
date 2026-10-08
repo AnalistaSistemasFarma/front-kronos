@@ -65,6 +65,7 @@ import {
 } from '@/lib/orion/access';
 import { isDeleteAttachmentsSubprocess } from '@/lib/attachments/access';
 import { isValentineWallSubprocess } from '@/lib/valentine/constants';
+import { describeSgcPermissionMarker, isSgcPermissionMarkerSubprocess } from '@/lib/sgc/constants';
 
 const AVATAR_COLORS = ['blue', 'teal', 'violet', 'indigo', 'cyan', 'grape', 'orange'] as const;
 
@@ -2192,7 +2193,9 @@ function UserManagement() {
                                 )}
                                 {isHubHiddenRequestDashboardSubprocess(subprocess) ? (
                                   <Badge size='xs' variant='light' color='teal' mt={4}>
-                                    {isValentineWallSubprocess(subprocess)
+                                    {isSgcPermissionMarkerSubprocess(subprocess)
+                                      ? describeSgcPermissionMarker(subprocess.subprocess_url)
+                                      : isValentineWallSubprocess(subprocess)
                                       ? 'Permiso OLP: corazón en el header (muro Dosis de Amor)'
                                       : isOrionFirmaPrepareSubprocess(subprocess)
                                         ? 'Permiso: preparar PDF, firmantes y enviar a firma'

@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import {
   chatFetch,
   isAbortError,
+  notificarActividad,
   notifyChatRefresh,
   pedirSondeoDelHilo,
 } from '../../lib/chat/client';
@@ -22,7 +23,7 @@ import {
 
 /**
  * PULSO GLOBAL del chat entre personas. No pinta nada: vive en la cabecera de
- * TODA la aplicación (components/Header.tsx, junto a ChatAgentBar) y mantiene
+ * TODA la aplicación (components/Header.tsx, junto a ChatRail) y mantiene
  * abierto un long-poll contra /api/chat/pulse para enterarse en ~1 s de un
  * mensaje directo o de un zumbido, esté la persona en la pantalla que esté.
  *
@@ -86,7 +87,12 @@ export default function ChatPulse() {
     const procesar = (eventos: ChatPulseEvent[]) => {
       if (eventos.length === 0) return;
       const hilos = new Set<number>();
-      for (const e of eventos) hilos.add(e.idConversation);
+      for (const e of eventos) {
+        hilos.add(e.idConversation);
+        // Me escribieron: la conversación sube de primera ya, antes de que la
+        // bandeja vuelva con los contadores.
+        notificarActividad(e.idConversation, e.createdAt);
+      }
       // Que el hilo abierto (si es uno de estos) pregunte ya, y que la bandeja
       // actualice sus contadores.
       for (const id of hilos) pedirSondeoDelHilo(id);

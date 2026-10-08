@@ -1,0 +1,40 @@
+/*
+ * Estados de interacción del módulo (línea gss-design, «States»): hover con
+ * tinte neutro, sin elevar ni escalar; foco siempre visible con anillo azul
+ * translúcido de 3px; 120ms para hover/foco.
+ */
+
+/* Filas de tabla que abren la vista interna (useSgcRowLink). */
+.sgc-row-link {
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.sgc-row-link:hover {
+  background-color: var(--mantine-color-default-hover);
+}
+
+.sgc-row-link:focus {
+  outline: none;
+}
+
+.sgc-row-link:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--mantine-primary-color-filled) 40%, transparent);
+  outline-offset: -3px;
+  background-color: var(--mantine-color-default-hover);
+}
+
+/* Tarjetas del tablero: tinte al pasar, sin sombra que «flota». */
+.sgc-module-card {
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.sgc-module-card:hover {
+  background-color: var(--mantine-color-default-hover);
+  border-color: var(--mantine-primary-color-filled);
+}
+
+.sgc-module-card:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--mantine-primary-color-filled) 40%, transparent);
+  outline-offset: 2px;
+}

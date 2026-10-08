@@ -315,6 +315,13 @@ export default function OrionReviewPanel({
             <Badge size='xs' variant='outline' color='gray'>
               {view.versionLabel}
             </Badge>
+            {review?.source === 'word' ? (
+              <Tooltip label='Una sola validación: la hicieron en el Word. El PDF no se vuelve a validar.' withArrow>
+                <Badge size='xs' variant='light' color='teal' styles={{ label: { textTransform: 'none' } }}>
+                  Validado en el Word{review.sourceVersionLabel ? ` ${review.sourceVersionLabel}` : ''}
+                </Badge>
+              </Tooltip>
+            ) : null}
           </Group>
         ) : null}
 

@@ -25,13 +25,11 @@ import {
   applyPaletteAppearanceToDocument,
   applyPaletteToDocument,
   isValidPaletteKey,
+  paletteCustomHex,
   readStoredPalette,
   resolvePrimaryColor,
 } from '../lib/theme/palettes';
-import {
-  mantineTupleFromHex,
-  parseCustomPaletteHex,
-} from '../lib/theme/customPalette';
+import { mantineTupleFromHex } from '../lib/theme/customPalette';
 import { UserProvider } from '../lib/user-context';
 import { SapProvider } from '../lib/sap-context';
 import {
@@ -182,7 +180,7 @@ function ThemeProvider({ children }: { children: ReactNode }) {
 
   const primaryColor = resolvePrimaryColor(visualPalette);
   const mantineTheme = useMemo(() => {
-    const hex = parseCustomPaletteHex(visualPalette);
+    const hex = paletteCustomHex(visualPalette);
     const customColors = hex ? mantineTupleFromHex(hex) : undefined;
     return visualTheme === 'dark'
       ? buildDarkTheme(primaryColor, customColors)

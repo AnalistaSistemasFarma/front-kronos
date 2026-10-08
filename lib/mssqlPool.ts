@@ -1,11 +1,7 @@
 import 'server-only';
 import sql from 'mssql';
 import dbconfig from '../dbconfig';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const ensureDbHost = require('./db/ensureDatabaseHost.server.cjs') as {
-  ensureDatabaseHostResolved?: () => Promise<string>;
-  clearResolvedDatabaseHost?: () => void;
-};
+import { connectWithRetry } from './db/poolConnectRetry';
 
 // `dbconfig` puede ser un objeto de configuración plano (dbconfig.js) o exponer helpers.
 const dbAny = dbconfig as unknown as {
@@ -65,42 +61,20 @@ export function isMssqlNotOpenError(error: unknown): boolean {
 /**
  * Errores de conexión recuperables reintentando con un pool nuevo: la conexión no está abierta
  * (ENOTOPEN) o se cerró mientras la operación estaba en vuelo (ECONNCLOSED, típico si el pool
- * global se recicla durante una espera larga).
+ * global se recicla durante una espera larga). Un timeout de consulta NO se reintenta: casi
+ * siempre es un bloqueo en la base, y relanzarla solo suma sesiones bloqueadas.
  */
 export function isRetryablePoolError(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null || !('code' in error)) {
-    if (error instanceof Error && error.message.toLowerCase().includes('abort')) {
-      return true;
-    }
-    return false;
-  }
-  const code = (error as { code: string }).code;
-  return (
-    code === 'ENOTOPEN' ||
-    code === 'ECONNCLOSED' ||
-    code === 'ESOCKET' ||
-    code === 'ETIMEOUT' ||
-    code === 'ABORT_ERR'
-  );
-}
-
-function isAbortedError(error: unknown): boolean {
-  if (error instanceof Error) {
-    const msg = error.message.toLowerCase();
-    if (msg === 'aborted' || msg.includes('abort')) return true;
-  }
-  return false;
-}
-
-function isSocketReachabilityError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null || !('code' in error)) return false;
   const code = (error as { code: string }).code;
-  return code === 'ESOCKET' || code === 'ETIMEOUT';
+  return code === 'ENOTOPEN' || code === 'ECONNCLOSED';
 }
 
 /**
  * Pool compartido de la aplicación. No cerrar por request (evita agotar el pool global).
  * Usa single-flight para evitar ENOTOPEN por conexiones concurrentes en dev.
+ * Si SQL no responde al conectar (caída corta de red o del servicio), reintenta la
+ * conexión 2 veces con espera creciente (lib/db/poolConnectRetry.ts).
  */
 export async function getPool(): Promise<sql.ConnectionPool> {
   const configKey = getDatabaseConfigKey();
@@ -126,12 +100,29 @@ export async function getPool(): Promise<sql.ConnectionPool> {
   invalidateGlobalPool();
 
   const connectPromise = (async () => {
-    if (typeof ensureDbHost.ensureDatabaseHostResolved === 'function') {
-      await ensureDbHost.ensureDatabaseHostResolved();
-    }
-    const pool = await new sql.ConnectionPool(buildMssqlConfig()).connect();
+    const pool = await connectWithRetry(
+      async () => {
+        const candidate = new sql.ConnectionPool(buildMssqlConfig());
+        try {
+          return await candidate.connect();
+        } catch (error) {
+          void candidate.close().catch(() => {
+            /* nunca abrió */
+          });
+          throw error;
+        }
+      },
+      {
+        onRetry: ({ attempt, delayMs, error }) => {
+          const code = (error as { code?: string })?.code ?? 'sin código';
+          console.warn(
+            `[mssqlPool] conexión a SQL falló (${code}, intento ${attempt}); reintento en ${delayMs} ms`
+          );
+        },
+      }
+    );
     global.__kronosMssqlPool = pool;
-    global.__kronosMssqlPoolConfigKey = getDatabaseConfigKey();
+    global.__kronosMssqlPoolConfigKey = configKey;
     global.__kronosMssqlModule = sql;
     return pool;
   })();
@@ -150,32 +141,18 @@ export async function getPool(): Promise<sql.ConnectionPool> {
   }
 }
 
-/** Ejecuta una consulta reintentando si el pool quedó cerrado o la conexión se abortó (dev/HMR). */
-export async function withMssqlPool<T>(
-  fn: (pool: sql.ConnectionPool) => Promise<T>,
-  attempt = 0
-): Promise<T> {
-  const maxAttempts = 3;
+/**
+ * Ejecuta `fn` con el pool compartido. La conexión se reintenta dentro de getPool(), pero
+ * `fn` NUNCA se repite: si ya corrió una parte, repetirla podría duplicar escrituras. Si falla
+ * porque el pool quedó cerrado (ENOTOPEN / ECONNCLOSED), se descarta el pool para que la
+ * siguiente llamada abra uno nuevo, y el error se propaga.
+ */
+export async function withMssqlPool<T>(fn: (pool: sql.ConnectionPool) => Promise<T>): Promise<T> {
+  const pool = await getPool();
   try {
-    return await fn(await getPool());
+    return await fn(pool);
   } catch (error) {
-    if (attempt >= maxAttempts - 1) throw error;
-
-    if (isSocketReachabilityError(error) && typeof ensureDbHost.clearResolvedDatabaseHost === 'function') {
-      ensureDbHost.clearResolvedDatabaseHost();
-      invalidateGlobalPool();
-      if (typeof ensureDbHost.ensureDatabaseHostResolved === 'function') {
-        await ensureDbHost.ensureDatabaseHostResolved();
-      }
-      return withMssqlPool(fn, attempt + 1);
-    }
-
-    if (isRetryablePoolError(error) || isAbortedError(error)) {
-      invalidateGlobalPool();
-      await new Promise((resolve) => setTimeout(resolve, 40 * (attempt + 1)));
-      return withMssqlPool(fn, attempt + 1);
-    }
-
+    if (isRetryablePoolError(error) && global.__kronosMssqlPool === pool) invalidateGlobalPool();
     throw error;
   }
 }

@@ -7,6 +7,7 @@ import type { HelpDeskCaseListItem } from '../../lib/help-desk/types';
 import { getCaseContactEmail, getCaseContactEmailDisplay } from '../../lib/help-desk/contactEmail';
 import { formatTicketDateIso } from '../../lib/help-desk/dates';
 import { getPriorityColor, getPriorityIcon, getStatusColor } from '../../lib/help-desk/ticketDisplay';
+import { saveTicketsListForNavigation } from '../../lib/help-desk/ticketsBoardStorage';
 
 interface HelpDeskCasesTableProps {
   tickets: HelpDeskCaseListItem[];
@@ -26,8 +27,12 @@ export function HelpDeskCasesTable({
   const openTicket = (ticket: HelpDeskCaseListItem) => {
     const contactEmail = getCaseContactEmail(ticket);
     const normalized = { ...ticket, email: contactEmail || undefined };
-    sessionStorage.setItem('selectedTicket', JSON.stringify(normalized));
-    sessionStorage.setItem('ticketsList', JSON.stringify(tickets));
+    try {
+      sessionStorage.setItem('selectedTicket', JSON.stringify(normalized));
+    } catch {
+      // Sin espacio en sessionStorage: el detalle carga el caso por ?id=.
+    }
+    saveTicketsListForNavigation(tickets, ticket.id_case);
     router.push(`/process/help-desk/view-ticket?id=${ticket.id_case}`);
   };
 

@@ -18,6 +18,7 @@ import {
   toCustomPaletteKey,
 } from '../../lib/theme/customPalette'; 
 import { PALETTES } from '../../lib/theme/palettes';
+import { findDuoPalette } from '../../lib/theme/duoPalettes';
 
 interface CustomColorPickerProps {
   palette: string;
@@ -29,7 +30,7 @@ function startingHex(palette: string): string {
   const custom = parseCustomPaletteHex(palette);
   if (custom) return custom;
   const preset = PALETTES.find((p) => p.key === palette);
-  return preset?.swatch ?? '#2563eb';
+  return preset?.swatch ?? findDuoPalette(palette)?.accent ?? '#2563eb';
 }
 
 export function CustomColorPicker({

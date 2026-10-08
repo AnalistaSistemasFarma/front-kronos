@@ -1250,24 +1250,266 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
   color: var(--app-text-muted, #64748b) !important;
 }
 
-/* ── Barra de avatares en la cabecera ── */
-.chat-agent-bar {
-  margin-right: 2px;
+/* ── Barra lateral del chat (ChatRail, 2026-09-30) ──
+   Los selectores de botones y títulos van con `.chat-rail` delante: Mantine
+   (UnstyledButton, Text) pone `padding: 0` con la misma especificidad y su CSS
+   se importa DESPUÉS de este archivo, así que sin eso ganaría el empate.
+   Reemplaza a los avatares de la cabecera. Fija a la izquierda, debajo de la
+   cabecera; el contenido de la página se corre su ancho con `.con-chat-rail`
+   (lo pone y lo QUITA ChatRail). Sin transición de ancho a propósito: animar
+   el ancho obliga a rehacer el diseño de toda la página en cada cuadro. */
+:root {
+  --chat-rail-w: 64px;
+  --chat-rail-w-expandida: 288px;
 }
 
-.chat-agent-bar__item {
+.chat-rail {
+  background-color: var(--app-header, var(--app-surface));
+  color: var(--app-text);
+}
+
+.chat-rail--fija {
+  position: fixed;
+  top: var(--app-header-height);
+  left: 0;
+  bottom: 0;
+  z-index: 45;
+  width: var(--chat-rail-w);
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--app-border);
+  padding-left: env(safe-area-inset-left);
+}
+
+.chat-rail--fija.chat-rail--expandida {
+  width: var(--chat-rail-w-expandida);
+}
+
+body.con-chat-rail .app-page-shell {
+  padding-left: var(--chat-rail-w);
+}
+
+body.con-chat-rail.con-chat-rail--expandida .app-page-shell {
+  padding-left: var(--chat-rail-w-expandida);
+}
+
+/* Modo inmersivo del chat: sin cabecera tampoco hay barra (ver más abajo). */
+body.chat-inmersivo .chat-rail--fija {
+  display: none;
+}
+
+body.chat-inmersivo.con-chat-rail .app-page-shell {
+  padding-left: 0;
+}
+
+/* El marco del chat de escritorio (`.chat-escritorio`) va `fixed` con
+   `left: 0`, así que el `padding-left` de arriba no lo mueve y la barra le
+   tapaba la lista de conversaciones (reporte de Nicolás, 2026-10-01). Se corre
+   el mismo ancho de la barra. En modo inmersivo no hay barra: vuelve a 0. */
+body.con-chat-rail .chat-escritorio {
+  left: var(--chat-rail-w);
+}
+
+body.con-chat-rail.con-chat-rail--expandida .chat-escritorio {
+  left: var(--chat-rail-w-expandida);
+}
+
+body.chat-inmersivo.con-chat-rail .chat-escritorio {
+  left: 0;
+}
+
+.chat-rail__cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px 6px;
+}
+
+.chat-rail--expandida .chat-rail__cabecera:first-child {
+  justify-content: space-between;
+}
+
+.chat-rail__cabecera--buscar {
+  padding-top: 0;
+}
+
+.chat-rail__nombre {
+  padding-left: 4px;
+}
+
+.chat-rail__scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-rail__seccion {
+  padding: 2px 0 6px;
+}
+
+.chat-rail .chat-rail__titulo {
+  margin: 0;
+  padding: 8px 16px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--app-text-muted);
+}
+
+.chat-rail__separador {
+  width: 28px;
+  margin: 4px auto 8px;
+  border: 0;
+  border-top: 1px solid var(--app-border);
+}
+
+.chat-rail__lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chat-rail__li {
+  display: flex;
+  justify-content: center;
+  padding: 3px 0;
+}
+
+.chat-rail .chat-rail__icono {
   display: inline-flex;
-  padding: 2px;
+  padding: 3px;
   border-radius: 999px;
   transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
-.chat-agent-bar__item:hover {
+.chat-rail__icono:hover {
   transform: translateY(-1px);
 }
 
-.chat-agent-bar__item--active {
-  box-shadow: 0 0 0 2px var(--app-accent, #2563eb);
+.chat-rail__icono:focus-visible,
+.chat-rail__fila-boton:focus-visible,
+.chat-rail__pie-enlace:focus-visible {
+  outline: 2px solid var(--app-accent, #113562);
+  outline-offset: 2px;
+}
+
+.chat-rail__icono--activo {
+  box-shadow: 0 0 0 2px var(--app-accent, #113562);
+}
+
+.chat-rail__fila {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 1px 8px;
+  border-radius: 10px;
+  transition: background-color 120ms ease;
+}
+
+.chat-rail__fila:hover,
+.chat-rail__fila:focus-within {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-rail__fila--activa {
+  background-color: color-mix(in srgb, var(--app-accent, #113562) 12%, transparent);
+}
+
+.chat-rail .chat-rail__fila-boton {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 10px;
+}
+
+.chat-rail__texto {
+  flex: 1;
+  min-width: 0;
+}
+
+/* El botón de anclar aparece al pasar el mouse o con el teclado; el que ya
+   está anclado se ve siempre, para que se sepa por qué está arriba. En
+   pantallas táctiles (sin hover) se ve siempre. */
+.chat-rail__ancla {
+  flex: 0 0 auto;
+  margin-right: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.chat-rail__fila:hover .chat-rail__ancla,
+.chat-rail__fila:focus-within .chat-rail__ancla,
+.chat-rail__ancla--puesta {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .chat-rail__ancla {
+    opacity: 1;
+  }
+}
+
+.chat-rail__pie {
+  border-top: 1px solid var(--app-border);
+  padding: 8px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  display: flex;
+  justify-content: center;
+}
+
+.chat-rail--expandida .chat-rail__pie,
+.chat-rail--drawer .chat-rail__pie {
+  justify-content: flex-start;
+}
+
+.chat-rail__pie-enlace {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  color: var(--app-text-muted);
+}
+
+.chat-rail__pie-enlace:hover {
+  color: var(--app-accent, #113562);
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-rail--drawer {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-rail--drawer .mantine-Drawer-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat-rail--drawer .chat-rail__nav {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* El Drawer va con padding={0} (la lista llega a los bordes); la cabecera
+   con el título "Chats" sí necesita su margen. */
+.chat-rail--drawer .chat-rail__drawer-cabecera {
+  background-color: inherit;
+  padding: 12px 12px 8px 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-rail__icono,
+  .chat-rail__fila,
+  .chat-rail__ancla {
+    transition: none;
+  }
 }
 
 .chat-list-row {
@@ -1482,14 +1724,23 @@ html[data-mantine-color-scheme='dark'] .notification-bell-accent,
 }
 
 /* En la burbuja del usuario el fondo es azul, así que la cita necesita su
-   propio contraste o desaparece. */
+   propio contraste o desaparece. El `!important` hace falta: `.chat-text-muted`
+   trae `!important` y pintaba el extracto citado en gris sobre el azul, donde
+   no se leía (reporte de Nicolás, 2026-10-01). */
 .chat-bubble--user .chat-cita--burbuja {
   background-color: rgba(255, 255, 255, 0.18);
 }
 
 .chat-bubble--user .chat-cita--burbuja .chat-text-muted,
 .chat-bubble--user .chat-cita--burbuja .mantine-Text-root {
-  color: #ffffff;
+  color: #ffffff !important;
+}
+
+/* Tema oscuro: el acento es claro (celeste, verde, gris…), y blanco sobre un
+   velo blanco se pierde. Un velo oscuro le devuelve el contraste al texto. */
+html.dark .chat-bubble--user .chat-cita--burbuja,
+html[data-mantine-color-scheme='dark'] .chat-bubble--user .chat-cita--burbuja {
+  background-color: rgba(0, 0, 0, 0.45);
 }
 
 .chat-bubble--user .chat-cita--burbuja .chat-cita__barra {
@@ -2418,6 +2669,87 @@ body.chat-inmersivo .chat-page-thread--completa {
   border-color: #ffffff;
 }
 
+/* ── Miniatura de una imagen adjunta (2026-10-01) ──
+   Caja de tamaño FIJO: la imagen llega después que la burbuja y, si la caja
+   creciera al cargar, el hilo cambiaría de alto y el desplazamiento saltaría
+   (ver el doble rAF de ChatThread). `cover` recorta sin deformar. */
+.chat-imagen {
+  display: block;
+  width: min(240px, 100%);
+  height: 180px;
+  padding: 0;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  border-radius: 12px;
+  overflow: hidden;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  cursor: zoom-in;
+}
+
+.chat-imagen img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chat-imagen:focus-visible {
+  outline: 2px solid var(--app-accent, #2563eb);
+  outline-offset: 2px;
+}
+
+/* Multimedia y archivos de una conversación */
+.chat-galeria {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px;
+}
+
+.chat-galeria__foto {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+}
+
+.chat-galeria__archivo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  color: var(--app-text, var(--foreground));
+  text-decoration: none;
+}
+
+.chat-galeria__archivo:hover {
+  border-color: var(--app-accent, #2563eb);
+}
+
+/* Visor a pantalla completa */
+.chat-visor__contenido {
+  max-width: 96vw;
+  background-color: var(--app-surface, var(--surface));
+}
+
+.chat-visor__cuerpo {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-visor__barra {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--app-border, var(--border-subtle));
+}
+
+.chat-visor__imagen {
+  display: block;
+  max-width: 96vw;
+  max-height: calc(100dvh - 120px);
+  margin: 0 auto;
+  object-fit: contain;
+}
+
 /* Markdown de los mensajes */
 .chat-md {
   /* +2 pt sobre los 13.5 originales, a pedido de Nicolás (2026-09-07): en el
@@ -2558,6 +2890,15 @@ body.chat-inmersivo .chat-page-thread--completa {
   overflow-y: auto;
   padding: 4px 12px 6px;
   border-top: 1px solid var(--app-border, #e2e8f0);
+  background-color: var(--app-surface, var(--surface));
+}
+
+/* Barra de métricas del agente (AgentMetricsBar, mod synerlink-metrics F1):
+   anclada arriba del hilo directo, fuera del área que se desplaza. */
+.chat-thread__metricas {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--app-border, #e2e8f0);
   background-color: var(--app-surface, var(--surface));
 }
 
@@ -3308,6 +3649,426 @@ body.chat-inmersivo .chat-page-thread--completa {
   cursor: pointer;
 }
 
+/* ══════════════════ FORMACIÓN ("tipo Moodle") ══════════════════════════
+   Pedido de Cristian Baldión (2026-09-18). Reutiliza las variables --pth-*
+   declaradas en `.portal-th` arriba — nada de colores nuevos. */
+
+.portal-th__formacion-barra {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.portal-th__formacion-toggle {
+  display: inline-flex;
+  border: 1px solid var(--pth-linea);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.portal-th__formacion-toggle button {
+  padding: 8px 14px;
+  border: none;
+  background: #fff;
+  color: var(--pth-tinta-2);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.portal-th__formacion-toggle button + button {
+  border-left: 1px solid var(--pth-linea);
+}
+
+.portal-th__formacion-toggle-activo {
+  background-color: var(--pth-azul) !important;
+  color: #fff !important;
+}
+
+.portal-th__curso-grilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.portal-th__curso-tarjeta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 12px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.portal-th__curso-tarjeta:hover {
+  border-color: var(--pth-azul);
+}
+
+.portal-th__curso-tarjeta strong {
+  color: var(--pth-azul-700);
+}
+
+.portal-th__curso-tarjeta p {
+  margin: 0;
+  color: var(--pth-tinta-2);
+  font-size: 0.9rem;
+}
+
+.portal-th__curso-borrador {
+  color: var(--pth-tinta-3);
+  font-weight: 400;
+  font-size: 0.85em;
+}
+
+.portal-th__curso-meta {
+  font-size: 0.8rem;
+  color: var(--pth-tinta-3);
+}
+
+.portal-th__curso-certificado-chip {
+  font-size: 0.85rem;
+  color: #1a7d3c;
+}
+
+.portal-th__curso-progreso {
+  position: relative;
+  height: 18px;
+  border-radius: 999px;
+  background-color: var(--pth-azul-50);
+  border: 1px solid var(--pth-linea);
+  overflow: hidden;
+}
+
+.portal-th__curso-progreso-barra {
+  height: 100%;
+  background-color: var(--pth-azul);
+  transition: width 0.25s ease;
+}
+
+.portal-th__curso-progreso span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--pth-tinta);
+  mix-blend-mode: difference;
+  filter: invert(1) grayscale(1) contrast(9);
+}
+
+.portal-th__curso-detalle h3,
+.portal-th__curso-detalle h4 {
+  color: var(--pth-azul-700);
+  margin: 20px 0 10px;
+}
+
+.portal-th__curso-detalle h3 {
+  margin-top: 0;
+}
+
+.portal-th__curso-descripcion {
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__volver {
+  border: none;
+  background: none;
+  color: var(--pth-azul);
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 12px;
+  font: inherit;
+}
+
+.portal-th__formacion-gestion-barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.portal-th__formacion-gestion-barra button {
+  border: 1px solid var(--pth-azul);
+  background: #fff;
+  color: var(--pth-azul);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.portal-th__material-lista {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.portal-th__material-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.portal-th__material-check {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 2px solid var(--pth-linea);
+  background: #fff;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.portal-th__material-check--hecho {
+  background-color: #1a7d3c;
+  border-color: #1a7d3c;
+}
+
+.portal-th__material-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.portal-th__material-info a {
+  color: var(--pth-tinta);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.portal-th__material-info a:hover {
+  text-decoration: underline;
+}
+
+.portal-th__material-tipo {
+  font-size: 0.78rem;
+  color: var(--pth-tinta-3);
+}
+
+.portal-th__certificado-boton {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background-color: var(--pth-azul);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.portal-th__certificado-boton:hover {
+  background-color: var(--pth-azul-700);
+}
+
+.portal-th__formacion-crear {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 20px;
+  padding: 14px;
+  border: 1px dashed var(--pth-linea);
+  border-radius: 12px;
+}
+
+.portal-th__formacion-crear input[type='text'],
+.portal-th__formacion-crear input:not([type]),
+.portal-th__formacion-crear input[type='file'] {
+  padding: 8px 10px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.portal-th__formacion-crear button {
+  padding: 9px 16px;
+  border: none;
+  border-radius: 8px;
+  background-color: var(--pth-azul);
+  color: #fff;
+  cursor: pointer;
+}
+
+.portal-th__formacion-crear button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.portal-th__formacion-obligatorio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__formacion-crear textarea {
+  flex: 1 1 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 8px;
+  font: inherit;
+  resize: vertical;
+}
+
+/* ── Formación: acceso desde el portal principal (abre pestaña nueva) ── */
+.portal-th__acceso-formacion {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 16px;
+  align-items: center;
+  padding: 18px 20px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--pth-tinta);
+  text-decoration: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.portal-th__acceso-formacion:hover,
+.portal-th__acceso-formacion:focus-visible {
+  border-color: var(--pth-azul);
+  box-shadow: 0 2px 10px rgba(26, 60, 110, 0.12);
+}
+
+.portal-th__acceso-formacion-titulo {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--pth-azul);
+}
+
+.portal-th__acceso-formacion-texto {
+  grid-column: 1;
+  font-size: 0.88rem;
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__acceso-formacion-flecha {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  font-size: 1.3rem;
+  color: var(--pth-azul);
+}
+
+/* Página propia de Formación: el "Volver al portal" es un enlace. */
+.portal-th__volver-portal {
+  display: inline-block;
+  text-decoration: none;
+}
+
+/* ── Formación: edición en línea (vista formador) ── */
+.portal-th__formacion-titulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.portal-th__formacion-descripcion {
+  margin: 4px 0 12px;
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__formacion-editar input:not([type]) {
+  flex: 1 1 220px;
+}
+
+.portal-th__formacion-editar .portal-th__aviso {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.portal-th__formacion-editar-acciones {
+  display: flex;
+  gap: 8px;
+}
+
+.portal-th__formacion-crear .portal-th__boton-secundario {
+  border: 1px solid var(--pth-linea);
+  background: #fff;
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__formacion-archivo {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__material-item--editando {
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.portal-th__material-item--editando .portal-th__formacion-crear {
+  flex: 1;
+  margin: 0;
+}
+
+.portal-th__material-acciones {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.portal-th__icono-boton {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--pth-linea);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--pth-tinta-2);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.portal-th__icono-boton:hover:not(:disabled) {
+  border-color: var(--pth-azul);
+  color: var(--pth-azul);
+}
+
+.portal-th__icono-boton:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.portal-th__error--accion {
+  margin-bottom: 12px;
+}
+
+.portal-th__roster-tabla td {
+  vertical-align: middle;
+}
+
+.portal-th__roster-tabla .portal-th__curso-progreso {
+  min-width: 140px;
+}
+
 /* ── iOS: mismo zoom automático del composer del chat, ahora en el login ──
    Los TextInput de Mantine en /login y /proveedor/login no tenían `size`,
    así que tomaban el "sm" por defecto (14px) y Safari hacía zoom al
@@ -3317,4 +4078,141 @@ body.chat-inmersivo .chat-page-thread--completa {
    orden de imports de Mantine, no debe reabrirse el bug en silencio. */
 .login-page input {
   font-size: 16px !important;
+}
+
+/* ─── Predicciones (/process/predicciones) ───
+   Colores de semáforo como variables del tema: en claro son los tonos GSS
+   (verde, ocre, rojo) y en oscuro se aclaran para mantener contraste AA sobre
+   las tarjetas navy. Las tarjetas y el texto usan los tokens --app-* de
+   siempre, así que siguen la paleta del perfil igual que el resto de la app. */
+:root {
+  --pred-ok: #1a6b43;
+  --pred-warn: #8a5a00;
+  --pred-danger: #b3261e;
+  --pred-neutral: #5c6370;
+  --pred-info: #1a3c6e;
+}
+
+.dark {
+  --pred-ok: #4ade80;
+  --pred-warn: #fbbf24;
+  --pred-danger: #ff8a80;
+  --pred-neutral: #aab4cf;
+  --pred-info: #7eb8f0;
+}
+
+.pred-tone--ok { --pred-tone: var(--pred-ok); }
+.pred-tone--warn { --pred-tone: var(--pred-warn); }
+.pred-tone--danger { --pred-tone: var(--pred-danger); }
+.pred-tone--neutral { --pred-tone: var(--pred-neutral); }
+.pred-tone--info { --pred-tone: var(--pred-info); }
+
+.pred-text--danger {
+  color: var(--pred-danger);
+}
+
+/* Pastilla de estado: punto relleno + texto (sin emoji, no se trunca) */
+.pred-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  color: var(--pred-tone);
+  background-color: color-mix(in srgb, var(--pred-tone) 12%, transparent);
+}
+
+.pred-pill__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background-color: var(--pred-tone);
+}
+
+/* Tarjeta con acento de estado a la izquierda (KPI, mes pasado, listas) */
+.pred-accent {
+  border-left: 4px solid var(--pred-tone) !important;
+}
+
+.pred-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 100%;
+}
+
+.pred-kpi__label {
+  color: var(--app-text-muted, var(--mantine-color-dimmed));
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.pred-kpi__value {
+  color: var(--app-text, var(--mantine-color-text));
+  font-size: clamp(1.375rem, 1.1rem + 0.9vw, 1.75rem);
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.pred-hero__title {
+  font-size: clamp(1.25rem, 1rem + 1.2vw, 1.75rem) !important;
+  line-height: 1.2 !important;
+}
+
+.pred-section__icon {
+  color: var(--pred-info);
+  flex-shrink: 0;
+}
+
+/* Alertas: fila neutra con acento de color; el texto va en el color normal
+   del tema (antes era texto rojo sobre fondo rojo, ilegible en oscuro). */
+.pred-alerta {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--app-border-subtle, var(--border-subtle));
+  border-left: 4px solid var(--pred-tone);
+  background-color: color-mix(in srgb, var(--pred-tone) 6%, var(--app-surface, #ffffff));
+}
+
+.pred-alerta__titulo {
+  color: var(--app-text, var(--mantine-color-text));
+}
+
+.pred-alerta__titulo .pred-pill {
+  margin-right: 8px;
+  vertical-align: 1px;
+}
+
+.pred-accion {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--app-text-muted, var(--mantine-color-dimmed));
+}
+
+.pred-accion svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--pred-tone, var(--pred-info));
+}
+
+/* Antigüedad de la cartera: celdas con fondo sutil */
+.pred-tramo {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: color-mix(in srgb, var(--pred-info) 5%, var(--app-surface, #ffffff));
+  border: 1px solid var(--app-border-subtle, var(--border-subtle));
+}
+
+.pred-chart {
+  position: relative;
+  width: 100%;
 }

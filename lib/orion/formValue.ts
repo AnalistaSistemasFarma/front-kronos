@@ -1,7 +1,8 @@
-import { normalizeAttachmentStem } from './attachmentList';
+import { isVersionCopyFileName, normalizeAttachmentStem } from './attachmentList';
 import { ORION_LEGACY_FILE_ID } from './config';
 import type {
   OrionDeletedDocument,
+  OrionDraftState,
   OrionSignatureBagBag,
   OrionSignatureIntent,
   OrionSignatureState,
@@ -26,6 +27,21 @@ function parseDeletedDocuments(raw: unknown): OrionDeletedDocument[] | undefined
     }))
     .filter((row) => row.fileId);
   return list.length > 0 ? list : undefined;
+}
+
+/** Preparaciones en Word (`drafts`); se conservan tal cual, solo se descartan entradas inválidas. */
+function parseDrafts(raw: unknown): Record<string, OrionDraftState> | undefined {
+  if (!isPlainObject(raw)) return undefined;
+  const drafts: Record<string, OrionDraftState> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!isPlainObject(value) || typeof value.status !== 'string') continue;
+    drafts[key] = {
+      ...(value as OrionDraftState),
+      fileId: String(value.fileId || key),
+      versions: Array.isArray(value.versions) ? (value.versions as OrionDraftState['versions']) : [],
+    };
+  }
+  return Object.keys(drafts).length > 0 ? drafts : undefined;
 }
 
 /** ¿El documento (por fileId u orionDocumentId) fue eliminado con "Eliminar"? */
@@ -241,10 +257,12 @@ export function parseOrionSignatureBagBag(raw: string | null | undefined): Orion
         };
       }
       const deletedDocuments = parseDeletedDocuments(parsed.deletedDocuments);
+      const drafts = parseDrafts(parsed.drafts);
       return {
         documents,
         updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
         ...(deletedDocuments ? { deletedDocuments } : {}),
+        ...(drafts ? { drafts } : {}),
       };
     }
 
@@ -285,6 +303,7 @@ export function serializeOrionSignatureBagBag(bag: OrionSignatureBagBag): string
     documents: bag.documents,
     updatedAt: new Date().toISOString(),
     ...(bag.deletedDocuments?.length ? { deletedDocuments: bag.deletedDocuments } : {}),
+    ...(bag.drafts && Object.keys(bag.drafts).length > 0 ? { drafts: bag.drafts } : {}),
   });
 }
 
@@ -367,9 +386,7 @@ export function resolveOrionDocumentForAttachment(params: {
   // Copia de versión (X-firmado.pdf) tras liberar el original: mismo stem → mismo doc Orion.
   // Solo si hay exactamente un candidato (no cruzar PDFs distintos).
   const lookupStem = normalizeAttachmentStem(params.fileName);
-  const isVersionCopy = /-(firmado|original|parcial)(\s*\(\d+\))?\.pdf$/i.test(
-    String(params.fileName || '').trim()
-  );
+  const isVersionCopy = isVersionCopyFileName(params.fileName);
   if (lookupStem && isVersionCopy) {
     const stemMatches = entries.filter(([, doc]) => {
       if (!doc) return false;
