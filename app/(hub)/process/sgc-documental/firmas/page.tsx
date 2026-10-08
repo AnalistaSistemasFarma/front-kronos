@@ -10,6 +10,7 @@ import { formatDateCO } from '../../../../../components/sgc/tareas/format';
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
 import { SGC_SIGNATURE_AUTH_METHOD_LABEL, SGC_SIGNATURE_CONSENT, SGC_SIGNATURE_CONSENT_VERSION } from '../../../../../lib/sgc/signature/consent';
 import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
+import { SGC_MASTER_STATUS_LABELS, type SgcMasterStatus } from '../../../../../lib/sgc/signature/ownSignature';
 
 /**
  * «Firma electrónica del SGC» — MAESTRO DE FIRMAS (Sprint 3, solo Calidad).
@@ -34,12 +35,24 @@ interface MasterRow {
   revokedAt: string | null;
   revokedBy: string | null;
   revokeReason: string | null;
+  // Sprint 13: firma propia (origen, método y validación de Calidad).
+  origin: 'calidad' | 'propia';
+  captureMethod: 'dibujada' | 'imagen' | null;
+  status: SgcMasterStatus;
+  validatedBy: string | null;
+  validatedAt: string | null;
 }
+
+const STATUS_COLOR: Record<SgcMasterStatus, string> = { validada: 'teal', pendiente: 'orange', rechazada: 'red', revocada: 'gray' };
 
 function Masters({ company }: { company: SgcCompanyAccess }) {
   const id = company.idCompany;
   const { data, error, reload } = useSgcFetch<{ masters: MasterRow[] }>(`/api/sgc/signature/masters?company=${id}`);
   const users = useSgcFetch<{ users: { email: string; name: string | null }[] }>(`/api/sgc/users?company=${id}`);
+  // Sprint 13: con la firma propia encendida, Calidad ya no registra firmas de otros: valida o revoca.
+  const own = useSgcFetch<{ enabled: boolean }>(`/api/sgc/signature/own?company=${id}`);
+  const selfSignature = Boolean(own.data?.enabled);
+  const [validate, setValidate] = useState<{ id: number; label: string; reason: string } | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [image, setImage] = useState<string | null>(null);
@@ -81,6 +94,13 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
         </Text>
       </Card>
 
+      {selfSignature && (
+        <Alert color='blue' icon={<IconAlertCircle size={16} />} data-testid='sgc-firmas-propia-activa'>
+          La firma propia está activa: cada persona registra la suya en «Mi firma» y queda pendiente. Aseguramiento de Calidad la valida (por ejemplo, comparándola con el documento de identidad) o la rechaza con motivo. Nadie valida su propia firma.
+        </Alert>
+      )}
+
+      {!selfSignature && (
       <Card withBorder radius='md' p='lg'>
         <Title order={4} mb='sm'>
           Registrar firma (inducción)
@@ -116,6 +136,7 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
           </Group>
         </Stack>
       </Card>
+      )}
 
       <Card withBorder radius='md' p='lg'>
         <Title order={4} mb='sm'>
@@ -152,20 +173,27 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
                     </Text>
                   </Table.Td>
                   <Table.Td>
-                    {m.revokedAt ? (
-                      <Badge color='gray' title={m.revokeReason ?? ''}>
-                        Revocada
-                      </Badge>
-                    ) : (
-                      <Badge color='teal'>Vigente</Badge>
-                    )}
+                    <Badge color={STATUS_COLOR[m.status] ?? 'gray'} title={m.revokeReason ?? ''}>
+                      {SGC_MASTER_STATUS_LABELS[m.status] ?? m.status}
+                    </Badge>
+                    <Text size='xs' c='dimmed'>
+                      {m.origin === 'propia' ? `Propia (${m.captureMethod === 'imagen' ? 'imagen' : 'dibujada'})` : 'Registrada por Calidad'}
+                      {m.validatedBy ? ` · validó ${m.validatedBy}` : ''}
+                    </Text>
                   </Table.Td>
                   <Table.Td>
-                    {!m.revokedAt && (
-                      <Button size='xs' variant='subtle' color='red' leftSection={<IconX size={14} />} onClick={() => setRevoke({ id: m.id, reason: '' })}>
-                        Revocar
-                      </Button>
-                    )}
+                    <Group gap={4} wrap='nowrap'>
+                      {m.status === 'pendiente' && (
+                        <Button size='xs' variant='light' color='teal' leftSection={<IconCheck size={14} />} onClick={() => setValidate({ id: m.id, label: m.name ?? m.email, reason: '' })} data-testid={`sgc-firmas-validar-${m.id}`}>
+                          Validar
+                        </Button>
+                      )}
+                      {!m.revokedAt && (
+                        <Button size='xs' variant='subtle' color='red' leftSection={<IconX size={14} />} onClick={() => setRevoke({ id: m.id, reason: '' })}>
+                          {m.status === 'pendiente' ? 'Rechazar' : 'Revocar'}
+                        </Button>
+                      )}
+                    </Group>
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -174,7 +202,31 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
         </Table.ScrollContainer>
       </Card>
 
-      <Modal opened={Boolean(revoke)} onClose={() => setRevoke(null)} title='Revocar firma registrada' centered>
+      <Modal opened={Boolean(validate)} onClose={() => setValidate(null)} title={`Validar la firma de ${validate?.label ?? ''}`} centered>
+        <Stack>
+          <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Cómo la validó' placeholder='Comparada con la cédula en la inducción' minRows={2} autosize value={validate?.reason ?? ''} onChange={(e) => setValidate((v) => (v ? { ...v, reason: e.currentTarget.value } : v))} data-testid='sgc-firmas-validar-motivo' />
+          <Group justify='flex-end'>
+            <Button variant='default' onClick={() => setValidate(null)}>
+              Volver
+            </Button>
+            <Button
+              color='teal'
+              disabled={(validate?.reason.trim().length ?? 0) < 5}
+              loading={busy}
+              onClick={async () => {
+                if (!validate) return;
+                const ok = await act(() => sgcSend(`/api/sgc/signature/masters/${validate.id}/validate`, 'POST', { company: id, reason: validate.reason.trim() }), 'Firma validada: desde ahora se estampa en los documentos que firme.');
+                if (ok) setValidate(null);
+              }}
+              data-testid='sgc-firmas-validar-confirmar'
+            >
+              Validar
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal opened={Boolean(revoke)} onClose={() => setRevoke(null)} title='Revocar o rechazar firma registrada' centered>
         <Stack>
           <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Motivo' minRows={2} autosize value={revoke?.reason ?? ''} onChange={(e) => setRevoke((r) => (r ? { ...r, reason: e.currentTarget.value } : r))} />
           <Group justify='flex-end'>
@@ -202,7 +254,7 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
 
 export default function SgcSignatureMastersPage() {
   return (
-    <SgcShell section='Firma electrónica' subtitle='Maestro de firmas registrado por Aseguramiento de Calidad' requireQuality>
+    <SgcShell section='Firma electrónica' subtitle='Maestro de firmas: Aseguramiento de Calidad registra (inducción) o valida la firma propia de cada persona' requireQuality>
       {(company) => <Masters company={company} />}
     </SgcShell>
   );

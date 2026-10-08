@@ -98,7 +98,8 @@ async function lastRecordHash(tx: Tx, idCompany: number): Promise<string | null>
 
 async function activeMaster(tx: Tx, idCompany: number, email: string) {
   return tx.sgcSignatureMaster.findFirst({
-    where: { id_company: idCompany, user_email: email, revoked_at: null },
+    // Sprint 13: una firma pendiente de validación NO se estampa.
+    where: { id_company: idCompany, user_email: email, revoked_at: null, validation_status: 'validada' },
     orderBy: { version_number: 'desc' },
     select: { id_signature_master: true, image_sha256: true },
   });

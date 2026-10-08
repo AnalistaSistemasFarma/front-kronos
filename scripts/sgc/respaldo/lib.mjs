@@ -32,6 +32,7 @@ export const SGC_SCHEMA_MIGRATIONS = [
   '20261008120000_sgc_s10_capacitacion_opcional',
   '20261008130000_sgc_s11_copias_no_controladas',
   '20261008140000_sgc_s12_aprobadores_sustitutos',
+  '20261008150000_sgc_s13_firma_propia_registro',
 ];
 
 export function sha256Hex(content) {

@@ -6,7 +6,7 @@ import { SGC_SIGNATURE_LABELS, type SgcSignatureMeaning } from '../flows/definit
 import type { SgcNotifier } from '../notifications';
 import type { SgcCompanyAccess } from '../permissions';
 import { buildControlledPdfWithLayout, manifestSha256, readManifest, verifyControlledPdf, type SgcManifest, type SgcManifestMinorRevision, type SgcManifestPlacement, type SgcPdfVerification } from '../pdf/controlledPdf';
-import { suggestInstitutionalPlacements } from '../pdf/institutional';
+import { overflowMeanings, suggestInstitutionalPlacements } from '../pdf/institutional';
 import type { SgcDocxToHtml, SgcHtmlToPdf } from '../pdf/render';
 import { sgcSignerKey, type SgcPlacedMeaning, type SgcPlacementParticipant } from '../signature/fields';
 import { SGC_SIGNATURE_CONSENT_VERSION } from '../signature/consent';
@@ -24,6 +24,9 @@ import { withSgcAppLock } from './lock';
 import { getReadSignError, type SgcReadStatus } from '../dissemination/scope';
 import type { SgcSignatureRow, SgcSignedContent } from '../signature/record';
 import { buildVerifyUrl } from '../pdf/qr';
+import { signatureInkBounds } from '../pdf/controlledPdf';
+import { SGC_SELF_SIGNATURE_DISABLED, masterStatus, normalizeOwnSignature, validationDenial, type SgcCaptureMethod, type SgcMasterOrigin } from '../signature/ownSignature';
+import type { Prisma } from '../../../app/generated/prisma';
 import { latestTrainingUpload, trainingNeedsJustification, uploadSummary } from './training';
 
 /**
@@ -321,13 +324,15 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
     const layout = await latestLayout(db, idRequest);
     // Sprint 8: encabezado obligatorio por configuración de la empresa (salvo un borrador PDF anterior a la regla).
     const institutional = effectiveInstitutional(layout.institutionalHeader, await isHeaderMandatory(db, request.id_company), draft.format);
-    const signerRows = await db.sgcTaskAssignee.findMany({ where: { id_task_assignee: { in: signatures.map((s) => s.id_task_assignee) } }, select: { id_task_assignee: true, user_email: true, pool_type_code: true, task: { select: { task_key: true } } } });
+    const signerRows = await db.sgcTaskAssignee.findMany({ where: { id_task_assignee: { in: signatures.map((s) => s.id_task_assignee) } }, select: { id_task_assignee: true, user_email: true, pool_type_code: true, sign_order: true, task: { select: { task_key: true } } } });
     const keyOfAssignee = new Map(signerRows.map((a) => [a.id_task_assignee, sgcSignerKey(a.task.task_key, a.user_email, a.pool_type_code)]));
     const cargos = await cargoOf(db, request.id_company, signatures.map((s) => s.signer_email));
+    const signOrderOf = new Map(signerRows.map((a) => [a.id_task_assignee, a.user_email ? a.sign_order : Number.MAX_SAFE_INTEGER]));
     // Sprint 12: la firma de un sustituto queda «en sustitución de» el titular también en el encabezado.
     const namesFor = (m: SgcPlacedMeaning) => [
       ...new Set(
-        signatures
+        [...signatures]
+          .sort((a, b) => (signOrderOf.get(a.id_task_assignee) ?? 0) - (signOrderOf.get(b.id_task_assignee) ?? 0))
           .filter((s) => s.meaning === m)
           .map((s) => {
             const label = personLabel(s.signer_name, s.signer_email, cargos.get(s.signer_email.trim().toLowerCase()));
@@ -363,9 +368,20 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
           : null;
     const explicit = new Map(layout.fields.map((f) => [f.signerKey, f]));
     const signedParticipants: SgcPlacementParticipant[] = [];
-    for (const s of signatures) {
+    // Sprint 13: en el orden de firma que se confirmó (el cupo de grupo al final): el primero es el TITULAR del recuadro.
+    const orderOf = new Map(signerRows.map((a) => [a.id_task_assignee, a.user_email ? a.sign_order : Number.MAX_SAFE_INTEGER]));
+    const inOrder = [...signatures].sort((a, b) => (orderOf.get(a.id_task_assignee) ?? 0) - (orderOf.get(b.id_task_assignee) ?? 0));
+    for (const s of inOrder) {
       const key = keyOfAssignee.get(s.id_task_assignee);
       if (key && !signedParticipants.some((p) => p.key === key)) signedParticipants.push({ key, meaning: s.meaning as SgcPlacedMeaning, name: s.signer_name ?? s.signer_email, email: s.signer_email, role: SGC_SIGNATURE_LABELS[s.meaning as SgcSignatureMeaning] });
+    }
+    // Sprint 13 (R14): con 3 o más firmantes de un significado, todos van a la página «Registro de firmas».
+    const overflow = new Set<string>(overflowMeanings(signedParticipants));
+    const signatureRegister = inOrder.filter((s) => overflow.has(s.meaning)).map((s) => s.signature_uid.trim());
+    const registerCargos: Record<string, string> = {};
+    for (const s of inOrder) {
+      const c = cargos.get(s.signer_email.trim().toLowerCase());
+      if (c && overflow.has(s.meaning)) registerCargos[s.signature_uid.trim()] = c;
     }
     // Con plantilla institucional, la firma que no se ubicó va en su recuadro «Firma» del encabezado.
     const suggested = institutional ? new Map(suggestInstitutionalPlacements(signedParticipants, layout.fields).map((f) => [f.signerKey, f])) : new Map();
@@ -409,6 +425,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       ...(placements.length ? { placements } : {}),
       ...(institutional ? { institutionalHeader: true } : {}),
       ...(minorRevisions.length ? { minorRevisions } : {}),
+      ...(signatureRegister.length ? { signatureRegister } : {}),
     };
     const masterIds = [...new Set(signatures.map((s) => s.id_signature_master).filter((x): x is number => !!x))];
     const masters = masterIds.length ? await db.sgcSignatureMaster.findMany({ where: { id_signature_master: { in: masterIds } } }) : [];
@@ -418,7 +435,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       const png = m ? dataUrlToBytes(m.image_png) : null;
       if (png) masterPng[s.signature_uid.trim()] = png;
     }
-    const built = await buildControlledPdfWithLayout(contentPdf, manifest, masterPng, { header: composed.header });
+    const built = await buildControlledPdfWithLayout(contentPdf, manifest, masterPng, { header: composed.header, registerCargos });
     const controlled = built.bytes;
     const pdfSha256 = sha256HexOf(controlled);
 
@@ -630,11 +647,14 @@ async function revokeRow(tx: Pick<SgcDb, '$executeRaw'>, idMaster: number, at: D
   if (n !== 1) throw new SgcError('La firma ya estaba revocada.', 409);
 }
 
-export async function listSignatureMasters(db: SgcDb, idCompany: number) {
-  const rows = await db.sgcSignatureMaster.findMany({ where: { id_company: idCompany }, orderBy: [{ user_email: 'asc' }, { version_number: 'desc' }] });
-  const names = await db.user.findMany({ where: { email: { in: [...new Set(rows.map((r) => r.user_email))] } }, select: { email: true, name: true } });
-  const nameOf = new Map(names.map((n) => [lower(n.email), n.name]));
-  return rows.map((r) => ({
+/** Sprint 13: ¿la empresa tiene la FIRMA PROPIA encendida? (apagada por defecto; requiere el aval de Adriana Cárdenas). */
+export async function isSelfSignatureEnabled(db: Pick<SgcDb, 'sgcCompanyConfig'>, idCompany: number): Promise<boolean> {
+  const c = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { self_signature_enabled: true } });
+  return Boolean(c?.self_signature_enabled);
+}
+
+function masterView(r: Prisma.SgcSignatureMasterGetPayload<object>, nameOf: Map<string, string | null>) {
+  return {
     id: r.id_signature_master,
     email: r.user_email,
     name: nameOf.get(lower(r.user_email)) ?? null,
@@ -647,10 +667,25 @@ export async function listSignatureMasters(db: SgcDb, idCompany: number) {
     revokedAt: r.revoked_at?.toISOString() ?? null,
     revokedBy: r.revoked_by,
     revokeReason: r.revoke_reason,
-  }));
+    // Sprint 13: origen, método y validación.
+    origin: r.origin as SgcMasterOrigin,
+    captureMethod: r.capture_method as SgcCaptureMethod | null,
+    status: masterStatus(r),
+    validatedBy: r.validated_by,
+    validatedAt: r.validated_at?.toISOString() ?? null,
+  };
+}
+
+export async function listSignatureMasters(db: SgcDb, idCompany: number) {
+  const rows = await db.sgcSignatureMaster.findMany({ where: { id_company: idCompany }, orderBy: [{ user_email: 'asc' }, { version_number: 'desc' }] });
+  const names = await db.user.findMany({ where: { email: { in: [...new Set(rows.map((r) => r.user_email))] } }, select: { email: true, name: true } });
+  const nameOf = new Map(names.map((n) => [lower(n.email), n.name]));
+  return rows.map((r) => masterView(r, nameOf));
 }
 
 export async function registerSignatureMaster(db: SgcDb, idCompany: number, input: { email: unknown; imagePng: unknown; reason: unknown }, actor: SgcActor) {
+  // Sprint 13 (D10): con la firma propia encendida, Calidad ya no registra firmas de otros: solo valida o revoca.
+  if (await isSelfSignatureEnabled(db, idCompany)) throw new SgcError('Con la firma propia activa, cada persona registra la suya en «Mi firma»; Aseguramiento de Calidad solo la valida o la revoca.', 409);
   const email = lower(typeof input.email === 'string' ? input.email : '');
   if (!email.includes('@')) throw new SgcError('Indique el correo de la persona.');
   const imgError = getMasterImageError(input.imagePng);
@@ -686,4 +721,83 @@ export async function revokeSignatureMaster(db: SgcDb, idCompany: number, idMast
     await writeSgcAudit(tx, { idCompany, actorEmail: actor.email, action: SGC_AUDIT_ACTIONS.firmaMaestroRevocado, entity: 'signature_master', entityId: idMaster, before: { revoked: false }, after: { revoked: true }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });
   });
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 13 (R13): FIRMA PROPIA con validación de Calidad
+// ---------------------------------------------------------------------------
+
+async function hasSgcPermission(db: SgcDb, idCompany: number, email: string): Promise<boolean> {
+  return (
+    (await db.subprocessUserCompany.count({
+      where: { subprocess: { subprocess_url: { in: Object.values(SGC_SUBPROCESS_URLS) } }, companyUser: { company: { id_company: idCompany }, user: { email, isActive: true } } },
+    })) > 0
+  );
+}
+
+/** «Mi firma»: si la empresa la tiene encendida, la firma con la que firma hoy y la pendiente de validación. */
+export async function getMySignature(db: SgcDb, idCompany: number, email: string) {
+  const me = lower(email);
+  const enabled = await isSelfSignatureEnabled(db, idCompany);
+  const rows = await db.sgcSignatureMaster.findMany({ where: { id_company: idCompany, user_email: me }, orderBy: { version_number: 'desc' }, take: 10 });
+  const nameOf = new Map<string, string | null>();
+  const views = rows.map((r) => masterView(r, nameOf));
+  return {
+    enabled,
+    active: views.find((v) => v.status === 'validada') ?? null,
+    pending: views.find((v) => v.status === 'pendiente') ?? null,
+    history: views,
+  };
+}
+
+/**
+ * La persona registra SU firma (correo de la sesión). Queda PENDIENTE: no
+ * firma hasta que Calidad la valide; mientras tanto sigue firmando con la
+ * validada anterior (si la tiene). Una pendiente anterior se reemplaza.
+ */
+export async function registerOwnSignature(db: SgcDb, idCompany: number, raw: unknown, actor: SgcActor) {
+  const me = lower(actor.email);
+  const input = normalizeOwnSignature(raw, me);
+  if (!(await isSelfSignatureEnabled(db, idCompany))) throw new SgcError(SGC_SELF_SIGNATURE_DISABLED, 409);
+  const imgError = getMasterImageError(input.imagePng);
+  if (imgError) throw new SgcError(imgError);
+  const bytes = dataUrlToBytes(input.imagePng)!;
+  if (!signatureInkBounds(bytes)) throw new SgcError('La imagen no tiene trazo: dibuje su firma o suba una foto clara de ella.');
+  if (!(await hasSgcPermission(db, idCompany, me))) throw new SgcError('Usted no tiene permisos del SGC en esta empresa.', 403);
+  const sha = sha256HexOf(bytes);
+  const now = new Date();
+  const reason = `Firma propia registrada por su titular (${input.method === 'dibujada' ? 'dibujada' : 'imagen subida y recortada a la tinta'}).`;
+  return db.$transaction(async (tx) => {
+    const pending = await tx.sgcSignatureMaster.findMany({ where: { id_company: idCompany, user_email: me, revoked_at: null, validation_status: 'pendiente' } });
+    for (const p of pending) await revokeRow(tx, p.id_signature_master, now, me, 'Reemplazada por una nueva firma propia antes de su validación.');
+    const last = await tx.sgcSignatureMaster.findFirst({ where: { id_company: idCompany, user_email: me }, orderBy: { version_number: 'desc' } });
+    const row = await tx.sgcSignatureMaster.create({
+      data: { id_company: idCompany, user_email: me, version_number: (last?.version_number ?? 0) + 1, image_png: input.imagePng, image_sha256: sha, registered_by: me, registered_at: now, reason, origin: 'propia', capture_method: input.method, validation_status: 'pendiente' },
+    });
+    await writeSgcAudit(tx, { idCompany, actorEmail: me, action: SGC_AUDIT_ACTIONS.firmaPropiaRegistrada, entity: 'signature_master', entityId: row.id_signature_master, after: { email: me, version: row.version_number, sha256: sha, method: input.method, status: 'pendiente' }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });
+    return { id: row.id_signature_master, versionNumber: row.version_number, sha256: sha, status: 'pendiente' as const };
+  });
+}
+
+/**
+ * Calidad VALIDA una firma propia pendiente (una vez; nunca la suya). Las
+ * versiones validadas anteriores de esa persona quedan revocadas.
+ */
+export async function validateSignatureMaster(db: SgcDb, idCompany: number, idMaster: number, input: { reason?: unknown }, actor: SgcActor) {
+  const me = lower(actor.email);
+  const reason = typeof input?.reason === 'string' ? input.reason.trim().slice(0, 1000) : '';
+  if (reason.length < 5) throw new SgcError('Escriba cómo la validó (p. ej. «Comparada con la cédula en la inducción»), mínimo 5 caracteres.');
+  const row = await db.sgcSignatureMaster.findUnique({ where: { id_signature_master: idMaster } });
+  if (!row || row.id_company !== idCompany) throw new SgcError('Firma registrada no encontrada.', 404);
+  const denial = validationDenial(row, me);
+  if (denial) throw new SgcError(denial, denial.startsWith('Nadie') ? 403 : 409);
+  const now = new Date();
+  await db.$transaction(async (tx) => {
+    const n = await tx.$executeRaw`UPDATE [sgc].[signature_master] SET validation_status = N'validada', validated_by = ${me}, validated_at = ${now} WHERE id_signature_master = ${idMaster} AND validation_status = N'pendiente' AND revoked_at IS NULL`;
+    if (n !== 1) throw new SgcError('La firma ya no está pendiente de validación.', 409);
+    const older = await tx.sgcSignatureMaster.findMany({ where: { id_company: idCompany, user_email: row.user_email, revoked_at: null, validation_status: 'validada', version_number: { lt: row.version_number } } });
+    for (const o of older) await revokeRow(tx, o.id_signature_master, now, me, `Reemplazada por la versión ${row.version_number} validada.`);
+    await writeSgcAudit(tx, { idCompany, actorEmail: me, action: SGC_AUDIT_ACTIONS.firmaPropiaValidada, entity: 'signature_master', entityId: idMaster, before: { status: 'pendiente' }, after: { status: 'validada', email: row.user_email, version: row.version_number }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });
+  });
+  return { ok: true, status: 'validada' as const };
 }
