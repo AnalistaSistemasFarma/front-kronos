@@ -143,12 +143,13 @@ export function usePortalContenido(): EstadoPortal & {
 }
 
 export default function PortalContenido({
-  documentos,
   banners,
   puedeEditar = false,
   onCambioEnBanners,
   origen = 'abierto',
 }: {
+  /** Ya no se pinta (Cristian, 2026-10-08: sin tarjetas en Políticas); se
+   *  conserva en la firma para no tocar las dos páginas que lo pasan. */
   documentos: Documento[];
   banners: Banner[];
   /** Solo Talento Humano administra la cartelera. */
@@ -489,36 +490,11 @@ export default function PortalContenido({
                 VISUALIZAR
               </button>
             </div>
-            {documentos.length === 0 ? (
-              <p className='portal-th__estado'>Todavía no hay documentos publicados.</p>
-            ) : (
-              <div className='portal-th__tarjetas'>
-                {documentos.map((d) => (
-                  <button
-                    type='button'
-                    key={d.ruta}
-                    className='portal-th__tarjeta'
-                    onClick={() =>
-                      setAbierto({ titulo: d.titulo, url: archivoUrl(d.ruta), esImagen: false })
-                    }
-                    aria-label={`Ver ${d.titulo}`}
-                  >
-                    {d.portada ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={archivoUrl(d.portada)} alt='' loading='lazy' />
-                    ) : (
-                      <div className='portal-th__sinportada'>PDF</div>
-                    )}
-                    {/* Sin el peso del archivo: a quien entra a leer una política no
-                        le dice nada saber que pesa 3 MB, y llenaba el renglón de
-                        ruido. Pedido de Cristian (2026-09-09). */}
-                    <div className='portal-th__tarjeta-pie'>
-                      <strong>{d.titulo}</strong>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* Sin tarjetas: pedido de Cristian Baldión (2026-10-08). La sección
+                deja solo el título y VISUALIZAR, que lista TODOS los archivos de
+                la carpeta de SharePoint en su ventana (PoliticasVisor). Las
+                portadas que traía /api/portal/content ya no se pintan aquí; el
+                endpoint queda igual porque también entrega los anuncios. */}
           </section>
 
           {/* FORMACIÓN — solo el ACCESO. Los cursos viven en su propia página,
