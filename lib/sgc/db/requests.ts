@@ -50,6 +50,8 @@ import { getPoolMembers, getPoolTypeCodes } from './authorizations';
 import type { SgcActor, SgcDb } from './catalogs';
 import type { SgcUploader } from './documents';
 import { getCurrentFlowVersion, loadDefinition } from './flows';
+import { resolveElaboratorFor } from './elaborator';
+import { describeElaboratorChoice } from '../flows/elaborator';
 import { activateReaders, checkReadThreshold, getDisseminationView, getMyReading } from './dissemination';
 import { getTrainingView } from './training';
 import { annulUnpublishedVersion, publishApprovedVersion, type SgcPublishResult } from './vigencia';
@@ -313,6 +315,7 @@ export interface SgcCreateRequestInput {
   idDocument?: unknown;
   idProcess?: unknown;
   idDocumentType?: unknown;
+  /** IGNORADO desde el 2026-10-05: el elaborador sale de la configuración (resolveElaboratorFor). */
   elaboratorEmail?: unknown;
   formValues?: Record<string, unknown>;
 }
@@ -369,9 +372,10 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
   const requestType = input.requestType;
   const subject = text(input.subject, 'El asunto', 300, 5);
   const description = text(input.description, 'La justificación', 4000, 10);
-  const elaborator = lower(typeof input.elaboratorEmail === 'string' && input.elaboratorEmail.trim() ? input.elaboratorEmail : actor.email);
+  // 2026-10-05 (demo PiSA): el solicitante NO elige al elaborador. Si la petición trae
+  // elaboratorEmail (pantalla vieja o llamada directa a la API), se IGNORA y queda en la auditoría.
+  const ignoredElaborator = typeof input.elaboratorEmail === 'string' && input.elaboratorEmail.trim() ? lower(input.elaboratorEmail) : null;
   const eligible = new Set((await listEligibleUsers(db, idCompany)).map((u) => u.email));
-  if (!eligible.has(elaborator)) throw new SgcError(`${elaborator} no tiene permiso de gestión documental en el SGC de esta empresa.`);
 
   let idDocument: number | null = null;
   let idProcess: number | null = null;
@@ -398,20 +402,20 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
 
   const { process, version } = await getCurrentFlowVersion(db, idCompany, input.flowCode ?? SGC_DOCUMENT_FLOW_CODE);
   const def = await loadDefinition(db, version.id_flow_version);
-  // 2026-10-05: si la primera tarea es la elaboración, el elaborador es quien selecciona a los
-  // firmantes y el alcance; la solicitud no puede nacer sin nadie habilitado para hacerlo.
+  // 2026-10-05: el elaborador sale de la CONFIGURACIÓN (matriz de responsables del proceso ×
+  // tipo documental; si no define a nadie, Aseguramiento de Calidad), nunca del solicitante.
+  // Si la política exige que quien crea el documento sea de Calidad, solo cuentan los de Calidad.
   const policy = sgcAssignmentPolicy();
-  if (firstWorkTask(def)?.assignment === 'elaborador' && (policy === 'tarea' || policy === 'tarea_y_calidad')) {
-    if (elaborator === lower(actor.email)) {
-      throw new SgcError('Elija como elaborador a quien crea el documento (Aseguramiento de Calidad): quien hace la solicitud no selecciona a los revisores, los aprobadores ni la divulgación.');
-    }
-    if (policy === 'tarea_y_calidad') {
-      const quality = await db.subprocessUserCompany.count({
-        where: { subprocess: { subprocess_url: SGC_SUBPROCESS_URLS.calidad }, companyUser: { company: { id_company: idCompany }, user: { isActive: true, email: elaborator } } },
-      });
-      if (quality === 0) throw new SgcError(`${elaborator} no tiene el permiso de Aseguramiento de Calidad del SGC: el elaborador es quien selecciona a los revisores, los aprobadores y la divulgación.`);
-    }
+  const requireQuality = firstWorkTask(def)?.assignment === 'elaborador' && policy === 'tarea_y_calidad';
+  const resolved = await resolveElaboratorFor(db, idCompany, { idProcess, idDocumentType }, { requesterEmail: actor.email, eligible, requireQuality });
+  if (!resolved.choice) {
+    throw new SgcError(
+      'No hay quién elabore el documento: configure el elaborador del proceso en la matriz de responsables (Administración de flujos validados) o asigne el permiso de Aseguramiento de Calidad del SGC a otra persona distinta de quien hace la solicitud.',
+      409
+    );
   }
+  const elaborator = resolved.choice.email;
+  const elaboratorNote = describeElaboratorChoice(resolved.choice, resolved.matrixLabel);
   const requestFields = def.formFields.filter((f) => f.taskKey === null);
   for (const f of requestFields) validateFieldValue(f, input.formValues?.[f.key]);
   const notifications: SgcNotification[] = [];
@@ -443,6 +447,10 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
       data: { id_request: request.id_request, id_flow_task_def: startDef.id_flow_task_def, task_key: start.key, name: start.name, step_order: start.stepOrder, status: 'resuelta', started_at: now, ended_at: now, resolved_by: lower(actor.email), resolution: 'Solicitud registrada.' },
     });
     await addInteraction(tx, request.id_request, 'estado', actor.email, `Solicitud documental creada (${SGC_DOCUMENT_REQUEST_TYPE_LABELS[requestType]}). Flujo «${process.name}» versión ${version.version_number}.`, { idTask: startTask.id_task });
+    await addInteraction(tx, request.id_request, 'sistema', actor.email, elaboratorNote, {
+      idTask: startTask.id_task,
+      meta: { elaborator, source: resolved.choice!.source, matrix: resolved.matrixLabel, candidates: resolved.choice!.candidates, discarded: resolved.choice!.discarded },
+    });
     const next = resolveNextStep(def, start.key, 'aprobar', { requestType, requiresTraining: request.documentType?.requires_training ?? true });
     if (next.kind === 'task') await activateTask(ctx, next.task, 1);
     await writeSgcAudit(tx, {
@@ -451,7 +459,18 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
       action: SGC_AUDIT_ACTIONS.solicitudCreada,
       entity: 'request',
       entityId: request.id_request,
-      after: { requestType, subject, idDocument, idProcess, idDocumentType, elaborator, flowVersion: version.version_number },
+      after: {
+        requestType,
+        subject,
+        idDocument,
+        idProcess,
+        idDocumentType,
+        elaborator,
+        elaboratorSource: resolved.choice!.source,
+        elaboratorMatrix: resolved.matrixLabel,
+        ...(ignoredElaborator ? { elaboratorRequestedIgnored: ignoredElaborator } : {}),
+        flowVersion: version.version_number,
+      },
       ip: actor.ip,
       userAgent: actor.userAgent,
     });
@@ -972,8 +991,20 @@ export async function reassignTask(
     if (task.taskDef.multi_assignee || task.taskDef.assignment === 'calidad') throw new SgcError('En los pasos con firmantes el elaborador cambia a las personas (no se reasigna la tarea).', 409);
     const current = task.assignees.find((a) => a.status === 'pendiente');
     if (!current) throw new SgcError('La tarea no tiene un responsable pendiente.', 409);
-    const allowed = me === lower(current.user_email) || me === lower(request.requester_email) || Boolean(access?.canQuality);
-    if (!allowed) throw new SgcError('Solo el responsable actual, el solicitante o Aseguramiento de Calidad reasignan esta tarea.', 403);
+    const isElaboration = task.taskDef.assignment === 'elaborador';
+    const isRequester = me === lower(request.requester_email);
+    // 2026-10-05: la elaboración la redirige el elaborador actual o Calidad, nunca el solicitante
+    // (sería elegir al elaborador por la puerta de atrás), y nunca queda en el solicitante.
+    const allowed = isElaboration
+      ? me === lower(current.user_email) || (Boolean(access?.canQuality) && !isRequester)
+      : me === lower(current.user_email) || isRequester || Boolean(access?.canQuality);
+    if (!allowed) {
+      throw new SgcError(
+        isElaboration ? 'La elaboración la reasigna el elaborador actual o Aseguramiento de Calidad; quien hace la solicitud no elige al elaborador.' : 'Solo el responsable actual, el solicitante o Aseguramiento de Calidad reasignan esta tarea.',
+        403
+      );
+    }
+    if (isElaboration && to === lower(request.requester_email)) throw new SgcError('Quien hace la solicitud no puede quedar como elaborador de su propia solicitud.', 409);
     if (to === lower(current.user_email)) throw new SgcError('La tarea ya está asignada a esa persona.');
     const eligible = new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email));
     if (!eligible.has(to)) throw new SgcError(`${to} no tiene permiso de gestión documental en el SGC de esta empresa.`);
@@ -1317,7 +1348,12 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       assignment: tDef?.assignment ?? t.taskDef.assignment,
       role: tDef?.role ?? t.taskDef.role,
       canReturn: def.transitions.some((x) => x.from === t.task_key && x.action === 'devolver'),
-      canReassign: t.status === 'abierta' && single && isOpen && Boolean(currentAssignee) && (isRequester || isQuality || lower(currentAssignee?.user_email) === me),
+      canReassign:
+        t.status === 'abierta' &&
+        single &&
+        isOpen &&
+        Boolean(currentAssignee) &&
+        (tDef?.assignment === 'elaborador' ? (isQuality && !isRequester) || lower(currentAssignee?.user_email) === me : isRequester || isQuality || lower(currentAssignee?.user_email) === me),
       assignedLabel:
         t.taskDef.assignment === 'alcance'
           ? `Personas del alcance de divulgación (${t.assignees.filter((a) => a.status !== 'reemplazado' && a.status !== 'anulado').length})`
