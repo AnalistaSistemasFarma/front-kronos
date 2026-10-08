@@ -1332,6 +1332,12 @@ model SgcCompanyConfig {
   initial_load_closed_by    String?   @db.NVarChar(255)
   initial_load_closed_at    DateTime?
   initial_load_close_reason String?   @db.NVarChar(1000)
+  // Sprint 9: POLÍTICA DE CORREO de la empresa: nunca (por defecto: solo campana
+  // y tablero) | vencimientos (solo los avisos de vencimiento) | resumen_diario
+  // (un correo al día con los pendientes de cada persona).
+  email_mode                String    @default("nunca") @db.NVarChar(20)
+  // Día del último resumen diario enviado (evita repetirlo el mismo día).
+  email_digest_last_date    DateTime? @db.Date
 
   company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1365,6 +1371,8 @@ model SgcCompanyConfig {
 
   // Sprint 8: importaciones del listado maestro (Excel de Calidad).
   masterListImports SgcMasterListImport[]
+  // Sprint 9: cargas masivas de los PDF del listado maestro.
+  bulkUploads       SgcBulkUpload[]
 
   @@map("company_config")
   @@schema("sgc")
@@ -1520,6 +1528,8 @@ model SgcDocument {
   // Sprint 8: solicitudes de documentos que heredan su número y filas del listado maestro que lo crearon.
   childRequests      SgcRequest[]                @relation("SgcRequestParent")
   importRows         SgcMasterListImportRow[]
+  // Sprint 9: archivos de la carga masiva que se le asignaron.
+  bulkUploadItems    SgcBulkUploadItem[]
 
   @@unique([id_company, code])
   @@index([id_company, status])
@@ -2440,6 +2450,12 @@ model SgcDocumentRelation {
   removed_by           String?   @db.NVarChar(255)
   removed_at           DateTime?
   remove_reason        String?   @db.NVarChar(1000)
+  // Sprint 9: de dónde sale (manual | codigo | listado) y si Calidad ya la
+  // confirmó (propuesta | confirmada). El mapa solo muestra las confirmadas.
+  origin               String    @default("manual") @db.NVarChar(20)
+  status               String    @default("confirmada") @db.NVarChar(20)
+  confirmed_by         String?   @db.NVarChar(255)
+  confirmed_at         DateTime?
 
   companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   source        SgcDocument      @relation("SgcRelationSource", fields: [id_source_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
@@ -2688,6 +2704,52 @@ model SgcMasterListImportRow {
   @@index([id_master_list_import])
   @@index([id_document])
   @@map("master_list_import_row")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 9: CARGA MASIVA de los PDF del listado maestro. Cada
+// tanda deja su encabezado y una fila por archivo (cargado o con su error y el
+// aviso si el nombre no coincide con el del listado). SOLO INSERCIÓN.
+// ---------------------------------------------------------------------------
+model SgcBulkUpload {
+  id_bulk_upload Int      @id @default(autoincrement())
+  id_company     Int
+  files_total    Int
+  created_by     String   @db.NVarChar(255)
+  created_at     DateTime
+  ip             String?  @db.NVarChar(64)
+
+  companyConfig SgcCompanyConfig    @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  items         SgcBulkUploadItem[]
+
+  @@index([id_company, created_at])
+  @@map("bulk_upload")
+  @@schema("sgc")
+}
+
+model SgcBulkUploadItem {
+  id_bulk_upload_item Int      @id @default(autoincrement())
+  id_bulk_upload      Int
+  file_name           String   @db.NVarChar(260)
+  size_bytes          Int
+  sha256              String?  @db.Char(64)
+  code                String?  @db.NVarChar(60)
+  id_document         Int?
+  id_document_version Int?
+  // cargado | error
+  status              String   @db.NVarChar(20)
+  warning             String?  @db.NVarChar(1000)
+  error               String?  @db.NVarChar(1000)
+  created_by          String   @db.NVarChar(255)
+  created_at          DateTime
+
+  bulkUpload SgcBulkUpload @relation(fields: [id_bulk_upload], references: [id_bulk_upload], onDelete: NoAction, onUpdate: NoAction)
+  document   SgcDocument?  @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_bulk_upload])
+  @@index([id_document])
+  @@map("bulk_upload_item")
   @@schema("sgc")
 }
 

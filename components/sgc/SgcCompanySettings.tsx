@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Card, FileInput, Group, Loader, NumberInput, Stack, Text, TextInput, Textarea } from '@mantine/core';
 import { IconAlertTriangle, IconCheck, IconPhoto } from '@tabler/icons-react';
 import { sgcSend, useSgcFetch } from './useSgcFetch';
+import SgcSelect from './SgcSelect';
+import { SGC_EMAIL_MODES, SGC_EMAIL_MODE_LABELS } from '../../lib/sgc/pendings';
 
 /**
  * «Encabezado y divulgación» en Configuración del SGC (correcciones de
@@ -24,6 +26,7 @@ interface Settings {
   readThresholdPct: number;
   headerMandatory?: boolean;
   initialLoad?: { open: boolean; closedBy: string | null; closedAt: string | null; reason: string | null };
+  emailMode?: string;
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -41,6 +44,8 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
   const [domains, setDomains] = useState('');
   const [threshold, setThreshold] = useState<number | string>(90);
   const [reason, setReason] = useState('');
+  const [emailMode, setEmailMode] = useState<string>('nunca');
+  const [closeReason, setCloseReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -48,6 +53,7 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
     if (!data) return;
     setDomains((data.disseminationDomains ?? []).join(', '));
     setThreshold(data.readThresholdPct);
+    setEmailMode(data.emailMode ?? 'nunca');
   }, [data]);
 
   if (error) {
@@ -69,12 +75,28 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
     setBusy(true);
     setFeedback(null);
     try {
-      const body: Record<string, unknown> = { company: idCompany, reason, disseminationDomains: domains, readThresholdPct: Number(threshold) };
+      const body: Record<string, unknown> = { company: idCompany, reason, disseminationDomains: domains, readThresholdPct: Number(threshold), emailMode };
       if (logo) body.logoDataUrl = await fileToDataUrl(logo);
       await sgcSend('/api/sgc/company-settings', 'PUT', body);
       setFeedback({ ok: true, text: 'Configuración guardada y registrada en la auditoría.' });
       setLogo(null);
       setReason('');
+      reload();
+    } catch (e) {
+      setFeedback({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Sprint 9: cierre de la carga inicial (Calidad, con motivo; no se cierra con documentos pendientes de archivo).
+  const closeLoad = async () => {
+    setBusy(true);
+    setFeedback(null);
+    try {
+      await sgcSend('/api/sgc/company-settings/initial-load', 'POST', { company: idCompany, reason: closeReason });
+      setFeedback({ ok: true, text: 'Carga inicial cerrada: desde ahora los documentos nuevos entran por una solicitud documental.' });
+      setCloseReason('');
       reload();
     } catch (e) {
       setFeedback({ ok: false, text: e instanceof Error ? e.message : String(e) });
@@ -108,6 +130,14 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
               ? `La cerró ${data.initialLoad.closedBy ?? '—'} el ${data.initialLoad.closedAt?.slice(0, 10) ?? '—'}: ${data.initialLoad.reason ?? ''}`
               : 'Mientras la carga inicial está abierta, Calidad sube los documentos vigentes con su propio encabezado (uno a uno o desde el listado maestro en Excel).'}
           </Text>
+          {data.initialLoad?.open !== false && (
+            <Group align='flex-end' mt='xs' wrap='wrap'>
+              <TextInput label='Motivo del cierre' placeholder='Carga del listado maestro terminada y verificada' value={closeReason} onChange={(e) => setCloseReason(e.currentTarget.value)} autoComplete='off' style={{ flex: 1, minWidth: 260 }} data-testid='sgc-config-cierre-motivo' />
+              <Button color='orange' variant='light' onClick={() => void closeLoad()} loading={busy} disabled={closeReason.trim().length < 10} data-testid='sgc-config-cerrar-carga'>
+                Cerrar carga inicial
+              </Button>
+            </Group>
+          )}
         </div>
         <div>
           <Text fw={600} size='sm' mb={4}>
@@ -133,6 +163,16 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
           onChange={(e) => setDomains(e.currentTarget.value)}
           autoComplete='off'
           data-testid='sgc-config-dominios'
+        />
+        <SgcSelect
+          label='Correo del SGC'
+          description='Los avisos siempre llegan a la campana y al tablero «Mis pendientes». El correo es opcional: por defecto, ninguno.'
+          data={SGC_EMAIL_MODES.map((m) => ({ value: m, label: SGC_EMAIL_MODE_LABELS[m] }))}
+          value={emailMode}
+          onChange={(v) => setEmailMode(v ?? 'nunca')}
+          allowDeselect={false}
+          w={360}
+          data-testid='sgc-config-correo'
         />
         <NumberInput label='Umbral de aviso de avance de lectura (%)' description='Al llegar a este porcentaje de lectura se avisa una vez al creador del documento y a Calidad.' min={1} max={100} value={threshold} onChange={setThreshold} w={320} data-testid='sgc-config-umbral' />
         <Textarea label='Motivo del cambio' description='Mínimo 10 caracteres: queda en el control de cambios.' autosize minRows={2} value={reason} onChange={(e) => setReason(e.currentTarget.value)} autoComplete='off' data-testid='sgc-config-empresa-motivo' />

@@ -4,7 +4,8 @@ import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Alert, Anchor, Badge, Button, Card, FileInput, Grid, Group, Loader, NumberInput, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
 import SgcSelect from '../../../../../components/sgc/SgcSelect';
-import { IconAlertTriangle, IconCheck, IconFileSpreadsheet, IconFileTypePdf, IconFileTypeDoc, IconUpload } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCheck, IconFiles, IconFileSpreadsheet, IconFileTypePdf, IconFileTypeDoc, IconLock, IconUpload } from '@tabler/icons-react';
+import SgcBulkFilesModal from '../../../../../components/sgc/SgcBulkFilesModal';
 import SgcMasterListImportModal from '../../../../../components/sgc/SgcMasterListImportModal';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { sgcHref } from '../../../../../components/sgc/useSgcCompany';
@@ -54,6 +55,11 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
+  // Sprint 9: estado de la carga inicial (cerrada = ya no se suben vigentes sin el encabezado del sistema).
+  const settings = useSgcFetch<{ initialLoad?: { open: boolean; closedBy: string | null; closedAt: string | null; reason: string | null } }>(`/api/sgc/company-settings?company=${company.idCompany}`);
+  const closed = settings.data?.initialLoad?.open === false;
+  const pendingFiles = useSgcFetch<{ documents: { idDocument: number }[] }>(`/api/sgc/documents?company=${company.idCompany}&status=pendiente_archivo`);
   const [idParent, setIdParent] = useState<string | null>(null);
   const imports = useSgcFetch<{ imports: ImportRow[] }>(`/api/sgc/master-list?company=${company.idCompany}`);
   const parents = useSgcFetch<{ documents: { idDocument: number; code: string; title: string; status: string }[] }>(`/api/sgc/documents?company=${company.idCompany}&status=todos`);
@@ -133,6 +139,15 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
     );
   }
 
+  if (closed) {
+    return (
+      <Alert color='gray' icon={<IconLock size={18} />} title='Carga inicial cerrada' data-testid='sgc-carga-cerrada'>
+        La cerró {settings.data?.initialLoad?.closedBy ?? '—'} el {settings.data?.initialLoad?.closedAt?.slice(0, 10) ?? '—'}: {settings.data?.initialLoad?.reason}. Los documentos nuevos y las nuevas versiones entran por
+        una solicitud documental, con el encabezado institucional.
+      </Alert>
+    );
+  }
+
   return (
     <Stack gap='lg'>
       {result && (
@@ -161,9 +176,15 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
               Primero se ve la vista previa con los errores por fila.
             </Text>
           </div>
-          <Button leftSection={<IconFileSpreadsheet size={16} />} onClick={() => setImportOpen(true)} data-testid='sgc-carga-listado-abrir'>
-            Cargar listado maestro (Excel)
-          </Button>
+          <Group gap='xs'>
+            <Button leftSection={<IconFileSpreadsheet size={16} />} onClick={() => setImportOpen(true)} data-testid='sgc-carga-listado-abrir'>
+              Cargar listado maestro (Excel)
+            </Button>
+            {/* Sprint 9: los PDF de los documentos «pendientes de archivo», emparejados por su código. */}
+            <Button variant='light' leftSection={<IconFiles size={16} />} onClick={() => setFilesOpen(true)} disabled={(pendingFiles.data?.documents.length ?? 0) === 0} data-testid='sgc-carga-archivos-abrir'>
+              Cargar archivos (PDF){pendingFiles.data?.documents.length ? ` · ${pendingFiles.data.documents.length} pendientes` : ''}
+            </Button>
+          </Group>
         </Group>
         {(imports.data?.imports.length ?? 0) > 0 && (
           <Table.ScrollContainer minWidth={600}>
@@ -197,6 +218,16 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
         )}
       </Card>
 
+      <SgcBulkFilesModal
+        opened={filesOpen}
+        onClose={() => setFilesOpen(false)}
+        idCompany={company.idCompany}
+        onLoaded={() => {
+          pendingFiles.reload();
+          parents.reload();
+        }}
+      />
+
       <SgcMasterListImportModal
         opened={importOpen}
         onClose={() => setImportOpen(false)}
@@ -209,6 +240,7 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
         onLoaded={() => {
           imports.reload();
           parents.reload();
+          pendingFiles.reload();
         }}
       />
 

@@ -89,6 +89,12 @@ export const SGC_AUDIT_ACTIONS = {
   // Sprint 8: encabezado obligatorio, codificación con herencia y listado maestro.
   listadoMaestroImportado: 'listado_maestro.importado',
   documentoImportado: 'documento.importado',
+  // Sprint 9: archivos del listado, relaciones por código, cierre de la carga inicial y correo.
+  cargaMasivaArchivos: 'listado_maestro.carga_archivos',
+  relacionPropuesta: 'relacion.propuesta',
+  relacionConfirmada: 'relacion.confirmada',
+  cargaInicialCerrada: 'carga_inicial.cerrada',
+  correoResumenDiario: 'correo.resumen_diario',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];
