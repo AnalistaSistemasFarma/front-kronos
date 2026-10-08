@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { loadOrionFormBag } from '@/lib/orion/service';
 import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
 import { isOrionReviewResolution, parseOrionReviewFileId } from '@/lib/orion/signerAuthMarkers';
+import { resolveSessionUser } from '@/lib/chat/http';
 
 // Las fechas DATETIME de BD son hora Colombia leída como UTC; `submittedAt` es UTC real.
 const COLOMBIA_OFFSET_MS = 5 * 60 * 60 * 1000;
@@ -37,10 +38,17 @@ async function applyReviewSubmittedAt(pool, rows) {
 
 export async function GET(req) {
   try {
+    // El usuario sale SIEMPRE de la sesión del servidor. El parámetro `idUser` que
+    // envía el cliente se ignora: aceptarlo permitía consultar la bandeja de otra persona.
+    const sessionUser = await resolveSessionUser();
+    if (!sessionUser) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+    const idUser = sessionUser.id;
+
     const pool = await sql.connect(sqlConfig);
 
     const { searchParams } = new URL(req.url);
-    const idUser = searchParams.get('idUser');
     const id = searchParams.get('id');
     const status = searchParams.get('status');
     const company = searchParams.get('company');
@@ -48,20 +56,11 @@ export async function GET(req) {
     const date_to = searchParams.get('date_to');
     const assigned_to = searchParams.get('assigned_to');
 
-    console.log('API: idUser recibido:', idUser);
-
-    if (!idUser) {
-      console.log('API activities: No se proporcionó idUser, devolviendo error');
-      return NextResponse.json(
-        { error: 'Se requiere el parámetro idUser para filtrar actividades asignados' },
-        { status: 400 }
-      );
-    }
-
     // Enrutamiento:
     //  - Autorizaciones asignadas directamente al usuario (firma Orion por firmante):
     //    siempre visibles, sin filtrar por empresa/subprocess.
-    //  - Pool por tipo en user_types_authorization + mismo departamento + empresa accesible.
+    //  - Pool por tipo en user_types_authorization + mismo departamento + empresa accesible,
+    //    SOLO para tareas sin persona asignada: si la tarea es de alguien, solo la ve su asignado.
     let query = `
         SELECT
             trg.id as id_task_request, trg.id_request_general, trg.id_status, trg.resolution,
@@ -96,7 +95,8 @@ export async function GET(req) {
           AND (
             trg.id_assigned = @idUser
             OR (
-              c.id_company IN (
+              trg.id_assigned IS NULL
+              AND c.id_company IN (
                 SELECT cu.id_company
                 FROM company_user cu
                 INNER JOIN subprocess_user_company suc ON suc.id_company_user = cu.id_company_user
@@ -120,7 +120,6 @@ export async function GET(req) {
 
     if (status && status !== '0') {
       query += ` AND trg.id_status = @status`;
-      console.log('API activities: Agregando filtro por status:', status);
     }
 
     else if (!status) query += ` AND sc.id_status_case = 4`;
@@ -148,10 +147,6 @@ export async function GET(req) {
     const request = pool.request();
 
     request.input('idUser', sql.NVarChar, idUser);
-    
-    if (assigned_to) {
-      request.input('assignedTo', sql.NVarChar, assigned_to);
-    }
 
     if (status) {
       request.input('status', sql.Int, parseInt(status));
@@ -180,14 +175,8 @@ export async function GET(req) {
       request.input('assigned_to', sql.NVarChar, assigned_to);
     }
 
-    console.log('API activities: Ejecutando consulta:', query);
     query += ` ORDER BY trg.id DESC`;
     const result = await request.query(query);
-    console.log(
-      'API activities: Resultados obtenidos:',
-      result.recordset.length,
-      'registros'
-    );
     await applyReviewSubmittedAt(pool, result.recordset).catch((err) =>
       console.warn('API activities: no se pudo ajustar la llegada de validaciones', err)
     );
@@ -196,7 +185,7 @@ export async function GET(req) {
   } catch (err) {
     console.error('Error en el procesamiento de la solicitud:', err);
     return NextResponse.json(
-      { error: 'Error procesando la solicitud', details: err.message },
+      { error: 'Error procesando la solicitud' },
       { status: 500 }
     );
   }

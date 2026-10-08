@@ -15,7 +15,11 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['lib/**/*.test.ts'],
+    include: [
+      'lib/**/*.test.ts',
+      // `app/api/authorization/**`: rutas de Autorizaciones (sesión obligatoria, anti-IDOR).
+      'app/api/authorization/**/*.test.ts',
+    ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
 
     // -----------------------------------------------------------------------
