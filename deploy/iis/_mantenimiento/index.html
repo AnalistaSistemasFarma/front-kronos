@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<meta name="robots" content="noindex">
+<title>SynerLink se está actualizando</title>
+<!--
+  Página de mantenimiento de SynerLink. La sirve IIS directamente (sin pasar por
+  Node) cuando:
+    - existe la bandera de mantenimiento (503 planificado), o
+    - Node no responde y ARR devuelve 502/503.
+  Debe ser AUTOCONTENIDA: sin fuentes, scripts, imágenes ni hojas externas,
+  porque durante el mantenimiento todo lo demás va a la app, que está abajo.
+  Fuente en el repo: deploy/iis/_mantenimiento/index.html
+-->
+<style>
+  :root {
+    --gss-blue: #1a3c6e;
+    --gss-blue-700: #15315a;
+    --gss-blue-50: #f5f7fa;
+    --gss-ink: #0f1a2c;
+    --gss-ink-2: #38445a;
+    --gss-ink-3: #6a7689;
+    --gss-line: #d8dde6;
+    --card: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --gss-blue-50: #0f1a2c;
+      --gss-ink: #eef2f8;
+      --gss-ink-2: #c3ccda;
+      --gss-ink-3: #8e9ab0;
+      --gss-line: #2a3a55;
+      --card: #15223a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--gss-blue-50);
+    color: var(--gss-ink);
+    font-family: "Source Sans 3", "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    line-height: 1.5;
+  }
+  main {
+    width: 100%;
+    max-width: 440px;
+    background: var(--card);
+    border: 1px solid var(--gss-line);
+    border-radius: 12px;
+    padding: 32px 24px;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(15, 26, 44, .06), 0 4px 16px rgba(15, 26, 44, .06);
+  }
+  .marca {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 20px;
+    color: var(--gss-ink);
+    margin-bottom: 24px;
+  }
+  .marca svg { flex: none; }
+  h1 {
+    font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 22px;
+    line-height: 1.3;
+    margin: 0 0 8px;
+  }
+  p { margin: 0 0 8px; color: var(--gss-ink-2); }
+  .pie { margin-top: 24px; font-size: 13px; color: var(--gss-ink-3); }
+  .rueda {
+    width: 28px; height: 28px; margin: 0 auto 20px;
+    border: 3px solid var(--gss-line);
+    border-top-color: var(--gss-blue);
+    border-radius: 50%;
+    animation: girar 1.2s linear infinite;
+  }
+  @media (prefers-color-scheme: dark) { .rueda { border-top-color: #8fb0e0; } }
+  @media (prefers-reduced-motion: reduce) { .rueda { animation: none; } }
+  @keyframes girar { to { transform: rotate(360deg); } }
+  button {
+    margin-top: 16px;
+    font: inherit;
+    font-weight: 600;
+    color: #fff;
+    background: var(--gss-blue);
+    border: 0;
+    border-radius: 8px;
+    padding: 10px 20px;
+    min-height: 44px;
+    cursor: pointer;
+  }
+  button:hover { background: var(--gss-blue-700); }
+</style>
+</head>
+<body>
+<main>
+  <div class="marca" aria-label="SynerLink">
+    <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true">
+      <rect width="28" height="28" rx="7" fill="#1a3c6e"/>
+      <circle cx="10" cy="14" r="4.5" fill="none" stroke="#fff" stroke-width="2.2"/>
+      <circle cx="18" cy="14" r="4.5" fill="none" stroke="#fff" stroke-width="2.2"/>
+    </svg>
+    SynerLink
+  </div>
+  <div class="rueda" role="presentation"></div>
+  <h1>SynerLink se está actualizando</h1>
+  <p>Vuelve en unos minutos.</p>
+  <p>Estamos instalando una nueva versión. No necesitas hacer nada: esta página se recarga sola cada 30 segundos.</p>
+  <button type="button" onclick="location.reload()">Intentar de nuevo</button>
+  <div class="pie">Group Shared Services Latinoamérica</div>
+</main>
+</body>
+</html>
