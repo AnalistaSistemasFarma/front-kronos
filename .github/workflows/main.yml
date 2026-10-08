@@ -73,6 +73,20 @@ jobs:
           echo === npm install ===
           call npm install || exit /b 1
 
+      # PAGINA "SynerLink se esta actualizando" (deploy/iis/README.md). Solo el
+      # camino de cambio de esquema detiene las apps; justo antes se crea la
+      # bandera de IIS para que el publico del :8445 vea la pagina (503 +
+      # Retry-After) en vez de un 502. La quita el ultimo paso del job, y solo si
+      # GSS-Front ya responde 200. continue-on-error: la pagina es cosmetica y
+      # nunca debe frenar un pase. Los agentes (directo a :3003) no se afectan.
+      - name: (Solo si cambio el esquema) activar pagina de mantenimiento en IIS
+        if: env.SCHEMA_CHANGED == '1'
+        continue-on-error: true
+        shell: cmd
+        run: |
+          cd /d %PROJECT_DIR% || exit /b 1
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-on.ps1 -Motivo "deploy %GITHUB_SHA% (cambio de esquema)"
+
       - name: (Solo si cambio el esquema) detener apps y regenerar cliente Prisma
         if: env.SCHEMA_CHANGED == '1'
         shell: cmd
@@ -127,3 +141,22 @@ jobs:
             call pm2 reload GSS-Front || exit /b 1
           )
           call pm2 save
+
+      # Corre SIEMPRE (tambien si el job fallo) y en todo deploy, no solo en el de
+      # cambio de esquema: asi una bandera que haya quedado de un run interrumpido
+      # se limpia en el siguiente pase. maintenance-off.ps1 verifica HTTP 200 en
+      # http://localhost:3003/ (con reintentos ~2 min) ANTES de borrar la bandera:
+      #   - app arriba  -> borra la bandera (el publico vuelve a SynerLink);
+      #   - app abajo   -> la CONSERVA (la pagina es lo correcto) y sale con 1.
+      # Sin bandera termina al instante. Tras recuperar la app a mano, correr:
+      #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-off.ps1
+      - name: Quitar pagina de mantenimiento si GSS-Front responde 200
+        if: always()
+        shell: cmd
+        run: |
+          cd /d %PROJECT_DIR% || exit /b 1
+          if not exist scripts\maintenance-off.ps1 (
+            echo scripts\maintenance-off.ps1 no existe en este checkout; nada que hacer
+            exit /b 0
+          )
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-off.ps1
