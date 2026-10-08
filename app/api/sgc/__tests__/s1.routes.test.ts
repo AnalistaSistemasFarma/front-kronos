@@ -21,12 +21,15 @@ const m = vi.hoisted(() => ({
   saveCatalogEntry: vi.fn(),
   downloadVerifiedPdf: vi.fn(),
   auditCreate: vi.fn(),
+  isViewerProtected: vi.fn(),
 }));
 
 vi.mock('next-auth', () => ({ getServerSession: m.getServerSession }));
 vi.mock('../../auth/[...nextauth]/route', () => ({ authOptions: {} }));
 vi.mock('../../../../lib/prisma', () => ({ prisma: { sgcAuditLog: { create: m.auditCreate } } }));
 vi.mock('../../../../lib/sgc/access', () => ({ getSgcAccessForUser: m.getSgcAccessForUser }));
+// Sprint 11: protección del visor por empresa (marca en mosaico).
+vi.mock('../../../../lib/sgc/db/companySettings', () => ({ isViewerProtected: m.isViewerProtected }));
 vi.mock('../../../../lib/sgc/db/documents', () => ({
   getAccessSubject: m.getAccessSubject,
   listMasterDocuments: m.listMasterDocuments,
@@ -257,8 +260,13 @@ describe('Rutas del SGC · visor sin descarga ni impresión', () => {
     asUser([lectura]);
     m.getVersionForViewer.mockResolvedValue(found());
     m.downloadVerifiedPdf.mockResolvedValue(await samplePdf());
+    m.isViewerProtected.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     const res = await getFile(new Request('http://x/file', { headers: { 'x-forwarded-for': '10.9.9.9:4444' } }), params({ id: '7', versionId: '11' }));
     expect(res.status).toBe(200);
+    // Sprint 11: con la protección del visor el servidor lo indica (marca en mosaico) y el visor oculta sin foco.
+    expect(res.headers.get('x-sgc-proteccion')).toBe('1');
+    const unprotected = await getFile(new Request('http://x/file'), params({ id: '7', versionId: '11' }));
+    expect(unprotected.headers.get('x-sgc-proteccion')).toBe('0');
     expect(res.headers.get('content-type')).toBe('application/pdf');
     expect(res.headers.get('content-disposition')).toMatch(/^inline;/);
     expect(res.headers.get('cache-control')).toContain('no-store');

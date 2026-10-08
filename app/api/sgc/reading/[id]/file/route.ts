@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { isViewerProtected } from '@/lib/sgc/db/companySettings';
 import { openReadingFile } from '@/lib/sgc/db/dissemination';
 import { downloadVerifiedPdf } from '@/lib/sgc/onedrive';
 import { stampControlledCopy } from '@/lib/sgc/watermark';
@@ -23,7 +24,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     if (!id) return jsonNoStore({ error: 'Petición inválida' }, 400);
     const file = await openReadingFile(prisma, id, { email: ctx.email, access: ctx.access }, ctx.actor);
     const original = await downloadVerifiedPdf(file.itemId, file.sha256);
-    const stamped = await stampControlledCopy(original, { code: file.code, versionNumber: file.versionNumber, viewerEmail: ctx.email, at: new Date(), mode: 'consulta', state: file.state, emission: file.emission });
+    // Sprint 11: protección del visor (marca en mosaico con correo, fecha, hora e IP), configurable por empresa.
+    const protect = await isViewerProtected(prisma, file.idCompany);
+    const stamped = await stampControlledCopy(original, { code: file.code, versionNumber: file.versionNumber, viewerEmail: ctx.email, at: new Date(), mode: 'consulta', state: file.state, emission: file.emission, ...(protect ? { tiled: true, ip: ctx.actor.ip ?? null } : {}) });
     return new NextResponse(Buffer.from(stamped), {
       status: 200,
       headers: {
@@ -32,6 +35,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(`${file.code} V${file.versionNumber} - lectura.pdf`)}`,
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'SAMEORIGIN',
+        'X-Sgc-Proteccion': protect ? '1' : '0',
       },
     });
   } catch (error) {

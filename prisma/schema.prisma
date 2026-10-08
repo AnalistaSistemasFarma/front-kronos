@@ -1338,6 +1338,15 @@ model SgcCompanyConfig {
   email_mode                String    @default("nunca") @db.NVarChar(20)
   // Día del último resumen diario enviado (evita repetirlo el mismo día).
   email_digest_last_date    DateTime? @db.Date
+  // Sprint 11: COPIAS NO CONTROLADAS — tipos documentales que las admiten
+  // (códigos separados por coma; por defecto formatos FO,FR), días de
+  // vigencia por defecto y máximo.
+  uncontrolled_copy_types    String?   @default("FO,FR") @db.NVarChar(200)
+  uncontrolled_copy_days     Int       @default(30)
+  uncontrolled_copy_max_days Int       @default(90)
+  // Sprint 11: protección del VISOR (marca de agua en mosaico, ocultar sin foco
+  // y registrar «Imprimir pantalla»). Encendida por defecto; reversible.
+  viewer_protection          Boolean   @default(true)
 
   company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1373,6 +1382,8 @@ model SgcCompanyConfig {
   masterListImports SgcMasterListImport[]
   // Sprint 9: cargas masivas de los PDF del listado maestro.
   bulkUploads       SgcBulkUpload[]
+  // Sprint 11: copias no controladas.
+  uncontrolledCopies SgcUncontrolledCopyRequest[]
 
   @@map("company_config")
   @@schema("sgc")
@@ -1530,6 +1541,8 @@ model SgcDocument {
   importRows         SgcMasterListImportRow[]
   // Sprint 9: archivos de la carga masiva que se le asignaron.
   bulkUploadItems    SgcBulkUploadItem[]
+  // Sprint 11: copias no controladas solicitadas.
+  uncontrolledCopies SgcUncontrolledCopyRequest[]
 
   @@unique([id_company, code])
   @@index([id_company, status])
@@ -3041,4 +3054,60 @@ model AgentCvSummary {
   @@unique([id_agent, week_start])
   @@map("agent_cv_summary")
   @@schema("dbo")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 11: COPIAS NO CONTROLADAS. Solicitud con
+// justificación, destino y días; decide SOLO el grupo SGC-COPIA-NC (nunca el
+// jefe del área), con motivo; autorizada, se imprime (o, si es para un tercero,
+// se baja) con la marca «COPIA NO CONTROLADA» hasta su vencimiento. La
+// solicitud no se borra (trigger) y cada impresión o descarga es un EVENTO de
+// solo inserción.
+// ---------------------------------------------------------------------------
+model SgcUncontrolledCopyRequest {
+  id_copy_request     Int       @id @default(autoincrement())
+  id_company          Int
+  id_document         Int
+  id_document_version Int
+  requester_email     String    @db.NVarChar(255)
+  justification       String    @db.NVarChar(1000)
+  // interno | tercero
+  destination         String    @db.NVarChar(20)
+  destination_detail  String?   @db.NVarChar(300)
+  days_requested      Int
+  // pendiente | autorizada | rechazada | cancelada
+  status              String    @default("pendiente") @db.NVarChar(20)
+  decided_by          String?   @db.NVarChar(255)
+  decided_at          DateTime?
+  decision_reason     String?   @db.NVarChar(1000)
+  expires_at          DateTime?
+  allow_download      Boolean   @default(false)
+  created_at          DateTime
+  ip                  String?   @db.NVarChar(64)
+
+  companyConfig SgcCompanyConfig           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  document      SgcDocument                @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  events        SgcUncontrolledCopyEvent[]
+
+  @@index([id_company, status])
+  @@index([requester_email])
+  @@map("uncontrolled_copy_request")
+  @@schema("sgc")
+}
+
+model SgcUncontrolledCopyEvent {
+  id_copy_event   Int      @id @default(autoincrement())
+  id_copy_request Int
+  // impresion | descarga
+  event           String   @db.NVarChar(20)
+  actor_email     String   @db.NVarChar(255)
+  occurred_at     DateTime
+  ip              String?  @db.NVarChar(64)
+  user_agent      String?  @db.NVarChar(400)
+
+  request SgcUncontrolledCopyRequest @relation(fields: [id_copy_request], references: [id_copy_request], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_copy_request])
+  @@map("uncontrolled_copy_event")
+  @@schema("sgc")
 }

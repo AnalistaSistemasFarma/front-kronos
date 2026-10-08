@@ -11,6 +11,7 @@ import type { SgcCatalogs } from '../../../../../../lib/sgc/db/catalogs';
 import type { SgcCompanyAccess } from '../../../../../../lib/sgc/permissions';
 import type { SgcFormFieldDefinition } from '../../../../../../lib/sgc/flows/definition';
 import { inheritsParentNumber } from '../../../../../../lib/sgc/coding';
+import { SgcCopyRequestForm } from '../../../../../../components/sgc/SgcUncontrolledCopies';
 
 /**
  * Solicitud documental (paso 0 del flujo): nuevo documento, nueva versión o
@@ -36,7 +37,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
     if (typeof window === 'undefined') return { tipo: null as string | null, documento: null as string | null };
     const q = new URLSearchParams(window.location.search);
     const tipo = q.get('tipo');
-    return { tipo: tipo === 'nueva_version' || tipo === 'modificacion' ? tipo : null, documento: /^\d+$/.test(q.get('documento') ?? '') ? q.get('documento') : null };
+    return { tipo: tipo === 'nueva_version' || tipo === 'modificacion' || tipo === 'copia_no_controlada' ? tipo : null, documento: /^\d+$/.test(q.get('documento') ?? '') ? q.get('documento') : null };
   });
   const [requestType, setRequestType] = useState<string | null>(prefill.tipo ?? 'nuevo');
   const [idProcess, setIdProcess] = useState<string | null>(null);
@@ -107,7 +108,20 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         </Alert>
       )}
       <Stack>
-        <SgcSelect label='Tipo de solicitud' data={form.data?.requestTypes ?? []} value={requestType} onChange={setRequestType} allowDeselect={false} required data-testid='sgc-nueva-tipo' />
+        <SgcSelect
+          label='Tipo de solicitud'
+          data={[...(form.data?.requestTypes ?? []), { value: 'copia_no_controlada', label: 'Copia no controlada de un documento vigente' }]}
+          value={requestType}
+          onChange={setRequestType}
+          allowDeselect={false}
+          required
+          data-testid='sgc-nueva-tipo'
+        />
+        {/* Sprint 11: la copia no controlada se pide desde el mismo formulario (va a Calidad, no al flujo documental). */}
+        {requestType === 'copia_no_controlada' ? (
+          <SgcCopyRequestForm idCompany={id} initialDocument={prefill.documento} onDone={() => router.push(`/process/sgc-documental/copias?empresa=${id}`)} />
+        ) : (
+        <>
         {requestType === 'nuevo' ? (
           <Grid>
             <Grid.Col span={{ base: 12, md: 6 }}>
@@ -219,6 +233,8 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
             Crear solicitud
           </Button>
         </Group>
+        </>
+        )}
       </Stack>
     </Card>
   );

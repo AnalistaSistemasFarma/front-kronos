@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '../../../../../../../../lib/prisma';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../../../../../../../../lib/sgc/audit';
+import { isViewerProtected } from '../../../../../../../../lib/sgc/db/companySettings';
 import { getVersionForViewer } from '../../../../../../../../lib/sgc/db/documents';
 import { downloadVerifiedPdf } from '../../../../../../../../lib/sgc/onedrive';
 import { emissionStampFor, stampControlledCopy, type SgcWatermarkInfo } from '../../../../../../../../lib/sgc/watermark';
@@ -72,6 +73,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       // 2026-10-03: fecha de emisión (vigencia) en el recuadro del encabezado institucional.
       emission: emissionStampFor(found.version),
     };
+    // Sprint 11: protección del visor (marca en mosaico con correo, fecha, hora e IP), configurable por empresa.
+    const protect = await isViewerProtected(prisma, found.document.idCompany);
+    if (protect) Object.assign(info, { tiled: true, ip: ctx.actor.ip ?? null });
     const stamped = await stampControlledCopy(original, info);
 
     await writeSgcAudit(prisma, {
@@ -94,6 +98,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         'Content-Disposition': `${mode === 'descarga' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'SAMEORIGIN',
+        'X-Sgc-Proteccion': protect ? '1' : '0',
       },
     });
   } catch (error) {

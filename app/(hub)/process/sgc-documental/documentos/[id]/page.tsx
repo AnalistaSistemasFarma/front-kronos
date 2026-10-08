@@ -20,7 +20,8 @@ import {
   Title,
 } from '@mantine/core';
 import SgcSelect from '../../../../../../components/sgc/SgcSelect';
-import { IconAlertTriangle, IconArrowLeft, IconBan, IconCheck, IconEdit, IconEye, IconFilePlus, IconKey } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowLeft, IconBan, IconCheck, IconCopy,
+  IconEdit, IconEye, IconFilePlus, IconKey } from '@tabler/icons-react';
 import SgcShell from '../../../../../../components/sgc/SgcShell';
 import SgcSecureViewer from '../../../../../../components/sgc/SgcSecureViewer';
 import SgcDocumentRelations from '../../../../../../components/sgc/relations/SgcDocumentRelations';
@@ -152,6 +153,12 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
                 data-testid='sgc-ficha-nueva-version'
               >
                 Solicitar nueva versión
+              </Button>
+            )}
+            {/* Sprint 11: copia no controlada (la decide Calidad; solo los tipos que la admiten). */}
+            {d.status === 'vigente' && (
+              <Button component={Link} href={sgcHref(`${SGC_BASE_URL}/copias`, company.idCompany, { documento: String(d.idDocument) })} variant='light' color='orange' leftSection={<IconCopy size={16} />} data-testid='sgc-ficha-copia'>
+                Copia no controlada
               </Button>
             )}
             {permissions.canAdminister && d.status !== 'anulado' && (

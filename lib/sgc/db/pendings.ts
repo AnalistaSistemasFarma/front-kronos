@@ -6,6 +6,7 @@ import { formatCalendarDate } from '../review';
 import { colombiaToday } from './vigencia';
 import type { SgcDb } from './catalogs';
 import { listTaskInbox } from './requests';
+import { countCopiesToDecide } from './uncontrolledCopies';
 
 /**
  * «MIS PENDIENTES DEL SGC» (tablero de la entrada del módulo) y POLÍTICA DE
@@ -23,7 +24,8 @@ export interface SgcMyPendings {
 /** Lo que le toca HOY a la persona en el SGC de la empresa (tareas en su turno, lecturas, autorizaciones, capacitaciones). */
 export async function getMyPendings(db: SgcDb, email: string, access: SgcCompanyAccess, extra?: SgcExtraPendings): Promise<SgcMyPendings> {
   const rows = await listTaskInbox(db, email, [access], { status: 'abierta', idCompany: access.idCompany });
-  const more = extra ? await extra(db, email, access) : {};
+  // Sprint 11: por defecto se suman las copias no controladas que la persona decide (grupo SGC-COPIA-NC).
+  const more = extra ? await extra(db, email, access) : { copias: await countCopiesToDecide(db, access.idCompany, email) };
   return {
     counts: countPendings(rows, more),
     items: rows
