@@ -15,8 +15,10 @@ import {
   GraphClient,
   loadGraphConfig,
   requestFolderPath,
+  ticketFolderPath,
   type GraphFile,
 } from '../graph.js';
+import { sanitizeOneDriveName } from '../onedriveName.js';
 import { loadTeamsGraphConfig, TeamsGraphClient } from '../teams.js';
 
 interface ToolContext {
@@ -181,6 +183,50 @@ function graphFileToOutput(f: GraphFile) {
 }
 
 
+// ---------------------------------------------------------------------------
+// Límites y reglas de las tools de adjuntos y formulario dinámico.
+// ---------------------------------------------------------------------------
+
+/** Tamaño máximo (decodificado) de un adjunto subido por el MCP. */
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024; // 4 MB
+const MAX_FILE_NAME_LENGTH = 200;
+const MAX_LABEL_LENGTH = 120;
+/** type/subtype de un MIME (RFC 6838, sin parámetros). */
+const MIME_TYPE_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i;
+/** driveItem id de OneDrive/SharePoint (alfanumérico con ! . _ -). */
+const ONEDRIVE_ITEM_ID_RE = /^[A-Za-z0-9!._-]{1,200}$/;
+
+/** Misma regla de la app (lib/orion/deletePolicy.ts). */
+const DELETE_JUSTIFICATION_MIN = 10;
+const DELETE_JUSTIFICATION_MAX = 1000;
+/** Subprocesos de la doble llave de la app (lib/access-control.ts, lib/attachments/access.ts). */
+const ADMIN_USERS_SUBPROCESS_URL = '/process/administration/users';
+const DELETE_ATTACHMENTS_SUBPROCESS_URL = '/process/request-general/delete-attachments';
+const DELETE_ATTACHMENTS_SUBPROCESS_NAME = 'eliminar adjuntos';
+/** Campo del formulario que guarda el estado de firma Orion (lib/orion/fieldType.ts). */
+const ORION_SIGNATURE_FIELD_TYPE = 'orion_signature';
+
+const MAX_FORM_VALUES = 100;
+const MAX_FORM_VALUE_LENGTH = 4000;
+
+/**
+ * Decodifica base64 de forma ESTRICTA: Buffer.from(x, 'base64') ignora
+ * caracteres inválidos en silencio y subiría un archivo corrupto.
+ */
+function decodeStrictBase64(input: string): Buffer {
+  const clean = input.replace(/\s+/g, '');
+  if (clean.length === 0 || clean.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(clean)) {
+    throw new Error('contentBase64 no es base64 válido.');
+  }
+  return Buffer.from(clean, 'base64');
+}
+
+/** SQL Server 208 (Invalid object name): la tabla opcional aún no existe en esa BD. */
+function isMissingTableError(err: unknown): boolean {
+  const e = err as { message?: string; meta?: { code?: string | number } } | null;
+  return String(e?.meta?.code ?? '') === '208' || /Invalid object name/i.test(String(e?.message ?? ''));
+}
+
 export const ENTITY_METADATA = {
   requests: {
     description:
@@ -275,15 +321,15 @@ export const ENTITY_METADATA = {
 } as const;
 
 /**
- * Capacidades del servidor: 13 tools en total = 11 de LECTURA + 2 de ESCRITURA.
+ * Capacidades del servidor: 29 tools en total = 21 de LECTURA + 8 de ESCRITURA.
  *
- * Las de escritura están acotadas exclusivamente a CATEGORIZACIÓN (asignar la
- * categoría de un caso o el proceso de una solicitud), son transaccionales,
- * parametrizadas, validan alcance/coherencia y se auditan. NO debilitan el
+ * Las de escritura están acotadas (categorización, creación de solicitudes,
+ * notas, resolución de tareas, adjuntos en OneDrive y formulario dinámico),
+ * son parametrizadas, validan alcance/coherencia y se auditan. NO debilitan el
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 24,
+  totalTools: 29,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
@@ -292,6 +338,8 @@ export const TOOL_CAPABILITIES = {
     'kronos_list_request_tasks',
     'kronos_list_attachments',
     'kronos_get_attachment',
+    'kronos_get_process_fields',
+    'kronos_get_request_fields',
     'kronos_list_tickets',
     'kronos_get_ticket',
     'kronos_list_processes',
@@ -305,9 +353,18 @@ export const TOOL_CAPABILITIES = {
     'teams_list_transcripts',
     'teams_get_transcript',
   ],
-  write: ['kronos_categorize_case', 'kronos_categorize_request', 'kronos_create_request', 'kronos_add_note', 'kronos_resolve_task'],
+  write: [
+    'kronos_categorize_case',
+    'kronos_categorize_request',
+    'kronos_create_request',
+    'kronos_add_note',
+    'kronos_resolve_task',
+    'kronos_upload_attachment',
+    'kronos_delete_attachment',
+    'kronos_set_request_fields',
+  ],
   writeNote:
-    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general), creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones), notas de bitácora (kronos_add_note) y resolución de actividades del workflow (kronos_resolve_task: cierra task_request_general con id_status=2 + date_resolution/end_date + id_executor_final, respetando el gate secuencial y avanzando el flujo). Todas transaccionales, parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las tools de lectura.',
+    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general), creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones), notas de bitácora (kronos_add_note) y resolución de actividades del workflow (kronos_resolve_task: cierra task_request_general con id_status=2 + date_resolution/end_date + id_executor_final, respetando el gate secuencial y avanzando el flujo), subida de adjuntos a OneDrive (kronos_upload_attachment: carpeta SAPSEND/TEC/SG/Request-<id> o SAPSEND/TEC/MA/Ticket-<id>, sin sobrescribir archivos existentes), eliminación de adjuntos (kronos_delete_attachment: solo key admin + usuario con doble llave de la app, justificación obligatoria, rechaza documentos con flujo de firma Orion y deja nota en la bitácora) y diligenciamiento del formulario dinámico (kronos_set_request_fields: UPSERT en request_form_value, sin campos de firma Orion ni solicitudes cerradas). Todas parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las tools de lectura.',
 } as const;
 
 export function registerTools(server: McpServer, ctx: ToolContext): void {
@@ -918,6 +975,631 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           },
           rows: 1,
         };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_upload_attachment  (ESCRITURA, MS Graph) — sube un adjunto a OneDrive
+  //
+  // Recuperada del respaldo de producción (index.ts.bak-del-20260806) y
+  // endurecida. Replica el flujo del front-kronos: resuelve/crea la carpeta
+  // determinística de la solicitud (SAPSEND/TEC/SG/Request-<id>) o del ticket
+  // (SAPSEND/TEC/MA/Ticket-<id>) y sube el archivo con PUT .../content. NO
+  // escribe en la base de datos; el binario vive en OneDrive. Valida SIEMPRE el
+  // alcance de empresa antes de subir y NUNCA sobrescribe un archivo existente.
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_upload_attachment',
+    'ESCRITURA. Sube un archivo adjunto a la carpeta OneDrive de una solicitud (kind="request": SAPSEND/TEC/SG/Request-<id>) o de un ticket (kind="ticket": SAPSEND/TEC/MA/Ticket-<id>), igual que lo hace la app SynerLink. El contenido se pasa en base64 (contentBase64, máximo 4 MB decodificado; el servidor acepta cuerpos de hasta 1 MB, así que en la práctica el archivo debe pesar menos de ~700 KB). El nombre final se sanea para OneDrive y, si se envía "label", se antepone como "Etiqueta - archivo.ext". Si ya existe un archivo con ese nombre NO se sobrescribe (error). Valida SIEMPRE que la solicitud/ticket pertenezca a una empresa del alcance de la key. Devuelve file_id, name, web_url y size del archivo creado. Verifíquelo luego con kronos_list_attachments.',
+    {
+      requestId: z
+        .number()
+        .int()
+        .positive()
+        .describe('id de la solicitud (requests_general.id) cuando kind="request", o del ticket (case.id_case) cuando kind="ticket".'),
+      fileName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(MAX_FILE_NAME_LENGTH)
+        .describe('Nombre del archivo con su extensión (p.ej. "factura.pdf").'),
+      contentBase64: z.string().min(1).describe('Contenido del archivo codificado en base64.'),
+      label: z
+        .string()
+        .trim()
+        .max(MAX_LABEL_LENGTH)
+        .optional()
+        .describe('Etiqueta opcional del documento; se antepone al nombre como "Etiqueta - archivo.ext".'),
+      contentType: z
+        .string()
+        .trim()
+        .max(127)
+        .regex(MIME_TYPE_RE, 'contentType debe ser un MIME type válido (p.ej. "application/pdf").')
+        .optional()
+        .describe('MIME type del archivo (p.ej. "application/pdf"). Por defecto application/octet-stream.'),
+      kind: z
+        .enum(['request', 'ticket'])
+        .default('request')
+        .describe('"request" (solicitud general, carpeta SG) o "ticket" (caso de mesa de ayuda, carpeta MA).'),
+    },
+    async (args) =>
+      withAudit(
+        ctx,
+        'kronos_upload_attachment',
+        // El binario NO va a la bitácora de auditoría: solo su tamaño.
+        { ...args, contentBase64: `<${args.contentBase64.length} caracteres base64>` },
+        async () => {
+          const filter = effectiveCompanyFilter(ctx.scope, null);
+
+          // 1. Contenido: base64 estricto y tamaño acotado (antes de tocar nada).
+          const buffer = decodeStrictBase64(args.contentBase64);
+          if (buffer.length === 0) throw new Error('El archivo está vacío.');
+          if (buffer.length > MAX_UPLOAD_BYTES) {
+            throw new Error(`El archivo supera el máximo permitido de ${MAX_UPLOAD_BYTES} bytes.`);
+          }
+
+          // 2. Nombre final saneado para OneDrive.
+          const rawName = args.label ? `${args.label} - ${args.fileName}` : args.fileName;
+          const name = sanitizeOneDriveName(rawName);
+          if (!name) {
+            throw new Error('El nombre del archivo queda vacío tras sanearlo para OneDrive.');
+          }
+
+          const graph = getGraphClient();
+          if (!graph) {
+            throw new Error('MS Graph no está configurado en este MCP; no se puede subir el archivo a OneDrive.');
+          }
+
+          // 3. La solicitud/ticket existe y pertenece al alcance de empresa.
+          let folderPath: string;
+          if (args.kind === 'ticket') {
+            const rows = await queryReadOnly<{ id_case: number }>(Prisma.sql`
+              SELECT TOP 1 c.id_case
+              FROM [case] c
+              WHERE c.id_case = ${args.requestId} AND ${companyClause('c.company', filter)}
+            `);
+            if (!rows[0]) throw new Error('ticket inexistente o fuera de alcance');
+            folderPath = ticketFolderPath(args.requestId);
+          } else {
+            const rows = await queryReadOnly<{ id: number }>(Prisma.sql`
+              SELECT TOP 1 rg.id
+              FROM requests_general rg
+              WHERE rg.id = ${args.requestId} AND ${companyClause('rg.id_company', filter)}
+            `);
+            if (!rows[0]) throw new Error('solicitud inexistente o fuera de alcance');
+            folderPath = requestFolderPath(args.requestId);
+          }
+
+          // 4. Carpeta destino (misma convención determinística del front) y subida.
+          const lastSlash = folderPath.lastIndexOf('/');
+          const folderId = await graph.ensureFolder(
+            folderPath.slice(0, lastSlash),
+            folderPath.slice(lastSlash + 1)
+          );
+          const contentType = args.contentType || 'application/octet-stream';
+          const file = await graph.uploadFileToFolder(folderId, name, buffer, contentType);
+
+          return {
+            result: {
+              kind: args.kind,
+              id: args.requestId,
+              onedrive_folder: folderPath,
+              file_id: file.id,
+              name: file.name,
+              web_url: file.webUrl,
+              size: file.size,
+            },
+            rows: 1,
+          };
+        }
+      )
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_delete_attachment  (ESCRITURA, MS Graph + bitácora)
+  //
+  // REESCRITA (no quedó en ningún respaldo). Sigue el modelo de adjuntos de la
+  // app (POST /api/requests-general/delete-attachment →
+  // lib/orion/deleteDocument.ts), con las mismas reglas que puede cumplir un MCP
+  // sin acceso a Orion:
+  //   - Doble llave de la app sobre el usuario que actúa (actorUserId):
+  //     administrador (role admin/super_user o subproceso
+  //     /process/administration/users) Y permiso "Eliminar adjuntos"
+  //     (subproceso /process/request-general/delete-attachments). Además la API
+  //     key debe tener role "admin".
+  //   - Justificación obligatoria (10 a 1000 caracteres), igual que la app.
+  //   - El archivo debe estar en la carpeta OneDrive de la solicitud.
+  //   - Documentos con flujo de firma Orion (en el bag orion_signature, en
+  //     orion_document_index o con tareas de firma abiertas) se RECHAZAN: su
+  //     borrado exige detener Orion y conservar la hoja de vida, y eso solo lo
+  //     hace la app. Se remite al usuario a SynerLink.
+  //   - Tras borrar en OneDrive (papelera), deja la misma nota de la app en la
+  //     bitácora y el evento ELIMINADO en orion_document_event (si la tabla
+  //     existe), todo parametrizado.
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_delete_attachment',
+    'ESCRITURA. Elimina un adjunto de la carpeta OneDrive de una solicitud general (SAPSEND/TEC/SG/Request-<id>), con las mismas reglas de la app SynerLink: el usuario que actúa (actorUserId) debe ser administrador Y tener el permiso "Eliminar adjuntos"; la API key debe ser admin; la justificación es obligatoria (10 a 1000 caracteres); el file_id debe pertenecer a la carpeta de esa solicitud (use kronos_list_attachments). NO elimina documentos con flujo de firma en Orion (firmados, en firma o en borrador): esos deben eliminarse desde SynerLink. Deja una nota en la bitácora con la justificación. Valida SIEMPRE el alcance de empresa.',
+    {
+      requestId: z.number().int().positive().describe('requests_general.id de la solicitud dueña del adjunto.'),
+      fileId: z
+        .string()
+        .trim()
+        .regex(ONEDRIVE_ITEM_ID_RE, 'fileId debe ser un id de OneDrive válido (file_id de kronos_list_attachments).')
+        .describe('file_id (driveItem id) del archivo, tal como lo entrega kronos_list_attachments en "files".'),
+      justification: z
+        .string()
+        .trim()
+        .min(DELETE_JUSTIFICATION_MIN, `La justificación debe tener al menos ${DELETE_JUSTIFICATION_MIN} caracteres.`)
+        .max(DELETE_JUSTIFICATION_MAX, `La justificación no puede superar ${DELETE_JUSTIFICATION_MAX} caracteres.`)
+        .describe('Motivo de la eliminación (obligatorio). Queda en la bitácora de la solicitud.'),
+      actorUserId: z
+        .string()
+        .trim()
+        .min(1)
+        .max(255)
+        .describe('user.id de la persona que ordena la eliminación (kronos_list_users). Debe ser administrador y tener el permiso "Eliminar adjuntos".'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_delete_attachment', args, async () => {
+        // 0. Solo keys admin pueden borrar.
+        if (ctx.scope.role !== 'admin') {
+          throw new Error('Esta API key no tiene permiso para eliminar adjuntos (se requiere role "admin").');
+        }
+        const filter = effectiveCompanyFilter(ctx.scope, null);
+
+        // 1. La solicitud existe y pertenece al alcance.
+        const reqRows = await queryReadOnly<{ id: number; id_company: number }>(Prisma.sql`
+          SELECT TOP 1 rg.id, rg.id_company
+          FROM requests_general rg
+          WHERE rg.id = ${args.requestId} AND ${companyClause('rg.id_company', filter)}
+        `);
+        if (!reqRows[0]) throw new Error('solicitud inexistente o fuera de alcance');
+
+        // 2. Doble llave de la app sobre el usuario que actúa.
+        const actorRows = await queryReadOnly<{
+          id: string;
+          name: string | null;
+          email: string | null;
+          is_admin: number;
+          can_delete: number;
+        }>(Prisma.sql`
+          SELECT TOP 1 u.id, u.name, u.email,
+            CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(u.role, N'')))) IN (N'admin', N'super_user')
+                   OR EXISTS (
+                     SELECT 1 FROM subprocess_user_company suc
+                     INNER JOIN company_user cu ON cu.id_company_user = suc.id_company_user
+                     INNER JOIN subprocess s ON s.id_subprocess = suc.id_subprocess
+                     WHERE cu.id_user = u.id
+                       AND LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N'')))) = ${ADMIN_USERS_SUBPROCESS_URL}
+                   )
+                 THEN 1 ELSE 0 END AS is_admin,
+            CASE WHEN EXISTS (
+                     SELECT 1 FROM subprocess_user_company suc
+                     INNER JOIN company_user cu ON cu.id_company_user = suc.id_company_user
+                     INNER JOIN subprocess s ON s.id_subprocess = suc.id_subprocess
+                     WHERE cu.id_user = u.id
+                       AND (
+                         LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, N'')))) = ${DELETE_ATTACHMENTS_SUBPROCESS_URL}
+                         OR LOWER(LTRIM(RTRIM(ISNULL(s.subprocess, N'')))) LIKE ${'%' + DELETE_ATTACHMENTS_SUBPROCESS_NAME + '%'}
+                       )
+                   )
+                 THEN 1 ELSE 0 END AS can_delete
+          FROM [user] u
+          WHERE u.id = ${args.actorUserId} AND u.isActive = 1
+        `);
+        const actor = actorRows[0];
+        if (!actor) throw new Error('usuario que ordena la eliminación inexistente o inactivo');
+        const isAdmin = Number(actor.is_admin) === 1;
+        const canDelete = Number(actor.can_delete) === 1;
+        if (!isAdmin || !canDelete) {
+          throw new Error(
+            !isAdmin && !canDelete
+              ? 'Para eliminar documentos debe ser administrador y tener el permiso “Eliminar adjuntos”.'
+              : !isAdmin
+                ? 'Solo los administradores pueden eliminar documentos de la solicitud.'
+                : 'Le falta el permiso “Eliminar adjuntos”.'
+          );
+        }
+
+        // 3. Documentos con flujo de firma Orion: solo desde la app.
+        const orionRows = await queryReadOnly<{ in_bag: number; open_tasks: number }>(Prisma.sql`
+          SELECT
+            (SELECT COUNT(1)
+               FROM process_category_request_general pcr
+               INNER JOIN process_form_field pff ON pff.id_process_category = pcr.id_process_category
+               INNER JOIN request_form_value rfv
+                 ON rfv.id_form_field = pff.id AND rfv.id_request_general = pcr.id_request_general
+              WHERE pcr.id_request_general = ${args.requestId}
+                AND pff.field_type = ${ORION_SIGNATURE_FIELD_TYPE}
+                AND CHARINDEX(${args.fileId}, ISNULL(rfv.value_text, N'')) > 0) AS in_bag,
+            (SELECT COUNT(1)
+               FROM task_request_general trg
+              WHERE trg.id_request_general = ${args.requestId}
+                AND trg.id_status NOT IN (2, 3)
+                AND (CHARINDEX(${'[orionFile:' + args.fileId + ']'}, ISNULL(trg.resolution, N'')) > 0
+                  OR CHARINDEX(${'[orionReviewFile:' + args.fileId + ']'}, ISNULL(trg.resolution, N'')) > 0)) AS open_tasks
+        `);
+        let indexed = 0;
+        try {
+          const idx = await queryReadOnly<{ n: number }>(Prisma.sql`
+            SELECT COUNT(1) AS n FROM orion_document_index
+            WHERE id_request = ${args.requestId} AND file_id = ${args.fileId}
+          `);
+          indexed = Number(idx[0]?.n ?? 0);
+        } catch (err) {
+          if (!isMissingTableError(err)) throw err;
+        }
+        const orion = orionRows[0];
+        if (Number(orion?.in_bag ?? 0) > 0 || Number(orion?.open_tasks ?? 0) > 0 || indexed > 0) {
+          throw new Error(
+            'El documento tiene flujo de firma en Orion; elimínelo desde SynerLink (la app detiene el flujo y conserva la hoja de vida).'
+          );
+        }
+
+        // 4. El archivo pertenece EXACTAMENTE a la carpeta de esta solicitud.
+        const graph = getGraphClient();
+        if (!graph) {
+          throw new Error('MS Graph no está configurado en este MCP; no se puede eliminar el archivo de OneDrive.');
+        }
+        const folderPath = requestFolderPath(args.requestId);
+        const files = await graph.listFolderFiles(folderPath);
+        const file = files.find((f) => f.id === args.fileId);
+        if (!file) throw new Error('El documento no pertenece a esta solicitud o ya no existe.');
+
+        // 5. Borrado en OneDrive (va a la papelera del drive).
+        await graph.deleteItem(file.id);
+
+        // 6. Rastro en la bitácora (mismo texto de la app) y en la hoja de vida.
+        const actorDisplay = actor.name ? `${actor.name} (${actor.email ?? ''})` : actor.email ?? actor.id;
+        const noteText = `🗑️ Documento eliminado: ${file.name} — por ${actorDisplay} vía MCP (${ctx.scope.agent}) — Justificación: ${args.justification}`;
+        let noteId: number | null = null;
+        let traceError: string | undefined;
+        try {
+          noteId = await executeWrite(async (tx: TxClient) => {
+            const inserted = await tx.$queryRaw<{ id_note: number }[]>(Prisma.sql`
+              INSERT INTO notes (note, id_request, created_by)
+              OUTPUT INSERTED.id_note
+              VALUES (${noteText}, ${args.requestId}, ${actor.id})
+            `);
+            return inserted[0]?.id_note ?? null;
+          });
+        } catch (err) {
+          traceError = `El archivo se eliminó, pero no se pudo registrar la nota: ${(err as Error).message}`;
+        }
+        try {
+          await executeWrite(async (tx: TxClient) =>
+            tx.$executeRaw(Prisma.sql`
+              INSERT INTO orion_document_event
+                (id_request, file_id, orion_document_id, version_label, event_type, actor_email, actor_name, detail)
+              VALUES
+                (${args.requestId}, ${file.id}, ${null}, ${null}, ${'ELIMINADO'},
+                 ${(actor.email ?? '').trim().toLowerCase() || null}, ${actor.name ?? null},
+                 ${`Documento eliminado por ${actorDisplay} vía MCP (estado previo: sin flujo). Justificación: ${args.justification}`})
+            `)
+          );
+        } catch (err) {
+          // La hoja de vida es trazabilidad complementaria: no revierte el borrado.
+          if (!isMissingTableError(err)) {
+            traceError = traceError ?? `El archivo se eliminó, pero no se registró el evento en la hoja de vida: ${(err as Error).message}`;
+          }
+        }
+
+        return {
+          result: {
+            id_request: args.requestId,
+            file_id: file.id,
+            name: file.name,
+            onedrive_folder: folderPath,
+            onedrive_deleted: true,
+            id_note: noteId,
+            ...(traceError ? { warning: traceError } : {}),
+          },
+          rows: 1,
+        };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_get_process_fields  (LECTURA) — definición del formulario dinámico
+  // (recuperada del respaldo de producción)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_get_process_fields',
+    'Lectura. Devuelve la DEFINICIÓN del formulario dinámico de un proceso: los campos activos (id, field_label, field_type, required, display_order), sus opciones (para campos tipo "select", con id_request_type/id_request_subtype) y las condiciones de visibilidad (field_condition_option). Indique el proceso con "processId" (process_category.id) o deje que se resuelva a partir de una solicitud con "requestId" (tabla puente process_category_request_general). Respeta SIEMPRE el alcance de empresa. Úsela antes de kronos_set_request_fields para saber qué campos y opciones existen.',
+    {
+      processId: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe('process_category.id del proceso cuyo formulario se describe.'),
+      requestId: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe('requests_general.id; si se pasa sin processId, se resuelve el proceso de esa solicitud.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_get_process_fields', args, async () => {
+        if (args.processId === undefined && args.requestId === undefined) {
+          throw new Error('Debe indicar "processId" o "requestId".');
+        }
+        const filter = effectiveCompanyFilter(ctx.scope, null);
+
+        // Resolver el id_process_category respetando el alcance de empresa.
+        let idProcessCategory: number;
+        if (args.processId !== undefined) {
+          // Con alcance restringido, el proceso debe estar habilitado para alguna
+          // empresa del alcance (company_category_request).
+          if (filter.applyFilter) {
+            const ok = await queryReadOnly<{ ok: number }>(Prisma.sql`
+              SELECT TOP 1 1 AS ok
+              FROM process_category pc
+              INNER JOIN company_category_request ccr ON ccr.id_category_request = pc.id_category_request
+              WHERE pc.id = ${args.processId} AND ${companyClause('ccr.id_company', filter)}
+            `);
+            if (!ok[0]) return { result: null, rows: 0 };
+          }
+          idProcessCategory = args.processId;
+        } else {
+          const rows = await queryReadOnly<{ id_process_category: number | null }>(Prisma.sql`
+            SELECT TOP 1 pcrg.id_process_category
+            FROM requests_general rg
+            INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+            WHERE rg.id = ${args.requestId} AND ${companyClause('rg.id_company', filter)}
+          `);
+          const resolved = rows[0]?.id_process_category ?? null;
+          if (resolved === null) return { result: null, rows: 0 };
+          idProcessCategory = resolved;
+        }
+
+        // Campos activos del proceso.
+        const fields = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+          SELECT id, field_label, field_type, required, display_order
+          FROM process_form_field
+          WHERE active = 1 AND id_process_category = ${idProcessCategory}
+          ORDER BY ISNULL(display_order, 2147483647), id
+        `);
+        if (fields.length === 0) {
+          return { result: { id_process_category: idProcessCategory, fields: [] }, rows: 0 };
+        }
+        const fieldIds = fields.map((f) => f.id as number);
+
+        // Opciones (solo campos tipo select) y condiciones de visibilidad.
+        const options = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+          SELECT id, id_form_field, option_label, display_order, id_request_type, id_request_subtype
+          FROM process_form_field_option
+          WHERE active = 1 AND id_form_field IN (${Prisma.join(fieldIds)})
+          ORDER BY id_form_field, ISNULL(display_order, 2147483647), id
+        `);
+        const conditions = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+          SELECT id, id_form_field, id_option
+          FROM field_condition_option
+          WHERE id_form_field IN (${Prisma.join(fieldIds)})
+        `);
+
+        const optByField = new Map<number, Record<string, unknown>[]>();
+        for (const o of options) {
+          const k = o.id_form_field as number;
+          if (!optByField.has(k)) optByField.set(k, []);
+          optByField.get(k)!.push({
+            id: o.id,
+            option_label: typeof o.option_label === 'string' ? (o.option_label as string).trim() : o.option_label,
+            display_order: o.display_order,
+            id_request_type: o.id_request_type,
+            id_request_subtype: o.id_request_subtype,
+          });
+        }
+        const condByField = new Map<number, Record<string, unknown>[]>();
+        for (const c of conditions) {
+          const k = c.id_form_field as number;
+          if (!condByField.has(k)) condByField.set(k, []);
+          condByField.get(k)!.push({ id: c.id, id_option: c.id_option });
+        }
+
+        const out = fields.map((f) => ({
+          id: f.id,
+          field_label: typeof f.field_label === 'string' ? (f.field_label as string).trim() : f.field_label,
+          field_type: f.field_type,
+          required: f.required,
+          display_order: f.display_order,
+          options: optByField.get(f.id as number) ?? [],
+          conditions: condByField.get(f.id as number) ?? [],
+        }));
+
+        return { result: { id_process_category: idProcessCategory, fields: out }, rows: out.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_get_request_fields  (LECTURA) — valores diligenciados de una solicitud
+  // (recuperada del respaldo de producción)
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_get_request_fields',
+    'Lectura. Devuelve los valores YA diligenciados del formulario dinámico de una solicitud (request_form_value), con la etiqueta del campo (field_label) y, si es tipo select, la etiqueta de la opción elegida (option_label). Respeta SIEMPRE el alcance de empresa. Útil para verificar lo que dejó kronos_set_request_fields.',
+    {
+      requestId: z.number().int().positive().describe('requests_general.id de la solicitud.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_get_request_fields', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, null);
+
+        // La solicitud existe y está en el alcance.
+        const reqRows = await queryReadOnly<{ id: number }>(Prisma.sql`
+          SELECT TOP 1 rg.id
+          FROM requests_general rg
+          WHERE rg.id = ${args.requestId} AND ${companyClause('rg.id_company', filter)}
+        `);
+        if (!reqRows[0]) return { result: null, rows: 0 };
+
+        const values = await queryReadOnly<Record<string, unknown>>(Prisma.sql`
+          SELECT rfv.id, rfv.id_form_field, ff.field_label, ff.field_type,
+                 rfv.id_option, o.option_label, rfv.value_text
+          FROM request_form_value rfv
+          INNER JOIN process_form_field ff ON ff.id = rfv.id_form_field
+          LEFT JOIN process_form_field_option o ON o.id = rfv.id_option
+          WHERE rfv.id_request_general = ${args.requestId}
+          ORDER BY ISNULL(ff.display_order, 2147483647), ff.id
+        `);
+        for (const v of values) {
+          if (typeof v.field_label === 'string') v.field_label = (v.field_label as string).trim();
+          if (typeof v.option_label === 'string') v.option_label = (v.option_label as string).trim();
+        }
+        return { result: { id_request: args.requestId, values }, rows: values.length };
+      })
+  );
+
+  // ---------------------------------------------------------------------------
+  // kronos_set_request_fields  (ESCRITURA, DB) — UPSERT del formulario dinámico
+  //
+  // Recuperada del respaldo de producción y endurecida con las reglas de la app
+  // (POST /api/requests-general/update-form-values): no se edita una solicitud
+  // cerrada (status_req 2/3) y un campo ya diligenciado solo se cambia si está
+  // marcado editable=1. Además NUNCA toca campos de firma Orion
+  // (field_type orion_signature): ese estado lo gestiona solo la app.
+  // Mapeo del front-kronos: campo "select" -> id_option; el resto (texto/número/
+  // fecha/socio de negocio) -> value_text. Transaccional, parametrizado,
+  // validado por alcance y coherencia, y auditado.
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'kronos_set_request_fields',
+    'ESCRITURA. Diligencia (UPSERT) los valores del formulario dinámico de una solicitud en request_form_value. Cada valor lleva id_field (process_form_field.id) y, según el tipo del campo, id_option (campos tipo "select") o value_text (el resto: texto/número/fecha/socio de negocio). Valida que la solicitud esté en el alcance y abierta, que cada campo pertenezca al proceso de la solicitud y que cada opción pertenezca a su campo. Si ya existe valor para (solicitud, campo) lo ACTUALIZA solo si el campo es editable; si no, lo INSERTA. No permite modificar campos de firma Orion. Transaccional y auditada. Use kronos_get_process_fields para conocer los campos/opciones válidos y kronos_get_request_fields para verificar el resultado.',
+    {
+      requestId: z.number().int().positive().describe('requests_general.id de la solicitud a diligenciar.'),
+      values: z
+        .array(
+          z.object({
+            id_field: z.number().int().positive().describe('process_form_field.id del campo a diligenciar.'),
+            id_option: z
+              .number()
+              .int()
+              .positive()
+              .optional()
+              .describe('process_form_field_option.id (obligatorio en campos tipo "select").'),
+            value_text: z
+              .string()
+              .max(MAX_FORM_VALUE_LENGTH)
+              .optional()
+              .describe('Valor de texto (campos no-select: texto, número, fecha, socio de negocio).'),
+          })
+        )
+        .min(1)
+        .max(MAX_FORM_VALUES)
+        .describe('Lista de valores a diligenciar (al menos uno).'),
+    },
+    async (args) =>
+      withAudit(ctx, 'kronos_set_request_fields', args, async () => {
+        const filter = effectiveCompanyFilter(ctx.scope, null);
+        const scopeClause = companyClause('rg.id_company', filter);
+
+        const ids = args.values.map((v) => v.id_field);
+        if (new Set(ids).size !== ids.length) {
+          throw new Error('Hay campos repetidos en "values"; envíe cada id_field una sola vez.');
+        }
+
+        const result = await executeWrite(async (tx: TxClient) => {
+          // 1. La solicitud existe, está en el alcance, está abierta y tiene
+          //    proceso asignado (tabla puente, fuente autoritativa).
+          const reqRows = await tx.$queryRaw<{ id_process_category: number | null; status_req: number | null }[]>(Prisma.sql`
+            SELECT TOP 1 pcrg.id_process_category, rg.status_req
+            FROM requests_general rg
+            INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+            WHERE rg.id = ${args.requestId} AND ${scopeClause}
+          `);
+          const idProcessCategory = reqRows[0]?.id_process_category ?? null;
+          if (idProcessCategory === null) {
+            throw new Error('solicitud inexistente, fuera de alcance o sin proceso asignado');
+          }
+          const statusReq = Number(reqRows[0]?.status_req);
+          if (statusReq === 2 || statusReq === 3) {
+            throw new Error('La solicitud está cerrada; sus campos ya no se pueden editar');
+          }
+
+          // 2. Campos válidos (activos) del proceso, con su tipo y si son editables.
+          const fieldRows = await tx.$queryRaw<{ id: number; field_type: string | null; editable: number | boolean | null }[]>(Prisma.sql`
+            SELECT id, field_type, editable FROM process_form_field
+            WHERE id_process_category = ${idProcessCategory} AND active = 1
+          `);
+          const fieldInfo = new Map<number, { type: string; editable: boolean }>();
+          for (const f of fieldRows) {
+            fieldInfo.set(f.id, {
+              type: (f.field_type || '').trim(),
+              editable: f.editable === true || Number(f.editable) === 1,
+            });
+          }
+
+          // Valores ya existentes (para aplicar la regla de editable).
+          const existingRows = await tx.$queryRaw<{ id_form_field: number }[]>(Prisma.sql`
+            SELECT id_form_field FROM request_form_value
+            WHERE id_request_general = ${args.requestId} AND id_form_field IN (${Prisma.join(ids)})
+          `);
+          const existing = new Set(existingRows.map((r) => r.id_form_field));
+
+          // 3. Validar TODO antes de escribir nada.
+          const plan: { idField: number; idOption: number | null; valueText: string | null; update: boolean }[] = [];
+          for (const v of args.values) {
+            const info = fieldInfo.get(v.id_field);
+            if (info === undefined) {
+              throw new Error(`el campo ${v.id_field} no pertenece al proceso de la solicitud o no está activo`);
+            }
+            if (info.type === ORION_SIGNATURE_FIELD_TYPE) {
+              throw new Error(`el campo ${v.id_field} es de firma Orion y solo lo gestiona la app`);
+            }
+            const update = existing.has(v.id_field);
+            if (update && !info.editable) {
+              throw new Error(`el campo ${v.id_field} ya está diligenciado y no está marcado como editable durante el proceso`);
+            }
+
+            let idOption: number | null = null;
+            let valueText: string | null = null;
+            if (info.type === 'select') {
+              if (v.id_option === undefined) {
+                throw new Error(`el campo ${v.id_field} es de tipo "select" y requiere id_option`);
+              }
+              const okOpt = await tx.$queryRaw<{ ok: number }[]>(Prisma.sql`
+                SELECT TOP 1 1 AS ok FROM process_form_field_option
+                WHERE id = ${v.id_option} AND id_form_field = ${v.id_field} AND active = 1
+              `);
+              if (okOpt.length === 0) {
+                throw new Error(`la opción ${v.id_option} no pertenece al campo ${v.id_field}`);
+              }
+              idOption = v.id_option;
+            } else {
+              if (v.value_text === undefined) {
+                throw new Error(`el campo ${v.id_field} (tipo "${info.type}") requiere value_text`);
+              }
+              valueText = String(v.value_text);
+            }
+            plan.push({ idField: v.id_field, idOption, valueText, update });
+          }
+
+          // 4. UPSERT en request_form_value (clave lógica id_request_general + id_form_field).
+          let updated = 0;
+          let inserted = 0;
+          for (const p of plan) {
+            if (p.update) {
+              await tx.$executeRaw(Prisma.sql`
+                UPDATE request_form_value
+                SET id_option = ${p.idOption}, value_text = ${p.valueText}
+                WHERE id_request_general = ${args.requestId} AND id_form_field = ${p.idField}
+              `);
+              updated += 1;
+            } else {
+              await tx.$executeRaw(Prisma.sql`
+                INSERT INTO request_form_value (id_request_general, id_form_field, id_option, value_text)
+                VALUES (${args.requestId}, ${p.idField}, ${p.idOption}, ${p.valueText})
+              `);
+              inserted += 1;
+            }
+          }
+
+          return { id_request: args.requestId, id_process_category: idProcessCategory, updated, inserted };
+        });
+
+        return { result, rows: result.updated + result.inserted };
       })
   );
 
