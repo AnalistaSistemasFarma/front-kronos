@@ -65,6 +65,12 @@ jobs:
           rem paso condicional de abajo NUNCA se ejecutaba. Con la redireccion primero
           rem no hay digito adyacente al operador y el valor viaja completo.
           >>"%GITHUB_ENV%" echo SCHEMA_CHANGED=%SCHEMA_CHANGED%
+          echo === detectar cambio bajo mcp/ ===
+          git diff --quiet %OLD_HEAD% HEAD -- mcp
+          if errorlevel 1 (set "MCP_CHANGED=1") else (set "MCP_CHANGED=0")
+          echo MCP_CHANGED=%MCP_CHANGED%
+          rem Misma regla de arriba: la redireccion va DELANTE del echo.
+          >>"%GITHUB_ENV%" echo MCP_CHANGED=%MCP_CHANGED%
 
       - name: Instalar dependencias
         shell: cmd
@@ -117,3 +123,49 @@ jobs:
             call pm2 reload GSS-Front || exit /b 1
           )
           call pm2 save
+
+      # MCP de Kronos (kronos-mcp, :3020). Antes el deploy NUNCA compilaba mcp/:
+      # serve.mjs arranca desde mcp/dist (gitignored), asi que un cambio en
+      # mcp/src llegaba al disco pero el proceso seguia sirviendo el dist viejo
+      # hasta que alguien compilaba a mano. Aqui, si el push trae cambios bajo
+      # mcp/, se instala, se compila y se reinicia SOLO kronos-mcp (1 instancia;
+      # nunca all/kill). Va despues de "Levantar" para cubrir tambien el camino
+      # de cambio de esquema (que ya hizo pm2 start kronos-mcp con el dist viejo).
+      #
+      # PM2: el runner corre como DFARUNIADM\nicolas.rivera, pero el daemon real
+      # de produccion vive en el PM2_HOME de administrador (servicio 0pm2.exe,
+      # ver incidente 2026-10-06). Se fijan PM2_HOME y la ruta completa de
+      # pm2.cmd para no depender del PATH ni de que el servicio del runner haya
+      # heredado la variable de maquina. Sin --update-env: no se inyecta el
+      # entorno del runner al proceso del MCP (este lee su propio mcp\.env).
+      - name: (Solo si cambio mcp/) compilar y reiniciar kronos-mcp
+        if: env.MCP_CHANGED == '1'
+        shell: cmd
+        env:
+          PM2_HOME: C:\Users\administrador.DFARUNIADM\.pm2
+          PM2_CMD: C:\Users\administrador.DFARUNIADM\AppData\Roaming\npm\pm2.cmd
+        run: |
+          cd /d %PROJECT_DIR%\mcp || exit /b 1
+          echo === npm ci (mcp) ===
+          call npm ci --no-audit --no-fund || exit /b 1
+          echo === npm run build (mcp) ===
+          call npm run build || exit /b 1
+          echo === pm2 restart kronos-mcp ===
+          call "%PM2_CMD%" restart kronos-mcp || exit /b 1
+          rem `pm2 list` (no `describe`/`jlist`, que imprimen variables de entorno).
+          call "%PM2_CMD%" list
+
+      - name: (Solo si cambio mcp/) verificar que kronos-mcp responde
+        if: env.MCP_CHANGED == '1'
+        shell: powershell
+        run: |
+          $ok = $false
+          for ($i = 1; $i -le 12; $i++) {
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 -Uri "http://127.0.0.1:3020/health"
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch { }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $ok) { throw "kronos-mcp no respondio /health en :3020 tras el reinicio" }
+          Write-Host "kronos-mcp OK en :3020/health"
