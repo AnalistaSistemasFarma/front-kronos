@@ -1,3 +1,4 @@
+import { trainingForTask } from './training';
 import type { Prisma } from '../../../app/generated/prisma';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
 import { pickCurrentDraft, type SgcCurrentDraft } from '../draft/current';
@@ -72,7 +73,8 @@ export async function signedContentInTx(tx: Tx, idRequest: number, idTask: numbe
     return { kind: 'pdf_controlado', ref: expected.ref, name: version.pdf_file_name, sha256: version.pdf_sha256.trim() };
   }
   if (expected.kind === 'resultados_capacitacion') {
-    const training = await tx.sgcTraining.findUnique({ where: { id_task: idTask } });
+    // Sprint 10: la capacitación es de la solicitud (puede venir de la tarea del material).
+    const training = await trainingForTask(tx, idTask);
     const up = training ? await tx.sgcTrainingUpload.findFirst({ where: { id_training: training.id_training }, orderBy: { id_training_upload: 'desc' } }) : null;
     if (!up || expected.ref !== `training_upload:${up.id_training_upload}` || expected.sha256 !== up.sha256.trim()) {
       throw new SgcError('Los resultados de la capacitación cambiaron mientras firmaba: revíselos de nuevo antes de firmar.', 409);

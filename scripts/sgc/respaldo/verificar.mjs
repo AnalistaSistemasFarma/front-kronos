@@ -110,6 +110,8 @@ try {
     // Sprint 9: carga masiva de los PDF del listado.
     ['bulk_upload', 'ip'],
     ['bulk_upload_item', 'warning'],
+    // Sprint 10: recapacitaciones.
+    ['retraining', 'notes'],
   ]) {
     if (!tables.has(table)) continue;
     const tx = new sql.Transaction(pool);

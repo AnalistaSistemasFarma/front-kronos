@@ -57,7 +57,7 @@ async function sign(api: APIRequestContext, idTask: number, meaning: string, pas
 async function newRequest(api: APIRequestContext, subject: string): Promise<number> {
   const cat = await ok<{ processes: { id: number; code: string }[]; documentTypes: { id: number; code: string }[] }>(await api.get(`/api/sgc/catalogs?company=${OLP}`));
   const created = await ok<{ idRequest: number }>(
-    await api.post('/api/sgc/requests', { data: { company: OLP, requestType: 'nuevo', subject: `${subject} ${new Date().toISOString()}`, description: 'Recorrido automático de la e2e de las correcciones de Calidad (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, formValues: { urgencia: 'Normal' } } }),
+    await api.post('/api/sgc/requests', { data: { company: OLP, requestType: 'nuevo', subject: `${subject} ${new Date().toISOString()}`, description: 'Recorrido automático de la e2e de las correcciones de Calidad (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, requiresTraining: 'no', formValues: { urgencia: 'Normal' } } }),
     [201]
   );
   return created.idRequest;

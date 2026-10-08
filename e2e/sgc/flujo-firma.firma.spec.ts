@@ -91,6 +91,8 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     await page.getByTestId('sgc-nueva-asunto').fill(`E2E S3 · procedimiento firmado ${new Date().toISOString()}`);
     await page.getByTestId('sgc-nueva-justificacion').fill('Recorrido automático de la e2e del Sprint 3 (datos de prueba, firma electrónica).');
     await chooseOption(page, 'sgc-campo-urgencia', 'Normal');
+    // Sprint 10: esta e2e prueba la firma (no la capacitación): la solicitud se crea sin capacitación.
+    await chooseOption(page, 'sgc-nueva-capacitacion', 'No requiere capacitación');
     await page.getByTestId('sgc-nueva-crear').click();
     await page.waitForURL(/\/process\/sgc-documental\/solicitudes\/\d+/, { timeout: 45_000 });
     idRequest = Number(/solicitudes\/(\d+)/.exec(page.url())![1]);

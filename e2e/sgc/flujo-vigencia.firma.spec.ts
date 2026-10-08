@@ -72,7 +72,16 @@ async function throughApproval(p1: Page, p2: Page, p3: Page, idRequest: number, 
   await ok(await sign(p3.request, apr, 'aprobo', PW3));
   const res = await ok<{ controlledPdf: { status: string } }>(await sign(p2.request, apr, 'aprobo', PW2, { checklist: CHECKLIST }));
   expect(res.controlledPdf.status).toBe('generado');
+  // Sprint 10: con el flujo de capacitación previa, Calidad registra el material ANTES de la divulgación.
+  const d = await ok<{ request: { currentTaskKey: string } }>(await p1.request.get(`/api/sgc/requests/${idRequest}`));
+  if (d.request.currentTaskKey === 'preparacion_capacitacion') {
+    await ok(await p2.request.post(`/api/sgc/requests/${idRequest}/training`, { data: TRAINING }));
+    await ok(await p2.request.post(`/api/sgc/tasks/${await taskId(p2.request, idRequest, /^Preparación de la capacitación/)}/decision`, { data: { decision: 'aprobar', comment: 'Material listo (e2e).' } }));
+  }
 }
+
+/** Sprint 10: material de la capacitación de la e2e (evaluación en Microsoft Forms). */
+const TRAINING = { mode: 'mixta', title: 'Capacitación e2e del procedimiento', videoUrl: 'https://stream.example.com/e2e-s4', formsUrl: 'https://forms.office.com/r/e2e-s4', sessionDate: '2026-10-05', maxScore: 10, minScorePct: 80 };
 
 /** Lectura completa por la API: abrir el PDF desde el servidor, llegar al final y firmar «Leído». */
 async function readAndSign(page: Page, idRequest: number, password: string) {
@@ -98,7 +107,7 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     const cat = await ok<{ processes: { id: number; code: string }[]; documentTypes: { id: number; code: string }[] }>(await page.request.get(`/api/sgc/catalogs?company=${OLP}`));
     const created = await ok<{ idRequest: number }>(
       await page.request.post('/api/sgc/requests', {
-        data: { company: OLP, requestType: 'nuevo', subject: `E2E S4 · lectura y vigencia ${new Date().toISOString()}`, description: 'Recorrido automático de la e2e del Sprint 4 (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, formValues: { urgencia: 'Normal' } },
+        data: { company: OLP, requestType: 'nuevo', subject: `E2E S4 · lectura y vigencia ${new Date().toISOString()}`, description: 'Recorrido automático de la e2e del Sprint 4 (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, requiresTraining: 'si', formValues: { urgencia: 'Normal' } },
       }),
       [201]
     );
@@ -156,17 +165,21 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     await page.goto(`/process/sgc-documental/solicitudes/${idRequest}?empresa=${OLP}`);
     const card = page.getByTestId('sgc-capacitacion');
     await expect(card).toBeVisible();
-    await page.getByTestId('sgc-capacitacion-titulo').fill('Capacitación e2e del procedimiento');
-    await page.getByTestId('sgc-capacitacion-video').fill('https://stream.example.com/e2e-s4');
-    await page.getByTestId('sgc-capacitacion-forms').fill('https://forms.office.com/r/e2e-s4');
-    await page.getByTestId('sgc-capacitacion-fecha').fill('2026-10-05');
-    await page.getByTestId('sgc-capacitacion-guardar').click();
-    await expect(page.getByTestId('sgc-mensaje')).toContainText('Capacitación registrada');
+    // Sprint 10: con la capacitación previa, el material ya quedó registrado antes de la divulgación.
+    if (await page.getByTestId('sgc-capacitacion-titulo').isVisible()) {
+      await page.getByTestId('sgc-capacitacion-titulo').fill('Capacitación e2e del procedimiento');
+      await page.getByTestId('sgc-capacitacion-video').fill('https://stream.example.com/e2e-s4');
+      await page.getByTestId('sgc-capacitacion-forms').fill('https://forms.office.com/r/e2e-s4');
+      await page.getByTestId('sgc-capacitacion-fecha').fill('2026-10-05');
+      await page.getByTestId('sgc-capacitacion-guardar').click();
+      await expect(page.getByTestId('sgc-mensaje')).toContainText('Capacitación registrada');
+    }
     await expect(page.getByTestId('sgc-capacitacion-tema')).toHaveText('Capacitación e2e del procedimiento');
     const buffer = await xlsx([HEAD, [1, 'a', 'b', U1, 'QA 1', 10], [2, 'a', 'b', U2, 'QA 2', 9], [3, 'a', 'b', U3, 'QA 3', 5]]);
     await card.locator('input[type="file"]').setInputFiles({ name: 'Resultados Forms e2e.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer });
     await expect(page.getByTestId('sgc-mensaje')).toContainText('Resultados de la capacitación cargados', { timeout: 60_000 });
     await expect(page.getByTestId('sgc-capacitacion-resumen')).toContainText('2 aprobaron, 1 reprobaron');
+    // Sprint 10: un solo intento reprobado (de 2 permitidos) sigue siendo «Reprobó» (no recapacitación).
     await expect(page.getByTestId(`sgc-capacitado-${U3.toLowerCase()}`)).toContainText('Reprobó');
   });
 

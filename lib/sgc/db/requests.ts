@@ -57,6 +57,7 @@ import { guideInputOf, loadParentDocument } from './coding';
 import { inheritsParentNumber } from '../coding';
 import { activateReaders, checkReadThreshold, getDisseminationView, getMyReading } from './dissemination';
 import { getTrainingView } from './training';
+import { SGC_TRAINING_FLAG_SOURCE_LABELS, SGC_TRAINING_LOCKED_ROLES, effectiveRequiresTraining, parseTrainingChoice, trainingFlagSource } from '../training/flag';
 import { annulUnpublishedVersion, publishApprovedVersion, type SgcPublishResult } from './vigencia';
 
 /**
@@ -86,6 +87,11 @@ function text(value: unknown, label: string, max: number, min = 1): string {
   if (s.length < min) throw new SgcError(min > 1 ? `${label} es obligatorio (mínimo ${min} caracteres).` : `${label} es obligatorio.`);
   if (s.length > max) throw new SgcError(`${label} admite máximo ${max} caracteres.`);
   return s;
+}
+
+/** Sprint 10: ¿la solicitud requiere capacitación? (confirmada → sugerida → tipo documental). */
+export function requiresTrainingOf(request: { requires_training?: boolean | null; requires_training_suggested?: boolean | null; documentType?: { requires_training: boolean } | null }): boolean {
+  return effectiveRequiresTraining({ confirmed: request.requires_training, suggested: request.requires_training_suggested, typeDefault: request.documentType?.requires_training ?? true });
 }
 
 function lower(email: string | null | undefined): string {
@@ -265,7 +271,7 @@ async function notifyTurn(ctx: EngineCtx, idTask: number, taskDef: { name: strin
  */
 async function advanceAfterResolved(ctx: EngineCtx, fromKey: string, now: Date, me: string): Promise<{ next: string; published: SgcPublishResult | null }> {
   const { tx, request, def } = ctx;
-  const condition = { requestType: request.request_type, requiresTraining: request.documentType?.requires_training ?? true };
+  const condition = { requestType: request.request_type, requiresTraining: requiresTrainingOf(request) };
   const step = resolveNextStep(def, fromKey, 'aprobar', condition);
   if (step.kind === 'task') {
     await activateTask(ctx, step.task, 1);
@@ -320,6 +326,8 @@ export interface SgcCreateRequestInput {
   idDocumentType?: unknown;
   /** Sprint 8: documento padre de un formato o instructivo que hereda su número (guía de codificación). */
   idParentDocument?: unknown;
+  /** Sprint 10: SUGERENCIA del solicitante: ¿requiere capacitación? (sí, no o vacío = según el tipo). */
+  requiresTraining?: unknown;
   /** IGNORADO desde el 2026-10-05: el elaborador sale de la configuración (resolveElaboratorFor). */
   elaboratorEmail?: unknown;
   formValues?: Record<string, unknown>;
@@ -448,6 +456,7 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
         id_process_map: idProcess,
         id_document_type: idDocumentType,
         id_parent_document: idParentDocument,
+        requires_training_suggested: parseTrainingChoice(input.requiresTraining),
         requester_email: lower(actor.email),
         elaborator_email: elaborator,
         status: 'abierta',
@@ -467,7 +476,7 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
       idTask: startTask.id_task,
       meta: { elaborator, source: resolved.choice!.source, matrix: resolved.matrixLabel, candidates: resolved.choice!.candidates, discarded: resolved.choice!.discarded },
     });
-    const next = resolveNextStep(def, start.key, 'aprobar', { requestType, requiresTraining: request.documentType?.requires_training ?? true });
+    const next = resolveNextStep(def, start.key, 'aprobar', { requestType, requiresTraining: requiresTrainingOf(request) });
     if (next.kind === 'task') await activateTask(ctx, next.task, 1);
     await writeSgcAudit(tx, {
       idCompany,
@@ -597,6 +606,10 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     if (!def.transitions.some((t) => t.from === task.task_key && t.action === decision)) {
       throw new SgcError(decision === 'devolver' ? 'Esta tarea no se puede devolver.' : 'Esta tarea no tiene a dónde avanzar.', 409);
     }
+    // Sprint 10: con capacitación, la divulgación no abre sin el material (video y evaluación) registrado.
+    if (taskDef.role === 'material' && decision === 'aprobar' && !(await tx.sgcTraining.findFirst({ where: { id_request: request.id_request } }))) {
+      throw new SgcError('Registre primero el material de la capacitación (video o sesión y la evaluación en Microsoft Forms o Google Forms): la divulgación abre con él.', 409);
+    }
     const isSubmit = taskDef.assignment === 'elaborador' && decision === 'aprobar';
     if (isSubmit) await assertReadyToSubmit(tx, request, def, task.task_key);
     if (isFirstWork && decision === 'aprobar') await assertAssignmentComplete(tx, request, def, task.name);
@@ -676,7 +689,7 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     const after = task.assignees.map((a) => (a.id_task_assignee === chosen.id ? { ...toAssigneeState(a), status: (decision === 'aprobar' ? 'aprobado' : 'devuelto') as SgcAssigneeStatus } : toAssigneeState(a)));
     const outcome = taskOutcome(after);
     const ctx: EngineCtx = { tx, request, def, notifications, actor, subjectLabel: request.subject };
-    const condition = { requestType: request.request_type, requiresTraining: request.documentType?.requires_training ?? true };
+    const condition = { requestType: request.request_type, requiresTraining: requiresTrainingOf(request) };
     let next: string = task.task_key;
     let published: SgcPublishResult | null = null;
 
@@ -933,7 +946,9 @@ export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idReq
     assertCanAssignParticipants(def, await assignerOf(tx, request, def, me, access), sgcAssignmentPolicy());
     const pending = await tx.sgcRequestSigner.findMany({ where: { id_request: idRequest, ...SGC_PENDING_SUGGESTION }, orderBy: [{ step_key: 'asc' }, { sign_order: 'asc' }] });
     const pendingScope = await tx.sgcDisseminationScope.findMany({ where: { id_request: idRequest, ...SGC_PENDING_SUGGESTION } });
-    if (pending.length === 0 && pendingScope.length === 0) throw new SgcError('No hay firmantes ni alcance sugeridos por confirmar.', 409);
+    // Sprint 10: la capacitación sugerida por el solicitante se confirma junto con firmantes y alcance.
+    const pendingTraining = request.requires_training === null && typeof request.requires_training_suggested === 'boolean';
+    if (pending.length === 0 && pendingScope.length === 0 && !pendingTraining) throw new SgcError('No hay firmantes, alcance ni capacitación sugeridos por confirmar.', 409);
     const active = await tx.sgcRequestSigner.findMany({ where: { id_request: idRequest, is_active: true } });
     const eligible = new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email));
     const finalByStep = new Map<string, { email: string; stepKey: string }[]>();
@@ -960,9 +975,13 @@ export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idReq
     for (const r of pendingScope) {
       await tx.sgcDisseminationScope.update({ where: { id_scope: r.id_scope }, data: { is_active: true, change_reason: `${r.change_reason ?? ''} · confirmada por ${me}`.slice(0, 1000) } });
     }
+    if (pendingTraining) {
+      await tx.sgcRequest.update({ where: { id_request: idRequest }, data: { requires_training: request.requires_training_suggested, training_confirmed_by: me, training_confirmed_at: now } });
+    }
     const lines = [
       ...pending.map((p) => `✓ ${def.tasks.find((t) => t.key === p.step_key)?.name ?? p.step_key}: ${p.user_email} (sugerido por ${p.added_by})`),
       ...pendingScope.map((r) => `✓ Alcance: ${r.scope_key} (sugerido por ${r.added_by})`),
+      ...(pendingTraining ? [`✓ Capacitación: ${request.requires_training_suggested ? 'sí' : 'no'} (sugerida por ${request.requester_email})`] : []),
     ];
     await addInteraction(tx, idRequest, 'firmantes', me, `Confirmó la sugerencia de firmantes y alcance.\n${lines.join('\n')}`, {
       meta: { confirmed: { signers: pending.map((p) => ({ stepKey: p.step_key, email: lower(p.user_email), suggestedBy: p.added_by })), scope: pendingScope.map((r) => r.scope_key) } },
@@ -973,13 +992,13 @@ export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idReq
       action: SGC_AUDIT_ACTIONS.firmantesCambiados,
       entity: 'request',
       entityId: idRequest,
-      before: { status: 'sugerido', signers: pending.map((p) => ({ stepKey: p.step_key, email: lower(p.user_email), suggestedBy: p.added_by })), scope: pendingScope.map((r) => r.scope_key) },
+      before: { status: 'sugerido', signers: pending.map((p) => ({ stepKey: p.step_key, email: lower(p.user_email), suggestedBy: p.added_by })), scope: pendingScope.map((r) => r.scope_key), ...(pendingTraining ? { requiresTraining: request.requires_training_suggested } : {}) },
       after: { status: 'confirmado' },
       detail: 'Confirmación de la sugerencia del solicitante.',
       ip: actor.ip,
       userAgent: actor.userAgent,
     });
-    return { confirmed: pending.length, confirmedScope: pendingScope.length };
+    return { confirmed: pending.length, confirmedScope: pendingScope.length, confirmedTraining: pendingTraining };
   }, TX_OPTS);
 }
 
@@ -1062,7 +1081,7 @@ export async function cancelRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
     }
     // Sprint 4: en la divulgación y la capacitación (versión ya aprobada) solo Calidad cancela.
     const currentDef = def.tasks.find((t) => t.key === request.current_task_key);
-    const postApproval = Boolean(currentDef && (currentDef.assignment === 'alcance' || currentDef.role === 'capacitacion'));
+    const postApproval = Boolean(currentDef && (currentDef.assignment === 'alcance' || currentDef.role === 'capacitacion' || currentDef.role === 'material'));
     if (postApproval && !access?.canQuality) throw new SgcError('En la divulgación y la capacitación solo Aseguramiento de Calidad cancela la solicitud.', 403);
     const now = new Date();
     const open = await tx.sgcTask.findMany({ where: { id_request: idRequest, status: { in: ['abierta', 'sin_empezar', 'en_espera'] } }, include: { assignees: true } });
@@ -1286,7 +1305,8 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
   const canAssign = canAssignParticipants(def, assigner, sgcAssignmentPolicy());
   // Quien no selecciona pero es el solicitante (o el elaborador) SUGIERE con la misma pantalla.
   const canSuggest = !canAssign && canSuggestParticipants(assigner);
-  const hasPending = row.signers.some(isPendingSuggestion) || (await db.sgcDisseminationScope.count({ where: { id_request: row.id_request, ...SGC_PENDING_SUGGESTION } })) > 0;
+  const trainingPending = row.requires_training === null && typeof row.requires_training_suggested === 'boolean';
+  const hasPending = trainingPending || row.signers.some(isPendingSuggestion) || (await db.sgcDisseminationScope.count({ where: { id_request: row.id_request, ...SGC_PENDING_SUGGESTION } })) > 0;
   const permissions: SgcRequestPermissions = {
     canNote: !readerOnly && (row.status === 'abierta' || row.status === 'en_espera'),
     canUploadDraft: isOpen && isElaborator && inElaboration,
@@ -1444,6 +1464,23 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       documentType: row.documentType ? { id: row.documentType.id_document_type, code: row.documentType.code, name: row.documentType.name } : null,
       // Sprint 8: documento padre (hereda su número) y formatos admitidos para el borrador.
       parentDocument: row.parentDocument ? { id: row.parentDocument.id_document, code: row.parentDocument.code, title: row.parentDocument.title } : null,
+      // Sprint 10: capacitación de la solicitud (sugerida, confirmada o según el tipo documental).
+      trainingFlag: (() => {
+        const state = { confirmed: row.requires_training, suggested: row.requires_training_suggested, typeDefault: row.documentType?.requires_training ?? true };
+        const source = trainingFlagSource(state);
+        const locked = row.tasks.some((t) => SGC_TRAINING_LOCKED_ROLES.includes(t.taskDef.role));
+        return {
+          effective: effectiveRequiresTraining(state),
+          source,
+          sourceLabel: SGC_TRAINING_FLAG_SOURCE_LABELS[source],
+          suggested: row.requires_training_suggested,
+          confirmed: row.requires_training,
+          typeDefault: row.documentType?.requires_training ?? true,
+          confirmedBy: nameOf(row.training_confirmed_by),
+          confirmedAt: row.training_confirmed_at?.toISOString() ?? null,
+          canChange: isOpen && canAssign && !locked,
+        };
+      })(),
       draftFormats: row.companyConfig.header_mandatory ? ['docx', 'doc'] : ['docx', 'doc', 'pdf'],
     },
     focusTaskId: focusTaskId ?? null,
@@ -1826,4 +1863,42 @@ export async function getRequestForm(db: SgcDb, idCompany: number, flowCode = SG
     fields: def.formFields.filter((f) => f.taskKey === null),
     steps: def.tasks.map((t) => ({ key: t.key, name: t.name, stepOrder: t.stepOrder, isEnabled: t.isEnabled, signature: t.signatureMeaning })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 10 — capacitación opcional por solicitud (la confirma quien crea el documento o Calidad)
+// ---------------------------------------------------------------------------
+
+export async function setTrainingFlag(db: SgcDb, idRequest: number, input: { requiresTraining?: unknown; reason?: unknown }, actor: SgcActor, access: SgcCompanyAccess | null) {
+  const me = lower(actor.email);
+  const value = parseTrainingChoice(input.requiresTraining);
+  if (value === null) throw new SgcError('Indique si la solicitud requiere capacitación (sí o no).');
+  return db.$transaction(async (tx) => {
+    const request = await lockRequest(tx, idRequest);
+    if (request.status !== 'abierta') throw new SgcError('La solicitud no está abierta.', 409);
+    const def = await loadDefinition(tx, request.id_flow_version);
+    if (!canAssignParticipants(def, await assignerOf(tx, request, def, me, access), sgcAssignmentPolicy())) {
+      throw new SgcError('La capacitación la SUGIERE el solicitante y la CONFIRMA quien crea el documento o Aseguramiento de Calidad.', 403);
+    }
+    const started = await tx.sgcTask.findFirst({ where: { id_request: idRequest, taskDef: { role: { in: [...SGC_TRAINING_LOCKED_ROLES] } } } });
+    if (started) throw new SgcError('La capacitación ya no se cambia: empezó la preparación del material, la divulgación o la capacitación.', 409);
+    const reason = typeof input.reason === 'string' ? input.reason.trim().slice(0, 1000) : '';
+    const now = new Date();
+    const before = { confirmed: request.requires_training, suggested: request.requires_training_suggested };
+    await tx.sgcRequest.update({ where: { id_request: idRequest }, data: { requires_training: value, training_confirmed_by: me, training_confirmed_at: now } });
+    await addInteraction(tx, idRequest, 'estado', me, `Confirmó que la solicitud ${value ? 'SÍ' : 'NO'} requiere capacitación.${typeof request.requires_training_suggested === 'boolean' ? ` (El solicitante sugirió: ${request.requires_training_suggested ? 'sí' : 'no'}.)` : ''}${reason ? `\nMotivo: ${reason}` : ''}`);
+    await writeSgcAudit(tx, {
+      idCompany: request.id_company,
+      actorEmail: me,
+      action: SGC_AUDIT_ACTIONS.capacitacionBandera,
+      entity: 'request',
+      entityId: idRequest,
+      before,
+      after: { confirmed: value },
+      detail: reason || null,
+      ip: actor.ip,
+      userAgent: actor.userAgent,
+    });
+    return { requiresTraining: value };
+  }, TX_OPTS);
 }

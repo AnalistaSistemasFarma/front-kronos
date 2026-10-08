@@ -1890,6 +1890,13 @@ model SgcRequest {
   controlled_pdf_error  String?   @db.NVarChar(1000)
   // Sprint 8: documento padre del que hereda el número (formato o instructivo de un procedimiento).
   id_parent_document    Int?
+  // Sprint 10: ¿requiere capacitación? La SUGIERE el solicitante y la CONFIRMA
+  // quien crea el documento o Calidad. NULL = sin sugerir / sin confirmar
+  // (manda la sugerencia y, si no hay, el tipo documental).
+  requires_training_suggested Boolean?
+  requires_training           Boolean?
+  training_confirmed_by       String?   @db.NVarChar(255)
+  training_confirmed_at       DateTime?
 
   companyConfig  SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   process        SgcFlowProcess     @relation(fields: [id_flow_process], references: [id_flow_process], onDelete: NoAction, onUpdate: NoAction)
@@ -1914,6 +1921,8 @@ model SgcRequest {
   // Correcciones 2026-10-03: composición del documento (firmas ubicadas) y avisos de umbral de lectura.
   documentLayouts      SgcDocumentLayout[]
   readThresholdNotices SgcReadThresholdNotice[]
+  // Sprint 10: recapacitaciones de quienes no aprobaron en los intentos permitidos.
+  retrainings          SgcRetraining[]
 
   @@index([id_company, status])
   @@index([requester_email])
@@ -2374,10 +2383,14 @@ model SgcTraining {
   registered_at DateTime
   updated_by    String    @db.NVarChar(255)
   updated_at    DateTime
+  // Sprint 10: proveedor de la evaluación (microsoft | google) y máximo de intentos que cuentan.
+  evaluation_provider String? @db.NVarChar(20)
+  max_attempts        Int     @default(2)
 
-  request SgcRequest          @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
-  task    SgcTask             @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
-  uploads SgcTrainingUpload[]
+  request     SgcRequest          @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+  task        SgcTask             @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
+  uploads     SgcTrainingUpload[]
+  retrainings SgcRetraining[]
 
   @@index([id_request])
   @@map("training")
@@ -2427,11 +2440,40 @@ model SgcTrainingResult {
   attempts           Int
   in_scope           Boolean
   completed_at_text  String? @db.NVarChar(40)
+  // Sprint 10: intento que cuenta, intentos de más (no cuentan) y si queda en recapacitación.
+  attempt_number      Int?
+  extra_attempts      Int     @default(0)
+  retraining_required Boolean @default(false)
 
   upload SgcTrainingUpload @relation(fields: [id_training_upload], references: [id_training_upload], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([id_training_upload])
   @@map("training_result")
+  @@schema("sgc")
+}
+
+// Sprint 10: RECAPACITACIÓN (presencial o virtual) de quien no aprobó la
+// evaluación en los intentos permitidos. La registra Calidad. SOLO INSERCIÓN.
+model SgcRetraining {
+  id_retraining Int      @id @default(autoincrement())
+  id_request    Int
+  id_training   Int
+  user_email    String   @db.NVarChar(255)
+  // presencial | virtual
+  mode          String   @db.NVarChar(20)
+  session_date  DateTime @db.Date
+  // asistio | aprobo | reprobo
+  result        String   @db.NVarChar(20)
+  notes         String?  @db.NVarChar(1000)
+  registered_by String   @db.NVarChar(255)
+  registered_at DateTime
+
+  request  SgcRequest  @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+  training SgcTraining @relation(fields: [id_training], references: [id_training], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_request])
+  @@index([user_email])
+  @@map("retraining")
   @@schema("sgc")
 }
 
