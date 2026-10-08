@@ -29,6 +29,7 @@ import {
   starterDefinition,
   updateFlowProcess,
 } from '../../../lib/sgc/db/flows';
+import { addCargoMember } from '../../../lib/sgc/db/cargoMembers';
 import { addMatrixEntry, deactivateMatrixEntry, listMatrix, suggestForTarget } from '../../../lib/sgc/db/matrix';
 import {
   addNote,
@@ -761,5 +762,49 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     expect((await getRequestDetail(prisma, fresh.idRequest, await viewer(E.elab))).formFields.map((f) => f.key)).not.toContain('urgencia');
     const form = await getRequestForm(prisma, CO);
     expect(form.flow.version).toBe(2);
+  });
+
+  it('[SGC-REQ-034] 2026-10-05: el elaborador sale de la matriz (fila por persona o por cargo, la más específica) y, si la matriz no define a nadie, de Aseguramiento de Calidad (el de menor carga)', async () => {
+    const solAccess = await accessOf(E.sol);
+    const cat = await getCatalogs(prisma, CO);
+    const otherType = cat.documentTypes.find((t) => t.code !== 'PR')!.id;
+    const req = (subject: string) =>
+      createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'nuevo', subject, description: 'Solicitud para probar de dónde sale el elaborador.', idProcess: procGC, idDocumentType: otherType, formValues: {} }, actor(E.sol));
+    // Sin fila para proceso GC × otro tipo: respaldo Calidad, nunca el solicitante; gana quien tiene menos solicitudes abiertas.
+    const a = await req('Elaborador por respaldo de Calidad');
+    const ra = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: a.idRequest } });
+    expect([E.cal, E.elab2]).toContain(ra.elaborator_email);
+    const auditA = await prisma.sgcAuditLog.findFirstOrThrow({ where: { action: 'solicitud.creada', entity_id: String(a.idRequest) } });
+    expect(JSON.parse(auditA.after_json!)).toMatchObject({ elaboratorSource: 'calidad', elaboratorMatrix: null });
+    expect((await prisma.sgcInteraction.findFirstOrThrow({ where: { id_request: a.idRequest, kind: 'sistema' } })).body).toContain('por respaldo: Aseguramiento de Calidad');
+    // Fila por CARGO para el proceso GC (cualquier tipo): elabora quien Calidad registró en ese cargo.
+    const cargoName = `ELABORADOR GC S2 CI ${Date.now()}`;
+    const idCargo = (await prisma.cargo.create({ data: { nombre_normalizado: cargoName } })).id_cargo;
+    await addCargoMember(prisma, CO, { idCargo, email: E.elab2, reason: 'Elaborador del proceso GC' }, actor(E.cal));
+    await addMatrixEntry(prisma, CO, { role: 'elaborador', idProcess: procGC, cargoName, reason: 'Elabora el cargo del proceso GC' }, actor(E.cal));
+    const b = await req('Elaborador por cargo de la matriz');
+    expect((await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: b.idRequest } })).elaborator_email).toBe(E.elab2);
+    const auditB = await prisma.sgcAuditLog.findFirstOrThrow({ where: { action: 'solicitud.creada', entity_id: String(b.idRequest) } });
+    expect(JSON.parse(auditB.after_json!)).toMatchObject({ elaborator: E.elab2, elaboratorSource: 'matriz', elaboratorMatrix: 'proceso GC' });
+    // La fila más específica (GC × PR, por persona) sigue mandando para su tipo.
+    const c = await createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'nuevo', subject: 'Elaborador por fila específica', description: 'La fila proceso × tipo gana a la del proceso.', idProcess: procGC, idDocumentType: typePR, formValues: {} }, actor(E.sol));
+    const auditC = await prisma.sgcAuditLog.findFirstOrThrow({ where: { action: 'solicitud.creada', entity_id: String(c.idRequest) } });
+    expect(JSON.parse(auditC.after_json!)).toMatchObject({ elaborator: E.elab, elaboratorSource: 'matriz', elaboratorMatrix: 'proceso GC × tipo PR' });
+    // Otro proceso: una fila por TIPO documental (sin proceso) y, si tampoco aplica, la fila general de la empresa.
+    const otherProc = cat.processes.find((p) => p.code !== 'GC')!;
+    const otherTypeCode = cat.documentTypes.find((t) => t.id === otherType)!.code;
+    await addMatrixEntry(prisma, CO, { role: 'elaborador', idDocumentType: otherType, userEmail: E.elab2, reason: 'Elabora ese tipo en cualquier proceso' }, actor(E.cal));
+    const d = await createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'nuevo', subject: 'Elaborador por tipo documental', description: 'Fila de la matriz solo por tipo documental.', idProcess: otherProc.id, idDocumentType: otherType, formValues: {} }, actor(E.sol));
+    const auditD = await prisma.sgcAuditLog.findFirstOrThrow({ where: { action: 'solicitud.creada', entity_id: String(d.idRequest) } });
+    expect(JSON.parse(auditD.after_json!)).toMatchObject({ elaborator: E.elab2, elaboratorSource: 'matriz', elaboratorMatrix: `tipo ${otherTypeCode}` });
+    await addMatrixEntry(prisma, CO, { role: 'elaborador', userEmail: E.elab, reason: 'Elaborador general de la empresa' }, actor(E.cal));
+    const e = await createRequest(prisma, notifier, solAccess, { idCompany: CO, requestType: 'nuevo', subject: 'Elaborador por fila general', description: 'Fila general de la matriz (sin proceso ni tipo).', idProcess: otherProc.id, idDocumentType: typePR, formValues: {} }, actor(E.sol));
+    const auditE = await prisma.sgcAuditLog.findFirstOrThrow({ where: { action: 'solicitud.creada', entity_id: String(e.idRequest) } });
+    expect(JSON.parse(auditE.after_json!)).toMatchObject({ elaborator: E.elab, elaboratorSource: 'matriz', elaboratorMatrix: 'general de la empresa' });
+    // Calidad (sin ser el elaborador ni el solicitante) también reasigna la elaboración.
+    await reassignTask(prisma, notifier, await accessOf(E.cal), (await taskOf(e.idRequest, 'elaboracion')).id_task, { toEmail: E.elab2, reason: 'Calidad redistribuye la carga' }, actor(E.cal));
+    expect((await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: e.idRequest } })).elaborator_email).toBe(E.elab2);
+    const calAccess = await accessOf(E.cal);
+    for (const id of [a.idRequest, b.idRequest, c.idRequest, d.idRequest, e.idRequest]) await cancelRequest(prisma, notifier, calAccess, id, { reason: 'Fin de la prueba del elaborador' }, actor(E.cal));
   });
 });
