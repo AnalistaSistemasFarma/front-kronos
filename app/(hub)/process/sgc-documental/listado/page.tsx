@@ -220,7 +220,7 @@ export default function ListadoMaestroPage() {
             Por área
           </Button>
           <Button component={Link} href={sgcHref(`${SGC_BASE_URL}/mapa`, company.idCompany)} variant='light' leftSection={<IconHierarchy2 size={16} />}>
-            Mapa de procesos
+            Mapa de documentos
           </Button>
           {company.canQuality && (
             <Button component={Link} href={sgcHref(`${SGC_BASE_URL}/carga`, company.idCompany)} leftSection={<IconFileUpload size={16} />}>

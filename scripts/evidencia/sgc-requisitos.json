@@ -15,7 +15,7 @@
   "SGC-REQ-013": { "sprint": "S1", "descripcion": "Guía de codificación configurable por empresa (prefijo OLP, estilo Farmalógica) y código único por empresa, con consecutivo automático o código existente." },
   "SGC-REQ-014": { "sprint": "S1", "descripcion": "Carga administrativa inicial de documentos vigentes solo por Calidad: PDF controlado (y Word fuente opcional) en la carpeta propia SGC/<EMPRESA>/<TIPO>/<CODIGO>/v<n>, con huella SHA-256." },
   "SGC-REQ-015": { "sprint": "S1", "descripcion": "Listado maestro de vigentes con buscador por código o título y filtros por tipo de proceso, proceso y tipo documental; código y versión siempre visibles." },
-  "SGC-REQ-016": { "sprint": "S1", "descripcion": "Mapa de procesos en cascada: tipo de proceso → proceso → carpeta por tipo documental → documento." },
+  "SGC-REQ-016": { "sprint": "S1", "descripcion": "Mapa de documentos (antes «Mapa de procesos», S7) en cascada: tipo de proceso → proceso → carpeta por tipo documental → documento." },
   "SGC-REQ-017": { "sprint": "S1", "descripcion": "Visor en línea sin descarga ni impresión, con marca de agua de copia controlada (usuario y fecha) y verificación de integridad; descarga/impresión solo con permiso excepcional con vencimiento." },
   "SGC-REQ-018": { "sprint": "S1", "descripcion": "Permisos por departamento y confidencialidad (pública interna, por departamento, confidencial); quien no es de Calidad solo ve vigentes." },
   "SGC-REQ-019": { "sprint": "S1", "descripcion": "Cada consulta, descarga, impresión, intento denegado y cambio queda en la auditoría con quién, qué, cuándo y desde dónde (IP sin puerto)." },

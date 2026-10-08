@@ -60,7 +60,7 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
       href: sgcHref(`${SGC_BASE_URL}/areas`, id),
     },
     {
-      title: 'Mapa de procesos',
+      title: 'Mapa de documentos',
       description: 'Tipo de proceso → proceso → tipo documental → documento.',
       icon: <IconHierarchy2 size={24} />,
       sprint: 'Sprint 1',
