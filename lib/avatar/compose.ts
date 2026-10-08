@@ -175,6 +175,92 @@ const HALO =
   '<feComposite in="blanco" in2="borde" operator="in" result="halo"/>' +
   '<feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
 
+/**
+ * ESTILO "A LÁPIZ" (prototipo, 2026-10-08). Mismos dibujos (Noto CC0 y
+ * propios); solo cambia CÓMO se traza, con un filtro SVG dentro del mismo
+ * filtro del halo (un solo paso de filtro por avatar):
+ *   1. Temblor lento (turbulencia de baja frecuencia): la línea se ondula como
+ *      hecha a pulso.
+ *   2. Temblor medio: los dos bordes del trazo se mueven distinto, así que el
+ *      GROSOR varía a lo largo de la línea (tinta/lápiz, no plumón parejo).
+ *   3. Desenfoque mínimo + contraste: feDisplacementMap muestrea sin
+ *      interpolar y deja bordes dentados; esto los vuelve orgánicos.
+ *   4. (solo 'grafito') Grano: motas blancas muy escasas SOLO dentro de lo
+ *      negro, como un relleno de grafito.
+ * Todo va en unidades del lienzo (300), así que a 40 o 28 px el efecto se
+ * reduce en proporción y no ensucia la miniatura del chat.
+ *
+ * DETERMINISTA: la semilla de la turbulencia sale de la configuración (hash
+ * FNV-1a), así que el mismo avatar se ve igual en el servidor, en el editor y
+ * en cada recarga; dos avatares distintos tiemblan distinto.
+ *
+ * Blanco y negro: el SVG sigue declarando solo #000 y #fff. Los grises que
+ * aparecen al rasterizar (antialias del borde y, en 'grafito', el promedio
+ * del grano a tamaño pequeño) son del dibujado, no colores del catálogo.
+ */
+export type AvatarStyle = 'plano' | 'lapiz' | 'grafito';
+export const AVATAR_STYLES: readonly AvatarStyle[] = ['plano', 'lapiz', 'grafito'];
+
+interface ParamsLapiz {
+  /** Factor sobre el grosor de trazo del catálogo. */
+  grosor: number;
+  /** Ondulación lenta: frecuencia y amplitud (unidades del lienzo). */
+  lenta: [number, number];
+  /** Variación de grosor: frecuencia y amplitud. */
+  media: [number, number];
+  /** Grano de grafito (frecuencia x/y), o null. */
+  grano: string | null;
+}
+
+const ESTILOS: Record<Exclude<AvatarStyle, 'plano'>, ParamsLapiz> = {
+  lapiz: { grosor: 0.85, lenta: [0.012, 7], media: [0.04, 2.6], grano: null },
+  grafito: { grosor: 0.8, lenta: [0.012, 6], media: [0.04, 3], grano: '0.6 0.1' },
+};
+
+/** Semilla estable (1…997) a partir de la configuración. */
+function semillaDe(config: AvatarConfig): number {
+  let h = 2166136261;
+  for (const c of serializeAvatarConfig(config)) {
+    h ^= c.charCodeAt(0);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 997) + 1;
+}
+
+/** Multiplica los stroke-width del catálogo (trazo algo más fino, como lápiz). */
+function afinarTrazo(svg: string, factor: number): string {
+  if (factor === 1) return svg;
+  return svg.replace(/stroke-width="([\d.]+)"/g, (_m, w: string) => `stroke-width="${Math.round(Number(w) * factor * 100) / 100}"`);
+}
+
+function filtroLapiz(p: ParamsLapiz, semilla: number): string {
+  const k = 3; // contraste tras el desenfoque: borde nítido pero suave
+  const lineal = `type="linear" slope="${k}" intercept="${-(k - 1) / 2}"`;
+  const grano = p.grano
+    ? `<feTurbulence type="fractalNoise" baseFrequency="${p.grano}" numOctaves="2" seed="${semilla + 13}" result="ruido"/>` +
+      // alfa = ruido; solo las motas por encima del 83 % quedan
+      '<feColorMatrix in="ruido" type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 1 0 0 0 0" result="ra"/>' +
+      '<feComponentTransfer in="ra" result="motas"><feFuncA type="discrete" tableValues="0 0 0 0 0 1"/></feComponentTransfer>' +
+      // máscara de lo negro: alfa = A − R (blanco y transparente dan 0)
+      '<feColorMatrix in="trazo" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 1 0" result="oscuro"/>' +
+      '<feComposite in="motas" in2="oscuro" operator="in" result="brillo"/>'
+    : '';
+  return (
+    '<defs><filter id="halo" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">' +
+    `<feTurbulence type="fractalNoise" baseFrequency="${p.lenta[0]}" numOctaves="1" seed="${semilla}" result="r1"/>` +
+    `<feDisplacementMap in="SourceGraphic" in2="r1" scale="${p.lenta[1]}" xChannelSelector="R" yChannelSelector="G" result="t1"/>` +
+    `<feTurbulence type="fractalNoise" baseFrequency="${p.media[0]}" numOctaves="1" seed="${semilla + 7}" result="r2"/>` +
+    `<feDisplacementMap in="t1" in2="r2" scale="${p.media[1]}" xChannelSelector="G" yChannelSelector="R" result="t2"/>` +
+    '<feGaussianBlur in="t2" stdDeviation="0.9" result="t3"/>' +
+    `<feComponentTransfer in="t3" result="trazo"><feFuncR ${lineal}/><feFuncG ${lineal}/><feFuncB ${lineal}/><feFuncA ${lineal}/></feComponentTransfer>` +
+    grano +
+    '<feMorphology operator="dilate" radius="5" in="trazo" result="borde"/>' +
+    '<feFlood flood-color="#fff" result="blanco"/>' +
+    '<feComposite in="blanco" in2="borde" operator="in" result="halo"/>' +
+    `<feMerge><feMergeNode in="halo"/><feMergeNode in="trazo"/>${p.grano ? '<feMergeNode in="brillo"/>' : ''}</feMerge></filter></defs>`
+  );
+}
+
 function capa(config: AvatarConfig, id: string): string {
   const def = TIPOS[config.tipo];
   const cat = def.categorias.find((c) => c.id === id);
@@ -186,17 +272,24 @@ function capa(config: AvatarConfig, id: string): string {
 
 /**
  * SVG completo del avatar (300×300). `size` fija width/height; sin él, el
- * SVG se estira a su contenedor.
+ * SVG se estira a su contenedor. `style` (por defecto 'plano', el de
+ * siempre) permite el trazo a lápiz; ver AvatarStyle.
  */
-export function composeAvatarSvg(config: AvatarConfig, opts: { size?: number; title?: string } = {}): string {
+export function composeAvatarSvg(
+  config: AvatarConfig,
+  opts: { size?: number; title?: string; style?: AvatarStyle } = {}
+): string {
   const fondo = AVATAR_BACKGROUNDS[config.fondo]?.color ?? null;
   const medidas = opts.size ? ` width="${opts.size}" height="${opts.size}"` : '';
   const titulo = opts.title ? `<title>${escapeXml(opts.title)}</title>` : '';
-  const capas = TIPOS[config.tipo].orden.map((id) => capa(config, id)).join('');
+  const estilo = opts.style ?? 'plano';
+  let capas = TIPOS[config.tipo].orden.map((id) => capa(config, id)).join('');
+  if (estilo !== 'plano') capas = afinarTrazo(capas, ESTILOS[estilo].grosor);
+  const defs = estilo === 'plano' ? HALO : filtroLapiz(ESTILOS[estilo], semillaDe(config));
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300"${medidas}>` +
     titulo +
-    HALO +
+    defs +
     (fondo ? `<rect width="300" height="300" fill="${fondo}"/>` : '') +
     ABRE_GRUPO +
     capas +

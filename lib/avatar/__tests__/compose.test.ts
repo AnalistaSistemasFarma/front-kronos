@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AVATAR_BACKGROUNDS,
+  AVATAR_STYLES,
   AVATAR_KINDS,
   agentAvatarNotionUrl,
   categoriasDe,
@@ -128,6 +129,49 @@ describe('composeAvatarSvg', () => {
     expect(conteo).toEqual({
       cara: 16, cabello: 59, ojos: 14, cejas: 16, nariz: 14, boca: 20, barba: 17, gafas: 15, accesorios: 15, detalles: 14,
     });
+  });
+});
+
+describe('estilo a lápiz', () => {
+  const c = randomAvatarConfig('persona', { fondo: 0 }, () => 0.3);
+
+  it('por defecto es el plano de siempre (sin turbulencia)', () => {
+    expect(composeAvatarSvg(c)).toBe(composeAvatarSvg(c, { style: 'plano' }));
+    expect(composeAvatarSvg(c)).not.toContain('feTurbulence');
+  });
+
+  it('es determinista: misma configuración, mismo SVG (servidor = cliente)', () => {
+    for (const style of AVATAR_STYLES) {
+      expect(composeAvatarSvg(c, { style })).toBe(composeAvatarSvg({ ...c, partes: { ...c.partes } }, { style }));
+    }
+  });
+
+  it('la semilla depende del avatar: dos avatares distintos tiemblan distinto', () => {
+    const otro = { ...c, partes: { ...c.partes, cabello: (c.partes.cabello + 1) % 59 } };
+    const semilla = (svg: string) => svg.match(/seed="(\d+)"/)?.[1];
+    expect(semilla(composeAvatarSvg(c, { style: 'lapiz' }))).not.toBe(semilla(composeAvatarSvg(otro, { style: 'lapiz' })));
+  });
+
+  it('sigue en blanco y negro puro y sin nada ejecutable, en todos los tipos', () => {
+    for (const tipo of AVATAR_KINDS) {
+      for (const style of ['lapiz', 'grafito'] as const) {
+        const svg = composeAvatarSvg({ ...randomAvatarConfig(tipo, {}, () => 0.5), fondo: 1 }, { style });
+        expect(svg).toContain('feDisplacementMap');
+        expect(svg).not.toMatch(/<script|on[a-z]+=|javascript:|href=/i);
+        const colores = svg.match(/#[0-9a-f]{3,6}\b/gi) ?? [];
+        for (const color of colores) expect(['#000', '#fff', '#ffffff']).toContain(color.toLowerCase());
+      }
+    }
+  });
+
+  it('afina el trazo y solo grafito lleva grano', () => {
+    expect(composeAvatarSvg(c, { style: 'lapiz' })).not.toContain('result="motas"');
+    expect(composeAvatarSvg(c, { style: 'grafito' })).toContain('result="motas"');
+    const grosores = (svg: string) => [...svg.matchAll(/stroke-width="([\d.]+)"/g)].map((m) => Number(m[1]));
+    const plano = grosores(composeAvatarSvg(c));
+    const lapiz = grosores(composeAvatarSvg(c, { style: 'lapiz' }));
+    expect(lapiz.length).toBe(plano.length);
+    lapiz.forEach((w, i) => expect(w).toBeLessThanOrEqual(plano[i]));
   });
 });
 

@@ -108,3 +108,29 @@ El script limpia los ids y normaliza los colores a `#000` y `#fff`. También rec
 - **Reestructuración de la versión 3**: como nada se había desplegado ni guardado (la tabla no existe en ninguna base), el catálogo de **personas** se reemplazó completo. Las categorías nuevas quedan así: `cara, cabello, ojos, cejas, nariz, boca, barba, gafas, accesorios, detalles`; ya no hay `ropa`. Los animales ganaron `cejas` y se crearon los tipos `planeta` y `constelacion`.
 - **Desde aquí, no se reordena ni se borra nada**: la base guarda índices y lo nuevo va al final. La prueba "el catálogo no se reordena" fija los nombres y los conteos.
 - En personas, el índice de cada opción es el número del archivo de Noto (`0.svg`, `1.svg`…).
+
+## Trazo a lápiz (prototipo, 2026-10-08)
+
+Pregunta de Nicolás: "¿no se puede simular el trazo como si fuera lápiz?". Los
+dibujos de Avatartion (DrawKit) no se pueden usar, pero la sensación "hecha a
+mano" sí se puede lograr sobre NUESTROS dibujos (Noto CC0 y propios) cambiando
+cómo se trazan. `composeAvatarSvg(config, { style })` acepta:
+
+- `'plano'` (por defecto): el de siempre; nada cambia si no se pasa `style`.
+- `'lapiz'`: filtro SVG (turbulencia + desplazamiento) dentro del mismo filtro
+  del halo: línea ondulada a pulso, grosor que varía a lo largo del trazo y
+  trazo un 15 % más fino. Recomendado.
+- `'grafito'`: lo anterior más un grano muy escaso dentro de los negros.
+
+Semilla fija por avatar (hash de la configuración): el mismo avatar se ve igual
+en servidor y cliente. El efecto va en unidades del lienzo, así que a 40/28 px
+casi no se nota y no ensucia el chat. Costo medido en Chromium: +0,2 ms por
+avatar distinto al rasterizar (el `<img>` queda en caché). Sin dependencias.
+
+Se evaluó también rough.js (MIT, 27,7 KB / 8,9 KB gzip): el bosquejo de doble
+línea se ve desordenado en caras pequeñas, triplica el SVG (~18 KB) y sería
+dependencia nueva; si se quisiera, convendría pre-generar los trazos en build.
+
+Columnas: sin efecto · lápiz (filtro) · rough.js · grafito.
+
+![Comparativa del trazo a lápiz](avatar-notion/lapiz-comparativa.png)
