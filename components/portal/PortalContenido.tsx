@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { urlFormacion as urlPaginaFormacion, type OrigenPortal } from '../../lib/portal/formacion-navegacion';
+import PoliticasVisor from './PoliticasVisor';
 import PortalNavegacion, { useSeccionActiva, type SeccionNav } from './PortalNavegacion';
 
 /** Cada cuánto rota sola la imagen principal del carrusel de anuncios. */
@@ -273,6 +274,13 @@ export default function PortalContenido({
    * que luego cuenta de dónde sale la información de cada uno.
    */
   const [contactosAbierto, setContactosAbierto] = useState(false);
+  /**
+   * Ventana "VISUALIZAR" de Políticas y reglamentos. Pedido de Cristian
+   * (2026-10-08): todos los archivos de la carpeta de SharePoint, con vista
+   * previa, en una sola ventana (ver `PoliticasVisor`).
+   */
+  const [politicasAbierto, setPoliticasAbierto] = useState(false);
+  const cerrarPoliticas = useCallback(() => setPoliticasAbierto(false), []);
   const [contactoSeleccionado, setContactoSeleccionado] = useState<'correos' | 'extensiones' | null>(null);
   const cerrarContactos = () => {
     setContactosAbierto(false);
@@ -471,7 +479,16 @@ export default function PortalContenido({
           )}
 
           <section id={ID_SECCION_POLITICAS} className='portal-th__seccion'>
-            <h2>Políticas y reglamentos</h2>
+            <div className='portal-th__seccion-barra'>
+              <h2>Políticas y reglamentos</h2>
+              <button
+                type='button'
+                className='portal-th__cargar portal-th__visualizar'
+                onClick={() => setPoliticasAbierto(true)}
+              >
+                VISUALIZAR
+              </button>
+            </div>
             {documentos.length === 0 ? (
               <p className='portal-th__estado'>Todavía no hay documentos publicados.</p>
             ) : (
@@ -565,6 +582,8 @@ export default function PortalContenido({
           </div>
         </div>
       )}
+
+      {politicasAbierto && <PoliticasVisor onCerrar={cerrarPoliticas} />}
 
       {/* VENTANA DE CONTACTOS — mismo marco que la vista previa de documentos,
           pero con dos botones adentro en vez de un PDF. Sin contenido todavía:

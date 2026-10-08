@@ -26,6 +26,8 @@ export default defineConfig({
       'app/api/sgc/**/*.test.ts',
       // `app/api/authorization/**`: rutas de Autorizaciones (sesión obligatoria, anti-IDOR).
       'app/api/authorization/**/*.test.ts',
+      // `app/api/portal/politicas/**`: Políticas y reglamentos del Portal TH (sesión obligatoria, Graph simulado).
+      'app/api/portal/**/*.test.ts',
       'components/sgc/**/*.test.ts',
     ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
