@@ -117,6 +117,14 @@ async function resolveTaskIdForRequest(pool, { requestId, fileId, userId }) {
 
 export async function GET(req) {
   try {
+    // Sesión obligatoria también para `?id=`: antes cualquiera sin sesión podía leer
+    // cualquier tarea (asunto, descripción, correo del solicitante) por su id.
+    // Nota: aún no se valida que la sesión tenga relación con la tarea (ver inventario IDOR).
+    const guardSession = await getServerSession(authOptions);
+    if (!guardSession?.user?.email) {
+      return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
     const requestIdRaw = searchParams.get('requestId');
