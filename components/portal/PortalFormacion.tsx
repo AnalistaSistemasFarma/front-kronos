@@ -40,6 +40,7 @@ interface Material {
   orden: number;
   url: string | null;
   nombreArchivo: string | null;
+  mime?: string | null;
   obligatorio: boolean;
   completadoEl: string | null;
 }
@@ -47,6 +48,8 @@ interface Material {
 interface DetalleCurso {
   curso: { id: number; titulo: string; descripcion: string | null; activo: boolean; creadoPor: string };
   esFormador: boolean;
+  /** Administrador/formador del Excel de permisos: puede marcar a mano. */
+  puedeMarcarManual?: boolean;
   porcentaje: number;
   materiales: Material[];
   certificado: { code: string; emitidoEl: string } | null;
@@ -150,14 +153,33 @@ export default function PortalFormacion({ onSinSesion }: { onSinSesion?: () => v
 
 /* ─────────────────────────────── Estudiante ────────────────────────────── */
 
-function BarraProgreso({ porcentaje }: { porcentaje: number }) {
-  return (
+function BarraProgreso({ porcentaje, mostrarCompletado = false }: { porcentaje: number; mostrarCompletado?: boolean }) {
+  const barra = (
     <div className='portal-th__curso-progreso' role='progressbar' aria-valuenow={porcentaje} aria-valuemin={0} aria-valuemax={100}>
       <div className='portal-th__curso-progreso-barra' style={{ width: `${Math.min(100, Math.max(0, porcentaje))}%` }} />
       <span>{porcentaje}%</span>
     </div>
   );
+  if (!mostrarCompletado) return barra;
+  // Cristian (2026-10-08): al quedar completo, "Completado" a la derecha de la barra.
+  return (
+    <div className='portal-th__progreso-fila'>
+      {barra}
+      {porcentaje >= 100 && <InsigniaCompletado />}
+    </div>
+  );
 }
+
+function InsigniaCompletado() {
+  return (
+    <span className='portal-th__completado' data-testid='insignia-completado'>
+      ✓ Completado
+    </span>
+  );
+}
+
+/** Tooltip de la casilla bloqueada (pedido de Cristian, 2026-10-08). */
+const AYUDA_CASILLA_BLOQUEADA = 'Se marca automáticamente al revisar el material';
 
 /** Avance de una subida directa a SharePoint, con botón para cancelar. */
 interface EstadoSubida {
@@ -195,7 +217,7 @@ function ListaCursosEstudiante({ cursos, onAbrir }: { cursos: CursoResumen[]; on
           <strong>{c.titulo}</strong>
           {c.descripcion && <p>{c.descripcion}</p>}
           <span className='portal-th__curso-meta'>{c.totalMateriales} material(es)</span>
-          <BarraProgreso porcentaje={c.porcentaje ?? 0} />
+          <BarraProgreso porcentaje={c.porcentaje ?? 0} mostrarCompletado />
           {c.certificado && <span className='portal-th__curso-certificado-chip'>✅ Certificado emitido</span>}
         </button>
       ))}
@@ -214,8 +236,12 @@ function VistaCursoEstudiante({
 }) {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Resultado de una ACCIÓN (marcar, revisar): arriba y con color, sin
+  // desmontar la vista (ver la convención de avisos visibles).
+  const [aviso, setAviso] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
   const [detalle, setDetalle] = useState<DetalleCurso | null>(null);
   const [marcando, setMarcando] = useState<number | null>(null);
+  const [abierto, setAbierto] = useState<Material | null>(null);
 
   const cargar = useCallback(async () => {
     setError(null);
@@ -235,8 +261,13 @@ function VistaCursoEstudiante({
     void cargar();
   }, [cargar]);
 
+  const puedeMarcar = detalle?.puedeMarcarManual === true;
+
+  /** Marcado MANUAL: solo administradores/formadores (el servidor lo exige). */
   const alternarMaterial = async (materialId: number, completado: boolean) => {
+    if (!puedeMarcar) return;
     setMarcando(materialId);
+    setAviso(null);
     try {
       const res = await fetch(`/api/portal/materials/${materialId}/progress`, {
         method: completado ? 'DELETE' : 'POST',
@@ -246,10 +277,27 @@ function VistaCursoEstudiante({
       await cargar();
       await onCambio();
     } catch (e) {
-      setError((e as Error).message);
+      setAviso({ tipo: 'error', texto: (e as Error).message });
     } finally {
       setMarcando(null);
     }
+  };
+
+  const alCompletar = async (titulo: string) => {
+    setAviso({ tipo: 'ok', texto: `"${titulo}" quedó completado.` });
+    await cargar();
+    await onCambio();
+  };
+
+  /** Un ENLACE cuenta como revisado al abrirlo (lo registra el servidor). */
+  const abrirEnlace = (m: Material) => {
+    void fetch(`/api/portal/materials/${m.id}/vista`, { method: 'POST', keepalive: true })
+      .then(async (res) => {
+        const data = await leerJson(res);
+        if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo registrar la apertura del enlace.'));
+        if (m.completadoEl === null) await alCompletar(m.titulo);
+      })
+      .catch((e) => setAviso({ tipo: 'error', texto: (e as Error).message }));
   };
 
   if (cargando) return <p className='portal-th__estado'>Cargando curso…</p>;
@@ -263,39 +311,67 @@ function VistaCursoEstudiante({
       </button>
       <h3>{detalle.curso.titulo}</h3>
       {detalle.curso.descripcion && <p className='portal-th__curso-descripcion'>{detalle.curso.descripcion}</p>}
-      <BarraProgreso porcentaje={detalle.porcentaje} />
+      {aviso && (
+        <p className={`portal-th__resultado portal-th__resultado--${aviso.tipo}`} role={aviso.tipo === 'error' ? 'alert' : 'status'}>
+          {aviso.texto}
+        </p>
+      )}
+      <BarraProgreso porcentaje={detalle.porcentaje} mostrarCompletado />
 
       <ul className='portal-th__material-lista'>
         {detalle.materiales.map((m) => {
           const completado = m.completadoEl !== null;
           return (
             <li key={m.id} className='portal-th__material-item'>
-              <button
-                type='button'
-                className={`portal-th__material-check${completado ? ' portal-th__material-check--hecho' : ''}`}
-                disabled={marcando === m.id}
-                onClick={() => void alternarMaterial(m.id, completado)}
-                aria-label={completado ? `Marcar ${m.titulo} como pendiente` : `Marcar ${m.titulo} como completado`}
-              >
-                {completado ? '✓' : ''}
-              </button>
-              <div className='portal-th__material-info'>
-                <a
-                  href={m.tipo === 'LINK' ? (m.url ?? '#') : materialUrl(detalle.curso.id, m.id)}
-                  target='_blank'
-                  rel='noopener noreferrer'
+              {puedeMarcar ? (
+                <button
+                  type='button'
+                  className={`portal-th__material-check${completado ? ' portal-th__material-check--hecho' : ''}`}
+                  disabled={marcando === m.id}
+                  onClick={() => void alternarMaterial(m.id, completado)}
+                  aria-label={completado ? `Marcar ${m.titulo} como pendiente` : `Marcar ${m.titulo} como completado`}
+                  title='Puede marcar o desmarcar a mano (administrador/formador)'
                 >
-                  {m.titulo}
-                </a>
+                  {completado ? '✓' : ''}
+                </button>
+              ) : (
+                <span
+                  role='checkbox'
+                  aria-checked={completado}
+                  aria-disabled='true'
+                  aria-label={`${m.titulo}: ${AYUDA_CASILLA_BLOQUEADA.toLowerCase()}`}
+                  title={AYUDA_CASILLA_BLOQUEADA}
+                  className={`portal-th__material-check portal-th__material-check--bloqueada${completado ? ' portal-th__material-check--hecho' : ''}`}
+                >
+                  {completado ? '✓' : ''}
+                </span>
+              )}
+              <div className='portal-th__material-info'>
+                {m.tipo === 'LINK' ? (
+                  <a href={m.url ?? '#'} target='_blank' rel='noopener noreferrer' onClick={() => abrirEnlace(m)}>
+                    {m.titulo}
+                  </a>
+                ) : (
+                  <button type='button' className='portal-th__material-abrir' onClick={() => setAbierto(m)}>
+                    {m.titulo}
+                  </button>
+                )}
                 <span className='portal-th__material-tipo'>
-                  {m.tipo === 'LINK' ? 'Enlace' : 'Documento'}
+                  {etiquetaTipo(m)}
                   {!m.obligatorio && ' · opcional'}
                 </span>
               </div>
+              {completado && <InsigniaCompletado />}
             </li>
           );
         })}
       </ul>
+      {!puedeMarcar && detalle.materiales.length > 0 && (
+        <p className='portal-th__estado'>
+          Las casillas se marcan automáticamente cuando revisa cada material: los videos hasta el final y los documentos
+          abiertos aquí durante el tiempo indicado.
+        </p>
+      )}
 
       {detalle.certificado ? (
         <a
@@ -313,6 +389,244 @@ function VistaCursoEstudiante({
           </p>
         )
       )}
+
+      {abierto && (
+        <VisorMaterial
+          cursoId={detalle.curso.id}
+          material={abierto}
+          onCerrar={() => setAbierto(null)}
+          onCompletado={() => alCompletar(abierto.titulo)}
+        />
+      )}
+    </div>
+  );
+}
+
+function etiquetaTipo(m: Material): string {
+  if (m.tipo === 'LINK') return 'Enlace';
+  const mime = (m.mime ?? '').toLowerCase();
+  if (mime.startsWith('video/')) return 'Video';
+  return 'Documento';
+}
+
+/* ─────────────── Visor del material + revisión (2026-10-08) ─────────────── */
+
+interface ReglaRevision {
+  tipo: 'video' | 'pdf' | 'imagen' | 'documento' | 'enlace';
+  segundosMinimos: number;
+  fraccionVideo: number;
+}
+
+function mmss(segundos: number): string {
+  const s = Math.max(0, Math.floor(segundos));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Abre un material DENTRO del portal y mide la revisión (Cristian,
+ * 2026-10-08). El servidor registra la apertura; aquí se cuenta lo que se ve
+ * y, al cumplir la regla, se reporta. Es el servidor quien marca.
+ *
+ * - Video: solo suma el tiempo reproducido de verdad; no deja adelantar más
+ *   allá de lo ya visto y fija la velocidad en 1×.
+ * - PDF e imagen: el tiempo corre con la ventana abierta y la pestaña visible.
+ * - Word/Excel/PowerPoint: se abren o descargan desde aquí; el tiempo corre
+ *   con la ventana abierta.
+ */
+function VisorMaterial({
+  cursoId,
+  material,
+  onCerrar,
+  onCompletado,
+}: {
+  cursoId: number;
+  material: Material;
+  onCerrar: () => void;
+  onCompletado: () => Promise<void> | void;
+}) {
+  const url = materialUrl(cursoId, material.id);
+  const [regla, setRegla] = useState<ReglaRevision | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [completado, setCompletado] = useState(material.completadoEl !== null);
+  const [error, setError] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
+  const [segundos, setSegundos] = useState(0);
+  const [duracion, setDuracion] = useState(0);
+  const reportado = useRef(false);
+  const video = useRef({ maximo: 0, acumulado: 0, ultimo: 0 });
+
+  useEffect(() => {
+    let vivo = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/portal/materials/${material.id}/vista`, { method: 'POST' });
+        const data = await leerJson(res);
+        if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo abrir el material.'));
+        if (!vivo) return;
+        setToken(String(data.token));
+        setRegla(data.regla as unknown as ReglaRevision);
+        if (data.completado === true) setCompletado(true);
+      } catch (e) {
+        if (vivo) setError((e as Error).message);
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [material.id]);
+
+  useEffect(() => {
+    const alTeclear = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCerrar();
+    };
+    window.addEventListener('keydown', alTeclear);
+    return () => window.removeEventListener('keydown', alTeclear);
+  }, [onCerrar]);
+
+  const reportar = useCallback(
+    async (segundosVistos: number, duracionVideo?: number) => {
+      if (!token || reportado.current) return;
+      reportado.current = true;
+      try {
+        const res = await fetch(`/api/portal/materials/${material.id}/vista/${token}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ segundosVistos, duracion: duracionVideo ?? null }),
+        });
+        const data = await leerJson(res);
+        if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo registrar la revisión.'));
+        setCompletado(true);
+        setAviso(null);
+        await onCompletado();
+      } catch (e) {
+        // Se puede volver a intentar con la misma apertura (p. ej. si faltó tiempo).
+        reportado.current = false;
+        setAviso((e as Error).message);
+      }
+    },
+    [material.id, token, onCompletado]
+  );
+
+  // Documentos: cuenta el tiempo con la ventana abierta.
+  const esDocumento = regla !== null && regla.tipo !== 'video' && regla.tipo !== 'enlace';
+  useEffect(() => {
+    if (!esDocumento || completado || !regla) return;
+    const exigeVisible = regla.tipo !== 'documento';
+    const reloj = window.setInterval(() => {
+      if (exigeVisible && document.visibilityState !== 'visible') return;
+      setSegundos((s) => s + 1);
+    }, 1000);
+    return () => window.clearInterval(reloj);
+  }, [esDocumento, completado, regla]);
+
+  useEffect(() => {
+    if (esDocumento && !completado && regla && segundos >= regla.segundosMinimos) void reportar(segundos);
+  }, [esDocumento, completado, regla, segundos, reportar]);
+
+  // Video: solo cuenta lo reproducido de verdad.
+  const alAvanzarVideo = (v: HTMLVideoElement) => {
+    const estado = video.current;
+    const delta = v.currentTime - estado.ultimo;
+    if (delta > 0 && delta <= 1.5 && v.playbackRate === 1) estado.acumulado += delta;
+    if (v.currentTime > estado.maximo) estado.maximo = v.currentTime;
+    estado.ultimo = v.currentTime;
+    const vistos = Math.min(estado.acumulado, estado.maximo);
+    setSegundos(vistos);
+    if (regla && !completado && v.duration > 0 && vistos >= v.duration * regla.fraccionVideo) {
+      void reportar(vistos, v.duration);
+    }
+  };
+  const alBuscarVideo = (v: HTMLVideoElement) => {
+    // No se puede saltar hacia adelante de lo ya visto (sí volver atrás).
+    if (!completado && v.currentTime > video.current.maximo + 1) v.currentTime = video.current.maximo;
+    video.current.ultimo = v.currentTime;
+  };
+
+  const mime = (material.mime ?? '').toLowerCase();
+  const tipo = regla?.tipo ?? (mime.startsWith('video/') ? 'video' : null);
+
+  let estadoTexto = 'Preparando…';
+  if (completado) estadoTexto = '✓ Completado';
+  else if (regla?.tipo === 'video') {
+    const pct = duracion > 0 ? Math.min(100, Math.floor((segundos / duracion) * 100)) : 0;
+    estadoTexto = `Visto ${pct} % · se marca al llegar al ${Math.round(regla.fraccionVideo * 100)} %`;
+  } else if (regla) {
+    estadoTexto = `Revisando… ${mmss(Math.min(segundos, regla.segundosMinimos))} de ${mmss(regla.segundosMinimos)}`;
+  }
+
+  return (
+    <div
+      className='portal-th__visor'
+      role='dialog'
+      aria-modal='true'
+      aria-label={material.titulo}
+      data-testid='visor-material'
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCerrar();
+      }}
+    >
+      <div className='portal-th__visor-caja'>
+        <header className='portal-th__visor-barra'>
+          <strong>{material.titulo}</strong>
+          <div className='portal-th__visor-acciones'>
+            {tipo !== 'video' && (
+              <a href={url} target='_blank' rel='noopener noreferrer'>
+                Abrir aparte
+              </a>
+            )}
+            <button type='button' onClick={onCerrar} aria-label='Cerrar'>
+              ✕
+            </button>
+          </div>
+        </header>
+        <div
+          className={`portal-th__visor-revision${completado ? ' portal-th__visor-revision--hecho' : ''}`}
+          role='status'
+          data-testid='estado-revision'
+        >
+          {estadoTexto}
+        </div>
+        {error && (
+          <p className='portal-th__resultado portal-th__resultado--error' role='alert'>
+            {error}
+          </p>
+        )}
+        {aviso && (
+          <p className='portal-th__resultado portal-th__resultado--advertencia' role='alert'>
+            {aviso}
+          </p>
+        )}
+        {tipo === 'video' ? (
+          <video
+            className='portal-th__visor-video'
+            src={url}
+            controls
+            controlsList='nodownload noplaybackrate'
+            disablePictureInPicture
+            playsInline
+            preload='metadata'
+            onLoadedMetadata={(e) => setDuracion(e.currentTarget.duration || 0)}
+            onTimeUpdate={(e) => alAvanzarVideo(e.currentTarget)}
+            onSeeking={(e) => alBuscarVideo(e.currentTarget)}
+            onRateChange={(e) => {
+              if (e.currentTarget.playbackRate !== 1) e.currentTarget.playbackRate = 1;
+            }}
+          />
+        ) : tipo === 'imagen' ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img className='portal-th__visor-imagen' src={url} alt={material.titulo} />
+        ) : tipo === 'pdf' ? (
+          <iframe src={url} title={material.titulo} />
+        ) : tipo === 'documento' ? (
+          <div className='portal-th__visor-documento'>
+            <p>Este documento se abre con su programa (Word, Excel o PowerPoint).</p>
+            <a className='portal-th__certificado-boton' href={url} target='_blank' rel='noopener noreferrer'>
+              Abrir documento
+            </a>
+            <p className='portal-th__estado'>Mantenga esta ventana abierta mientras lo revisa.</p>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

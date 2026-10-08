@@ -11,9 +11,11 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../prisma';
 import { generarCertificadoPdf } from './certificado-pdf';
 import { MATERIAL_MIMES_PERMITIDOS, maxMaterialBytes, mensajeArchivoMuyGrande } from './config';
+import { PDFDocument } from 'pdf-lib';
 import {
   carpetaDeCurso,
   crearSesionSubida,
+  descargarArchivoFormacion,
   leerConfigFormacion,
   obtenerArchivoSubidoEnCarpeta,
   moverMaterialAEliminados,
@@ -351,4 +353,115 @@ export async function moverArchivoDeMaterialAEliminados(
     carpetaCurso: await carpetaSharePointDelCurso(courseId),
     nombreArchivo: nombreArchivo ?? 'material',
   });
+}
+
+/* ─────────────── Progreso: recalcular y marcar (2026-10-08) ─────────────── */
+
+/**
+ * Recalcula el % del curso del material para un estudiante y, si llegó al
+ * 100 %, emite su certificado (o devuelve el que ya tenía). Lo comparten el
+ * marcado MANUAL (administradores/formadores) y el AUTOMÁTICO (reporte de
+ * revisión), para que los dos calculen lo mismo.
+ */
+export async function recalcularProgresoDeMaterial(
+  materialId: number,
+  correo: string,
+  opciones: { emitirCertificado?: boolean } = {}
+): Promise<{ porcentaje: number; certificado: { code: string; emitidoEl: Date } | null } | null> {
+  const material = await prisma.portalCourseMaterial.findFirst({
+    where: { id: materialId, eliminado_at: null },
+    select: { course_id: true, course: { select: { title: true, active: true } } },
+  });
+  if (!material) return null;
+
+  const materiales = await prisma.portalCourseMaterial.findMany({
+    where: { course_id: material.course_id, eliminado_at: null },
+    select: { id: true, required: true },
+  });
+  const completados = await prisma.portalMaterialProgress.findMany({
+    where: { student_email: correo, material_id: { in: materiales.map((m) => m.id) } },
+    select: { material_id: true },
+  });
+  const { porcentaje } = calcularProgreso(materiales, new Set(completados.map((c) => c.material_id)));
+
+  let certificado = null;
+  if (opciones.emitirCertificado !== false && material.course.active) {
+    const nombre = await resolverNombreEstudiante(correo);
+    const emitido = await emitirCertificadoSiCorresponde({
+      courseId: material.course_id,
+      studentEmail: correo,
+      studentName: nombre,
+      courseTitle: material.course.title,
+      porcentaje,
+    });
+    if (emitido) certificado = { code: emitido.code, emitidoEl: emitido.issuedAt };
+  }
+  return { porcentaje, certificado };
+}
+
+/**
+ * Marca un material como completado. No pisa una marca existente (su fecha y
+ * su origen quedan como estaban).
+ */
+export async function marcarMaterialCompletado(params: {
+  materialId: number;
+  correo: string;
+  origen: 'AUTO' | 'MANUAL';
+  marcadoPor?: string | null;
+}): Promise<void> {
+  const { materialId, correo, origen, marcadoPor } = params;
+  await prisma.portalMaterialProgress.upsert({
+    where: { material_id_student_email: { material_id: materialId, student_email: correo } },
+    update: {},
+    create: {
+      material_id: materialId,
+      student_email: correo,
+      origen,
+      marcado_por: origen === 'MANUAL' ? (marcadoPor ?? null) : null,
+    },
+  });
+}
+
+/** PDFs más grandes que esto no se descargan para contar páginas. */
+const MAX_BYTES_CONTAR_PAGINAS = 60 * 1024 * 1024;
+const paginasPorArchivo = new Map<string, number>();
+
+/** Solo para pruebas. */
+export function _reiniciarCachePaginas() {
+  paginasPorArchivo.clear();
+}
+
+/**
+ * Páginas de un PDF de Formación (para el tiempo mínimo de revisión).
+ * Devuelve null si no se pudo contar; quien llama usa entonces el máximo.
+ * Se recuerda por archivo: reemplazar el archivo cambia el driveItemId.
+ */
+export async function contarPaginasPdf(material: {
+  id: number;
+  sp_drive_item_id: string | null;
+  file_size: bigint | null;
+  contenido?: Uint8Array | null;
+}): Promise<number | null> {
+  const clave = material.sp_drive_item_id ?? `bd-${material.id}`;
+  const enCache = paginasPorArchivo.get(clave);
+  if (enCache) return enCache;
+  try {
+    if (material.file_size !== null && Number(material.file_size) > MAX_BYTES_CONTAR_PAGINAS) return null;
+    let bytes: Uint8Array | null = null;
+    if (material.sp_drive_item_id) {
+      const archivo = await descargarArchivoFormacion(material.sp_drive_item_id);
+      if (!archivo.cuerpo) return null;
+      bytes = new Uint8Array(await new Response(archivo.cuerpo).arrayBuffer());
+    } else if (material.contenido) {
+      bytes = material.contenido;
+    }
+    if (!bytes) return null;
+    const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+    const paginas = pdf.getPageCount();
+    if (paginas > 0) paginasPorArchivo.set(clave, paginas);
+    return paginas > 0 ? paginas : null;
+  } catch (error) {
+    console.warn('[portal] No se pudieron contar las páginas del PDF', material.id, (error as Error).message);
+    return null;
+  }
 }

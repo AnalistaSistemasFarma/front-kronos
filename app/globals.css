@@ -4483,3 +4483,125 @@ body.chat-inmersivo .chat-page-thread--completa {
   position: relative;
   width: 100%;
 }
+
+/* ── Formación: completado automático (Cristian, 2026-10-08) ─────────────────
+   La casilla queda bloqueada para el estudiante y se marca sola al revisar el
+   material; "Completado" aparece a la derecha de la barra y de cada material. */
+.portal-th__progreso-fila {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.portal-th__progreso-fila .portal-th__curso-progreso {
+  flex: 1;
+  min-width: 0;
+}
+
+.portal-th__completado {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background-color: #e6f4ea;
+  border: 1px solid #b7dfc3;
+  color: #1a7d3c;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.portal-th__material-check--bloqueada {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: not-allowed;
+  background-color: #f3f5f8;
+}
+
+.portal-th__material-check--bloqueada.portal-th__material-check--hecho {
+  background-color: #1a7d3c;
+}
+
+.portal-th__material-abrir {
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  color: var(--pth-tinta);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.portal-th__material-abrir:hover {
+  text-decoration: underline;
+}
+
+.portal-th__resultado {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.86rem;
+  border: 1px solid transparent;
+}
+
+.portal-th__resultado--ok {
+  background-color: #e6f4ea;
+  border-color: #b7dfc3;
+  color: #14632f;
+}
+
+.portal-th__resultado--advertencia {
+  background-color: #fff6db;
+  border-color: #f1d98a;
+  color: #7a5a00;
+}
+
+.portal-th__resultado--error {
+  background-color: #fde8e7;
+  border-color: #f3b7b3;
+  color: #8c1d18;
+}
+
+.portal-th__visor .portal-th__resultado {
+  margin: 8px 14px 0;
+}
+
+.portal-th__visor-revision {
+  padding: 8px 14px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--pth-azul-700);
+  background-color: var(--pth-azul-50);
+  border-bottom: 1px solid var(--pth-linea);
+}
+
+.portal-th__visor-revision--hecho {
+  color: #1a7d3c;
+  background-color: #e6f4ea;
+}
+
+.portal-th__visor-video {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  background-color: #000;
+}
+
+.portal-th__visor-documento {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+}
+
+.portal-th__curso-detalle > .portal-th__progreso-fila {
+  margin-bottom: 12px;
+}
