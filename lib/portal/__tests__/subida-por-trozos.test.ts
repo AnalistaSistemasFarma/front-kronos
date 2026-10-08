@@ -57,7 +57,7 @@ function sesionGraph(total: number, opciones: { fallarPrimeros?: number; statusF
 }
 
 const blob = (bytes: number) => new Blob([new Uint8Array(bytes)]);
-const sinEspera = async () => undefined;
+const sinEspera = async (_ms: number): Promise<void> => undefined;
 
 describe('subirPorTrozos', () => {
   it('trozo por defecto de 10 MiB, múltiplo de 320 KiB', () => {
