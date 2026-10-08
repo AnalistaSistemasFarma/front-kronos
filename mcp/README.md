@@ -54,9 +54,9 @@ Los catálogos son globales (compartidos por todas las empresas), así que se ex
 
 ---
 
-## 2. Tools disponibles (13: 11 lectura + 2 escritura)
+## 2. Tools disponibles (26: 18 lectura + 8 escritura)
 
-### 2.1 Lectura (11)
+### 2.1 Lectura (18)
 
 | Tool | Descripción |
 |---|---|
@@ -71,6 +71,8 @@ Los catálogos son globales (compartidos por todas las empresas), así que se ex
 | `kronos_list_categories` | Categorías y subcategorías (catálogo global). |
 | `kronos_list_users` | Usuarios de las empresas del alcance. **Excluye** `password` y tokens. |
 | `kronos_search` | Búsqueda paginada sobre solicitudes y/o tickets (`text`, `dateFrom`, `dateTo`, `status`, `companyId`). |
+| `kronos_get_process_fields` | Definición del formulario dinámico de un proceso (`processId` o `requestId`): campos activos, opciones y condiciones. Valida el proceso contra las empresas del alcance. |
+| `kronos_get_request_fields` | Valores ya diligenciados del formulario dinámico de una solicitud del alcance. |
 
 **Paginación:** todas usan `limit`/`offset` con tope máximo (`MCP_MAX_PAGE_SIZE`, default 200) y default (`MCP_DEFAULT_PAGE_SIZE`, default 50).
 
@@ -90,6 +92,14 @@ Las dos únicas tools que mutan datos. Acotadas a **categorizar**, transaccional
 - **`kronos_categorize_request` — proceso válido.** El `process_category` debe estar **activo** (`active = 1`) y su `category_request` **habilitada para la empresa** de la solicitud (vía `company_category_request`); si no, `"proceso inexistente, inactivo o no habilitado para la empresa"`.
 
 Ambas hacen **UPSERT** sobre su tabla puente (UPDATE; si afecta 0 filas, INSERT) y devuelven la acción (`updated`/`inserted`), las filas afectadas y los nombres resueltos de la nueva categorización.
+
+### 2.3 Escritura — adjuntos y formulario dinámico
+
+| Tool | Parámetros | Qué hace y qué valida |
+|---|---|---|
+| `kronos_upload_attachment` | `requestId`, `fileName`, `contentBase64`, `label?`, `contentType?`, `kind?` | Sube el archivo a `SAPSEND/TEC/SG/Request-<id>` (o `SAPSEND/TEC/MA/Ticket-<id>`) en OneDrive. Valida alcance de empresa, base64 estricto, máximo 4 MB, MIME válido y nombre saneado para OneDrive. **Nunca sobrescribe** (`conflictBehavior=fail`); el binario no se escribe en la auditoría. |
+| `kronos_delete_attachment` | `requestId`, `fileId`, `justification`, `actorUserId` | Elimina un adjunto con las reglas de la app: key con `role: "admin"`, usuario con la doble llave (administrador + permiso “Eliminar adjuntos”), justificación de 10 a 1000 caracteres y `fileId` presente en la carpeta de **esa** solicitud. Rechaza documentos con flujo de firma Orion (se eliminan desde SynerLink). Deja nota en la bitácora y evento `ELIMINADO` en la hoja de vida. |
+| `kronos_set_request_fields` | `requestId`, `values[]` (`id_field`, `id_option?`, `value_text?`) | UPSERT en `request_form_value`. Valida alcance, solicitud abierta, que el campo sea del proceso, que la opción sea del campo, sin campos repetidos, y que un campo ya diligenciado solo cambie si es `editable`. Nunca toca campos `orion_signature`. Valida todo antes de escribir, dentro de una transacción. |
 
 **Sanitización:** `kronos_list_users` solo devuelve `id, name, email, isActive, role, phone, identification, createdAt`. Nunca `password`, `emailVerified`, cuentas/tokens ni sesiones.
 
