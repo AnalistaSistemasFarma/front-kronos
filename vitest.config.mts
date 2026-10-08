@@ -21,7 +21,13 @@ export default defineConfig({
     // `app/api/sgc/**`: pruebas de las rutas del SGC documental (con sesión y
     // base simuladas); son evidencia de validación del módulo.
     // `components/sgc/**`: prueba de PARIDAD de las pantallas copiadas de SynerLink (render del marcado).
-    include: ['lib/**/*.test.ts', 'app/api/sgc/**/*.test.ts', 'components/sgc/**/*.test.ts'],
+    include: [
+      'lib/**/*.test.ts',
+      'app/api/sgc/**/*.test.ts',
+      // `app/api/authorization/**`: rutas de Autorizaciones (sesión obligatoria, anti-IDOR).
+      'app/api/authorization/**/*.test.ts',
+      'components/sgc/**/*.test.ts',
+    ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
 
     // -----------------------------------------------------------------------
