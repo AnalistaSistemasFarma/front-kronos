@@ -260,6 +260,8 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008120000_sgc_s10_capacitacion_opcional/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008130000_sgc_s11_copias_no_controladas/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008130000_sgc_s11_copias_no_controladas/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008140000_sgc_s12_aprobadores_sustitutos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008140000_sgc_s12_aprobadores_sustitutos/migration.sql
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
@@ -275,7 +277,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -286,6 +288,10 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          reversa prisma/manual/2026-10-08-sgc-s12-aprobadores-sustitutos-reversa.sql
+          # Con firmas de sustitutos (integración del S12) la reversa CONSERVA signature.on_behalf_of.
+          echo "IF COL_LENGTH(N'sgc.signature', N'on_behalf_of') IS NULL THROW 50000, N'La reversa del S12 quitó signature.on_behalf_of con firmas de sustitutos.', 1;" > /tmp/s12-conserva.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/s12-conserva.sql
           reversa prisma/manual/2026-10-08-sgc-s11-copias-no-controladas-reversa.sql
           # La del S10 también retira el flujo con capacitación previa: se prueba sobre la empresa de su integración (101).
           sed 's/DECLARE @IdCompany INT = 3;/DECLARE @IdCompany INT = 101;/' prisma/manual/2026-10-08-sgc-s10-capacitacion-opcional-reversa.sql > /tmp/reversa-s10.sql
@@ -297,6 +303,7 @@ jobs:
           migra 20261008110000_sgc_s9_archivos_relaciones_correo
           migra 20261008120000_sgc_s10_capacitacion_opcional
           migra 20261008130000_sgc_s11_copias_no_controladas
+          migra 20261008140000_sgc_s12_aprobadores_sustitutos
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-08-sgc-s8-guia-codificacion-olp.sql
 
       - name: Evidencia SGC (manifiesto + matriz de trazabilidad)

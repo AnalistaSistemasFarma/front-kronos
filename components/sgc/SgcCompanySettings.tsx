@@ -29,6 +29,7 @@ interface Settings {
   emailMode?: string;
   uncontrolledCopies?: { types: string[]; days: number; maxDays: number };
   viewerProtection?: boolean;
+  approverListEnforced?: boolean;
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -52,6 +53,7 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
   const [copyDays, setCopyDays] = useState<number | string>(30);
   const [copyMaxDays, setCopyMaxDays] = useState<number | string>(90);
   const [viewerProtection, setViewerProtection] = useState(true);
+  const [approverListEnforced, setApproverListEnforced] = useState(true);
   const [closeReason, setCloseReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
@@ -67,6 +69,7 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
       setCopyMaxDays(data.uncontrolledCopies.maxDays);
     }
     setViewerProtection(data.viewerProtection ?? true);
+    setApproverListEnforced(data.approverListEnforced ?? true);
   }, [data]);
 
   if (error) {
@@ -88,7 +91,7 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
     setBusy(true);
     setFeedback(null);
     try {
-      const body: Record<string, unknown> = { company: idCompany, reason, disseminationDomains: domains, readThresholdPct: Number(threshold), emailMode, uncontrolledCopyTypes: copyTypes, uncontrolledCopyDays: Number(copyDays), uncontrolledCopyMaxDays: Number(copyMaxDays), viewerProtection };
+      const body: Record<string, unknown> = { company: idCompany, reason, disseminationDomains: domains, readThresholdPct: Number(threshold), emailMode, uncontrolledCopyTypes: copyTypes, uncontrolledCopyDays: Number(copyDays), uncontrolledCopyMaxDays: Number(copyMaxDays), viewerProtection, approverListEnforced };
       if (logo) body.logoDataUrl = await fileToDataUrl(logo);
       await sgcSend('/api/sgc/company-settings', 'PUT', body);
       setFeedback({ ok: true, text: 'Configuración guardada y registrada en la auditoría.' });
@@ -198,6 +201,13 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
           checked={viewerProtection}
           onChange={(e) => setViewerProtection(e.currentTarget.checked)}
           data-testid='sgc-config-visor'
+        />
+        <Switch
+          label='Aprobadores autorizados: solo aprueba quien esté en la lista (Configuración → Aprobadores autorizados)'
+          description='Aplica cuando la lista tiene al menos una persona; mientras esté vacía no se restringe a nadie.'
+          checked={approverListEnforced}
+          onChange={(e) => setApproverListEnforced(e.currentTarget.checked)}
+          data-testid='sgc-config-aprobadores'
         />
         <NumberInput label='Umbral de aviso de avance de lectura (%)' description='Al llegar a este porcentaje de lectura se avisa una vez al creador del documento y a Calidad.' min={1} max={100} value={threshold} onChange={setThreshold} w={320} data-testid='sgc-config-umbral' />
         <Textarea label='Motivo del cambio' description='Mínimo 10 caracteres: queda en el control de cambios.' autosize minRows={2} value={reason} onChange={(e) => setReason(e.currentTarget.value)} autoComplete='off' data-testid='sgc-config-empresa-motivo' />

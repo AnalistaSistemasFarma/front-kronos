@@ -52,6 +52,14 @@ export interface SgcManifestSignature {
   authMethod: string;
   contentSha256: string;
   recordHash: string;
+  /** Sprint 12: la firmó un SUSTITUTO «en sustitución de» esta persona (solo si aplica). */
+  onBehalfOf?: string;
+}
+
+/** Texto del firmante con la sustitución, si la hubo: «Ana (ana@x) en sustitución de luis@x». */
+export function signerWithSubstitution(s: Pick<SgcManifestSignature, 'signerName' | 'signerEmail' | 'onBehalfOf'>, withEmail = true): string {
+  const who = withEmail ? `${s.signerName ?? s.signerEmail} (${s.signerEmail})` : s.signerName ?? s.signerEmail;
+  return s.onBehalfOf ? `${who} en sustitución de ${s.onBehalfOf}` : who;
 }
 
 /** Firma ubicada en el documento: página del CONTENIDO (1 = primera) y caja en % (origen arriba-izquierda). */
@@ -242,7 +250,7 @@ function drawCover(w: Writer, m: SgcManifest, mSha: string, placed: ReadonlySet<
   if (unplaced.length > 0) {
     w.text(placed.size > 0 ? 'Firmas sin ubicación en el documento' : 'Firmas', { size: 11, font: 'bold', gap: 4 });
     for (const s of unplaced) {
-      w.row(s.meaningLabel, `${s.signerName ?? s.signerEmail} (${s.signerEmail}) · ${colombia(s.signedAt)} · Motivo: ${s.reason}`);
+      w.row(s.meaningLabel, `${signerWithSubstitution(s)} · ${colombia(s.signedAt)} · Motivo: ${s.reason}`);
     }
   }
   w.y -= 10;
@@ -261,7 +269,7 @@ async function drawManifest(pdf: PDFDocument, w: Writer, m: SgcManifest, mSha: s
   for (const s of m.signatures) {
     const png = masters[s.uid];
     w.ensure(png ? 190 : 150);
-    w.text(`${s.meaningLabel} — ${s.signerName ?? s.signerEmail}`, { size: 11, font: 'bold', gap: 2 });
+    w.text(`${s.meaningLabel} — ${signerWithSubstitution(s, false)}`, { size: 11, font: 'bold', gap: 2 });
     if (png) {
       try {
         const img = await pdf.embedPng(png);
@@ -274,6 +282,7 @@ async function drawManifest(pdf: PDFDocument, w: Writer, m: SgcManifest, mSha: s
       }
     }
     w.row('Firmante', `${s.signerName ?? ''} <${s.signerEmail}>`.trim());
+    if (s.onBehalfOf) w.row('En sustitución de', `${s.onBehalfOf} (firmante sustituto asignado por Aseguramiento de Calidad)`);
     w.row('Significado', s.meaningLabel);
     w.row('Sello de tiempo (servidor)', `${s.signedAt} UTC · ${colombia(s.signedAt)}`);
     w.row('Motivo', s.reason);
@@ -508,7 +517,7 @@ export async function verifyControlledPdf(
     else if (db.recordHash.trim() !== s.recordHash) problem = 'El registro de la firma no coincide con el del PDF.';
     else if (db.contentSha256.trim() !== s.contentSha256 || !accepted.has(s.contentSha256)) problem = 'La firma no corresponde al contenido del documento.';
     if (problem) problems.push(`${s.meaningLabel} (${s.signerEmail}): ${problem}`);
-    return { uid: s.uid, meaningLabel: s.meaningLabel, signer: s.signerName ?? s.signerEmail, ok: !problem, problem };
+    return { uid: s.uid, meaningLabel: s.meaningLabel, signer: signerWithSubstitution(s, false), ok: !problem, problem };
   });
   if (manifest && signatures.length === 0) problems.push('El manifiesto no tiene firmas.');
   return { ok: problems.length === 0, pdfSha256, pdfMatches, manifestFound: Boolean(manifest), manifestSha256: mSha, manifestMatches, signatures, problems };

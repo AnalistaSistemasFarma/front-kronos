@@ -80,6 +80,11 @@ export default function SgcSignaturesCard({ data, onRetryPdf, idTask = null }: {
                     </Table.Td>
                     <Table.Td>
                       <Text size='sm'>{s.signerName ?? s.signerEmail}</Text>
+                      {s.onBehalfOf && (
+                        <Text size='xs' c='dimmed'>
+                          en sustitución de {s.onBehalfOf}
+                        </Text>
+                      )}
                       <Text size='xs' c='dimmed'>
                         {s.signerEmail}
                       </Text>

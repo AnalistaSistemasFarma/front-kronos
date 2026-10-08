@@ -50,6 +50,7 @@ import SgcAdditionalInfo from './SgcAdditionalInfo';
 import SgcAttachmentsCard from './SgcAttachmentsCard';
 import SgcInteractionHistory from './SgcInteractionHistory';
 import SgcSignersPanel from './SgcSignersPanel';
+import SgcSubstituteCard from './SgcSubstituteCard';
 import SgcTasksModal from './SgcTasksModal';
 import SgcSignModal from '../signature/SgcSignModal';
 import SgcSignaturesCard from '../signature/SgcSignaturesCard';
@@ -110,6 +111,14 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
   const [signOpen, setSignOpen] = useState(false);
 
   const userOptions = useMemo(() => (users.data?.users ?? []).map((u) => ({ value: u.email, label: u.name ? `${u.name} (${u.email})` : u.email })), [users.data]);
+  // Sprint 12: en APROBACIÓN solo se ofrecen los aprobadores autorizados del proceso (si la lista aplica).
+  const approvers = useSgcFetch<{ restricted: boolean; users: { email: string; name: string | null }[] }>(
+    idCompany && (data?.permissions.canChangeSigners || data?.permissions.canSubstitute) ? `/api/sgc/users?company=${idCompany}&role=aprobador&process=${data.request.process?.id ?? ''}` : null
+  );
+  const approverOptions = useMemo(
+    () => (approvers.data?.restricted ? approvers.data.users.map((u) => ({ value: u.email, label: u.name ? `${u.name} (${u.email})` : u.email })) : null),
+    [approvers.data]
+  );
 
   const run = useCallback(
     async (fn: () => Promise<unknown>, ok: string) => {
@@ -580,6 +589,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           steps={data.steps}
           canEdit={permissions.canChangeSigners}
           users={userOptions.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase())}
+          approverUsers={approverOptions?.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase()) ?? null}
           suggestion={sugg.data?.suggestion ?? null}
           suggestOnly={permissions.signersSuggestOnly}
           canConfirm={permissions.canConfirmSuggestion}
@@ -589,6 +599,15 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           onSave={async (stepKey, signers, signingMode, reason) => {
             await run(() => sgcSend(`/api/sgc/requests/${request.id}/signers`, 'POST', { stepKey, signers, mode: signingMode, reason }), 'Firmantes actualizados.');
           }}
+        />
+
+        <SgcSubstituteCard
+          tasks={data.tasks}
+          substitutions={data.substitutions}
+          canSubstitute={permissions.canSubstitute}
+          users={userOptions.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase())}
+          approverUsers={approverOptions?.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase()) ?? null}
+          onAssign={(idTask, body) => run(() => sgcSend(`/api/sgc/tasks/${idTask}/substitute`, 'POST', body), 'Sustituto asignado: firmará en sustitución del titular.')}
         />
 
         <SgcDocumentLayoutCard

@@ -59,6 +59,8 @@ import { activateReaders, checkReadThreshold, getDisseminationView, getMyReading
 import { getTrainingView } from './training';
 import { SGC_TRAINING_FLAG_SOURCE_LABELS, SGC_TRAINING_LOCKED_ROLES, effectiveRequiresTraining, parseTrainingChoice, trainingFlagSource } from '../training/flag';
 import { annulUnpublishedVersion, publishApprovedVersion, type SgcPublishResult } from './vigencia';
+import { assertApproversAuthorized, canApprove, getApproverPolicy, isApprovalStep, isSubstituteAssigner } from './approvers';
+import { SGC_AUTH_TYPE_SUBSTITUTES, isAuthorizedApprover, normalizeSubstitution, substitutionDenial } from '../approvers';
 
 /**
  * Solicitudes y «Tareas documentales» del SGC (Sprint 2): instancias del
@@ -610,6 +612,10 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     if (taskDef.role === 'material' && decision === 'aprobar' && !(await tx.sgcTraining.findFirst({ where: { id_request: request.id_request } }))) {
       throw new SgcError('Registre primero el material de la capacitación (video o sesión y la evaluación en Microsoft Forms o Google Forms): la divulgación abre con él.', 409);
     }
+    // Sprint 12: al APROBAR, la persona (titular o sustituto) debe seguir en la lista de aprobadores autorizados.
+    if (decision === 'aprobar' && isApprovalStep(taskDef) && chosenRow?.user_email && !(await canApprove(tx, request.id_company, me, request.id_process_map, new Date()))) {
+      throw new SgcError('Usted no está (o ya no está) en la lista de aprobadores autorizados de este proceso: Aseguramiento de Calidad puede asignar un sustituto autorizado.', 409);
+    }
     const isSubmit = taskDef.assignment === 'elaborador' && decision === 'aprobar';
     if (isSubmit) await assertReadyToSubmit(tx, request, def, task.task_key);
     if (isFirstWork && decision === 'aprobar') await assertAssignmentComplete(tx, request, def, task.name);
@@ -780,6 +786,8 @@ export async function setSigners(db: SgcDb, notifier: SgcNotifier, idRequest: nu
     }
     const eligible = new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email));
     const desired = normalizeSigners(input.signers, { stepName: stepDef.name, elaboratorEmail: request.elaborator_email, requesterEmail: request.requester_email, eligibleEmails: eligible });
+    // Sprint 12: en APROBACIÓN solo quedan (ni se sugieren) los aprobadores autorizados del proceso.
+    await assertApproversAuthorized(tx, request, stepDef, desired.map((d) => d.email), new Date());
     const modes = parseSigningModes(request.signing_modes_json);
     const currentMode = signingModeFor(stepDef, modes);
     const newMode = input.mode === 'orden' || input.mode === 'paralelo' ? input.mode : currentMode;
@@ -820,7 +828,8 @@ export async function setSigners(db: SgcDb, notifier: SgcNotifier, idRequest: nu
     // Si el paso está en curso, se ajustan sus cupos pendientes (lo decidido se conserva).
     if (openTask) {
       const point = signaturePointFor(stepDef.signatureMeaning);
-      const removed = openTask.assignees.filter((a) => a.user_email && plan.remove.includes(lower(a.user_email)) && a.status === 'pendiente');
+      // Sprint 12: quitar al titular también anula el cupo pendiente de su sustituto.
+      const removed = openTask.assignees.filter((a) => a.status === 'pendiente' && ((a.user_email && plan.remove.includes(lower(a.user_email))) || (a.on_behalf_of && plan.remove.includes(lower(a.on_behalf_of)))));
       if (removed.length) {
         await tx.sgcTaskAssignee.updateMany({ where: { id_task_assignee: { in: removed.map((a) => a.id_task_assignee) } }, data: { status: 'reemplazado' } });
         await tx.sgcAuthorization.updateMany({ where: { id_task_assignee: { in: removed.map((a) => a.id_task_assignee) }, status: 'pendiente' }, data: { status: 'anulada' } });
@@ -962,6 +971,8 @@ export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idReq
       if (!stepDef) throw new SgcError(`El paso ${stepKey} no admite firmantes.`, 409);
       if (await tx.sgcTask.findFirst({ where: { id_request: idRequest, task_key: stepKey, status: 'abierta' } })) throw new SgcError(`«${stepDef.name}» ya está en curso: reasigne a las personas en lugar de confirmar.`, 409);
       normalizeSigners(list.map((x) => x.email), { stepName: stepDef.name, elaboratorEmail: request.elaborator_email, requesterEmail: request.requester_email, eligibleEmails: eligible });
+      // Sprint 12: lo sugerido para APROBACIÓN se confirma solo si son aprobadores autorizados.
+      await assertApproversAuthorized(tx, request, stepDef, list.map((x) => x.email), new Date());
     }
     const now = new Date();
     // El orden de lo confirmado sigue al de lo que ya estaba activo.
@@ -1060,6 +1071,126 @@ export async function reassignTask(
   }, TX_OPTS);
   await send(notifier, notifications);
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 12: FIRMANTE SUSTITUTO (R12) — solo el grupo exclusivo SGC-SUSTITUTOS
+// ---------------------------------------------------------------------------
+
+/**
+ * Asigna un SUSTITUTO a un cupo PENDIENTE de un paso con firmantes (titular
+ * ausente). Solo el grupo exclusivo SGC-SUSTITUTOS (María Camila y su
+ * suplente, D8), con motivo y periodo de ausencia. El sustituto cumple las
+ * mismas reglas que un firmante (segregación; en aprobación, aprobador
+ * autorizado). El cupo del titular queda «reemplazado» (y su autorización
+ * anulada); el nuevo cupo conserva el orden y lleva on_behalf_of, así la firma
+ * queda «Firmó X en sustitución de Y» en el registro, el PDF y el manifiesto.
+ * La lista de firmantes del documento NO cambia: si el paso vuelve a
+ * empezar (devolución), el cupo vuelve al titular.
+ */
+export async function assignSubstitute(db: SgcDb, notifier: SgcNotifier, idTask: number, raw: unknown, actor: SgcActor) {
+  const me = lower(actor.email);
+  const idTaskAssignee = Number((raw as { idAssignee?: unknown } | null)?.idAssignee);
+  if (!Number.isInteger(idTaskAssignee) || idTaskAssignee < 1) throw new SgcError('Indique el cupo (firmante) que se sustituye.');
+  const input = normalizeSubstitution(raw);
+  const head = await db.sgcTaskAssignee.findUnique({ where: { id_task_assignee: idTaskAssignee }, select: { id_task: true, task: { select: { id_request: true } } } });
+  if (!head || head.id_task !== idTask) throw new SgcError('Cupo no encontrado.', 404);
+  const notifications: SgcNotification[] = [];
+  const result = await db.$transaction(async (tx) => {
+    const request = await lockRequest(tx, head.task.id_request);
+    if (!(await isSubstituteAssigner(tx, request.id_company, me))) {
+      throw new SgcError('Solo el grupo exclusivo de Calidad «Firmantes sustitutos» (SGC-SUSTITUTOS) asigna un firmante sustituto.', 403);
+    }
+    const slot = await tx.sgcTaskAssignee.findUniqueOrThrow({ where: { id_task_assignee: idTaskAssignee }, include: { task: { include: { assignees: true, taskDef: true } } } });
+    const task = slot.task;
+    if (request.status !== 'abierta' || task.status !== 'abierta') throw new SgcError('La tarea no está abierta.', 409);
+    if (task.taskDef.assignment !== 'firmantes') throw new SgcError('El sustituto se asigna en los pasos de revisión o aprobación (en elaboración se reasigna la tarea).', 409);
+    if (slot.status !== 'pendiente' || !slot.user_email) throw new SgcError('Solo se sustituye a una persona con su firma PENDIENTE (no un cupo de grupo ni una firma ya decidida).', 409);
+    const def = await loadDefinition(tx, request.id_flow_version);
+    const stepDef = def.tasks.find((t) => t.key === task.task_key);
+    if (!stepDef) throw new SgcError('La tarea no existe en la versión del flujo.', 500);
+    // El titular es la persona a la que se sustituye (si el cupo ya era de un sustituto, el titular original).
+    const original = lower(slot.on_behalf_of ?? slot.user_email);
+    const approval = isApprovalStep(stepDef);
+    const now = new Date();
+    const policy = approval ? await getApproverPolicy(tx, request.id_company) : null;
+    const denial = substitutionDenial(input.toEmail, {
+      originalEmail: original,
+      requesterEmail: request.requester_email,
+      elaboratorEmail: request.elaborator_email,
+      taskPeople: task.assignees.filter((a) => a.user_email && a.status !== 'reemplazado' && a.status !== 'anulado').map((a) => a.user_email!),
+      eligible: new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email)),
+      mustBeAuthorizedApprover: Boolean(policy?.applies),
+      isAuthorizedApprover: Boolean(policy && isAuthorizedApprover(policy.list, input.toEmail, request.id_process_map, now)),
+    });
+    if (denial) throw new SgcError(denial, 409);
+
+    await tx.sgcTaskAssignee.update({ where: { id_task_assignee: slot.id_task_assignee }, data: { status: 'reemplazado', decided_by: me, decided_at: now, comment: `Sustituido por ${input.toEmail}: ${input.reason}`.slice(0, 2000) } });
+    await tx.sgcAuthorization.updateMany({ where: { id_task_assignee: slot.id_task_assignee, status: 'pendiente' }, data: { status: 'anulada' } });
+    const created = await tx.sgcTaskAssignee.create({
+      data: { id_task: task.id_task, user_email: input.toEmail, sign_order: slot.sign_order, status: 'pendiente', signature_status: slot.signature_status, signature_meaning: slot.signature_meaning, on_behalf_of: original },
+    });
+    const authType = stepDef.isAuthorization && stepDef.authorizationTypeCode
+      ? await tx.sgcAuthorizationType.findUnique({ where: { id_company_code: { id_company: request.id_company, code: stepDef.authorizationTypeCode } } })
+      : null;
+    if (authType) await tx.sgcAuthorization.create({ data: { id_company: request.id_company, id_authorization_type: authType.id_authorization_type, id_request: request.id_request, id_task_assignee: created.id_task_assignee, assigned_email: input.toEmail } });
+    await tx.sgcSignerSubstitution.create({
+      data: {
+        id_company: request.id_company,
+        id_request: request.id_request,
+        id_task: task.id_task,
+        step_key: task.task_key,
+        id_task_assignee_original: slot.id_task_assignee,
+        id_task_assignee_new: created.id_task_assignee,
+        original_email: original,
+        substitute_email: input.toEmail,
+        reason: input.reason,
+        absence_from: input.absenceFrom,
+        absence_to: input.absenceTo,
+        assigned_by: me,
+        assigned_at: now,
+      },
+    });
+    const period = input.absenceFrom || input.absenceTo ? `\nAusencia: ${input.absenceFrom?.toISOString().slice(0, 10) ?? '¿?'} a ${input.absenceTo?.toISOString().slice(0, 10) ?? '¿?'}` : '';
+    await addInteraction(tx, request.id_request, 'reasignacion', me, `Asignó a ${input.toEmail} como SUSTITUTO de ${original} en «${task.name}» (firmará en sustitución).${period}\nMotivo: ${input.reason}`, {
+      idTask: task.id_task,
+      meta: { substitution: { from: original, to: input.toEmail, absenceFrom: input.absenceFrom?.toISOString().slice(0, 10) ?? null, absenceTo: input.absenceTo?.toISOString().slice(0, 10) ?? null } },
+    });
+    await writeSgcAudit(tx, {
+      idCompany: request.id_company,
+      actorEmail: me,
+      action: SGC_AUDIT_ACTIONS.firmanteSustituido,
+      entity: 'task_assignee',
+      entityId: created.id_task_assignee,
+      before: { idTaskAssignee: slot.id_task_assignee, email: slot.user_email, onBehalfOf: slot.on_behalf_of },
+      after: { idTaskAssignee: created.id_task_assignee, email: input.toEmail, onBehalfOf: original, stepKey: task.task_key },
+      detail: input.reason,
+      ip: actor.ip,
+      userAgent: actor.userAgent,
+    });
+    const fresh = await tx.sgcTaskAssignee.findMany({ where: { id_task: task.id_task } });
+    const inTurn = assigneesInTurn(fresh.map(toAssigneeState), (task.signing_mode as 'orden' | 'paralelo' | null) ?? null).filter((a) => a.id === created.id_task_assignee);
+    await notifyTurn({ tx, request, def, notifications, actor, subjectLabel: request.subject }, task.id_task, stepDef, inTurn, 'paralelo');
+    return { idAssignee: created.id_task_assignee };
+  }, TX_OPTS);
+  await send(notifier, notifications);
+  return result;
+}
+
+/** Sprint 12: sustituciones de la solicitud (para el expediente). */
+export async function listSubstitutions(db: SgcDb | Tx, idRequest: number) {
+  const rows = await db.sgcSignerSubstitution.findMany({ where: { id_request: idRequest }, orderBy: { id_signer_substitution: 'asc' } });
+  return rows.map((r) => ({
+    id: r.id_signer_substitution,
+    stepKey: r.step_key,
+    original: r.original_email,
+    substitute: r.substitute_email,
+    reason: r.reason,
+    absenceFrom: r.absence_from?.toISOString().slice(0, 10) ?? null,
+    absenceTo: r.absence_to?.toISOString().slice(0, 10) ?? null,
+    assignedBy: r.assigned_by,
+    assignedAt: r.assigned_at.toISOString(),
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1238,6 +1369,8 @@ export interface SgcRequestPermissions {
   isRequester: boolean;
   isElaborator: boolean;
   isQuality: boolean;
+  /** Sprint 12: integrante del grupo exclusivo SGC-SUSTITUTOS (asigna firmantes sustitutos). */
+  canSubstitute: boolean;
 }
 
 /**
@@ -1263,7 +1396,8 @@ function involvementKind(row: DetailRow, email: string, pools: readonly string[]
     }
   }
   const poolPending = row.tasks.some((t) => t.status === 'abierta' && t.assignees.some((a) => !a.user_email && a.status === 'pendiente' && a.pool_type_code && pools.includes(a.pool_type_code)));
-  if (emails.has(me) || poolPending) return 'full';
+  // Sprint 12: el grupo SGC-SUSTITUTOS ve las solicitudes para resolver una ausencia.
+  if (emails.has(me) || poolPending || pools.includes(SGC_AUTH_TYPE_SUBSTITUTES)) return 'full';
   return reader ? 'reader' : null;
 }
 
@@ -1319,6 +1453,7 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
     isRequester,
     isElaborator,
     isQuality,
+    canSubstitute: isOpen && pools.includes(SGC_AUTH_TYPE_SUBSTITUTES),
   };
 
   const sigById = new Map(row.signatures.map((sg) => [sg.id_signature, sg]));
@@ -1372,6 +1507,9 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
         signatureStatusLabel: SGC_SIGNATURE_STATUS_LABELS[a.signature_status as SgcSignatureStatus] ?? a.signature_status,
         signatureMeaning: a.signature_meaning,
         signature: signatureOf(a.id_signature),
+        // Sprint 12: cupo de un SUSTITUTO «en sustitución de» el titular.
+        onBehalfOf: a.on_behalf_of,
+        onBehalfOfName: a.on_behalf_of ? nameOf(a.on_behalf_of) : null,
       })),
       myAction:
         myTurn && !blockedBySoD
@@ -1396,7 +1534,10 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       assignedLabel:
         t.taskDef.assignment === 'alcance'
           ? `Personas del alcance de divulgación (${t.assignees.filter((a) => a.status !== 'reemplazado' && a.status !== 'anulado').length})`
-          : t.assignees.filter((a) => a.status !== 'reemplazado' && a.status !== 'anulado').map((a) => (a.user_email ? nameOf(a.user_email) : `Grupo ${a.pool_type_code}`)).join(', '),
+          : t.assignees
+              .filter((a) => a.status !== 'reemplazado' && a.status !== 'anulado')
+              .map((a) => (a.user_email ? `${nameOf(a.user_email)}${a.on_behalf_of ? ` (en sustitución de ${nameOf(a.on_behalf_of)})` : ''}` : `Grupo ${a.pool_type_code}`))
+              .join(', '),
     };
   });
 
@@ -1502,6 +1643,8 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       withdrawReason: a.withdraw_reason,
     })),
     permissions,
+    // Sprint 12: sustituciones de firmantes (quién, por quién, motivo y periodo).
+    substitutions: readerOnly ? [] : await listSubstitutions(db, row.id_request),
     signatureNotice: SGC_SIGNATURE_NOTICE,
     // Sprint 3: borrador vigente (lo que se firma), revisiones del editor, firmas, chequeos y PDF controlado.
     currentDraft: (() => {
@@ -1516,6 +1659,7 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       meaningLabel: SGC_SIGNATURE_LABELS[sg.meaning as keyof typeof SGC_SIGNATURE_LABELS] ?? sg.meaning,
       signerEmail: sg.signer_email,
       signerName: sg.signer_name ?? nameOf(sg.signer_email),
+      onBehalfOf: sg.on_behalf_of,
       signedAt: sg.signed_at.toISOString(),
       reason: sg.reason,
       contentName: sg.content_name,

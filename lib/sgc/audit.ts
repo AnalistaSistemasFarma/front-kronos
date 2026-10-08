@@ -102,6 +102,10 @@ export const SGC_AUDIT_ACTIONS = {
   copiaNoControladaSolicitada: 'copia_no_controlada.solicitada',
   copiaNoControladaDecidida: 'copia_no_controlada.decidida',
   visorEvento: 'documento.visor_evento',
+  // Sprint 12: aprobadores autorizados y firmante sustituto.
+  aprobadorAutorizado: 'aprobador.autorizado',
+  aprobadorRevocado: 'aprobador.revocado',
+  firmanteSustituido: 'firmante.sustituido',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];

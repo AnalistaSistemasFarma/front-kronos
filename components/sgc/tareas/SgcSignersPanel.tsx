@@ -22,6 +22,8 @@ export interface SgcSignersPanelProps {
   steps: Step[];
   canEdit: boolean;
   users: { value: string; label: string }[];
+  /** Sprint 12: personas que se ofrecen en APROBACIÓN (aprobadores autorizados); null = la lista no aplica. */
+  approverUsers?: { value: string; label: string }[] | null;
   suggestion: SgcMatrixSuggestion[] | null;
   /** Lo que guarde esta persona queda SUGERIDO (solicitante). */
   suggestOnly?: boolean;
@@ -33,7 +35,7 @@ export interface SgcSignersPanelProps {
 
 const ROLE_OF_STEP: Record<string, 'revisor' | 'aprobador'> = { revision: 'revisor', aprobacion: 'aprobador' };
 
-function StepEditor({ step, canEdit, users, suggestion, suggestOnly, onSave }: { step: Step } & Omit<SgcSignersPanelProps, 'steps' | 'canConfirm' | 'onConfirm'>) {
+function StepEditor({ step, canEdit, users, approverUsers, suggestion, suggestOnly, onSave }: { step: Step } & Omit<SgcSignersPanelProps, 'steps' | 'canConfirm' | 'onConfirm'>) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState<string[]>((step.signers.length ? step.signers : step.suggested).map((s) => s.email));
   const [mode, setMode] = useState<'orden' | 'paralelo'>((step.mode as 'orden' | 'paralelo') ?? 'paralelo');
@@ -43,6 +45,8 @@ function StepEditor({ step, canEdit, users, suggestion, suggestOnly, onSave }: {
   const initial = step.signers.length === 0;
   const role = ROLE_OF_STEP[step.key];
   const hint = suggestion?.find((s) => s.role === role);
+  const restricted = role === 'aprobador' && Boolean(approverUsers);
+  const people = restricted ? approverUsers! : users;
 
   return (
     <Card withBorder radius='md' p='md' data-testid={`sgc-firmantes-${step.key}`}>
@@ -105,9 +109,14 @@ function StepEditor({ step, canEdit, users, suggestion, suggestOnly, onSave }: {
               </Text>
             </Alert>
           )}
+          {restricted && (
+            <Text size='xs' c='dimmed' data-testid={`sgc-firmantes-solo-autorizados-${step.key}`}>
+              Solo se ofrecen los aprobadores autorizados de este proceso (los mantiene Aseguramiento de Calidad).
+            </Text>
+          )}
           <MultiSelect comboboxProps={sgcTouchComboboxProps()}
             label={`Personas (${mode === 'orden' ? 'firman en el orden en que las elija' : 'firman todas a la vez'})`}
-            data={users}
+            data={people}
             value={value}
             onChange={setValue}
             searchable
@@ -204,7 +213,7 @@ export default function SgcSignersPanel(props: SgcSignersPanelProps) {
       )}
       <Stack gap='sm'>
         {props.steps.map((s) => (
-          <StepEditor key={`${s.key}-${s.signers.map((x) => x.email).join(',')}-${s.suggested.map((x) => x.email).join(',')}-${s.mode}`} step={s} canEdit={props.canEdit} users={props.users} suggestion={props.suggestion} suggestOnly={props.suggestOnly} onSave={props.onSave} />
+          <StepEditor key={`${s.key}-${s.signers.map((x) => x.email).join(',')}-${s.suggested.map((x) => x.email).join(',')}-${s.mode}`} step={s} canEdit={props.canEdit} users={props.users} approverUsers={props.approverUsers ?? null} suggestion={props.suggestion} suggestOnly={props.suggestOnly} onSave={props.onSave} />
         ))}
       </Stack>
     </Card>

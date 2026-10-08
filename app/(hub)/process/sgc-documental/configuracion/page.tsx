@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Card, Checkbox, Group, Loader, Modal, NumberInput
 import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import { IconAlertTriangle, IconCheck, IconEdit, IconPlus } from '@tabler/icons-react';
 import SgcCargoMembers from '../../../../../components/sgc/SgcCargoMembers';
+import SgcApprovers from '../../../../../components/sgc/SgcApprovers';
 import SgcCompanySettings from '../../../../../components/sgc/SgcCompanySettings';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
@@ -128,6 +129,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
           <Tabs.Tab value='procesos'>Procesos</Tabs.Tab>
           <Tabs.Tab value='tipos-documentales'>Tipos documentales</Tabs.Tab>
           <Tabs.Tab value='cargos'>Personas por cargo</Tabs.Tab>
+          <Tabs.Tab value='aprobadores'>Aprobadores autorizados</Tabs.Tab>
           <Tabs.Tab value='empresa'>Encabezado y divulgación</Tabs.Tab>
         </Tabs.List>
 
@@ -321,6 +323,10 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
 
         <Tabs.Panel value='cargos'>
           <SgcCargoMembers idCompany={company.idCompany} />
+        </Tabs.Panel>
+
+        <Tabs.Panel value='aprobadores'>
+          <SgcApprovers idCompany={company.idCompany} processes={(data?.processes ?? []).filter((p) => p.isActive).map((p) => ({ id: p.id, code: p.code, name: p.name }))} />
         </Tabs.Panel>
 
         <Tabs.Panel value='empresa'>
