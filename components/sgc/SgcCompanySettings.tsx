@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, FileInput, Group, Loader, NumberInput, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import { Alert, Badge, Button, Card, FileInput, Group, Loader, NumberInput, Stack, Text, TextInput, Textarea } from '@mantine/core';
 import { IconAlertTriangle, IconCheck, IconPhoto } from '@tabler/icons-react';
 import { sgcSend, useSgcFetch } from './useSgcFetch';
 
@@ -22,6 +22,8 @@ interface Settings {
   logoDataUrl: string | null;
   disseminationDomains: string[] | null;
   readThresholdPct: number;
+  headerMandatory?: boolean;
+  initialLoad?: { open: boolean; closedBy: string | null; closedAt: string | null; reason: string | null };
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -89,6 +91,24 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
             {feedback.text}
           </Alert>
         )}
+        <div data-testid='sgc-config-encabezado-carga'>
+          <Text fw={600} size='sm' mb={4}>
+            Encabezado institucional y carga inicial
+          </Text>
+          <Group gap='xs' wrap='wrap'>
+            <Badge color={data.headerMandatory === false ? 'gray' : 'blue'} variant='light' data-testid='sgc-config-encabezado-obligatorio'>
+              {data.headerMandatory === false ? 'Encabezado opcional por documento' : 'Encabezado obligatorio en documentos nuevos y nuevas versiones'}
+            </Badge>
+            <Badge color={data.initialLoad?.open === false ? 'gray' : 'green'} variant='light' data-testid='sgc-config-carga-inicial'>
+              {data.initialLoad?.open === false ? 'Carga inicial cerrada' : 'Carga inicial abierta'}
+            </Badge>
+          </Group>
+          <Text size='xs' c='dimmed' mt={4}>
+            {data.initialLoad?.open === false
+              ? `La cerró ${data.initialLoad.closedBy ?? '—'} el ${data.initialLoad.closedAt?.slice(0, 10) ?? '—'}: ${data.initialLoad.reason ?? ''}`
+              : 'Mientras la carga inicial está abierta, Calidad sube los documentos vigentes con su propio encabezado (uno a uno o desde el listado maestro en Excel).'}
+          </Text>
+        </div>
         <div>
           <Text fw={600} size='sm' mb={4}>
             Logo del encabezado institucional

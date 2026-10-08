@@ -143,7 +143,9 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
       SET IDENTITY_INSERT [dbo].[company] ON;
       IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = ${CO}) INSERT INTO [dbo].[company] (id_company, company) VALUES (${CO}, N'EMPRESA S4 CI');
       SET IDENTITY_INSERT [dbo].[company] OFF;`);
-    await prisma.sgcCompanyConfig.upsert({ where: { id_company: CO }, create: { id_company: CO, is_active: true, storage_root: 'SGC/S4', activated_by: 'ci', activated_at: new Date() }, update: { is_active: true } });
+    // Sprint 8: esta suite usa borradores PDF y el encabezado opcional (modo configurable header_mandatory = 0);
+    // el encabezado OBLIGATORIO se prueba en tests/integration/sgc/s8.integration.test.ts.
+    await prisma.sgcCompanyConfig.upsert({ where: { id_company: CO }, create: { id_company: CO, is_active: true, header_mandatory: false, storage_root: 'SGC/S4', activated_by: 'ci', activated_at: new Date() }, update: { is_active: true, header_mandatory: false } });
     const proc = await prisma.process.create({ data: { process: `${SGC_PROCESS_NAME} (S4 CI)` } });
     const sub: Record<string, number> = {};
     for (const perm of ['lectura', 'gestion', 'calidad', 'flujos'] as const) {

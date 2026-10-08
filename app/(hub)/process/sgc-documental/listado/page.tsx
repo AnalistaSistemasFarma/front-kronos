@@ -30,6 +30,8 @@ const STATUS_OPTIONS = [
   { value: 'vigente', label: 'Vigentes' },
   { value: 'obsoleto', label: 'Obsoletos' },
   { value: 'anulado', label: 'Anulados' },
+  // Sprint 8: importados del listado maestro a los que aún les falta el PDF.
+  { value: 'pendiente_archivo', label: 'Pendientes de archivo' },
   { value: 'todos', label: 'Todos los estados' },
 ];
 
