@@ -9,7 +9,7 @@ import {
 } from '../../lib/sgc/constants';
 import { SGC_REVIEW_STATE_LABELS, getReviewState } from '../../lib/sgc/review';
 
-const STATUS_COLOR: Record<string, string> = { borrador: 'gray', vigente: 'green', obsoleto: 'orange', anulado: 'red' };
+const STATUS_COLOR: Record<string, string> = { borrador: 'gray', vigente: 'green', obsoleto: 'orange', anulado: 'red', pendiente_archivo: 'yellow' };
 const CONF_COLOR: Record<string, string> = { publica: 'blue', departamento: 'violet', confidencial: 'red' };
 const REVIEW_COLOR = { al_dia: 'teal', por_vencer: 'yellow', vencido: 'red', sin_fecha: 'gray' } as const;
 // El texto del distintivo de Mantine tiene overflow:hidden, así que en una

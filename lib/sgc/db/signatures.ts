@@ -1,5 +1,4 @@
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
-import { buildCodeRoot, buildDocumentCode, nextSequence } from '../coding';
 import { SGC_SUBPROCESS_URLS } from '../constants';
 import type { SgcAccessSubject } from '../documentAccess';
 import { SgcError, isSgcError } from '../errors';
@@ -15,9 +14,11 @@ import { consentTextSha256, sha256HexOf, validateSignInput, verifySignatureRow }
 import { assertReauthNotLocked, type SgcPasswordVerifier } from '../signature/reauth';
 import { buildVersionFileName, buildVersionFolderSegments } from '../storage';
 import type { SgcActor, SgcDb } from './catalogs';
+import { resolveNewDocumentCode } from './coding';
 import { getVersionForViewer, type SgcUploader } from './documents';
 import { addInteraction, decideTask, requestOfTask } from './requests';
-import { cargoOf, composeContent, latestLayout, loadVerifiedDraft, personLabel } from './layout';
+import { cargoOf, composeContent, effectiveInstitutional, latestLayout, loadVerifiedDraft, personLabel } from './layout';
+import { isHeaderMandatory } from './companySettings';
 import { minorRevisionChain } from './drafts';
 import { withSgcAppLock } from './lock';
 import { getReadSignError, type SgcReadStatus } from '../dissemination/scope';
@@ -298,13 +299,16 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       const last = await db.sgcDocumentVersion.findFirst({ where: { id_document: request.document.id_document }, orderBy: { version_number: 'desc' }, select: { version_number: true } });
       versionNumber = (last?.version_number ?? 0) + 1;
     } else {
-      const guide = await db.sgcCodingGuide.findUnique({ where: { id_company: request.id_company } });
-      if (!guide) throw new SgcError('La empresa no tiene guía de codificación: configúrela para generar el código del documento nuevo.', 409);
-      const g = { prefix: guide.prefix, pattern: guide.pattern, sequenceDigits: guide.sequence_digits };
-      const parts = { processTypeCode: request.processMap.processType.code, processCode: request.processMap.code, documentTypeCode: request.documentType.code };
-      const existing = await db.sgcDocument.findMany({ where: { id_company: request.id_company, code: { startsWith: buildCodeRoot(g, parts) } }, select: { code: true } });
-      sequence = nextSequence(g, parts, existing.map((e) => e.code));
-      code = buildDocumentCode(g, parts, sequence);
+      // Sprint 8: con la guía de la empresa; un formato o instructivo hereda el número de su documento padre.
+      const resolved = await resolveNewDocumentCode(db, {
+        idCompany: request.id_company,
+        processTypeCode: request.processMap.processType.code,
+        processCode: request.processMap.code,
+        documentTypeCode: request.documentType.code,
+        idParentDocument: request.id_parent_document,
+      });
+      sequence = resolved.sequence;
+      code = resolved.code;
       title = request.subject.slice(0, 300);
       versionNumber = 1;
     }
@@ -315,7 +319,8 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
     // 2026-10-03: composición — encabezado institucional (si el documento lo usa), campos de sistema,
     // historial de cambios y firmas DENTRO del documento en la posición que ubicó el elaborador.
     const layout = await latestLayout(db, idRequest);
-    const institutional = layout.institutionalHeader && draft.format !== 'pdf';
+    // Sprint 8: encabezado obligatorio por configuración de la empresa (salvo un borrador PDF anterior a la regla).
+    const institutional = effectiveInstitutional(layout.institutionalHeader, await isHeaderMandatory(db, request.id_company), draft.format);
     const signerRows = await db.sgcTaskAssignee.findMany({ where: { id_task_assignee: { in: signatures.map((s) => s.id_task_assignee) } }, select: { id_task_assignee: true, user_email: true, pool_type_code: true, task: { select: { task_key: true } } } });
     const keyOfAssignee = new Map(signerRows.map((a) => [a.id_task_assignee, sgcSignerKey(a.task.task_key, a.user_email, a.pool_type_code)]));
     const cargos = await cargoOf(db, request.id_company, signatures.map((s) => s.signer_email));

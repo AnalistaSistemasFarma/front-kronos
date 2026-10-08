@@ -10,6 +10,7 @@ import { sgcSend, useSgcFetch } from '../../../../../../components/sgc/useSgcFet
 import type { SgcCatalogs } from '../../../../../../lib/sgc/db/catalogs';
 import type { SgcCompanyAccess } from '../../../../../../lib/sgc/permissions';
 import type { SgcFormFieldDefinition } from '../../../../../../lib/sgc/flows/definition';
+import { inheritsParentNumber } from '../../../../../../lib/sgc/coding';
 
 /**
  * Solicitud documental (paso 0 del flujo): nuevo documento, nueva versión o
@@ -41,6 +42,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const [idProcess, setIdProcess] = useState<string | null>(null);
   const [idDocumentType, setIdDocumentType] = useState<string | null>(null);
   const [idDocument, setIdDocument] = useState<string | null>(prefill.tipo ? prefill.documento : null);
+  const [idParentDocument, setIdParentDocument] = useState<string | null>(null);
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [values, setValues] = useState<Record<string, string>>({});
@@ -48,6 +50,10 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const [error, setError] = useState<string | null>(null);
 
   const selectedDoc = docs.data?.documents.find((d) => String(d.idDocument) === idDocument);
+  // Sprint 8: un formato o instructivo hereda el número de su documento padre (guía de codificación).
+  const selectedType = catalogs.data?.documentTypes.find((t) => String(t.id) === idDocumentType) ?? null;
+  const guide = catalogs.data?.codingGuide ?? null;
+  const inherits = Boolean(requestType === 'nuevo' && guide && selectedType && inheritsParentNumber(guide, selectedType.code));
   const [subjectTouched, setSubjectTouched] = useState(false);
   const suggestedSubject = selectedDoc && requestType === 'nueva_version' ? `Nueva versión de ${selectedDoc.code} (V${(selectedDoc.versionNumber ?? 0) + 1})` : '';
 
@@ -71,6 +77,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         idProcess: requestType === 'nuevo' ? Number(idProcess) : undefined,
         idDocumentType: requestType === 'nuevo' ? Number(idDocumentType) : undefined,
         idDocument: requestType !== 'nuevo' ? Number(idDocument) : undefined,
+        idParentDocument: inherits && idParentDocument ? Number(idParentDocument) : undefined,
         formValues: values,
       });
       router.push(`/process/sgc-documental/solicitudes/${res.idRequest}?empresa=${id}`);
@@ -121,6 +128,21 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
                 data-testid='sgc-nueva-tipo-documental'
               />
             </Grid.Col>
+            {inherits && (
+              <Grid.Col span={12}>
+                <SgcSelect
+                  label='Documento padre'
+                  description={`Un ${selectedType?.name.toLowerCase() ?? 'documento'} hereda el número de su documento padre (por ejemplo, el procedimiento).`}
+                  required
+                  searchable
+                  data={(docs.data?.documents ?? []).map((d) => ({ value: String(d.idDocument), label: `${d.code} · ${d.title}` }))}
+                  value={idParentDocument}
+                  onChange={setIdParentDocument}
+                  nothingFoundMessage='No hay documentos vigentes que usted pueda consultar'
+                  data-testid='sgc-nueva-padre'
+                />
+              </Grid.Col>
+            )}
           </Grid>
         ) : (
           <SgcSelect

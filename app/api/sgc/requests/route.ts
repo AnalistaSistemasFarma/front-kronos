@@ -44,6 +44,7 @@ export async function POST(request: Request) {
         idDocument: body.idDocument,
         idProcess: body.idProcess,
         idDocumentType: body.idDocumentType,
+        idParentDocument: body.idParentDocument,
         elaboratorEmail: body.elaboratorEmail,
         formValues: body.formValues && typeof body.formValues === 'object' ? (body.formValues as Record<string, unknown>) : {},
       },

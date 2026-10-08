@@ -56,9 +56,15 @@ export default function SgcDocumentLayoutCard({ requestId, onMessage }: { reques
         </Text>
         <Switch
           label='Usar el encabezado institucional (logo, código, versión, página x de y, elaboró, revisó, aprobó con su recuadro «Firma», fecha de emisión y proceso)'
-          description={isPdf ? 'No aplica a un borrador PDF: el PDF ya trae su propio formato.' : 'El sistema llena estos campos y el historial de cambios al generar el PDF controlado.'}
+          description={
+            isPdf
+              ? 'No aplica a un borrador PDF: el PDF ya trae su propio formato.'
+              : data.headerMandatory
+                ? 'Obligatorio en los documentos nuevos y en las nuevas versiones (Aseguramiento de Calidad). El sistema llena estos campos y el historial de cambios al generar el PDF controlado.'
+                : 'El sistema llena estos campos y el historial de cambios al generar el PDF controlado.'
+          }
           checked={data.institutionalHeader}
-          disabled={!data.canEdit || busy || (isPdf && !data.institutionalHeader)}
+          disabled={!data.canEdit || busy || data.headerMandatory || (isPdf && !data.institutionalHeader)}
           onChange={(e) => {
             const value = e.currentTarget.checked;
             void save({ institutionalHeader: value }, value ? 'El documento usará el encabezado institucional.' : 'El documento ya no usará el encabezado institucional.').catch(() => undefined);

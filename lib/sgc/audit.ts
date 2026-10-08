@@ -86,6 +86,9 @@ export const SGC_AUDIT_ACTIONS = {
   lecturaNoEntendi: 'divulgacion.no_entendi',
   lecturaUmbral: 'divulgacion.umbral_lectura',
   empresaConfigurada: 'configuracion.empresa',
+  // Sprint 8: encabezado obligatorio, codificación con herencia y listado maestro.
+  listadoMaestroImportado: 'listado_maestro.importado',
+  documentoImportado: 'documento.importado',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];

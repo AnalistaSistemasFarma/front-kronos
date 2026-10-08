@@ -1,6 +1,5 @@
 import type { Prisma } from '../../../app/generated/prisma';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
-import { buildCodeRoot, buildDocumentCode, nextSequence } from '../coding';
 import type { SgcCurrentDraft } from '../draft/current';
 import { sanitizeDraftHtml } from '../draft/html';
 import { SgcError } from '../errors';
@@ -30,6 +29,8 @@ import { sha256HexOf } from '../signature/record';
 import { isPdf } from '../storage';
 import { toWinAnsiSafe } from '../watermark';
 import type { SgcActor, SgcDb } from './catalogs';
+import { resolveNewDocumentCode } from './coding';
+import { isHeaderMandatory } from './companySettings';
 import { loadDefinition } from './flows';
 import { addInteraction, assertCanView, type SgcViewer } from './requests';
 import { currentDraftInTx } from './signatureRecord';
@@ -152,6 +153,11 @@ export async function latestLayout(db: Db, idRequest: number): Promise<SgcLayout
   };
 }
 
+/** Encabezado que se aplica: el guardado, o siempre si es obligatorio; nunca sobre un borrador PDF. */
+export function effectiveInstitutional(saved: boolean, mandatory: boolean, draftFormat: string | null | undefined): boolean {
+  return (saved || mandatory) && draftFormat !== 'pdf';
+}
+
 function inElaboration(row: { status: string; tasks: { status: string; taskDef: { assignment: string } }[] }): boolean {
   return row.status === 'abierta' && row.tasks.some((t) => t.status === 'abierta' && t.taskDef.assignment === 'elaborador');
 }
@@ -159,17 +165,20 @@ function inElaboration(row: { status: string; tasks: { status: string; taskDef: 
 /** Composición del documento para la vista (participantes, cajas, sugerencias y si la persona puede editarla). */
 export async function getDocumentLayout(db: SgcDb, idRequest: number, viewer: SgcViewer) {
   const { row } = await assertCanView(db, idRequest, viewer);
-  const [participants, layout, draft] = await Promise.all([layoutParticipants(db, row), latestLayout(db, idRequest), currentDraftInTx(db as never, idRequest)]);
+  const [participants, layout, draft, headerMandatory] = await Promise.all([layoutParticipants(db, row), latestLayout(db, idRequest), currentDraftInTx(db as never, idRequest), isHeaderMandatory(db, row.id_company)]);
   const keys = new Set(participants.map((p) => p.key));
   const fields = layout.fields.filter((f) => keys.has(f.signerKey));
   const canEdit = inElaboration(row) && lower(row.elaborator_email) === lower(viewer.email);
+  // Sprint 8: con el encabezado obligatorio, el documento siempre lo usa (salvo un borrador PDF anterior a la regla).
+  const institutionalHeader = headerMandatory ? draft?.format !== 'pdf' : layout.institutionalHeader;
   return {
     idRequest,
-    institutionalHeader: layout.institutionalHeader,
+    institutionalHeader,
+    headerMandatory,
     fields,
     participants,
     missing: missingPlacements(participants, fields).map((p) => p.key),
-    suggested: layout.institutionalHeader ? suggestInstitutionalPlacements(participants, fields) : [],
+    suggested: institutionalHeader ? suggestInstitutionalPlacements(participants, fields) : [],
     canEdit,
     draft: draft ? { name: draft.name, sha256: draft.sha256, format: draft.format } : null,
     // La firma se ubicó sobre otro borrador: conviene revisar que la caja siga en su sitio.
@@ -188,8 +197,12 @@ export async function saveDocumentLayout(db: SgcDb, idRequest: number, input: { 
   const { row } = await assertCanView(db, idRequest, viewer);
   if (lower(row.elaborator_email) !== lower(actor.email)) throw new SgcError('Solo el elaborador ubica las firmas en el documento.', 403);
   if (!inElaboration(row)) throw new SgcError('Las firmas se ubican durante la elaboración (antes de enviar el documento a revisión).', 409);
-  const [participants, current, draft] = await Promise.all([layoutParticipants(db, row), latestLayout(db, idRequest), currentDraftInTx(db as never, idRequest)]);
-  const institutional = typeof input.institutionalHeader === 'boolean' ? input.institutionalHeader : current.institutionalHeader;
+  const [participants, current, draft, headerMandatory] = await Promise.all([layoutParticipants(db, row), latestLayout(db, idRequest), currentDraftInTx(db as never, idRequest), isHeaderMandatory(db, row.id_company)]);
+  // Sprint 8: con el encabezado obligatorio no se ofrece apagarlo (el servidor lo rechaza).
+  if (headerMandatory && input.institutionalHeader === false) {
+    throw new SgcError('El encabezado institucional es obligatorio en los documentos nuevos y en las nuevas versiones: no se puede quitar.', 409);
+  }
+  const institutional = headerMandatory ? draft?.format !== 'pdf' : typeof input.institutionalHeader === 'boolean' ? input.institutionalHeader : current.institutionalHeader;
   if (institutional && draft?.format === 'pdf') {
     throw new SgcError('El encabezado institucional se aplica a documentos editados en la app o en Word: un PDF ya trae su propio formato. Ubique las firmas sobre el PDF.', 409);
   }
@@ -359,7 +372,7 @@ export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idReque
   });
   const [participants, layout] = await Promise.all([layoutParticipants(db, row), latestLayout(db, idRequest)]);
   const { draft, bytes, html } = await loadVerifiedDraft(db, deps, idRequest);
-  const institutional = layout.institutionalHeader && draft.format !== 'pdf';
+  const institutional = effectiveInstitutional(layout.institutionalHeader, await isHeaderMandatory(db, request.id_company), draft.format);
   const people = participants.filter((p) => p.email.includes('@'));
   const cargos = await cargoOf(db, request.id_company, people.map((p) => p.email));
   const label = (m: SgcPlacedMeaning) => participants.filter((p) => p.meaning === m).map((p) => (p.email.includes('@') ? personLabel(p.name, p.email, cargos.get(p.email)) : p.name));
@@ -373,13 +386,18 @@ export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idReque
     const last = await db.sgcDocumentVersion.findFirst({ where: { id_document: request.document.id_document }, orderBy: { version_number: 'desc' }, select: { version_number: true } });
     versionNumber = (last?.version_number ?? 0) + 1;
   } else {
-    const guide = await db.sgcCodingGuide.findUnique({ where: { id_company: request.id_company } });
-    if (guide && request.processMap && request.documentType) {
-      const g = { prefix: guide.prefix, pattern: guide.pattern, sequenceDigits: guide.sequence_digits };
-      const parts = { processTypeCode: request.processMap.processType.code, processCode: request.processMap.code, documentTypeCode: request.documentType.code };
-      const existing = await db.sgcDocument.findMany({ where: { id_company: request.id_company, code: { startsWith: buildCodeRoot(g, parts) } }, select: { code: true } });
-      code = `${buildDocumentCode(g, parts, nextSequence(g, parts, existing.map((e) => e.code)))} (provisional)`;
-    } else code = 'Se asigna al aprobar';
+    code = 'Se asigna al aprobar';
+    if (request.processMap && request.documentType) {
+      // Sprint 8: misma regla que la aprobación (guía de la empresa y herencia del número del padre).
+      const resolved = await resolveNewDocumentCode(db, {
+        idCompany: request.id_company,
+        processTypeCode: request.processMap.processType.code,
+        processCode: request.processMap.code,
+        documentTypeCode: request.documentType.code,
+        idParentDocument: request.id_parent_document,
+      }).catch(() => null);
+      if (resolved) code = `${resolved.code} (provisional)`;
+    }
   }
   const changeValue = request.formValues.find((v) => v.field.field_key === 'resumen_cambios')?.value_text ?? null;
   const composed = await composeContent(db, deps, {

@@ -252,9 +252,29 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261001200000_sgc_s6_endurecimiento/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261003120000_sgc_correcciones_calidad/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261003120000_sgc_correcciones_calidad/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008100000_sgc_s8_encabezado_listado_maestro/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008100000_sgc_s8_encabezado_listado_maestro/migration.sql
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
+
+      - name: Reversas del SGC (ida y vuelta, S8 en adelante)
+        # Cada reversa nueva se prueba contra la base efímera DESPUÉS de las
+        # pruebas (con datos reales de prueba): se corre dos veces (idempotente)
+        # declarando en la sesión que se aceptan sus pérdidas, y luego se vuelve
+        # a aplicar la migración (que también debe quedar igual). Las reversas
+        # se corren de la más nueva a la más antigua.
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          declara() { printf "EXEC sp_set_session_context N'%s', 1;\n" "$@"; }
+          { declara sgc_reversa_pendientes_archivo sgc_reversa_padres; cat prisma/manual/2026-10-08-sgc-s8-encabezado-listado-maestro-reversa.sql; } > /tmp/reversa-s8.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa-s8.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa-s8.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008100000_sgc_s8_encabezado_listado_maestro/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008100000_sgc_s8_encabezado_listado_maestro/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-08-sgc-s8-guia-codificacion-olp.sql
 
       - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
         if: always()

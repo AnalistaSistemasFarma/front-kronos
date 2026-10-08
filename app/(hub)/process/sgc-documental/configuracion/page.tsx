@@ -8,7 +8,7 @@ import SgcCargoMembers from '../../../../../components/sgc/SgcCargoMembers';
 import SgcCompanySettings from '../../../../../components/sgc/SgcCompanySettings';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
-import { SGC_CODING_TOKENS, buildDocumentCode, validateCodingGuide } from '../../../../../lib/sgc/coding';
+import { SGC_CHILD_CODING_TOKENS, SGC_CODING_TOKENS, buildChildCode, buildDocumentCode, parseChildTypeCodes, validateCodingGuide } from '../../../../../lib/sgc/coding';
 import type { SgcCatalogs } from '../../../../../lib/sgc/db/catalogs';
 import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
 
@@ -52,13 +52,29 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
     prefix: data.codingGuide?.prefix ?? '',
     pattern: data.codingGuide?.pattern ?? '{PREFIJO}-{PROCESO}-{TIPO}-{CONSECUTIVO}',
     sequenceDigits: data.codingGuide?.sequenceDigits ?? 3,
+    // Sprint 8: herencia del número del padre (formatos e instructivos de un procedimiento).
+    childPattern: data.codingGuide?.childPattern ?? '',
+    childTypeCodes: (data.codingGuide?.childTypeCodes ?? []).join(', '),
+    childSequenceDigits: data.codingGuide?.childSequenceDigits ?? 2,
     reason: '',
   };
-  const guideInput = { prefix: String(guideForm.prefix), pattern: String(guideForm.pattern), sequenceDigits: Number(guideForm.sequenceDigits) };
+  const childPattern = String(guideForm.childPattern ?? '').trim();
+  const guideInput = {
+    prefix: String(guideForm.prefix),
+    pattern: String(guideForm.pattern),
+    sequenceDigits: Number(guideForm.sequenceDigits),
+    childPattern: childPattern || null,
+    childTypeCodes: parseChildTypeCodes(String(guideForm.childTypeCodes ?? '')),
+    childSequenceDigits: Number(guideForm.childSequenceDigits),
+  };
   const guideErrors = validateCodingGuide(guideInput);
   const example = guideErrors.length
     ? null
     : buildDocumentCode(guideInput, { processTypeCode: 'M', processCode: 'GC', documentTypeCode: 'PR' }, 1);
+  const childType = guideInput.childTypeCodes[0] ?? 'FO';
+  const childExample = guideErrors.length || !childPattern || !example
+    ? null
+    : buildChildCode(guideInput, { processTypeCode: 'M', processCode: 'GC', documentTypeCode: childType }, { code: example, sequence: 1 }, 1);
 
   const save = async (entity: Entity | 'coding-guide', form: Form) => {
     setBusy(true);
@@ -127,9 +143,27 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                 <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Patrón' value={String(guideForm.pattern)} onChange={(e) => setGuide({ ...guideForm, pattern: e.currentTarget.value })} w={380} ff='monospace' />
                 <NumberInput label='Dígitos' min={1} max={6} value={Number(guideForm.sequenceDigits)} onChange={(v) => setGuide({ ...guideForm, sequenceDigits: Number(v) })} w={100} />
               </Group>
+              <Text size='sm' fw={600} mt='xs'>
+                Herencia del número del documento padre
+              </Text>
+              <Text size='sm' c='dimmed'>
+                Opcional. Los tipos indicados (por ejemplo formatos e instructivos) toman el número de su documento padre. Marcas:{' '}
+                {SGC_CHILD_CODING_TOKENS.map((t) => `{${t}}`).join(' ')}. Vacío = sin herencia.
+              </Text>
+              <Group align='flex-end' wrap='wrap'>
+                <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Patrón de herencia' placeholder='{CODIGO_PADRE}-{TIPO}{CONSECUTIVO}' value={String(guideForm.childPattern ?? '')} onChange={(e) => setGuide({ ...guideForm, childPattern: e.currentTarget.value })} w={380} ff='monospace' data-testid='sgc-guia-herencia' />
+                <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Tipos que heredan' placeholder='FO, IN' value={String(guideForm.childTypeCodes ?? '')} onChange={(e) => setGuide({ ...guideForm, childTypeCodes: e.currentTarget.value.toUpperCase() })} w={180} />
+                <NumberInput label='Dígitos' min={1} max={6} value={Number(guideForm.childSequenceDigits)} onChange={(v) => setGuide({ ...guideForm, childSequenceDigits: Number(v) })} w={100} />
+              </Group>
               {example ? (
                 <Text size='sm'>
                   Ejemplo (proceso GC, procedimiento): <Text span ff='monospace' fw={700}>{example}</Text>
+                  {childExample && (
+                    <>
+                      {' '}
+                      · su {childType}: <Text span ff='monospace' fw={700} data-testid='sgc-guia-ejemplo-hijo'>{childExample}</Text>
+                    </>
+                  )}
                 </Text>
               ) : (
                 <Alert color='yellow' icon={<IconAlertTriangle size={18} />}>

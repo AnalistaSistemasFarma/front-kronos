@@ -32,6 +32,8 @@ import SgcSignersPlacementList from './SgcSignersPlacementList';
 export interface SgcLayoutData {
   idRequest: number;
   institutionalHeader: boolean;
+  /** Sprint 8: encabezado institucional obligatorio (configuración de la empresa). */
+  headerMandatory?: boolean;
   fields: SgcStoredField[];
   participants: SgcPlacementParticipant[];
   missing: string[];

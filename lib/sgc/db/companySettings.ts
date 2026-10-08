@@ -16,18 +16,44 @@ import type { SgcActor, SgcDb } from './catalogs';
  * su huella SHA-256 y tamaño, no completo).
  */
 
+/**
+ * Sprint 8 (Calidad OLP, 2026-10-07: «que sea fijo, que no sea una opción»):
+ * ¿el encabezado institucional es OBLIGATORIO en la empresa? Por defecto sí;
+ * es configuración por empresa (sgc.company_config.header_mandatory) para
+ * poder revertirlo sin tocar el código.
+ */
+export async function isHeaderMandatory(db: Pick<SgcDb, 'sgcCompanyConfig'>, idCompany: number): Promise<boolean> {
+  const c = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { header_mandatory: true } });
+  return c?.header_mandatory ?? true;
+}
+
 export interface SgcCompanySettings {
   idCompany: number;
   hasLogo: boolean;
   logoDataUrl: string | null;
   disseminationDomains: string[] | null;
   readThresholdPct: number;
+  /** Sprint 8: encabezado institucional obligatorio en documento nuevo y nueva versión. */
+  headerMandatory: boolean;
+  /** Sprint 8: carga inicial de vigentes (sin el encabezado del sistema) abierta o cerrada por Calidad. */
+  initialLoad: { open: boolean; closedBy: string | null; closedAt: string | null; reason: string | null };
 }
 
 export async function getCompanySettings(db: SgcDb, idCompany: number): Promise<SgcCompanySettings> {
-  const c = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { logo_data_url: true, dissemination_domains: true, read_threshold_pct: true } });
+  const c = await db.sgcCompanyConfig.findUnique({
+    where: { id_company: idCompany },
+    select: { logo_data_url: true, dissemination_domains: true, read_threshold_pct: true, header_mandatory: true, initial_load_open: true, initial_load_closed_by: true, initial_load_closed_at: true, initial_load_close_reason: true },
+  });
   if (!c) throw new SgcError('La empresa no tiene el SGC activo.', 404);
-  return { idCompany, hasLogo: Boolean(decodeLogoDataUrl(c.logo_data_url)), logoDataUrl: c.logo_data_url, disseminationDomains: parseCompanyDomains(c.dissemination_domains), readThresholdPct: c.read_threshold_pct };
+  return {
+    idCompany,
+    hasLogo: Boolean(decodeLogoDataUrl(c.logo_data_url)),
+    logoDataUrl: c.logo_data_url,
+    disseminationDomains: parseCompanyDomains(c.dissemination_domains),
+    readThresholdPct: c.read_threshold_pct,
+    headerMandatory: c.header_mandatory,
+    initialLoad: { open: c.initial_load_open, closedBy: c.initial_load_closed_by, closedAt: c.initial_load_closed_at?.toISOString() ?? null, reason: c.initial_load_close_reason },
+  };
 }
 
 function logoSummary(dataUrl: string | null): { bytes: number; sha256: string } | null {
