@@ -2,33 +2,34 @@
 
 import { useMemo, useState } from 'react';
 import { Button, Group, Modal, Tooltip } from '@mantine/core';
-import { IconBan, IconDownload, IconFlipVertical, IconRefresh } from '@tabler/icons-react';
+import { IconBan, IconDownload, IconRefresh } from '@tabler/icons-react';
 import {
-  CATEGORIAS_EDITOR,
+  avatarDataUri,
+  categoriasEditor,
   composeAvatarSvg,
-  composePartThumbSvg,
   etiquetaOpcion,
   randomAvatarConfig,
-  svgToDataUri,
+  thumbDataUri,
   type CategoriaEditor,
 } from '../../lib/avatar/compose';
-import type { AvatarConfig } from '../../lib/avatar/types';
+import type { AvatarConfig, AvatarOwner } from '../../lib/avatar/types';
 import classes from './avatarEditor.module.css';
 
 /**
- * EDITOR DE AVATAR ESTILO NOTION con DiceBear + Lorelei. Misma interfaz que
+ * EDITOR DE AVATAR ESTILO NOTION con DiceBear 10 + Lorelei (@dicebear/styles). Misma interfaz que
  * Avatartion (github.com/wilmerterrero/Avatartion, MIT; solo la idea, ningún
  * dibujo):
  *
  *   - lienzo al centro con el avatar y su fondo;
- *   - a un lado, un círculo por opción de Lorelei (cabello, cara, ojos, cejas,
- *     boca, nariz, lentes, barba, aretes, pecas, accesorio y colores) con su
- *     miniatura y la flecha ↕; al tocarlo se abre la cuadrícula de opciones
- *     (8 por página) y al elegir una se cierra sola;
- *   - al otro lado, "Aleatorio", "Voltear" y "Descargar" (SVG o PNG).
+ *   - a un lado, un círculo por opción de Lorelei (cabello 48, cabeza 4, ojos
+ *     24, cejas 13, boca 27 —asistentes: solo sonrisas—, nariz 6, gafas,
+ *     aretes, barba, pecas, flores, colores y voltear) con su miniatura y la
+ *     flecha ↕; al tocarlo se abre la cuadrícula de opciones (8 por página);
+ *   - al otro lado, "Aleatorio" y "Descargar" (SVG o PNG).
  *
- * La vista previa usa createAvatar(lorelei, …) en el navegador con el MISMO
- * código (lib/avatar/compose.ts) que usa el servidor para servir la imagen.
+ * Todo se pinta con <img src="data:…"> (nunca SVG en línea): así el HTML del
+ * servidor y el del navegador coinciden y no hay errores de hidratación. La
+ * vista previa usa el MISMO código (lib/avatar/compose.ts) que el endpoint.
  * Este componente NO guarda nada: avisa con `onChange` y el padre decide.
  */
 
@@ -37,19 +38,24 @@ const POR_PAGINA = 8;
 interface Props {
   config: AvatarConfig;
   onChange: (config: AvatarConfig) => void;
+  /** Dueño: los asistentes ('agent') solo tienen bocas sonrientes. */
+  owner?: AvatarOwner;
+  /** Semilla que se conserva al generar al azar (asistentes: su nombre). */
+  semillaFija?: string;
   /** Nombre base del archivo descargado. */
   nombreArchivo?: string;
 }
 
-export default function AvatarEditor({ config, onChange, nombreArchivo = 'avatar' }: Props) {
+export default function AvatarEditor({ config, onChange, owner = 'user', semillaFija, nombreArchivo = 'avatar' }: Props) {
   const [abierto, setAbierto] = useState<CategoriaEditor | null>(null);
   const [pagina, setPagina] = useState(1);
   const [descarga, setDescarga] = useState(false);
 
-  const svg = useMemo(() => composeAvatarSvg(config), [config]);
+  const categorias = useMemo(() => categoriasEditor(owner), [owner]);
+  const vista = useMemo(() => avatarDataUri(config), [config]);
 
-  const mitad = Math.ceil(CATEGORIAS_EDITOR.length / 2);
-  const columnas = [CATEGORIAS_EDITOR.slice(0, mitad), CATEGORIAS_EDITOR.slice(mitad)];
+  const mitad = Math.ceil(categorias.length / 2);
+  const columnas = [categorias.slice(0, mitad), categorias.slice(mitad)];
 
   const abrir = (cat: CategoriaEditor) => {
     const actual = cat.opciones.indexOf(config[cat.id] ?? null);
@@ -63,29 +69,28 @@ export default function AvatarEditor({ config, onChange, nombreArchivo = 'avatar
   };
 
   // Aleatorio: partes nuevas (azar de DiceBear) conservando los colores elegidos.
-  const aleatorio = () =>
-    onChange(
-      randomAvatarConfig({
-        hairColor: config.hairColor,
-        skinColor: config.skinColor,
-        backgroundColor: config.backgroundColor,
-      })
+  // En los asistentes la semilla guardada sigue siendo su nombre.
+  const aleatorio = () => {
+    const nuevo = randomAvatarConfig(
+      { hairColor: config.hairColor, skinColor: config.skinColor, backgroundColor: config.backgroundColor },
+      owner
     );
-
-  const voltear = () => onChange({ ...config, flip: !config.flip });
+    onChange(semillaFija ? { ...nuevo, seed: semillaFija.slice(0, 64) } : nuevo);
+  };
 
   const descargar = async (formato: 'SVG' | 'PNG') => {
     setDescarga(false);
     let href = '';
     let liberar: (() => void) | null = null;
     if (formato === 'SVG') {
+      const svg = composeAvatarSvg(config);
       const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
       href = url;
       liberar = () => URL.revokeObjectURL(url);
     } else {
       // PNG sin dependencias: se pinta el SVG en un canvas de 600×600.
       const img = new Image();
-      img.src = svgToDataUri(svg);
+      img.src = vista;
       await img.decode();
       const canvas = document.createElement('canvas');
       canvas.width = 600;
@@ -111,17 +116,6 @@ export default function AvatarEditor({ config, onChange, nombreArchivo = 'avatar
               <IconRefresh size={24} stroke={2} />
             </button>
           </Tooltip>
-          <Tooltip label='Voltear' color='dark' withArrow>
-            <button
-              type='button'
-              className={classes.circle}
-              onClick={voltear}
-              aria-pressed={config.flip}
-              aria-label='Voltear el avatar horizontalmente'
-            >
-              <IconFlipVertical size={24} stroke={2} />
-            </button>
-          </Tooltip>
           <Tooltip label='Descargar' color='dark' withArrow>
             <button type='button' className={classes.circle} onClick={() => setDescarga(true)} aria-label='Descargar el avatar'>
               <IconDownload size={24} stroke={2} />
@@ -132,7 +126,7 @@ export default function AvatarEditor({ config, onChange, nombreArchivo = 'avatar
         <div className={classes.canvas} data-testid='avatar-canvas'>
           {/* data: URI en un <img>: el SVG no se inyecta en el DOM (next/image no aplica a data:). */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={svgToDataUri(svg)} alt='Vista previa del avatar' />
+          <img src={vista} alt='Vista previa del avatar' />
         </div>
 
         <div className={classes.pickerColumns}>
@@ -182,7 +176,7 @@ export default function AvatarEditor({ config, onChange, nombreArchivo = 'avatar
 }
 
 function Miniatura({ config, cat, valor, enCuadricula = false }: { config: AvatarConfig; cat: CategoriaEditor; valor: string | null; enCuadricula?: boolean }) {
-  const src = useMemo(() => svgToDataUri(composePartThumbSvg(config, cat.id, valor)), [config, cat.id, valor]);
+  const src = useMemo(() => thumbDataUri(config, cat.id, valor), [config, cat.id, valor]);
   if (cat.esColor) return <Muestra color={valor ?? 'transparent'} />;
   // "Ninguno" en el círculo: se marca con el símbolo de vacío.
   if (valor === null && !enCuadricula) return <IconBan size={22} stroke={1.5} color='#9ca3af' aria-hidden />;
@@ -297,6 +291,6 @@ function SelectorModal({
 }
 
 /** Configuración con la que arranca el editor cuando no hay nada guardado. */
-export function configInicial(): AvatarConfig {
-  return randomAvatarConfig();
+export function configInicial(owner: AvatarOwner = 'user'): AvatarConfig {
+  return randomAvatarConfig({}, owner);
 }

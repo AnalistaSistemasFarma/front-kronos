@@ -30,7 +30,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!agente) return forbidden('No tiene permiso para cambiar el avatar de este asistente.');
 
     const body = (await request.json().catch(() => null)) as { config?: unknown } | null;
-    const config = parseAvatarConfig(body?.config);
+    // Asistentes: persona Lorelei con boca sonriente (happy*); la semilla la fija el servidor (su nombre).
+    const config = parseAvatarConfig(body?.config, 'agent');
     if (!config) return badRequest('La configuración del avatar no es válida.');
 
     const avatarUrl = await saveAgentAvatar(agente, user.email, config);

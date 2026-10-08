@@ -43,7 +43,7 @@ export async function getUserAvatar(userId: string): Promise<UserAvatarState> {
     readAvatarConfig('user', userId),
     prisma.user.findUnique({ where: { id: userId }, select: { image: true } }),
   ]);
-  return { config: fila ? parseAvatarConfig(fila.configJson) : null, image: user?.image ?? null };
+  return { config: fila ? parseAvatarConfig(fila.configJson, 'user') : null, image: user?.image ?? null };
 }
 
 export async function saveUserAvatar(userId: string, email: string, config: AvatarConfig): Promise<string> {
@@ -151,7 +151,7 @@ export async function listManagedAgents(email: string): Promise<ManagedAgent[]> 
       avatarUrl: a.avatarUrl,
       avatarVersion: a.avatarVersion,
       motivo: a.motivo,
-      config: fila ? parseAvatarConfig(fila.configJson) : null,
+      config: fila ? parseAvatarConfig(fila.configJson, 'agent') : null,
     };
   });
 }
@@ -166,7 +166,9 @@ export async function saveAgentAvatar(agent: ManagedAgent, email: string, config
   const fila = await prisma.agent.findUnique({ where: { id_agent: agent.idAgent }, select: { avatar_url: true } });
   const ahora = new Date();
   const anterior = isNotionAvatarUrl(fila?.avatar_url) ? null : fila?.avatar_url ?? null;
-  await upsertAvatarConfig('agent', String(agent.idAgent), serializeAvatarConfig(config), anterior, email, ahora);
+  // Regla: la semilla de un asistente es SU NOMBRE (se fuerza aquí, no se confía en el cliente).
+  const conSemilla: AvatarConfig = { ...config, seed: agent.displayName.slice(0, 64) };
+  await upsertAvatarConfig('agent', String(agent.idAgent), serializeAvatarConfig(conSemilla), anterior, email, ahora);
   const url = agentAvatarNotionUrl(agent.code, ahora.getTime());
   await prisma.agent.update({ where: { id_agent: agent.idAgent }, data: { avatar_url: url } });
   console.info(`[avatar] ${email} cambió el avatar del agente ${agent.code} -> ${url}`);

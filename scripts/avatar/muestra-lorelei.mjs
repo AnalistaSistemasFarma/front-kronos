@@ -13,7 +13,7 @@ import { createJiti } from 'jiti';
 
 const salida = process.argv[2] ?? 'avatares-lorelei-muestra';
 const jiti = createJiti(import.meta.url);
-const { composeAvatarSvg, configDesdeSemilla, sugerenciaParaAgente, RECORTES, composePartThumbSvg } = await jiti.import(
+const { composeAvatarSvg, configDesdeSemilla, sugerenciaParaAgente, RECORTES, thumbDataUri } = await jiti.import(
   '../../lib/avatar/compose.ts'
 );
 
@@ -24,10 +24,13 @@ const personas = [
   ['Persona · semilla "ana"', configDesdeSemilla('ana')],
   ['Persona · "carlos" (color)', configDesdeSemilla('carlos', { hairColor: '724133', skinColor: 'ecad80', backgroundColor: 'b6e3f4' })],
   ['Persona · "lucia"', configDesdeSemilla('lucia', { backgroundColor: 'ffd5dc' })],
-  ['Persona · "andres" + lentes, barba', { ...configDesdeSemilla('andres'), glasses: 'variant02', beard: 'variant01' }],
+  ['Persona · "andres" + gafas, barba, flip', { ...configDesdeSemilla('andres'), glasses: 'variant02', beard: 'variant01', flip: 'horizontal' }],
   ['Persona · "valentina" (color)', configDesdeSemilla('valentina', { hairColor: 'a55728', skinColor: 'f2d3b1', backgroundColor: 'c0aede' })],
 ];
-const agentes = ['Atlas', 'Galileo', 'Kepler', 'Mercurio', 'Orión', 'Sirio', 'Vega'].map((n) => [`Asistente OLP · ${n}`, sugerenciaParaAgente(n)]);
+const agentes = ['Atlas', 'Galileo', 'Kepler', 'Mercurio', 'Orión', 'Sirio', 'Vega'].map((n) => {
+  const c = sugerenciaParaAgente(n);
+  return [`Asistente OLP · ${n} (${c.mouth})`, c];
+});
 const todos = [...personas, ...agentes];
 
 const tarjeta = ([titulo, config]) => `
@@ -41,8 +44,9 @@ const tarjeta = ([titulo, config]) => `
   </figure>`;
 
 const muestraConfig = todos[0][1];
+const ejemplo = { glasses: 'variant01', beard: 'variant01', earrings: 'variant01', freckles: 'variant01', hairAccessories: 'flowers', flip: 'horizontal' };
 const recortes = Object.keys(RECORTES)
-  .map((p) => `<figure class="rec"><img src="${svgUri(composePartThumbSvg(muestraConfig, p, muestraConfig[p] ?? (p === 'glasses' ? 'variant01' : p === 'beard' ? 'variant01' : p === 'earrings' ? 'variant01' : p === 'freckles' ? 'variant01' : p === 'hairAccessories' ? 'flowers' : null)))}" width="64" height="64" alt=""><figcaption>${p}</figcaption></figure>`)
+  .map((p) => `<figure class="rec"><img src="${thumbDataUri(muestraConfig, p, muestraConfig[p] ?? ejemplo[p] ?? null)}" width="64" height="64" alt=""><figcaption>${p}</figcaption></figure>`)
   .join('');
 
 const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Avatares Lorelei — muestra</title>
@@ -60,7 +64,7 @@ const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>
   h2{font-size:14px;margin:20px 0 4px}
 </style></head><body>
 <h1>Avatares de SynerLink con DiceBear · Lorelei</h1>
-<p>@dicebear/core + @dicebear/lorelei 9.4.3 · diseño “Lorelei” de Lisa Wischofsky (CC0 1.0) · cada tarjeta a 150, 40 y 28 px. Asistentes de OLP: Lorelei con la semilla de su nombre.</p>
+<p>@dicebear/core 10.7.0 + @dicebear/styles 10.6.0 (lorelei) · diseño “Lorelei” de Lisa Wischofsky (CC0 1.0) · cada tarjeta a 150, 40 y 28 px. Asistentes de OLP: Lorelei con semilla = su nombre y solo bocas happy*.</p>
 <div class="grid">${todos.map(tarjeta).join('')}</div>
 <h2>Miniaturas del editor (recorte por parte)</h2>
 <div class="recortes">${recortes}</div>

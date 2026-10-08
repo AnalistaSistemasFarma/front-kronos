@@ -2,6 +2,9 @@
   "name": "front-kronos",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:clean": "node scripts/dev.mjs --clean",
@@ -23,8 +26,8 @@
     "seed:dashboard-solicitudes": "node scripts/seed-dashboard-solicitante-solicitado.cjs"
   },
   "dependencies": {
-    "@dicebear/core": "^9.4.3",
-    "@dicebear/lorelei": "^9.4.3",
+    "@dicebear/core": "10.7.0",
+    "@dicebear/styles": "10.6.0",
     "@ducanh2912/next-pwa": "^10.2.9",
     "@mantine/core": "^8.3.3",
     "@mantine/hooks": "^8.3.3",

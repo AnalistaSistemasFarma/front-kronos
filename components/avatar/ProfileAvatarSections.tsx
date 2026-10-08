@@ -47,7 +47,7 @@ export function MiAvatarSection({
         if (!r.ok) throw new Error(await leerError(r, 'No se pudo cargar su avatar.'));
         const data = (await r.json()) as { disponible: boolean; config: unknown };
         if (!vivo) return;
-        const previa = parseAvatarConfig(data.config);
+        const previa = parseAvatarConfig(data.config, 'user');
         setDisponible(data.disponible);
         setGuardada(previa);
         setConfig(previa ?? configInicial());
@@ -183,7 +183,7 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
   const abrir = (a: AgenteGestionable) => {
     setEditando(a.code);
     // Sin avatar guardado: Lorelei con la semilla del nombre del asistente.
-    setConfig(parseAvatarConfig(a.config) ?? sugerenciaParaAgente(a.displayName));
+    setConfig(parseAvatarConfig(a.config, 'agent') ?? sugerenciaParaAgente(a.displayName));
   };
 
   const actualizar = (code: string, cambios: Partial<AgenteGestionable>) =>
@@ -236,7 +236,7 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
       </Title>
       <Text size='sm' c='dimmed' mb='md'>
         Asistentes del chat de los que usted es responsable (o todos, si es administrador). Su avatar es un retrato
-        estilo Notion (DiceBear · Lorelei); si aún no tiene, el editor arranca con el que sale de su nombre. El cambio lo
+        estilo Notion (DiceBear · Lorelei), siempre sonriente; si aún no tiene, el editor arranca con el que sale de su nombre. El cambio lo
         ve toda la empresa.
       </Text>
 
@@ -264,7 +264,13 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
 
             {editando === a.code && config && (
               <Stack gap='md' mt='md'>
-                <AvatarEditor config={config} onChange={setConfig} nombreArchivo={`avatar-${a.code}`} />
+                <AvatarEditor
+                  config={config}
+                  onChange={setConfig}
+                  owner='agent'
+                  semillaFija={a.displayName}
+                  nombreArchivo={`avatar-${a.code}`}
+                />
                 <Group justify='flex-end'>
                   <Button variant='subtle' color='gray' onClick={() => setEditando(null)} disabled={!!ocupado}>
                     Cancelar

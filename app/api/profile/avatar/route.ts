@@ -35,7 +35,7 @@ export async function PUT(request: NextRequest) {
     if (!user) return unauthorized();
 
     const body = (await request.json().catch(() => null)) as { config?: unknown } | null;
-    const config = parseAvatarConfig(body?.config);
+    const config = parseAvatarConfig(body?.config, 'user');
     if (!config) return badRequest('La configuración del avatar no es válida.');
 
     const image = await saveUserAvatar(user.id, user.email, config);

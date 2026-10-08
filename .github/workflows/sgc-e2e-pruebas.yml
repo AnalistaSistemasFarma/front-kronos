@@ -60,10 +60,10 @@ jobs:
           done
           echo "::error::El despliegue a pruebas no terminó en 30 minutos."; exit 1
 
-      - name: Configurar Node 20
+      - name: Configurar Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
 
       - name: Instalar dependencias

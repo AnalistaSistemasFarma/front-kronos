@@ -25,7 +25,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cod
     const fila = await readAvatarConfig('agent', String(agente.id_agent));
     if (!fila) return NextResponse.json({ error: 'Este agente no tiene avatar.' }, { status: 404 });
 
-    return svgResponse(fila.configJson, agente.display_name, fila.updatedAt.getTime());
+    return svgResponse(fila.configJson, agente.display_name, fila.updatedAt.getTime(), 'agent');
   } catch (error) {
     if (isStoreUnavailable(error)) return NextResponse.json({ error: 'No encontrado.' }, { status: 404 });
     return serverError('GET /api/avatar/agent/[code]', error);

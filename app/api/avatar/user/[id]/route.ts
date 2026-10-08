@@ -23,7 +23,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     if (!fila) return NextResponse.json({ error: 'Esta persona no tiene avatar.' }, { status: 404 });
 
     const persona = await prisma.user.findUnique({ where: { id }, select: { name: true } });
-    return svgResponse(fila.configJson, persona?.name ?? 'Avatar', fila.updatedAt.getTime());
+    return svgResponse(fila.configJson, persona?.name ?? 'Avatar', fila.updatedAt.getTime(), 'user');
   } catch (error) {
     if (isStoreUnavailable(error)) return NextResponse.json({ error: 'No encontrado.' }, { status: 404 });
     return serverError('GET /api/avatar/user/[id]', error);

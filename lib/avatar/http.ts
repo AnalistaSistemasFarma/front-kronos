@@ -2,7 +2,7 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import { jsonNoStore } from '../chat/http';
 import { composeAvatarSvg, parseAvatarConfig } from './compose';
-import { AvatarStoreUnavailableError } from './store';
+import { AvatarStoreUnavailableError, type AvatarOwnerType } from './store';
 
 /**
  * Respuesta con el SVG del avatar. Cabeceras pensadas para un SVG servido
@@ -13,8 +13,8 @@ import { AvatarStoreUnavailableError } from './store';
  *   - Caché larga e inmutable: la URL lleva ?v=<fecha del cambio>, así que al
  *     guardar otro avatar cambia la URL y se pide el nuevo.
  */
-export function svgResponse(configJson: string, title: string, version: number): NextResponse {
-  const config = parseAvatarConfig(configJson);
+export function svgResponse(configJson: string, title: string, version: number, owner: AvatarOwnerType): NextResponse {
+  const config = parseAvatarConfig(configJson, owner);
   if (!config) return NextResponse.json({ error: 'Avatar inválido.' }, { status: 404 });
   const svg = composeAvatarSvg(config, { title });
   return new NextResponse(svg, {
