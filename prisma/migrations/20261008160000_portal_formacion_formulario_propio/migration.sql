@@ -19,8 +19,9 @@
   5. SIEMBRA del primer formulario: SST-01-FR-001 PERFIL SOCIODEMOGRÁFICO SST
      (40 preguntas), generada desde lib/portal/formularios/sst-01-fr-001.json.
 
-  No borra ni modifica datos existentes; NO convierte ningún material (eso lo
-  hace aparte prisma/manual/2026-10-08-portal-pruebas-material-4-a-formulario.sql, después
+  No borra ni modifica datos existentes; NO agrega ni convierte materiales (el
+  formulario se agrega al curso aparte con
+  prisma/manual/2026-10-08-portal-pruebas-agregar-formulario-sst.sql, después
   del despliegue). Generada MANUALMENTE (sin shadow database — P3014, igual
   que las migraciones anteriores del portal). Correr primero contra
   KRONOSDB_PRUEBAS (.230). Idempotente: se puede correr dos veces.
@@ -139,8 +140,8 @@ END
 /*
   REVERSA: prisma/manual/2026-10-08-portal-formulario-propio-reversa.sql (la
   misma de abajo, con un candado si ya hay respuestas). ANTES, si algún
-  material ya se convirtió a formulario, devolverlo a enlace con la reversa de
-  prisma/manual/2026-10-08-portal-pruebas-material-4-a-formulario.sql. OJO: borra las
+  curso ya tiene el formulario como material, quitarlo con la reversa de
+  prisma/manual/2026-10-08-portal-pruebas-agregar-formulario-sst.sql. OJO: borra las
   respuestas de los formularios (datos personales); respáldelas antes si se
   necesitan (exportación a Excel desde el portal).
 
