@@ -10,13 +10,16 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../prisma';
 import { generarCertificadoPdf } from './certificado-pdf';
-import { MATERIAL_MIMES_PERMITIDOS, MAX_MATERIAL_BYTES } from './config';
+import { MATERIAL_MIMES_PERMITIDOS, maxMaterialBytes, mensajeArchivoMuyGrande } from './config';
 import {
   carpetaDeCurso,
+  crearSesionSubida,
   leerConfigFormacion,
+  obtenerArchivoSubidoEnCarpeta,
   moverMaterialAEliminados,
   subirArchivoFormacion,
   type ArchivoEnSharePoint,
+  type SesionSubida,
 } from './formacion-storage';
 
 /** Un material tal como lo necesita el cálculo de progreso. */
@@ -205,8 +208,98 @@ export function validarArchivoMaterial(archivo: unknown): string | null {
   const mime = (archivo.type || '').toLowerCase();
   if (!MATERIAL_MIMES_PERMITIDOS.includes(mime)) return `Formato no admitido (${mime || 'desconocido'}).`;
   if (archivo.size === 0) return 'El archivo llegó vacío.';
-  if (archivo.size > MAX_MATERIAL_BYTES) return 'El archivo es muy grande. El tope es 25 MB.';
+  const tope = maxMaterialBytes();
+  if (tope !== null && archivo.size > tope) return mensajeArchivoMuyGrande(tope);
   return null;
+}
+
+/** Lo que el navegador declara ANTES de subir directo a SharePoint. */
+export interface DeclaracionArchivo {
+  nombre: string;
+  mime: string;
+  tamano: number;
+}
+
+/**
+ * Valida lo que el navegador declara del archivo antes de abrirle una upload
+ * session. Mismas reglas de formato que `validarArchivoMaterial` (no se
+ * amplían los tipos); sin tope de tamaño salvo `PORTAL_TH_MAX_UPLOAD_MB`.
+ * Devuelve la declaración normalizada o el mensaje de error.
+ */
+export function validarDeclaracionMaterial(cuerpo: unknown): { ok: true; valor: DeclaracionArchivo } | { ok: false; error: string } {
+  const c = (cuerpo ?? {}) as Record<string, unknown>;
+  const nombre = typeof c.nombre === 'string' ? c.nombre.trim() : '';
+  const mime = typeof c.mime === 'string' ? c.mime.trim().toLowerCase() : '';
+  const tamano = typeof c.tamano === 'number' ? c.tamano : Number.NaN;
+  if (!nombre) return { ok: false, error: 'Falta el nombre del archivo.' };
+  if (!MATERIAL_MIMES_PERMITIDOS.includes(mime)) return { ok: false, error: `Formato no admitido (${mime || 'desconocido'}).` };
+  if (!Number.isSafeInteger(tamano) || tamano < 0) return { ok: false, error: 'Tamaño de archivo no válido.' };
+  if (tamano === 0) return { ok: false, error: 'El archivo está vacío.' };
+  const tope = maxMaterialBytes();
+  if (tope !== null && tamano > tope) return { ok: false, error: mensajeArchivoMuyGrande(tope) };
+  return { ok: true, valor: { nombre, mime, tamano } };
+}
+
+/**
+ * Abre la upload session de un material en FORMACION/<curso>/materiales.
+ * Lanza `FormacionStorageNoConfigurado` si falta la configuración.
+ */
+export async function abrirSubidaDeMaterial(courseId: number, declaracion: DeclaracionArchivo): Promise<SesionSubida> {
+  leerConfigFormacion();
+  const carpetaCurso = await carpetaSharePointDelCurso(courseId);
+  return crearSesionSubida({ carpetaCurso, subcarpeta: 'materiales', nombreArchivo: declaracion.nombre });
+}
+
+/**
+ * Tras la subida directa del navegador: comprueba que el driveItem esté en
+ * FORMACION/<curso>/materiales (y que respete el tope, si lo hay) y devuelve
+ * las columnas a guardar. Lanza `FormacionStorageError` si no cumple.
+ */
+export async function referenciaDeMaterialSubido(
+  courseId: number,
+  driveItemId: string,
+  mime: string
+): Promise<ReferenciaMaterial> {
+  leerConfigFormacion();
+  const carpetaCurso = await carpetaSharePointDelCurso(courseId);
+  const item = await obtenerArchivoSubidoEnCarpeta({ driveItemId, carpetaCurso, subcarpeta: 'materiales', mime });
+  const tope = maxMaterialBytes();
+  if (tope !== null && item.tamano > tope) {
+    // Se registra igual el error, pero el archivo queda en SharePoint: no se
+    // borra nada desde el portal. Se mueve a ELIMINADOS para no dejarlo suelto.
+    await moverMaterialAEliminados({ driveItemId: item.driveItemId, carpetaCurso, nombreArchivo: item.nombre || 'material' }).catch(
+      () => undefined
+    );
+    throw new MaterialNoValido(mensajeArchivoMuyGrande(tope));
+  }
+  return {
+    file_name: (item.nombre || 'material').slice(0, 255),
+    mime,
+    sp_drive_item_id: item.driveItemId,
+    sp_web_url: item.webUrl,
+    file_size: BigInt(item.tamano),
+  };
+}
+
+/** El material subido no cumple una regla (se responde 400 con el mensaje). */
+export class MaterialNoValido extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MaterialNoValido';
+  }
+}
+
+/**
+ * Lee el cuerpo JSON de "registrar un material ya subido": `driveItemId` y
+ * `mime` (el mismo que se declaró al abrir la sesión, validado otra vez).
+ */
+export function validarRegistroSubido(cuerpo: unknown): { ok: true; driveItemId: string; mime: string } | { ok: false; error: string } {
+  const c = (cuerpo ?? {}) as Record<string, unknown>;
+  const driveItemId = typeof c.driveItemId === 'string' ? c.driveItemId.trim() : '';
+  const mime = typeof c.mime === 'string' ? c.mime.trim().toLowerCase() : '';
+  if (!/^[A-Za-z0-9!._-]{1,200}$/.test(driveItemId)) return { ok: false, error: 'Falta la referencia del archivo subido.' };
+  if (!MATERIAL_MIMES_PERMITIDOS.includes(mime)) return { ok: false, error: `Formato no admitido (${mime || 'desconocido'}).` };
+  return { ok: true, driveItemId, mime };
 }
 
 /** Columnas de referencia de un material ya subido a SharePoint. */

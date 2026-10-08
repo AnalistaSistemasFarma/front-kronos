@@ -4091,6 +4091,59 @@ body.chat-inmersivo .chat-page-thread--completa {
   background-color: var(--pth-azul-700);
 }
 
+/* Subida directa a SharePoint (Formación): queda pegada arriba mientras dura,
+   para que el formador vea el avance aunque esté al final de la página. */
+.portal-th__subida {
+  position: sticky;
+  top: 8px;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 8px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--pth-azul);
+  border-radius: 12px;
+  background-color: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+}
+
+.portal-th__subida-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+
+.portal-th__subida-texto span {
+  color: var(--pth-tinta-2);
+  font-size: 0.82rem;
+}
+
+.portal-th__subida .portal-th__curso-progreso {
+  flex: 1 1 200px;
+}
+
+.portal-th__subida button {
+  padding: 8px 14px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--pth-tinta-2);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.portal-th__subida button:hover {
+  border-color: var(--pth-azul);
+  color: var(--pth-azul);
+}
+
 .portal-th__formacion-crear {
   display: flex;
   flex-wrap: wrap;

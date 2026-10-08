@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ArchivoFueraDeCarpeta,
   FormacionStorageNoConfigurado,
+  crearSesionSubida,
+  obtenerArchivoSubidoEnCarpeta,
   LIMITE_SUBIDA_SIMPLE,
   TAMANO_TROZO,
   _reiniciarCacheToken,
@@ -260,5 +263,43 @@ describe('moverMaterialAEliminados', () => {
       )
     ).rejects.toThrow();
     expect(f).not.toHaveBeenCalled();
+  });
+});
+
+describe('subida directa del navegador (sin tope de peso, 2026-10-08)', () => {
+  it('crearSesionSubida: abre la sesión en la ruta saneada y no devuelve el token', async () => {
+    const f = fetchFalso((url) =>
+      url.endsWith(':/createUploadSession') ? respuesta(200, { uploadUrl: 'https://upload.sp/s1', expirationDateTime: 'X' }) : respuesta(404)
+    );
+    const s = await crearSesionSubida(
+      { carpetaCurso: 'sst-1', subcarpeta: 'materiales', nombreArchivo: 'C:\\videos\\..\\clase:1.mp4' },
+      { config: CFG, fetch: f as unknown as typeof fetch }
+    );
+    expect(s).toEqual({ uploadUrl: 'https://upload.sp/s1', expiracion: 'X', nombre: 'clase_1.mp4' });
+    expect(String(f.mock.calls.at(-1)?.[0])).toContain('/drive/root:/FORMACION/sst-1/materiales/clase_1.mp4:/createUploadSession');
+  });
+
+  it('crearSesionSubida: una uploadUrl que no es https se rechaza', async () => {
+    const f = fetchFalso(() => respuesta(200, { uploadUrl: 'http://raro/s' }));
+    await expect(
+      crearSesionSubida({ carpetaCurso: 'sst-1', subcarpeta: 'materiales', nombreArchivo: 'a.mp4' }, { config: CFG, fetch: f as unknown as typeof fetch })
+    ).rejects.toThrow(/no válida/);
+  });
+
+  it('obtenerArchivoSubidoEnCarpeta: acepta el padre exacto (codificado o no) y rechaza otro', async () => {
+    const conPadre = (path: string) =>
+      fetchFalso(() => respuesta(200, { id: '01X', name: 'v.mp4', size: 10, file: { mimeType: 'video/mp4' }, parentReference: { path } }));
+    const op = { driveItemId: '01X', carpetaCurso: 'curso con espacio-1', subcarpeta: 'materiales' as const, mime: 'video/mp4' };
+    for (const path of ['/drives/b!a/root:/FORMACION/curso%20con%20espacio-1/materiales', '/drive/root:/FORMACION/curso con espacio-1/materiales']) {
+      await expect(obtenerArchivoSubidoEnCarpeta(op, { config: CFG, fetch: conPadre(path) as unknown as typeof fetch })).resolves.toMatchObject({
+        driveItemId: '01X',
+        tamano: 10,
+      });
+    }
+    for (const path of ['/drive/root:/FORMACION/curso con espacio-1', '/drive/root:/FORMACION/curso con espacio-1/materiales/sub', '/drive/root:/OTRA/materiales']) {
+      await expect(
+        obtenerArchivoSubidoEnCarpeta(op, { config: CFG, fetch: conPadre(path) as unknown as typeof fetch })
+      ).rejects.toBeInstanceOf(ArchivoFueraDeCarpeta);
+    }
   });
 });
