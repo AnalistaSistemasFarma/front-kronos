@@ -13,7 +13,7 @@ import { buildProcessCascade, type SgcMasterItem } from '../../../../../lib/sgc/
 import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
 
 /**
- * MAPA DE PROCESOS en cascada (referencia de experiencia: ICalidad, sin su
+ * MAPA DE DOCUMENTOS (antes «Mapa de procesos», renombrado en el S7) en cascada (referencia de experiencia: ICalidad, sin su
  * estética): tipo de proceso → proceso → carpeta por tipo documental →
  * documento con código y versión. Solo muestra lo que la persona puede
  * consultar.
@@ -54,7 +54,7 @@ function MapaProcesos({ company }: { company: SgcCompanyAccess }) {
   if (cascade.length === 0) {
     return (
       <Alert color='yellow' icon={<IconAlertTriangle size={18} />}>
-        La empresa aún no tiene configurado su mapa de procesos. Aseguramiento de Calidad lo configura en «Configuración».
+        La empresa aún no tiene configurado su mapa de documentos. Aseguramiento de Calidad lo configura en «Configuración».
       </Alert>
     );
   }
@@ -192,7 +192,7 @@ function MapaProcesos({ company }: { company: SgcCompanyAccess }) {
 export default function MapaProcesosPage() {
   return (
     <SgcShell
-      section='Mapa de procesos'
+      section='Mapa de documentos'
       subtitle='Tipo de proceso → proceso → tipo documental → documento'
       actions={(company) => (
         <Button component={Link} href={sgcHref(`${SGC_BASE_URL}/listado`, company.idCompany)} variant='light' leftSection={<IconListDetails size={16} />}>

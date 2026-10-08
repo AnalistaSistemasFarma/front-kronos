@@ -16,7 +16,7 @@ test.describe('SGC documental · con sesión', () => {
     await expect(page.getByRole('tab', { name: 'Documentos' })).toBeVisible();
     const activos = page.locator('[data-testid="sgc-module-card"][data-enabled="true"]');
     await expect(activos.filter({ hasText: 'Listado maestro' })).toBeVisible();
-    await expect(activos.filter({ hasText: 'Mapa de procesos' })).toBeVisible();
+    await expect(activos.filter({ hasText: 'Mapa de documentos' })).toBeVisible();
     await expect(activos.filter({ hasText: 'Manuales' })).toBeVisible();
   });
 
@@ -27,8 +27,10 @@ test.describe('SGC documental · con sesión', () => {
     await expect(page.getByTestId('sgc-listado-vacio')).toBeVisible();
   });
 
-  test('[SGC-REQ-016] el mapa de procesos muestra los tipos de proceso y sus procesos en cascada', async ({ page }) => {
+  test('[SGC-REQ-016] el mapa de documentos muestra los tipos de proceso y sus procesos en cascada', async ({ page }) => {
     await page.goto(`/process/sgc-documental/mapa?empresa=${OLP}`);
+    // S7: el rótulo visible es «Mapa de documentos» (recomendación de Calidad); la ruta /mapa no cambia.
+    await expect(page.getByText('Mapa de documentos').first()).toBeVisible();
     const tipos = page.getByTestId('sgc-mapa-tipo');
     await expect(tipos.first()).toBeVisible();
     expect(await tipos.count()).toBeGreaterThanOrEqual(4);
