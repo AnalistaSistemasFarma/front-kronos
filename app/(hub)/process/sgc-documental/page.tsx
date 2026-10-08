@@ -7,6 +7,7 @@ import {
   IconBuildingCommunity,
   IconCalendarDue,
   IconChecklist,
+  IconCopy,
   IconFileCertificate,
   IconFilePlus,
   IconFileUpload,
@@ -87,6 +88,13 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
       icon: <IconCalendarDue size={24} />,
       sprint: 'Sprint 5',
       href: sgcHref(`${SGC_BASE_URL}/vencimientos`, id),
+    },
+    {
+      title: 'Copias no controladas',
+      description: 'Pida una copia imprimible de un formato (con marca y vencimiento); la autoriza Calidad.',
+      icon: <IconCopy size={24} />,
+      sprint: 'Sprint 11',
+      href: sgcHref(`${SGC_BASE_URL}/copias`, id),
     },
     {
       title: 'Solicitudes de acceso',

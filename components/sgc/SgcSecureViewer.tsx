@@ -17,6 +17,19 @@ import { IconAlertTriangle, IconDownload, IconLock, IconPrinter, IconZoomIn, Ico
  *   hoja de impresión sale en blanco (@media print).
  * Limitación honesta: nada impide una captura de pantalla; la marca de agua y
  * el registro de consultas son la mitigación.
+ *
+ * Sprint 11 (bloqueo de capturas, R10), cuando la empresa tiene la protección
+ * del visor (el servidor lo indica con X-Sgc-Proteccion: 1):
+ *   - el PDF trae del servidor una marca de agua EN MOSAICO con el correo, la
+ *     fecha y hora y la IP de quien consulta (toda captura lo identifica);
+ *   - el documento se OCULTA cuando la ventana pierde el foco o la pestaña se
+ *     oculta (dificulta la herramienta Recortes y el cambio de ventana);
+ *   - la tecla «Imprimir pantalla» (Windows) oculta el documento un momento,
+ *     intenta vaciar el portapapeles y deja el intento en la AUDITORÍA; también
+ *     se registran los intentos de copiar e imprimir sin permiso.
+ * Lo que NO se puede: impedir la captura del sistema operativo, de la
+ * herramienta Recortes, del celular o de una foto con otro teléfono (ningún
+ * navegador lo permite); en macOS la tecla de captura no llega a la página.
  */
 export interface SgcSecureViewerProps {
   fileUrl: string;
@@ -73,7 +86,7 @@ async function renderPdf(bytes: Uint8Array, scale: number, container: HTMLElemen
 }
 
 /** Imprime (solo con permiso) a partir del PDF de "impresión autorizada". */
-async function printAuthorized(url: string) {
+export async function printAuthorized(url: string) {
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || 'No se pudo preparar la impresión');
   const bytes = new Uint8Array(await res.arrayBuffer());
@@ -120,6 +133,19 @@ export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp,
     tipo: 'cargando',
   });
   const [printError, setPrintError] = useState<string | null>(null);
+  // Sprint 11: protección del visor (la indica el servidor) y documento oculto mientras la ventana no está activa.
+  const [protect, setProtect] = useState(false);
+  const [veiled, setVeiled] = useState(false);
+  const lastEventRef = useRef<Record<string, number>>({});
+  const report = useCallback(
+    (event: 'imprimir_pantalla' | 'copiar' | 'imprimir_bloqueado') => {
+      const now = Date.now();
+      if (now - (lastEventRef.current[event] ?? 0) < 5000) return;
+      lastEventRef.current[event] = now;
+      void fetch('/api/sgc/viewer-events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event, resource: fileUrl }) }).catch(() => undefined);
+    },
+    [fileUrl]
+  );
 
   // Descarga del PDF (una sola vez por URL: cada apertura queda en la auditoría).
   useEffect(() => {
@@ -129,6 +155,7 @@ export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp,
     fetch(fileUrl, { cache: 'no-store' })
       .then(async (res) => {
         if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `Error ${res.status}`);
+        if (!cancelled) setProtect(res.headers.get('X-Sgc-Proteccion') === '1');
         return new Uint8Array(await res.arrayBuffer());
       })
       .then(async (bytes) => {
@@ -157,11 +184,42 @@ export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp,
       if ((e.ctrlKey || e.metaKey) && (key === 's' || key === 'p')) {
         e.preventDefault();
         e.stopPropagation();
+        if (key === 'p' && protect && !canPrint) report('imprimir_bloqueado');
       }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, []);
+  }, [protect, canPrint, report]);
+
+  // Sprint 11: ocultar al perder el foco y registrar «Imprimir pantalla».
+  useEffect(() => {
+    if (!protect) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const hide = () => setVeiled(true);
+    const show = () => setVeiled(false);
+    const onVisibility = () => (document.hidden ? hide() : show());
+    const onPrintScreen = (e: KeyboardEvent) => {
+      if (e.key !== 'PrintScreen') return;
+      hide();
+      navigator.clipboard?.writeText('').catch(() => undefined);
+      report('imprimir_pantalla');
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(show, 1500);
+    };
+    window.addEventListener('blur', hide);
+    window.addEventListener('focus', show);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('keyup', onPrintScreen, true);
+    window.addEventListener('keydown', onPrintScreen, true);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('blur', hide);
+      window.removeEventListener('focus', show);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('keyup', onPrintScreen, true);
+      window.removeEventListener('keydown', onPrintScreen, true);
+    };
+  }, [protect, report]);
 
   const block = (e: React.SyntheticEvent) => e.preventDefault();
 
@@ -248,13 +306,24 @@ export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp,
           {progress >= 100 ? 'Llegó al final del documento.' : `Lectura obligatoria: desplácese hasta el final del documento (${progress} %).`}
         </Text>
       )}
+      {protect && veiled && (
+        <Alert color='gray' icon={<IconLock size={18} />} data-testid='sgc-visor-oculto'>
+          El documento se oculta mientras la ventana no está activa. Vuelva a esta ventana para seguir leyendo.
+        </Alert>
+      )}
       <div
         ref={pagesRef}
         onScroll={onReachedEnd ? checkEnd : undefined}
         onContextMenu={block}
         onDragStart={block}
-        onCopy={block}
+        onCopy={(e) => {
+          block(e);
+          if (protect) report('copiar');
+        }}
+        data-protegido={protect ? '1' : '0'}
         style={{
+          filter: protect && veiled ? 'blur(18px)' : undefined,
+          visibility: protect && veiled ? 'hidden' : undefined,
           userSelect: 'none',
           WebkitUserSelect: 'none',
           background: 'var(--mantine-color-default-hover)',
