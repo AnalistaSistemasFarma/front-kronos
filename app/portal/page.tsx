@@ -100,7 +100,7 @@ export default function PortalAbierto() {
         )}
       </header>
 
-      <main className='portal-th__cuerpo'>
+      <main className='portal-th__cuerpo portal-th__cuerpo--ancho'>
         {cargando && <p className='portal-th__estado'>Cargando…</p>}
 
         {!cargando && !email && (
