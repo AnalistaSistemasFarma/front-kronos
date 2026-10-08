@@ -95,6 +95,9 @@ export const SGC_AUDIT_ACTIONS = {
   relacionConfirmada: 'relacion.confirmada',
   cargaInicialCerrada: 'carga_inicial.cerrada',
   correoResumenDiario: 'correo.resumen_diario',
+  // Sprint 10: capacitación opcional por solicitud, material previo y recapacitación.
+  capacitacionBandera: 'capacitacion.bandera',
+  capacitacionRecapacitacion: 'capacitacion.recapacitacion',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];

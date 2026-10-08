@@ -29,6 +29,7 @@ export const SGC_SCHEMA_MIGRATIONS = [
   '20261003120000_sgc_correcciones_calidad',
   '20261008100000_sgc_s8_encabezado_listado_maestro',
   '20261008110000_sgc_s9_archivos_relaciones_correo',
+  '20261008120000_sgc_s10_capacitacion_opcional',
 ];
 
 export function sha256Hex(content) {

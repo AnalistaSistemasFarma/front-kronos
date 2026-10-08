@@ -71,6 +71,8 @@ export function evaluateCondition(conditionKey: SgcConditionKey | null, ctx: Sgc
     case null:
       return true;
     case 'tipo_exige_capacitacion':
+    case 'requiere_capacitacion':
+      // Sprint 10: requiresTraining ya es la bandera efectiva de la solicitud (lib/sgc/training/flag.ts).
       return ctx.requiresTraining;
     case 'solicitud_es_nueva':
       return ctx.requestType === 'nuevo';

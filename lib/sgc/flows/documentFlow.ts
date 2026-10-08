@@ -1,4 +1,4 @@
-import type { SgcFlowDefinition } from './definition';
+import type { SgcFlowDefinition, SgcTaskDefinition } from './definition';
 
 /**
  * Flujo DOCUMENTAL v1 — primer flujo configurado en el motor de flujos
@@ -291,4 +291,55 @@ export const SGC_DOCUMENT_FLOW_V3: SgcFlowDefinition = {
     { from: 'capacitacion', action: 'cancelar', to: null, terminalStatus: 'cancelada' },
   ],
   formFields: SGC_DOCUMENT_FLOW_V2.formFields,
+};
+
+/**
+ * Flujo DOCUMENTAL con CAPACITACIÓN PREVIA (Sprint 10, «DOC v6» del plan;
+ * socialización con Calidad OLP del 2026-10-07: el material se configura
+ * ANTES de la divulgación y la capacitación es OPCIONAL por solicitud):
+ *
+ *   3 Aprobación → 4 Preparación de la capacitación (Calidad registra el video
+ *   o la sesión y la evaluación en Microsoft Forms o Google Forms; solo si la
+ *   solicitud requiere capacitación) → 5 Divulgación (lectura con el video y
+ *   el enlace de la evaluación) → 6 Capacitación (resultados, 2 intentos y
+ *   recapacitación; solo si la solicitud la requiere) → vigente.
+ *
+ * La siembra prisma/manual/2026-10-08-sgc-s10-flujo-capacitacion-previa-olp.sql
+ * como versión nueva de DOC (el número en la base puede ser otro); las
+ * solicitudes en curso siguen con su versión.
+ */
+export const SGC_DOCUMENT_FLOW_TRAINING_FIRST: SgcFlowDefinition = {
+  tasks: ([
+    ...SGC_DOCUMENT_FLOW_V3.tasks.map((t): SgcTaskDefinition => {
+      if (t.key === 'divulgacion') return { ...t, stepOrder: 5, description: 'Lectura obligatoria del PDF controlado hasta el final y firma «Leyó» de cada persona del alcance; si la solicitud requiere capacitación, debajo del documento van el video y la evaluación.' };
+      if (t.key === 'capacitacion') {
+        return { ...t, stepOrder: 6, conditionKey: 'requiere_capacitacion' as const, description: 'Calidad carga los resultados de la evaluación (Microsoft Forms o Google Forms; cuentan 2 intentos), registra la recapacitación de quien no aprobó y firma «Capacitó». Solo si la solicitud requiere capacitación.' };
+      }
+      return t;
+    }),
+    {
+      key: 'preparacion_capacitacion',
+      name: 'Preparación de la capacitación',
+      stepOrder: 4,
+      role: 'material',
+      assignment: 'calidad',
+      multiAssignee: false,
+      signingModeDefault: null,
+      signatureMeaning: null,
+      targetDays: 5,
+      conditionKey: 'requiere_capacitacion',
+      isAuthorization: false,
+      authorizationTypeCode: null,
+      poolAuthorizationTypeCode: SGC_AUTH_TYPE_QUALITY,
+      isEnabled: true,
+      description: 'Antes de la divulgación, Calidad registra el material de la capacitación: video o sesión y evaluación en Microsoft Forms o Google Forms. Solo si la solicitud requiere capacitación.',
+    },
+  ] as SgcTaskDefinition[]).sort((a, b) => a.stepOrder - b.stepOrder),
+  transitions: [
+    ...SGC_DOCUMENT_FLOW_V3.transitions.filter((t) => !(t.from === 'aprobacion' && t.action === 'aprobar')),
+    { from: 'aprobacion', action: 'aprobar', to: 'preparacion_capacitacion', terminalStatus: null },
+    { from: 'preparacion_capacitacion', action: 'aprobar', to: 'divulgacion', terminalStatus: null },
+    { from: 'preparacion_capacitacion', action: 'cancelar', to: null, terminalStatus: 'cancelada' },
+  ],
+  formFields: SGC_DOCUMENT_FLOW_V3.formFields,
 };

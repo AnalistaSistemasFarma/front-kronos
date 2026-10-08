@@ -276,7 +276,7 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
 
     it('quien crea el documento (Calidad) confirma firmantes y alcance: pasan a is_active = 1, con historial y auditoría', async () => {
       const f = confirmDb();
-      expect(await confirmSuggestions(f.db, notifier, 7, actor(ELAB), access(true))).toEqual({ confirmed: 2, confirmedScope: 1 });
+      expect(await confirmSuggestions(f.db, notifier, 7, actor(ELAB), access(true))).toEqual({ confirmed: 2, confirmedScope: 1, confirmedTraining: false });
       const upd = f.calls.filter((c) => c.model === 'sgcRequestSigner' && c.method === 'update').map((c) => c.args as { where: { id_request_signer: number }; data: { is_active: boolean } });
       expect(upd.map((u) => [u.where.id_request_signer, u.data.is_active])).toEqual([[61, true], [62, true]]);
       expect(f.calls.find((c) => c.model === 'sgcDisseminationScope' && c.method === 'update')!.args).toMatchObject({ where: { id_scope: 9 }, data: { is_active: true } });
@@ -289,7 +289,7 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
       await expect(confirmSuggestions(bad.db, notifier, 7, actor(ELAB), access(true))).rejects.toThrow(/Quien hizo la solicitud no puede ser firmante/);
       expect(bad.writes('sgcRequestSigner')).toEqual([]);
       const same = confirmDb([pendingRows[0], { ...pendingRows[1], user_email: REV }], []);
-      expect(await confirmSuggestions(same.db, notifier, 7, actor(ELAB), access(true))).toEqual({ confirmed: 2, confirmedScope: 0 });
+      expect(await confirmSuggestions(same.db, notifier, 7, actor(ELAB), access(true))).toEqual({ confirmed: 2, confirmedScope: 0, confirmedTraining: false });
     });
 
     it('sin nada sugerido no hay qué confirmar (409)', async () => {

@@ -387,7 +387,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(confirmSuggestions(prisma, notifier, req1, actor(E.sol), await accessOf(E.sol))).rejects.toMatchObject({ status: 403 });
     // Sin el permiso de Calidad, el elaborador tampoco confirma (política tarea_y_calidad).
     await expect(confirmSuggestions(prisma, notifier, req1, actor(E.elab), null)).rejects.toMatchObject({ status: 403 });
-    expect(await confirmSuggestions(prisma, notifier, req1, actor(E.elab), elabAccess)).toEqual({ confirmed: 2, confirmedScope: 0 });
+    expect(await confirmSuggestions(prisma, notifier, req1, actor(E.elab), elabAccess)).toEqual({ confirmed: 2, confirmedScope: 0, confirmedTraining: false });
     await expect(confirmSuggestions(prisma, notifier, req1, actor(E.elab), elabAccess)).rejects.toMatchObject({ status: 409 });
     // Ya confirmados, el solicitante no los cambia.
     await expect(setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.rev1] }, actor(E.sol), await accessOf(E.sol))).rejects.toMatchObject({ status: 403 });

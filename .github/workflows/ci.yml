@@ -256,6 +256,8 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008100000_sgc_s8_encabezado_listado_maestro/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008110000_sgc_s9_archivos_relaciones_correo/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008110000_sgc_s9_archivos_relaciones_correo/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008120000_sgc_s10_capacitacion_opcional/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008120000_sgc_s10_capacitacion_opcional/migration.sql
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
@@ -271,7 +273,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -282,11 +284,15 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # La del S10 también retira el flujo con capacitación previa: se prueba sobre la empresa de su integración (101).
+          sed 's/DECLARE @IdCompany INT = 3;/DECLARE @IdCompany INT = 101;/' prisma/manual/2026-10-08-sgc-s10-capacitacion-opcional-reversa.sql > /tmp/reversa-s10.sql
+          reversa /tmp/reversa-s10.sql
           reversa prisma/manual/2026-10-08-sgc-s9-archivos-relaciones-correo-reversa.sql
           reversa prisma/manual/2026-10-08-sgc-s8-encabezado-listado-maestro-reversa.sql
           # …y otra vez hacia adelante.
           migra 20261008100000_sgc_s8_encabezado_listado_maestro
           migra 20261008110000_sgc_s9_archivos_relaciones_correo
+          migra 20261008120000_sgc_s10_capacitacion_opcional
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-08-sgc-s8-guia-codificacion-olp.sql
 
       - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
