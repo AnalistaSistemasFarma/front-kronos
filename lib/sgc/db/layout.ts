@@ -28,6 +28,7 @@ import {
 } from '../signature/fields';
 import { sha256HexOf } from '../signature/record';
 import { isPdf } from '../storage';
+import { toWinAnsiSafe } from '../watermark';
 import type { SgcActor, SgcDb } from './catalogs';
 import { loadDefinition } from './flows';
 import { addInteraction, assertCanView, type SgcViewer } from './requests';
@@ -347,7 +348,10 @@ const PREVIEW_TTL_MS = 10 * 60 * 1000;
  * el contenido compuesto como quedará en el PDF controlado, con el encabezado
  * institucional si aplica. Código provisional en un documento nuevo.
  */
-export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idRequest: number, viewer: SgcViewer): Promise<Uint8Array> {
+export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idRequest: number, viewer: SgcViewer, options: { runningHeader?: boolean } = {}): Promise<Uint8Array> {
+  // 2026-10-05 («Ver documento» sin descarga): sin encabezado institucional, la
+  // misma línea superior del PDF controlado (código · versión · título).
+  const runningHeader = options.runningHeader === true;
   const { row } = await assertCanView(db, idRequest, viewer);
   const request = await db.sgcRequest.findUniqueOrThrow({
     where: { id_request: idRequest },
@@ -359,7 +363,7 @@ export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idReque
   const people = participants.filter((p) => p.email.includes('@'));
   const cargos = await cargoOf(db, request.id_company, people.map((p) => p.email));
   const label = (m: SgcPlacedMeaning) => participants.filter((p) => p.meaning === m).map((p) => (p.email.includes('@') ? personLabel(p.name, p.email, cargos.get(p.email)) : p.name));
-  const key = [idRequest, draft.sha256, institutional ? 1 : 0, sha256HexOf(JSON.stringify([label('elaboro'), label('reviso'), label('aprobo')]))].join(':');
+  const key = [idRequest, draft.sha256, institutional ? 1 : 0, runningHeader ? 1 : 0, sha256HexOf(JSON.stringify([label('elaboro'), label('reviso'), label('aprobo')]))].join(':');
   const hit = previewCache.get(key);
   if (hit && Date.now() - hit.at < PREVIEW_TTL_MS) return hit.bytes;
 
@@ -400,6 +404,15 @@ export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idReque
   const pdf = await PDFDocument.load(composed.contentPdf, { ignoreEncryption: true });
   const fonts = { regular: await pdf.embedFont(StandardFonts.Helvetica), bold: await pdf.embedFont(StandardFonts.HelveticaBold) };
   if (composed.header) await drawInstitutionalHeaders(pdf, pdf.getPages(), composed.header, fonts);
+  else if (runningHeader) {
+    const top = toWinAnsiSafe(`${code} · Versión ${versionNumber} · ${request.document?.title ?? request.subject}`);
+    for (const page of pdf.getPages()) {
+      const { width, height } = page.getSize();
+      let size = 7.5;
+      while (size > 5 && fonts.regular.widthOfTextAtSize(top, size) > width - 40) size -= 0.5;
+      page.drawText(top, { x: 20, y: height - 14, size, font: fonts.regular, color: rgb(0.42, 0.45, 0.5) });
+    }
+  }
   for (const page of pdf.getPages()) page.drawText('Vista previa del documento final (sin firmas) · SynerLink', { x: 20, y: 8, size: 7, font: fonts.regular, color: rgb(0.55, 0.1, 0.1) });
   const out = await pdf.save();
   if (previewCache.size > 30) previewCache.delete(previewCache.keys().next().value!);

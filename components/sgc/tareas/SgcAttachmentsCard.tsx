@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { ActionIcon, Badge, Button, Card, FileInput, Group, Modal, ScrollArea, Stack, Table, Text, Textarea, Title, Tooltip } from '@mantine/core';
 import SgcSelect from '../SgcSelect';
-import { IconDownload, IconEye, IconTrash, IconUpload } from '@tabler/icons-react';
+import { IconEye, IconTrash, IconUpload } from '@tabler/icons-react';
+import SgcDocumentViewerModal from '../SgcDocumentViewerModal';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import { formatDateCO, formatFileSize } from './format';
 import { attachmentDraftLabel } from '../../../lib/sgc/draft/view';
@@ -33,6 +34,7 @@ export default function SgcAttachmentsCard({ requestId, attachments, currentDraf
   const [uploading, setUploading] = useState(false);
   const [withdraw, setWithdraw] = useState<Attachment | null>(null);
   const [reason, setReason] = useState('');
+  const [viewing, setViewing] = useState<Attachment | null>(null);
   const active = attachments.filter((a) => !a.withdrawnAt);
 
   return (
@@ -109,9 +111,9 @@ export default function SgcAttachmentsCard({ requestId, attachments, currentDraf
                   <Table.Td data-label='Abrir'>
                     <Group gap={6} wrap='nowrap'>
                       {!a.withdrawnAt && (
-                        <Tooltip label='Descargar (queda registrado)'>
-                          <ActionIcon variant='subtle' color='blue' size='sm' component='a' href={`/api/sgc/requests/${requestId}/attachments/${a.id}`}>
-                            <IconDownload size={16} />
+                        <Tooltip label='Ver documento (queda registrado)'>
+                          <ActionIcon variant='subtle' color='blue' size='sm' aria-label='Ver documento' onClick={() => setViewing(a)} data-testid='sgc-adjunto-ver'>
+                            <IconEye size={16} />
                           </ActionIcon>
                         </Tooltip>
                       )}
@@ -177,6 +179,7 @@ export default function SgcAttachmentsCard({ requestId, attachments, currentDraf
           </Button>
         </Group>
       )}
+      <SgcDocumentViewerModal fileUrl={viewing ? `/api/sgc/requests/${requestId}/attachments/${viewing.id}` : null} title={viewing?.fileName ?? ''} onClose={() => setViewing(null)} />
       <Modal opened={Boolean(withdraw)} onClose={() => setWithdraw(null)} title='Retirar adjunto' centered>
         <Stack>
           <Text size='sm'>
