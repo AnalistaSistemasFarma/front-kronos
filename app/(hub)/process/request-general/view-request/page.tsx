@@ -1114,7 +1114,11 @@ function ViewRequestPage() {
       const files = Array.isArray(data.files) ? data.files : [];
       setFolderContents((prev) => mergeListedWithPending(request.id, files, prev));
     } catch (error) {
-      console.error('Error al listar los archivos de la carpeta:', error);
+      if (error instanceof TypeError) {
+        console.warn('No se pudo contactar el servidor para listar adjuntos; se conserva la caché.', error.message);
+      } else {
+        console.error('Error al listar los archivos de la carpeta:', error);
+      }
       // null = fallo de red: conservar caché / optimistas
       setFolderContents((prev) => mergeListedWithPending(request.id, null, prev));
     }
