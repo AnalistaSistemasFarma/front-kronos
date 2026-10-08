@@ -1,6 +1,8 @@
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { checkAdminPrivileges } from '../../../../../lib/access-control';
+import { getPool } from '../../../../../lib/mssqlPool';
+import { syncUserToOrionInBackground } from '../../../../../lib/orion/userSync';
 import { prisma } from '../../../../../lib/prisma';
 import {
   consolidateDuplicateCompanyUsers,
@@ -84,6 +86,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
     });
 
+    if (user.role !== 'supplier' && (result.added > 0 || result.removed > 0)) {
+      void getPool()
+        .then((pool) => syncUserToOrionInBackground(pool, userId))
+        .catch(() => undefined);
+    }
+
     return NextResponse.json({
       message: 'Subprocesses updated successfully',
       added: result.added,
@@ -146,6 +154,12 @@ export async function DELETE(
         details: `Removed all subprocess assignments for company ${companyId}`,
       },
     });
+
+    if (result.count > 0) {
+      void getPool()
+        .then((pool) => syncUserToOrionInBackground(pool, userId))
+        .catch(() => undefined);
+    }
 
     return NextResponse.json({
       message: 'All subprocesses removed successfully',

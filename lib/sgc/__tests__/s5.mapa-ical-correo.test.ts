@@ -165,7 +165,7 @@ describe('SGC · S5 · job del programador central', () => {
     expect(JOB_TYPES).toContain('create_general_request');
     const summary = { runDate: '2026-10-01', companies: 1, documents: 2, sent: 2, omitted: 1, notified: 6, emails: 5, emailErrors: 1, readingReminders: 3 };
     m.runDailySgcJob.mockResolvedValue(summary);
-    const out = await (JOB_HANDLERS as Record<string, (p: unknown) => Promise<{ ref: string; detail: string }>>).sgc_review_alerts({ company: 3 });
+    const out = await (JOB_HANDLERS as unknown as Record<string, (p: unknown) => Promise<{ ref: string; detail: string }>>).sgc_review_alerts({ company: 3 });
     expect(out.ref).toBe('2026-10-01');
     expect(out.detail).toBe(summarizeRun(summary));
     expect(out.detail).toContain('2 aviso(s) de vencimiento, 1 omitido(s)');
