@@ -13,7 +13,7 @@ import { getCatalogs } from '../../../lib/sgc/db/catalogs';
 import { addScopeEntry, getMyReading, openReadingFile, recordReadingEvent, removeScopeEntry, sendReadingReminders } from '../../../lib/sgc/db/dissemination';
 import { canViewDocument, createInitialDocument, getAccessSubject, type SgcUploader } from '../../../lib/sgc/db/documents';
 import { getCurrentFlowVersion, loadDefinition } from '../../../lib/sgc/db/flows';
-import { addNote, cancelRequest, closeDissemination, confirmSuggestions, createRequest, excludeReader, getAttachmentForDownload, getRequestDetail, getTaskDetail, listTaskInbox, setSigners, uploadAttachment } from '../../../lib/sgc/db/requests';
+import { addNote, cancelRequest, closeDissemination, confirmSuggestions, createRequest, decideTask, excludeReader, getAttachmentForDownload, getRequestDetail, getTaskDetail, listTaskInbox, setSigners, uploadAttachment } from '../../../lib/sgc/db/requests';
 import { listDraftRevisions } from '../../../lib/sgc/db/drafts';
 import { signTask, type SgcSignatureDeps } from '../../../lib/sgc/db/signatures';
 import { saveTraining, uploadTrainingResults } from '../../../lib/sgc/db/training';
@@ -235,6 +235,14 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
       ['departamento', false],
       ['cargo', true],
     ]);
+    await expect(addScopeEntry(prisma, notifier, await accessOf(E.sol), reqA, { entry: { kind: 'cargo', idCargo: cargo }, reason: 'Repetido' }, actor(E.sol))).rejects.toThrow(/ya está sugerida/);
+    // Quien sugiere retira lo que sugirió, pero no lo confirmado.
+    const sugAjeno = await addScopeEntry(prisma, notifier, await accessOf(E.sol), reqA, { entry: { kind: 'persona', email: E.ajeno }, reason: 'Sugerencia que se retira' }, actor(E.sol));
+    await removeScopeEntry(prisma, await accessOf(E.sol), reqA, sugAjeno.idScope, { reason: 'Ya no se sugiere' }, actor(E.sol));
+    const deptRow = await prisma.sgcDisseminationScope.findFirstOrThrow({ where: { id_request: reqA, kind: 'departamento', is_active: true } });
+    await expect(removeScopeEntry(prisma, await accessOf(E.sol), reqA, deptRow.id_scope, { reason: 'Retirar lo confirmado' }, actor(E.sol))).rejects.toMatchObject({ status: 403 });
+    // Lo sugerido sin confirmar no deja completar la primera tarea (la elaboración).
+    await expect(decideTask(prisma, notifier, (await taskOf(reqA, 'elaboracion')).id_task, { decision: 'aprobar' }, actor(E.elab))).rejects.toThrow(/SUGERIDOS sin confirmar/);
     await expect(confirmSuggestions(prisma, notifier, reqA, actor(E.sol), await accessOf(E.sol))).rejects.toMatchObject({ status: 403 });
     expect(await confirmSuggestions(prisma, notifier, reqA, actor(E.elab), await accessOf(E.elab))).toEqual({ confirmed: 0, confirmedScope: 1 });
     const tmp = await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'persona', email: E.ajeno }, reason: 'Por error' }, actor(E.elab));

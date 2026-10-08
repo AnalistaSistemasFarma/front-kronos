@@ -410,6 +410,41 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     expect(hist[3].body).toContain('Modo de firma: en orden');
   });
 
+  it('[SGC-REQ-030] 2026-10-05: lo sugerido se reemplaza por una nueva sugerencia y, si el elaborador de Calidad reasigna, se retira (queda en el historial)', async () => {
+    const solAccess = await accessOf(E.sol);
+    const elabAccess = await accessOf(E.elab);
+    const { idRequest } = await createRequest(
+      prisma,
+      notifier,
+      solAccess,
+      { idCompany: CO, requestType: 'nuevo', subject: 'Instructivo con firmantes sugeridos', description: 'Solicitud para probar sugerencias y reasignación.', idProcess: procGC, idDocumentType: typePR, elaboratorEmail: E.elab, formValues: { urgencia: 'Normal' } },
+      actor(E.sol)
+    );
+    expect(await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr1] }, actor(E.sol), solAccess)).toEqual({ changed: true, suggested: true });
+    expect(await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr1] }, actor(E.sol), solAccess)).toEqual({ changed: false, suggested: true });
+    expect(await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr1, E.rev2], mode: 'paralelo' }, actor(E.sol), solAccess)).toEqual({ changed: true, suggested: true });
+    let rows = await prisma.sgcRequestSigner.findMany({ where: { id_request: idRequest }, orderBy: { id_request_signer: 'asc' } });
+    expect(rows.map((r) => [r.user_email, r.is_active, r.removed_at === null])).toEqual([
+      [E.apr1, false, false],
+      [E.apr1, false, true],
+      [E.rev2, false, true],
+    ]);
+    expect(JSON.parse((await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest } })).signing_modes_json)).toEqual({ aprobacion: 'paralelo' });
+    // El elaborador de Calidad reasigna directamente: lo sugerido se retira y entra su selección.
+    expect(await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr1], mode: 'orden' }, actor(E.elab), elabAccess)).toEqual({ changed: true });
+    rows = await prisma.sgcRequestSigner.findMany({ where: { id_request: idRequest }, orderBy: { id_request_signer: 'asc' } });
+    expect(rows.filter((r) => r.is_active).map((r) => [r.user_email, r.added_by])).toEqual([[E.apr1, E.elab]]);
+    expect(rows.filter((r) => !r.is_active && r.removed_at === null)).toHaveLength(0);
+    expect(rows.find((r) => r.user_email === E.rev2)).toMatchObject({ removed_by: E.elab, change_reason: expect.stringContaining('Sugerencia reasignada') });
+    const last = await prisma.sgcInteraction.findFirstOrThrow({ where: { id_request: idRequest, kind: 'firmantes' }, orderBy: { id_interaction: 'desc' } });
+    expect(last.body).toContain('Reemplaza lo sugerido');
+    // Sin los revisores seleccionados por Calidad, la elaboración no se envía.
+    await uploadAttachment(prisma, upload, idRequest, { purpose: 'borrador', ...word('sugeridos') }, await viewer(E.elab), actor(E.elab));
+    const elabT = (await taskOf(idRequest, 'elaboracion')).id_task;
+    await expect(decideTask(prisma, notifier, elabT, { decision: 'aprobar', signature: await sig(elabT) }, actor(E.elab))).rejects.toThrow(/Aseguramiento de Calidad debe asignar los firmantes/);
+    await cancelRequest(prisma, notifier, elabAccess, idRequest, { reason: 'Fin de la prueba de sugerencias' }, actor(E.elab));
+  });
+
   it('[SGC-REQ-032] adjuntos en la carpeta propia con SHA-256: el borrador solo lo carga el elaborador; nada se borra, se retira', async () => {
     await expect(decideTask(prisma, notifier, (await taskOf(req1, 'elaboracion')).id_task, { decision: 'aprobar' }, actor(E.elab))).rejects.toThrow(/borrador del documento/);
     await expect(uploadAttachment(prisma, upload, req1, { purpose: 'borrador', ...word() }, await viewer(E.rev1), actor(E.rev1))).rejects.toMatchObject({ status: 403 });
@@ -543,6 +578,11 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     const detailCal = await getTaskDetail(prisma, apr.id_task, await viewer(E.cal));
     expect(detailCal.tasks.find((t) => t.id === apr.id_task)!.myAction).toEqual({ idAssignee: expect.any(Number), kind: 'decidir', signatureMeaning: 'aprobo', checklist: [] });
     await expect(decideTask(prisma, notifier, apr.id_task, { decision: 'aprobar' }, actor(E.elab))).rejects.toMatchObject({ status: 403 });
+    // 2026-10-05: quien hizo la solicitud no toma el cupo de Calidad de su propia solicitud aunque esté en el grupo.
+    const calidadType = (await listAuthorizationTypes(prisma, CO)).find((x) => x.code === 'SGC-VERIF-CALIDAD')!;
+    const tmpSol = await grantAuthorizationTypeUser(prisma, CO, calidadType.id, { email: E.sol, reason: 'Prueba del cupo de Calidad' }, actor(E.cal));
+    await expect(decideTask(prisma, notifier, apr.id_task, { decision: 'aprobar', signature: await sig(apr.id_task) }, actor(E.sol))).rejects.toThrow(/Quien hizo la solicitud no revisa ni aprueba/);
+    await revokeAuthorizationTypeUser(prisma, CO, tmpSol.id, { reason: 'Fin de la prueba del cupo' }, actor(E.cal));
     const fin = await decideTask(prisma, notifier, apr.id_task, { decision: 'aprobar', comment: 'Estructura conforme a la guía', signature: await sig(apr.id_task) }, actor(E.cal));
     expect(fin).toMatchObject({ outcome: 'resuelta', next: 'divulgacion' });
     const r = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: req1 } });
