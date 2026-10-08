@@ -14,18 +14,21 @@ export interface AvatarOption {
   /** Marcado SVG (sin la etiqueta <svg>) en el lienzo de 300×300. */
   svg: string;
   /**
-   * Capa de ATRÁS, opcional: lo que debe quedar detrás de la cabeza y del
-   * cuerpo (p. ej. el cabello largo cae por detrás de los hombros).
-   */
-  back?: string;
-  /**
    * Peso al generar un avatar ALEATORIO (por defecto 1; 0 = nunca sale al
    * azar, solo a mano). Sirve para que lo aleatorio salga sobrio: casi
    * siempre sin barba, sin gafas y sin accesorios.
    */
   peso?: number;
-  /** Animales con antifaz negro (panda): los ojos se pintan en blanco. */
-  ojosBlancos?: boolean;
+  /**
+   * Figura OSCURA (panda, planeta relleno de negro): la carita que va encima
+   * se pinta invirtiendo blanco y negro para que se vea.
+   */
+  oscuro?: boolean;
+  /**
+   * Dónde va la carita sobre esta figura (planetas): centro entre los ojos y
+   * escala. Por defecto (150, 150) y escala 1.
+   */
+  cara?: { x: number; y: number; k?: number };
   /** Accesorio que puede ir junto con gafas (p. ej. aretes). */
   combinable?: boolean;
 }
@@ -53,8 +56,11 @@ export interface AvatarCategory {
   optional?: boolean;
 }
 
-/** Tipo de avatar: persona (perfil) o animal (agentes). */
-export type AvatarKind = 'persona' | 'animal';
+/**
+ * Tipo de avatar. Las personas usan siempre 'persona'; los asistentes del
+ * chat pueden usar cualquiera de los cuatro.
+ */
+export type AvatarKind = 'persona' | 'animal' | 'planeta' | 'constelacion';
 
 /** Lo que se guarda en la base: versión, tipo, índice por categoría y fondo. */
 export interface AvatarConfig {

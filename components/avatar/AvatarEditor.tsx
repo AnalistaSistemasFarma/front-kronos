@@ -8,6 +8,8 @@ import {
   FONDO_INICIAL,
   categoriasDe,
   composeAvatarSvg,
+  esTipoAvatar,
+  etiquetaTipo,
   composePartThumbSvg,
   randomAvatarConfig,
   svgToDataUri,
@@ -25,9 +27,10 @@ import classes from './avatarEditor.module.css';
  *     página, paginación en píldoras) y al elegir una se cierra sola;
  *   - al otro lado, "Aleatorio" y "Descargar" (SVG o PNG).
  *
- * El dibujo es propio de SynerLink (ver lib/avatar/parts-*.ts): las
- * ilustraciones de Avatartion son de DrawKit y su licencia no permite
- * incluirlas en un creador de avatares.
+ * Los dibujos: personas con las piezas de "Noto avatar" (CC0, las mismas de
+ * notion-avatar); animales, planetas y constelaciones propios de SynerLink.
+ * Nada de Avatartion: sus ilustraciones son de DrawKit y su licencia no
+ * permite incluirlas en un creador de avatares. Ver docs/avatar-notion.md.
  *
  * Este componente NO guarda nada: avisa con `onChange` y el padre decide.
  */
@@ -38,7 +41,7 @@ const FONDO_ID = '__fondo';
 interface Props {
   config: AvatarConfig;
   onChange: (config: AvatarConfig) => void;
-  /** Tipos que se pueden elegir (agentes: animal y persona). */
+  /** Tipos que se pueden elegir (agentes: animal, planeta, constelación y persona). */
   tiposPermitidos?: AvatarKind[];
   /** Nombre base del archivo descargado. */
   nombreArchivo?: string;
@@ -75,8 +78,7 @@ export default function AvatarEditor({ config, onChange, tiposPermitidos = ['per
   const aleatorio = () => onChange(randomAvatarConfig(config.tipo));
 
   const cambiarTipo = (tipo: string) => {
-    if (tipo !== 'persona' && tipo !== 'animal') return;
-    if (tipo === config.tipo) return;
+    if (!esTipoAvatar(tipo) || tipo === config.tipo) return;
     onChange(randomAvatarConfig(tipo, { fondo: config.fondo }));
   };
 
@@ -116,7 +118,9 @@ export default function AvatarEditor({ config, onChange, tiposPermitidos = ['per
         <SegmentedControl
           value={config.tipo}
           onChange={cambiarTipo}
-          data={tiposPermitidos.map((t) => ({ value: t, label: t === 'animal' ? 'Animal' : 'Persona' }))}
+          fullWidth
+          aria-label='Tipo de avatar'
+          data={tiposPermitidos.map((t) => ({ value: t, label: etiquetaTipo(t) }))}
         />
       )}
 
@@ -207,7 +211,7 @@ function Miniatura({ tipo, catId, indice }: { tipo: AvatarKind; catId: string; i
   const src = useMemo(() => svgToDataUri(composePartThumbSvg(tipo, catId, indice)), [tipo, catId, indice]);
   const opcion = categoriasDe(tipo).find((c) => c.id === catId)?.options[indice];
   // "Ninguno": un círculo vacío no dice nada; se marca con el símbolo de vacío.
-  if (opcion && !opcion.svg && !opcion.back) return <IconBan size={22} stroke={1.5} color='#9ca3af' aria-hidden />;
+  if (opcion && !opcion.svg) return <IconBan size={22} stroke={1.5} color='#9ca3af' aria-hidden />;
   // eslint-disable-next-line @next/next/no-img-element -- data: URI generado en el navegador
   return <img src={src} alt='' />;
 }

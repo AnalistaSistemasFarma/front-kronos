@@ -1,5 +1,8 @@
-import { CATEGORIAS_ANIMAL, ORDEN_ANIMAL } from './parts-animal';
-import { CATEGORIAS_PERSONA, CUELLO, ORDEN_PERSONA, OREJA } from './parts-persona';
+import { CATEGORIAS_ANIMAL, ORDEN_ANIMAL, capaAnimal } from './parts-animal';
+import { CATEGORIAS_CONSTELACION, ORDEN_CONSTELACION, capaConstelacion } from './parts-constelacion';
+import { CATEGORIAS_PERSONA, ORDEN_PERSONA } from './parts-persona';
+import { CATEGORIAS_PLANETA, ORDEN_PLANETA, capaPlaneta } from './parts-planeta';
+import { sugerenciaCruda } from './sugerencias';
 import type { AvatarBackground, AvatarCategory, AvatarConfig, AvatarKind } from './types';
 
 /**
@@ -24,14 +27,38 @@ export const AVATAR_BACKGROUNDS: AvatarBackground[] = [
 /** Fondo con el que arranca el editor. */
 export const FONDO_INICIAL = 0;
 
-export const AVATAR_KINDS: readonly AvatarKind[] = ['persona', 'animal'];
-
-export function categoriasDe(tipo: AvatarKind): AvatarCategory[] {
-  return tipo === 'animal' ? CATEGORIAS_ANIMAL : CATEGORIAS_PERSONA;
+interface DefTipo {
+  label: string;
+  categorias: AvatarCategory[];
+  /** Capas de atrás hacia adelante (ids de categoría). */
+  orden: readonly string[];
+  /** Ajuste de una capa según el resto de la configuración (posición, color). */
+  capa?: (config: AvatarConfig, id: string, svg: string) => string;
 }
 
-function ordenDe(tipo: AvatarKind): readonly string[] {
-  return tipo === 'animal' ? ORDEN_ANIMAL : ORDEN_PERSONA;
+const TIPOS: Record<AvatarKind, DefTipo> = {
+  persona: { label: 'Persona', categorias: CATEGORIAS_PERSONA, orden: ORDEN_PERSONA },
+  animal: { label: 'Animal', categorias: CATEGORIAS_ANIMAL, orden: ORDEN_ANIMAL, capa: capaAnimal },
+  planeta: { label: 'Planeta', categorias: CATEGORIAS_PLANETA, orden: ORDEN_PLANETA, capa: capaPlaneta },
+  constelacion: {
+    label: 'Constelación',
+    categorias: CATEGORIAS_CONSTELACION,
+    orden: ORDEN_CONSTELACION,
+    capa: capaConstelacion,
+  },
+};
+
+/** Todos los tipos, en el orden en que se muestran en el editor de agentes. */
+export const AVATAR_KINDS: readonly AvatarKind[] = ['animal', 'planeta', 'constelacion', 'persona'];
+
+export const esTipoAvatar = (t: unknown): t is AvatarKind => typeof t === 'string' && t in TIPOS;
+
+export function etiquetaTipo(tipo: AvatarKind): string {
+  return TIPOS[tipo].label;
+}
+
+export function categoriasDe(tipo: AvatarKind): AvatarCategory[] {
+  return TIPOS[tipo].categorias;
 }
 
 /** Tope del JSON guardado. Una configuración válida ocupa ~150 caracteres. */
@@ -61,8 +88,8 @@ export function parseAvatarConfig(raw: unknown): AvatarConfig | null {
   if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return null;
   const o = valor as Record<string, unknown>;
   if (o.v !== 1) return null;
-  if (o.tipo !== 'persona' && o.tipo !== 'animal') return null;
-  const tipo = o.tipo as AvatarKind;
+  if (!esTipoAvatar(o.tipo)) return null;
+  const tipo = o.tipo;
   if (!esEnteroEnRango(o.fondo, AVATAR_BACKGROUNDS.length)) return null;
   if (!o.partes || typeof o.partes !== 'object' || Array.isArray(o.partes)) return null;
 
@@ -135,24 +162,26 @@ export function randomAvatarConfig(
 }
 
 const ABRE_GRUPO =
-  '<g fill="#fff" stroke="#000" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">';
+  '<g fill="#fff" stroke="#000" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" filter="url(#halo)">';
 
-function capa(config: AvatarConfig, paso: string): string {
-  if (paso === 'cuello') return CUELLO;
-  if (paso === 'oreja') return OREJA;
-  const [id, parte] = paso.split(':');
-  const cat = categoriasDe(config.tipo).find((c) => c.id === id);
+/**
+ * Halo blanco alrededor de todo el dibujo (como notion-avatar): lo despega
+ * del fondo y lo hace legible sobre cualquier color, incluso a 28 px.
+ */
+const HALO =
+  '<defs><filter id="halo" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">' +
+  '<feMorphology operator="dilate" radius="5" in="SourceAlpha" result="borde"/>' +
+  '<feFlood flood-color="#fff" result="blanco"/>' +
+  '<feComposite in="blanco" in2="borde" operator="in" result="halo"/>' +
+  '<feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
+
+function capa(config: AvatarConfig, id: string): string {
+  const def = TIPOS[config.tipo];
+  const cat = def.categorias.find((c) => c.id === id);
   if (!cat) return '';
   const opcion = cat.options[config.partes[id] ?? 0] ?? cat.options[0];
-  const svg = parte === 'back' ? opcion.back ?? '' : opcion.svg;
-  // Panda: los ojos van sobre el antifaz negro, así que se pintan en blanco.
-  if (id === 'ojos' && config.tipo === 'animal') {
-    const animal = categoriasDe('animal').find((c) => c.id === 'animal');
-    if (animal?.options[config.partes.animal ?? 0]?.ojosBlancos) {
-      return `<g stroke="#fff">${svg.replaceAll('fill="#000"', 'fill="#fff"')}</g>`;
-    }
-  }
-  return svg;
+  const svg = opcion.svg;
+  return def.capa ? def.capa(config, id, svg) : svg;
 }
 
 /**
@@ -163,10 +192,11 @@ export function composeAvatarSvg(config: AvatarConfig, opts: { size?: number; ti
   const fondo = AVATAR_BACKGROUNDS[config.fondo]?.color ?? null;
   const medidas = opts.size ? ` width="${opts.size}" height="${opts.size}"` : '';
   const titulo = opts.title ? `<title>${escapeXml(opts.title)}</title>` : '';
-  const capas = ordenDe(config.tipo).map((paso) => capa(config, paso)).join('');
+  const capas = TIPOS[config.tipo].orden.map((id) => capa(config, id)).join('');
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300"${medidas}>` +
     titulo +
+    HALO +
     (fondo ? `<rect width="300" height="300" fill="${fondo}"/>` : '') +
     ABRE_GRUPO +
     capas +
@@ -179,10 +209,10 @@ export function composePartThumbSvg(tipo: AvatarKind, categoriaId: string, indic
   const cat = categoriasDe(tipo).find((c) => c.id === categoriaId);
   if (!cat) return '';
   const opcion = cat.options[indice] ?? cat.options[0];
-  const cuerpo = (cat.thumbBase ?? '') + (opcion.back ?? '') + opcion.svg;
+  const cuerpo = (cat.thumbBase ?? '') + opcion.svg;
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${cat.thumbViewBox}">` +
-    ABRE_GRUPO +
+    ABRE_GRUPO.replace(' filter="url(#halo)"', '') +
     cuerpo +
     '</g></svg>'
   );
@@ -206,3 +236,12 @@ export {
   notionAvatarVersion,
   userAvatarUrl,
 } from './urls';
+
+/**
+ * Avatar sugerido para un asistente por su nombre (Orión → constelación de
+ * Orión, Mercurio → planeta Mercurio…), ya validado. Null si no hay.
+ */
+export function sugerenciaParaAgente(nombre: string): AvatarConfig | null {
+  const s = sugerenciaCruda(nombre);
+  return s ? parseAvatarConfig({ ...s, fondo: FONDO_INICIAL }) : null;
+}

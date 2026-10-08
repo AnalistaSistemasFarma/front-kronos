@@ -1,4 +1,5 @@
-import type { AvatarCategory, AvatarOption } from './types';
+import { NOTO, bocaDeFrente, invertirBN, ojosDeFrente } from './noto';
+import type { AvatarCategory, AvatarConfig, AvatarOption } from './types';
 
 /**
  * CATÁLOGO DE PARTES — ANIMALES (avatares de los asistentes del chat).
@@ -87,7 +88,7 @@ const ANIMALES: AvatarOption[] = [
   },
   {
     label: 'Panda',
-    ojosBlancos: true,
+    oscuro: true,
     svg:
       `<circle cx="88" cy="84" r="24" ${NEGRO}/><circle cx="212" cy="84" r="24" ${NEGRO}/>` +
       cabeza() +
@@ -134,15 +135,18 @@ const ANIMALES: AvatarOption[] = [
 
 /* ──────────────────────────────── Ojos ──────────────────────────────── */
 
-const OJOS_ANIMAL: AvatarOption[] = [
-  { label: 'Puntos', peso: 4, svg: punto(122, 138, 6.5) + punto(178, 138, 6.5) },
-  {
-    label: 'Brillantes',
-    peso: 1,
-    svg: punto(122, 138, 9) + punto(178, 138, 9) + punto(125, 135, 3, '#fff') + punto(181, 135, 3, '#fff'),
-  },
-  { label: 'Felices', peso: 1, svg: linea('M112 141 Q122 129 132 141 M168 141 Q178 129 188 141', 5) },
-  { label: 'Cerrados', peso: 1, svg: linea('M112 136 Q122 145 132 136 M168 136 Q178 145 188 136', 5) },
+// Expresión con las piezas de Noto (CC0), las mismas de las personas, de
+// frente y centradas entre los ojos del animal (150, 138). Es lo que le da
+// carácter: cejas arqueadas, ojos entrecerrados, guiño…
+const S_ANIMAL = 0.38;
+const OJOS_ANIMAL: AvatarOption[] = NOTO.ojos.map((svg, i) => ({
+  label: `Ojos ${i + 1}`,
+  svg: ojosDeFrente(svg, 150, 138, S_ANIMAL),
+}));
+
+const CEJAS_ANIMAL: AvatarOption[] = [
+  { label: 'Sin cejas', peso: 4, svg: '' },
+  ...NOTO.cejas.map((svg, i) => ({ label: `Cejas ${i + 1}`, svg: ojosDeFrente(svg, 150, 130, S_ANIMAL) })),
 ];
 
 /* ──────────────────────────────── Boca ──────────────────────────────── */
@@ -152,6 +156,8 @@ const BOCAS_ANIMAL: AvatarOption[] = [
   { label: 'Sonrisa', peso: 2, svg: linea('M150 161 L150 166 M138 168 Q150 180 162 168', 5) },
   { label: 'Neutral', peso: 1, svg: linea('M150 161 L150 168 M142 170 L158 170', 5) },
   { label: 'Abierta', peso: 1, svg: '<path d="M139 166 Q150 186 161 166 Z" fill="#000" stroke-width="4"/>' },
+  // Bocas de Noto, más abajo de la nariz.
+  ...NOTO.boca.map((svg, i) => ({ label: `Boca ${i + 1}`, peso: 0.5, svg: bocaDeFrente(svg, 150, 138, 0.32, 42) })),
 ];
 
 /* ──────────────────────────────── Ropa ──────────────────────────────── */
@@ -254,11 +260,19 @@ const ACCESORIOS_ANIMAL: AvatarOption[] = [
 /** Categorías del editor de ANIMAL (asistentes). */
 export const CATEGORIAS_ANIMAL: AvatarCategory[] = [
   { id: 'animal', label: 'Animal', title: 'Animales', options: ANIMALES, thumbViewBox: '30 4 240 240' },
-  { id: 'ojos', label: 'Ojos', title: 'Ojos', options: OJOS_ANIMAL, thumbViewBox: '96 116 108 44' },
-  { id: 'boca', label: 'Boca', title: 'Bocas', options: BOCAS_ANIMAL, thumbViewBox: '126 150 48 40' },
+  { id: 'ojos', label: 'Ojos', title: 'Ojos', options: OJOS_ANIMAL, thumbViewBox: '96 112 108 52' },
+  { id: 'cejas', label: 'Cejas', title: 'Cejas', options: CEJAS_ANIMAL, thumbViewBox: '96 100 108 52', optional: true },
+  { id: 'boca', label: 'Boca', title: 'Bocas', options: BOCAS_ANIMAL, thumbViewBox: '118 146 64 52' },
   { id: 'ropa', label: 'Ropa', title: 'Ropa', options: ROPA_ANIMAL, thumbViewBox: '40 180 220 130' },
   { id: 'gafas', label: 'Gafas', title: 'Gafas', options: GAFAS_ANIMAL, thumbViewBox: '76 100 160 72', optional: true },
   { id: 'accesorios', label: 'Accesorios', title: 'Accesorios', options: ACCESORIOS_ANIMAL, thumbViewBox: '50 20 200 160', optional: true },
 ];
 
-export const ORDEN_ANIMAL = ['ropa', 'animal', 'ojos', 'boca', 'gafas', 'accesorios'] as const;
+export const ORDEN_ANIMAL = ['ropa', 'animal', 'ojos', 'cejas', 'boca', 'gafas', 'accesorios'] as const;
+
+/** Panda: los ojos van sobre el antifaz negro, así que se pintan en blanco. */
+export function capaAnimal(config: AvatarConfig, id: string, svg: string): string {
+  if (id !== 'ojos') return svg;
+  const animal = ANIMALES[config.partes.animal ?? 0];
+  return animal?.oscuro ? invertirBN(`<g stroke="#000" fill="#fff">${svg}</g>`) : svg;
+}

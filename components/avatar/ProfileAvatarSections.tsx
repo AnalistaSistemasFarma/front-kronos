@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Avatar, Badge, Button, Card, Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { IconAlertTriangle, IconMoodSmile, IconRobot } from '@tabler/icons-react';
-import { parseAvatarConfig } from '../../lib/avatar/compose';
+import { AVATAR_KINDS, parseAvatarConfig, sugerenciaParaAgente } from '../../lib/avatar/compose';
 import type { AvatarConfig } from '../../lib/avatar/types';
 import { agentAvatarSrc, agentInitials } from '../../lib/chat/client';
 import AvatarEditor, { configInicial } from './AvatarEditor';
@@ -182,7 +182,7 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
 
   const abrir = (a: AgenteGestionable) => {
     setEditando(a.code);
-    setConfig(parseAvatarConfig(a.config) ?? configInicial('animal'));
+    setConfig(parseAvatarConfig(a.config) ?? sugerenciaParaAgente(a.displayName) ?? configInicial('animal'));
   };
 
   const actualizar = (code: string, cambios: Partial<AgenteGestionable>) =>
@@ -234,8 +234,8 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
         </Group>
       </Title>
       <Text size='sm' c='dimmed' mb='md'>
-        Asistentes del chat de los que usted es responsable. Su avatar puede ser un animal o una persona estilo Notion;
-        el cambio lo ve toda la empresa.
+        Asistentes del chat de los que usted es responsable. Su avatar puede ser un animal, un planeta, una constelación
+        o una persona, estilo Notion; el cambio lo ve toda la empresa.
       </Text>
 
       <Stack gap='md'>
@@ -265,7 +265,7 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
                 <AvatarEditor
                   config={config}
                   onChange={setConfig}
-                  tiposPermitidos={['animal', 'persona']}
+                  tiposPermitidos={[...AVATAR_KINDS]}
                   nombreArchivo={`avatar-${a.code}`}
                 />
                 <Group justify='flex-end'>

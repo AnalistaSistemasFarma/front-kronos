@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AVATAR_BACKGROUNDS,
+  AVATAR_KINDS,
   agentAvatarNotionUrl,
   categoriasDe,
   composeAvatarSvg,
@@ -10,6 +11,7 @@ import {
   parseAvatarConfig,
   randomAvatarConfig,
   serializeAvatarConfig,
+  sugerenciaParaAgente,
   userAvatarUrl,
 } from '../compose';
 
@@ -49,7 +51,7 @@ describe('parseAvatarConfig', () => {
   });
 
   it('ida y vuelta: serializar y volver a leer da lo mismo', () => {
-    for (const tipo of ['persona', 'animal'] as const) {
+    for (const tipo of AVATAR_KINDS) {
       const c = randomAvatarConfig(tipo);
       expect(parseAvatarConfig(serializeAvatarConfig(c))).toEqual(c);
     }
@@ -58,7 +60,7 @@ describe('parseAvatarConfig', () => {
 
 describe('composeAvatarSvg', () => {
   it('compone todas las opciones de todas las categorías sin romper el SVG', () => {
-    for (const tipo of ['persona', 'animal'] as const) {
+    for (const tipo of AVATAR_KINDS) {
       for (const cat of categoriasDe(tipo)) {
         cat.options.forEach((_o, i) => {
           const c = randomAvatarConfig(tipo, {}, () => 0);
@@ -85,7 +87,7 @@ describe('composeAvatarSvg', () => {
   });
 
   it('el dibujo es blanco y negro puro (sin otros colores que el fondo)', () => {
-    for (const tipo of ['persona', 'animal'] as const) {
+    for (const tipo of AVATAR_KINDS) {
       for (const cat of categoriasDe(tipo)) {
         cat.options.forEach((_o, i) => {
           const c = randomAvatarConfig(tipo, {}, () => 0);
@@ -99,16 +101,40 @@ describe('composeAvatarSvg', () => {
 
   it('las categorías tienen claves únicas y los ids no cambian de nombre', () => {
     expect(categoriasDe('persona').map((c) => c.id)).toEqual([
-      'cara', 'cabello', 'ojos', 'boca', 'ropa', 'cejas', 'nariz', 'barba', 'gafas', 'accesorios',
+      'cara', 'cabello', 'ojos', 'cejas', 'nariz', 'boca', 'barba', 'gafas', 'accesorios', 'detalles',
     ]);
-    expect(categoriasDe('animal').map((c) => c.id)).toEqual(['animal', 'ojos', 'boca', 'ropa', 'gafas', 'accesorios']);
+    expect(categoriasDe('animal').map((c) => c.id)).toEqual(['animal', 'ojos', 'cejas', 'boca', 'ropa', 'gafas', 'accesorios']);
+    expect(categoriasDe('planeta').map((c) => c.id)).toEqual(['planeta', 'carita', 'ojos', 'cejas', 'boca', 'accesorios', 'decorado']);
+    expect(categoriasDe('constelacion').map((c) => c.id)).toEqual(['constelacion', 'estrella', 'marco', 'cielo']);
+  });
+
+  it('el catálogo no se reordena: nombres en su índice', () => {
+    // Si alguna de estas falla, se reordenó el catálogo y los avatares
+    // guardados cambiarían de dibujo. Lo nuevo va AL FINAL.
+    const nombres = (tipo: Parameters<typeof categoriasDe>[0], id: string) =>
+      categoriasDe(tipo).find((c) => c.id === id)!.options.map((o) => o.label);
+    expect(nombres('planeta', 'planeta').slice(0, 11)).toEqual([
+      'Mercurio', 'Venus', 'Tierra', 'Marte', 'Júpiter', 'Saturno', 'Urano', 'Neptuno', 'Luna', 'Sol', 'Plutón',
+    ]);
+    expect(nombres('constelacion', 'constelacion').slice(0, 12)).toEqual([
+      'Orión', 'Osa Mayor', 'Casiopea', 'Escorpio', 'Lira (Vega)', 'Can Mayor (Sirio)', 'Cruz del Sur', 'Leo',
+      'Cisne', 'Osa Menor', 'Pléyades (Atlas)', 'Géminis',
+    ]);
+    expect(nombres('animal', 'animal').slice(0, 11)).toEqual([
+      'Gato', 'Perro', 'Zorro', 'Búho', 'Oso', 'Conejo', 'Panda', 'León', 'Pingüino', 'Koala', 'Mono',
+    ]);
+    // Persona: piezas de Noto avatar (CC0), una por archivo 0.svg, 1.svg…
+    const conteo = Object.fromEntries(categoriasDe('persona').map((c) => [c.id, c.options.length]));
+    expect(conteo).toEqual({
+      cara: 16, cabello: 59, ojos: 14, cejas: 16, nariz: 14, boca: 20, barba: 17, gafas: 15, accesorios: 15, detalles: 14,
+    });
   });
 });
 
 describe('randomAvatarConfig', () => {
   it('siempre produce configuraciones válidas', () => {
     for (let i = 0; i < 200; i += 1) {
-      const tipo = i % 2 ? 'persona' : 'animal';
+      const tipo = AVATAR_KINDS[i % AVATAR_KINDS.length];
       expect(parseAvatarConfig(randomAvatarConfig(tipo))).not.toBeNull();
     }
   });
@@ -126,6 +152,51 @@ describe('randomAvatarConfig', () => {
         if (gafas.options[c.partes.gafas].svg && opcionAcc.svg) expect(opcionAcc.combinable).toBe(true);
       }
     }
+  });
+});
+
+describe('carita y figuras oscuras', () => {
+  it('"Sin carita" quita ojos, cejas y boca del planeta', () => {
+    const con = randomAvatarConfig('planeta', {}, () => 0);
+    con.partes.carita = 0;
+    const sin = { ...con, partes: { ...con.partes, carita: 1 } };
+    expect(composeAvatarSvg(sin).length).toBeLessThan(composeAvatarSvg(con).length);
+  });
+
+  it('sobre Marte (planeta negro) la carita se pinta en blanco', () => {
+    const c = randomAvatarConfig('planeta', {}, () => 0);
+    c.partes.planeta = categoriasDe('planeta')[0].options.findIndex((o) => o.label === 'Marte');
+    c.partes.carita = 0;
+    const svg = composeAvatarSvg(c);
+    expect(svg).toContain('<g stroke="#fff" fill="#000">');
+  });
+
+  it('con "Cielo negro" la constelación se invierte (líneas y estrellas blancas)', () => {
+    const c = randomAvatarConfig('constelacion', {}, () => 0);
+    c.partes.marco = categoriasDe('constelacion').find((x) => x.id === 'marco')!.options.findIndex((o) => o.label === 'Cielo negro');
+    expect(composeAvatarSvg(c)).toContain('<g stroke="#fff" fill="#000">');
+  });
+});
+
+describe('sugerencias para los asistentes de OLP', () => {
+  it.each([
+    ['Orión', 'constelacion', 'Orión'],
+    ['Vega', 'constelacion', 'Lira (Vega)'],
+    ['Sirio', 'constelacion', 'Can Mayor (Sirio)'],
+    ['Atlas', 'constelacion', 'Pléyades (Atlas)'],
+    ['Mercurio', 'planeta', 'Mercurio'],
+    ['Galileo', 'planeta', 'Júpiter'],
+    ['Kepler', 'planeta', 'Marte'],
+  ])('%s arranca con %s (%s)', (nombre, tipo, figura) => {
+    const c = sugerenciaParaAgente(nombre);
+    expect(c?.tipo).toBe(tipo);
+    const cat = categoriasDe(c!.tipo)[0];
+    expect(cat.options[c!.partes[cat.id]].label).toBe(figura);
+  });
+
+  it('un nombre sin sugerencia devuelve null', () => {
+    expect(sugerenciaParaAgente('Horus')).toBeNull();
+    expect(sugerenciaParaAgente('ORION')?.tipo).toBe('constelacion');
   });
 });
 
