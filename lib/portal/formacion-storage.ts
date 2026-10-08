@@ -7,7 +7,7 @@
  * VARBINARY en `portal_course_material.contenido` y los certificados se
  * generaban al vuelo sin guardarse en ningún lado.
  *
- * ⚠️ USO EXCLUSIVO DE LA SECCIÓN FORMACIÓN DEL PORTAL TH. Este módulo y sus
+ * ⚠️ USO EXCLUSIVO DEL PORTAL TH. Este módulo y sus
  * variables `PORTAL_TH_SP_*` NO se reutilizan desde ningún otro módulo de
  * SynerLink (SGC, solicitudes, gestión documental, chat…): la credencial es
  * una app dedicada (SynerLink-PortalTH-Formacion) con `Sites.Selected` y rol
@@ -15,6 +15,12 @@
  * DENTRO de la carpeta base (FORMACION). Hay una prueba que falla si alguien
  * lo importa por fuera de `lib/portal/` o `app/api/portal/`
  * (`__tests__/formacion-storage-aislamiento.test.ts`).
+ *
+ * Desde 2026-10-08 (pedido de Cristian: botón "VISUALIZAR" de Políticas y
+ * reglamentos) `politicas-storage.ts` reutiliza el token y la configuración
+ * de esta app para LEER la carpeta POLITICAS Y REGLAMENTOS del mismo sitio.
+ * Sigue siendo el Portal TH y el mismo sitio; aquel módulo solo lista y pide
+ * vistas previas, nunca escribe.
  *
  * POR QUÉ NO SE USA EL CONECTOR `mcp-sharepoint-gss` (como el resto del
  * portal): ese conector es de SOLO LECTURA a propósito y su app de Entra ya
@@ -46,7 +52,7 @@ export interface ConfigFormacionSharePoint {
 }
 
 /** Variables obligatorias. La carpeta base tiene valor por defecto. */
-const VARIABLES_OBLIGATORIAS = [
+export const VARIABLES_OBLIGATORIAS = [
   'PORTAL_TH_SP_TENANT_ID',
   'PORTAL_TH_SP_CLIENT_ID',
   'PORTAL_TH_SP_CLIENT_SECRET',
@@ -229,7 +235,16 @@ export function _reiniciarCacheToken() {
   tokenCache = null;
 }
 
-async function obtenerToken(cfg: ConfigFormacionSharePoint, f: Fetch): Promise<string> {
+/**
+ * Token app-only de Graph (client credentials) con caché en memoria.
+ * Exportado SOLO para `politicas-storage.ts` (lectura de POLITICAS Y
+ * REGLAMENTOS del mismo sitio, también parte del Portal TH). El token nunca
+ * sale del servidor.
+ */
+export async function obtenerToken(
+  cfg: Pick<ConfigFormacionSharePoint, 'tenantId' | 'clientId' | 'clientSecret'>,
+  f: Fetch
+): Promise<string> {
   const clave = `${cfg.tenantId}|${cfg.clientId}`;
   if (tokenCache && tokenCache.clave === clave && tokenCache.vence > Date.now() + 60_000) return tokenCache.token;
 
