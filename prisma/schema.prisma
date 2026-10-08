@@ -1350,6 +1350,9 @@ model SgcCompanyConfig {
   // Sprint 12: APROBADORES AUTORIZADOS — con la lista activa (y al menos una
   // persona autorizada en la empresa), solo ellos quedan como aprobadores.
   approver_list_enforced     Boolean   @default(true)
+  // Sprint 13: FIRMA PROPIA (cada persona registra la suya y Calidad la valida).
+  // APAGADA por defecto: encenderla requiere el aval de la Dra. Adriana Cárdenas.
+  self_signature_enabled     Boolean   @default(false)
 
   company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
@@ -2232,6 +2235,14 @@ model SgcSignatureMaster {
   revoked_at          DateTime?
   revoked_by          String?   @db.NVarChar(255)
   revoke_reason       String?   @db.NVarChar(1000)
+  // Sprint 13 (R13, FIRMA PROPIA): calidad = la registró Calidad (inducción) | propia = la registró su titular.
+  origin              String    @default("calidad") @db.NVarChar(20)
+  // dibujada | imagen (subida y recortada a la tinta). NULL en las registradas antes del S13.
+  capture_method      String?   @db.NVarChar(20)
+  // validada | pendiente. Una firma pendiente NO firma; Calidad la valida (una vez) o la revoca.
+  validation_status   String    @default("validada") @db.NVarChar(20)
+  validated_by        String?   @db.NVarChar(255)
+  validated_at        DateTime?
 
   companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
