@@ -5,6 +5,7 @@
  * que guarda el servidor (`DefinicionFormulario`). Vive aparte del componente
  * para probarla sin navegador. Ver `components/portal/ConstructorFormulario.tsx`.
  */
+import type { ImportacionForms } from './importar-forms';
 import {
   NOTA_MINIMA_POR_DEFECTO,
   PUNTOS_TOTAL,
@@ -250,3 +251,77 @@ export function construirDefinicion(entrada: Estado): { definicion: DefinicionFo
   return r.ok ? { definicion: r.definicion, errores: [] } : { definicion: null, errores: r.errores };
 }
 
+
+/** Quita tildes y signos para reconocer los datos de la persona por su enunciado. */
+const normalizar = (t: string) =>
+  t
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * ¿Esta pregunta de texto es un dato de la persona que el constructor ya sabe pedir? Así "Nombre
+ * Completo" y "Número de cédula" de un Forms importado quedan en "Datos que se piden" (con el nombre
+ * prellenado desde la sesión y el aviso de la Ley 1581 para la cédula), no como preguntas sueltas.
+ */
+const NOMBRES_DE_PERSONA = new Set([
+  'nombre',
+  'nombres',
+  'nombre completo',
+  'nombres completos',
+  'nombres y apellidos',
+  'nombre y apellidos',
+  'nombre y apellido',
+  'apellidos y nombres',
+]);
+
+export function claveDeDato(texto: string): DatoClave | null {
+  const t = normalizar(texto);
+  if (t.length > 40) return null;
+  if (NOMBRES_DE_PERSONA.has(t)) return 'nombre';
+  if (/^(correo|e ?mail)( electronico| corporativo| institucional)?$/.test(t)) return 'correo';
+  if (/(cedula|numero de documento|documento de identidad|n documento)/.test(t)) return 'cedula';
+  return null;
+}
+
+/**
+ * Lo importado de Microsoft Forms → estado del constructor (para revisarlo, editarlo y guardarlo).
+ * Evaluación: Forms no publica las respuestas correctas, así que llega como BORRADOR sin correctas; los
+ * puntos se reparten solos (100 ÷ preguntas) y quien crea el curso marca la correcta de cada pregunta.
+ */
+export function estadoDesdeImportacion(tipo: TipoFormulario, imp: ImportacionForms): Estado {
+  const base = estadoInicial(tipo);
+  const datos: Record<DatoClave, boolean> = { nombre: false, correo: false, cedula: false };
+  const preguntas: PreguntaEditable[] = [];
+  for (const p of imp.preguntas) {
+    const clave = p.tipo === 'texto' ? claveDeDato(p.texto) : null;
+    if (clave && !datos[clave]) {
+      datos[clave] = true;
+      continue;
+    }
+    preguntas.push({
+      id: `q${preguntas.length + 1}`,
+      texto: p.texto,
+      tipo: p.tipo,
+      obligatoria: p.obligatoria,
+      opciones: p.tipo === 'seleccion' ? [...p.opciones] : [],
+      permiteOtra: false,
+      ayuda: '',
+      puntos: '',
+      correcta: null,
+    });
+  }
+  const hayCalificables = preguntas.some((p) => p.tipo === 'seleccion');
+  return conReparto({
+    ...base,
+    puntosAuto: true,
+    titulo: imp.titulo,
+    descripcion: imp.descripcion,
+    datos,
+    preguntas,
+    borrador: tipo === 'evaluacion' && hayCalificables,
+  });
+}
