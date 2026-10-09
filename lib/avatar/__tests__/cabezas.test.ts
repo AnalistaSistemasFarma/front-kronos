@@ -14,7 +14,8 @@ import { createAvatar } from '@dicebear/core';
 import * as lorelei from '@dicebear/lorelei';
 import AvatarEditor from '../../../components/avatar/AvatarEditor';
 import { composeAgentAvatarSvg, parseAgentAvatarConfig, serializeAgentAvatarConfig } from '../agente';
-import { CABEZAS_FIGURA, VALORES_CABEZA_FIGURA, cabezaFiguraMarkup, esCabezaFigura, figuraLlevaPelo, loreleiCabezas } from '../cabezas';
+import { CABEZAS_FIGURA, GROSOR_LORELEI, VALORES_CABEZA_FIGURA, cabezaFiguraMarkup, esCabezaFigura, figuraLlevaPelo, loreleiCabezas } from '../cabezas';
+import { pincel } from '../pincel';
 import {
   CABEZAS_ASISTENTE,
   CATALOGO,
@@ -256,9 +257,50 @@ describe('cada cabeza-figura con las partes de Lorelei', () => {
     expect(svg).toContain('Lorelei');
     expect(composeAvatarSvg({ ...c, flip: true })).toContain('scale(-1 1)');
     expect(avatarDataUri(c).startsWith('data:image/svg+xml;utf8,')).toBe(true);
-    // Por defecto (piel blanca, cabello negro) solo blanco, negro y el gris del fondo… salvo los acentos tenues.
-    const bn = composeAvatarSvg(conFigura('orion'));
-    for (const col of new Set(bn.match(/#[0-9a-f]{3,6}\b/gi))) expect(['#000', '#fff', '#000000', '#ffffff', '#f2f2f2']).toContain(col.toLowerCase());
+    // Por defecto (piel blanca, cabello negro) solo blanco, negro, grises planos (sombras) y el gris del fondo.
+    for (const head of VALORES_CABEZA_FIGURA) {
+      const bn = composeAvatarSvg(conFigura(head.slice(7)));
+      for (const col of new Set(bn.match(/#[0-9a-f]{3,6}\b/gi))) {
+        const h = col.toLowerCase().slice(1);
+        const hex = h.length === 3 ? h.replace(/./g, (x) => x + x) : h;
+        expect(hex.slice(0, 2) === hex.slice(2, 4) && hex.slice(2, 4) === hex.slice(4, 6)).toBe(true);
+      }
+    }
+  });
+});
+
+describe('el trazo de las figuras es el de Lorelei (msg 15787)', () => {
+  it('Lorelei no usa stroke: contornos como formas rellenas #000, sin degradados ni transparencias', () => {
+    const persona = composeAvatarSvg(sugerenciaParaAgente('Vega'));
+    expect(persona).not.toMatch(/stroke/);
+    expect(persona).not.toMatch(/Gradient|opacity/);
+  });
+
+  it('las figuras tampoco: sin stroke, sin degradados, sin opacidades; contornos rellenos negros', () => {
+    for (const head of VALORES_CABEZA_FIGURA) {
+      const m = cabezaFiguraMarkup(head, '#ffffff', '#000000');
+      expect(m).not.toMatch(/stroke|Gradient|opacity/);
+      // Hay contornos de pincel (formas rellenas negras) y todos los path tienen geometría válida.
+      expect(m).toMatch(/<path d="M[^"]+ Z" fill="#000"/);
+      expect(m).not.toMatch(/NaN|Infinity|undefined/);
+    }
+  });
+
+  it('el grosor del pincel es el medido en Lorelei, en el mismo sistema de coordenadas', () => {
+    expect(GROSOR_LORELEI).toBeGreaterThanOrEqual(10);
+    expect(GROSOR_LORELEI).toBeLessThanOrEqual(14);
+    // El grupo de la figura usa la misma escala que siempre (lienzo 980 de Lorelei).
+    expect(cabezaFiguraMarkup('figura:gato', '#ffffff', '#000000')).toMatch(/^<g transform="matrix\(2\.85 0 0 2\.85 /);
+  });
+
+  it('pincel: ancho variable, puntas afinadas y huecos en los cerrados largos', () => {
+    const recta = pincel('M0 0 L100 0', { ancho: 4, variacion: 0 });
+    const ys = [...recta.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => Math.abs(Number(m[2])));
+    expect(Math.max(...ys)).toBeCloseTo(2, 0);
+    expect(Math.min(...ys.filter((y) => y > 0))).toBeLessThan(1.2); // puntas afinadas
+    expect(pincel('M0 0 A100 100 0 1 0 200 0 A100 100 0 1 0 0 0 Z', { ancho: 4, huecos: true }).split('M').length - 1).toBeGreaterThan(1);
+    expect(pincel('M0 0 L10 0 L10 10 L0 10 Z', { ancho: 2 }).startsWith('M')).toBe(true);
+    expect(() => pincel('m0 0 l10 10', { ancho: 2 })).toThrow();
   });
 });
 
